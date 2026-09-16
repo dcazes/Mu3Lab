@@ -58,6 +58,27 @@ for arg in "$@"; do
 done
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "Error: --port must be numeric, got '$PORT'" >&2; exit 1; }
 
+# --- 0. port already taken? (a previous ./check.sh is usually the culprit) ---
+# A second server cannot bind the port: instead of dying with a traceback,
+# report WHO holds it (with its own version/start time) and stop. Stale
+# servers serve new pages with old APIs — the exact confusion this avoids.
+if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(0 if s.connect_ex(('127.0.0.1', $PORT))==0 else 1)" 2>/dev/null; then
+  echo "Port $PORT is already serving something." >&2
+  python3 - "$PORT" >&2 <<'EOF'
+import json, sys, urllib.request
+port = sys.argv[1]
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=3) as r:
+        st = json.load(r)
+    print(f"  It is a Mu3Lab check server (code v{st.get('code_version', '?no-version(old)')}, started {st.get('server_started_at', 'unknown')}).", file=sys.stderr)
+    print(f"  Open http://127.0.0.1:{port} to use it,", file=sys.stderr)
+    print(f"  or stop that process first (Ctrl-C in its terminal), then re-run ./check.sh.", file=sys.stderr)
+except Exception:
+    print(f"  It is NOT a Mu3Lab server. Free the port, then re-run ./check.sh.", file=sys.stderr)
+EOF
+  exit 1
+fi
+
 # --- 1. python3 present? (plain English, no traceback) ---
 command -v python3 >/dev/null 2>&1 || {
   echo "Mu3Lab check needs python3, but none was found." >&2
