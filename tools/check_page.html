@@ -135,7 +135,9 @@ async function killTests() {
   try { await api('/api/tests/kill', 'POST'); } catch (e) { console.error('tests/kill', e); }
 }
 function groupOf(id) {
-  const parts = id.split('.');
+  // Runner ids carry the package prefix ("tests.test_preflight.OsTests…");
+  // strip it so grouping matches TEST_GROUPS file names.
+  const parts = id.replace(/^tests\./, '').split('.');
   for (const g of TEST_GROUPS) {
     if (g.files.includes(parts[0]) && (!g.classes || g.classes.includes(parts[1]))) return g.label;
   }
