@@ -253,6 +253,14 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/tests/events":
             with state.lock:
                 self._json({"events": list(state.test_events)})
+        elif self.path == "/api/install/state":
+            # GET alias (the page polls state/events with GET; POST works too).
+            with state.lock:
+                self._json({"job": _serialize_job(state.install_job)})
+        elif self.path == "/api/install/events":
+            with state.lock:
+                job = state.install_job
+                self._json({"events": list(job["events"]) if job else []})
         else:
             self._json({"error": "not found",
                         "hint": "see / for the dashboard"}, 404)
