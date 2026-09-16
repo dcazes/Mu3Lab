@@ -38,6 +38,11 @@
 <body>
 <h1>Mu3Lab — fresh checkout check</h1>
 <p class="mut">Cards unlock in order. Nothing here installs anything.</p>
+<div id="stale-banner" hidden style="border:2px solid var(--bad); border-radius:8px; padding:.8rem 1rem; margin-bottom:1rem;">
+  <strong>Outdated server.</strong> This page is newer than the running check
+  dashboard — stop it with Ctrl-C in its terminal and re-run
+  <code class="act">./check.sh</code>, then refresh.
+</div>
 
 <section class="card" id="card-tests">
   <h2>① Unit tests <span class="status mut" id="tests-status">idle</span></h2>
@@ -266,7 +271,13 @@ async function startInstall() {
     } else {
       await postJSON('/api/install/start');
     }
-  } catch (e) { console.error('install/start', e); setStatus('inst-status', e.message, 'bad'); return; }
+  } catch (e) {
+    console.error('install/start', e);
+    setStatus('inst-status',
+      e.status === 404 ? 'outdated server — stop it and re-run ./check.sh' : e.message, 'bad');
+    document.getElementById('btn-inst').disabled = false;
+    return;
+  }
   instTimer = setInterval(refreshInstall, 1000);
 }
 async function killInstall() {
@@ -368,6 +379,11 @@ async function refreshInstall() {
       document.getElementById('btn-instop').disabled = false;
       instTimer = setInterval(refreshInstall, 1000);
     }
+  }
+  // Stale-server tripwire: servers predating the version field can't serve
+  // this page's endpoints (their 404s otherwise masquerade as statuses).
+  if (st.code_version === undefined || st.code_version < 3) {
+    document.getElementById('stale-banner').hidden = false;
   }
 })();
 </script>

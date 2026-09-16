@@ -52,6 +52,7 @@ class State:
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
+        self.code_version = 3  # bump on ANY api change; page warns on mismatch
         self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         self.test_run: dict | None = None      # active run or None
         self.test_events: list[dict] = []      # JSON lines from the runner
@@ -241,6 +242,7 @@ class Handler(BaseHTTPRequestHandler):
             with state.lock:
                 self._json({
                     "server_started_at": state.started_at,
+                    "code_version": state.code_version,
                     "tests_running": state.test_run is not None,
                     "tests_green": state.tests_green,
                     "tests_summary": state.tests_summary,
