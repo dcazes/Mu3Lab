@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<!--
+  Mu3Lab :: tools/check_page.html
+  WHAT:  The zero-install check dashboard. Three gated cards:
+         1 tests (grouped table) -> 2 preflight (blockers vs step-3 list)
+         -> 3 install (live remediation: check first, fix the gap only).
+  WHY:   Fresh users see status instead of tracebacks. No framework, no build
+         step, no npm: one static file served by check_server.py (stdlib).
+         Deleted at Phase 11 (React dashboard replaces it).
+  DEBUG: Open devtools console: every fetch error is logged there with the
+         endpoint name. API shapes: /api/state, /api/tests/run|kill,
+         /api/tests/events, /api/preflight/run, /api/install/*.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mu3Lab — fresh checkout check</title>
+<style>
+  :root { --ok:#1a7f37; --bad:#cf222e; --wait:#9a6700; --mut:#57606a; --line:#d0d7de; }
+  body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  .card.locked { opacity: .55; }
+  .card h2 { margin: 0 0 .4rem; font-size: 1.1rem; }
+  .status { font-weight: bold; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .wait { color: var(--wait); } .mut { color: var(--mut); }
+  button { padding: .45rem 1rem; font-size: .95rem; cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; margin-top: .6rem; font-size: .92rem; }
+  td, th { border-bottom: 1px solid var(--line); padding: .35rem .4rem; text-align: left; vertical-align: top; }
+  .subhead td { background: #f6f8fa; font-weight: bold; }
+  .bar { height: 10px; background: #eaeef2; border-radius: 5px; margin: .5rem 0; }
+  .bar > div { height: 100%; background: var(--ok); border-radius: 5px; width: 0%; }
+  pre { background: #f6f8fa; padding: .6rem; overflow-x: auto; font-size: .82rem; max-height: 300px; overflow-y: auto; }
+  code.act { background: #f6f8fa; padding: .1rem .3rem; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>Mu3Lab — fresh checkout check</h1>
+<p class="mut">Cards unlock in order. Nothing here installs anything.</p>
+
+<section class="card" id="card-tests">
+  <h2>① Unit tests <span class="status mut" id="tests-status">idle</span></h2>
+  <p><button id="btn-tests" onclick="runTests()">Run tests</button>
+     <button id="btn-kill" onclick="killTests()" disabled>Kill</button></p>
+  <div class="bar"><div id="tests-bar"></div></div>
+  <div id="tests-summary" class="mut"></div>
+  <table id="tests-table" hidden>
+    <tr><th>area</th><th>result</th><th>detail</th></tr>
+  </table>
+  <details><summary>raw test lines</summary><pre id="tests-log">not run yet</pre></details>
+</section>
+
+<section class="card locked" id="card-preflight">
+  <h2>② Preflight <span class="status mut" id="pre-status">locked — needs green tests</span></h2>
+  <p><button id="btn-pre" onclick="runPreflight()" disabled>Run preflight</button></p>
+  <h3>Must pass before install</h3>
+  <table id="pre-block" hidden>
+    <tr><th>check</th><th>result</th><th>detail / fix</th></tr>
+  </table>
+  <h3>Step ③ will provide</h3>
+  <table id="pre-provided" hidden>
+    <tr><th>check</th><th>result</th><th>detail</th></tr>
+  </table>
+  <details><summary>raw report (all checks)</summary><pre id="pre-log">not run yet</pre></details>
+</section>
+
+<section class="card locked" id="card-install">
+  <h2>③ Install <span class="status mut" id="inst-status">locked — needs preflight pass</span></h2>
+  <div id="inst-body">
+    <p id="inst-intro" class="mut">This list appears after card ② runs — it will
+       name only the pieces missing on <em>your</em> machine, nothing else.</p>
+    <ol id="inst-manifest" hidden></ol>
+    <p id="inst-note" hidden>If anything above needs administrator permission,
+       your computer will ask for your password in its own system popup —
+       never typed into this page. Afterwards you will be guided to connect
+       Tailscale (sign in or paste a key); sharing and the phone check then
+       run by themselves.</p>
+    <p><button id="btn-inst" onclick="startInstall()" disabled>Install</button>
+       <button id="btn-instop" onclick="killInstall()" disabled>Stop</button></p>
+    <div id="inst-rows"></div>
+    <div id="inst-log" class="mut"></div>
+  </div>
+</section>
+
+<script>
+// Card-① grouping: test ids look like "test_preflight.OsTests.test_ok".
+// Groups are display-only; the blocking rule (any red blocks) is unchanged.
+const TEST_GROUPS = [
+  {label: 'Host compatibility (can this machine run Mu3Lab?)',
+   files: ['test_preflight'], classes: ['OsTests', 'ArchTests', 'PythonNodeTests']},
+  {label: 'Access method (how will install escalate and listen?)',
+   files: ['test_preflight'], classes: ['PrivilegeTests', 'PortTests']},
+  {label: 'Install-provided reporting (does absence report correctly?)',
+   files: ['test_preflight'], classes: ['DockerTests', 'TailscaleTests', 'BundleTests', 'AggregateTests']},
+  {label: 'Runner contract (is the JSON output exact?)', files: ['test_run_tests'], classes: null},
+  {label: 'Card gates (is the ordering logic exact?)', files: ['test_check_server'], classes: null},
+];
+async function api(path, method) {
+  const res = await fetch(path, {method: method || 'GET'});
+  const body = await res.json();
+  if (!res.ok) { const e = new Error(body.hint || body.error); e.status = res.status; throw e; }
+  return body;
+}
+function unlock(cardId, btnId, statusId, text) {
+  document.getElementById(cardId).classList.remove('locked');
+  document.getElementById(btnId).disabled = false;
+  const st = document.getElementById(statusId);
+  st.textContent = text; st.className = 'status mut';
+}
+function setStatus(id, text, cls) {
+  const el = document.getElementById(id);
+  el.textContent = text; el.className = 'status ' + cls;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// --- card 1: tests -------------------------------------------------------
+let pollTimer = null;
+async function runTests() {
+  document.getElementById('btn-tests').disabled = true;
+  document.getElementById('btn-kill').disabled = false;
+  setStatus('tests-status', 'running…', 'wait');
+  try { await api('/api/tests/run', 'POST'); }
+  catch (e) { console.error('tests/run', e); setStatus('tests-status', 'could not start: ' + e.message, 'bad'); return; }
+  pollTimer = setInterval(refreshTests, 500);
+}
+async function killTests() {
+  try { await api('/api/tests/kill', 'POST'); } catch (e) { console.error('tests/kill', e); }
+}
+function groupOf(id) {
+  const parts = id.split('.');
+  for (const g of TEST_GROUPS) {
+    if (g.files.includes(parts[0]) && (!g.classes || g.classes.includes(parts[1]))) return g.label;
+  }
+  return 'Other';
+}
+async function refreshTests() {
+  let data;
+  try { data = await api('/api/tests/events'); }
+  catch (e) { console.error('tests/events', e); return; }
+  const tests = data.events.filter(e => e.type === 'test');
+  const done = data.events.find(e => e.type === 'summary' && e.phase === 'done');
+  const totalEv = data.events.find(e => e.type === 'summary' && e.phase === 'start');
+  const total = (totalEv && totalEv.total) || tests.length || '?';
+  document.getElementById('tests-bar').style.width =
+    (typeof total === 'number' && total ? (100 * tests.length / total) : 0) + '%';
+  document.getElementById('tests-summary').textContent =
+    tests.length + ' / ' + total + ' tests';
+  // Grouped table: one row per area, failed ids listed in detail.
+  const byGroup = {};
+  for (const t of tests) {
+    const g = groupOf(t.id);
+    byGroup[g] = byGroup[g] || {ran: 0, bad: []};
+    byGroup[g].ran++;
+    if (t.outcome === 'fail' || t.outcome === 'error') byGroup[g].bad.push(t);
+  }
+  const tbl = document.getElementById('tests-table');
+  tbl.hidden = false;
+  tbl.innerHTML = '<tr><th>area</th><th>result</th><th>detail</th></tr>' +
+    TEST_GROUPS.map(g => {
+      const r = byGroup[g.label] || {ran: 0, bad: []};
+      const mark = r.bad.length ? '<span class="bad">FAIL</span>' : '<span class="ok">PASS</span>';
+      const detail = r.ran + ' ran' + (r.bad.length
+        ? '<br>' + r.bad.map(t => escapeHtml(t.id.split('.').slice(1).join('.'))).join('<br>') : '');
+      return '<tr><td>' + g.label + '</td><td>' + mark + '</td><td>' + detail + '</td></tr>';
+    }).join('');
+  document.getElementById('tests-log').textContent = tests.map(t =>
+    (t.outcome === 'pass' ? 'PASS' : t.outcome.toUpperCase()) + ' ' + t.id +
+    (t.detail ? '\n' + t.detail : '')).join('\n') || '(no output yet)';
+  const st = await api('/api/state');
+  if (!st.tests_running) {
+    clearInterval(pollTimer);
+    document.getElementById('btn-kill').disabled = true;
+    if (st.tests_green) {
+      setStatus('tests-status', 'green', 'ok');
+      document.getElementById('btn-tests').disabled = false;
+      unlock('card-preflight', 'btn-pre', 'pre-status', 'ready');
+    } else {
+      setStatus('tests-status', 'red — fix and re-run', 'bad');
+      document.getElementById('btn-tests').disabled = false;
+    }
+  }
+}
+
+// --- card 2: preflight ----------------------------------------------------
+function preRow(c, showAction) {
+  const mark = c.status === 'ok' ? '<span class="ok">PASS</span>'
+    : c.status === 'missing' ? '<span class="wait">TODO</span>' : '<span class="bad">FAIL</span>';
+  const fix = (showAction && c.action) ? '<br><code class="act">' + escapeHtml(c.action) + '</code>' : '';
+  return '<tr><td>' + c.name + '</td><td>' + mark + '</td><td>' +
+    escapeHtml(c.detail) + fix + '</td></tr>';
+}
+async function runPreflight() {
+  setStatus('pre-status', 'probing…', 'wait');
+  let report;
+  try { report = await api('/api/preflight/run', 'POST'); }
+  catch (e) { console.error('preflight/run', e); setStatus('pre-status', 'blocked: ' + e.message, 'bad'); return; }
+  const blockers = report.checks.filter(c => c.blocking);
+  const provided = report.checks.filter(c => !c.blocking);
+  const bt = document.getElementById('pre-block');
+  bt.hidden = false;
+  bt.innerHTML = '<tr><th>check</th><th>result</th><th>detail / fix</th></tr>' +
+    blockers.map(c => preRow(c, true)).join('');
+  const pt = document.getElementById('pre-provided');
+  pt.hidden = false;
+  pt.innerHTML = '<tr><th>check</th><th>result</th><th>detail</th></tr>' +
+    provided.map(c => preRow(c, true)).join('');
+  document.getElementById('pre-log').textContent = JSON.stringify(report, null, 1);
+  if (report.install_ready) {
+    // install_ready means zero FAILs among blockers; TODOs live in card ③.
+    setStatus('pre-status', 'ready for install', 'ok');
+    unlock('card-install', 'btn-inst', 'inst-status', 'ready');
+    renderManifest(report);
+  } else {
+    setStatus('pre-status', 'blocked — fix red rows above, then re-run', 'bad');
+  }
+}
+
+// --- card 3 manifest: built from card ②'s report, never static -----------
+// Only checks step ③ can provide appear here, and only when missing.
+// Plain names: this list is read by humans, not developers.
+const INSTALLABLE = {
+  node: 'Node.js — needed to build the dashboard screens',
+  docker: 'Docker — runs Mu3Lab\u2019s background services',
+  tailscale: 'Tailscale — lets your phone reach this computer',
+  bundle: 'Project workspace — helper files and the built dashboard',
+};
+function renderManifest(report) {
+  const list = document.getElementById('inst-manifest');
+  const note = document.getElementById('inst-note');
+  document.getElementById('inst-intro').hidden = true;
+  const missing = report.checks.filter(c => !c.blocking && c.status !== 'ok' && INSTALLABLE[c.name]);
+  list.hidden = false;
+  note.hidden = false;
+  if (!missing.length) {
+    list.innerHTML = '<li>Everything above is already installed — nothing to do.</li>';
+    document.getElementById('btn-inst').disabled = true;
+    return;
+  }
+  list.innerHTML = missing.map(c =>
+    '<li><strong>' + INSTALLABLE[c.name] + '</strong><br><span class="mut">' +
+    escapeHtml(c.detail) + '</span></li>').join('');
+}
+// --- card 3: install (live: start/poll/prompts) ------------------------------
+let instTimer = null;
+async function postJSON(path, body) {
+  const res = await fetch(path, {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {})});
+  const data = await res.json();
+  if (!res.ok) { const e = new Error(data.hint || data.error); e.status = res.status; throw e; }
+  return data;
+}
+async function startInstall() {
+  // Fresh start, or retry-resume an existing job (server skips ready steps).
+  document.getElementById('btn-inst').disabled = true;
+  document.getElementById('btn-instop').disabled = false;
+  setStatus('inst-status', 'starting…', 'wait');
+  try {
+    const st = await api('/api/install/state');
+    if (st.job && (st.job.status === 'waiting' || st.job.status === 'failed' ||
+                   st.job.status === 'cancelled' || st.job.status === 'ready')) {
+      await postJSON('/api/install/retry');
+    } else {
+      await postJSON('/api/install/start');
+    }
+  } catch (e) { console.error('install/start', e); setStatus('inst-status', e.message, 'bad'); return; }
+  instTimer = setInterval(refreshInstall, 1000);
+}
+async function killInstall() {
+  try { await api('/api/install/kill', 'POST'); } catch (e) { console.error('install/kill', e); }
+}
+async function sendKey() {
+  const key = document.getElementById('ts-key-live').value;
+  if (!key.trim()) return;
+  try { await postJSON('/api/install/input', {key: key.trim()}); }
+  catch (e) { console.error('install/input', e); return; }
+  document.getElementById('ts-key-live').value = '';  // wipe from the page immediately
+}
+async function sendContinue() {
+  try { await postJSON('/api/install/continue'); }
+  catch (e) { console.error('install/continue', e); }
+}
+async function retryInstall() {
+  try { await postJSON('/api/install/retry'); }
+  catch (e) { console.error('install/retry', e); return; }
+  document.getElementById('btn-inst').disabled = true;
+  document.getElementById('btn-instop').disabled = false;
+  instTimer = setInterval(refreshInstall, 1000);
+}
+function promptHtml(step) {
+  const p = step.prompt;
+  if (!p) return '';
+  if (p.kind === 'tailscale_login') {
+    return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
+      escapeHtml(p.body) + '<br>' +
+      (p.login_url ? 'Login page: <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
+      '<label>…or paste a reusable auth key (used once, never stored): ' +
+      '<input type="password" id="ts-key-live" autocomplete="off" placeholder="tskey-auth-…"></label> ' +
+      '<button onclick="sendKey()">Connect with key</button> ' +
+      '<button onclick="sendContinue()">I approved it — check again</button></div>';
+  }
+  let html = '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
+    escapeHtml(p.body);
+  if (p.commands) html += '<br>' + p.commands.map(c => '<code class="act">' + escapeHtml(c) + '</code>').join(' ');
+  if (p.terminal_command) html += '<br>Run: <code class="act">' + escapeHtml(p.terminal_command) + '</code>';
+  html += '<br><button onclick="retryInstall()">Done — retry</button></div>';
+  return html;
+}
+async function refreshInstall() {
+  let st;
+  try { st = await api('/api/install/state'); }
+  catch (e) { console.error('install/state', e); return; }
+  const job = st.job;
+  if (!job) return;
+  const marks = {pending: '<span class="mut">○</span>', installing: '<span class="wait">▶</span>',
+    verifying: '<span class="wait">◷</span>', ready: '<span class="ok">✓</span>',
+    failed: '<span class="bad">✗</span>', waiting: '<span class="wait">⏸</span>'};
+  document.getElementById('inst-rows').innerHTML =
+    job.steps.map(s => '<div>' + (marks[s.status] || '?') + ' <strong>' + s.label + '</strong>' +
+      (s.detail ? ' <span class="mut">' + escapeHtml(s.detail) + '</span>' : '') +
+      (s.error ? '<br><span class="bad">' + escapeHtml(s.error) + '</span>' : '') +
+      promptHtml(s) +
+      (s.log && s.log.length ? '<details><summary>log</summary><pre>' +
+        escapeHtml(s.log.join('\n')) + '</pre></details>' : '') + '</div>').join('');
+  const log = document.getElementById('inst-log');
+  if (['ready', 'failed', 'waiting', 'cancelled'].includes(job.status)) {
+    clearInterval(instTimer);
+    document.getElementById('btn-instop').disabled = true;
+    if (job.status === 'ready') {
+      setStatus('inst-status', 'done — infrastructure installed', 'ok');
+      log.textContent = 'Next: the real dashboard (Phase 8) will take over app installs here.';
+    } else if (job.status === 'waiting') {
+      setStatus('inst-status', 'needs you — see the paused row above', 'wait');
+      log.textContent = '';
+    } else if (job.status === 'failed') {
+      setStatus('inst-status', 'failed — fix and retry', 'bad');
+      log.innerHTML = 'The failed row is above. <button onclick="retryInstall()">Retry</button>';
+    } else {
+      setStatus('inst-status', 'stopped', 'mut');
+      document.getElementById('btn-inst').disabled = false;
+    }
+  } else {
+    setStatus('inst-status', 'installing…', 'wait');
+  }
+}
+
+// --- page load: restore unlocks the server still remembers -----------------
+// The server keeps results in memory, so a refresh rebuilds cards ②/③ from
+// the stored report instead of forcing re-runs. Card ①'s table needs a fresh
+// run (events are live), so only its unlock state restores.
+(async function init() {
+  let st;
+  try { st = await api('/api/state'); }
+  catch (e) { console.error('state', e); return; }
+  if (st.tests_green) unlock('card-preflight', 'btn-pre', 'pre-status', 'ready (re-run to refresh)');
+  if (st.preflight_passed && st.preflight_report) {
+    unlock('card-install', 'btn-inst', 'inst-status', 'ready');
+    renderManifest(st.preflight_report);
+    setStatus('pre-status', 'ready for install (restored)', 'ok');
+  }
+  if (st.install_job) {
+    refreshInstall();  // renders rows for any status (terminal or live)
+    if (['queued', 'running', 'waiting'].includes(st.install_job.status)) {
+      document.getElementById('btn-inst').disabled = true;
+      document.getElementById('btn-instop').disabled = false;
+      instTimer = setInterval(refreshInstall, 1000);
+    }
+  }
+})();
+</script>
+</body>
+</html>

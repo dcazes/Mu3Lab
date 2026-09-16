@@ -1,0 +1,434 @@
+"""Mu3Lab :: check_server.py
+RETIRE AT PHASE 11 (React dashboard + real API replace this file entirely).
+
+WHAT: Zero-dependency local dashboard for the fresh-user check flow. Serves
+      one static page (tools/check_page.html) plus a tiny JSON API that runs
+      the unit suite and the host preflight behind three GATED cards:
+      ① tests → ② preflight → ③ install (remediate-only: check first,
+      fix exactly the gap, skip what's ready; waiting rows need you).
+WHY:  The real dashboard needs .venv + npm build + install.sh to exist. This
+      scaffold needs only system python3 (stdlib), so `git clone` + one
+      command is enough to SEE host status. Small on purpose: ~200 lines,
+      deleted — not extended — once Phase 11 lands.
+RUN:  `./check.sh` (preferred: prechecks python, proves venv, execs this).
+      Direct: `python3 check_server.py [--port N] [--no-open]`.
+      Open http://127.0.0.1:8799 — buttons are manual (locked decision).
+DEBUG: All state is in-memory (see State). Restarting the server resets the
+      card chain honestly. Logs go to stdout; nothing is written to disk.
+      API errors are JSON {error, hint} with HTTP 409 for ordering/lock
+      violations and 501 for the Phase-7 install stub.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import subprocess
+import sys
+import threading
+import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Constants.
+# ---------------------------------------------------------------------------
+DEFAULT_PORT = 8799   # 8787 belongs to the real dashboard; never collide
+TEST_TIMEOUT = 120    # kill a hung suite run after N seconds
+MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
+ROOT = Path(__file__).resolve().parent
+PAGE = ROOT / "tools" / "check_page.html"
+
+
+class State:
+    """In-memory progression flags + latest results. One instance per process.
+
+    tests_green_this_session gates card ②; preflight_passed gates card ③
+    (passed = zero FAILs among BLOCKING checks; TODOs are card ③'s list).
+    A restart clears both — by design (see module docstring).
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.test_run: dict | None = None      # active run or None
+        self.test_events: list[dict] = []      # JSON lines from the runner
+        self.tests_green = False               # card ① exit-0 seen?
+        self.tests_summary: dict | None = None
+        self.preflight_passed = False          # card ② passed (no blocking FAILs)?
+        self.preflight_report: dict | None = None
+        # Install job (card ③): at most one active; threads + events live here.
+        self.install_job: dict | None = None
+        self.install_thread: threading.Thread | None = None
+        self.install_stop = threading.Event()
+        self.install_input = threading.Event()
+
+
+def can_run_preflight(state: State) -> tuple[bool, str]:
+    """Pure gate for card ②. Factored for tests (no HTTP involved)."""
+    if state.test_run is not None:
+        return False, "tests still running — wait for the suite to finish"
+    if not state.tests_green:
+        return False, "run card ① first: preflight unlocks on a green suite"
+    return True, ""
+
+
+def can_open_install(state: State) -> tuple[bool, str]:
+    """Pure gate for card ③. Factored for tests (no HTTP involved)."""
+    if not state.preflight_passed:
+        return False, "run card ② first: install unlocks on green preflight"
+    return True, ""
+
+
+def _test_worker(state: State, python: str) -> None:
+    """Background thread: spawn the JSON runner, buffer its lines into state.
+
+    Fixed argv, shell=False — no user input anywhere near this call, so no
+    injection surface. Kills the child on TEST_TIMEOUT.
+    """
+    try:
+        proc = subprocess.Popen(
+            [python, str(ROOT / "tools" / "run_tests.py")],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, cwd=str(ROOT),
+        )
+    except OSError as exc:
+        with state.lock:
+            state.test_run = None
+            state.test_events.append({"type": "error",
+                                      "detail": f"could not start runner: {exc}"})
+        return
+    with state.lock:
+        if state.test_run is not None:  # killed while spawning; clean up
+            state.test_run["proc"] = proc
+        else:  # kill arrived before we registered: stop immediately
+            proc.kill()
+            return
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                event = {"type": "raw", "detail": line[:500]}
+            with state.lock:
+                state.test_events.append(event)
+                if len(state.test_events) > MAX_EVENTS:
+                    del state.test_events[:len(state.test_events) - MAX_EVENTS]
+        rc = proc.wait(timeout=TEST_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        rc = 124
+        with state.lock:
+            state.test_events.append({"type": "error",
+                                      "detail": f"suite timed out after {TEST_TIMEOUT}s"})
+    with state.lock:
+        summary = next((e for e in reversed(state.test_events)
+                        if e.get("type") == "summary" and e.get("phase") == "done"),
+                       None)
+        state.tests_summary = summary
+        # Green = runner exit 0 AND a done-summary with zero failures/errors.
+        state.tests_green = (rc == 0 and summary is not None
+                             and not summary.get("failed") and not summary.get("errored"))
+        state.test_run = None
+
+
+def _install_worker(state: State) -> None:
+    """Background thread: run install.run_job with a server-backed ctx.
+
+    Auth keys arrive via job["inputs"] (memory-only, never logged — the
+    runner redacts the key in its own log line; see fix_tailscale_join).
+    """
+    from ctl import install
+    job = state.install_job
+    assert job is not None
+    MAX_INSTALL_EVENTS = 2000
+
+    def emit(event: dict) -> None:
+        with state.lock:
+            job["events"].append(event)
+            if len(job["events"]) > MAX_INSTALL_EVENTS:
+                del job["events"][:len(job["events"]) - MAX_INSTALL_EVENTS]
+
+    def log_fn(step_id: str):
+        def _log(line: str) -> None:
+            with state.lock:
+                for step in job["steps"]:
+                    if step["id"] == step_id:
+                        step["log"].append(line)
+                        break
+                job["events"].append({"type": "log", "id": step_id,
+                                      "line": line[:2000]})
+        return _log
+
+    def wait_input(step_id: str) -> dict:
+        # Blocks until the UI posts a key/continue (or kill). Returns a COPY
+        # so later wipes can't race the runner.
+        state.install_input.clear()
+        state.install_input.wait()
+        with state.lock:
+            return dict(job["inputs"])
+
+    ctx = {"root": ROOT, "log_fn": log_fn, "inputs": job["inputs"],
+           "wait_input": wait_input,
+           "stopped": state.install_stop.is_set, "emit": emit}
+    try:
+        install.run_job(job, ctx)
+    except Exception as exc:  # noqa: BLE001 (job must end, never hang)
+        with state.lock:
+            job["status"] = "failed"
+            job["events"].append({"type": "error",
+                                  "detail": f"installer crashed: {exc}"})
+    finally:
+        # Wipe any supplied key the moment the job stops being interactive.
+        with state.lock:
+            job["inputs"].pop("tailscale_authkey", None)
+        emit({"type": "summary", "phase": "done", "status": job["status"]})
+
+
+def _serialize_job(job: dict | None) -> dict | None:
+    """Job shape the page renders (per-step logs capped at 50 lines)."""
+    if job is None:
+        return None
+    return {"id": job["id"], "status": job["status"],
+            "steps": [{"id": s["id"], "label": s["label"], "status": s["status"],
+                       "log": s["log"][-50:], "prompt": s.get("prompt"),
+                       "error": s.get("error", ""), "detail": s.get("detail", "")}
+                      for s in job["steps"]]}
+
+
+class Handler(BaseHTTPRequestHandler):
+    """Routes. server_version is pinned down to avoid fingerprint noise."""
+
+    server_version = "Mu3LabCheck/0.1"
+
+    # -- helpers -----------------------------------------------------------
+    def _json(self, obj: dict, status: int = 200) -> None:
+        body = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _state(self) -> State:
+        return self.server.state  # type: ignore[attr-defined]
+
+    def log_message(self, *args):  # keep stdout for app logs, not HTTP noise
+        pass
+
+    # -- GET ---------------------------------------------------------------
+    def do_GET(self):  # noqa: N802 (BaseHTTPRequestHandler hook, keep it)
+        state = self._state()
+        if self.path == "/":
+            try:
+                page = PAGE.read_bytes()
+            except OSError:
+                self._json({"error": "page missing",
+                            "hint": "tools/check_page.html not found"}, 500)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+        elif self.path == "/api/state":
+            with state.lock:
+                self._json({
+                    "server_started_at": state.started_at,
+                    "tests_running": state.test_run is not None,
+                    "tests_green": state.tests_green,
+                    "tests_summary": state.tests_summary,
+                    "preflight_passed": state.preflight_passed,
+                    "preflight_report": state.preflight_report,
+                    "install_job": _serialize_job(state.install_job),
+                })
+        elif self.path == "/api/tests/events":
+            with state.lock:
+                self._json({"events": list(state.test_events)})
+        else:
+            self._json({"error": "not found",
+                        "hint": "see / for the dashboard"}, 404)
+
+    # -- POST --------------------------------------------------------------
+    def do_POST(self):  # noqa: N802 (BaseHTTPRequestHandler hook, keep it)
+        state = self._state()
+        length = int(self.headers.get("Content-Length", 0))
+        self._body = self.rfile.read(length)  # kept for /api/install/input
+        if self.path == "/api/tests/run":
+            with state.lock:
+                if state.test_run is not None:
+                    self._json({"error": "already running",
+                                "hint": "kill the active run first"}, 409)
+                    return
+                state.test_events = []
+                state.tests_green = False
+                state.preflight_passed = False  # new suite invalidates chain
+                state.preflight_report = None
+                state.test_run = {"status": "running"}
+            thread = threading.Thread(target=_test_worker,
+                                      args=(state, sys.executable),
+                                      daemon=True)
+            thread.start()
+            self._json({"started": True})
+        elif self.path == "/api/tests/kill":
+            with state.lock:
+                run = state.test_run
+                proc = (run or {}).get("proc")
+                state.test_run = None
+                if proc is not None:
+                    try:
+                        proc.kill()  # worker sees rc!=0, marks suite red
+                    except OSError:
+                        pass
+            if run is None:
+                self._json({"error": "nothing running"}, 409)
+            else:
+                self._json({"killed": True})
+        elif self.path == "/api/preflight/run":
+            ok, reason = can_run_preflight(state)
+            if not ok:
+                self._json({"error": "locked", "hint": reason}, 409)
+                return
+            # In-process: milliseconds, no subprocess. Import is lazy + reloaded
+            # so an already-running server always executes CURRENT disk code:
+            # without reload, Python's module cache would keep serving the
+            # preflight.py from server-start time after you edit files.
+            try:
+                from ctl import preflight
+                importlib.reload(preflight)
+                report = preflight.run_all()
+            except Exception as exc:  # noqa: BLE001 (must survive, report it)
+                self._json({"error": "preflight crashed",
+                            "hint": f"{type(exc).__name__}: {exc}"}, 500)
+                return
+            with state.lock:
+                state.preflight_report = report
+                # Gate: install_ready (zero FAILs among BLOCKING checks).
+                # Fall back to legacy "ok" for reports predating the field.
+                state.preflight_passed = bool(report.get("install_ready",
+                                                         report.get("ok")))
+            self._json(report)
+        elif self.path == "/api/install/start":
+            ok, reason = can_open_install(state)
+            if not ok:
+                self._json({"error": "locked", "hint": reason}, 409)
+                return
+            from ctl import install as _install
+            with state.lock:
+                thread = state.install_thread
+                alive = thread is not None and thread.is_alive()
+                if alive:
+                    self._json({"error": "already running",
+                                "hint": "kill the active install first"}, 409)
+                    return
+                job = _install.new_job()
+                import uuid as _uuid
+                job["id"] = _uuid.uuid4().hex[:12]
+                job["status"] = "queued"
+                state.install_job = job
+                state.install_stop.clear()
+                state.install_input.clear()
+                state.install_thread = threading.Thread(
+                    target=_install_worker, args=(state,), daemon=True)
+                state.install_thread.start()
+            self._json({"started": True, "job_id": job["id"]})
+        elif self.path == "/api/install/state":
+            with state.lock:
+                self._json({"job": _serialize_job(state.install_job)})
+        elif self.path == "/api/install/events":
+            with state.lock:
+                job = state.install_job
+                self._json({"events": list(job["events"]) if job else []})
+        elif self.path == "/api/install/input":
+            # Auth key delivery: memory-only. Body: {"key": "tskey-..."}.
+            # The key is stored in the job dict (wiped when the job ends) and
+            # the waiting runner is woken. Never logged, never persisted.
+            try:
+                payload = json.loads(self._body.decode() or "{}")
+            except (ValueError, AttributeError):
+                self._json({"error": "bad request",
+                            "hint": "send JSON {\"key\": \"tskey-...\"}"}, 400)
+                return
+            key = (payload.get("key") or "").strip()
+            if not key:
+                self._json({"error": "bad request",
+                            "hint": "empty key"}, 400)
+                return
+            with state.lock:
+                if state.install_job is None:
+                    self._json({"error": "no job"}, 409)
+                    return
+                state.install_job["inputs"]["tailscale_authkey"] = key
+                state.install_input.set()
+            self._json({"accepted": True})
+        elif self.path == "/api/install/continue":
+            # "Check again" for login-URL / relogin waits: wake the runner to
+            # re-poll (join status, group liveness).
+            with state.lock:
+                if state.install_job is None:
+                    self._json({"error": "no job"}, 409)
+                    return
+                state.install_input.set()
+            self._json({"continued": True})
+        elif self.path == "/api/install/kill":
+            with state.lock:
+                thread = state.install_thread
+                alive = thread is not None and thread.is_alive()
+                state.install_stop.set()
+                state.install_input.set()  # unblock a waiting join
+            if not alive:
+                self._json({"error": "nothing running"}, 409)
+            else:
+                self._json({"killed": True})
+        elif self.path == "/api/install/retry":
+            # Resume from the first non-ready step (run_job skips readies).
+            with state.lock:
+                job = state.install_job
+                thread = state.install_thread
+                if job is None:
+                    self._json({"error": "no job",
+                                "hint": "start an install first"}, 409)
+                    return
+                if thread is not None and thread.is_alive():
+                    self._json({"error": "already running"}, 409)
+                    return
+                job["status"] = "queued"
+                state.install_stop.clear()
+                state.install_input.clear()
+                state.install_thread = threading.Thread(
+                    target=_install_worker, args=(state,), daemon=True)
+                state.install_thread.start()
+            self._json({"retried": True})
+        else:
+            self._json({"error": "not found"}, 404)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse flags, serve forever on 127.0.0.1. Ctrl-C stops (no cleanup needed)."""
+    parser = argparse.ArgumentParser(description="Mu3Lab zero-install check dashboard")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--no-open", action="store_true",
+                        help="print the URL instead of opening a browser")
+    args = parser.parse_args(argv)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server.state = State()  # type: ignore[attr-defined]
+    url = f"http://127.0.0.1:{args.port}"
+    print(f"Mu3Lab check dashboard: {url}")
+    print("Cards unlock in order: ① tests → ② preflight → ③ install.")
+    if not args.no_open:
+        webbrowser.open(url)  # best effort; SSH sessions just keep the URL
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\ncheck dashboard stopped (nothing was installed or changed).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

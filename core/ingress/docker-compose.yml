@@ -1,0 +1,28 @@
+# Mu3Lab :: core/ingress/docker-compose.yml
+# WHAT:  Local entry point (Caddy reverse proxy). Minimal on purpose: one
+#        route, dashboard only. App routes + Authentik gates arrive later
+#        with the apps that need them (real dashboard work, not this build).
+# WHY:   Single loopback ingress means later services never invent their own
+#        ports/origins. Caddy validates its own config at startup
+#        (healthcheck), so a bad Caddyfile fails the step loudly, not subtly.
+# RUN:   `docker compose up -d` in this dir (card ③ does it). Needs the
+#        mu3lab_frontend external network (card ③ creates it first).
+# DEBUG: `docker compose logs caddy`; `curl -f http://127.0.0.1:19460/`.
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  caddy-data:
+  caddy-config:

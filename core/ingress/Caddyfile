@@ -1,0 +1,17 @@
+# Mu3Lab :: core/ingress/Caddyfile
+# WHAT:  Minimal starter: :19460 proxies to the real dashboard (:8787).
+# WHY:   TLS terminates at Tailscale Serve (tailnet), so Caddy stays plain
+#        HTTP on loopback with auto_https off. Forward-auth blocks, tailnet
+#        host vars, and per-app routes arrive with the apps (later phases) —
+#        adding them now would ship untested security config.
+# DEBUG: `docker exec <caddy> caddy validate --config /etc/caddy/Caddyfile
+#        --adapter caddyfile`; `curl -f http://127.0.0.1:19460/`.
+{
+	auto_https off
+	admin off
+}
+
+# Step 1: dashboard only. App routes + Authentik gates arrive later.
+http://:19460 {
+	reverse_proxy 127.0.0.1:8787
+}

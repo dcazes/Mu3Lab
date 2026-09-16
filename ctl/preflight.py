@@ -1,0 +1,468 @@
+"""Mu3Lab :: ctl/preflight.py
+
+WHAT: Read-only host checks for Step 0 (bootstrap) and the dashboard Setup
+      page. Every `check_*()` inspects the machine and reports; none of them
+      installs, modifies, or prompts for anything.
+WHY:  The dashboard's first card ("is this host ready?") and install.sh's
+      guard clauses both need the same answers. One module, two callers, so
+      the shell script and the UI can never disagree about requirements.
+RUN:  `python3 -m ctl.preflight` from the repo root prints a human table.
+      (Needs no .venv, no root, no network — stdlib only.)
+DEBUG: Each check returns a plain dict {name, status, detail, action} where
+      status is one of "ok" | "missing" | "fail". A failing gate tells you
+      the exact `action` string to fix it. `run_all()` aggregates to
+      {ok, checks:[...]} for the GET /api/preflight endpoint (Phase 8).
+"""
+
+from __future__ import annotations
+
+import grp
+import os
+import platform
+import re
+import shutil
+import socket
+import subprocess
+import sys
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Constants: every magic value lives here with its reason.
+# ---------------------------------------------------------------------------
+
+# Minimum supported distros. Mint is accepted via ID_LIKE=ubuntu + UBUNTU_CODENAME.
+MIN_DEBIAN_MAJOR = 12      # install.sh dies below Debian 12 (docker repo needs it)
+MIN_UBUNTU_MAJOR = 22      # install.sh dies below Ubuntu 22.04 (same reason)
+MIN_PYTHON = (3, 10)       # `match` syntax + new typing used across ctl/
+MIN_NODE_MAJOR = 20        # dashboard builds from source (Vite needs Node 18+;
+                         # install.sh ensures AT LEAST v20; newer (22+) is accepted)
+MIN_DOCKER_MAJOR = 24      # compose-v2 plugin era; step 3 upgrades older engines
+
+# Checks the installer CANNOT fix. Anything else is step 3's work list and
+# must never report "fail" — only "missing" (not ready, installer provides)
+# or "ok". run_all() stamps each check with blocking True/False from this set
+# and derives install_ready = "zero fails among blockers".
+BLOCKING = frozenset({"os", "arch", "python", "ports"})
+
+# Only these ports are probed. Ports for deferred Step-2 apps (e.g. 4000
+# LiteLLM) are deliberately NOT checked — a missing future port is not a
+# Step-0/1 failure. See BUILD_ORDER Phase 2 gate discussion.
+CHECK_PORTS = (8787, 19460, 9001, 8081)
+
+# Docker networks Step 1a must create before any compose project starts.
+MU3LAB_NETWORKS = ("mu3lab_frontend", "mu3lab_backend", "mu3lab_mcp")
+
+# Repo root = parent of this file's directory (ctl/ -> Mu3Lab/).
+ROOT = Path(__file__).resolve().parent.parent
+
+
+# ---------------------------------------------------------------------------
+# Small helpers (private). No subprocess here except via _run().
+# ---------------------------------------------------------------------------
+
+def _result(name: str, status: str, detail: str, action: str = "",
+            state: str = "") -> dict:
+    """Build one check dict. Status is "ok" | "missing" | "fail".
+
+    `state` is the machine-readable dispatch key card ③ switches on
+    (e.g. docker "daemon_down" → start it; "absent" → install it).
+    Convention: dispatchable checks use specific states; gate-only checks
+    (os/arch/python/ports) use "ready"/"blocked" mirroring status.
+    """
+    return {"name": name, "status": status, "detail": detail,
+            "action": action, "state": state or status}
+
+
+def _run(argv: list[str], timeout: int = 10) -> tuple[int, str]:
+    """Run a probe command, swallowing all errors into a return code.
+
+    Never raises: a missing binary is a normal "missing" answer, not an
+    exception. stdout+stderr are merged because error text is diagnostic.
+    """
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout,
+        )
+        return proc.returncode, (proc.stdout + proc.stderr).strip()
+    except FileNotFoundError:
+        return 127, f"{argv[0]}: command not found"
+    except subprocess.TimeoutExpired:
+        return 124, f"{argv[0]}: timed out after {timeout}s"
+    except OSError as exc:  # e.g. permission denied on the binary
+        return 126, f"{argv[0]}: {exc}"
+
+
+def _parse_os_release(text: str) -> dict[str, str]:
+    """Parse /etc/os-release content into a dict (handles quoted values)."""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" not in line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip().strip('"').strip("'")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Checks (public). Each takes only injectable inputs so tests never touch
+# the real host: file text / version tuples are passed in, and live values
+# are read at the bottom in run_all()/__main__.
+# ---------------------------------------------------------------------------
+
+def check_os(release_text: str, kernel_release: str = "") -> dict:
+    """Decide whether this distro family is supported (minimums, not pins).
+
+    Accepts Debian>=12, Ubuntu>=22.04, and ANY derivative declaring ID_LIKE
+    ubuntu/debian with a usable codename (needed later for apt repos) — no
+    distro is special-cased by name. WSL is detected via the kernel release
+    and reported ok-with-note (systemd + polkit caveats), never silently.
+    Both inputs are injected so tests feed fixtures, never the live host.
+    """
+    info = _parse_os_release(release_text)
+    distro_id = info.get("ID", "")
+    like = info.get("ID_LIKE", "")
+    version_id = info.get("VERSION_ID", "")
+    wsl = "microsoft" in (kernel_release or "").lower()
+    # WSL note: shown on success rows (action stays empty — this warns,
+    # never gates). systemd units, pkexec dialogs and Docker all behave
+    # differently under WSL; the user must know before installing.
+    wsl_note = (" WSL detected: set `systemd=true` in /etc/wsl.conf then "
+                "`wsl --shutdown`; no native polkit dialog (terminal "
+                "fallback); use Docker Engine or Docker Desktop.") if wsl else ""
+    try:
+        major = int(version_id.split(".")[0])
+    except (ValueError, IndexError):
+        return _result("os", "fail",
+                       f"Unparseable VERSION_ID {version_id!r} (ID={distro_id!r})." + wsl_note,
+                       "Use Debian 12+ or Ubuntu 22.04+.")
+    if distro_id == "debian":
+        if major >= MIN_DEBIAN_MAJOR:
+            return _result("os", "ok", f"Debian {version_id} supported." + wsl_note)
+        return _result("os", "fail", f"Debian {version_id} too old." + wsl_note,
+                       "Upgrade to Debian 12+.")
+    if distro_id == "ubuntu":
+        if major >= MIN_UBUNTU_MAJOR:
+            return _result("os", "ok", f"Ubuntu {version_id} supported." + wsl_note)
+        return _result("os", "fail", f"Ubuntu {version_id} too old." + wsl_note,
+                       "Upgrade to Ubuntu 22.04+.")
+    # Generic derivative path (Mint, Pop!_OS, ...): trust ID_LIKE, need a
+    # codename for the Docker/NodeSource apt repos that step 3 will add.
+    if "ubuntu" in like or "debian" in like:
+        codename = info.get("UBUNTU_CODENAME") or info.get("VERSION_CODENAME", "")
+        if major >= MIN_UBUNTU_MAJOR and codename:
+            return _result("os", "ok",
+                           f"{info.get('PRETTY_NAME', distro_id)} accepted as a "
+                           f"Debian/Ubuntu derivative (codename {codename})." + wsl_note)
+        return _result("os", "fail",
+                       f"{info.get('PRETTY_NAME', distro_id)}: version {version_id} "
+                       f"or missing codename." + wsl_note,
+                       "Use a derivative of Ubuntu 22.04+ / Debian 12+.")
+    return _result("os", "fail", f"Unsupported distro ID={distro_id!r}." + wsl_note,
+                   "Use Debian 12+, Ubuntu 22.04+, or a compatible derivative.")
+
+
+def check_arch(machine: str) -> dict:
+    """Accept x86_64 and ARM64 spellings; reject everything else."""
+    if machine in ("x86_64",):
+        return _result("arch", "ok", f"CPU arch {machine} supported.")
+    if machine in ("aarch64", "arm64"):
+        return _result("arch", "ok", f"CPU arch {machine} supported (ARM64).")
+    return _result("arch", "fail", f"CPU arch {machine!r} unsupported.",
+                   "Mu3Lab supports x86-64 and ARM64 hosts.")
+
+
+def check_python(version: tuple[int, ...]) -> dict:
+    """Require Python >= 3.10 (takes sys.version_info so tests can inject)."""
+    if tuple(version[:2]) >= MIN_PYTHON:
+        return _result("python", "ok",
+                       f"Python {version[0]}.{version[1]} meets "
+                       f">={MIN_PYTHON[0]}.{MIN_PYTHON[1]}.")
+    return _result("python", "fail",
+                   f"Python {version[0]}.{version[1]} too old.",
+                   "Install Python 3.10+ (do NOT remove system python3).")
+
+
+def check_node(node_version_output: str) -> dict:
+    """Require Node >= 20 (dashboard builds from source in install.sh step 9).
+
+    install.sh installs 20.x as the baseline, but a newer system Node (22+)
+    is accepted — downgrading a working Node would be pure churn.
+    Takes the raw text of `node --version` (e.g. "v22.3.0") or "" when the
+    binary is absent, so tests never need Node installed.
+    """
+    match = re.search(r"v?(\d+)\.(\d+)\.(\d+)", node_version_output or "")
+    if not match:
+        return _result("node", "missing", "Node.js not found.",
+                       "step 3 installs Node 20+ via NodeSource.", state="absent")
+    major = int(match.group(1))
+    if major >= MIN_NODE_MAJOR:
+        return _result("node", "ok", f"Node {match.group(0)} present (>= v20).",
+                       state="ready")
+    return _result("node", "missing",
+                   f"Node {match.group(0)} below minimum v20.",
+                   "step 3 upgrades it via the NodeSource repo.", state="old")
+
+
+def check_privilege(sudo_fresh: bool, graphical_session: bool) -> dict:
+    """Report HOW a future privileged step would prompt (never prompts here).
+
+    - sudo timestamp fresh  -> steps run silently, no dialog.
+    - graphical session     -> pkexec pops the native system dialog.
+    - neither               -> dashboard shows copy-paste terminal commands.
+    Both booleans are injected so tests (and --dry-run) don't probe the TTY.
+    """
+    if sudo_fresh:
+        return _result("privilege", "ok",
+                       "sudo timestamp fresh: privileged steps run without prompting.",
+                       state="fresh_sudo")
+    if graphical_session:
+        return _result("privilege", "ok",
+                       "No fresh sudo, but a graphical session exists: pkexec "
+                       "will show the native system password dialog.",
+                       state="polkit")
+    return _result("privilege", "missing",
+                   "No fresh sudo and no graphical session detected.",
+                   "Privileged steps will show terminal commands to run by hand.",
+                   state="terminal")
+
+
+def check_docker(docker_info_rc: int, group_names: list[str],
+                 networks_present: list[str], engine_version: str = "",
+                 compose_present: bool = False,
+                 binary_present: bool = True) -> dict:
+    """Report Docker readiness as a dispatchable STATE (never "fail").
+
+    States: absent | daemon_down | unverified | old_engine | no_compose |
+    no_group | no_networks | ready. Card ③ maps each to exactly one fix;
+    installing over a healthy component is structurally impossible.
+    All inputs injected (callers run `which docker`, `docker info`,
+    `docker version`, `docker compose version`, `id -nG`, network inspects).
+    """
+    if not binary_present:
+        return _result("docker", "missing", "Docker is not installed.",
+                       "step 3 installs Docker ≥24 + compose plugin.",
+                       state="absent")
+    if docker_info_rc != 0:
+        return _result("docker", "missing",
+                       "Docker is installed but the daemon is not running.",
+                       "step 3 enables and starts it (no reinstall).",
+                       state="daemon_down")
+    match = re.search(r"(\d+)\.(\d+)", engine_version or "")
+    if not match:
+        return _result("docker", "missing", "Daemon ok, engine version unknown.",
+                       "step 3 verifies and upgrades if needed.",
+                       state="unverified")
+    if int(match.group(1)) < MIN_DOCKER_MAJOR:
+        return _result("docker", "missing",
+                       f"Engine v{match.group(0)} below minimum v{MIN_DOCKER_MAJOR}.",
+                       "step 3 upgrades the engine (compose v2 era required).",
+                       state="old_engine")
+    if not compose_present:
+        return _result("docker", "missing",
+                       f"Engine v{match.group(0)} ok, compose plugin absent.",
+                       "step 3 installs docker-compose-plugin.",
+                       state="no_compose")
+    # NOTE: group membership must be LIVE in the backend process. A user added
+    # to `docker` five minutes ago still reports here until re-login/newgrp —
+    # step 3 pauses at its group checkpoint with instructions (not an error).
+    if "docker" not in group_names:
+        return _result("docker", "missing",
+                       "Installed and running; this login just needs the "
+                       "`docker` group to take effect.",
+                       "step 3 adds you and pauses for `newgrp docker` (or log out/in).",
+                       state="no_group")
+    missing = [net for net in MU3LAB_NETWORKS if net not in networks_present]
+    if missing:
+        return _result("docker", "missing",
+                       f"Engine ok, group ok, missing networks: {', '.join(missing)}.",
+                       "step 3 creates only the missing networks.",
+                       state="no_networks")
+    return _result("docker", "ok",
+                   f"Engine v{match.group(0)} + compose, group live, networks "
+                   f"present ({', '.join(MU3LAB_NETWORKS)}).",
+                   state="ready")
+
+
+def check_tailscale(binary_present: bool, daemon_active: bool,
+                    joined: bool) -> dict:
+    """Report Tailscale state. Never blocks: install, start and join (via the
+    card-③ auth key) are all step 3's job. Inputs injected."""
+    if not binary_present:
+        return _result("tailscale", "missing", "Tailscale is not installed.",
+                       "step 3 installs it (apt repo).", state="absent")
+    if not daemon_active:
+        return _result("tailscale", "missing",
+                       "Installed, but the background service is not running.",
+                       "step 3 enables and starts it (no reinstall).",
+                       state="daemon_down")
+    if not joined:
+        return _result("tailscale", "missing",
+                       "Installed, but not connected to your tailnet yet.",
+                       "step 3 guides the connection (sign in or paste a key).",
+                       state="unjoined")
+    return _result("tailscale", "ok", "Installed, service running, tailnet connected.",
+                   state="ready")
+
+
+def check_ports(connect_fn=None) -> dict:
+    """Probe that Step-0/1 ports are free (or already ours).
+
+    `connect_fn(port) -> bool` defaults to a real loopback connect; tests
+    inject a stub. A port that ACCEPTS a connection is reported "in use" —
+    on a clean box all four must be free.
+    """
+    if connect_fn is None:
+        def connect_fn(port: int) -> bool:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            try:
+                return sock.connect_ex(("127.0.0.1", port)) == 0
+            finally:
+                sock.close()
+    busy = [port for port in CHECK_PORTS if connect_fn(port)]
+    if busy:
+        return _result("ports", "fail",
+                       f"Ports already in use: {', '.join(map(str, busy))}.",
+                       "Stop the conflicting processes or change ports before installing.")
+    return _result("ports", "ok",
+                   f"Ports free ({', '.join(map(str, CHECK_PORTS))}).")
+
+
+def check_bundle(root: Path = ROOT) -> dict:
+    """Verify the repo-root venv and the built dashboard bundle exist."""
+    problems: list[str] = []
+    venv_ok = (root / ".venv" / "bin" / "python").exists()
+    if not venv_ok:
+        problems.append("project workspace folder (.venv) missing")
+    index = root / "dashboard" / "dist" / "index.html"
+    if not index.is_file():
+        problems.append("built dashboard missing")
+    else:
+        # Every /assets/* file referenced by index.html must exist on disk.
+        html = index.read_text(encoding="utf-8")
+        for marker in ('src="/assets/', 'href="/assets/'):
+            start = 0
+            while True:
+                found = html.find(marker, start)
+                if found == -1:
+                    break
+                asset = html[found + len(marker):].split('"', 1)[0]
+                if not (index.parent / "assets" / asset).is_file():
+                    problems.append(f"bundle references missing asset: {asset}")
+                start = found + len(marker)
+    if problems:
+        state = "no_venv" if not venv_ok else "no_build"
+        return _result("bundle", "missing", "; ".join(problems),
+                       "step 3 sets up the workspace.", state=state)
+    return _result("bundle", "ok", "Workspace ready (.venv + built dashboard).",
+                   state="ready")
+
+
+def check_compose_projects(root: Path = ROOT) -> dict:
+    """Report per-project .env presence and container state (Step 1c–1e).
+
+    Read-only: parses compose files and queries `docker compose ps` via _run.
+    On a clean box every project reports "not installed" (status missing),
+    which is the CORRECT pre-Step-1 answer — not an error.
+    """
+    lines: list[str] = []
+    for project in ("ingress", "authentik", "vaultwarden"):
+        projdir = root / "core" / project
+        if not (projdir / "docker-compose.yml").is_file():
+            lines.append(f"{project}: no compose file yet")
+            continue
+        env_note = ".env present" if (projdir / ".env").is_file() else ".env missing"
+        rc, out = _run(["docker", "compose", "ps", "--format", "{{.State}}"],
+                       timeout=15)
+        if rc != 0 and "command not found" in out:
+            lines.append(f"{project}: docker unavailable ({env_note})")
+        else:
+            states = out.split() if out else []
+            running = sum(1 for state in states if state == "running")
+            lines.append(f"{project}: {running} running ({env_note})")
+    return _result("compose", "ok" if lines else "missing", "; ".join(lines) or
+                   "no compose projects defined yet")
+
+
+# ---------------------------------------------------------------------------
+# Aggregation + live wiring (the only part that touches the real host).
+# ---------------------------------------------------------------------------
+
+def run_all() -> dict:
+    """Run every check against the live host. Powers GET /api/preflight."""
+    # OS release text (best effort; missing file = explicit fail, not crash).
+    try:
+        release_text = Path("/etc/os-release").read_text(encoding="utf-8")
+    except OSError as exc:
+        release_text = f"ID=unknown\nVERSION_ID=0\nPRETTY_NAME=unreadable ({exc})"
+    # Node version (absent binary is a normal "missing").
+    _, node_out = _run(["node", "--version"])
+    # Privilege signals: fresh sudo? graphical session?
+    sudo_fresh = _run(["sudo", "-n", "true"])[0] == 0
+    graphical = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    # Docker signals: binary? daemon? engine version? compose plugin?
+    # live group? which of the three networks exist?
+    docker_binary = shutil.which("docker") is not None
+    docker_rc, _ = _run(["docker", "info"])
+    engine_version = ""
+    compose_present = False
+    if docker_rc == 0:
+        _, engine_version = _run(["docker", "version", "--format",
+                                  "{{.Server.Version}}"])
+        compose_present = _run(["docker", "compose", "version"])[0] == 0
+    try:
+        groups = os.getgrouplist(os.getlogin(), os.getgid())
+        group_names = [grp.getgrgid(gid).gr_name for gid in groups]
+    except OSError:
+        group_names = []
+    networks: list[str] = []
+    if docker_rc == 0:
+        for net in MU3LAB_NETWORKS:
+            if _run(["docker", "network", "inspect", net])[0] == 0:
+                networks.append(net)
+    # Tailscale signals: binary? daemon? joined?
+    ts_binary = shutil.which("tailscale") is not None
+    ts_active = _run(["systemctl", "is-active", "tailscaled"])[0] == 0
+    ts_joined = _run(["tailscale", "status"])[0] == 0 if ts_binary else False
+
+    checks = [
+        check_os(release_text, kernel_release=platform.release()),
+        check_arch(platform.machine()),
+        check_python(tuple(sys.version_info)),
+        check_node(node_out),
+        check_privilege(sudo_fresh, graphical),
+        check_docker(docker_rc, group_names, networks,
+                     engine_version=engine_version,
+                     compose_present=compose_present,
+                     binary_present=docker_binary),
+        check_tailscale(ts_binary, ts_active, ts_joined),
+        check_ports(),
+        check_bundle(),
+        check_compose_projects(),
+    ]
+    # Each check is stamped blocking True/False from BLOCKING so the dashboard
+    # can split "fix this yourself" from "step ③ provides it" with no extra
+    # logic. install_ready (card ③'s gate) = zero fails among blockers.
+    # "ok" (all green) remains for exactness but gates nothing.
+    for check in checks:
+        check["blocking"] = check["name"] in BLOCKING
+    install_ready = not any(check["status"] == "fail" and check["blocking"]
+                            for check in checks)
+    return {"ok": all(check["status"] == "ok" for check in checks),
+            "install_ready": install_ready, "checks": checks}
+
+
+def main() -> int:
+    """Pretty-print run_all() for humans. Exit 0 only when all green."""
+    report = run_all()
+    width = max(len(check["name"]) for check in report["checks"])
+    for check in report["checks"]:
+        mark = {"ok": "PASS", "missing": "TODO", "fail": "FAIL"}[check["status"]]
+        print(f"[{mark}] {check['name']:<{width}}  {check['detail']}")
+        if check["action"]:
+            print(f"       {check['action']}")
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

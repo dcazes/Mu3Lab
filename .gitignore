@@ -1,0 +1,28 @@
+# Mu3Lab :: .gitignore
+# WHAT:  Tells git which local/generated files must never be committed.
+# WHY:   .env files hold real secrets; .state holds the job DB; .venv,
+#        node_modules and dashboard/dist are all regenerable build output.
+# DEBUG: `git check-ignore -v <path>` shows which line ignores a path.
+
+# Real secrets (examples are committed, values never are)
+.env
+core/*/.env
+
+# Runtime state (SQLite job database)
+.state/
+
+# Python virtualenv (recreated by install.sh)
+.venv/
+
+# Node modules + built dashboard bundle (recreated by npm ci/build)
+node_modules/
+dashboard/dist/
+
+# Service data dirs (bind-mounted container data, e.g. core/vaultwarden/data/)
+core/*/data/
+
+# Editor / OS noise
+.vscode/
+__pycache__/
+*.pyc
+.DS_Store
