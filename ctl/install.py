@@ -797,24 +797,35 @@ def _propagate(res: dict) -> dict:
 
 
 def _docker_check(ctx: dict) -> dict:
-    rc, _ = actions.privilege._exec(["docker", "info"])
-    eng_rc, eng = actions.privilege._exec(
-        ["docker", "version", "--format", "{{.Server.Version}}"])
-    comp = actions.privilege._exec(["docker", "compose", "version"])[0] == 0
-    user = getpass.getuser()
+    # Mirrors preflight.run_all()'s docker probes EXACTLY (same disambiguators:
+    # stderr-denied vs dead daemon, live process groups). Diverging here
+    # reintroduces the misdiagnosis this step exists to fix.
+    rc, out = actions.privilege._exec(["docker", "info"])
+    denied = "permission denied" in out.lower()
+    active = actions.privilege._exec(
+        ["systemctl", "is-active", "docker"])[0] == 0
+    eng, comp = "", False
+    if rc == 0:
+        eng_rc, eng = actions.privilege._exec(
+            ["docker", "version", "--format", "{{.Server.Version}}"])
+        eng = eng if eng_rc == 0 else ""
+        comp = actions.privilege._exec(
+            ["docker", "compose", "version"])[0] == 0
     try:
         import grp as _grp
-        groups = [_grp.getgrgid(g).gr_name
-                  for g in os.getgrouplist(user, os.getgid())]
+        groups = [_grp.getgrgid(gid).gr_name for gid in os.getgroups()]
     except OSError:
         groups = []
     nets = [n for n in preflight.MU3LAB_NETWORKS
-            if actions.privilege._exec(["docker", "network", "inspect", n])[0] == 0]
+            if actions.privilege._exec(
+                ["docker", "network", "inspect", n])[0] == 0]
     import shutil as _sh
     return preflight.check_docker(rc, groups, nets,
-                                  engine_version=eng if eng_rc == 0 else "",
+                                  engine_version=eng,
                                   compose_present=comp,
-                                  binary_present=_sh.which("docker") is not None)
+                                  binary_present=_sh.which("docker") is not None,
+                                  permission_denied=denied,
+                                  daemon_active=active)
 
 
 def _tailscale_pkg_check(ctx: dict) -> dict:

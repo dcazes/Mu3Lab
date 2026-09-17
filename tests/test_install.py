@@ -109,6 +109,30 @@ class DockerFixTests(unittest.TestCase):
         self.assertIsNone(result.get("waiting"))
         mod.assert_called_once()
 
+    def test_probe_distinguishes_denied_from_down(self):
+        # REGRESSION: the install-side probe once discarded docker-info
+        # stderr, misreading "permission denied" as a dead daemon (which then
+        # failed verify after a pointless start). It must mirror run_all().
+        def fake_exec(argv, timeout=300):
+            cmd = " ".join(argv)
+            if argv[:2] == ["docker", "info"]:
+                return 1, "permission denied while trying to connect"
+            if argv[:2] == ["systemctl", "is-active"]:
+                return 0, "active"
+            return 1, ""
+        import shutil as _sh
+        with patch("ctl.install.actions.privilege") as priv, \
+             patch.object(_sh, "which", return_value="/usr/bin/docker"):
+            priv._exec.side_effect = fake_exec
+            check = install._docker_check(_ctx())
+        self.assertEqual(check["state"], "no_access")
+
+    def test_verify_tolerates_downstream_states(self):
+        meta = next(m for m in install.STEPS if m["id"] == "docker")
+        for state in ("ready", "no_group", "no_networks", "no_access"):
+            self.assertIn(state, meta["verify_ok_states"])
+        self.assertNotIn("daemon_down", meta["verify_ok_states"])
+
 
 class WorkspaceStepTests(unittest.TestCase):
     def _ctx(self, root):
