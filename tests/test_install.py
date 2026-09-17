@@ -326,12 +326,28 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_tailscale_join(
                 {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
         run.assert_called_once_with(
-            ["tailscale", "up", "--hostname=mu3lab", "--timeout=10s"],
-            unittest.mock.ANY, timeout=20)
+            ["tailscale", "up", "--hostname=mu3lab", "--timeout=45s"],
+            unittest.mock.ANY, timeout=55)
         opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
         self.assertTrue(result["waiting"])
         self.assertEqual(result["prompt"]["login_url"],
                          "https://login.tailscale.com/a/abc123")
+
+    def test_tailscale_join_reads_pending_url_from_local_status(self):
+        status = type("Proc", (), {
+            "returncode": 0,
+            "stdout": '{"AuthURL":"https://login.tailscale.com/a/from-status"}',
+        })()
+        with patch("ctl.install.privilege.run_privileged", return_value={
+                "ok": False, "output": "timeout waiting"}), \
+             patch("ctl.install.subprocess.run", return_value=status) as status_run, \
+             patch("ctl.install.webbrowser.open", return_value=True):
+            result = install.fix_tailscale_join(
+                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        status_run.assert_called_once_with(["tailscale", "status", "--json"],
+                                           capture_output=True, text=True, timeout=10)
+        self.assertEqual(result["prompt"]["login_url"],
+                         "https://login.tailscale.com/a/from-status")
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com

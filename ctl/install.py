@@ -21,6 +21,7 @@ DEBUG: Every fix logs its commands before running (via actions.py). Job dict
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import platform
 import re
@@ -57,8 +58,8 @@ def tailscale_key_url(distro: str, codename: str) -> str:
 CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
 SERVE_PORT = "19460"      # `tailscale serve --bg` proxies this local port
 TS_HOSTNAME = "mu3lab"
-TAILSCALE_JOIN_TIMEOUT = "10s"  # prevents browser approval from blocking a job forever
-TAILSCALE_WORKER_TIMEOUT = 20    # bounds the elevated worker if the CLI misbehaves
+TAILSCALE_JOIN_TIMEOUT = "45s"  # enough time for initial control-plane registration
+TAILSCALE_WORKER_TIMEOUT = 55    # bounds the worker beyond the CLI's own join window
 
 
 # ---------------------------------------------------------------------------
@@ -754,6 +755,23 @@ def _join_prompt(login_url: str) -> dict:
     }
 
 
+def _tailscale_auth_url() -> str:
+    """Read a pending login URL from the local daemon without logging status data."""
+    try:
+        proc = subprocess.run(["tailscale", "status", "--json"],
+                              capture_output=True, text=True, timeout=10)
+    except OSError:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return ""
+    url = payload.get("AuthURL", "")
+    return url if isinstance(url, str) else ""
+
+
 def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     """Join through the installer's existing Polkit worker.
 
@@ -762,7 +780,7 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     immediately and is never persisted or sent back as a credential.
     """
     log = ctx["log_fn"]("tailscale_join")
-    log("$ tailscale up --hostname=mu3lab --timeout=10s  (waiting up to 10 seconds for login URL)")
+    log("$ tailscale up --hostname=mu3lab --timeout=45s  (waiting up to 45 seconds for login URL)")
     result = privilege.run_privileged(
         ["tailscale", "up", "--hostname=" + TS_HOSTNAME,
          "--timeout=" + TAILSCALE_JOIN_TIMEOUT], log,
@@ -770,8 +788,8 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     out = result.get("output", "")
     import re as _re
     match = _re.search(r"https://login\.tailscale\.com/[A-Za-z0-9/_-]+", out)
-    if match:
-        login_url = match.group(0).rstrip(".,);")
+    login_url = match.group(0).rstrip(".,);") if match else _tailscale_auth_url()
+    if login_url:
         try:
             webbrowser.open(login_url, new=2)
             log("opened the Tailscale login page in the default browser")
