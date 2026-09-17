@@ -231,16 +231,19 @@ def check_docker(docker_info_rc: int, group_names: list[str],
                  compose_present: bool = False,
                  binary_present: bool = True,
                  permission_denied: bool = False,
-                 daemon_active: bool = False) -> dict:
+                 daemon_active: bool = False,
+                 db_has_group: bool = True) -> dict:
     """Report Docker readiness as a dispatchable STATE (never "fail").
 
     rc!=0 is AMBIGUOUS (dead daemon vs unauthorized user), so callers pass
     the disambiguators: `permission_denied` (stderr said so) and
-    `daemon_active` (systemctl, no socket needed). States: absent |
+    `daemon_active` (systemctl, no socket needed). The group verdict splits
+    three ways via live credentials vs group database: no_group (DB lacks
+    you → installer adds), stale_login (DB has you, this process doesn't
+    → restart the checker, not another logout), ready. States: absent |
     daemon_down | no_access | unverified | old_engine | no_compose |
-    no_group | no_networks | ready. `no_access` (present, running, you're
-    just not authorized) routes to the group checkpoint, never to install.
-    All inputs injected; this function only judges.
+    no_group | stale_login | no_networks | ready. All inputs injected; this
+    function only judges.
     """
     if not binary_present:
         return _result("docker", "missing", "Docker is not installed.",
@@ -248,6 +251,13 @@ def check_docker(docker_info_rc: int, group_names: list[str],
                        state="absent")
     if docker_info_rc != 0:
         if permission_denied and daemon_active:
+            if db_has_group:
+                return _result("docker", "missing",
+                               "Docker runs and you're in its group — but this "
+                               "checker started before your fresh login.",
+                               "Restart ./check.sh (Ctrl-C, run again) — no new "
+                               "login needed.",
+                               state="stale_login")
             return _result("docker", "missing",
                            "Docker is installed and running — this login just "
                            "isn't authorized to use it yet.",
@@ -277,6 +287,16 @@ def check_docker(docker_info_rc: int, group_names: list[str],
     # reads the group DATABASE (/etc/group) and would parrot back a membership
     # added minutes ago; only getgroups() reports this process's credentials.
     if "docker" not in group_names:
+        if db_has_group:
+            # The USER is a member but THIS process isn't: the checker started
+            # before the fresh login. Restarting the checker (not logging out
+            # again) is the fix — name it exactly.
+            return _result("docker", "missing",
+                           "You're in the docker group, but this checker "
+                           "started before your fresh login.",
+                           "Restart ./check.sh (Ctrl-C, run again) — no new "
+                           "login needed.",
+                           state="stale_login")
         return _result("docker", "missing",
                        "Installed and running; this login just needs the "
                        "`docker` group to take effect.",
@@ -314,6 +334,34 @@ def check_tailscale(binary_present: bool, daemon_active: bool,
                        state="unjoined")
     return _result("tailscale", "ok", "Installed, service running, tailnet connected.",
                    state="ready")
+
+
+def _live_group_names() -> list[str]:
+    """Process credentials (what THIS process can actually use)."""
+    try:
+        return [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
+    except OSError:
+        return []
+
+
+def _db_has_group(user: str, group: str) -> bool:
+    """Group-database membership (/etc/group): what a FRESH login would hold.
+
+    Distinguishing this from _live_group_names() is the whole ballgame: DB
+    yes + live no means "restart this checker" (not "log out again").
+    Absent group name → False (installer will create/fill it).
+    """
+    import pwd as _pwd
+    try:
+        entry = grp.getgrnam(group)
+    except KeyError:
+        return False
+    if user in entry.gr_mem:
+        return True
+    try:
+        return _pwd.getpwnam(user).pw_gid == entry.gr_gid
+    except KeyError:
+        return False
 
 
 def _port_owner(port: int) -> dict | None:
@@ -369,10 +417,23 @@ def check_ports(connect_fn=None) -> dict:
     busy = [port for port in CHECK_PORTS if connect_fn(port)]
     if busy:
         owners = {str(port): _port_owner(port) for port in busy}
+        # Our own autostarted dashboard is EXPECTED here post-install (it
+        # starts at boot by design): report it as info, not a conflict.
+        # Only foreign holders block.
+        ours = [port for port in busy
+                if owners.get(str(port)) and owners[str(port)]["ours"]]
+        foreign = [port for port in busy if port not in ours]
+        if not foreign:
+            return {"name": "ports", "status": "ok",
+                    "detail": ("Port(s) " + ", ".join(map(str, ours)) +
+                               " held by our dashboard service (autostarted — "
+                               "normal once installed)."),
+                    "action": "", "state": "ready", "blocking": True,
+                    "owners": owners}
         return {"name": "ports", "status": "fail",
-                "detail": f"Ports already in use: {', '.join(map(str, busy))}.",
-                "action": ("Stop our dashboard service below, or free the "
-                           "ports before installing."),
+                "detail": f"Ports already in use: {', '.join(map(str, foreign))}.",
+                "action": ("Free the foreign ports before installing; ours "
+                           "(if any) can stay or be stopped below."),
                 "state": "blocked", "blocking": True, "owners": owners}
     return {"name": "ports", "status": "ok",
             "detail": f"Ports free ({', '.join(map(str, CHECK_PORTS))}).",
@@ -465,9 +526,14 @@ def run_all() -> dict:
                                   "{{.Server.Version}}"])
         compose_present = _run(["docker", "compose", "version"])[0] == 0
     try:
-        group_names = [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
+        group_names = _live_group_names()
     except OSError:
         group_names = []
+    try:
+        import getpass as _getpass
+        db_has_docker = _db_has_group(_getpass.getuser(), "docker")
+    except OSError:
+        db_has_docker = False
     networks: list[str] = []
     if docker_rc == 0:
         for net in MU3LAB_NETWORKS:
@@ -489,7 +555,8 @@ def run_all() -> dict:
                      compose_present=compose_present,
                      binary_present=docker_binary,
                      permission_denied=docker_denied,
-                     daemon_active=docker_active),
+                     daemon_active=docker_active,
+                     db_has_group=db_has_docker),
         check_tailscale(ts_binary, ts_active, ts_joined),
         check_ports(),
         check_bundle(),

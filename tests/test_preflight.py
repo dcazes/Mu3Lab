@@ -111,7 +111,7 @@ class DockerTests(unittest.TestCase):
         args = {"docker_info_rc": 0, "group_names": ["docker"],
                 "networks_present": list(preflight.MU3LAB_NETWORKS),
                 "engine_version": "25.0.3", "compose_present": True,
-                "binary_present": True}
+                "binary_present": True, "db_has_group": True}
         args.update(over)
         return preflight.check_docker(**args)
 
@@ -135,8 +135,11 @@ class DockerTests(unittest.TestCase):
     def test_denied_is_not_down(self):
         # Permission-denied looks identical by return code: the stderr flag
         # plus a live daemon must route to the group path, never install.
+        # (db_has_group=False here: with a real membership this box would
+        # correctly report stale_login instead.)
         result = self._base(docker_info_rc=1, permission_denied=True,
-                            daemon_active=True)
+                            daemon_active=True, group_names=["dak"],
+                            db_has_group=False)
         self.assertEqual(result["state"], "no_access")
         self.assertIn("authorized", result["detail"])
 
@@ -160,11 +163,23 @@ class DockerTests(unittest.TestCase):
         self.assertEqual(result["state"], "no_compose")
 
     def test_group(self):
-        # Daemon reachable but group not LIVE in this process: liveness is
-        # the restart checkpoint's question, not an install trigger.
-        result = self._base(group_names=["dak", "sudo"])
+        # Live lacks, DB lacks: installer must add, then fresh login.
+        result = self._base(group_names=["dak", "sudo"], db_has_group=False)
         self.assertEqual(result["state"], "no_group")
         self.assertIn("checkpoint", result["action"])
+
+    def test_stale_login(self):
+        # Live lacks, DB HAS: the checker (not the login) is stale — restart
+        # it, don't log out again. This is the exact post-relogin trap.
+        result = self._base(group_names=["dak", "sudo"], db_has_group=True)
+        self.assertEqual(result["state"], "stale_login")
+        self.assertIn("./check.sh", result["action"])
+
+    def test_denied_with_db_routes_to_restart(self):
+        result = self._base(docker_info_rc=1, permission_denied=True,
+                            daemon_active=True, group_names=["dak"],
+                            db_has_group=True)
+        self.assertEqual(result["state"], "stale_login")
 
     def test_networks(self):
         result = self._base(networks_present=["mu3lab_frontend"])
@@ -212,9 +227,30 @@ class PortTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
 
     def test_busy(self):
-        result = preflight.check_ports(connect_fn=lambda port: port == 8787)
+        # Deterministic: stub ss so the box's real listeners can't flip it.
+        from unittest.mock import patch as _patch
+        with _patch("ctl.preflight._run", return_value=(1, "")):
+            result = preflight.check_ports(connect_fn=lambda port: port == 8787)
         self.assertEqual(result["status"], "fail")
         self.assertIn("8787", result["detail"])
+
+    def test_ours_is_info_not_block(self):
+        # Our autostarted dashboard holding :8787 is EXPECTED post-install:
+        # info row, never a blocker (this kills the stop-and-rerun loop).
+        from unittest.mock import MagicMock, patch as _patch
+        ss_out = ('State Recv-Q Local Address:Port Process\n'
+                  'LISTEN 0 128 127.0.0.1:8787 '
+                  'users:(("uvicorn",pid=4242,fd=13))')
+        fake_path = MagicMock()
+        fake_path.return_value.read_bytes.return_value = (
+            b"/home/dak/Desktop/Mu3Lab/.venv/bin/python ctl.app:app")
+        with _patch("ctl.preflight._run", return_value=(0, ss_out)), \
+             _patch("ctl.preflight.Path", fake_path), \
+             _patch("ctl.preflight.ROOT", Path("/home/dak/Desktop/Mu3Lab")):
+            result = preflight.check_ports(
+                connect_fn=lambda port: port == 8787)
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("autostart", result["detail"])
 
     def test_busy_names_owner(self):
         # Busy ports carry an owners map so the UI can offer Stop for OURS.

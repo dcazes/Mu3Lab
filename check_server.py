@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -40,6 +41,8 @@ TEST_TIMEOUT = 120    # kill a hung suite run after N seconds
 MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
+STATE_FILE = ROOT / ".state" / "check-progress.json"
+CODE_VERSION = 3      # bump on ANY api/report-shape change (invalidates disk)
 
 
 class State:
@@ -52,7 +55,7 @@ class State:
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
-        self.code_version = 3  # bump on ANY api change; page warns on mismatch
+        self.code_version = CODE_VERSION
         self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         self.test_run: dict | None = None      # active run or None
         self.test_events: list[dict] = []      # JSON lines from the runner
@@ -137,6 +140,7 @@ def _test_worker(state: State, python: str) -> None:
         state.tests_green = (rc == 0 and summary is not None
                              and not summary.get("failed") and not summary.get("errored"))
         state.test_run = None
+        save_progress(state)
 
 
 def _install_worker(state: State) -> None:
@@ -204,6 +208,62 @@ def _serialize_job(job: dict | None) -> dict | None:
                        "log": s["log"][-50:], "prompt": s.get("prompt"),
                        "error": s.get("error", ""), "detail": s.get("detail", "")}
                       for s in job["steps"]]}
+
+
+def _repo_head() -> str:
+    """Current git HEAD (or "" when unavailable). Used to invalidate saved
+    progress after code changes — a green suite from older code proves
+    nothing about the current tree."""
+    try:
+        proc = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                              text=True, timeout=10, cwd=str(ROOT))
+    except OSError:
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def save_progress(state: State, path: Path = STATE_FILE) -> None:
+    """Persist unlock-level progress to disk (gitignored .state/).
+
+    Stores ONLY verdicts + the preflight report — never logs, keys, or
+    secrets. Test EVENTS are deliberately excluded: card ①'s table rebuilds
+    from a fresh run (the page says so when restoring).
+    """
+    with state.lock:
+        payload = {"code_version": state.code_version,
+                   "repo_head": _repo_head(),
+                   "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                   "tests_green": state.tests_green,
+                   "tests_summary": state.tests_summary,
+                   "preflight_passed": state.preflight_passed,
+                   "preflight_report": state.preflight_report}
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass  # persistence is convenience; a failed save must never break runs
+
+
+def load_progress(state: State, path: Path = STATE_FILE) -> str:
+    """Restore unlocks saved by save_progress(). Returns "restored", "stale"
+    (code changed → re-run required), or "none". Never raises."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "none"
+    if payload.get("code_version") != state.code_version:
+        return "stale"
+    head = _repo_head()
+    if head and payload.get("repo_head") and payload["repo_head"] != head:
+        return "stale"
+    with state.lock:
+        state.tests_green = bool(payload.get("tests_green"))
+        state.tests_summary = payload.get("tests_summary")
+        state.preflight_passed = bool(payload.get("preflight_passed"))
+        state.preflight_report = payload.get("preflight_report")
+    return "restored" if (state.tests_green or state.preflight_passed) else "none"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -333,6 +393,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Fall back to legacy "ok" for reports predating the field.
                 state.preflight_passed = bool(report.get("install_ready",
                                                          report.get("ok")))
+            save_progress(state)
             self._json(report)
         elif self.path == "/api/install/start":
             ok, reason = can_open_install(state)
@@ -466,9 +527,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.state = State()  # type: ignore[attr-defined]
+    restored = load_progress(server.state)
     url = f"http://127.0.0.1:{args.port}"
     print(f"Mu3Lab check dashboard: {url}")
     print("Cards unlock in order: ① tests → ② preflight → ③ install.")
+    if restored == "restored":
+        print("Previous progress restored (cards ①② unlocks kept).")
+    elif restored == "stale":
+        print("Previous progress is stale (code changed) — re-run cards.")
     if not args.no_open:
         webbrowser.open(url)  # best effort; SSH sessions just keep the URL
     try:

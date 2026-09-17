@@ -91,10 +91,12 @@ DISPATCH = {
     ("docker", "old_engine"): "docker_upgrade",
     ("docker", "no_compose"): "docker_compose_plugin",
     ("docker", "no_access"): "docker_group",
+    ("docker", "stale_login"): "docker_group",
     ("docker", "no_group"): "docker_group",
     ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",
     ("restart_checkpoint", "stale"): "guide_restart",
+    ("restart_checkpoint", "stale_login"): "guide_restart",
     ("restart_checkpoint", "ready"): "skip",
     ("docker_networks", "missing"): "create_networks",
     ("docker_networks", "denied"): "report_denied",
@@ -544,7 +546,8 @@ def fix_docker(check: dict, ctx: dict) -> dict:
         if not res["ok"]:
             return _propagate(res)
     if state in ("absent", "old_engine", "no_compose", "daemon_down",
-                 "unverified", "no_group", "no_networks", "no_access"):
+                 "unverified", "no_group", "stale_login", "no_networks",
+                 "no_access"):
         # Membership (idempotent): ensures the user is in the group. Whether
         # THIS process can use it yet is the restart checkpoint's question —
         # getgrouplist() would lie here (it reads /etc/group, not process
@@ -568,15 +571,20 @@ def _group_live() -> bool:
 
 
 def _checkpoint_check(ctx: dict) -> dict:
-    """The restart checkpoint row: stale until this process holds the group.
-
-    Shown from job start (pending) so the logout never ambushes anyone; goes
-    `waiting` with numbered instructions at its turn.
-    """
+    """The restart checkpoint row: ready only when THIS process holds the
+    group. Split verdicts so the remedy is exact: DB lacks you → fresh login
+    needed; DB has you → this checker is stale, restart IT (not another
+    logout). Shown from job start (pending) so neither ambushes anyone."""
+    import getpass as _gp
     if _group_live():
         return {"name": "restart_checkpoint", "status": "ok",
                 "detail": "Fresh login confirmed (docker group live).",
                 "action": "", "state": "ready", "blocking": False}
+    if preflight._db_has_group(_gp.getuser(), "docker"):
+        return {"name": "restart_checkpoint", "status": "missing",
+                "detail": "Group joined, but this checker predates the login.",
+                "action": "Restart ./check.sh (Ctrl-C, run again), then Resume.",
+                "state": "stale_login", "blocking": False}
     return {"name": "restart_checkpoint", "status": "missing",
             "detail": "Waiting for a fresh login.",
             "action": "See the paused row for the 3 steps.",
@@ -586,6 +594,18 @@ def _checkpoint_check(ctx: dict) -> dict:
 def fix_restart_checkpoint(check: dict, ctx: dict) -> dict:
     if _group_live():
         return {"ok": True, "skipped": True}
+    import getpass as _gp
+    if preflight._db_has_group(_gp.getuser(), "docker"):
+        return {"waiting": True, "prompt": {
+            "kind": "relogin",
+            "title": "Restart this checker (no new logout needed)",
+            "body": ("You're already in the docker group — but THIS checker "
+                     "process started before that login, and a running process "
+                     "can never gain groups. ① Stop this checker (Ctrl-C). "
+                     "② Run ./check.sh again. ③ Press Resume: finished rows "
+                     "skip in seconds."),
+            "commands": ["./check.sh"],
+        }}
     return {"waiting": True, "prompt": {
         "kind": "relogin",
         "title": "Log out and back in, then press Resume",
@@ -835,12 +855,15 @@ def _docker_check(ctx: dict) -> dict:
             if actions.privilege._exec(
                 ["docker", "network", "inspect", n])[0] == 0]
     import shutil as _sh
+    import getpass as _gp
     return preflight.check_docker(rc, groups, nets,
                                   engine_version=eng,
                                   compose_present=comp,
                                   binary_present=_sh.which("docker") is not None,
                                   permission_denied=denied,
-                                  daemon_active=active)
+                                  daemon_active=active,
+                                  db_has_group=preflight._db_has_group(
+                                      _gp.getuser(), "docker"))
 
 
 def _tailscale_pkg_check(ctx: dict) -> dict:
@@ -924,7 +947,7 @@ STEPS = [
      # Daemon-level states are owned downstream: group liveness belongs to
      # the restart checkpoint, networks to docker_networks. Verify passes
      # while any of these hold (the step's own work — install/start — is done).
-     "verify_ok_states": ("ready", "no_group", "no_networks", "no_access")},
+     "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access")},
     {"id": "tailscale_pkg", "label": "Tailscale app",
      "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg,
      # Installed + daemon running is this step's whole job; connecting is the

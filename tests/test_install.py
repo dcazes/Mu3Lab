@@ -122,7 +122,8 @@ class DockerFixTests(unittest.TestCase):
             return 1, ""
         import shutil as _sh
         with patch("ctl.install.actions.privilege") as priv, \
-             patch.object(_sh, "which", return_value="/usr/bin/docker"):
+             patch.object(_sh, "which", return_value="/usr/bin/docker"), \
+             patch("ctl.preflight._db_has_group", return_value=False):
             priv._exec.side_effect = fake_exec
             check = install._docker_check(_ctx())
         self.assertEqual(check["state"], "no_access")
@@ -288,7 +289,9 @@ class CheckpointTests(unittest.TestCase):
             self.assertEqual(check["state"], "stale")
 
     def test_waiting_copy(self):
-        with unittest.mock.patch("os.getgroups", return_value=[1000]):
+        with unittest.mock.patch("os.getgroups", return_value=[1000]), \
+             unittest.mock.patch("ctl.preflight._db_has_group",
+                                 return_value=False):
             check = install._checkpoint_check(self._ctx())
             self.assertEqual(check["state"], "stale")
             result = install.fix_restart_checkpoint(check, self._ctx())
@@ -298,6 +301,23 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn("Log out", body)
         self.assertIn("./check.sh", body)
         self.assertIn("Resume", body)
+
+    def test_stale_checker_copy(self):
+        # DB has the user but this process doesn't: the remedy is restarting
+        # the CHECKER — the copy must never send them to log out again.
+        import grp as _grp
+        docker_gids = [g.gr_gid for g in _grp.getgrall()
+                       if g.gr_name == "docker"]
+        self.assertTrue(docker_gids, "needs a docker group on the test box")
+        with unittest.mock.patch("os.getgroups", return_value=[1000]), \
+             unittest.mock.patch("ctl.preflight._db_has_group",
+                                 return_value=True):
+            check = install._checkpoint_check(self._ctx())
+            self.assertEqual(check["state"], "stale_login")
+            result = install.fix_restart_checkpoint(check, self._ctx())
+        body = result["prompt"]["body"]
+        self.assertIn("./check.sh", body)
+        self.assertNotIn("Log out and back in", body)
 
     def test_networks_denied_is_honest(self):
         check = {"name": "docker_networks", "status": "fail",
@@ -319,12 +339,12 @@ class CheckpointTests(unittest.TestCase):
             "root_env": ["missing", "ready"],
             "service": ["no_unit", "inactive", "unhealthy", "ready"],
             "docker": ["absent", "daemon_down", "unverified", "old_engine",
-                       "no_compose", "no_access", "no_group", "no_networks",
-                       "ready"],
+                       "no_compose", "no_access", "stale_login", "no_group",
+                       "no_networks", "ready"],
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],
-            "restart_checkpoint": ["stale", "ready"],
+            "restart_checkpoint": ["stale", "stale_login", "ready"],
             "docker_networks": ["missing", "denied", "ready"],
             "caddy": ["down", "ready"],
         }

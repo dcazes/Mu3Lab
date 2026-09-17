@@ -122,6 +122,7 @@ thresholds not pins; docker floor ≥24 + compose plugin; `blocking` flags +
 | 2.5.5 | `Makefile` | `check` target: `./check.sh` (+ passthrough of `--no-open`) | `make -n check` prints expected command |
 
 Fresh-user flow this enables: `git clone` → `./check.sh` (browser auto-opens `:8799`) → Run tests → Run preflight → Install card shows its **manifest** (exact install list + "guided later" join note) → Install runs credential-free Phase A, then guided Phase B prompts inline → *"Open the real dashboard"* link (`https://mu3lab.<tail>:port`, phone-ready) → check server may exit.
+Progress persists in gitignored `.state/` across checker restarts (invalidated on code change, with the reason stated). Our autostarted dashboard holding `:8787` is reported as info, never a blocker; DB-vs-live group split distinguishes "log out" from "restart the checker".
 Gate: manual click-through on your clean box, cards unlock in order, no password/auth-key value in any log or response (eyeball + leak test extended to cover the key field).
 
 ---
