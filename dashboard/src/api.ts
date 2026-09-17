@@ -47,8 +47,24 @@ export interface IntegrationsResponse {
   integrations: { source: string; destination: string; kind: string }[];
 }
 
+export interface CatalogProfile { id: string; name: string; services: string[]; }
+export interface CatalogService { summary: string; integrations?: string[]; }
+export interface CatalogResponse { ok: boolean; profiles: CatalogProfile[]; services: Record<string, CatalogService>; }
+export interface Metric { total: number; used: number; percent: number; }
+export interface BackupReadiness { ready?: boolean; detail?: string; [key: string]: unknown; }
+export interface SystemResponse {
+  ok: boolean;
+  cpu_percent: number;
+  docker_ready: boolean;
+  tailnet_dns_name: string;
+  runtime_root: string;
+  memory: Metric;
+  disk: Metric;
+  backup: BackupReadiness;
+}
+
 export async function api<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`GET ${path}: HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }

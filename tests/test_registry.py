@@ -62,3 +62,11 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
+
+    def test_dashboard_catalog_uses_curated_service_ids(self):
+        root = Path(__file__).resolve().parents[1]
+        catalog = yaml.safe_load((root / "catalog.yaml").read_text(encoding="utf-8"))
+        registry = load()
+        profile_ids = {service_id for profile in catalog["profiles"]
+                       for service_id in profile["services"]}
+        self.assertTrue(profile_ids.issubset({service.id for service in registry.services}))

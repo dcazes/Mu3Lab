@@ -17,7 +17,12 @@ DEBUG: `curl -f http://127.0.0.1:8787/api/health` must print {"ok":true,...}.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import psutil
+import yaml
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
@@ -31,6 +36,7 @@ from ctl.service_state import status as service_status, tailnet_dns_name
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dashboard" / "dist"
+CATALOG = ROOT / "catalog.yaml"
 
 app = FastAPI(title="Mu3Lab control plane", version=__version__)
 
@@ -77,6 +83,42 @@ def integrations() -> dict:
         {"source": "freellmapi", "destination": "litellm", "kind": "optional_model"},
         {"source": "litellm", "destination": "open-webui", "kind": "model"},
     ], "blocked": [service.public() for service in registry.services if service.is_blocked]}
+
+
+@app.get("/api/catalog")
+def catalog() -> dict:
+    """Return the checked-in, curated dashboard catalog without host mutation."""
+    try:
+        raw = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        return {"ok": False, "error": str(exc), "profiles": [], "services": {}}
+    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+        return {"ok": False, "error": "catalog schema is invalid", "profiles": [], "services": {}}
+    return {"ok": True, "profiles": raw.get("profiles", []),
+            "services": raw.get("services", {})}
+
+
+@app.get("/api/system")
+def system() -> dict:
+    """Read-only host capacity and private-network status for the dashboard."""
+    memory = psutil.virtual_memory()
+    disk = psutil.disk_usage(str(RuntimePaths().root.parent))
+    try:
+        docker = subprocess.run(["docker", "info"], capture_output=True,
+                                text=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        docker = False
+    return {
+        "ok": True,
+        "cpu_percent": psutil.cpu_percent(interval=None),
+        "memory": {"total": memory.total, "used": memory.used,
+                   "percent": memory.percent},
+        "disk": {"total": disk.total, "used": disk.used, "percent": disk.percent},
+        "docker_ready": docker,
+        "tailnet_dns_name": tailnet_dns_name(),
+        "runtime_root": str(RuntimePaths().root),
+        "backup": backup_readiness(),
+    }
 
 
 @app.get("/api/backups")
