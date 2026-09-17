@@ -1,0 +1,110 @@
+# Mu3Lab curated service registry.
+#
+# This file is the deployment source of truth.  Catalog copy lives in
+# catalog.yaml; neither file may contain credentials or user data.
+schema_version: 1
+settings:
+  runtime_root: /srv/mu3lab
+  dashboard_port: 8787
+  tailnet_hostname: mu3lab
+  backup_retention:
+    daily: 7
+    weekly: 4
+    monthly: 12
+
+services:
+  - id: ingress
+    name: Caddy ingress
+    category: infrastructure
+    lifecycle: always_on
+    compose_dir: core/ingress
+    https_port: 443
+    health: {kind: http, url: "http://127.0.0.1:19460/"}
+    auth: excluded
+    profiles: [cpu, nvidia, amd]
+    backup: {volumes: [caddy-data, caddy-config]}
+
+  - id: authentik
+    name: Authentik
+    category: infrastructure
+    lifecycle: always_on
+    compose_dir: core/authentik
+    https_port: 9001
+    health: {kind: http, url: "http://127.0.0.1:9001/-/health/ready/"}
+    auth: excluded
+    profiles: [cpu, nvidia, amd]
+    backup: {database: authentik, volumes: [authentik-media, authentik-templates]}
+
+  - id: vaultwarden
+    name: Vaultwarden
+    category: infrastructure
+    lifecycle: always_on
+    compose_dir: core/vaultwarden
+    https_port: 8081
+    health: {kind: http, url: "http://127.0.0.1:8081/alive"}
+    auth: excluded
+    profiles: [cpu, nvidia, amd]
+    backup: {binds: [data]}
+    mcp: {exposed: false}
+
+  - id: ollama
+    name: Ollama
+    category: ai
+    lifecycle: shared
+    compose_dir: core/ollama
+    https_port: 11434
+    health: {kind: http, url: "http://127.0.0.1:11434/"}
+    auth: proxy
+    profiles: [cpu, nvidia, amd]
+    backup: {binds: [data]}
+    mcp: {exposed: true, risk: read}
+
+  - id: litellm
+    name: LiteLLM
+    category: ai
+    lifecycle: shared
+    compose_dir: core/litellm
+    https_port: 4000
+    health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    dependencies: [ollama]
+    backup: {binds: [config]}
+    mcp: {exposed: true, risk: read}
+
+  - id: open-webui
+    name: Open WebUI
+    category: ai
+    lifecycle: optional
+    compose_dir: core/open-webui
+    https_port: 8084
+    health: {kind: http, url: "http://127.0.0.1:8084/health"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    dependencies: [litellm]
+    backup: {binds: [data]}
+
+  - id: freellmapi
+    name: FreeLLMAPI
+    category: ai
+    lifecycle: optional
+    compose_dir: apps/freellmapi
+    https_port: 3001
+    health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
+    auth: proxy
+    profiles: [cpu, nvidia, amd]
+    backup: {binds: [data]}
+
+  - id: surfsense
+    name: SurfSense
+    category: research
+    lifecycle: optional
+    compose_dir: apps/surfsense
+    https_port: 3929
+    health: {kind: tcp, port: 3929}
+    auth: excluded
+    profiles: [cpu, nvidia, amd]
+    dependencies: [litellm, ollama]
+    availability: blocked
+    blocked_reason: "No supported Authentik/OIDC or trusted-proxy identity integration."
+    backup: {database: surfsense, binds: [object-store]}

@@ -61,12 +61,18 @@ class OsTests(unittest.TestCase):
 
 class ArchTests(unittest.TestCase):
     def test_ok(self):
-        for machine in ("x86_64", "aarch64", "arm64"):
-            with self.subTest(machine=machine):
-                self.assertEqual(preflight.check_arch(machine)["status"], "ok")
+        self.assertEqual(preflight.check_arch("x86_64")["status"], "ok")
 
     def test_rejected(self):
         self.assertEqual(preflight.check_arch("i686")["status"], "fail")
+        self.assertEqual(preflight.check_arch("aarch64")["status"], "fail")
+
+
+class GpuTests(unittest.TestCase):
+    def test_profile_precedence_and_cpu_fallback(self):
+        self.assertEqual(preflight.check_gpu(False, False)["state"], "cpu")
+        self.assertEqual(preflight.check_gpu(False, True)["state"], "amd")
+        self.assertEqual(preflight.check_gpu(True, True)["state"], "nvidia")
 
 
 class PythonNodeTests(unittest.TestCase):
@@ -342,7 +348,7 @@ class AggregateTests(unittest.TestCase):
         # are TODO-heavy by definition).
         report = preflight.run_all()
         self.assertIn("install_ready", report)
-        self.assertEqual(len(report["checks"]), 10)
+        self.assertEqual(len(report["checks"]), 11)
         for check in report["checks"]:
             self.assertIn(check["status"], ("ok", "missing", "fail"))
             self.assertIn("blocking", check)

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -64,6 +65,15 @@ class GateTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_build_identity_shape(self):
+        # /api/state answers "which exact code" (short HEAD + dirty flag)
+        # so version questions never need paste-and-deduce again.
+        import check_server
+        ident = check_server.build_identity()
+        self.assertIn("head", ident)
+        self.assertIn("dirty", ident)
+        self.assertIsInstance(ident["dirty"], bool)
+        self.assertLessEqual(len(ident["head"]), 12)
     def test_response_headers_no_store(self):
         # A cached page against a newer server once produced a "mixed"
         # dashboard that blamed the user for a version skew. Every response
@@ -103,7 +113,6 @@ class ProgressTests(unittest.TestCase):
                 self.assertEqual(load_progress(State(), path), "stale")
 
     def test_never_persists_secrets(self):
-        import json
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "progress.json"
             src = State()

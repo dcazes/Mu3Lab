@@ -39,7 +39,8 @@
 </head>
 <body>
 <h1>Mu3Lab — fresh checkout check</h1>
-<p class="mut">Cards unlock in order. Nothing here installs anything.</p>
+<p class="mut">Cards unlock in order. Nothing here installs anything.
+  <span id="build-tag"></span></p>
 <div id="stale-banner" hidden style="border:2px solid var(--bad); border-radius:8px; padding:.8rem 1rem; margin-bottom:1rem;">
   <strong>Outdated server.</strong> This page is newer than the running check
   dashboard — stop it with Ctrl-C in its terminal and re-run
@@ -86,9 +87,9 @@
     <p id="inst-note" hidden>If anything above needs administrator permission,
        your computer will ask for your password in its own system popup —
        never typed into this page. One human moment at the end: the Tailscale
-       connection (sign up free, paste a key or approve a login page).
-       Everything else, including Docker group setup, runs itself with no
-       logout.</p>
+       connection (sign up free, then approve the normal Tailscale login page).
+       Docker group setup pauses for a required logout/login before Docker
+       backed steps continue.</p>
     <p><button id="btn-inst" onclick="startInstall()" disabled>Install</button>
        <button id="btn-instop" onclick="killInstall()" disabled>Stop</button>
        <button id="btn-script" onclick="copyScript()">Copy full admin script</button></p>
@@ -342,13 +343,6 @@ async function startInstall() {
 async function killInstall() {
   try { await api('/api/install/kill', 'POST'); } catch (e) { console.error('install/kill', e); }
 }
-async function sendKey() {
-  const key = document.getElementById('ts-key-live').value;
-  if (!key.trim()) return;
-  try { await postJSON('/api/install/input', {key: key.trim()}); }
-  catch (e) { console.error('install/input', e); return; }
-  document.getElementById('ts-key-live').value = '';  // wipe from the page immediately
-}
 async function sendContinue() {
   try { await postJSON('/api/install/continue'); }
   catch (e) { console.error('install/continue', e); }
@@ -367,17 +361,12 @@ function promptHtml(step) {
   const p = step.prompt;
   if (!p) return '';
   if (p.kind === 'tailscale_login') {
-    // Guided join: numbered paths rendered with real links. Key field only
-    // ever appears here, at the moment it's needed — never upfront.
+    // Guided join: normal Tailscale browser approval, no credential field.
     const link = (url, text) => url
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + text + '</a>' : text;
     return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
       escapeHtml(p.body) + '<br>' +
       (p.login_url ? 'Login page: <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
-      '<label>Paste a reusable auth key (used once, never stored — from ' +
-      link(p.keys_url, 'key settings') + '): ' +
-      '<input type="password" id="ts-key-live" autocomplete="off" placeholder="tskey-auth-…"></label> ' +
-      '<button onclick="sendKey()">Connect with key</button> ' +
       '<button onclick="sendContinue()">I approved it — check again</button><br>' +
       '<span class="mut">New to Tailscale? ' + link(p.signup_url, 'Sign up free') +
       ', then come back here.</span></div>';
@@ -519,6 +508,11 @@ async function copyScript() {
   // this page's endpoints (their 404s otherwise masquerade as statuses).
   if (st.code_version === undefined || st.code_version < 3) {
     document.getElementById('stale-banner').hidden = false;
+  }
+  // Build identity: which exact code answers (hash + dirty flag).
+  if (st.build && st.build.head) {
+    document.getElementById('build-tag').textContent =
+      'build ' + st.build.head + (st.build.dirty ? ' (uncommitted changes)' : '');
   }
   checkDashboardBanner();
 })();

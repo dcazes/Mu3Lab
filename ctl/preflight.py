@@ -162,13 +162,26 @@ def check_os(release_text: str, kernel_release: str = "") -> dict:
 
 
 def check_arch(machine: str) -> dict:
-    """Accept x86_64 and ARM64 spellings; reject everything else."""
-    if machine in ("x86_64",):
+    """Accept x86-64 only; ARM support is deliberately deferred for v1."""
+    if machine == "x86_64":
         return _result("arch", "ok", f"CPU arch {machine} supported.")
     if machine in ("aarch64", "arm64"):
-        return _result("arch", "ok", f"CPU arch {machine} supported (ARM64).")
+        return _result("arch", "fail", f"CPU arch {machine} is not in the v1 support matrix.",
+                       "Use an x86-64 host; ARM support is planned for a later release.")
     return _result("arch", "fail", f"CPU arch {machine!r} unsupported.",
-                   "Mu3Lab supports x86-64 and ARM64 hosts.")
+                   "Mu3Lab v1 supports x86-64 hosts.")
+
+
+def check_gpu(nvidia_present: bool, amd_present: bool) -> dict:
+    """Report a selectable CPU/NVIDIA/AMD profile; detection never installs drivers."""
+    if nvidia_present:
+        return _result("gpu", "ok", "NVIDIA GPU detected; confirm the NVIDIA profile before install.",
+                       state="nvidia")
+    if amd_present:
+        return _result("gpu", "ok", "AMD GPU detected; confirm the AMD profile before install.",
+                       state="amd")
+    return _result("gpu", "ok", "No supported GPU detected; CPU profile will be offered.",
+                   state="cpu")
 
 
 def check_python(version: tuple[int, ...]) -> dict:
@@ -330,7 +343,7 @@ def check_tailscale(binary_present: bool, daemon_active: bool,
     if not joined:
         return _result("tailscale", "missing",
                        "Installed, but not connected to your tailnet yet.",
-                       "step 3 guides the connection (sign in or paste a key).",
+                       "step 3 guides the normal browser-based Tailscale login.",
                        state="unjoined")
     return _result("tailscale", "ok", "Installed, service running, tailnet connected.",
                    state="ready")
@@ -452,6 +465,22 @@ def _port_owner(port: int) -> dict | None:
             process, pid = match.group(1), int(match.group(2))
             break
     if pid is None:
+        # Host-network Compose containers often hide their PID from an
+        # unprivileged `ss` invocation. Confirm ownership through Compose
+        # labels, but only when the working directory is this checkout.
+        project_by_port = {19460: "ingress", 9001: "authentik", 8081: "vaultwarden"}
+        project = project_by_port.get(port)
+        if project:
+            names_rc, names = _run([
+                "docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
+                "--format", "{{.Names}}"])
+            for name in names.splitlines() if names_rc == 0 else []:
+                label_rc, working_dir = _run([
+                    "docker", "inspect", "--format",
+                    "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}",
+                    name.strip()])
+                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "core" / project).resolve():
+                    return {"pid": None, "process": name.strip(), "ours": True}
         return {"pid": None, "process": process or "unknown", "ours": False}
     ours = False
     try:
@@ -584,9 +613,12 @@ def run_all() -> dict:
     docker_check = gather_docker()
     tailscale_check = gather_tailscale()
 
+    _, lspci_out = _run(["lspci", "-nn"])
     checks = [
         check_os(release_text, kernel_release=platform.release()),
         check_arch(platform.machine()),
+        check_gpu(_run(["nvidia-smi", "-L"])[0] == 0,
+                  "amd" in lspci_out.lower() or "advanced micro devices" in lspci_out.lower()),
         check_python(tuple(sys.version_info)),
         check_node(node_out),
         check_privilege(sudo_fresh, graphical),

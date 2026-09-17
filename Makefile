@@ -22,7 +22,8 @@ check:
 	./check.sh
 
 dry-run:
-	./install.sh --dry-run
+	@echo "Dry run is a read-only preflight; host mutations are available only from the bootstrap dashboard."
+	python3 -m ctl.preflight
 
 # clean: stop containers, drop runtime state. Keeps volumes, venv, images.
 clean:

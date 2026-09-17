@@ -45,12 +45,19 @@ EOF
 }
 
 # --- parse args (manual loop: no getopt dependency, keeps it portable) ---
-for arg in "$@"; do
+# Consume --port's separate value as well as --port=N. The documentation has
+# always advertised both forms; treating the value as a separate unknown
+# argument made the bootstrap fail before the page could open.
+while [[ $# -gt 0 ]]; do
+  arg="$1"
+  shift
   case "$arg" in
     --no-open) OPEN_BROWSER=false ;;
     --no-venv) WANT_VENV=false ;;
     --port)
-      echo "Error: --port needs a value: ./check.sh --port 8799" >&2; exit 1 ;;
+      [[ $# -gt 0 ]] || { echo "Error: --port needs a value: ./check.sh --port 8799" >&2; exit 1; }
+      PORT="$1"
+      shift ;;
     --port=*) PORT="${arg#--port=}" ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Error: unknown option '$arg'. See ./check.sh --help" >&2; exit 1 ;;

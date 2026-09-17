@@ -239,3 +239,25 @@ def docker_network_create(name: str, log: Callable[[str], None],
     if rc != 0:
         return _fail(lines)
     return _ok(lines)
+
+
+def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> dict:
+    """Create the approved /srv layout with root-only secrets and user state."""
+    lines: list[str] = []
+    paths = [root, root / "data", root / "backups", root / "runtime", root / "projects"]
+    for path in paths:
+        res = privilege.run_privileged(["install", "-d", "-m", "0750", str(path)], lines.append)
+        if res.get("need_terminal"):
+            return _fail(lines, terminal_command=res["terminal_command"])
+        if not res["ok"]:
+            return _fail(lines)
+    secret = privilege.run_privileged(["install", "-d", "-m", "0700", str(root / "secrets")], lines.append)
+    if secret.get("need_terminal"):
+        return _fail(lines, terminal_command=secret["terminal_command"])
+    if not secret["ok"]:
+        return _fail(lines)
+    owned = [str(path) for path in paths[1:]]
+    res = privilege.run_privileged(["chown", "-R", f"{user}:{user}"] + owned, lines.append)
+    if res.get("need_terminal"):
+        return _fail(lines, terminal_command=res["terminal_command"])
+    return _ok(lines) if res["ok"] else _fail(lines)

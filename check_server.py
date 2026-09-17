@@ -154,8 +154,8 @@ def _test_worker(state: State, python: str) -> None:
 def _install_worker(state: State) -> None:
     """Background thread: run install.run_job with a server-backed ctx.
 
-    Auth keys arrive via job["inputs"] (memory-only, never logged — the
-    runner redacts the key in its own log line; see fix_tailscale_join).
+    Tailscale uses a browser approval flow; no tailnet credential is accepted
+    by this server or stored in the job.
     """
     from ctl import install
     job = state.install_job
@@ -198,12 +198,9 @@ def _install_worker(state: State) -> None:
             job["events"].append({"type": "error",
                                   "detail": f"installer crashed: {exc}"})
     finally:
-        # Wipe any supplied key the moment the job stops being interactive,
-        # and stop the elevated worker (no lingering root process).
+        # Stop the elevated worker when the job ends (no lingering root process).
         from ctl import privilege as _priv
         _priv.release_elevation()
-        with state.lock:
-            job["inputs"].pop("tailscale_authkey", None)
         emit({"type": "summary", "phase": "done", "status": job["status"]})
 
 
@@ -228,6 +225,24 @@ def _repo_head() -> str:
     except OSError:
         return ""
     return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def build_identity() -> dict:
+    """Answerable build stamp for /api/state + page footer: short HEAD and
+    dirty flag. Added so "which code is answering?" never again needs a
+    paste-and-deduce session (the Caddy skipped+failed contradiction)."""
+    head = _repo_head()
+    dirty = False
+    if head:
+        try:
+            proc = subprocess.run(
+                ["git", "status", "--porcelain"], capture_output=True,
+                text=True, timeout=10, cwd=str(ROOT))
+            dirty = proc.returncode == 0 and bool(proc.stdout.strip())
+        except OSError:
+            dirty = False
+    return {"head": head[:12], "dirty": dirty,
+            "code_version": CODE_VERSION}
 
 
 def save_progress(state: State, path: Path = STATE_FILE) -> None:
@@ -323,6 +338,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({
                     "server_started_at": state.started_at,
                     "code_version": state.code_version,
+                    "build": build_identity(),
                     "tests_running": state.test_run is not None,
                     "tests_green": state.tests_green,
                     "tests_summary": state.tests_summary,
@@ -356,7 +372,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802 (BaseHTTPRequestHandler hook, keep it)
         state = self._state()
         length = int(self.headers.get("Content-Length", 0))
-        self._body = self.rfile.read(length)  # kept for /api/install/input
+        self._body = self.rfile.read(length)
         if self.path == "/api/tests/run":
             with state.lock:
                 if state.test_run is not None:
@@ -442,28 +458,6 @@ class Handler(BaseHTTPRequestHandler):
             with state.lock:
                 job = state.install_job
                 self._json({"events": list(job["events"]) if job else []})
-        elif self.path == "/api/install/input":
-            # Auth key delivery: memory-only. Body: {"key": "tskey-..."}.
-            # The key is stored in the job dict (wiped when the job ends) and
-            # the waiting runner is woken. Never logged, never persisted.
-            try:
-                payload = json.loads(self._body.decode() or "{}")
-            except (ValueError, AttributeError):
-                self._json({"error": "bad request",
-                            "hint": "send JSON {\"key\": \"tskey-...\"}"}, 400)
-                return
-            key = (payload.get("key") or "").strip()
-            if not key:
-                self._json({"error": "bad request",
-                            "hint": "empty key"}, 400)
-                return
-            with state.lock:
-                if state.install_job is None:
-                    self._json({"error": "no job"}, 409)
-                    return
-                state.install_job["inputs"]["tailscale_authkey"] = key
-                state.install_input.set()
-            self._json({"accepted": True})
         elif self.path == "/api/install/continue":
             # "Check again" for login-URL / relogin waits: wake the runner to
             # re-poll (join status, group liveness).
