@@ -4,7 +4,7 @@ Mu3Lab is a curated, private homelab control plane for Debian 12+ and Ubuntu
 22.04+ x86-64 hosts. It separates first-run host preparation from normal app
 management:
 
-1. `./check.sh` opens a temporary local bootstrap dashboard at
+1. `./install.sh` (or `./check.sh`) opens a temporary local bootstrap dashboard at
    `127.0.0.1:8799`. It runs tests, measures the host, installs only missing
    dependencies, and pauses for required human actions such as the normal
    Tailscale web login and Docker-group re-login.
@@ -38,7 +38,7 @@ is still being brought in.
 ## Developer checks
 
 ```bash
-./check.sh --no-open
+./install.sh --no-open
 make test
 cd dashboard && npm ci && npm run build
 ```
