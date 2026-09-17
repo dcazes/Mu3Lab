@@ -73,27 +73,20 @@ class DockerFixTests(unittest.TestCase):
                    return_value=_ok()) as start, \
              patch("ctl.install.actions.apt_install") as apt, \
              patch("ctl.install.actions.usermod_add_group",
-                   return_value=_ok()), \
-             patch("ctl.install.preflight") as _pre:
-            _pre.MU3LAB_NETWORKS = []
-            import grp
-            with patch("os.getgrouplist", return_value=[0]):
-                with patch.object(grp, "getgrgid") as getgr:
-                    getgr.return_value.gr_name = "docker"
-                    result = install.fix_docker(
-                        self._check("daemon_down"), _ctx())
+                   return_value=_ok()):
+            result = install.fix_docker(self._check("daemon_down"), _ctx())
         self.assertTrue(result.get("ok"))
         start.assert_called_once()
         apt.assert_not_called()
 
     def test_networks_only_creates_missing(self):
+        # Networks are a DEDICATED step now (fix_networks_router): only the
+        # missing ones get created, and liveness is someone else's job.
         created: list[str] = []
         def fake_net(name, log, internal=False):
             created.append(name)
             return _ok()
-        with patch("ctl.install.actions.usermod_add_group",
-                   return_value=_ok()), \
-             patch("ctl.install.actions.docker_network_create",
+        with patch("ctl.install.actions.docker_network_create",
                    side_effect=fake_net), \
              patch("ctl.install.actions.privilege") as priv, \
              patch("ctl.install.preflight") as _pre:
@@ -101,26 +94,20 @@ class DockerFixTests(unittest.TestCase):
             # frontend present, backend missing: only backend gets created.
             priv._exec.side_effect = lambda argv: (
                 (0, "") if argv[-1] == "mu3lab_frontend" else (1, ""))
-            import grp
-            with patch("os.getgrouplist", return_value=[0]):
-                with patch.object(grp, "getgrgid") as getgr:
-                    getgr.return_value.gr_name = "docker"
-                    result = install.fix_docker(
-                        self._check("no_networks"), _ctx())
+            result = install.fix_networks_router(
+                self._check("missing"), _ctx())
         self.assertTrue(result.get("ok"))
         self.assertEqual(created, ["mu3lab_backend"])
 
-    def test_group_pause_is_waiting(self):
+    def test_group_ensures_membership_defers_liveness(self):
+        # fix_docker ensures membership but NEVER judges liveness (that's the
+        # checkpoint's job): no waiting here, just ok.
         with patch("ctl.install.actions.usermod_add_group",
-                   return_value=_ok()), \
-             patch("os.getgrouplist", return_value=[0]):
-            import grp
-            with patch.object(grp, "getgrgid") as getgr:
-                getgr.return_value.gr_name = "users"  # group NOT live
-                result = install.fix_docker(self._check("no_group"), _ctx())
-        self.assertTrue(result.get("waiting"))
-        self.assertEqual(result["prompt"]["kind"], "relogin")
-        self.assertIn("newgrp", str(result["prompt"].get("commands")))
+                   return_value=_ok()) as mod:
+            result = install.fix_docker(self._check("no_group"), _ctx())
+        self.assertTrue(result.get("ok"))
+        self.assertIsNone(result.get("waiting"))
+        mod.assert_called_once()
 
 
 class WorkspaceStepTests(unittest.TestCase):
@@ -214,6 +201,55 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
 
+    def test_step_order(self):
+        # Networks + Caddy need a live group: both come after the checkpoint,
+        # which itself comes after everything group-independent (serve).
+        ids = [m["id"] for m in install.STEPS]
+        self.assertLess(ids.index("serve"), ids.index("restart_checkpoint"))
+        self.assertLess(ids.index("restart_checkpoint"),
+                        ids.index("docker_networks"))
+        self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
+
+
+class CheckpointTests(unittest.TestCase):
+    def _ctx(self):
+        return {"root": Path("/nonexistent"),
+                "log_fn": lambda step: lambda line: None,
+                "inputs": {}, "wait_input": lambda step: {},
+                "stopped": lambda: False}
+
+    def test_ready_when_group_live(self):
+        import grp
+        docker_gids = [g.gr_gid for g in grp.getgrall()
+                       if g.gr_name == "docker"]
+        with unittest.mock.patch("os.getgroups",
+                                 return_value=docker_gids or [0]):
+            check = install._checkpoint_check(self._ctx())
+        if docker_gids:
+            self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
+        else:
+            self.assertEqual(check["state"], "stale")
+
+    def test_waiting_copy(self):
+        with unittest.mock.patch("os.getgroups", return_value=[1000]):
+            check = install._checkpoint_check(self._ctx())
+            self.assertEqual(check["state"], "stale")
+            result = install.fix_restart_checkpoint(check, self._ctx())
+        self.assertTrue(result.get("waiting"))
+        body = result["prompt"]["body"]
+        # The numbered actions must all be present (no silent expectations).
+        self.assertIn("Log out", body)
+        self.assertIn("./check.sh", body)
+        self.assertIn("Resume", body)
+
+    def test_networks_denied_is_honest(self):
+        check = {"name": "docker_networks", "status": "fail",
+                 "detail": "x", "action": "y", "state": "denied",
+                 "blocking": False}
+        result = install.fix_networks_router(check, self._ctx())
+        self.assertFalse(result.get("ok"))
+        self.assertIn("./check.sh", result.get("error", ""))
+
     def test_full_dispatch_coverage(self):
         # Every state any step check can emit must map to a real fix.
         states = {
@@ -226,11 +262,14 @@ class WorkspaceStepTests(unittest.TestCase):
             "root_env": ["missing", "ready"],
             "service": ["no_unit", "inactive", "unhealthy", "ready"],
             "docker": ["absent", "daemon_down", "unverified", "old_engine",
-                       "no_compose", "no_group", "no_networks", "ready"],
+                       "no_compose", "no_access", "no_group", "no_networks",
+                       "ready"],
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
-            "caddy": ["down", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],
+            "restart_checkpoint": ["stale", "ready"],
+            "docker_networks": ["missing", "denied", "ready"],
+            "caddy": ["down", "ready"],
         }
         step_ids = {m["id"] for m in install.STEPS}
         self.assertEqual(set(states), step_ids)

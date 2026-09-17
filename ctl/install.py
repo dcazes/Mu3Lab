@@ -85,9 +85,15 @@ DISPATCH = {
     ("docker", "unverified"): "docker_start",
     ("docker", "old_engine"): "docker_upgrade",
     ("docker", "no_compose"): "docker_compose_plugin",
+    ("docker", "no_access"): "docker_group",
     ("docker", "no_group"): "docker_group",
-    ("docker", "no_networks"): "docker_networks",
+    ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",
+    ("restart_checkpoint", "stale"): "guide_restart",
+    ("restart_checkpoint", "ready"): "skip",
+    ("docker_networks", "missing"): "create_networks",
+    ("docker_networks", "denied"): "report_denied",
+    ("docker_networks", "ready"): "skip",
     ("tailscale_pkg", "absent"): "tailscale_install",
     ("tailscale_pkg", "daemon_down"): "tailscale_start",
     ("tailscale_pkg", "unjoined"): "skip",   # join is the NEXT step's job
@@ -533,41 +539,112 @@ def fix_docker(check: dict, ctx: dict) -> dict:
         if not res["ok"]:
             return _propagate(res)
     if state in ("absent", "old_engine", "no_compose", "daemon_down",
-                 "unverified", "no_group", "no_networks"):
-        # Group checkpoint (fresh installs AND pre-existing gaps land here):
-        # ensure membership, then require a LIVE group before continuing.
+                 "unverified", "no_group", "no_networks", "no_access"):
+        # Membership (idempotent): ensures the user is in the group. Whether
+        # THIS process can use it yet is the restart checkpoint's question —
+        # getgrouplist() would lie here (it reads /etc/group, not process
+        # credentials), so this step never judges liveness.
         user = getpass.getuser()
         res = actions.usermod_add_group(user, "docker", log)
         if not res["ok"]:
             return _propagate(res)
-        import grp as _grp
-        try:
-            live = [ _grp.getgrgid(gid).gr_name
-                     for gid in os.getgrouplist(user, os.getgid()) ]
-        except OSError:
-            live = []
-        if "docker" not in live:
-            return {"waiting": True, "prompt": {
-                "kind": "relogin",
-                "title": "One logout needed",
-                "body": ("Docker installed your user into the `docker` group, "
-                         "but this login doesn't have it yet. Run `newgrp docker` "
-                         "in a terminal (or log out and back in), then press Retry."),
-                "commands": ["newgrp docker"],
-            }}
-    if state in ("absent", "old_engine", "no_compose", "daemon_down",
-                 "unverified", "no_group", "no_networks"):
-        nets = preflight.MU3LAB_NETWORKS
-        have = [net for net in nets
-                if actions.privilege._exec(["docker", "network", "inspect", net])[0] == 0]
-        for net in nets:
-            if net in have:
-                continue
-            internal = (net == "mu3lab_backend")
-            res = actions.docker_network_create(net, log, internal=internal)
-            if not res["ok"]:
-                return _propagate(res)
     return {"ok": True}
+
+
+def _group_live() -> bool:
+    """True iff THIS process holds the docker group (os.getgroups: live
+    credentials, never the group database)."""
+    import grp as _grp
+    try:
+        return "docker" in [_grp.getgrgid(gid).gr_name
+                            for gid in os.getgroups()]
+    except OSError:
+        return False
+
+
+def _checkpoint_check(ctx: dict) -> dict:
+    """The restart checkpoint row: stale until this process holds the group.
+
+    Shown from job start (pending) so the logout never ambushes anyone; goes
+    `waiting` with numbered instructions at its turn.
+    """
+    if _group_live():
+        return {"name": "restart_checkpoint", "status": "ok",
+                "detail": "Fresh login confirmed (docker group live).",
+                "action": "", "state": "ready", "blocking": False}
+    return {"name": "restart_checkpoint", "status": "missing",
+            "detail": "Waiting for a fresh login.",
+            "action": "See the paused row for the 3 steps.",
+            "state": "stale", "blocking": False}
+
+
+def fix_restart_checkpoint(check: dict, ctx: dict) -> dict:
+    if _group_live():
+        return {"ok": True, "skipped": True}
+    return {"waiting": True, "prompt": {
+        "kind": "relogin",
+        "title": "Log out and back in, then press Resume",
+        "body": ("Linux only grants the docker group at login — everything "
+                 "above is installed and waiting. ① Log out and back in "
+                 "(this also refreshes your session for the other new "
+                 "programs). ② Run ./check.sh again. ③ Press Resume below: "
+                 "finished rows skip in seconds, then networks + Caddy finish."),
+        "commands": ["./check.sh"],
+    }}
+
+
+def _networks_check(ctx: dict) -> dict:
+    """Shared-network presence. Needs socket access: without it the state is
+    `denied` (honest failure telling the user to restart the checker after
+    re-login — NOT a reinstall)."""
+    rc, out = actions.privilege._exec(["docker", "info"])
+    if rc != 0:
+        if "permission denied" in out.lower():
+            return {"name": "docker_networks", "status": "fail",
+                    "detail": "Docker still unreachable from this checker "
+                              "process (stale login).",
+                    "action": "Restart ./check.sh after logging back in, then Resume.",
+                    "state": "denied", "blocking": False}
+        return {"name": "docker_networks", "status": "missing",
+                "detail": "Docker daemon not reachable.",
+                "action": "step 3 starts it.", "state": "missing",
+                "blocking": False}
+    missing = [net for net in preflight.MU3LAB_NETWORKS
+               if actions.privilege._exec(
+                   ["docker", "network", "inspect", net])[0] != 0]
+    if missing:
+        return {"name": "docker_networks", "status": "missing",
+                "detail": f"Missing networks: {', '.join(missing)}.",
+                "action": "step 3 creates only the missing ones.",
+                "state": "missing", "blocking": False}
+    return {"name": "docker_networks", "status": "ok",
+            "detail": "All shared networks present.",
+            "action": "", "state": "ready", "blocking": False}
+
+
+def fix_networks_router(check: dict, ctx: dict) -> dict:
+    """Route by state: missing → create; denied → honest failure."""
+    if check.get("state") == "denied":
+        return fix_denied_networks(check, ctx)
+    return fix_networks(check, ctx)
+
+
+def fix_networks(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("docker_networks")
+    for net in preflight.MU3LAB_NETWORKS:
+        if actions.privilege._exec(["docker", "network", "inspect", net])[0] == 0:
+            continue
+        res = actions.docker_network_create(
+            net, log, internal=(net == "mu3lab_backend"))
+        if not res["ok"]:
+            return _propagate(res)
+    return {"ok": True}
+
+
+def fix_denied_networks(check: dict, ctx: dict) -> dict:
+    return {"ok": False,
+            "error": "Docker unreachable from this checker (stale login). "
+                     "Log out/in, restart ./check.sh, press Resume — finished rows skip."}
 
 
 def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
@@ -816,12 +893,14 @@ STEPS = [
     {"id": "service", "label": "Dashboard service",
      "check": lambda ctx: _service_check(ctx["root"]),
      "fix": fix_service},
-    {"id": "docker", "label": "Docker",
-     "check": _docker_check, "fix": fix_docker},
+    {"id": "docker", "label": "Docker engine",
+     "check": _docker_check, "fix": fix_docker,
+     # Daemon-level states are owned downstream: group liveness belongs to
+     # the restart checkpoint, networks to docker_networks. Verify passes
+     # while any of these hold (the step's own work — install/start — is done).
+     "verify_ok_states": ("ready", "no_group", "no_networks", "no_access")},
     {"id": "tailscale_pkg", "label": "Tailscale app",
      "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg},
-    {"id": "caddy", "label": "Caddy",
-     "check": _caddy_check, "fix": fix_caddy},
     {"id": "tailscale_join", "label": "Tailscale connection",
      "check": lambda ctx: (lambda r: {
          "name": "tailscale_join", "status": "ok" if r["state"] == "ready" else "missing",
@@ -831,6 +910,12 @@ STEPS = [
      "fix": fix_tailscale_join},
     {"id": "serve", "label": "Phone access (sharing)",
      "check": _serve_check, "fix": fix_serve},
+    {"id": "restart_checkpoint", "label": "Fresh login checkpoint",
+     "check": _checkpoint_check, "fix": fix_restart_checkpoint},
+    {"id": "docker_networks", "label": "Shared networks",
+     "check": _networks_check, "fix": fix_networks_router},
+    {"id": "caddy", "label": "Caddy",
+     "check": _caddy_check, "fix": fix_caddy},
 ]
 
 
@@ -914,7 +999,11 @@ def run_job(job: dict, ctx: dict) -> None:
             _finish_step(job, ctx, step, {"ok": False, "error": f"verify crashed: {exc}"})
             job["status"] = "failed"
             return
-        if verify.get("status") != "ok":
+        # Most steps must verify fully green. Steps with downstream-owned
+        # states (docker → checkpoint/networks) pass while any listed state
+        # holds — their own work is done, the rest has a dedicated row.
+        acceptable = meta.get("verify_ok_states", ("ready",))
+        if verify.get("status") != "ok" and verify.get("state") not in acceptable:
             _finish_step(job, ctx, step, {"ok": False,
                                           "error": "fix ran but verify still red: "
                                                    + verify.get("detail", "")})

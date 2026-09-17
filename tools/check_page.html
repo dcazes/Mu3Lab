@@ -85,9 +85,11 @@
     <ol id="inst-manifest" hidden></ol>
     <p id="inst-note" hidden>If anything above needs administrator permission,
        your computer will ask for your password in its own system popup —
-       never typed into this page. Afterwards you will be guided to connect
-       Tailscale (sign in or paste a key); sharing and the phone check then
-       run by themselves.</p>
+       never typed into this page. The run ends with a fresh-login checkpoint
+       (Linux grants new groups at login): log out/in, run ./check.sh again,
+       press Resume — finished rows skip. Afterwards you will be guided to
+       connect Tailscale (sign in or paste a key); sharing and the phone check
+       then run by themselves.</p>
     <p><button id="btn-inst" onclick="startInstall()" disabled>Install</button>
        <button id="btn-instop" onclick="killInstall()" disabled>Stop</button>
        <button id="btn-script" onclick="copyScript()">Copy full admin script</button></p>

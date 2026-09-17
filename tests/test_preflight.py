@@ -132,6 +132,20 @@ class DockerTests(unittest.TestCase):
         self.assertEqual(result["state"], "daemon_down")
         self.assertIn("no reinstall", result["action"])
 
+    def test_denied_is_not_down(self):
+        # Permission-denied looks identical by return code: the stderr flag
+        # plus a live daemon must route to the group path, never install.
+        result = self._base(docker_info_rc=1, permission_denied=True,
+                            daemon_active=True)
+        self.assertEqual(result["state"], "no_access")
+        self.assertIn("authorized", result["detail"])
+
+    def test_denied_dead_daemon_starts(self):
+        # Denied text but daemon actually down: starting is still correct.
+        result = self._base(docker_info_rc=1, permission_denied=True,
+                            daemon_active=False)
+        self.assertEqual(result["state"], "daemon_down")
+
     def test_unverified(self):
         result = self._base(engine_version="")
         self.assertEqual(result["state"], "unverified")
@@ -146,10 +160,11 @@ class DockerTests(unittest.TestCase):
         self.assertEqual(result["state"], "no_compose")
 
     def test_group(self):
-        # Daemon reachable but group not LIVE: re-login pause, not reinstall.
+        # Daemon reachable but group not LIVE in this process: liveness is
+        # the restart checkpoint's question, not an install trigger.
         result = self._base(group_names=["dak", "sudo"])
         self.assertEqual(result["state"], "no_group")
-        self.assertIn("newgrp", result["action"])
+        self.assertIn("checkpoint", result["action"])
 
     def test_networks(self):
         result = self._base(networks_present=["mu3lab_frontend"])

@@ -229,20 +229,31 @@ def check_privilege(sudo_fresh: bool, graphical_session: bool) -> dict:
 def check_docker(docker_info_rc: int, group_names: list[str],
                  networks_present: list[str], engine_version: str = "",
                  compose_present: bool = False,
-                 binary_present: bool = True) -> dict:
+                 binary_present: bool = True,
+                 permission_denied: bool = False,
+                 daemon_active: bool = False) -> dict:
     """Report Docker readiness as a dispatchable STATE (never "fail").
 
-    States: absent | daemon_down | unverified | old_engine | no_compose |
-    no_group | no_networks | ready. Card ③ maps each to exactly one fix;
-    installing over a healthy component is structurally impossible.
-    All inputs injected (callers run `which docker`, `docker info`,
-    `docker version`, `docker compose version`, `id -nG`, network inspects).
+    rc!=0 is AMBIGUOUS (dead daemon vs unauthorized user), so callers pass
+    the disambiguators: `permission_denied` (stderr said so) and
+    `daemon_active` (systemctl, no socket needed). States: absent |
+    daemon_down | no_access | unverified | old_engine | no_compose |
+    no_group | no_networks | ready. `no_access` (present, running, you're
+    just not authorized) routes to the group checkpoint, never to install.
+    All inputs injected; this function only judges.
     """
     if not binary_present:
         return _result("docker", "missing", "Docker is not installed.",
                        "step 3 installs Docker ≥24 + compose plugin.",
                        state="absent")
     if docker_info_rc != 0:
+        if permission_denied and daemon_active:
+            return _result("docker", "missing",
+                           "Docker is installed and running — this login just "
+                           "isn't authorized to use it yet.",
+                           "step 3 adds you to the group, then pauses for a "
+                           "fresh login.",
+                           state="no_access")
         return _result("docker", "missing",
                        "Docker is installed but the daemon is not running.",
                        "step 3 enables and starts it (no reinstall).",
@@ -262,14 +273,15 @@ def check_docker(docker_info_rc: int, group_names: list[str],
                        f"Engine v{match.group(0)} ok, compose plugin absent.",
                        "step 3 installs docker-compose-plugin.",
                        state="no_compose")
-    # NOTE: group membership must be LIVE in the backend process. A user added
-    # to `docker` five minutes ago still reports here until re-login/newgrp —
-    # step 3 pauses at its group checkpoint with instructions (not an error).
+    # NOTE: group membership must be LIVE in this process. getgrouplist()
+    # reads the group DATABASE (/etc/group) and would parrot back a membership
+    # added minutes ago; only getgroups() reports this process's credentials.
     if "docker" not in group_names:
         return _result("docker", "missing",
                        "Installed and running; this login just needs the "
                        "`docker` group to take effect.",
-                       "step 3 adds you and pauses for `newgrp docker` (or log out/in).",
+                       "step 3 pauses at the restart checkpoint: fresh login, "
+                       "then Resume.",
                        state="no_group")
     missing = [net for net in MU3LAB_NETWORKS if net not in networks_present]
     if missing:
@@ -439,10 +451,13 @@ def run_all() -> dict:
     # Privilege signals: fresh sudo? graphical session?
     sudo_fresh = _run(["sudo", "-n", "true"])[0] == 0
     graphical = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    # Docker signals: binary? daemon? engine version? compose plugin?
-    # live group? which of the three networks exist?
+    # Docker signals: binary? daemon reachable AND why-not (stderr tells
+    # "permission denied" apart from a dead daemon)? engine version? compose
+    # plugin? LIVE process groups (getgroups, never getgrouplist)? networks?
     docker_binary = shutil.which("docker") is not None
-    docker_rc, _ = _run(["docker", "info"])
+    docker_rc, docker_out = _run(["docker", "info"])
+    docker_denied = "permission denied" in docker_out.lower()
+    docker_active = _run(["systemctl", "is-active", "docker"])[0] == 0
     engine_version = ""
     compose_present = False
     if docker_rc == 0:
@@ -450,8 +465,7 @@ def run_all() -> dict:
                                   "{{.Server.Version}}"])
         compose_present = _run(["docker", "compose", "version"])[0] == 0
     try:
-        groups = os.getgrouplist(os.getlogin(), os.getgid())
-        group_names = [grp.getgrgid(gid).gr_name for gid in groups]
+        group_names = [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
     except OSError:
         group_names = []
     networks: list[str] = []
@@ -473,7 +487,9 @@ def run_all() -> dict:
         check_docker(docker_rc, group_names, networks,
                      engine_version=engine_version,
                      compose_present=compose_present,
-                     binary_present=docker_binary),
+                     binary_present=docker_binary,
+                     permission_denied=docker_denied,
+                     daemon_active=docker_active),
         check_tailscale(ts_binary, ts_active, ts_joined),
         check_ports(),
         check_bundle(),
