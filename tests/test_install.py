@@ -114,8 +114,7 @@ class DockerFixTests(unittest.TestCase):
         self.assertIsNone(result.get("waiting"))
         mod.assert_called_once()
 
-    def test_probe_distinguishes_denied_from_down(self):
-        # REGRESSION: the install-side probe once discarded docker-info
+    def test_probe_distinguishes_denied_from_down(self):        # REGRESSION: the install-side probe once discarded docker-info
         # stderr, misreading "permission denied" as a dead daemon (which then
         # failed verify after a pointless start). It must mirror run_all().
         def fake_exec(argv, timeout=300):
@@ -138,6 +137,62 @@ class DockerFixTests(unittest.TestCase):
         for state in ("ready", "no_group", "no_networks", "no_access"):
             self.assertIn(state, meta["verify_ok_states"])
         self.assertNotIn("daemon_down", meta["verify_ok_states"])
+
+
+class CaddyFixTests(unittest.TestCase):
+    """`compose up -d` returns at container START, not when Caddy listens:
+    the fix must poll the port (the live failure), not declare victory."""
+
+    def _ctx(self, root):
+        return {"root": root, "log_fn": lambda step: lambda line: None,
+                "inputs": {}, "wait_input": lambda step: {},
+                "stopped": lambda: False}
+
+    def _projdir(self, root):
+        projdir = root / "core" / "ingress"
+        projdir.mkdir(parents=True)
+        (projdir / "docker-compose.yml").touch()
+        return projdir
+
+    def test_waits_for_port(self):
+        import tempfile
+        import urllib.request as _url
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._projdir(root)
+            calls = {"n": 0}
+
+            class FakeResp:
+                status = 200
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            with patch("ctl.install.actions.compose_up",
+                       return_value=(0, "up")), \
+                 patch("ctl.install._tcp_open",
+                       side_effect=lambda port: calls.__setitem__(
+                           "n", calls["n"] + 1) or calls["n"] >= 2), \
+                 patch.object(_url, "urlopen", return_value=FakeResp()):
+                result = install.fix_caddy({"state": "down"}, self._ctx(root))
+            self.assertTrue(result.get("ok"))
+            self.assertGreaterEqual(calls["n"], 2)
+
+    def test_times_out_honestly(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._projdir(root)
+            with patch("ctl.install.actions.compose_up",
+                       return_value=(0, "up")), \
+                 patch("ctl.install._tcp_open", return_value=False), \
+                 patch("time.sleep", return_value=None):
+                result = install.fix_caddy({"state": "down"}, self._ctx(root))
+            self.assertFalse(result.get("ok"))
+            self.assertIn("19460", result.get("error", ""))
 
 
 class WorkspaceStepTests(unittest.TestCase):
@@ -322,8 +377,7 @@ class SgFallbackTests(unittest.TestCase):
             check = install._networks_check(self._ctx())
         self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
 
-    def test_full_dispatch_coverage(self):
-        # Every state any step check can emit must map to a real fix.
+    def test_full_dispatch_coverage(self):        # Every state any step check can emit must map to a real fix.
         states = {
             "host_base": ["missing", "ready"],
             "node": ["absent", "old", "ready"],

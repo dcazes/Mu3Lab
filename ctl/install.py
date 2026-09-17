@@ -668,7 +668,26 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     log(out or f"(exit {rc})")
     if rc != 0:
         return {"ok": False, "error": "docker compose up failed (see log)."}
-    return {"ok": True}
+    # `up -d` returns the instant the container STARTS, not when Caddy
+    # listens — without this poll, verify races the boot every time
+    # (the exact failure seen live: container Started, port not yet bound).
+    import time as _time
+    import urllib.request as _url
+    for _ in range(30):
+        sock_ok = _tcp_open(CADDY_PORT)
+        if sock_ok:
+            try:
+                with _url.urlopen(f"http://127.0.0.1:{CADDY_PORT}/",
+                                  timeout=3) as resp:
+                    if resp.status == 200:
+                        log(f"Caddy answering on :{CADDY_PORT}")
+                        return {"ok": True}
+            except OSError:
+                pass
+        _time.sleep(2)
+    return {"ok": False,
+            "error": f"Caddy container started but :{CADDY_PORT} never "
+                     f"answered (see `docker logs ingress-caddy-1`)."}
 
 
 def _join_prompt(login_url: str) -> dict:
