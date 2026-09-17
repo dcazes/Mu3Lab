@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -42,6 +43,20 @@ ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
 STATE_FILE = ROOT / ".state" / "check-progress.json"
 CODE_VERSION = 3      # bump on ANY api/report-shape change (invalidates disk)
+
+
+def tailnet_dashboard_url() -> str:
+    """Return the node's canonical private HTTPS URL, if Tailscale is ready."""
+    try:
+        proc = subprocess.run(["tailscale", "status", "--json"],
+                              capture_output=True, text=True, timeout=5)
+        payload = json.loads(proc.stdout) if proc.returncode == 0 else {}
+        name = str(payload.get("Self", {}).get("DNSName", "")).rstrip(".")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return ""
+    if re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name):
+        return "https://" + name + "/"
+    return ""
 
 
 class State:
@@ -346,6 +361,7 @@ class Handler(BaseHTTPRequestHandler):
                     "preflight_passed": state.preflight_passed,
                     "preflight_report": state.preflight_report,
                     "install_job": _serialize_job(state.install_job),
+                    "tailnet_dashboard_url": tailnet_dashboard_url(),
                 })
         elif self.path == "/api/tests/events":
             with state.lock:
