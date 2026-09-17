@@ -34,8 +34,7 @@ from pathlib import Path
 MIN_DEBIAN_MAJOR = 12      # install.sh dies below Debian 12 (docker repo needs it)
 MIN_UBUNTU_MAJOR = 22      # install.sh dies below Ubuntu 22.04 (same reason)
 MIN_PYTHON = (3, 10)       # `match` syntax + new typing used across ctl/
-MIN_NODE_MAJOR = 20        # dashboard builds from source (Vite needs Node 18+;
-                         # install.sh ensures AT LEAST v20; newer (22+) is accepted)
+MIN_NODE_MAJOR = 24        # current Node.js LTS used by the dashboard build.
 MIN_DOCKER_MAJOR = 24      # compose-v2 plugin era; step 3 upgrades older engines
 
 # Checks the installer CANNOT fix. Anything else is step 3's work list and
@@ -196,23 +195,23 @@ def check_python(version: tuple[int, ...]) -> dict:
 
 
 def check_node(node_version_output: str) -> dict:
-    """Require Node >= 20 (dashboard builds from source in install.sh step 9).
+    """Require the current Node.js LTS line for the dashboard build.
 
-    install.sh installs 20.x as the baseline, but a newer system Node (22+)
-    is accepted — downgrading a working Node would be pure churn.
+    The installer uses the explicit NodeSource LTS channel. A newer system
+    Node is accepted; an older one is upgraded rather than left ambiguous.
     Takes the raw text of `node --version` (e.g. "v22.3.0") or "" when the
     binary is absent, so tests never need Node installed.
     """
     match = re.search(r"v?(\d+)\.(\d+)\.(\d+)", node_version_output or "")
     if not match:
         return _result("node", "missing", "Node.js not found.",
-                       "step 3 installs Node 20+ via NodeSource.", state="absent")
+                       "step 3 installs the current Node.js LTS via NodeSource.", state="absent")
     major = int(match.group(1))
     if major >= MIN_NODE_MAJOR:
-        return _result("node", "ok", f"Node {match.group(0)} present (>= v20).",
+        return _result("node", "ok", f"Node {match.group(0)} present (>= v{MIN_NODE_MAJOR}).",
                        state="ready")
     return _result("node", "missing",
-                   f"Node {match.group(0)} below minimum v20.",
+                   f"Node {match.group(0)} below the required Node.js LTS v{MIN_NODE_MAJOR}.",
                    "step 3 upgrades it via the NodeSource repo.", state="old")
 
 

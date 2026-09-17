@@ -44,11 +44,13 @@ ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg",
                  "python3", "python3-pip", "python3-venv", "restic"]
-# NodeSource 20.x baseline (accepts newer already-installed Nodes; the fix
-# only runs when check_node reports absent/old).
+# Current Node.js LTS channel for the supported v1 host. Keep this explicit so
+# the bootstrap remains reviewable and reproducible; advance it deliberately
+# when the LTS line changes rather than silently tracking a moving target.
+NODE_LTS_MAJOR = 24
 NODESOURCE_KEY_URL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
 NODESOURCE_LIST = ("deb [signed-by=/etc/apt/keyrings/nodesource.gpg] "
-                   "https://deb.nodesource.com/node_20.x nodistro main")
+                   f"https://deb.nodesource.com/node_{NODE_LTS_MAJOR}.x nodistro main")
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io",
                    "docker-buildx-plugin", "docker-compose-plugin"]
@@ -193,27 +195,34 @@ def _repair_managed_apt_keys(log: Callable[[str], None]) -> dict:
     three source files owned by Mu3Lab; unrelated repositories are untouched.
     """
     managed = [
-        (Path("/etc/apt/sources.list.d/nodesource.list"),
-         NODESOURCE_KEY_URL, Path("/etc/apt/keyrings/nodesource.gpg"), "644"),
-        (Path("/etc/apt/sources.list.d/docker.list"),
+        ((Path("/etc/apt/sources.list.d/nodesource.list"),
+          Path("/etc/apt/sources.list.d/nodesource.sources")),
+         NODESOURCE_KEY_URL,
+         (Path("/etc/apt/keyrings/nodesource.gpg"),
+          Path("/usr/share/keyrings/nodesource.gpg"))),
+        ((Path("/etc/apt/sources.list.d/docker.list"),
+          Path("/etc/apt/sources.list.d/docker.sources")),
          DOCKER_KEY_URL.format(slug=_distro_slug()),
-         Path("/etc/apt/keyrings/docker.asc"), "644"),
-        (Path("/etc/apt/sources.list.d/tailscale.list"),
+         (Path("/etc/apt/keyrings/docker.asc"),)),
+        ((Path("/etc/apt/sources.list.d/tailscale.list"),
+          Path("/etc/apt/sources.list.d/tailscale.sources")),
          tailscale_key_url(_distro_slug(), _repo_codename() or "noble"),
-         Path("/etc/apt/keyrings/tailscale.gpg"), "644"),
+         (Path("/etc/apt/keyrings/tailscale.gpg"),)),
     ]
-    for source, url, keyring, mode in managed:
-        if not source.is_file():
+    for sources, url, keyrings in managed:
+        present = [source for source in sources if source.is_file()]
+        if not present:
             continue
-        tmp = Path("/tmp") / f"mu3lab-repair-{keyring.name}"
+        tmp = Path("/tmp") / f"mu3lab-repair-{keyrings[0].name}"
         res = actions.fetch_url(url, tmp, log)
         if not res["ok"]:
             return _propagate(res)
-        res = actions.write_root_bytes(str(keyring), tmp.read_bytes(), log,
-                                       mode=mode)
-        if not res["ok"]:
-            return _propagate(res)
-        log(f"repaired signing key for {source.name}")
+        data = tmp.read_bytes()
+        for keyring in keyrings:
+            res = actions.write_root_bytes(str(keyring), data, log, mode="644")
+            if not res["ok"]:
+                return _propagate(res)
+        log("repaired signing key for " + ", ".join(source.name for source in present))
     return {"ok": True}
 
 
@@ -229,12 +238,14 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
     if not missing:
         return {"ok": True, "skipped": True}
     # A previous Mu3Lab install may have left our repo definitions behind
-    # after a test reset removed their keyrings.  Repair only the files owned
-    # by this installer before the first apt update; the Node/Docker steps
-    # recreate them with freshly downloaded keys.
+    # after a test reset removed their keyrings. Remove only the legacy files
+    # owned by this installer before the first apt update.
     for repo_file in ("/etc/apt/sources.list.d/nodesource.list",
+                      "/etc/apt/sources.list.d/nodesource.sources",
                       "/etc/apt/sources.list.d/docker.list",
-                      "/etc/apt/sources.list.d/tailscale.list"):
+                      "/etc/apt/sources.list.d/docker.sources",
+                      "/etc/apt/sources.list.d/tailscale.list",
+                      "/etc/apt/sources.list.d/tailscale.sources"):
         res = actions.remove_root_file(repo_file, ctx["log_fn"]("host_base"))
         if not res["ok"]:
             return _propagate(res)

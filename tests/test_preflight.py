@@ -78,17 +78,17 @@ class GpuTests(unittest.TestCase):
 class PythonNodeTests(unittest.TestCase):
     def test_ok(self):
         self.assertEqual(preflight.check_python((3, 12, 3))["status"], "ok")
-        self.assertEqual(preflight.check_node("v20.11.0")["status"], "ok")
+        self.assertEqual(preflight.check_node("v24.11.0")["status"], "ok")
 
     def test_newer_ok(self):
         # Witness values only: ANY version above minimum passes, nothing pins.
         self.assertEqual(preflight.check_python((3, 13, 0))["status"], "ok")
-        self.assertEqual(preflight.check_node("v22.3.0")["status"], "ok")
+        self.assertEqual(preflight.check_node("v25.3.0")["status"], "ok")
 
     def test_old(self):
         self.assertEqual(preflight.check_python((3, 9, 18))["status"], "fail")
         # Old node is "missing", not "fail": step ③ upgrades it.
-        result = preflight.check_node("v18.19.0")
+        result = preflight.check_node("v22.19.0")
         self.assertEqual(result["status"], "missing")
         self.assertIn("step 3", result["action"])
 
