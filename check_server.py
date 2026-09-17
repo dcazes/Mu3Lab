@@ -100,6 +100,7 @@ def _test_worker(state: State, python: str) -> None:
             [python, runner],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, cwd=str(ROOT),
+            env={**os.environ, "MU3LAB_BOOTSTRAP_TESTS": "1"},
         )
     except OSError as exc:
         with state.lock:

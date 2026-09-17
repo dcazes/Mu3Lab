@@ -167,10 +167,12 @@ async function refreshTests() {
   const done = data.events.find(e => e.type === 'summary' && e.phase === 'done');
   const totalEv = data.events.find(e => e.type === 'summary' && e.phase === 'start');
   const total = (totalEv && totalEv.total) || tests.length || '?';
+  const deferred = (totalEv && totalEv.deferred) || [];
   document.getElementById('tests-bar').style.width =
     (typeof total === 'number' && total ? (100 * tests.length / total) : 0) + '%';
   document.getElementById('tests-summary').textContent =
-    tests.length + ' / ' + total + ' tests';
+    tests.length + ' / ' + total + ' tests' + (deferred.length
+      ? ' (' + deferred.length + ' dependency-backed module deferred until install)' : '');
   // Grouped table: one row per area, failed ids listed in detail.
   const byGroup = {};
   for (const t of tests) {
