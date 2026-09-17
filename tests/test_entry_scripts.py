@@ -19,3 +19,12 @@ class EntryScriptTests(unittest.TestCase):
     def test_install_delegates_to_the_gated_bootstrapper(self):
         text = (Path(__file__).resolve().parents[1] / "install.sh").read_text(encoding="utf-8")
         self.assertIn('exec "$ROOT_DIR/check.sh"', text)
+
+    def test_tailscale_helper_is_shell_valid_and_documented(self):
+        root = Path(__file__).resolve().parents[1]
+        helper = root / "tools" / "open_tailscale_login.sh"
+        self.assertTrue(helper.is_file())
+        result = subprocess.run(["bash", "-n", str(helper)], capture_output=True,
+                                text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("xdg-open", helper.read_text(encoding="utf-8"))

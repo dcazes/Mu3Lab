@@ -306,7 +306,7 @@ class WorkspaceStepTests(unittest.TestCase):
         prompt = install._join_prompt("https://login.example/abc")
         self.assertEqual(prompt["kind"], "tailscale_login")
         for needle in ("Tailscale web login", "https://login.example/abc",
-                       "sudo tailscale up"):
+                       "open_tailscale_login.sh"):
             self.assertIn(needle, prompt["body"] + prompt.get("login_url", "")
                           + prompt.get("terminal_command", ""))
         self.assertNotIn("keys_url", prompt)
@@ -316,7 +316,7 @@ class WorkspaceStepTests(unittest.TestCase):
         prompt = install._join_prompt("")
         self.assertFalse(prompt["login_url"])
         self.assertEqual(prompt["terminal_command"],
-                         "sudo tailscale up --hostname=mu3lab")
+                         "./tools/open_tailscale_login.sh")
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com

@@ -747,7 +747,7 @@ def _join_prompt(login_url: str) -> dict:
                  "or account password. When approval is complete, press Check again."),
         "signup_url": "https://tailscale.com",
         "login_url": login_url.strip().rstrip(".,);"),
-        "terminal_command": "sudo tailscale up --hostname=mu3lab",
+        "terminal_command": "./tools/open_tailscale_login.sh",
     }
 
 
