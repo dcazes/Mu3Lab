@@ -82,14 +82,19 @@ class DockerFixTests(unittest.TestCase):
     def test_networks_only_creates_missing(self):
         # Networks are a DEDICATED step now (fix_networks_router): only the
         # missing ones get created, and liveness is someone else's job.
+        # Live group is stubbed (never the test box's real groups).
         created: list[str] = []
         def fake_net(name, log, internal=False):
             created.append(name)
             return _ok()
+        import types as _types
+        fake_grp = _types.SimpleNamespace(gr_name="docker")
         with patch("ctl.install.actions.docker_network_create",
                    side_effect=fake_net), \
              patch("ctl.install.actions.privilege") as priv, \
-             patch("ctl.install.preflight") as _pre:
+             patch("ctl.install.preflight") as _pre, \
+             patch("os.getgroups", return_value=[999]), \
+             patch("grp.getgrgid", return_value=fake_grp):
             _pre.MU3LAB_NETWORKS = ["mu3lab_frontend", "mu3lab_backend"]
             # frontend present, backend missing: only backend gets created.
             priv._exec.side_effect = lambda argv, **kw: (

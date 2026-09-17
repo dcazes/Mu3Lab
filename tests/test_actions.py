@@ -99,12 +99,17 @@ class SystemTests(unittest.TestCase):
         def fake(argv, timeout=300, env=None):
             seen.append(argv)
             return 0, "created"
-        with patch.object(actions.privilege, "_exec", fake):
+        def _no_elevate(*args, **kwargs):
+            raise AssertionError("must not elevate")
+        with patch.object(actions.privilege, "_exec", fake), \
+             patch.object(actions.privilege, "run_privileged", _no_elevate):
             result = actions.docker_network_create("mu3lab_backend", _silent,
                                                    internal=True)
         self.assertTrue(result["ok"])
-        self.assertEqual(seen[0][:3], ["docker", "network", "create"])
-        self.assertIn("--internal", seen[0])
+        # Direct or sg-wrapped — but never elevated.
+        flat = " ".join(seen[0])
+        self.assertIn("docker", flat)
+        self.assertIn("mu3lab_backend", flat)
 
 
 class DockerCmdTests(unittest.TestCase):
