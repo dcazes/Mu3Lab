@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import check_server
 from check_server import (State, can_open_install, can_run_preflight,
                           load_progress, save_progress)
 
@@ -65,6 +66,14 @@ class GateTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_tailnet_dashboard_url_uses_magicdns_name(self):
+        payload = '{"Self":{"DNSName":"mu3lab-1.taile2cc7a.ts.net."}}'
+        with unittest.mock.patch("check_server.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = payload
+            self.assertEqual(check_server.tailnet_dashboard_url(),
+                             "https://mu3lab-1.taile2cc7a.ts.net/")
+
     def test_build_identity_shape(self):
         # /api/state answers "which exact code" (short HEAD + dirty flag)
         # so version questions never need paste-and-deduce again.

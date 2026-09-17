@@ -35,6 +35,8 @@
   pre.tail { max-height: 9em; margin: .4rem 0; }
   .prompt { border-left: 3px solid var(--wait); padding: .4rem .6rem; margin: .4rem 0; background: #fff8e6; }
   code.act { background: #f6f8fa; padding: .1rem .3rem; font-size: .85rem; }
+  .spin { display: inline-block; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -97,6 +99,11 @@
     <details id="inst-transcript-wrap" hidden><summary>full install transcript</summary><pre id="inst-transcript"></pre></details>
     <details><summary>admin commands recorded so far</summary><pre id="script-pre">Nothing recorded yet — start the install first.</pre></details>
     <div id="inst-log" class="mut"></div>
+    <div id="inst-complete" hidden style="border:2px solid var(--ok); border-radius:8px; padding:.8rem 1rem; margin-top:.8rem;">
+      <strong>All done!</strong>
+      <span id="inst-complete-detail">Mu3Lab is ready.</span><br>
+      <a id="real-dashboard-link" href="http://127.0.0.1:8787" target="_blank" rel="noopener">Open the real dashboard</a>
+    </div>
   </div>
 </section>
 
@@ -165,10 +172,12 @@ async function refreshTests() {
   const done = data.events.find(e => e.type === 'summary' && e.phase === 'done');
   const totalEv = data.events.find(e => e.type === 'summary' && e.phase === 'start');
   const total = (totalEv && totalEv.total) || tests.length || '?';
+  const deferred = (totalEv && totalEv.deferred) || [];
   document.getElementById('tests-bar').style.width =
     (typeof total === 'number' && total ? (100 * tests.length / total) : 0) + '%';
   document.getElementById('tests-summary').textContent =
-    tests.length + ' / ' + total + ' tests';
+    tests.length + ' / ' + total + ' tests' + (deferred.length
+      ? ' (' + deferred.length + ' dependency-backed module deferred until install)' : '');
   // Grouped table: one row per area, failed ids listed in detail.
   const byGroup = {};
   for (const t of tests) {
@@ -295,8 +304,11 @@ function renderManifest(report) {
   list.hidden = false;
   note.hidden = false;
   if (!missing.length) {
-    list.innerHTML = '<li>Everything above is already installed — nothing to do.</li>';
-    document.getElementById('btn-inst').disabled = true;
+    // Preflight only validates host prerequisites.  The install job still owns
+    // reconciliation of /srv/mu3lab, private ingress, and Tailscale Serve.
+    // Keep the action available so a ready host can finish or repair those.
+    list.innerHTML = '<li><strong>Host prerequisites are ready.</strong><br><span class="mut">Install will verify and complete the persistent data layout, private ingress, and tailnet serving.</span></li>';
+    document.getElementById('btn-inst').disabled = false;
     return;
   }
   list.innerHTML = missing.map(c =>
@@ -347,6 +359,14 @@ async function sendContinue() {
   try { await postJSON('/api/install/continue'); }
   catch (e) { console.error('install/continue', e); }
 }
+async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (e) {
+    console.error('clipboard', e);
+    alert('Copy failed. Please select and copy the command manually.');
+  }
+}
 async function retryInstall() {
   try { await postJSON('/api/install/retry'); }
   catch (e) { console.error('install/retry', e); return; }
@@ -366,7 +386,11 @@ function promptHtml(step) {
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + text + '</a>' : text;
     return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
       escapeHtml(p.body) + '<br>' +
-      (p.login_url ? 'Login page: <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
+      (p.login_url ? ' <strong>' + link(p.login_url, 'Open Tailscale login page') + '</strong>' +
+        ' <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
+      (p.terminal_command ? 'If no login link appeared, run: <code class="act">' +
+        escapeHtml(p.terminal_command) + '</code> ' +
+        '<button onclick="copyText(\'' + escapeHtml(p.terminal_command).replace(/'/g, '&#39;') + '\')">Copy command</button><br>' : '') +
       '<button onclick="sendContinue()">I approved it — check again</button><br>' +
       '<span class="mut">New to Tailscale? ' + link(p.signup_url, 'Sign up free') +
       ', then come back here.</span></div>';
@@ -378,7 +402,7 @@ function promptHtml(step) {
   html += '<br><button onclick="retryInstall()">Done — retry</button></div>';
   return html;
 }
-const INST_MARKS = {pending: '<span class="mut">○</span>', installing: '<span class="wait">▶</span>',
+const INST_MARKS = {pending: '<span class="mut">○</span>', installing: '<span class="wait spin">◌</span>',
   verifying: '<span class="wait">◷</span>', ready: '<span class="ok">✓</span>',
   failed: '<span class="bad">✗</span>', waiting: '<span class="wait">⏸</span>'};
 // KEYED install rows: skeleton built once per job id; polls only update marks,
@@ -410,7 +434,10 @@ async function refreshInstall() {
   ensureInstRows(job);
   for (const s of job.steps) {
     document.getElementById('imark-' + s.id).innerHTML = INST_MARKS[s.status] || '?';
-    document.getElementById('idet-' + s.id).textContent = s.detail || '';
+    const liveDetail = s.id === 'tailscale_join' && s.status === 'installing'
+      ? 'Starting Tailscale and requesting the login link (up to 120 seconds)…'
+      : (s.detail || '');
+    document.getElementById('idet-' + s.id).textContent = liveDetail;
     document.getElementById('ierr-' + s.id).innerHTML = s.error
       ? '<span class="bad">' + escapeHtml(s.error) + '</span>' : '';
     document.getElementById('iprompt-' + s.id).innerHTML = promptHtml(s);
@@ -437,6 +464,8 @@ async function refreshInstall() {
       setStatus('inst-status', 'done — infrastructure installed', 'ok');
       log.textContent = '';
       renderTranscript(job);
+      api('/api/state').then(state => renderCompletion(job, state.tailnet_dashboard_url || ''))
+        .catch(e => { console.error('tailnet URL', e); renderCompletion(job, ''); });
       // End-of-job note from the installer (e.g. terminal re-login tip).
       api('/api/install/events').then(d => {
         const s = (d.events || []).find(e => e.type === 'summary' && e.detail);
@@ -454,7 +483,8 @@ async function refreshInstall() {
       document.getElementById('btn-inst').disabled = false;
     }
   } else {
-    setStatus('inst-status', 'installing…', 'wait');
+    const joining = job.steps.some(s => s.id === 'tailscale_join' && s.status === 'installing');
+    setStatus('inst-status', joining ? 'waiting for Tailscale login link…' : 'installing…', 'wait');
   }
 }
 // Full transcript: every step's complete log, built ONCE at terminal state.
@@ -465,6 +495,23 @@ function renderTranscript(job) {
   document.getElementById('inst-transcript').textContent = job.steps.map(s =>
     '=== ' + s.label + ' [' + s.status + '] ===\n' +
     (s.log || []).join('\n')).join('\n\n');
+}
+function renderCompletion(job, tailnetUrl) {
+  const serve = job.steps.find(s => s.id === 'serve');
+  const text = (serve && (serve.log || []).join('\n')) || '';
+  // Only accept the hostname-shaped URL emitted by Tailscale Serve. If it is
+  // absent, the local dashboard remains a truthful fallback for this machine.
+  const match = text.match(/https:\/\/[A-Za-z0-9.-]+\.ts\.net\/?/);
+  const link = document.getElementById('real-dashboard-link');
+  const detail = document.getElementById('inst-complete-detail');
+  if (tailnetUrl || match) {
+    link.href = tailnetUrl || match[0];
+    detail.textContent = ' Your private dashboard is ready on the tailnet.';
+  } else {
+    link.href = 'http://127.0.0.1:8787';
+    detail.textContent = ' Open it locally now; the private tailnet URL was not returned by Tailscale.';
+  }
+  document.getElementById('inst-complete').hidden = false;
 }
 async function copyScript() {
   // Combined admin script (headless fallback): recorded privileged commands.

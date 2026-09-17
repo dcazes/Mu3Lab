@@ -5,7 +5,8 @@ WHAT: Discovers tests/ and runs them, printing ONE JSON object per line:
        "detail": "..."} plus a final {"type": "summary", ...}.
 WHY:  The check dashboard streams progress (card 1). Parsing `unittest -v`
       text with regex is brittle across versions; a custom TestResult is
-      exact. Stdlib only — runs on system python3 with zero installs.
+      exact. The bootstrap profile is stdlib-only; dependency-backed modules
+      are explicitly deferred until card ③ installs control-plane packages.
 RUN:  `python3 tools/run_tests.py` from the repo root. Exit 0 iff all green.
       (check_server.py spawns exactly this command; see its fixed argv.)
 DEBUG: Each line is self-contained JSON (json.loads per line). `detail` holds
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import traceback
 import unittest
@@ -25,6 +27,7 @@ from pathlib import Path
 # into sys.path itself (see tests/test_preflight.py); belt-and-braces here too.
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+DEFERRED_BOOTSTRAP_MODULES = ("tests.test_registry",)
 
 
 class JsonResult(unittest.TestResult):
@@ -91,13 +94,25 @@ def parse_line(line: str) -> dict:
 def main() -> int:
     """Discover tests/, run with JsonResult, print summary. Returns exit code."""
     loader = unittest.TestLoader()
-    # start_dir tests/, top_level_dir root: test ids look like
-    # "test_preflight.OsTests.test_ubuntu_2204_accepted".
-    suite = loader.discover(start_dir=str(ROOT / "tests"),
-                            top_level_dir=str(ROOT))
+    bootstrap_mode = os.environ.get("MU3LAB_BOOTSTRAP_TESTS") == "1"
+    if bootstrap_mode:
+        # A fresh checkout cannot import PyYAML yet. Load modules separately
+        # so the registry module is deferred instead of becoming a FailedTest.
+        modules = sorted(path.stem for path in (ROOT / "tests").glob("test_*.py")
+                         if f"tests.{path.stem}" not in DEFERRED_BOOTSTRAP_MODULES)
+        suite = unittest.TestSuite(
+            loader.loadTestsFromName(f"tests.{module}") for module in modules
+        )
+    else:
+        # start_dir tests/, top_level_dir root: test ids look like
+        # "test_preflight.OsTests.test_ubuntu_2204_accepted".
+        suite = loader.discover(start_dir=str(ROOT / "tests"),
+                                top_level_dir=str(ROOT))
     total = suite.countTestCases()
     print(json.dumps({"type": "summary", "phase": "start",
-                      "total": total}), flush=True)
+                      "total": total,
+                      "deferred": list(DEFERRED_BOOTSTRAP_MODULES) if bootstrap_mode else []}),
+          flush=True)
     # Silence per-test stderr noise (dots/tracebacks unittest prints by
     # default); our JSON lines are the only output. Tracebacks survive inside
     # the `detail` field of fail/error lines.
@@ -108,7 +123,8 @@ def main() -> int:
     summary = {"type": "summary", "phase": "done", "ran": result.testsRun,
                "ok": result.testsRun - len(result.failures) - len(result.errors),
                "failed": len(result.failures), "errored": len(result.errors),
-               "skipped": len(result.skipped)}
+               "skipped": len(result.skipped),
+               "deferred": list(DEFERRED_BOOTSTRAP_MODULES) if bootstrap_mode else []}
     print(json.dumps(summary), flush=True)
     # Exit 0 only when everything ran and nothing failed/errored. Skips are
     # tolerated (they are explicit, not breakage).

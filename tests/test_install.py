@@ -62,6 +62,20 @@ class DispatchTests(unittest.TestCase):
         for step in job["steps"]:
             self.assertEqual(step["status"], "pending")
 
+    def test_runtime_layout_check_uses_persistent_root_not_checkout(self):
+        step = next(meta for meta in install.STEPS if meta["id"] == "runtime_layout")
+        with patch("ctl.install._runtime_layout_check", return_value={"state": "ready"}) as check:
+            step["check"](_ctx())
+        self.assertEqual(check.call_args.args[0], install.RuntimePaths().root)
+
+    def test_tailscale_serve_uses_privilege_boundary(self):
+        with patch("ctl.install.privilege.run_privileged", return_value={"ok": True}) as run:
+            result = install.fix_serve({}, _ctx())
+        self.assertTrue(result["ok"])
+        self.assertEqual(run.call_args.args[0],
+                         ["tailscale", "serve", "--bg", install.SERVE_PORT])
+        self.assertEqual(run.call_args.kwargs["timeout"], 60)
+
 
 class DockerFixTests(unittest.TestCase):
     def _check(self, state):
@@ -306,10 +320,48 @@ class WorkspaceStepTests(unittest.TestCase):
         prompt = install._join_prompt("https://login.example/abc")
         self.assertEqual(prompt["kind"], "tailscale_login")
         for needle in ("Tailscale web login", "https://login.example/abc",
-                       "sudo tailscale up"):
+                       "open_tailscale_login.sh"):
             self.assertIn(needle, prompt["body"] + prompt.get("login_url", "")
                           + prompt.get("terminal_command", ""))
         self.assertNotIn("keys_url", prompt)
+        self.assertEqual(prompt["login_url"], "https://login.example/abc")
+
+    def test_join_prompt_keeps_copyable_fallback_command(self):
+        prompt = install._join_prompt("")
+        self.assertFalse(prompt["login_url"])
+        self.assertEqual(prompt["terminal_command"],
+                         "./tools/open_tailscale_login.sh")
+
+    def test_tailscale_join_uses_elevation_worker_and_opens_url(self):
+        with patch("ctl.install.privilege.run_privileged", return_value={
+                "ok": True,
+                "output": "To authenticate, visit: https://login.tailscale.com/a/abc123"}) as run, \
+             patch("ctl.install.webbrowser.open", return_value=True) as opened:
+            result = install.fix_tailscale_join(
+                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        run.assert_called_once_with(
+            ["tailscale", "up", "--hostname=mu3lab", "--timeout=120s"],
+            unittest.mock.ANY, timeout=130)
+        opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
+        self.assertTrue(result["waiting"])
+        self.assertEqual(result["prompt"]["login_url"],
+                         "https://login.tailscale.com/a/abc123")
+
+    def test_tailscale_join_reads_pending_url_from_local_status(self):
+        status = type("Proc", (), {
+            "returncode": 0,
+            "stdout": '{"AuthURL":"https://login.tailscale.com/a/from-status"}',
+        })()
+        with patch("ctl.install.privilege.run_privileged", return_value={
+                "ok": False, "output": "timeout waiting"}), \
+             patch("ctl.install.subprocess.run", return_value=status) as status_run, \
+             patch("ctl.install.webbrowser.open", return_value=True):
+            result = install.fix_tailscale_join(
+                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        status_run.assert_called_once_with(["tailscale", "status", "--json"],
+                                           capture_output=True, text=True, timeout=10)
+        self.assertEqual(result["prompt"]["login_url"],
+                         "https://login.tailscale.com/a/from-status")
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com

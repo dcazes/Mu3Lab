@@ -21,6 +21,7 @@ DEBUG: Every fix logs its commands before running (via actions.py). Job dict
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import platform
 import re
@@ -28,10 +29,11 @@ import shutil
 import socket
 import subprocess
 import threading
+import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions, preflight
+from ctl import actions, preflight, privilege
 from ctl.runtime import RuntimePaths
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +58,8 @@ def tailscale_key_url(distro: str, codename: str) -> str:
 CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
 SERVE_PORT = "19460"      # `tailscale serve --bg` proxies this local port
 TS_HOSTNAME = "mu3lab"
+TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
+TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
 
 
 # ---------------------------------------------------------------------------
@@ -210,12 +214,21 @@ def _venv_check(root: Path) -> dict:
 
 def _runtime_layout_check(root: Path) -> dict:
     """Check the approved persistent-data root without creating it."""
-    paths = RuntimePaths()
-    required = (paths.data, paths.backups, paths.secrets, paths.runtime, paths.projects)
-    if any(not path.is_dir() for path in required):
+    paths = RuntimePaths(root)
+    user_paths = (paths.data, paths.backups, paths.runtime, paths.projects)
+    try:
+        missing = [path for path in user_paths if not path.is_dir()]
+        # Secrets are deliberately root-only. Checking the directory itself
+        # must not require the operator to read its contents.
+        secrets_ready = paths.secrets.is_dir()
+        accessible = [path for path in user_paths
+                      if not os.access(path, os.R_OK | os.X_OK)]
+    except OSError:
+        missing, secrets_ready, accessible = list(user_paths), False, list(user_paths)
+    if missing or not secrets_ready or accessible:
         return {"name": "runtime_layout", "status": "missing",
-                "detail": "Persistent runtime layout is missing.",
-                "action": "step 3 creates /srv/mu3lab with safe permissions.",
+                "detail": "Persistent runtime layout is missing or inaccessible to the operator.",
+                "action": "step 3 repairs /srv/mu3lab ownership and permissions.",
                 "state": "missing", "blocking": False}
     return {"name": "runtime_layout", "status": "ok",
             "detail": "Persistent runtime layout is ready.", "action": "",
@@ -746,37 +759,57 @@ def _join_prompt(login_url: str) -> dict:
                  "Tailscale web login. This bootstrapper never receives an auth key "
                  "or account password. When approval is complete, press Check again."),
         "signup_url": "https://tailscale.com",
-        "login_url": login_url,
-        "terminal_command": "sudo tailscale up --hostname=mu3lab",
+        "login_url": login_url.strip().rstrip(".,);"),
+        "terminal_command": "./tools/open_tailscale_login.sh",
     }
 
 
-def fix_tailscale_join(check: dict, ctx: dict) -> dict:
-    """Guided browser join; never handles an auth key or Tailscale password."""
-    log = ctx["log_fn"]("tailscale_join")
-    # `tailscale up` prints a URL and blocks; run it briefly to capture the
-    # ordinary browser login URL, then wait for the user's approval.
-    log("$ tailscale up --hostname=mu3lab  (capturing login URL)")
+def _tailscale_auth_url() -> str:
+    """Read a pending login URL from the local daemon without logging status data."""
     try:
-        proc = subprocess.run(["sudo", "-n", "tailscale", "up",
-                               "--hostname=" + TS_HOSTNAME],
-                              capture_output=True, text=True, timeout=25)
-    except subprocess.TimeoutExpired as exc:
-        out = ((exc.stdout or b"").decode(errors="replace")
-               + (exc.stderr or b"").decode(errors="replace"))
-        import re as _re
-        match = _re.search(r"https?://\S+", out)
-        return {"waiting": True,
-                "prompt": _join_prompt(match.group(0) if match else "")}
-    except OSError as exc:
-        return {"ok": False, "error": f"tailscale up failed: {exc}"}
-    out = (proc.stdout + proc.stderr).strip()
-    if proc.returncode == 0:
-        return {"ok": True}  # already logged in, nothing to approve
+        proc = subprocess.run(["tailscale", "status", "--json"],
+                              capture_output=True, text=True, timeout=10)
+    except OSError:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return ""
+    url = payload.get("AuthURL", "")
+    return url if isinstance(url, str) else ""
+
+
+def fix_tailscale_join(check: dict, ctx: dict) -> dict:
+    """Join through the installer's existing Polkit worker.
+
+    The worker already owns the one native password dialog. Its captured
+    output is inspected for Tailscale's one-time login URL; the URL is opened
+    immediately and is never persisted or sent back as a credential.
+    """
+    log = ctx["log_fn"]("tailscale_join")
+    log("$ tailscale up --hostname=mu3lab --timeout=120s  (waiting up to 120 seconds for login URL)")
+    result = privilege.run_privileged(
+        ["tailscale", "up", "--hostname=" + TS_HOSTNAME,
+         "--timeout=" + TAILSCALE_JOIN_TIMEOUT], log,
+        timeout=TAILSCALE_WORKER_TIMEOUT)
+    out = result.get("output", "")
     import re as _re
-    match = _re.search(r"https?://\S+", out)
-    return {"waiting": True,
-            "prompt": _join_prompt(match.group(0) if match else "")}
+    match = _re.search(r"https://login\.tailscale\.com/[A-Za-z0-9/_-]+", out)
+    login_url = match.group(0).rstrip(".,);") if match else _tailscale_auth_url()
+    if login_url:
+        try:
+            webbrowser.open(login_url, new=2)
+            log("opened the Tailscale login page in the default browser")
+        except Exception as exc:  # noqa: BLE001 - link remains in the prompt
+            log(f"could not open browser automatically: {exc}")
+        return {"waiting": True, "prompt": _join_prompt(login_url)}
+    if result.get("need_terminal"):
+        return {"waiting": True, "prompt": _join_prompt("")}
+    if result.get("ok"):
+        return {"ok": True}
+    return {"waiting": True, "prompt": _join_prompt("")}
 
 
 def fix_serve(check: dict, ctx: dict) -> dict:
@@ -786,14 +819,19 @@ def fix_serve(check: dict, ctx: dict) -> dict:
     `serve --help` is authoritative — the verify below catches any drift).
     """
     log = ctx["log_fn"]("serve")
-    log(f"$ tailscale serve --bg {SERVE_PORT}  (proxies local :{SERVE_PORT})")
-    try:
-        proc = subprocess.run(["tailscale", "serve", "--bg", SERVE_PORT],
-                              capture_output=True, text=True, timeout=60)
-    except OSError as exc:
-        return {"ok": False, "error": f"tailscale serve failed: {exc}"}
-    log((proc.stdout + proc.stderr).strip() or "(serving)")
-    if proc.returncode != 0:
+    # `tailscale serve` changes daemon configuration. Some installations
+    # require root unless an operator was configured explicitly, so it must
+    # use the same audited elevation boundary as every other host mutation.
+    result = privilege.run_privileged(
+        ["tailscale", "serve", "--bg", SERVE_PORT], log, timeout=60)
+    if result.get("need_terminal"):
+        return {"waiting": True, "prompt": {
+            "kind": "terminal",
+            "title": "Tailscale needs one administrator command",
+            "body": "Run this command, then press Retry.",
+            "terminal_command": result["terminal_command"],
+        }}
+    if not result.get("ok"):
         return {"ok": False, "error": "tailscale serve failed (see log)."}
     return {"ok": True}
 
@@ -921,7 +959,9 @@ STEPS = [
          "blocking": False})(_tailscale_pkg_check(ctx)),
      "fix": fix_tailscale_join},
     {"id": "runtime_layout", "label": "Persistent data layout",
-     "check": lambda ctx: _runtime_layout_check(ctx["root"]),
+     # `ctx["root"]` is the Git checkout. Persistent state is deliberately
+     # outside it, at RuntimePaths().root (/srv/mu3lab).
+     "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
      "fix": fix_runtime_layout},
     {"id": "docker_networks", "label": "Shared networks",
      "check": _networks_check, "fix": fix_networks_router},

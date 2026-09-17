@@ -47,6 +47,10 @@ class ParseLineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_tests.parse_line("not json at all{")
 
+    def test_bootstrap_defers_dependency_backed_registry_module(self):
+        self.assertEqual(run_tests.DEFERRED_BOOTSTRAP_MODULES,
+                         ("tests.test_registry",))
+
 
 class JsonResultTests(unittest.TestCase):
     def _run_one(self, test):

@@ -242,7 +242,11 @@ def docker_network_create(name: str, log: Callable[[str], None],
 
 
 def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> dict:
-    """Create the approved /srv layout with root-only secrets and user state."""
+    """Create the approved /srv layout with root-only secrets and user state.
+
+    The root itself is group-traversable by the operator. Without that one
+    permission, user-owned children such as `data/` remain unreachable.
+    """
     lines: list[str] = []
     paths = [root, root / "data", root / "backups", root / "runtime", root / "projects"]
     for path in paths:
@@ -251,6 +255,12 @@ def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> 
             return _fail(lines, terminal_command=res["terminal_command"])
         if not res["ok"]:
             return _fail(lines)
+    root_owner = privilege.run_privileged(
+        ["chown", f"root:{user}", str(root)], lines.append)
+    if root_owner.get("need_terminal"):
+        return _fail(lines, terminal_command=root_owner["terminal_command"])
+    if not root_owner["ok"]:
+        return _fail(lines)
     secret = privilege.run_privileged(["install", "-d", "-m", "0700", str(root / "secrets")], lines.append)
     if secret.get("need_terminal"):
         return _fail(lines, terminal_command=secret["terminal_command"])

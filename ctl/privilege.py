@@ -112,7 +112,7 @@ def release_elevation() -> None:
 
 def run_privileged(argv: list[str], log: Callable[[str], None],
                    _exec=_exec, _sudo_fresh: bool | None = None,
-                   _agent: bool | None = None) -> dict:
+                   _agent: bool | None = None, timeout: int = 300) -> dict:
     """Run a root-needing command, or return how to run it by hand.
 
     Returns {"ok": True, "rc", "output"} on success, {"ok": False, ...} on
@@ -125,19 +125,21 @@ def run_privileged(argv: list[str], log: Callable[[str], None],
     # One-dialog path: the session worker (spawned once by ensure_elevation)
     # runs every command without further prompts.
     if _worker is not None and _worker.alive():
-        rc, out = _worker.run(argv)
+        rc, out = _worker.run(argv, timeout=timeout)
         log(out or f"(exit {rc}, no output)")
         return {"ok": rc == 0, "rc": rc, "output": out}
     fresh = has_fresh_sudo(_exec) if _sudo_fresh is None else _sudo_fresh
     if fresh:
-        rc, out = _exec(["sudo"] + argv)
+        rc, out = (_exec(["sudo"] + argv) if timeout == 300
+                   else _exec(["sudo"] + argv, timeout=timeout))
         log(out or f"(exit {rc}, no output)")
         return {"ok": rc == 0, "rc": rc, "output": out}
     agent = has_polkit_agent() if _agent is None else _agent
     if agent:
         # Standalone single command (no session): one dialog for this call.
         # Install jobs avoid this path via ensure_elevation().
-        rc, out = _exec(["pkexec"] + argv)
+        rc, out = (_exec(["pkexec"] + argv) if timeout == 300
+                   else _exec(["pkexec"] + argv, timeout=timeout))
         log(out or f"(exit {rc}, no output)")
         return {"ok": rc == 0, "rc": rc, "output": out}
     return {"ok": False, "need_terminal": True,
