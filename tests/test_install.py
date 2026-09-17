@@ -225,13 +225,34 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
     def test_step_order(self):
-        # Networks + Caddy need a live group: both come after the checkpoint,
-        # which itself comes after everything group-independent (serve).
+        # Human pauses sit at the latest possible slots: group-independent
+        # work first, checkpoint, then socket-needing networks + Caddy, then
+        # the guided join, with sharing verifying last.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("serve"), ids.index("restart_checkpoint"))
+        self.assertLess(ids.index("tailscale_pkg"),
+                        ids.index("restart_checkpoint"))
         self.assertLess(ids.index("restart_checkpoint"),
                         ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
+        self.assertLess(ids.index("caddy"), ids.index("tailscale_join"))
+        self.assertLess(ids.index("tailscale_join"), ids.index("serve"))
+
+    def test_pkg_verify_tolerates_unjoined(self):
+        # Installing must not flunk itself on the NEXT step's job.
+        meta = next(m for m in install.STEPS if m["id"] == "tailscale_pkg")
+        self.assertIn("unjoined", meta["verify_ok_states"])
+        meta = next(m for m in install.STEPS if m["id"] == "docker")
+        self.assertIn("no_access", meta["verify_ok_states"])
+
+    def test_join_prompt_guides(self):
+        prompt = install._join_prompt("https://login.example/abc")
+        self.assertEqual(prompt["kind"], "tailscale_login")
+        for needle in ("tailscale.com", "settings/keys",
+                       "https://login.example/abc",
+                       "sudo tailscale up"):
+            self.assertIn(needle, prompt["body"] + prompt.get("keys_url", "")
+                          + prompt.get("login_url", "")
+                          + prompt.get("terminal_command", ""))
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com

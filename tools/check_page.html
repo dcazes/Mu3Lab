@@ -85,11 +85,11 @@
     <ol id="inst-manifest" hidden></ol>
     <p id="inst-note" hidden>If anything above needs administrator permission,
        your computer will ask for your password in its own system popup —
-       never typed into this page. The run ends with a fresh-login checkpoint
-       (Linux grants new groups at login): log out/in, run ./check.sh again,
-       press Resume — finished rows skip. Afterwards you will be guided to
-       connect Tailscale (sign in or paste a key); sharing and the phone check
-       then run by themselves.</p>
+       never typed into this page. Two human moments, both at the end, both
+       announced in their rows: a fresh login (Linux grants new groups at
+       login — log out/in, run ./check.sh, Resume; finished rows skip), then
+       the Tailscale connection (sign up free, paste a key or approve a login
+       page). Everything else runs itself.</p>
     <p><button id="btn-inst" onclick="startInstall()" disabled>Install</button>
        <button id="btn-instop" onclick="killInstall()" disabled>Stop</button>
        <button id="btn-script" onclick="copyScript()">Copy full admin script</button></p>
@@ -368,13 +368,20 @@ function promptHtml(step) {
   const p = step.prompt;
   if (!p) return '';
   if (p.kind === 'tailscale_login') {
+    // Guided join: numbered paths rendered with real links. Key field only
+    // ever appears here, at the moment it's needed — never upfront.
+    const link = (url, text) => url
+      ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + text + '</a>' : text;
     return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
       escapeHtml(p.body) + '<br>' +
       (p.login_url ? 'Login page: <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
-      '<label>…or paste a reusable auth key (used once, never stored): ' +
+      '<label>Paste a reusable auth key (used once, never stored — from ' +
+      link(p.keys_url, 'key settings') + '): ' +
       '<input type="password" id="ts-key-live" autocomplete="off" placeholder="tskey-auth-…"></label> ' +
       '<button onclick="sendKey()">Connect with key</button> ' +
-      '<button onclick="sendContinue()">I approved it — check again</button></div>';
+      '<button onclick="sendContinue()">I approved it — check again</button><br>' +
+      '<span class="mut">New to Tailscale? ' + link(p.signup_url, 'Sign up free') +
+      ', then come back here.</span></div>';
   }
   let html = '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
     escapeHtml(p.body);

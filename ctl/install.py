@@ -702,6 +702,30 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     return {"ok": True}
 
 
+def _join_prompt(login_url: str) -> dict:
+    """Guided Tailscale connection prompt (shown in the waiting row).
+
+    Three numbered paths, easiest first. Links are plain strings (the page
+    renders them); the key is memory-only and wiped after use.
+    """
+    return {
+        "kind": "tailscale_login",
+        "title": "Connect this computer to your tailnet",
+        "body": ("Tailscale is installed — now it needs to join your private "
+                 "network (this is how your phone will reach this computer). "
+                 "1) No Tailscale account yet? Sign up free at "
+                 "https://tailscale.com, then come back. "
+                 "2) Fastest: open https://login.tailscale.com/admin/settings/keys "
+                 "→ Generate auth key (reusable) → paste it below; everything "
+                 "after runs by itself. "
+                 "3) No key? Approve the login page below, then press Check again."),
+        "signup_url": "https://tailscale.com",
+        "keys_url": "https://login.tailscale.com/admin/settings/keys",
+        "login_url": login_url,
+        "terminal_command": "sudo tailscale up --hostname=mu3lab",
+    }
+
+
 def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     """Guided join. Automatic ONLY with a user-supplied auth key (memory-only,
     from job inputs); otherwise run `tailscale up` to surface its login URL
@@ -734,14 +758,8 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
                + (exc.stderr or b"").decode(errors="replace"))
         import re as _re
         match = _re.search(r"https?://\S+", out)
-        return {"waiting": True, "prompt": {
-            "kind": "tailscale_login",
-            "title": "Approve Tailscale login",
-            "body": ("Open this URL on any device where you're logged into "
-                     "Tailscale, approve the machine, then press Check again."),
-            "login_url": match.group(0) if match else "",
-            "terminal_command": "sudo tailscale up --hostname=mu3lab",
-        }}
+        return {"waiting": True,
+                "prompt": _join_prompt(match.group(0) if match else "")}
     except OSError as exc:
         return {"ok": False, "error": f"tailscale up failed: {exc}"}
     out = (proc.stdout + proc.stderr).strip()
@@ -749,14 +767,8 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
         return {"ok": True}  # already logged in, nothing to approve
     import re as _re
     match = _re.search(r"https?://\S+", out)
-    return {"waiting": True, "prompt": {
-        "kind": "tailscale_login",
-        "title": "Approve Tailscale login",
-        "body": ("Open this URL on any device where you're logged into "
-                 "Tailscale, approve the machine, then press Check again."),
-        "login_url": match.group(0) if match else "",
-        "terminal_command": "sudo tailscale up --hostname=mu3lab",
-    }}
+    return {"waiting": True,
+            "prompt": _join_prompt(match.group(0) if match else "")}
 
 
 def fix_serve(check: dict, ctx: dict) -> dict:
@@ -914,7 +926,16 @@ STEPS = [
      # while any of these hold (the step's own work — install/start — is done).
      "verify_ok_states": ("ready", "no_group", "no_networks", "no_access")},
     {"id": "tailscale_pkg", "label": "Tailscale app",
-     "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg},
+     "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg,
+     # Installed + daemon running is this step's whole job; connecting is the
+     # tailscale_join step's job (same verify-tolerance pattern as docker).
+     "verify_ok_states": ("ready", "unjoined")},
+    {"id": "restart_checkpoint", "label": "Fresh login checkpoint",
+     "check": _checkpoint_check, "fix": fix_restart_checkpoint},
+    {"id": "docker_networks", "label": "Shared networks",
+     "check": _networks_check, "fix": fix_networks_router},
+    {"id": "caddy", "label": "Caddy",
+     "check": _caddy_check, "fix": fix_caddy},
     {"id": "tailscale_join", "label": "Tailscale connection",
      "check": lambda ctx: (lambda r: {
          "name": "tailscale_join", "status": "ok" if r["state"] == "ready" else "missing",
@@ -924,12 +945,6 @@ STEPS = [
      "fix": fix_tailscale_join},
     {"id": "serve", "label": "Phone access (sharing)",
      "check": _serve_check, "fix": fix_serve},
-    {"id": "restart_checkpoint", "label": "Fresh login checkpoint",
-     "check": _checkpoint_check, "fix": fix_restart_checkpoint},
-    {"id": "docker_networks", "label": "Shared networks",
-     "check": _networks_check, "fix": fix_networks_router},
-    {"id": "caddy", "label": "Caddy",
-     "check": _caddy_check, "fix": fix_caddy},
 ]
 
 
