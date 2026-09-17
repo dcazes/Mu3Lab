@@ -335,8 +335,8 @@ Per-file gate: `npx tsc --noEmit` clean after each file; phase gate: `npm run bu
 
 ## Phase 12 — Docs + end-to-end (on your clean box)
 
-1. `docs/SETUP.md` — written FROM the verified run, not before: exact commands, expected outputs, the docker-group re-login checkpoint, the Tailscale join pause, the two manual account creations.
-2. E2E run: `./install.sh --dry-run` → `./install.sh --yes` → open `:8787` → `GET /api/preflight` honest → click Install → pkexec dialog appears → Docker → re-login checkpoint → Tailscale join pause → Caddy → Authentik (≤180s health) → Vaultwarden → manual accounts. Every deviation written back into `PLAN.md` + this file.
+1. `docs/SETUP.md` — written FROM the verified run, not before: exact commands, expected outputs, the Tailscale join pause, the two manual account creations. No logout choreography exists (sg covers group authorization inline).
+2. E2E run: open `:8799` → cards ①→② → Install (one pkexec dialog for apt steps, `sg` covers docker auth with zero logout) → Tailscale join pause → Caddy → phone check → `:8787` answers. Every deviation written back into `PLAN.md` + this file.
 3. Full suite: `.venv/bin/python -m unittest discover -s tests -v` green + `npm run build` green.
 
 Final gate: fresh-user path reproducible from your box state today (no docker/tailscale/caddy present).

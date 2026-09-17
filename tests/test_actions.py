@@ -93,17 +93,77 @@ class SystemTests(unittest.TestCase):
         self.assertEqual(seen[0], ["usermod", "-aG", "docker", "dak"])
 
     def test_network_unprivileged(self):
-        # Network creation must NOT go through elevation (relies on group).
+        # Network creation must NOT go through elevation (relies on group
+        # or the sg fallback inside docker_cmd, never pkexec/sudo).
         seen: list[list[str]] = []
-        def fake(argv, timeout=300):
+        def fake(argv, timeout=300, env=None):
             seen.append(argv)
             return 0, "created"
         with patch.object(actions.privilege, "_exec", fake):
             result = actions.docker_network_create("mu3lab_backend", _silent,
                                                    internal=True)
         self.assertTrue(result["ok"])
-        self.assertEqual(seen[0], ["docker", "network", "create",
-                                   "--internal", "mu3lab_backend"])
+        self.assertEqual(seen[0][:3], ["docker", "network", "create"])
+        self.assertIn("--internal", seen[0])
+
+
+class DockerCmdTests(unittest.TestCase):
+    """Selection contract for the docker choke point: live group → direct;
+    DB-member-only → `sg docker -c`; neither → clean error, nothing runs."""
+
+    def test_direct_with_live_group(self):
+        seen: list = []
+        def fake(argv, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "ok"
+        import grp as _grp
+        gids = [g.gr_gid for g in _grp.getgrall() if g.gr_name == "docker"]
+        with patch.object(actions.privilege, "_exec", fake), \
+             patch("os.getgroups", return_value=gids or [0]):
+            rc, _ = actions.docker_cmd(["docker", "info"], _silent)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen[0][:2], ["docker", "info"])
+
+    def test_sg_when_db_only(self):
+        seen: list = []
+        def fake(argv, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "ok"
+        with patch.object(actions.privilege, "_exec", fake), \
+             patch("os.getgroups", return_value=[1000]), \
+             patch("shutil.which", return_value="/usr/bin/sg"), \
+             patch("ctl.preflight._db_has_group", return_value=True):
+            rc, _ = actions.docker_cmd(
+                ["docker", "network", "create", "net with space"], _silent)
+        self.assertEqual(rc, 0)
+        # sg wrapper, single -c string, space-containing arg safely quoted.
+        self.assertEqual(seen[0][:3], ["sg", "docker", "-c"])
+        self.assertIn("net with space", seen[0][3])
+        self.assertNotIn("sudo", seen[0])
+        self.assertNotIn("pkexec", seen[0])
+
+    def test_error_when_nowhere(self):
+        with patch("os.getgroups", return_value=[1000]), \
+             patch("shutil.which", return_value=None), \
+             patch("ctl.preflight._db_has_group", return_value=False):
+            rc, out = actions.docker_cmd(["docker", "info"], _silent)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("docker unavailable", out)
+
+    def test_docker_config_isolated(self):
+        # Worker/root-run docker must not poison ~/.docker for the user.
+        seen: list = []
+        def fake(argv, timeout=300, env=None):
+            seen.append(env or {})
+            return 0, "ok"
+        import grp as _grp
+        gids = [g.gr_gid for g in _grp.getgrall() if g.gr_name == "docker"]
+        with patch.object(actions.privilege, "_exec", fake), \
+             patch("os.getgroups", return_value=gids or [0]):
+            actions.docker_cmd(["docker", "info"], _silent)
+        self.assertIn("DOCKER_CONFIG", seen[0])
+        self.assertNotIn(".docker", seen[0]["DOCKER_CONFIG"].replace(
+            "mu3lab-docker-cfg", ""))
 
 
 if __name__ == "__main__":

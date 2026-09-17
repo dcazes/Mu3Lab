@@ -16,6 +16,8 @@ DEBUG: Return shape is ALWAYS {"ok", "changed", "log"[, "terminal_command"]}.
 
 from __future__ import annotations
 
+import os as _os
+import shlex as _shlex
 from collections.abc import Callable
 from pathlib import Path
 import urllib.request
@@ -42,6 +44,66 @@ def _run_user(argv: list[str], log: Callable[[str], None],
     """
     log("$ " + " ".join(argv))  # argv here is internally built, never user input
     return _exec(argv)
+
+
+def _docker_config_env() -> dict[str, str]:
+    """Isolated DOCKER_CONFIG dir for OUR docker invocations.
+
+    Why: `docker` writes ~/.docker/config.json on first run. When root-run
+    and user-run docker mix (worker vs direct), the file ends up root-owned
+    and later user runs fail with permission denied (Docker's own docs warn
+    about this). A per-uid temp dir keeps both worlds separate. 0700.
+    """
+    import tempfile
+    path = Path(tempfile.gettempdir()) / f"mu3lab-docker-cfg-{_os.getuid()}"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return {"DOCKER_CONFIG": str(path)}
+
+
+def docker_cmd(argv: list[str], log: Callable[[str], None],
+               timeout: int = 300) -> tuple[int, str]:
+    """Run a docker CLI command with whatever access exists. THE choke point:
+    every installer docker invocation flows through here (never raw).
+
+    - live group → direct, as the user.
+    - DB-member-only → `sg docker -c` (group added on the fly, no logout;
+      `sg` ships in stock Ubuntu's login package; probed, not assumed).
+    - neither → (1, message) without executing anything.
+    """
+    import getpass as _gp
+    import shutil as _sh
+    from ctl import preflight as _pre
+    log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
+    env = _docker_config_env()
+    try:
+        live = privilege._exec  # resolved late for test patching
+        import grp as _grp
+        live_groups = [_grp.getgrgid(gid).gr_name for gid in _os.getgroups()]
+    except OSError:
+        live_groups = []
+    if "docker" in live_groups:
+        return privilege._exec(argv, timeout=timeout, env=env)
+    if _sh.which("sg") and _pre._db_has_group(_gp.getuser(), "docker"):
+        return privilege._exec(
+            ["sg", "docker", "-c", _shlex.join(argv)],
+            timeout=timeout, env=env)
+    return 1, ("docker unavailable: no live group and no DB membership "
+               "(installer should have added you — report this)")
+
+
+def compose_up(projdir: Path, log: Callable[[str], None],
+               timeout: int = 300) -> tuple[int, str]:
+    """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
+
+    Uses -f/--project-directory flags instead of cwd= so `sg -c` (single
+    string, no shell games beyond one quoted layer) stays exact.
+    """
+    return docker_cmd(
+        ["docker", "compose",
+         "-f", str(projdir / "docker-compose.yml"),
+         "--project-directory", str(projdir),
+         "up", "-d"],
+        log, timeout=timeout)
 
 
 def apt_update(log: Callable[[str], None]) -> dict:
@@ -165,16 +227,15 @@ def usermod_add_group(user: str, group: str, log: Callable[[str], None]) -> dict
 
 def docker_network_create(name: str, log: Callable[[str], None],
                           internal: bool = False) -> dict:
-    """`docker network create [--internal] <name>` as the invoking user.
+    """`docker network create [--internal] <name>`, sg-aware via docker_cmd.
 
-    Unprivileged by design (relies on docker-group membership, which the
-    installer's group checkpoint guarantees before networks are attempted).
+    Unprivileged by design (relies on group membership OR the sg fallback,
+    both handled inside docker_cmd) — never needs the pkexec worker.
     """
-    lines: list[str] = []
-    argv = ["docker", "network", "create"] + (["--internal"] if internal else []) + [name]
-    rc, out = privilege._exec(argv)
-    lines.append("$ " + " ".join(argv))
-    lines.append(out or f"(exit {rc})")
+    argv = (["docker", "network", "create"]
+            + (["--internal"] if internal else []) + [name])
+    rc, out = docker_cmd(argv, log)
+    lines = [out or f"(exit {rc})"]
     if rc != 0:
         return _fail(lines)
     return _ok(lines)

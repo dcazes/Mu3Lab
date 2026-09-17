@@ -24,11 +24,18 @@ import subprocess
 from collections.abc import Callable
 
 
-def _exec(argv: list[str], timeout: int = 300) -> tuple[int, str]:
-    """Run argv, return (rc, merged output). Never raises, never uses shell."""
+def _exec(argv: list[str], timeout: int = 300,
+          env: dict | None = None) -> tuple[int, str]:
+    """Run argv, return (rc, merged output). Never raises, never uses shell.
+
+    `env` merges over os.environ (used for DOCKER_CONFIG isolation); None
+    inherits the environment unchanged.
+    """
+    import os as _os
     try:
         proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=timeout)
+                              timeout=timeout,
+                              env={**_os.environ, **(env or {})})
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except FileNotFoundError:
         return 127, f"{argv[0]}: command not found"

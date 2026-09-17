@@ -85,11 +85,10 @@
     <ol id="inst-manifest" hidden></ol>
     <p id="inst-note" hidden>If anything above needs administrator permission,
        your computer will ask for your password in its own system popup —
-       never typed into this page. Two human moments, both at the end, both
-       announced in their rows: a fresh login (Linux grants new groups at
-       login — log out/in, run ./check.sh, Resume; finished rows skip), then
-       the Tailscale connection (sign up free, paste a key or approve a login
-       page). Everything else runs itself.</p>
+       never typed into this page. One human moment at the end: the Tailscale
+       connection (sign up free, paste a key or approve a login page).
+       Everything else, including Docker group setup, runs itself with no
+       logout.</p>
     <p><button id="btn-inst" onclick="startInstall()" disabled>Install</button>
        <button id="btn-instop" onclick="killInstall()" disabled>Stop</button>
        <button id="btn-script" onclick="copyScript()">Copy full admin script</button></p>
@@ -449,6 +448,11 @@ async function refreshInstall() {
       setStatus('inst-status', 'done — infrastructure installed', 'ok');
       log.textContent = '';
       renderTranscript(job);
+      // End-of-job note from the installer (e.g. terminal re-login tip).
+      api('/api/install/events').then(d => {
+        const s = (d.events || []).find(e => e.type === 'summary' && e.detail);
+        if (s) document.getElementById('inst-log').textContent = s.detail;
+      }).catch(e => console.error('install/events', e));
     } else if (job.status === 'waiting') {
       setStatus('inst-status', 'needs you — see the paused row above', 'wait');
       log.textContent = '';

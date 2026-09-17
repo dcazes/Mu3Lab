@@ -92,7 +92,7 @@ class DockerFixTests(unittest.TestCase):
              patch("ctl.install.preflight") as _pre:
             _pre.MU3LAB_NETWORKS = ["mu3lab_frontend", "mu3lab_backend"]
             # frontend present, backend missing: only backend gets created.
-            priv._exec.side_effect = lambda argv: (
+            priv._exec.side_effect = lambda argv, **kw: (
                 (0, "") if argv[-1] == "mu3lab_frontend" else (1, ""))
             result = install.fix_networks_router(
                 self._check("missing"), _ctx())
@@ -226,14 +226,10 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
     def test_step_order(self):
-        # Human pauses sit at the latest possible slots: group-independent
-        # work first, checkpoint, then socket-needing networks + Caddy, then
-        # the guided join, with sharing verifying last.
+        # No logout choreography left: networks + Caddy follow the engine
+        # (sg covers authorization), then the guided join, sharing last.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("tailscale_pkg"),
-                        ids.index("restart_checkpoint"))
-        self.assertLess(ids.index("restart_checkpoint"),
-                        ids.index("docker_networks"))
+        self.assertLess(ids.index("docker"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
         self.assertLess(ids.index("caddy"), ids.index("tailscale_join"))
         self.assertLess(ids.index("tailscale_join"), ids.index("serve"))
@@ -269,63 +265,40 @@ class WorkspaceStepTests(unittest.TestCase):
             "https://pkgs.tailscale.com/stable/debian/bookworm.gpg")
 
 
-class CheckpointTests(unittest.TestCase):
+class SgFallbackTests(unittest.TestCase):
+    """No logout/relogin choreography: DB members proceed via `sg`.
+
+    These replace the deleted CheckpointTests (restart rows, relogin
+    prompts). If docker access needs anything beyond sg + usermod, these
+    tests — not a new waiting row — are where that logic lands.
+    """
     def _ctx(self):
         return {"root": Path("/nonexistent"),
                 "log_fn": lambda step: lambda line: None,
                 "inputs": {}, "wait_input": lambda step: {},
                 "stopped": lambda: False}
 
-    def test_ready_when_group_live(self):
-        import grp
-        docker_gids = [g.gr_gid for g in grp.getgrall()
-                       if g.gr_name == "docker"]
-        with unittest.mock.patch("os.getgroups",
-                                 return_value=docker_gids or [0]):
-            check = install._checkpoint_check(self._ctx())
-        if docker_gids:
-            self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
-        else:
-            self.assertEqual(check["state"], "stale")
+    def test_no_checkpoint_step(self):
+        ids = [m["id"] for m in install.STEPS]
+        self.assertNotIn("restart_checkpoint", ids)
 
-    def test_waiting_copy(self):
-        with unittest.mock.patch("os.getgroups", return_value=[1000]), \
-             unittest.mock.patch("ctl.preflight._db_has_group",
-                                 return_value=False):
-            check = install._checkpoint_check(self._ctx())
-            self.assertEqual(check["state"], "stale")
-            result = install.fix_restart_checkpoint(check, self._ctx())
-        self.assertTrue(result.get("waiting"))
-        body = result["prompt"]["body"]
-        # The numbered actions must all be present (no silent expectations).
-        self.assertIn("Log out", body)
-        self.assertIn("./check.sh", body)
-        self.assertIn("Resume", body)
-
-    def test_stale_checker_copy(self):
-        # DB has the user but this process doesn't: the remedy is restarting
-        # the CHECKER — the copy must never send them to log out again.
-        import grp as _grp
-        docker_gids = [g.gr_gid for g in _grp.getgrall()
-                       if g.gr_name == "docker"]
-        self.assertTrue(docker_gids, "needs a docker group on the test box")
-        with unittest.mock.patch("os.getgroups", return_value=[1000]), \
-             unittest.mock.patch("ctl.preflight._db_has_group",
-                                 return_value=True):
-            check = install._checkpoint_check(self._ctx())
-            self.assertEqual(check["state"], "stale_login")
-            result = install.fix_restart_checkpoint(check, self._ctx())
-        body = result["prompt"]["body"]
-        self.assertIn("./check.sh", body)
-        self.assertNotIn("Log out and back in", body)
-
-    def test_networks_denied_is_honest(self):
-        check = {"name": "docker_networks", "status": "fail",
+    def test_networks_denied_proceeds(self):
+        # denied probes no longer fail: fix_networks runs through docker_cmd
+        # (sg when needed). Only a genuinely dead daemon fails.
+        check = {"name": "docker_networks", "status": "missing",
                  "detail": "x", "action": "y", "state": "denied",
                  "blocking": False}
-        result = install.fix_networks_router(check, self._ctx())
-        self.assertFalse(result.get("ok"))
-        self.assertIn("./check.sh", result.get("error", ""))
+        created: list[str] = []
+        def fake_cmd(argv, log, timeout=300):
+            created.append(" ".join(argv))
+            return 0, "created"
+        with unittest.mock.patch("ctl.install.actions.docker_cmd",
+                                 side_effect=fake_cmd), \
+             unittest.mock.patch("ctl.install.preflight") as _pre:
+            _pre.MU3LAB_NETWORKS = ["mu3lab_backend"]
+            result = install.fix_networks_router(check, self._ctx())
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(any("mu3lab_backend" in cmd for cmd in created))
 
     def test_full_dispatch_coverage(self):
         # Every state any step check can emit must map to a real fix.
@@ -344,7 +317,6 @@ class CheckpointTests(unittest.TestCase):
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],
-            "restart_checkpoint": ["stale", "stale_login", "ready"],
             "docker_networks": ["missing", "denied", "ready"],
             "caddy": ["down", "ready"],
         }

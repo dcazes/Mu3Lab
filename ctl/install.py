@@ -94,9 +94,6 @@ DISPATCH = {
     ("docker", "no_group"): "docker_group",
     ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",
-    ("restart_checkpoint", "stale"): "guide_restart",
-    ("restart_checkpoint", "stale_login"): "guide_restart",
-    ("restart_checkpoint", "ready"): "skip",
     ("docker_networks", "missing"): "create_networks",
     ("docker_networks", "denied"): "report_denied",
     ("docker_networks", "ready"): "skip",
@@ -560,7 +557,8 @@ def fix_docker(check: dict, ctx: dict) -> dict:
 
 def _group_live() -> bool:
     """True iff THIS process holds the docker group (os.getgroups: live
-    credentials, never the group database)."""
+    credentials, never the group database). Kept for diagnostics; install
+    execution no longer gates on it (sg covers DB members)."""
     import grp as _grp
     try:
         return "docker" in [_grp.getgrgid(gid).gr_name
@@ -569,65 +567,26 @@ def _group_live() -> bool:
         return False
 
 
-def _checkpoint_check(ctx: dict) -> dict:
-    """The restart checkpoint row: ready only when THIS process holds the
-    group. Split verdicts so the remedy is exact: DB lacks you → fresh login
-    needed; DB has you → this checker is stale, restart IT (not another
-    logout). Shown from job start (pending) so neither ambushes anyone."""
-    import getpass as _gp
-    if _group_live():
-        return {"name": "restart_checkpoint", "status": "ok",
-                "detail": "Fresh login confirmed (docker group live).",
-                "action": "", "state": "ready", "blocking": False}
-    if preflight._db_has_group(_gp.getuser(), "docker"):
-        return {"name": "restart_checkpoint", "status": "missing",
-                "detail": "Group joined, but this checker predates the login.",
-                "action": "Restart ./check.sh (Ctrl-C, run again), then Resume.",
-                "state": "stale_login", "blocking": False}
-    return {"name": "restart_checkpoint", "status": "missing",
-            "detail": "Waiting for a fresh login.",
-            "action": "See the paused row for the 3 steps.",
-            "state": "stale", "blocking": False}
-
-
-def fix_restart_checkpoint(check: dict, ctx: dict) -> dict:
-    if _group_live():
-        return {"ok": True, "skipped": True}
-    import getpass as _gp
-    if preflight._db_has_group(_gp.getuser(), "docker"):
-        return {"waiting": True, "prompt": {
-            "kind": "relogin",
-            "title": "Restart this checker (no new logout needed)",
-            "body": ("You're already in the docker group — but THIS checker "
-                     "process started before that login, and a running process "
-                     "can never gain groups. ① Stop this checker (Ctrl-C). "
-                     "② Run ./check.sh again. ③ Press Resume: finished rows "
-                     "skip in seconds."),
-            "commands": ["./check.sh"],
-        }}
-    return {"waiting": True, "prompt": {
-        "kind": "relogin",
-        "title": "Log out and back in, then press Resume",
-        "body": ("Linux only grants the docker group at login — everything "
-                 "above is installed and waiting. ① Log out and back in "
-                 "(this also refreshes your session for the other new "
-                 "programs). ② Run ./check.sh again. ③ Press Resume below: "
-                 "finished rows skip in seconds, then networks + Caddy finish."),
-        "commands": ["./check.sh"],
-    }}
+# FYI shown at job end (not a gate): direct `docker` in the user's OWN
+# terminals still needs one login cycle to pick up the group. The installer
+# itself never waits for this (sg covers execution).
+TERMINAL_LOGIN_FYI = (
+    "Tip: log out and back in once at your convenience so bare `docker` "
+    "works in your own terminals too — the install above needed no logout."
+)
 
 
 def _networks_check(ctx: dict) -> dict:
-    """Shared-network presence. Needs socket access: without it the state is
-    `denied` (honest failure telling the user to restart the checker after
-    re-login — NOT a reinstall)."""
+    """Shared-network presence, probed RAW (no sg): the check must report the
+    process's true access. missing/denied both fix the same way (docker_cmd
+    adds sg when needed), so both are non-blocking work items."""
     rc, out = actions.privilege._exec(["docker", "info"])
     if rc != 0:
         if "permission denied" in out.lower():
-            return {"name": "docker_networks", "status": "fail",
-                    "detail": "Docker still unreachable from this checker "
-                              "process (stale login).",
-                    "action": "Restart ./check.sh after logging back in, then Resume.",
+            return {"name": "docker_networks", "status": "missing",
+                    "detail": "Docker unreachable from this process; fixes run "
+                              "with on-demand group access.",
+                    "action": "step 3 proceeds without logout.",
                     "state": "denied", "blocking": False}
         return {"name": "docker_networks", "status": "missing",
                 "detail": "Docker daemon not reachable.",
@@ -647,28 +606,24 @@ def _networks_check(ctx: dict) -> dict:
 
 
 def fix_networks_router(check: dict, ctx: dict) -> dict:
-    """Route by state: missing → create; denied → honest failure."""
-    if check.get("state") == "denied":
-        return fix_denied_networks(check, ctx)
+    """All non-ready networks states fix the same way (docker_cmd adds sg
+    when the process lacks the group). Kept as a router so new states get
+    an explicit branch instead of falling through."""
     return fix_networks(check, ctx)
 
 
 def fix_networks(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("docker_networks")
     for net in preflight.MU3LAB_NETWORKS:
-        if actions.privilege._exec(["docker", "network", "inspect", net])[0] == 0:
+        rc, _ = actions.docker_cmd(
+            ["docker", "network", "inspect", net], lambda line: None)
+        if rc == 0:
             continue
         res = actions.docker_network_create(
             net, log, internal=(net == "mu3lab_backend"))
         if not res["ok"]:
             return _propagate(res)
     return {"ok": True}
-
-
-def fix_denied_networks(check: dict, ctx: dict) -> dict:
-    return {"ok": False,
-            "error": "Docker unreachable from this checker (stale login). "
-                     "Log out/in, restart ./check.sh, press Resume — finished rows skip."}
 
 
 def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
@@ -707,16 +662,10 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     projdir = ctx["root"] / "core" / "ingress"
     if not (projdir / "docker-compose.yml").is_file():
         return {"ok": False,
-                "error": "core/ingress/docker-compose.yml missing (Phase 9 config)."}
-    log("$ docker compose up -d  (in core/ingress)")
-    try:
-        proc = subprocess.run(["docker", "compose", "up", "-d"],
-                              capture_output=True, text=True, timeout=300,
-                              cwd=str(projdir))
-    except OSError as exc:
-        return {"ok": False, "error": f"compose failed: {exc}"}
-    log((proc.stdout + proc.stderr).strip() or "(up)")
-    if proc.returncode != 0:
+                "error": "core/ingress/docker-compose.yml missing from checkout."}
+    rc, out = actions.compose_up(projdir, log)
+    log(out or f"(exit {rc})")
+    if rc != 0:
         return {"ok": False, "error": "docker compose up failed (see log)."}
     return {"ok": True}
 
@@ -831,47 +780,17 @@ def _propagate(res: dict) -> dict:
 
 
 def _docker_check(ctx: dict) -> dict:
-    # Mirrors preflight.run_all()'s docker probes EXACTLY (same disambiguators:
-    # stderr-denied vs dead daemon, live process groups). Diverging here
-    # reintroduces the misdiagnosis this step exists to fix.
-    rc, out = actions.privilege._exec(["docker", "info"])
-    denied = "permission denied" in out.lower()
-    active = actions.privilege._exec(
-        ["systemctl", "is-active", "docker"])[0] == 0
-    eng, comp = "", False
-    if rc == 0:
-        eng_rc, eng = actions.privilege._exec(
-            ["docker", "version", "--format", "{{.Server.Version}}"])
-        eng = eng if eng_rc == 0 else ""
-        comp = actions.privilege._exec(
-            ["docker", "compose", "version"])[0] == 0
-    try:
-        import grp as _grp
-        groups = [_grp.getgrgid(gid).gr_name for gid in os.getgroups()]
-    except OSError:
-        groups = []
-    nets = [n for n in preflight.MU3LAB_NETWORKS
-            if actions.privilege._exec(
-                ["docker", "network", "inspect", n])[0] == 0]
-    import shutil as _sh
-    import getpass as _gp
-    return preflight.check_docker(rc, groups, nets,
-                                  engine_version=eng,
-                                  compose_present=comp,
-                                  binary_present=_sh.which("docker") is not None,
-                                  permission_denied=denied,
-                                  daemon_active=active,
-                                  db_has_group=preflight._db_has_group(
-                                      _gp.getuser(), "docker"))
+    # Delegates to the SHARED probe (preflight.gather_docker) with the
+    # installer's exec backend — the two can never disagree about docker
+    # state again (that drift caused the denied-vs-down misdiagnosis).
+    from ctl import preflight as _pre
+    return _pre.gather_docker(exec_fn=actions.privilege._exec)
 
 
 def _tailscale_pkg_check(ctx: dict) -> dict:
-    import shutil as _sh
-    binary = _sh.which("tailscale") is not None
-    active = actions.privilege._exec(
-        ["systemctl", "is-active", "tailscaled"])[0] == 0
-    joined = actions.privilege._exec(["tailscale", "status"])[0] == 0 if binary else False
-    return preflight.check_tailscale(binary, active, joined)
+    # Shared probe (same anti-drift contract as docker above).
+    from ctl import preflight as _pre
+    return _pre.gather_tailscale(exec_fn=actions.privilege._exec)
 
 
 def _caddy_check(ctx: dict) -> dict:
@@ -943,17 +862,15 @@ STEPS = [
      "fix": fix_service},
     {"id": "docker", "label": "Docker engine",
      "check": _docker_check, "fix": fix_docker,
-     # Daemon-level states are owned downstream: group liveness belongs to
-     # the restart checkpoint, networks to docker_networks. Verify passes
-     # while any of these hold (the step's own work — install/start — is done).
+     # Daemon-level states are owned downstream (networks step); group
+     # authorization never blocks because fixes run via sg when needed.
+     # Verify passes while any of these hold (the step's own work is done).
      "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access")},
     {"id": "tailscale_pkg", "label": "Tailscale app",
      "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg,
      # Installed + daemon running is this step's whole job; connecting is the
      # tailscale_join step's job (same verify-tolerance pattern as docker).
      "verify_ok_states": ("ready", "unjoined")},
-    {"id": "restart_checkpoint", "label": "Fresh login checkpoint",
-     "check": _checkpoint_check, "fix": fix_restart_checkpoint},
     {"id": "docker_networks", "label": "Shared networks",
      "check": _networks_check, "fix": fix_networks_router},
     {"id": "caddy", "label": "Caddy",
@@ -1062,7 +979,8 @@ def run_job(job: dict, ctx: dict) -> None:
             return
         _finish_step(job, ctx, step, {"ok": True})
     job["status"] = "ready"
-    ctx["emit"]({"type": "summary", "phase": "done", "status": "ready"})
+    ctx["emit"]({"type": "summary", "phase": "done", "status": "ready",
+                 "detail": TERMINAL_LOGIN_FYI})
 
 
 def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:

@@ -40,8 +40,8 @@ MIN_DOCKER_MAJOR = 24      # compose-v2 plugin era; step 3 upgrades older engine
 
 # Checks the installer CANNOT fix. Anything else is step 3's work list and
 # must never report "fail" — only "missing" (not ready, installer provides)
-# or "ok". run_all() stamps each check with blocking True/False from this set
-# and derives install_ready = "zero fails among blockers".
+# or "ok". run_all() stamps each check with blocking True/False from this set;
+# the single gating rule is gate_passed() (no FAIL among BLOCKING).
 BLOCKING = frozenset({"os", "arch", "python", "ports"})
 
 # Only these ports are probed. Ports for deferred Step-2 apps (e.g. 4000
@@ -344,6 +344,73 @@ def _live_group_names() -> list[str]:
         return []
 
 
+def gather_docker(exec_fn=None, which_fn=None, getgroups_fn=None,
+                  getuser_fn=None) -> dict:
+    """Live docker signals → check dict. THE shared probe: run_all() and the
+    installer's _docker_check both call this, so the two can never disagree
+    again (the denied-vs-down drift came from duplicated probes).
+
+    All inputs injectable (default = live host). exec_fn(argv, timeout?)
+    returns (rc, output); which_fn mirrors shutil.which; getgroups_fn mirrors
+    os.getgroups; getuser_fn mirrors getpass.getuser.
+    """
+    import getpass as _gp
+    import shutil as _sh
+    exec_fn = exec_fn or _run
+    which_fn = which_fn or _sh.which
+    getgroups_fn = getgroups_fn or os.getgroups
+    getuser_fn = getuser_fn or _gp.getuser
+    binary = which_fn("docker") is not None
+    rc, out = exec_fn(["docker", "info"])
+    denied = "permission denied" in (out or "").lower()
+    active = exec_fn(["systemctl", "is-active", "docker"])[0] == 0
+    engine, compose = "", False
+    if rc == 0:
+        eng_rc, eng = exec_fn(["docker", "version", "--format",
+                               "{{.Server.Version}}"])
+        engine = eng if eng_rc == 0 else ""
+        compose = exec_fn(["docker", "compose", "version"])[0] == 0
+    try:
+        groups = [grp.getgrgid(gid).gr_name for gid in getgroups_fn()]
+    except OSError:
+        groups = []
+    try:
+        db_has = _db_has_group(getuser_fn(), "docker")
+    except OSError:
+        db_has = False
+    nets = [net for net in MU3LAB_NETWORKS
+            if exec_fn(["docker", "network", "inspect", net])[0] == 0]
+    return check_docker(rc, groups, nets, engine_version=engine,
+                        compose_present=compose, binary_present=binary,
+                        permission_denied=denied, daemon_active=active,
+                        db_has_group=db_has)
+
+
+def gather_tailscale(exec_fn=None, which_fn=None) -> dict:
+    """Live tailscale signals → check dict. Shared by run_all() and the
+    installer (same anti-drift contract as gather_docker)."""
+    import shutil as _sh
+    exec_fn = exec_fn or _run
+    which_fn = which_fn or _sh.which
+    binary = which_fn("tailscale") is not None
+    active = exec_fn(["systemctl", "is-active", "tailscaled"])[0] == 0
+    joined = exec_fn(["tailscale", "status"])[0] == 0 if binary else False
+    return check_tailscale(binary, active, joined)
+
+
+def gate_passed(checks: list[dict]) -> bool:
+    """THE gating rule (single source of truth): no FAIL among BLOCKING
+    checks. Card ②'s unlock, the server, and the tests all use this —
+    nothing maintains a parallel definition."""
+    return not any(check.get("status") == "fail" and check.get("blocking")
+                   for check in checks)
+    """Process credentials (what THIS process can actually use)."""
+    try:
+        return [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
+    except OSError:
+        return []
+
+
 def _db_has_group(user: str, group: str) -> bool:
     """Group-database membership (/etc/group): what a FRESH login would hold.
 
@@ -512,37 +579,10 @@ def run_all() -> dict:
     # Privilege signals: fresh sudo? graphical session?
     sudo_fresh = _run(["sudo", "-n", "true"])[0] == 0
     graphical = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    # Docker signals: binary? daemon reachable AND why-not (stderr tells
-    # "permission denied" apart from a dead daemon)? engine version? compose
-    # plugin? LIVE process groups (getgroups, never getgrouplist)? networks?
-    docker_binary = shutil.which("docker") is not None
-    docker_rc, docker_out = _run(["docker", "info"])
-    docker_denied = "permission denied" in docker_out.lower()
-    docker_active = _run(["systemctl", "is-active", "docker"])[0] == 0
-    engine_version = ""
-    compose_present = False
-    if docker_rc == 0:
-        _, engine_version = _run(["docker", "version", "--format",
-                                  "{{.Server.Version}}"])
-        compose_present = _run(["docker", "compose", "version"])[0] == 0
-    try:
-        group_names = _live_group_names()
-    except OSError:
-        group_names = []
-    try:
-        import getpass as _getpass
-        db_has_docker = _db_has_group(_getpass.getuser(), "docker")
-    except OSError:
-        db_has_docker = False
-    networks: list[str] = []
-    if docker_rc == 0:
-        for net in MU3LAB_NETWORKS:
-            if _run(["docker", "network", "inspect", net])[0] == 0:
-                networks.append(net)
-    # Tailscale signals: binary? daemon? joined?
-    ts_binary = shutil.which("tailscale") is not None
-    ts_active = _run(["systemctl", "is-active", "tailscaled"])[0] == 0
-    ts_joined = _run(["tailscale", "status"])[0] == 0 if ts_binary else False
+    # Docker + tailscale signals: shared gatherers (install/verify use the
+    # same code path, so the two can never disagree again).
+    docker_check = gather_docker()
+    tailscale_check = gather_tailscale()
 
     checks = [
         check_os(release_text, kernel_release=platform.release()),
@@ -550,28 +590,20 @@ def run_all() -> dict:
         check_python(tuple(sys.version_info)),
         check_node(node_out),
         check_privilege(sudo_fresh, graphical),
-        check_docker(docker_rc, group_names, networks,
-                     engine_version=engine_version,
-                     compose_present=compose_present,
-                     binary_present=docker_binary,
-                     permission_denied=docker_denied,
-                     daemon_active=docker_active,
-                     db_has_group=db_has_docker),
-        check_tailscale(ts_binary, ts_active, ts_joined),
+        docker_check,
+        tailscale_check,
         check_ports(),
         check_bundle(),
         check_compose_projects(),
     ]
     # Each check is stamped blocking True/False from BLOCKING so the dashboard
     # can split "fix this yourself" from "step ③ provides it" with no extra
-    # logic. install_ready (card ③'s gate) = zero fails among blockers.
-    # "ok" (all green) remains for exactness but gates nothing.
+    # logic. "ok" (all green) remains for exactness but gates nothing; the
+    # gate itself is gate_passed() below (single rule, shared with server).
     for check in checks:
         check["blocking"] = check["name"] in BLOCKING
-    install_ready = not any(check["status"] == "fail" and check["blocking"]
-                            for check in checks)
     return {"ok": all(check["status"] == "ok" for check in checks),
-            "install_ready": install_ready, "checks": checks}
+            "install_ready": gate_passed(checks), "checks": checks}
 
 
 def main() -> int:

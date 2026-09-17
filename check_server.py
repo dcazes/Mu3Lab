@@ -22,7 +22,6 @@ DEBUG: All state is in-memory (see State). Restarting the server resets the
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import os
 import subprocess
@@ -384,13 +383,12 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 self._json({"error": "locked", "hint": reason}, 409)
                 return
-            # In-process: milliseconds, no subprocess. Import is lazy + reloaded
-            # so an already-running server always executes CURRENT disk code:
-            # without reload, Python's module cache would keep serving the
-            # preflight.py from server-start time after you edit files.
+            # In-process: milliseconds, no subprocess. The running server
+            # always executes ITS OWN startup code — edited files take effect
+            # on restart, which the version banner enforces (no hot-reload
+            # hacks: reload() leaves stale closures and double state).
             try:
                 from ctl import preflight
-                importlib.reload(preflight)
                 report = preflight.run_all()
             except Exception as exc:  # noqa: BLE001 (must survive, report it)
                 self._json({"error": "preflight crashed",
