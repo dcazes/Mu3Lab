@@ -123,6 +123,124 @@ class DockerFixTests(unittest.TestCase):
         self.assertIn("newgrp", str(result["prompt"].get("commands")))
 
 
+class WorkspaceStepTests(unittest.TestCase):
+    def _ctx(self, root):
+        return {"root": root, "log_fn": lambda step: lambda line: None,
+                "inputs": {}, "wait_input": lambda step: {},
+                "stopped": lambda: False}
+
+    def test_venv_ready_skips(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".venv" / "bin").mkdir(parents=True)
+            (root / ".venv" / "bin" / "python").touch()
+            check = install._venv_check(root)
+            self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
+            self.assertEqual(install.fix_for_state("venv", "ready"), "skip")
+
+    def test_venv_missing_creates(self):
+        import tempfile
+        from unittest.mock import patch as _patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            check = install._venv_check(root)
+            self.assertEqual(check["state"], "no_venv")
+            def fake_run(argv, **kwargs):
+                # Simulate a real venv creation (mock must produce the
+                # artifact the fix verifies, like the real command would).
+                (root / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
+                (root / ".venv" / "bin" / "python").touch(exist_ok=True)
+                result = type("R", (), {})()
+                result.returncode = 0
+                result.stdout = ""
+                result.stderr = ""
+                return result
+            with _patch("subprocess.run", side_effect=fake_run) as run:
+                result = install.fix_venv(check, self._ctx(root))
+            self.assertTrue(result.get("ok"))
+            run.assert_called_once()
+
+    def test_pip_missing_installs(self):
+        import tempfile
+        from unittest.mock import patch as _patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".venv" / "bin").mkdir(parents=True)
+            (root / ".venv" / "bin" / "pip").touch()
+            (root / "ctl").mkdir()
+            (root / "ctl" / "requirements.txt").touch()
+            with _patch("subprocess.run") as run:
+                run.return_value.returncode = 1  # import fastapi fails…
+                run.return_value.stdout = ""
+                run.return_value.stderr = ""
+                check = install._pip_check(root)
+                self.assertEqual(check["state"], "missing")
+                run.return_value.returncode = 0  # …but pip install works
+                result = install.fix_pip_deps(check, self._ctx(root))
+            self.assertTrue(result.get("ok"))
+
+    def test_build_stale_rebuilds(self):
+        import tempfile
+        import time
+        from unittest.mock import patch as _patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dash = root / "dashboard"
+            (dash / "src").mkdir(parents=True)
+            (dash / "src" / "a.tsx").touch()
+            (dash / "dist").mkdir(parents=True)
+            (dash / "dist" / "index.html").touch()
+            # Make src NEWER than dist → stale.
+            now = time.time()
+            import os as _os
+            _os.utime(dash / "dist" / "index.html", (now - 100, now - 100))
+            check = install._build_check(root)
+            self.assertEqual(check["state"], "stale")
+            (dash / "node_modules").mkdir()  # skip npm ci, test build only
+            with _patch("subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = "built"
+                run.return_value.stderr = ""
+                result = install.fix_dashboard_build(check, self._ctx(root))
+            self.assertTrue(result.get("ok"))
+            run.assert_called_once()  # build only, no npm ci
+
+    def test_src_missing_fails_plainly(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            check = install._src_check(Path(tmp))
+            self.assertEqual(check["status"], "fail")
+            result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
+            self.assertFalse(result.get("ok"))
+
+    def test_full_dispatch_coverage(self):
+        # Every state any step check can emit must map to a real fix.
+        states = {
+            "host_base": ["missing", "ready"],
+            "node": ["absent", "old", "ready"],
+            "venv": ["no_venv", "ready"],
+            "pip_deps": ["missing", "ready"],
+            "dashboard_src": ["missing", "ready"],
+            "dashboard_build": ["stale", "ready"],
+            "root_env": ["missing", "ready"],
+            "service": ["no_unit", "inactive", "unhealthy", "ready"],
+            "docker": ["absent", "daemon_down", "unverified", "old_engine",
+                       "no_compose", "no_group", "no_networks", "ready"],
+            "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
+            "caddy": ["down", "ready"],
+            "tailscale_join": ["unjoined", "ready"],
+            "serve": ["unshared", "ready"],
+        }
+        step_ids = {m["id"] for m in install.STEPS}
+        self.assertEqual(set(states), step_ids)
+        for step, lst in states.items():
+            for state in lst:
+                self.assertNotEqual(
+                    install.fix_for_state(step, state), "unknown",
+                    f"{step}/{state}")
+
+
 class PropagateTests(unittest.TestCase):
     def test_terminal_becomes_waiting(self):
         result = install._propagate({"ok": False, "changed": False, "log": [],

@@ -101,12 +101,15 @@ thresholds not pins; docker floor ≥24 + compose plugin; `blocking` flags +
 ## Phase 2.5 — Simple check dashboard (stdlib only, retired at Phase 11)
 
 > Locked scope: THREE gated cards — ① Unit tests → ② Preflight → ③ Install.
-> Card ③ delivers host deps + Node + venv + Docker/networks + Tailscale
-> (install, guided join, serve) + Caddy, remediating precisely per granular
-> check states (never reinstalling). Authentik + Vaultwarden are NOT here
-> (real dashboard, PLAN.md row 16). Dashboard build/systemd/serve-dashboard
-> items are marked "arrives next" until Phases 8/11. No React, no pip
-> packages, no npm here.
+> Card ③ delivers host deps + Node + venv + pip + dashboard source check +
+> dashboard build + root `.env` + systemd service + Docker/networks +
+> Tailscale (install, guided join, serve) + Caddy, remediating precisely per
+> granular check states (never reinstalling). Authentik + Vaultwarden are NOT
+> here (real dashboard, PLAN.md row 16). The real dashboard's richer UI
+> (routers, app installers) still arrives in Phases 8/11; the status screen
+> + health API ship now because card ③ must end on a working :8787. React
+> builds as the unprivileged user with per-step log tails — background tech,
+> never user-facing.
 
 | # | File | Contains | Test / gate |
 |---|------|----------|-------------|

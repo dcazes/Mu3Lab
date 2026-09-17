@@ -1,0 +1,22 @@
+# Mu3Lab :: deploy/mu3lab-ctl.service
+# WHAT:  User-level systemd unit for the real dashboard backend (:8787).
+# WHY:   The dashboard must survive the installer finishing and the user
+#        logging out (linger) and restart on crashes. Started by card ③'s
+#        service step; rendered with @MU3LAB_ROOT@ replaced by the repo path.
+# RUN:   Rendered to ~/.config/systemd/user/mu3lab-ctl.service, then
+#        `loginctl enable-linger $USER` (once) + daemon-reload + enable/start.
+# DEBUG: `systemctl --user status mu3lab-ctl`; logs via
+#        `journalctl --user -u mu3lab-ctl -n 100`.
+[Unit]
+Description=Mu3Lab Control Plane
+After=network.target
+
+[Service]
+Type=exec
+WorkingDirectory=@MU3LAB_ROOT@
+ExecStart=@MU3LAB_ROOT@/.venv/bin/uvicorn ctl.app:app --host 127.0.0.1 --port 8787
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

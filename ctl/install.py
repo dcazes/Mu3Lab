@@ -68,6 +68,18 @@ DISPATCH = {
     ("node", "ready"): "skip",
     ("venv", "no_venv"): "create_venv",
     ("venv", "ready"): "skip",
+    ("pip_deps", "missing"): "pip_install",
+    ("pip_deps", "ready"): "skip",
+    ("dashboard_src", "missing"): "report_incomplete",
+    ("dashboard_src", "ready"): "skip",
+    ("dashboard_build", "stale"): "npm_build",
+    ("dashboard_build", "ready"): "skip",
+    ("root_env", "missing"): "write_env",
+    ("root_env", "ready"): "skip",
+    ("service", "no_unit"): "render_unit",
+    ("service", "inactive"): "start_service",
+    ("service", "unhealthy"): "restart_service",
+    ("service", "ready"): "skip",
     ("docker", "absent"): "docker_install",
     ("docker", "daemon_down"): "docker_start",
     ("docker", "unverified"): "docker_start",
@@ -82,6 +94,10 @@ DISPATCH = {
     ("tailscale_pkg", "ready"): "skip",
     ("caddy", "down"): "caddy_up",
     ("caddy", "ready"): "skip",
+    ("tailscale_join", "unjoined"): "guided_join",
+    ("tailscale_join", "ready"): "skip",
+    ("serve", "unshared"): "share_tailnet",
+    ("serve", "ready"): "skip",
 }
 
 
@@ -165,6 +181,265 @@ def fix_node(check: dict, ctx: dict) -> dict:
     if not res["ok"]:
         return _propagate(res)
     return _propagate(actions.apt_install(["nodejs"], log))
+
+
+def _venv_check(root: Path) -> dict:
+    """Venv-only readiness (NOT the combined bundle check: dist belongs to
+    the dashboard_build step). States: no_venv | ready."""
+    if (root / ".venv" / "bin" / "python").exists():
+        return {"name": "venv", "status": "ok",
+                "detail": "Project virtualenv present.",
+                "action": "", "state": "ready", "blocking": False}
+    return {"name": "venv", "status": "missing",
+            "detail": "Project virtualenv (.venv) missing.",
+            "action": "step 3 creates it.", "state": "no_venv",
+            "blocking": False}
+
+
+def _pip_check(root: Path) -> dict:
+    """Control-plane deps importable from the venv? States: missing | ready.
+
+    Probes the real import (not a marker file) so half-finished installs are
+    detected. fastapi stands in for the whole requirements file.
+    """
+    venv_py = root / ".venv" / "bin" / "python"
+    if not venv_py.exists():
+        return {"name": "pip_deps", "status": "missing",
+                "detail": "No virtualenv yet (venv step runs first).",
+                "action": "step 3 creates it, then installs packages.",
+                "state": "missing", "blocking": False}
+    try:
+        proc = subprocess.run([str(venv_py), "-c", "import fastapi"],
+                              capture_output=True, text=True, timeout=30)
+    except OSError as exc:
+        return {"name": "pip_deps", "status": "missing",
+                "detail": f"Cannot probe venv: {exc}.",
+                "action": "step 3 reinstalls packages.", "state": "missing",
+                "blocking": False}
+    if proc.returncode != 0:
+        return {"name": "pip_deps", "status": "missing",
+                "detail": "Control-plane packages not installed in .venv.",
+                "action": "step 3 installs them.", "state": "missing",
+                "blocking": False}
+    return {"name": "pip_deps", "status": "ok",
+            "detail": "Control-plane packages importable.",
+            "action": "", "state": "ready", "blocking": False}
+
+
+def _src_check(root: Path) -> dict:
+    """Dashboard source present? States: ready | missing (unfixable live —
+    a missing source tree means a broken checkout, not a gap to fill)."""
+    needed = [root / "dashboard" / "package.json",
+              root / "dashboard" / "src" / "main.tsx"]
+    absent = [str(path.relative_to(root)) for path in needed if not path.is_file()]
+    if absent:
+        return {"name": "dashboard_src", "status": "fail",
+                "detail": f"Missing from checkout: {', '.join(absent)}.",
+                "action": "Re-clone the repository (files, not setup).",
+                "state": "missing", "blocking": True}
+    return {"name": "dashboard_src", "status": "ok",
+            "detail": "Dashboard source present.",
+            "action": "", "state": "ready", "blocking": False}
+
+
+def _build_check(root: Path) -> dict:
+    """Built bundle fresh? States: ready | stale (missing OR older than src).
+
+    Compares dist/index.html mtime against the newest file under src/ so
+    edited sources rebuild automatically on re-run.
+    """
+    dist_index = root / "dashboard" / "dist" / "index.html"
+    src_dir = root / "dashboard" / "src"
+    if not dist_index.is_file():
+        return {"name": "dashboard_build", "status": "missing",
+                "detail": "Built dashboard (dist/) missing.",
+                "action": "step 3 builds it.", "state": "stale",
+                "blocking": False}
+    try:
+        newest_src = max(path.stat().st_mtime for path in src_dir.rglob("*")
+                         if path.is_file())
+    except OSError:
+        newest_src = 0.0
+    if newest_src > dist_index.stat().st_mtime:
+        return {"name": "dashboard_build", "status": "missing",
+                "detail": "Sources newer than built bundle.",
+                "action": "step 3 rebuilds it.", "state": "stale",
+                "blocking": False}
+    return {"name": "dashboard_build", "status": "ok",
+            "detail": "Built dashboard fresh.",
+            "action": "", "state": "ready", "blocking": False}
+
+
+def _env_check(root: Path) -> dict:
+    """Root .env holds both MU3LAB_* tokens? States: ready | missing."""
+    from ctl import secrets as _secrets
+    values: dict[str, str] = {}
+    env_path = root / ".env"
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip()
+    absent = [key for key in _secrets.ROOT_ENV_KEYS if not values.get(key)]
+    if absent:
+        return {"name": "root_env", "status": "missing",
+                "detail": f"Missing secret keys: {', '.join(absent)}.",
+                "action": "step 3 generates them (existing keys kept).",
+                "state": "missing", "blocking": False}
+    return {"name": "root_env", "status": "ok",
+            "detail": "Secret keys present.",
+            "action": "", "state": "ready", "blocking": False}
+
+
+def _service_check(root: Path) -> dict:
+    """mu3lab-ctl unit rendered, enabled, and answering /api/health?
+    States: no_unit | inactive | unhealthy | ready."""
+    import urllib.request as _url
+    unit_path = Path.home() / ".config" / "systemd" / "user" / "mu3lab-ctl.service"
+    if not unit_path.is_file():
+        return {"name": "service", "status": "missing",
+                "detail": "Startup entry not installed.",
+                "action": "step 3 installs and starts it.",
+                "state": "no_unit", "blocking": False}
+    try:
+        proc = subprocess.run(["systemctl", "--user", "is-active", "mu3lab-ctl"],
+                              capture_output=True, text=True, timeout=15)
+        active = proc.returncode == 0
+    except OSError:
+        active = False
+    if not active:
+        return {"name": "service", "status": "missing",
+                "detail": "Startup entry present but not running.",
+                "action": "step 3 starts it.", "state": "inactive",
+                "blocking": False}
+    try:
+        with _url.urlopen("http://127.0.0.1:8787/api/health", timeout=5) as resp:
+            healthy = resp.status == 200
+    except OSError:
+        healthy = False
+    if not healthy:
+        return {"name": "service", "status": "missing",
+                "detail": "Running but not answering health checks.",
+                "action": "step 3 restarts it.", "state": "unhealthy",
+                "blocking": False}
+    return {"name": "service", "status": "ok",
+            "detail": "Dashboard service answering on :8787.",
+            "action": "", "state": "ready", "blocking": False}
+
+
+def fix_pip_deps(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("pip_deps")
+    venv_pip = ctx["root"] / ".venv" / "bin" / "pip"
+    if not venv_pip.exists():
+        return {"ok": False, "error": "no venv pip (venv step must run first)"}
+    log("$ .venv/bin/pip install -r ctl/requirements.txt")
+    try:
+        proc = subprocess.run([str(venv_pip), "install", "-r",
+                               str(ctx["root"] / "ctl" / "requirements.txt")],
+                              capture_output=True, text=True, timeout=600,
+                              cwd=str(ctx["root"]))
+    except OSError as exc:
+        return {"ok": False, "error": f"pip failed: {exc}"}
+    tail = (proc.stdout + proc.stderr).strip().splitlines()[-5:]
+    for line in tail:
+        log(line)
+    if proc.returncode != 0:
+        return {"ok": False, "error": "pip install failed (see log)."}
+    return {"ok": True}
+
+
+def fix_dashboard_src(check: dict, ctx: dict) -> dict:
+    # Unfixable by design: reached only when the checkout itself lacks files.
+    return {"ok": False, "error": check.get("detail", "dashboard source missing")}
+
+
+def fix_dashboard_build(check: dict, ctx: dict) -> dict:
+    """npm ci (only if node_modules absent) + npm run build, as the USER.
+
+    Long step (minutes on first run); output tailed into the log so the UI
+    never looks stuck. No privilege involved at any point.
+    """
+    log = ctx["log_fn"]("dashboard_build")
+    dashdir = ctx["root"] / "dashboard"
+    if not (dashdir / "node_modules").is_dir():
+        log("$ npm ci  (in dashboard/)")
+        try:
+            proc = subprocess.run(["npm", "ci"], capture_output=True, text=True,
+                                  timeout=900, cwd=str(dashdir))
+        except OSError as exc:
+            return {"ok": False, "error": f"npm ci failed: {exc} (is Node installed?)"}
+        for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
+            log(line)
+        if proc.returncode != 0:
+            return {"ok": False, "error": "npm ci failed (see log); check network and retry."}
+    log("$ npm run build  (in dashboard/)")
+    try:
+        proc = subprocess.run(["npm", "run", "build"], capture_output=True,
+                              text=True, timeout=900, cwd=str(dashdir))
+    except OSError as exc:
+        return {"ok": False, "error": f"npm run build failed: {exc}"}
+    for line in (proc.stdout + proc.stderr).strip().splitlines()[-10:]:
+        log(line)
+    if proc.returncode != 0:
+        return {"ok": False, "error": "dashboard build failed (see log)."}
+    return {"ok": True}
+
+
+def fix_root_env(check: dict, ctx: dict) -> dict:
+    from ctl import secrets as _secrets
+    _values, added = _secrets.ensure_root_env(ctx["root"])
+    log = ctx["log_fn"]("root_env")
+    if added:
+        log(f"generated keys (names only): {', '.join(added)} → .env (0600)")
+    else:
+        log("all keys already present — touched nothing")
+    return {"ok": True, "skipped": not added}
+
+
+def fix_service(check: dict, ctx: dict) -> dict:
+    """Render unit → linger → reload → enable → start → poll /api/health."""
+    import urllib.request as _url
+    log = ctx["log_fn"]("service")
+    state = check.get("state", "")
+    unit_path = Path.home() / ".config" / "systemd" / "user" / "mu3lab-ctl.service"
+    if state == "no_unit":
+        template = ctx["root"] / "deploy" / "mu3lab-ctl.service"
+        if not template.is_file():
+            return {"ok": False, "error": "deploy/mu3lab-ctl.service missing from checkout"}
+        rendered = template.read_text(encoding="utf-8").replace(
+            "@MU3LAB_ROOT@", str(ctx["root"]))
+        unit_path.parent.mkdir(parents=True, exist_ok=True)
+        unit_path.write_text(rendered, encoding="utf-8")
+        log(f"rendered {unit_path}")
+        res = actions.privilege.run_privileged(
+            ["loginctl", "enable-linger", getpass.getuser()], log)
+        if res.get("need_terminal") or not res.get("ok"):
+            return _propagate(res)
+    if state in ("no_unit", "inactive", "unhealthy"):
+        rc, out = actions.privilege._exec(
+            ["systemctl", "--user", "daemon-reload"])
+        log("$ systemctl --user daemon-reload")
+        rc, out = actions.privilege._exec(
+            ["systemctl", "--user", "enable", "mu3lab-ctl.service"])
+        log("$ systemctl --user enable mu3lab-ctl.service")
+        rc, out = actions.privilege._exec(
+            ["systemctl", "--user", "restart", "mu3lab-ctl.service"])
+        log("$ systemctl --user restart mu3lab-ctl.service")
+        log(out or f"(exit {rc})")
+        if rc != 0:
+            return {"ok": False, "error": "could not start mu3lab-ctl (see log)"}
+        import time as _time
+        for _attempt in range(30):
+            try:
+                with _url.urlopen("http://127.0.0.1:8787/api/health", timeout=2) as resp:
+                    if resp.status == 200:
+                        log("dashboard answering on :8787")
+                        return {"ok": True}
+            except OSError:
+                pass
+            _time.sleep(2)
+        return {"ok": False, "error": "service started but :8787 never answered"}
+    return {"ok": True, "skipped": True}
 
 
 def fix_venv(check: dict, ctx: dict) -> dict:
@@ -496,9 +771,24 @@ STEPS = [
      "check": lambda ctx: preflight.check_node(
          actions.privilege._exec(["node", "--version"])[1]),
      "fix": fix_node},
-    {"id": "venv", "label": "Project workspace",
-     "check": lambda ctx: preflight.check_bundle(root=ctx["root"]),
+    {"id": "venv", "label": "Project workspace folder",
+     "check": lambda ctx: _venv_check(ctx["root"]),
      "fix": fix_venv},
+    {"id": "pip_deps", "label": "Control-plane packages",
+     "check": lambda ctx: _pip_check(ctx["root"]),
+     "fix": fix_pip_deps},
+    {"id": "dashboard_src", "label": "Dashboard source",
+     "check": lambda ctx: _src_check(ctx["root"]),
+     "fix": fix_dashboard_src},
+    {"id": "dashboard_build", "label": "Dashboard interface",
+     "check": lambda ctx: _build_check(ctx["root"]),
+     "fix": fix_dashboard_build},
+    {"id": "root_env", "label": "Secret keys file",
+     "check": lambda ctx: _env_check(ctx["root"]),
+     "fix": fix_root_env},
+    {"id": "service", "label": "Dashboard service",
+     "check": lambda ctx: _service_check(ctx["root"]),
+     "fix": fix_service},
     {"id": "docker", "label": "Docker",
      "check": _docker_check, "fix": fix_docker},
     {"id": "tailscale_pkg", "label": "Tailscale app",
