@@ -310,6 +310,13 @@ class WorkspaceStepTests(unittest.TestCase):
             self.assertIn(needle, prompt["body"] + prompt.get("login_url", "")
                           + prompt.get("terminal_command", ""))
         self.assertNotIn("keys_url", prompt)
+        self.assertEqual(prompt["login_url"], "https://login.example/abc")
+
+    def test_join_prompt_keeps_copyable_fallback_command(self):
+        prompt = install._join_prompt("")
+        self.assertFalse(prompt["login_url"])
+        self.assertEqual(prompt["terminal_command"],
+                         "sudo tailscale up --hostname=mu3lab")
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com

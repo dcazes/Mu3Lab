@@ -347,6 +347,14 @@ async function sendContinue() {
   try { await postJSON('/api/install/continue'); }
   catch (e) { console.error('install/continue', e); }
 }
+async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (e) {
+    console.error('clipboard', e);
+    alert('Copy failed. Please select and copy the command manually.');
+  }
+}
 async function retryInstall() {
   try { await postJSON('/api/install/retry'); }
   catch (e) { console.error('install/retry', e); return; }
@@ -366,7 +374,11 @@ function promptHtml(step) {
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + text + '</a>' : text;
     return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
       escapeHtml(p.body) + '<br>' +
-      (p.login_url ? 'Login page: <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
+      (p.login_url ? ' <strong>' + link(p.login_url, 'Open Tailscale login page') + '</strong>' +
+        ' <code class="act">' + escapeHtml(p.login_url) + '</code><br>' : '') +
+      (p.terminal_command ? 'If no login link appeared, run: <code class="act">' +
+        escapeHtml(p.terminal_command) + '</code> ' +
+        '<button onclick="copyText(\'' + escapeHtml(p.terminal_command).replace(/'/g, '&#39;') + '\')">Copy command</button><br>' : '') +
       '<button onclick="sendContinue()">I approved it — check again</button><br>' +
       '<span class="mut">New to Tailscale? ' + link(p.signup_url, 'Sign up free') +
       ', then come back here.</span></div>';
