@@ -28,10 +28,11 @@ import shutil
 import socket
 import subprocess
 import threading
+import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions, preflight
+from ctl import actions, preflight, privilege
 from ctl.runtime import RuntimePaths
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -752,31 +753,32 @@ def _join_prompt(login_url: str) -> dict:
 
 
 def fix_tailscale_join(check: dict, ctx: dict) -> dict:
-    """Guided browser join; never handles an auth key or Tailscale password."""
+    """Join through the installer's existing Polkit worker.
+
+    The worker already owns the one native password dialog. Its captured
+    output is inspected for Tailscale's one-time login URL; the URL is opened
+    immediately and is never persisted or sent back as a credential.
+    """
     log = ctx["log_fn"]("tailscale_join")
-    # `tailscale up` prints a URL and blocks; run it briefly to capture the
-    # ordinary browser login URL, then wait for the user's approval.
     log("$ tailscale up --hostname=mu3lab  (capturing login URL)")
-    try:
-        proc = subprocess.run(["sudo", "-n", "tailscale", "up",
-                               "--hostname=" + TS_HOSTNAME],
-                              capture_output=True, text=True, timeout=25)
-    except subprocess.TimeoutExpired as exc:
-        out = ((exc.stdout or b"").decode(errors="replace")
-               + (exc.stderr or b"").decode(errors="replace"))
-        import re as _re
-        match = _re.search(r"https?://\S+", out)
-        return {"waiting": True,
-                "prompt": _join_prompt(match.group(0) if match else "")}
-    except OSError as exc:
-        return {"ok": False, "error": f"tailscale up failed: {exc}"}
-    out = (proc.stdout + proc.stderr).strip()
-    if proc.returncode == 0:
-        return {"ok": True}  # already logged in, nothing to approve
+    result = privilege.run_privileged(
+        ["tailscale", "up", "--hostname=" + TS_HOSTNAME], log)
+    out = result.get("output", "")
     import re as _re
-    match = _re.search(r"https?://\S+", out)
-    return {"waiting": True,
-            "prompt": _join_prompt(match.group(0) if match else "")}
+    match = _re.search(r"https://login\.tailscale\.com/[A-Za-z0-9/_-]+", out)
+    if match:
+        login_url = match.group(0).rstrip(".,);")
+        try:
+            webbrowser.open(login_url, new=2)
+            log("opened the Tailscale login page in the default browser")
+        except Exception as exc:  # noqa: BLE001 - link remains in the prompt
+            log(f"could not open browser automatically: {exc}")
+        return {"waiting": True, "prompt": _join_prompt(login_url)}
+    if result.get("need_terminal"):
+        return {"waiting": True, "prompt": _join_prompt("")}
+    if result.get("ok"):
+        return {"ok": True}
+    return {"waiting": True, "prompt": _join_prompt("")}
 
 
 def fix_serve(check: dict, ctx: dict) -> dict:

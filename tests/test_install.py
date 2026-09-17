@@ -318,6 +318,19 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertEqual(prompt["terminal_command"],
                          "./tools/open_tailscale_login.sh")
 
+    def test_tailscale_join_uses_elevation_worker_and_opens_url(self):
+        with patch("ctl.install.privilege.run_privileged", return_value={
+                "ok": True,
+                "output": "To authenticate, visit: https://login.tailscale.com/a/abc123"}) as run, \
+             patch("ctl.install.webbrowser.open", return_value=True) as opened:
+            result = install.fix_tailscale_join(
+                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        run.assert_called_once()
+        opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
+        self.assertTrue(result["waiting"])
+        self.assertEqual(result["prompt"]["login_url"],
+                         "https://login.tailscale.com/a/abc123")
+
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com
         # after the dotted form failed a real install). Never trust memory.
