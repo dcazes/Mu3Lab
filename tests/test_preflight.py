@@ -257,7 +257,7 @@ class PortTests(unittest.TestCase):
             result = preflight.check_ports(
                 connect_fn=lambda port: port == 8787)
         self.assertEqual(result["status"], "ok")
-        self.assertIn("autostart", result["detail"])
+        self.assertIn("Mu3Lab services", result["detail"])
 
     def test_busy_names_owner(self):
         # Busy ports carry an owners map so the UI can offer Stop for OURS.
@@ -293,6 +293,36 @@ class PortTests(unittest.TestCase):
         owner = result["owners"]["8787"]
         self.assertEqual(owner["pid"], 4243)
         self.assertFalse(owner["ours"])
+
+    def test_compose_owner_uses_sg_when_checker_group_is_stale(self):
+        # Docker publishes loopback ports without exposing a PID to an
+        # unprivileged ss. A server that predates the docker-group update must
+        # still identify this checkout's labeled container via sg docker.
+        ss_out = "LISTEN 0 4096 127.0.0.1:8081 0.0.0.0:*"
+        root = Path("/home/dak/Desktop/Mu3Lab")
+        def fake_run(argv, timeout=10):
+            if argv[:2] == ["ss", "-tlnp"]:
+                return 0, ss_out
+            if argv[:2] == ["docker", "ps"]:
+                return 1, "permission denied"
+            if argv[:3] == ["sg", "docker", "-c"] and "docker ps" in argv[3]:
+                return 0, "vaultwarden-vaultwarden-1"
+            if argv[:2] == ["docker", "inspect"]:
+                return 1, "permission denied"
+            if argv[:3] == ["sg", "docker", "-c"] and "docker inspect" in argv[3]:
+                return 0, str(root / "core" / "vaultwarden")
+            return 1, "unexpected command"
+        from unittest.mock import patch as _patch
+        with _patch("ctl.preflight._run", side_effect=fake_run), \
+             _patch("ctl.preflight._db_has_group", return_value=True), \
+             _patch("ctl.preflight.getpass.getuser", return_value="dak"), \
+             _patch("ctl.preflight.shutil.which", return_value="/usr/bin/sg"), \
+             _patch("ctl.preflight.ROOT", root):
+            result = preflight.check_ports(connect_fn=lambda port: port == 8081)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["owners"]["8081"]["ours"])
+        self.assertEqual(result["owners"]["8081"]["process"],
+                         "vaultwarden-vaultwarden-1")
 
     def test_ss_missing_still_reports(self):
         from unittest.mock import patch as _patch

@@ -17,9 +17,11 @@ DEBUG: Each check returns a plain dict {name, status, detail, action} where
 from __future__ import annotations
 
 import grp
+import getpass
 import os
 import platform
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -439,6 +441,22 @@ def _db_has_group(user: str, group: str) -> bool:
         return False
 
 
+def _docker_probe(argv: list[str]) -> tuple[int, str]:
+    """Run one read-only Docker query, tolerating a stale bootstrap process.
+
+    A bootstrap server started before ``usermod -aG docker`` keeps its old
+    supplementary groups even after the operator logs in again. Installer
+    actions already use ``sg docker`` for this case. Preflight ownership
+    detection must use the same safe fallback or it mislabels our own Compose
+    listeners as foreign port conflicts.
+    """
+    command = ["docker"] + argv
+    rc, out = _run(command)
+    if rc == 0 or not shutil.which("sg") or not _db_has_group(getpass.getuser(), "docker"):
+        return rc, out
+    return _run(["sg", "docker", "-c", shlex.join(command)])
+
+
 def _port_owner(port: int) -> dict | None:
     """Best-effort owner of a loopback listener: {pid, process, ours}.
 
@@ -466,12 +484,12 @@ def _port_owner(port: int) -> dict | None:
         project_by_port = {19460: "ingress", 9001: "authentik", 8081: "vaultwarden"}
         project = project_by_port.get(port)
         if project:
-            names_rc, names = _run([
-                "docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
+            names_rc, names = _docker_probe([
+                "ps", "--filter", f"label=com.docker.compose.project={project}",
                 "--format", "{{.Names}}"])
             for name in names.splitlines() if names_rc == 0 else []:
-                label_rc, working_dir = _run([
-                    "docker", "inspect", "--format",
+                label_rc, working_dir = _docker_probe([
+                    "inspect", "--format",
                     "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}",
                     name.strip()])
                 if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "core" / project).resolve():
@@ -517,8 +535,8 @@ def check_ports(connect_fn=None) -> dict:
         if not foreign:
             return {"name": "ports", "status": "ok",
                     "detail": ("Port(s) " + ", ".join(map(str, ours)) +
-                               " held by our dashboard service (autostarted — "
-                               "normal once installed)."),
+                               " held by Mu3Lab services (already started — "
+                               "normal while resuming setup)."),
                     "action": "", "state": "ready", "blocking": True,
                     "owners": owners}
         return {"name": "ports", "status": "fail",
