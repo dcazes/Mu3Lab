@@ -162,13 +162,26 @@ def check_os(release_text: str, kernel_release: str = "") -> dict:
 
 
 def check_arch(machine: str) -> dict:
-    """Accept x86_64 and ARM64 spellings; reject everything else."""
-    if machine in ("x86_64",):
+    """Accept x86-64 only; ARM support is deliberately deferred for v1."""
+    if machine == "x86_64":
         return _result("arch", "ok", f"CPU arch {machine} supported.")
     if machine in ("aarch64", "arm64"):
-        return _result("arch", "ok", f"CPU arch {machine} supported (ARM64).")
+        return _result("arch", "fail", f"CPU arch {machine} is not in the v1 support matrix.",
+                       "Use an x86-64 host; ARM support is planned for a later release.")
     return _result("arch", "fail", f"CPU arch {machine!r} unsupported.",
-                   "Mu3Lab supports x86-64 and ARM64 hosts.")
+                   "Mu3Lab v1 supports x86-64 hosts.")
+
+
+def check_gpu(nvidia_present: bool, amd_present: bool) -> dict:
+    """Report a selectable CPU/NVIDIA/AMD profile; detection never installs drivers."""
+    if nvidia_present:
+        return _result("gpu", "ok", "NVIDIA GPU detected; confirm the NVIDIA profile before install.",
+                       state="nvidia")
+    if amd_present:
+        return _result("gpu", "ok", "AMD GPU detected; confirm the AMD profile before install.",
+                       state="amd")
+    return _result("gpu", "ok", "No supported GPU detected; CPU profile will be offered.",
+                   state="cpu")
 
 
 def check_python(version: tuple[int, ...]) -> dict:
@@ -584,9 +597,12 @@ def run_all() -> dict:
     docker_check = gather_docker()
     tailscale_check = gather_tailscale()
 
+    _, lspci_out = _run(["lspci", "-nn"])
     checks = [
         check_os(release_text, kernel_release=platform.release()),
         check_arch(platform.machine()),
+        check_gpu(_run(["nvidia-smi", "-L"])[0] == 0,
+                  "amd" in lspci_out.lower() or "advanced micro devices" in lspci_out.lower()),
         check_python(tuple(sys.version_info)),
         check_node(node_out),
         check_privilege(sudo_fresh, graphical),

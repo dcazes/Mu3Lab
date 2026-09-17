@@ -24,6 +24,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ctl import __version__  # noqa: F401 (re-exported for /api/health)
+from ctl.backups import readiness as backup_readiness
+from ctl.registry import RegistryError, load as load_registry
+from ctl.runtime import RuntimePaths
+from ctl.service_state import status as service_status, tailnet_dns_name
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dashboard" / "dist"
@@ -39,24 +43,46 @@ def health() -> dict:
 
 @app.get("/api/status")
 def status() -> dict:
-    """Installed-infrastructure summary for the status screen.
+    """Compatibility summary derived from the curated registry, not constants."""
+    services = list_services()["services"]
+    return {"version": __version__, "components": [
+        {"id": item["id"], "label": item["name"], "detail": item["detail"]}
+        for item in services
+    ]}
 
-    Minimal milestone: static component list. Later phases replace `detail`
-    with live probes (docker ps, compose state) — the SHAPE stays.
-    """
-    return {
-        "version": __version__,
-        "components": [
-            {"id": "dashboard", "label": "Dashboard",
-             "detail": "this page, served locally"},
-            {"id": "caddy", "label": "Caddy",
-             "detail": "local entry point on :19460"},
-            {"id": "docker", "label": "Docker",
-             "detail": "container runtime + shared networks"},
-            {"id": "tailscale", "label": "Tailscale",
-             "detail": "tailnet access for your other devices"},
-        ],
-    }
+
+@app.get("/api/services")
+def list_services() -> dict:
+    """Read the curated catalog and project live, non-mutating service health."""
+    try:
+        registry = load_registry()
+    except RegistryError as exc:
+        return {"ok": False, "error": str(exc), "services": []}
+    dns_name = tailnet_dns_name()
+    return {"ok": True, "version": __version__, "tailnet_dns_name": dns_name,
+            "runtime": RuntimePaths().as_dict(),
+            "services": [service_status(service, dns_name, ROOT)
+                         for service in registry.services]}
+
+
+@app.get("/api/integrations")
+def integrations() -> dict:
+    """Expose reviewed wiring declarations only; no credentials or mutations."""
+    try:
+        registry = load_registry()
+    except RegistryError as exc:
+        return {"ok": False, "error": str(exc), "integrations": []}
+    return {"ok": True, "policy": "free-first", "integrations": [
+        {"source": "ollama", "destination": "litellm", "kind": "model"},
+        {"source": "freellmapi", "destination": "litellm", "kind": "optional_model"},
+        {"source": "litellm", "destination": "open-webui", "kind": "model"},
+    ], "blocked": [service.public() for service in registry.services if service.is_blocked]}
+
+
+@app.get("/api/backups")
+def backups() -> dict:
+    """Return local encrypted-backup readiness; execution needs an authenticated job."""
+    return {"ok": True, **backup_readiness()}
 
 
 if DIST.is_dir():

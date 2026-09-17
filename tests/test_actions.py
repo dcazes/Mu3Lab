@@ -111,6 +111,17 @@ class SystemTests(unittest.TestCase):
         self.assertIn("docker", flat)
         self.assertIn("mu3lab_backend", flat)
 
+    def test_runtime_layout_keeps_secrets_root_only(self):
+        seen: list[list[str]] = []
+        def fake(argv, log):
+            seen.append(argv)
+            return {"ok": True}
+        with patch.object(actions.privilege, "run_privileged", fake):
+            result = actions.ensure_runtime_layout(Path("/srv/mu3lab"), "tester", _silent)
+        self.assertTrue(result["ok"])
+        self.assertIn(["install", "-d", "-m", "0700", "/srv/mu3lab/secrets"], seen)
+        self.assertNotIn("/srv/mu3lab/secrets", seen[-1])
+
 
 class DockerCmdTests(unittest.TestCase):
     """Selection contract for the docker choke point: live group → direct;

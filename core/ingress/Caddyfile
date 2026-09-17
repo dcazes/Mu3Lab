@@ -11,7 +11,25 @@
 	admin off
 }
 
-# Step 1: dashboard only. App routes + Authentik gates arrive later.
+# Dashboard entrypoint. Tailscale Serve terminates tailnet HTTPS and sends only
+# loopback HTTP here; no application container binds to the LAN.
 http://:19460 {
 	reverse_proxy 127.0.0.1:8787
+}
+
+# Authentik first-run UI. It is intentionally not protected by forward auth:
+# Authentik is the identity provider and its own first administrator is created
+# in its official UI after bootstrap.
+http://:19461 {
+	reverse_proxy 127.0.0.1:9001 {
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# Vaultwarden remains its own application authentication boundary. Its remote
+# route is private to the tailnet; it is never exposed through MCP.
+http://:19462 {
+	reverse_proxy 127.0.0.1:8081 {
+		header_up X-Forwarded-Proto https
+	}
 }

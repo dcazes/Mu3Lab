@@ -1,71 +1,66 @@
 # Mu3Lab
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](ctl/requirements.txt)
+Mu3Lab is a curated, private homelab control plane for Debian 12+ and Ubuntu
+22.04+ x86-64 hosts. It separates first-run host preparation from normal app
+management:
 
-**Minimal homelab bootstrap with a guided dashboard.** Mu3Lab takes a bare
-Debian/Ubuntu machine from zero to working infrastructure — Docker, Tailscale,
-and a local entry point — through three gated, self-verifying steps.
-No Ansible, no committed build artifacts, no blind shell scripts.
+1. `./check.sh` opens a temporary local bootstrap dashboard at
+   `127.0.0.1:8799`. It runs tests, measures the host, installs only missing
+   dependencies, and pauses for required human actions such as the normal
+   Tailscale web login and Docker-group re-login.
+2. The React control plane is the permanent dashboard. It is intended to be
+   reached through private Tailscale HTTPS, manages only Mu3Lab's curated
+   services, and never treats arbitrary Docker projects as trusted apps.
 
-## How it works
+## Product safety rules
 
-```
-① Unit tests  →  ② Preflight  →  ③ Install
-   (prove the      (measure the     (fix exactly
-    ruler)          machine)         what's missing)
-```
+- Tailscale and Authentik are mandatory infrastructure for the completed
+  platform; reusable Tailscale auth keys are never accepted by the dashboard.
+- Persistent data lives under `/srv/mu3lab`, not in the Git checkout.
+- Git contains definitions and safe defaults, never application data, backups,
+  or unencrypted secrets.
+- Updates are reviewed/pinned and manually initiated. Failed operations stop
+  the affected stack, preserve diagnostics, and offer a guided restore rather
+  than silently rolling back.
+- Vaultwarden is excluded from MCP exposure. MCP capabilities are curated and
+  policy-bound, with read-only defaults.
+- SurfSense is tracked as blocked until it has a supported native SSO or
+  trusted-identity integration; Mu3Lab will not fork it or replay passwords.
 
-1. **Clone and check** — `./check.sh` needs only `git` and `python3`. It opens
-   a zero-dependency local dashboard (`http://127.0.0.1:8799`) that runs the
-   unit suite and host preflight behind three cards that unlock in order.
-2. **Install** — card ③ remediates precisely: every component reports a
-   granular state (`absent`, `daemon_down`, `no_group`, …) and the installer
-   runs exactly the fix for that state — starting a stopped daemon instead of
-   reinstalling it, creating only missing networks, skipping what's ready.
-3. **Guided setup** — steps needing a human (Tailscale connection, Docker
-   group re-login) pause as `waiting` rows with inline instructions instead
-   of failing. Privilege escalation uses the native system dialog (polkit);
-   passwords are never typed into any page.
+## Current development state
 
-## Quickstart
+The bootstrapper and registry-backed dashboard foundation are active work.
+`services.yaml` is the deployment source of truth and `catalog.yaml` is the
+user-facing curated catalog. Authentik and Vaultwarden Compose definitions are
+included, while the first complete AI slice (Ollama, LiteLLM, and Open WebUI)
+is still being brought in.
+
+## Developer checks
 
 ```bash
-git clone https://github.com/dcazes/Mu3Lab.git
-cd Mu3Lab
-./check.sh            # opens the check dashboard, no installs
+./check.sh --no-open
+make test
+cd dashboard && npm ci && npm run build
 ```
 
-Requires: Debian 12+ / Ubuntu 22.04+ (or derivative), x86-64 or ARM64,
-Python 3.10+. Everything else is installed by card ③.
+The CI workflow runs the Python suite, dashboard build, and YAML validation.
 
-## Project layout
+## Storage and backups
 
-| Path | Purpose |
-|---|---|
-| `check.sh` | Fresh-user entry: python precheck, venv prove-or-warn, serves dashboard |
-| `check_server.py` | Stdlib-only check dashboard (retired when the real dashboard lands) |
-| `ctl/preflight.py` | Read-only host checks; thresholds, never version pins |
-| `ctl/install.py` | Check-first remediation runner (states → exact fixes) |
-| `ctl/privilege.py`, `ctl/actions.py` | pkexec-first elevation + auditable host verbs |
-| `tools/run_tests.py` | JSON-line test runner for live dashboard progress |
-| `core/ingress/` | Minimal Caddy entry point (`:19460` → dashboard) |
-| `tests/` | Unit suite — every check pinned by fixtures, nothing touches the host |
-| `PLAN.md`, `BUILD_ORDER.md` | Architecture and file-by-file build record |
+```text
+/srv/mu3lab/
+├── data/
+├── backups/
+├── secrets/
+├── runtime/
+└── projects/
+```
 
-See [`docs/SETUP.md`](docs/SETUP.md) for the full guide (written from verified
-runs), [`PLAN.md`](PLAN.md) for architecture decisions, and
-[`BUILD_ORDER.md`](BUILD_ORDER.md) for the build sequence.
-
-## Status
-
-Active development. The check dashboard (cards ①–③ through infrastructure
-install) works; the React control dashboard, Authentik/Vaultwarden onboarding,
-and app catalog arrive in later phases. `PLAN.md` tracks what's locked vs open.
+Local encrypted Restic backups use a default retention policy of 7 daily,
+4 weekly, and 12 monthly snapshots. A restore must always be explicitly
+confirmed.
 
 ## License
 
-Mu3Lab is free software: you can redistribute and/or modify it under the terms
-of the **GNU Affero General Public License** as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version. See [LICENSE](LICENSE) for the full text.
+Mu3Lab is licensed under the AGPL-3.0-or-later. Individual curated apps retain
+their own licenses and operational requirements.

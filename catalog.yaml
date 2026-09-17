@@ -1,0 +1,26 @@
+# Mu3Lab user-facing curated catalog.  Deployment facts remain in services.yaml.
+schema_version: 1
+profiles:
+  - id: local-ai
+    name: Local AI
+    services: [ollama, litellm, open-webui, freellmapi]
+  - id: research
+    name: Research
+    services: [surfsense]
+
+services:
+  ollama:
+    summary: Local model runner for lightweight inference and embeddings.
+    integrations: [litellm]
+  litellm:
+    summary: OpenAI-compatible model gateway with a free-first routing policy.
+    integrations: [ollama, freellmapi, open-webui]
+  open-webui:
+    summary: Private AI chat UI routed through LiteLLM.
+    integrations: [litellm]
+  freellmapi:
+    summary: Optional free-inference provider; never selected over a paid route automatically.
+    integrations: [litellm]
+  surfsense:
+    summary: Research workspace pending a supported true-SSO integration.
+    integrations: [litellm, ollama]

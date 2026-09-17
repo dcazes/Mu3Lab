@@ -304,12 +304,11 @@ class WorkspaceStepTests(unittest.TestCase):
     def test_join_prompt_guides(self):
         prompt = install._join_prompt("https://login.example/abc")
         self.assertEqual(prompt["kind"], "tailscale_login")
-        for needle in ("tailscale.com", "settings/keys",
-                       "https://login.example/abc",
+        for needle in ("Tailscale web login", "https://login.example/abc",
                        "sudo tailscale up"):
-            self.assertIn(needle, prompt["body"] + prompt.get("keys_url", "")
-                          + prompt.get("login_url", "")
+            self.assertIn(needle, prompt["body"] + prompt.get("login_url", "")
                           + prompt.get("terminal_command", ""))
+        self.assertNotIn("keys_url", prompt)
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com
@@ -386,6 +385,7 @@ class SgFallbackTests(unittest.TestCase):
             "dashboard_src": ["missing", "ready"],
             "dashboard_build": ["stale", "ready"],
             "root_env": ["missing", "ready"],
+            "runtime_layout": ["missing", "ready"],
             "service": ["no_unit", "inactive", "unhealthy", "ready"],
             "docker": ["absent", "daemon_down", "unverified", "old_engine",
                        "no_compose", "no_access", "stale_login", "no_group",
@@ -436,6 +436,27 @@ class PropagateTests(unittest.TestCase):
                                      "log": ["boom"]})
         self.assertFalse(result.get("ok"))
         self.assertIn("boom", result.get("error", ""))
+
+    def test_retry_clears_stale_state(self):
+        # REGRESSION (the Caddy contradiction): a failed attempt's error text
+        # rendered forever under a later success. Every terminal state must
+        # write ALL of status/error/prompt/detail; only logs accumulate.
+        events: list[dict] = []
+        ctx = {"emit": events.append}
+        step = {"id": "caddy", "label": "Caddy", "status": "pending",
+                "log": ["old line"], "prompt": None, "error": "",
+                "detail": ""}
+        job = {"status": "running", "steps": [step], "events": []}
+        install._finish_step(job, ctx, step,
+                             {"ok": False, "error": "port never answered"})
+        self.assertEqual(step["status"], "failed")
+        self.assertTrue(step["error"])
+        install._finish_step(job, ctx, step, {"ok": True, "skipped": True})
+        self.assertEqual(step["status"], "ready")
+        self.assertEqual(step["error"], "")
+        self.assertIsNone(step["prompt"])
+        self.assertIn("skipped", step["detail"])
+        self.assertEqual(step["log"], ["old line"])
 
 
 if __name__ == "__main__":

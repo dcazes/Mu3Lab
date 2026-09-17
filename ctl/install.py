@@ -7,8 +7,8 @@ WHAT: Card-③ execution engine. Ordered remediation steps (host deps → node �
       `waiting` prompts instead of failures; resume continues from them.
 WHY:  Installing over healthy components is structurally impossible here:
       no step runs without its check reporting a gap first. Steps never
-      accept secrets as arguments — the tailscale auth key arrives via the
-      job's memory-only `inputs` dict (server-held, never logged).
+      never accept user secrets. Tailscale uses its normal browser approval
+      flow, so the installer never handles reusable tailnet credentials.
 RUN:  Driven by check_server.py (/api/install/*). Pure dispatch helpers
       (fix_for_state) are unit-testable with mocked actions; live probes run
       only inside fix()/check() with the real host.
@@ -32,6 +32,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ctl import actions, preflight
+from ctl.runtime import RuntimePaths
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -39,7 +40,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Constants: versions, package lists, ports. Reasons inline.
 # ---------------------------------------------------------------------------
 BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg",
-                 "python3", "python3-pip", "python3-venv"]
+                 "python3", "python3-pip", "python3-venv", "restic"]
 # NodeSource 20.x baseline (accepts newer already-installed Nodes; the fix
 # only runs when check_node reports absent/old).
 NODESOURCE_KEY_URL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
@@ -49,9 +50,7 @@ DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io",
                    "docker-buildx-plugin", "docker-compose-plugin"]
 def tailscale_key_url(distro: str, codename: str) -> str:
-    """GPG key URL for the Tailscale apt repo. Slash-separated
-    (…/stable/ubuntu/noble.gpg) — the dotted form 404s. Pure helper so the
-    shape is unit-testable instead of trusted from memory."""
+    """GPG key URL for the Tailscale apt repo; pure and unit-testable."""
     family = "debian" if distro == "debian" else "ubuntu"
     return f"https://pkgs.tailscale.com/stable/{family}/{codename}.gpg"
 CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
@@ -81,6 +80,8 @@ DISPATCH = {
     ("dashboard_build", "ready"): "skip",
     ("root_env", "missing"): "write_env",
     ("root_env", "ready"): "skip",
+    ("runtime_layout", "missing"): "create_runtime_layout",
+    ("runtime_layout", "ready"): "skip",
     ("service", "no_unit"): "render_unit",
     ("service", "inactive"): "start_service",
     ("service", "unhealthy"): "restart_service",
@@ -203,6 +204,27 @@ def _venv_check(root: Path) -> dict:
             "detail": "Project virtualenv (.venv) missing.",
             "action": "step 3 creates it.", "state": "no_venv",
             "blocking": False}
+
+
+def _runtime_layout_check(root: Path) -> dict:
+    """Check the approved persistent-data root without creating it."""
+    paths = RuntimePaths()
+    required = (paths.data, paths.backups, paths.secrets, paths.runtime, paths.projects)
+    if any(not path.is_dir() for path in required):
+        return {"name": "runtime_layout", "status": "missing",
+                "detail": "Persistent runtime layout is missing.",
+                "action": "step 3 creates /srv/mu3lab with safe permissions.",
+                "state": "missing", "blocking": False}
+    return {"name": "runtime_layout", "status": "ok",
+            "detail": "Persistent runtime layout is ready.", "action": "",
+            "state": "ready", "blocking": False}
+
+
+def fix_runtime_layout(check: dict, ctx: dict) -> dict:
+    """Create persistent paths using the auditable privilege boundary."""
+    return _propagate(actions.ensure_runtime_layout(RuntimePaths().root,
+                                                    getpass.getuser(),
+                                                    ctx["log_fn"]("runtime_layout")))
 
 
 def _pip_check(root: Path) -> dict:
@@ -693,49 +715,25 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
 def _join_prompt(login_url: str) -> dict:
     """Guided Tailscale connection prompt (shown in the waiting row).
 
-    Three numbered paths, easiest first. Links are plain strings (the page
-    renders them); the key is memory-only and wiped after use.
+    The user approves the normal Tailscale web login, then resumes this job.
     """
     return {
         "kind": "tailscale_login",
         "title": "Connect this computer to your tailnet",
-        "body": ("Tailscale is installed — now it needs to join your private "
-                 "network (this is how your phone will reach this computer). "
-                 "1) No Tailscale account yet? Sign up free at "
-                 "https://tailscale.com, then come back. "
-                 "2) Fastest: open https://login.tailscale.com/admin/settings/keys "
-                 "→ Generate auth key (reusable) → paste it below; everything "
-                 "after runs by itself. "
-                 "3) No key? Approve the login page below, then press Check again."),
+        "body": ("Tailscale is installed — approve this computer in the normal "
+                 "Tailscale web login. This bootstrapper never receives an auth key "
+                 "or account password. When approval is complete, press Check again."),
         "signup_url": "https://tailscale.com",
-        "keys_url": "https://login.tailscale.com/admin/settings/keys",
         "login_url": login_url,
         "terminal_command": "sudo tailscale up --hostname=mu3lab",
     }
 
 
 def fix_tailscale_join(check: dict, ctx: dict) -> dict:
-    """Guided join. Automatic ONLY with a user-supplied auth key (memory-only,
-    from job inputs); otherwise run `tailscale up` to surface its login URL
-    and wait for the user to approve it in a browser."""
+    """Guided browser join; never handles an auth key or Tailscale password."""
     log = ctx["log_fn"]("tailscale_join")
-    key = (ctx.get("inputs") or {}).get("tailscale_authkey", "")
-    if key:
-        log("$ tailscale up --authkey=*** --hostname=mu3lab (key redacted)")
-        try:
-            proc = subprocess.run(
-                ["sudo", "-n", "tailscale", "up", f"--authkey={key}",
-                 "--hostname=" + TS_HOSTNAME],
-                capture_output=True, text=True, timeout=120)
-        except OSError as exc:
-            return {"ok": False, "error": f"tailscale up failed: {exc}"}
-        key = ""  # wipe local reference immediately after use
-        if proc.returncode != 0:
-            return {"ok": False,
-                    "error": "tailscale up rejected the key: " + (proc.stdout + proc.stderr).strip()[:300]}
-        return {"ok": True}
-    # No key: interactive login-URL flow. `tailscale up` prints a URL and
-    # blocks; run it briefly to capture the URL, then wait for approval.
+    # `tailscale up` prints a URL and blocks; run it briefly to capture the
+    # ordinary browser login URL, then wait for the user's approval.
     log("$ tailscale up --hostname=mu3lab  (capturing login URL)")
     try:
         proc = subprocess.run(["sudo", "-n", "tailscale", "up",
@@ -877,6 +875,9 @@ STEPS = [
     {"id": "root_env", "label": "Secret keys file",
      "check": lambda ctx: _env_check(ctx["root"]),
      "fix": fix_root_env},
+    {"id": "runtime_layout", "label": "Persistent data layout",
+     "check": lambda ctx: _runtime_layout_check(ctx["root"]),
+     "fix": fix_runtime_layout},
     {"id": "service", "label": "Dashboard service",
      "check": lambda ctx: _service_check(ctx["root"]),
      "fix": fix_service},
@@ -966,7 +967,7 @@ def run_job(job: dict, ctx: dict) -> None:
                 if ctx["stopped"]():
                     job["status"] = "cancelled"
                     return
-                result = meta["fix"](check, ctx)  # retry with key or re-poll
+                result = meta["fix"](check, ctx)  # retry after browser approval
                 if result.get("waiting"):
                     _finish_step(job, ctx, step, result)
                     job["status"] = "waiting"
@@ -1004,19 +1005,29 @@ def run_job(job: dict, ctx: dict) -> None:
 
 
 def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
+    # Write-on-transition (logs excepted): every terminal state sets ALL of
+    # status/error/prompt/detail, so a retried step can never display a
+    # previous attempt's error under a new success. Logs accumulate only.
     if result.get("waiting"):
         step["status"] = "waiting"
         step["prompt"] = result.get("prompt", {})
+        step["error"] = ""
+        step["detail"] = ""
         ctx["emit"]({"type": "prompt", "id": step["id"], "prompt": step["prompt"]})
     elif result.get("ok"):
         step["status"] = "ready"
+        step["error"] = ""
+        step["prompt"] = None
         if result.get("skipped"):
             step["detail"] = "already done — skipped"
+        else:
+            step["detail"] = ""
         ctx["emit"]({"type": "step", "id": step["id"], "status": "ready",
                      "skipped": bool(result.get("skipped"))})
     else:
         step["status"] = "failed"
         step["error"] = result.get("error", "unknown error")
+        step["prompt"] = None
         ctx["emit"]({"type": "step", "id": step["id"], "status": "failed",
                      "error": step["error"]})
 
