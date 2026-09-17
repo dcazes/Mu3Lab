@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os as _os
 import shlex as _shlex
+import subprocess as _subprocess
 from collections.abc import Callable
 from pathlib import Path
 import urllib.request
@@ -168,19 +169,42 @@ def write_root_file(path: str, content: str, log: Callable[[str], None],
 
 
 def write_root_bytes(path: str, data: bytes, log: Callable[[str], None],
-                     mode: str = "644") -> dict:
+                    mode: str = "644") -> dict:
     """Write a root-owned BINARY file (repo GPG keys) as root.
 
-    Staged in a user-private temp dir (0700), then `cp`+`chmod` privileged.
-    Separate from write_root_file because binary bytes must never pass
-    through a str round-trip (utf-8 would corrupt bytes >= 0x80).
+    APT's ``.gpg`` keyring format is binary, while the official repository
+    endpoints serve ASCII-armored keys.  Dearmor those inputs before staging;
+    merely copying an armored key into a ``.gpg`` file makes APT silently
+    ignore the key and produces a misleading NO_PUBKEY error.  Staging and
+    conversion happen as the user; only the final copy and chmod are elevated.
     """
     lines: list[str] = []
     import tempfile
     tmpdir = Path(tempfile.mkdtemp(prefix="mu3lab-"))
     tmpdir.chmod(0o700)
     staged = tmpdir / "payload"
-    staged.write_bytes(data)
+    if Path(path).suffix == ".gpg" and data.lstrip().startswith(
+            b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
+        armored = tmpdir / "payload.asc"
+        binary = tmpdir / "payload.gpg"
+        armored.write_bytes(data)
+        gnupg_home = tmpdir / "gnupg"
+        gnupg_home.mkdir(mode=0o700)
+        try:
+            proc = _subprocess.run(
+                ["gpg", "--batch", "--yes", "--dearmor",
+                 "--output", str(binary), str(armored)],
+                capture_output=True, text=True, timeout=30,
+                env={**_os.environ, "GNUPGHOME": str(gnupg_home)})
+        except (OSError, _subprocess.TimeoutExpired) as exc:
+            return _fail([f"could not dearmor GPG key for {path}: {exc}"])
+        if proc.returncode != 0 or not binary.is_file():
+            detail = (proc.stderr or proc.stdout or "gpg dearmor failed").strip()
+            return _fail([f"could not dearmor GPG key for {path}: {detail}"])
+        staged.write_bytes(binary.read_bytes())
+        lines.append(f"dearmored ASCII key for {path}")
+    else:
+        staged.write_bytes(data)
     lines.append(f"staged {len(data)} bytes for {path}")
     cp = privilege.run_privileged(["cp", str(staged), path], lines.append)
     if cp.get("need_terminal") or not cp["ok"]:
