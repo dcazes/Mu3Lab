@@ -48,7 +48,12 @@ NODESOURCE_LIST = ("deb [signed-by=/etc/apt/keyrings/nodesource.gpg] "
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io",
                    "docker-buildx-plugin", "docker-compose-plugin"]
-TAILSCALE_KEY_URL = "https://pkgs.tailscale.com/stable/{distro}.{codename}.gpg"
+def tailscale_key_url(distro: str, codename: str) -> str:
+    """GPG key URL for the Tailscale apt repo. Slash-separated
+    (…/stable/ubuntu/noble.gpg) — the dotted form 404s. Pure helper so the
+    shape is unit-testable instead of trusted from memory."""
+    family = "debian" if distro == "debian" else "ubuntu"
+    return f"https://pkgs.tailscale.com/stable/{family}/{codename}.gpg"
 CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
 SERVE_PORT = "19460"      # `tailscale serve --bg` proxies this local port
 TS_HOSTNAME = "mu3lab"
@@ -655,9 +660,7 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
         codename = _repo_codename() or "noble"
         key_tmp = Path("/tmp/mu3lab-tailscale.gpg")
         res = actions.fetch_url(
-            TAILSCALE_KEY_URL.format(
-                distro="debian" if distro == "debian" else "ubuntu",
-                codename=codename),
+            tailscale_key_url(_distro_slug(), codename),
             key_tmp, log)
         if not res["ok"]:
             return _propagate(res)

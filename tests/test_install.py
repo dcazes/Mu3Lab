@@ -224,7 +224,6 @@ class WorkspaceStepTests(unittest.TestCase):
             self.assertEqual(check["status"], "fail")
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
-
     def test_step_order(self):
         # Networks + Caddy need a live group: both come after the checkpoint,
         # which itself comes after everything group-independent (serve).
@@ -233,6 +232,19 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertLess(ids.index("restart_checkpoint"),
                         ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
+
+    def test_tailscale_key_url_shape(self):
+        # Slash-separated or it 404s (verified live against pkgs.tailscale.com
+        # after the dotted form failed a real install). Never trust memory.
+        self.assertEqual(
+            install.tailscale_key_url("ubuntu", "noble"),
+            "https://pkgs.tailscale.com/stable/ubuntu/noble.gpg")
+        self.assertEqual(
+            install.tailscale_key_url("linuxmint", "noble"),
+            "https://pkgs.tailscale.com/stable/ubuntu/noble.gpg")
+        self.assertEqual(
+            install.tailscale_key_url("debian", "bookworm"),
+            "https://pkgs.tailscale.com/stable/debian/bookworm.gpg")
 
 
 class CheckpointTests(unittest.TestCase):
