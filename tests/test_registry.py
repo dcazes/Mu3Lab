@@ -34,8 +34,15 @@ class RegistryTests(unittest.TestCase):
     def test_tailnet_url_never_falls_back_to_localhost(self):
         service = load().get("litellm")
         self.assertEqual(public_url(service, ""), "")
-        self.assertEqual(public_url(service, "mu3lab.example.ts.net"),
-                         "https://mu3lab.example.ts.net:4000")
+        self.assertEqual(public_url(service, "mu3lab.example.ts.net"), "")
+        ingress = load().get("ingress")
+        self.assertEqual(public_url(ingress, "mu3lab.example.ts.net"),
+                         "https://mu3lab.example.ts.net")
+
+    def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
+        registry = load()
+        self.assertTrue(registry.get("vaultwarden").images)
+        self.assertFalse(registry.get("open-webui").route == "ready")
 
     def test_runtime_paths_are_outside_checkout(self):
         paths = RuntimePaths()

@@ -31,9 +31,17 @@ management:
 
 The bootstrapper and registry-backed dashboard foundation are active work.
 `services.yaml` is the deployment source of truth and `catalog.yaml` is the
-user-facing curated catalog. Authentik and Vaultwarden Compose definitions are
-included, while the first complete AI slice (Ollama, LiteLLM, and Open WebUI)
-is still being brought in.
+user-facing curated catalog. The permanent dashboard has Home, Apps, AI & MCP,
+Identity & backup, and System views. It truthfully distinguishes foundation,
+planned, and policy-blocked services, and never offers a browser route until
+that route is actually published through the tailnet.
+
+The control plane currently remains deliberately read-only: durable,
+secret-redacted SQLite job and audit storage exists under
+`/srv/mu3lab/runtime`, but Compose lifecycle, backup, restore, and wiring
+actions stay disabled until Authentik protection and role mapping are active.
+Authentik and Vaultwarden Compose definitions are included, while the first
+complete AI slice (Ollama, LiteLLM, and Open WebUI) is still being brought in.
 
 ## Developer checks
 

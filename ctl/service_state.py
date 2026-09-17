@@ -31,8 +31,8 @@ def tailnet_dns_name(run=subprocess.run) -> str:
 
 
 def public_url(service: Service, dns_name: str) -> str:
-    """Build the only user-facing route: tailnet HTTPS, never localhost."""
-    if not dns_name:
+    """Build a tailnet URL only after the manifest declares a verified route."""
+    if not dns_name or service.route != "ready":
         return ""
     suffix = "" if service.https_port == 443 else f":{service.https_port}"
     return f"https://{dns_name}{suffix}"
@@ -71,6 +71,8 @@ def status(service: Service, dns_name: str, root: Path) -> dict:
     else:
         ok, detail = _healthy(service)
         state = "healthy" if ok else "stopped_or_unhealthy"
+    route_ready = service.route == "ready" and state == "healthy"
     return {**service.public(), "state": state, "detail": detail,
             "url": public_url(service, dns_name),
+            "route_ready": route_ready,
             "compose_present": compose_file.is_file()}

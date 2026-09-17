@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ctl import __version__  # noqa: F401 (re-exported for /api/health)
 from ctl.backups import readiness as backup_readiness
+from ctl.jobs import JobStore
 from ctl.registry import RegistryError, load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.service_state import status as service_status, tailnet_dns_name
@@ -125,6 +126,35 @@ def system() -> dict:
 def backups() -> dict:
     """Return local encrypted-backup readiness; execution needs an authenticated job."""
     return {"ok": True, **backup_readiness()}
+
+
+@app.get("/api/identity")
+def identity() -> dict:
+    """Report identity posture without pretending tailnet access is SSO."""
+    return {
+        "ok": True,
+        "control_plane_auth": "not_configured",
+        "detail": "Tailnet access is private, but Authentik protection and role mapping are not configured yet.",
+        "writes_enabled": False,
+    }
+
+
+@app.get("/api/jobs")
+def jobs() -> dict:
+    """Read durable job state. No job creation endpoint exists before identity enforcement."""
+    store = JobStore.runtime()
+    if store is None:
+        return {"ok": True, "available": False, "jobs": []}
+    return {"ok": True, "available": True, "jobs": store.jobs()}
+
+
+@app.get("/api/audit")
+def audit() -> dict:
+    """Read append-only, secret-redacted audit metadata."""
+    store = JobStore.runtime()
+    if store is None:
+        return {"ok": True, "available": False, "events": []}
+    return {"ok": True, "available": True, "events": store.audit()}
 
 
 if DIST.is_dir():

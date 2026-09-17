@@ -18,6 +18,8 @@ REGISTRY_PATH = ROOT / "services.yaml"
 VALID_AUTH = frozenset({"oidc", "proxy", "local", "excluded"})
 VALID_LIFECYCLE = frozenset({"always_on", "shared", "optional"})
 VALID_ACTIONS = frozenset({"start", "stop", "restart", "update"})
+VALID_STAGES = frozenset({"foundation", "planned", "blocked"})
+VALID_ROUTES = frozenset({"ready", "pending", "unavailable"})
 
 
 class RegistryError(ValueError):
@@ -42,6 +44,9 @@ class Service:
     blocked_reason: str = ""
     backup: dict[str, Any] = field(default_factory=dict)
     mcp: dict[str, Any] = field(default_factory=dict)
+    stage: str = "planned"
+    images: tuple[str, ...] = ()
+    route: str = "pending"
 
     @property
     def is_blocked(self) -> bool:
@@ -63,6 +68,8 @@ class Service:
                 "dependencies": list(self.dependencies),
                 "availability": self.availability,
                 "blocked_reason": self.blocked_reason,
+                "stage": self.stage, "route": self.route,
+                "routable": self.route == "ready",
                 "mcp": {"exposed": bool(self.mcp.get("exposed", False)),
                         "risk": self.mcp.get("risk", "")}}
 
@@ -96,6 +103,20 @@ def _service(item: dict[str, Any]) -> Service:
     profiles = tuple(_required(item, "profiles"))
     if not set(profiles).issubset({"cpu", "nvidia", "amd"}):
         raise RegistryError(f"service {service_id}: unsupported hardware profile")
+    stage = item.get("stage", "planned")
+    route = item.get("route", "pending")
+    if stage not in VALID_STAGES:
+        raise RegistryError(f"service {service_id}: unsupported stage {stage!r}")
+    if route not in VALID_ROUTES:
+        raise RegistryError(f"service {service_id}: unsupported route state {route!r}")
+    images = tuple(item.get("images", []))
+    if stage == "foundation" and not images:
+        raise RegistryError(f"service {service_id}: foundation services require reviewed images")
+    if not all(isinstance(image, str) and image and ":" in image and ":latest" not in image
+               for image in images):
+        raise RegistryError(f"service {service_id}: images must be pinned and never use latest")
+    if stage == "blocked" and item.get("availability") != "blocked":
+        raise RegistryError(f"service {service_id}: blocked stage requires blocked availability")
     return Service(id=service_id, name=_required(item, "name"),
                    category=_required(item, "category"), lifecycle=lifecycle,
                    compose_dir=compose_dir, https_port=port, health=health,
@@ -103,7 +124,8 @@ def _service(item: dict[str, Any]) -> Service:
                    dependencies=tuple(item.get("dependencies", [])),
                    availability=item.get("availability", "available"),
                    blocked_reason=item.get("blocked_reason", ""),
-                   backup=dict(item.get("backup", {})), mcp=dict(item.get("mcp", {})))
+                   backup=dict(item.get("backup", {})), mcp=dict(item.get("mcp", {})),
+                   stage=stage, images=images, route=route)
 
 
 class Registry:

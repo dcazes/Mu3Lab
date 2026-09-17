@@ -22,6 +22,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:19460/"}
     auth: excluded
     profiles: [cpu, nvidia, amd]
+    stage: foundation
+    images: ["caddy:2.10.2-alpine"]
+    route: ready
     backup: {volumes: [caddy-data, caddy-config]}
 
   - id: authentik
@@ -33,6 +36,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:9001/-/health/ready/"}
     auth: excluded
     profiles: [cpu, nvidia, amd]
+    stage: foundation
+    images: ["postgres:16-alpine", "ghcr.io/goauthentik/server:2026.5.0"]
+    route: pending
     backup: {database: authentik, volumes: [authentik-media, authentik-templates]}
 
   - id: vaultwarden
@@ -44,6 +50,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8081/alive"}
     auth: excluded
     profiles: [cpu, nvidia, amd]
+    stage: foundation
+    images: ["vaultwarden/server:1.34.3-alpine"]
+    route: pending
     backup: {binds: [data]}
     mcp: {exposed: false}
 
@@ -56,6 +65,8 @@ services:
     health: {kind: http, url: "http://127.0.0.1:11434/"}
     auth: proxy
     profiles: [cpu, nvidia, amd]
+    stage: planned
+    route: pending
     backup: {binds: [data]}
     mcp: {exposed: true, risk: read}
 
@@ -68,6 +79,8 @@ services:
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
+    stage: planned
+    route: pending
     dependencies: [ollama]
     backup: {binds: [config]}
     mcp: {exposed: true, risk: read}
@@ -81,6 +94,8 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8084/health"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
+    stage: planned
+    route: pending
     dependencies: [litellm]
     backup: {binds: [data]}
 
@@ -93,6 +108,8 @@ services:
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
     auth: proxy
     profiles: [cpu, nvidia, amd]
+    stage: planned
+    route: pending
     backup: {binds: [data]}
 
   - id: surfsense
@@ -106,5 +123,7 @@ services:
     profiles: [cpu, nvidia, amd]
     dependencies: [litellm, ollama]
     availability: blocked
+    stage: blocked
+    route: unavailable
     blocked_reason: "No supported Authentik/OIDC or trusted-proxy identity integration."
     backup: {database: surfsense, binds: [object-store]}

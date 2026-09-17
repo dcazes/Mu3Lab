@@ -3,24 +3,41 @@ schema_version: 1
 profiles:
   - id: local-ai
     name: Local AI
+    description: A private, free-first AI workspace with local models and an optional routed provider.
     services: [ollama, litellm, open-webui, freellmapi]
   - id: research
     name: Research
+    description: A research workspace that remains unavailable until it supports a safe identity model.
     services: [surfsense]
 
 services:
   ollama:
     summary: Local model runner for lightweight inference and embeddings.
+    category: AI foundation
+    stage_label: Planned
+    resource_guidance: Starts small; model downloads determine disk and RAM use.
     integrations: [litellm]
   litellm:
     summary: OpenAI-compatible model gateway with a free-first routing policy.
+    category: AI routing
+    stage_label: Planned
+    resource_guidance: Low host overhead; depends on configured providers.
     integrations: [ollama, freellmapi, open-webui]
   open-webui:
     summary: Private AI chat UI routed through LiteLLM.
+    category: AI workspace
+    stage_label: Planned
+    resource_guidance: Moderate memory use; model work happens upstream.
     integrations: [litellm]
   freellmapi:
     summary: Optional free-inference provider; never selected over a paid route automatically.
+    category: AI provider
+    stage_label: Planned
+    resource_guidance: Optional; requires an explicit provider configuration.
     integrations: [litellm]
   surfsense:
     summary: Research workspace pending a supported true-SSO integration.
+    category: Research
+    stage_label: Blocked by identity policy
+    resource_guidance: Not offered until upstream provides a supported identity hook.
     integrations: [litellm, ollama]
