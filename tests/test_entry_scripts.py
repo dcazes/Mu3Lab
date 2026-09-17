@@ -28,3 +28,11 @@ class EntryScriptTests(unittest.TestCase):
                                 text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("xdg-open", helper.read_text(encoding="utf-8"))
+
+    def test_ready_preflight_keeps_install_action_available(self):
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Host prerequisites are ready.", page)
+        self.assertIn("btn-inst').disabled = false", page)
+        self.assertNotIn("Everything above is already installed — nothing to do.", page)

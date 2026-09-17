@@ -297,8 +297,11 @@ function renderManifest(report) {
   list.hidden = false;
   note.hidden = false;
   if (!missing.length) {
-    list.innerHTML = '<li>Everything above is already installed — nothing to do.</li>';
-    document.getElementById('btn-inst').disabled = true;
+    // Preflight only validates host prerequisites.  The install job still owns
+    // reconciliation of /srv/mu3lab, private ingress, and Tailscale Serve.
+    // Keep the action available so a ready host can finish or repair those.
+    list.innerHTML = '<li><strong>Host prerequisites are ready.</strong><br><span class="mut">Install will verify and complete the persistent data layout, private ingress, and tailnet serving.</span></li>';
+    document.getElementById('btn-inst').disabled = false;
     return;
   }
   list.innerHTML = missing.map(c =>
