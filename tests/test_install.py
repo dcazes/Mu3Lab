@@ -303,8 +303,7 @@ class WorkspaceStepTests(unittest.TestCase):
         # Identity-first bootstrap: Vaultwarden is initialized locally before
         # the tailnet and Authentik are introduced.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("docker"), ids.index("docker_session"))
-        self.assertLess(ids.index("docker_session"), ids.index("runtime_layout"))
+        self.assertLess(ids.index("docker"), ids.index("runtime_layout"))
         self.assertLess(ids.index("runtime_layout"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
         self.assertLess(ids.index("caddy"), ids.index("vaultwarden"))
@@ -384,23 +383,19 @@ class WorkspaceStepTests(unittest.TestCase):
 
 
 class DockerSessionTests(unittest.TestCase):
-    """The user-visible Docker boundary requires a real re-login."""
+    """A stale bootstrap process continues via the Docker group safely."""
+
     def _ctx(self):
         return {"root": Path("/nonexistent"),
                 "log_fn": lambda step: lambda line: None,
                 "inputs": {}, "wait_input": lambda step: {},
                 "stopped": lambda: False}
 
-    def test_relogin_checkpoint_exists(self):
+    def test_stale_bootstrap_has_no_wait_step(self):
         ids = [m["id"] for m in install.STEPS]
-        self.assertIn("docker_session", ids)
-
-    def test_missing_session_waits_without_running_docker(self):
-        result = install.fix_docker_session(
-            {"state": "relogin_required"}, self._ctx())
-        self.assertTrue(result.get("waiting"))
-        self.assertEqual(result["prompt"]["kind"], "docker_relogin")
-        self.assertIn("Log out and back in", result["prompt"]["body"])
+        self.assertNotIn("docker_session", ids)
+        self.assertEqual(install.fix_for_state("docker", "stale_login"),
+                         "docker_group")
 
     def test_networks_denied_proceeds(self):
         # denied probes no longer fail: fix_networks runs through docker_cmd
@@ -451,7 +446,6 @@ class DockerSessionTests(unittest.TestCase):
             "docker": ["absent", "daemon_down", "unverified", "old_engine",
                        "no_compose", "no_access", "stale_login", "no_group",
                        "no_networks", "ready"],
-            "docker_session": ["relogin_required", "ready"],
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],

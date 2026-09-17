@@ -106,8 +106,6 @@ DISPATCH = {
     ("docker", "no_group"): "docker_group",
     ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",
-    ("docker_session", "relogin_required"): "wait_for_relogin",
-    ("docker_session", "ready"): "skip",
     ("docker_networks", "missing"): "create_networks",
     ("docker_networks", "denied"): "report_denied",
     ("docker_networks", "ready"): "skip",
@@ -679,47 +677,6 @@ def fix_docker(check: dict, ctx: dict) -> dict:
     return {"ok": True}
 
 
-def _group_live() -> bool:
-    """True iff THIS process holds the docker group (os.getgroups: live
-    credentials, never the group database). Kept for diagnostics; install
-    execution no longer gates on it (sg covers DB members)."""
-    import grp as _grp
-    try:
-        return "docker" in [_grp.getgrgid(gid).gr_name
-                            for gid in os.getgroups()]
-    except OSError:
-        return False
-
-
-def _docker_session_check(ctx: dict) -> dict:
-    """Require a fresh login after Docker group membership changes.
-
-    `sg docker` is intentionally not accepted as proof here: it would let the
-    bootstrap continue in a process whose normal operator session is still
-    wrong. A fresh desktop/SSH login is the supported boundary.
-    """
-    if _group_live():
-        return {"name": "docker_session", "status": "ok",
-                "detail": "Current session has Docker group access.",
-                "action": "", "state": "ready", "blocking": False}
-    return {"name": "docker_session", "status": "missing",
-            "detail": "Docker membership was added, but this login session has not refreshed.",
-            "action": "Log out and back in, reopen the bootstrap dashboard, then retry.",
-            "state": "relogin_required", "blocking": False}
-
-
-def fix_docker_session(check: dict, ctx: dict) -> dict:
-    """Pause safely for the real OS-session transition; never bypass it."""
-    return {"waiting": True, "prompt": {
-        "kind": "docker_relogin",
-        "title": "Log out and back in to activate Docker access",
-        "body": ("Mu3Lab added your account to the Docker group. Log out and back in "
-                 "now, reopen the local bootstrap dashboard with ./install.sh, then "
-                 "choose Retry. No Docker-backed stack has been started yet."),
-        "terminal_command": "./install.sh",
-    }}
-
-
 def _networks_check(ctx: dict) -> dict:
     """Shared-network presence, probed the SAME way the fix executes.
 
@@ -1259,8 +1216,6 @@ STEPS = [
      # authorization never blocks because fixes run via sg when needed.
      # Verify passes while any of these hold (the step's own work is done).
      "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access")},
-    {"id": "docker_session", "label": "Docker login session",
-     "check": _docker_session_check, "fix": fix_docker_session},
     {"id": "runtime_layout", "label": "Persistent data layout",
      "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
      "fix": fix_runtime_layout},

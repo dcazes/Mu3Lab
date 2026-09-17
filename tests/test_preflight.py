@@ -169,17 +169,18 @@ class DockerTests(unittest.TestCase):
         self.assertEqual(result["state"], "no_compose")
 
     def test_group(self):
-        # Live lacks, DB lacks: installer must add, then fresh login.
+        # Live lacks and DB lacks: installer adds the group, then uses its
+        # sg-aware Docker runner for the remainder of this bootstrap.
         result = self._base(group_names=["dak", "sudo"], db_has_group=False)
         self.assertEqual(result["state"], "no_group")
-        self.assertIn("checkpoint", result["action"])
+        self.assertIn("continues safely", result["action"])
 
     def test_stale_login(self):
-        # Live lacks, DB HAS: the checker (not the login) is stale — restart
-        # it, don't log out again. This is the exact post-relogin trap.
+        # Live lacks but DB has the membership: a long-lived checker may
+        # predate it, and its sg-aware Docker runner still works.
         result = self._base(group_names=["dak", "sudo"], db_has_group=True)
         self.assertEqual(result["state"], "stale_login")
-        self.assertIn("./check.sh", result["action"])
+        self.assertIn("continue safely", result["action"])
 
     def test_denied_with_db_routes_to_restart(self):
         result = self._base(docker_info_rc=1, permission_denied=True,

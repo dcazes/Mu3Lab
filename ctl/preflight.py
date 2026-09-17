@@ -251,8 +251,9 @@ def check_docker(docker_info_rc: int, group_names: list[str],
     the disambiguators: `permission_denied` (stderr said so) and
     `daemon_active` (systemctl, no socket needed). The group verdict splits
     three ways via live credentials vs group database: no_group (DB lacks
-    you → installer adds), stale_login (DB has you, this process doesn't
-    → restart the checker, not another logout), ready. States: absent |
+    you → installer adds), stale_login (DB has you, this process predates
+    the membership), ready. Docker commands safely use ``sg docker`` for
+    either non-live state, so neither creates a user-facing pause. States: absent |
     daemon_down | no_access | unverified | old_engine | no_compose |
     no_group | stale_login | no_networks | ready. All inputs injected; this
     function only judges.
@@ -267,14 +268,12 @@ def check_docker(docker_info_rc: int, group_names: list[str],
                 return _result("docker", "missing",
                                "Docker runs and you're in its group — but this "
                                "checker started before your fresh login.",
-                               "Restart ./check.sh (Ctrl-C, run again) — no new "
-                               "login needed.",
+                               "Mu3Lab can continue safely using your docker group.",
                                state="stale_login")
             return _result("docker", "missing",
                            "Docker is installed and running — this login just "
                            "isn't authorized to use it yet.",
-                           "step 3 adds you to the group, then pauses for a "
-                           "fresh login.",
+                           "step 3 adds you to the group and continues safely.",
                            state="no_access")
         return _result("docker", "missing",
                        "Docker is installed but the daemon is not running.",
@@ -300,20 +299,17 @@ def check_docker(docker_info_rc: int, group_names: list[str],
     # added minutes ago; only getgroups() reports this process's credentials.
     if "docker" not in group_names:
         if db_has_group:
-            # The USER is a member but THIS process isn't: the checker started
-            # before the fresh login. Restarting the checker (not logging out
-            # again) is the fix — name it exactly.
+            # The user is a member but this long-lived checker predates that
+            # membership. Docker actions use ``sg docker`` until it exits.
             return _result("docker", "missing",
                            "You're in the docker group, but this checker "
                            "started before your fresh login.",
-                           "Restart ./check.sh (Ctrl-C, run again) — no new "
-                           "login needed.",
+                           "Mu3Lab can continue safely using your docker group.",
                            state="stale_login")
         return _result("docker", "missing",
                        "Installed and running; this login just needs the "
                        "`docker` group to take effect.",
-                       "step 3 pauses at the restart checkpoint: fresh login, "
-                       "then Resume.",
+                       "step 3 adds the group and continues safely.",
                        state="no_group")
     missing = [net for net in MU3LAB_NETWORKS if net not in networks_present]
     if missing:
