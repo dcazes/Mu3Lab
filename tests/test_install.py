@@ -325,7 +325,9 @@ class WorkspaceStepTests(unittest.TestCase):
              patch("ctl.install.webbrowser.open", return_value=True) as opened:
             result = install.fix_tailscale_join(
                 {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
-        run.assert_called_once()
+        run.assert_called_once_with(
+            ["tailscale", "up", "--hostname=mu3lab", "--timeout=10s"],
+            unittest.mock.ANY, timeout=20)
         opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
         self.assertTrue(result["waiting"])
         self.assertEqual(result["prompt"]["login_url"],

@@ -57,6 +57,8 @@ def tailscale_key_url(distro: str, codename: str) -> str:
 CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
 SERVE_PORT = "19460"      # `tailscale serve --bg` proxies this local port
 TS_HOSTNAME = "mu3lab"
+TAILSCALE_JOIN_TIMEOUT = "10s"  # prevents browser approval from blocking a job forever
+TAILSCALE_WORKER_TIMEOUT = 20    # bounds the elevated worker if the CLI misbehaves
 
 
 # ---------------------------------------------------------------------------
@@ -760,9 +762,11 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     immediately and is never persisted or sent back as a credential.
     """
     log = ctx["log_fn"]("tailscale_join")
-    log("$ tailscale up --hostname=mu3lab  (capturing login URL)")
+    log("$ tailscale up --hostname=mu3lab --timeout=10s  (waiting up to 10 seconds for login URL)")
     result = privilege.run_privileged(
-        ["tailscale", "up", "--hostname=" + TS_HOSTNAME], log)
+        ["tailscale", "up", "--hostname=" + TS_HOSTNAME,
+         "--timeout=" + TAILSCALE_JOIN_TIMEOUT], log,
+        timeout=TAILSCALE_WORKER_TIMEOUT)
     out = result.get("output", "")
     import re as _re
     match = _re.search(r"https://login\.tailscale\.com/[A-Za-z0-9/_-]+", out)

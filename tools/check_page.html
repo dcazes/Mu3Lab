@@ -35,6 +35,8 @@
   pre.tail { max-height: 9em; margin: .4rem 0; }
   .prompt { border-left: 3px solid var(--wait); padding: .4rem .6rem; margin: .4rem 0; background: #fff8e6; }
   code.act { background: #f6f8fa; padding: .1rem .3rem; font-size: .85rem; }
+  .spin { display: inline-block; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -390,7 +392,7 @@ function promptHtml(step) {
   html += '<br><button onclick="retryInstall()">Done — retry</button></div>';
   return html;
 }
-const INST_MARKS = {pending: '<span class="mut">○</span>', installing: '<span class="wait">▶</span>',
+const INST_MARKS = {pending: '<span class="mut">○</span>', installing: '<span class="wait spin">◌</span>',
   verifying: '<span class="wait">◷</span>', ready: '<span class="ok">✓</span>',
   failed: '<span class="bad">✗</span>', waiting: '<span class="wait">⏸</span>'};
 // KEYED install rows: skeleton built once per job id; polls only update marks,
@@ -422,7 +424,10 @@ async function refreshInstall() {
   ensureInstRows(job);
   for (const s of job.steps) {
     document.getElementById('imark-' + s.id).innerHTML = INST_MARKS[s.status] || '?';
-    document.getElementById('idet-' + s.id).textContent = s.detail || '';
+    const liveDetail = s.id === 'tailscale_join' && s.status === 'installing'
+      ? 'Requesting the Tailscale login link (up to 10 seconds)…'
+      : (s.detail || '');
+    document.getElementById('idet-' + s.id).textContent = liveDetail;
     document.getElementById('ierr-' + s.id).innerHTML = s.error
       ? '<span class="bad">' + escapeHtml(s.error) + '</span>' : '';
     document.getElementById('iprompt-' + s.id).innerHTML = promptHtml(s);
@@ -466,7 +471,8 @@ async function refreshInstall() {
       document.getElementById('btn-inst').disabled = false;
     }
   } else {
-    setStatus('inst-status', 'installing…', 'wait');
+    const joining = job.steps.some(s => s.id === 'tailscale_join' && s.status === 'installing');
+    setStatus('inst-status', joining ? 'waiting for Tailscale login link…' : 'installing…', 'wait');
   }
 }
 // Full transcript: every step's complete log, built ONCE at terminal state.
