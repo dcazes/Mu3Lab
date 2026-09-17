@@ -54,3 +54,11 @@ class RegistryTests(unittest.TestCase):
                 self.assertIn("services", compose)
         authentik = (root / "core/authentik/.env.example").read_text(encoding="utf-8")
         self.assertNotIn("AUTHENTIK_TAG=latest", authentik)
+
+    def test_ingress_matches_tailnet_host_headers_on_loopback(self):
+        caddyfile = (Path(__file__).resolve().parents[1] / "core/ingress/Caddyfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(":19460 {", caddyfile)
+        self.assertIn("bind 127.0.0.1", caddyfile)
+        self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)

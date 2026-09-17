@@ -13,7 +13,10 @@
 
 # Dashboard entrypoint. Tailscale Serve terminates tailnet HTTPS and sends only
 # loopback HTTP here; no application container binds to the LAN.
-http://127.0.0.1:19460 {
+# Match any Host header arriving from Tailscale Serve while still binding only
+# to loopback. A host-specific site address would return an empty response
+# when the tailnet hostname is forwarded by Serve.
+:19460 {
 	bind 127.0.0.1
 	reverse_proxy 127.0.0.1:8787
 }
@@ -21,7 +24,7 @@ http://127.0.0.1:19460 {
 # Authentik first-run UI. It is intentionally not protected by forward auth:
 # Authentik is the identity provider and its own first administrator is created
 # in its official UI after bootstrap.
-http://127.0.0.1:19461 {
+:19461 {
 	bind 127.0.0.1
 	reverse_proxy 127.0.0.1:9001 {
 		header_up X-Forwarded-Proto https
@@ -30,7 +33,7 @@ http://127.0.0.1:19461 {
 
 # Vaultwarden remains its own application authentication boundary. Its remote
 # route is private to the tailnet; it is never exposed through MCP.
-http://127.0.0.1:19462 {
+:19462 {
 	bind 127.0.0.1
 	reverse_proxy 127.0.0.1:8081 {
 		header_up X-Forwarded-Proto https
