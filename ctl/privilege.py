@@ -58,6 +58,51 @@ def quote_terminal(argv: list[str]) -> str:
     return "sudo " + shlex.join(argv)
 
 
+# Module-owned elevated worker (ONE pkexec dialog per install, not per
+# command). Created by ensure_elevation(), used by run_privileged(),
+# destroyed by release_elevation(). Never holds secrets — it only ferries
+# argv (see ctl/elevate.py).
+_worker = None
+
+
+def ensure_elevation(log: Callable[[str], None]) -> str:
+    """Prepare ONE elevation for many commands. Returns "sudo" | "worker" |
+    "terminal". Spawns the worker (single pkexec dialog) only when sudo is
+    stale AND a polkit agent exists; otherwise reports the fallback path.
+    Idempotent: safe to call per job start AND per step."""
+    global _worker
+    if has_fresh_sudo():
+        return "sudo"
+    if _worker is not None and _worker.alive():
+        return "worker"
+    if has_polkit_agent():
+        from ctl import elevate
+        worker = elevate.Worker()
+        if worker.start(log):
+            _worker = worker
+            return "worker"
+        _worker = None
+        log("system dialog cancelled/failed; falling back to terminal commands")
+    return "terminal"
+
+
+def release_elevation() -> None:
+    """Stop the worker if running. Always called at job end (finally).
+
+    Tolerates foreign worker objects (tests) — a missing stop() is treated
+    as already-stopped, never as an error worth crashing cleanup.
+    """
+    global _worker
+    if _worker is not None:
+        try:
+            stop = getattr(_worker, "stop", None)
+            if callable(stop):
+                stop()
+        except OSError:
+            pass
+        _worker = None
+
+
 def run_privileged(argv: list[str], log: Callable[[str], None],
                    _exec=_exec, _sudo_fresh: bool | None = None,
                    _agent: bool | None = None) -> dict:
@@ -70,6 +115,12 @@ def run_privileged(argv: list[str], log: Callable[[str], None],
     for tests; live callers omit them (real probes run).
     """
     log("$ " + quote_terminal(argv))
+    # One-dialog path: the session worker (spawned once by ensure_elevation)
+    # runs every command without further prompts.
+    if _worker is not None and _worker.alive():
+        rc, out = _worker.run(argv)
+        log(out or f"(exit {rc}, no output)")
+        return {"ok": rc == 0, "rc": rc, "output": out}
     fresh = has_fresh_sudo(_exec) if _sudo_fresh is None else _sudo_fresh
     if fresh:
         rc, out = _exec(["sudo"] + argv)
@@ -77,8 +128,8 @@ def run_privileged(argv: list[str], log: Callable[[str], None],
         return {"ok": rc == 0, "rc": rc, "output": out}
     agent = has_polkit_agent() if _agent is None else _agent
     if agent:
-        # pkexec pops the NATIVE system dialog (dimmed screen). The secret
-        # goes to the system auth agent only — this process never sees it.
+        # Standalone single command (no session): one dialog for this call.
+        # Install jobs avoid this path via ensure_elevation().
         rc, out = _exec(["pkexec"] + argv)
         log(out or f"(exit {rc}, no output)")
         return {"ok": rc == 0, "rc": rc, "output": out}

@@ -32,6 +32,8 @@
   .bar { height: 10px; background: #eaeef2; border-radius: 5px; margin: .5rem 0; }
   .bar > div { height: 100%; background: var(--ok); border-radius: 5px; width: 0%; }
   pre { background: #f6f8fa; padding: .6rem; overflow-x: auto; font-size: .82rem; max-height: 300px; overflow-y: auto; }
+  pre.tail { max-height: 9em; margin: .4rem 0; }
+  .prompt { border-left: 3px solid var(--wait); padding: .4rem .6rem; margin: .4rem 0; background: #fff8e6; }
   code.act { background: #f6f8fa; padding: .1rem .3rem; font-size: .85rem; }
 </style>
 </head>
@@ -82,8 +84,11 @@
        Tailscale (sign in or paste a key); sharing and the phone check then
        run by themselves.</p>
     <p><button id="btn-inst" onclick="startInstall()" disabled>Install</button>
-       <button id="btn-instop" onclick="killInstall()" disabled>Stop</button></p>
+       <button id="btn-instop" onclick="killInstall()" disabled>Stop</button>
+       <button id="btn-script" onclick="copyScript()">Copy full admin script</button></p>
     <div id="inst-rows"></div>
+    <details id="inst-transcript-wrap" hidden><summary>full install transcript</summary><pre id="inst-transcript"></pre></details>
+    <details><summary>admin commands recorded so far</summary><pre id="script-pre">Nothing recorded yet — start the install first.</pre></details>
     <div id="inst-log" class="mut"></div>
   </div>
 </section>
@@ -126,6 +131,8 @@ let pollTimer = null;
 async function runTests() {
   document.getElementById('btn-tests').disabled = true;
   document.getElementById('btn-kill').disabled = false;
+  // Fresh skeleton per run so stale counts can't linger.
+  delete document.getElementById('tests-table').dataset.built;
   setStatus('tests-status', 'running…', 'wait');
   try { await api('/api/tests/run', 'POST'); }
   catch (e) { console.error('tests/run', e); setStatus('tests-status', 'could not start: ' + e.message, 'bad'); return; }
@@ -163,16 +170,24 @@ async function refreshTests() {
     byGroup[g].ran++;
     if (t.outcome === 'fail' || t.outcome === 'error') byGroup[g].bad.push(t);
   }
+  // Grouped table, KEYED: skeleton built once per run, cells updated in
+  // place. Rebuilding innerHTML every poll would destroy <details> state;
+  // keyed cells never touch the expander below.
   const tbl = document.getElementById('tests-table');
-  tbl.hidden = false;
-  tbl.innerHTML = '<tr><th>area</th><th>result</th><th>detail</th></tr>' +
-    TEST_GROUPS.map(g => {
-      const r = byGroup[g.label] || {ran: 0, bad: []};
-      const mark = r.bad.length ? '<span class="bad">FAIL</span>' : '<span class="ok">PASS</span>';
-      const detail = r.ran + ' ran' + (r.bad.length
-        ? '<br>' + r.bad.map(t => escapeHtml(t.id.split('.').slice(1).join('.'))).join('<br>') : '');
-      return '<tr><td>' + g.label + '</td><td>' + mark + '</td><td>' + detail + '</td></tr>';
-    }).join('');
+  if (!tbl.dataset.built) {
+    tbl.hidden = false;
+    tbl.innerHTML = '<tr><th>area</th><th>result</th><th>detail</th></tr>' +
+      TEST_GROUPS.map((g, i) => '<tr><td>' + g.label + '</td><td id="tmark' +
+        i + '">…</td><td id="tdet' + i + '">…</td></tr>').join('');
+    tbl.dataset.built = '1';
+  }
+  TEST_GROUPS.forEach((g, i) => {
+    const r = byGroup[g.label] || {ran: 0, bad: []};
+    document.getElementById('tmark' + i).innerHTML = r.bad.length
+      ? '<span class="bad">FAIL</span>' : '<span class="ok">PASS</span>';
+    document.getElementById('tdet' + i).innerHTML = r.ran + ' ran' + (r.bad.length
+      ? '<br>' + r.bad.map(t => escapeHtml(t.id.split('.').slice(1).join('.'))).join('<br>') : '');
+  });
   document.getElementById('tests-log').textContent = tests.map(t =>
     (t.outcome === 'pass' ? 'PASS' : t.outcome.toUpperCase()) + ' ' + t.id +
     (t.detail ? '\n' + t.detail : '')).join('\n') || '(no output yet)';
@@ -261,7 +276,12 @@ async function postJSON(path, body) {
   return data;
 }
 async function startInstall() {
-  // Fresh start, or retry-resume an existing job (server skips ready steps).
+  // New job (or retry-resume): reset row keys so a previous job's rows
+  // can't leak into this run's keyed updates.
+  instJobId = null;
+  for (const k of Object.keys(instLines)) delete instLines[k];
+  document.getElementById('inst-rows').innerHTML = '';
+  document.getElementById('inst-transcript-wrap').hidden = true;
   document.getElementById('btn-inst').disabled = true;
   document.getElementById('btn-instop').disabled = false;
   setStatus('inst-status', 'starting…', 'wait');
@@ -299,6 +319,9 @@ async function sendContinue() {
 async function retryInstall() {
   try { await postJSON('/api/install/retry'); }
   catch (e) { console.error('install/retry', e); return; }
+  instJobId = null;  // re-render rows for the resumed job (same id, fresh keys)
+  for (const k of Object.keys(instLines)) delete instLines[k];
+  document.getElementById('inst-rows').innerHTML = '';
   document.getElementById('btn-inst').disabled = true;
   document.getElementById('btn-instop').disabled = false;
   instTimer = setInterval(refreshInstall, 1000);
@@ -322,35 +345,72 @@ function promptHtml(step) {
   html += '<br><button onclick="retryInstall()">Done — retry</button></div>';
   return html;
 }
+const INST_MARKS = {pending: '<span class="mut">○</span>', installing: '<span class="wait">▶</span>',
+  verifying: '<span class="wait">◷</span>', ready: '<span class="ok">✓</span>',
+  failed: '<span class="bad">✗</span>', waiting: '<span class="wait">⏸</span>'};
+// KEYED install rows: skeleton built once per job id; polls only update marks,
+// errors, prompt blocks and APPEND new log lines. Rebuilding rows would close
+// the reader's open <details> on every poll (the auto-close bug).
+let instJobId = null;
+const instLines = {};  // step id -> rendered log line count
+function ensureInstRows(job) {
+  if (instJobId === job.id) return;
+  instJobId = job.id;
+  for (const k of Object.keys(instLines)) delete instLines[k];
+  document.getElementById('inst-rows').innerHTML = job.steps.map(s =>
+    '<div id="irow-' + s.id + '">' +
+    '<span id="imark-' + s.id + '"></span> <strong>' + s.label + '</strong>' +
+    ' <span class="mut" id="idet-' + s.id + '"></span>' +
+    '<div id="ierr-' + s.id + '"></div>' +
+    '<div id="iprompt-' + s.id + '"></div>' +
+    '<pre class="tail" id="itail-' + s.id + '" hidden></pre>' +
+    '<details id="ifull-' + s.id + '" hidden><summary>full log</summary><pre id="ilog-' +
+    s.id + '"></pre></details></div>').join('');
+  document.getElementById('inst-transcript-wrap').hidden = true;
+}
 async function refreshInstall() {
   let st;
   try { st = await api('/api/install/state'); }
   catch (e) { console.error('install/state', e); return; }
   const job = st.job;
   if (!job) return;
-  const marks = {pending: '<span class="mut">○</span>', installing: '<span class="wait">▶</span>',
-    verifying: '<span class="wait">◷</span>', ready: '<span class="ok">✓</span>',
-    failed: '<span class="bad">✗</span>', waiting: '<span class="wait">⏸</span>'};
-  document.getElementById('inst-rows').innerHTML =
-    job.steps.map(s => '<div>' + (marks[s.status] || '?') + ' <strong>' + s.label + '</strong>' +
-      (s.detail ? ' <span class="mut">' + escapeHtml(s.detail) + '</span>' : '') +
-      (s.error ? '<br><span class="bad">' + escapeHtml(s.error) + '</span>' : '') +
-      promptHtml(s) +
-      (s.log && s.log.length ? '<details><summary>log</summary><pre>' +
-        escapeHtml(s.log.join('\n')) + '</pre></details>' : '') + '</div>').join('');
+  ensureInstRows(job);
+  for (const s of job.steps) {
+    document.getElementById('imark-' + s.id).innerHTML = INST_MARKS[s.status] || '?';
+    document.getElementById('idet-' + s.id).textContent = s.detail || '';
+    document.getElementById('ierr-' + s.id).innerHTML = s.error
+      ? '<span class="bad">' + escapeHtml(s.error) + '</span>' : '';
+    document.getElementById('iprompt-' + s.id).innerHTML = promptHtml(s);
+    // Append-only log sync: never rewrite, so open states and scroll survive.
+    const shown = instLines[s.id] || 0;
+    const lines = s.log || [];
+    if (lines.length > shown) {
+      const fresh = lines.slice(shown).map(escapeHtml);
+      instLines[s.id] = lines.length;
+      const tail = document.getElementById('itail-' + s.id);
+      tail.hidden = false;
+      tail.textContent = (tail.textContent + '\n' + fresh.join('\n')).trim()
+        .split('\n').slice(-8).join('\n');  // visible tail: last 8 lines
+      const full = document.getElementById('ilog-' + s.id);
+      full.textContent = (full.textContent + '\n' + fresh.join('\n')).trim();
+      document.getElementById('ifull-' + s.id).hidden = false;
+    }
+  }
   const log = document.getElementById('inst-log');
   if (['ready', 'failed', 'waiting', 'cancelled'].includes(job.status)) {
     clearInterval(instTimer);
     document.getElementById('btn-instop').disabled = true;
     if (job.status === 'ready') {
       setStatus('inst-status', 'done — infrastructure installed', 'ok');
-      log.textContent = 'Next: the real dashboard (Phase 8) will take over app installs here.';
+      log.textContent = '';
+      renderTranscript(job);
     } else if (job.status === 'waiting') {
       setStatus('inst-status', 'needs you — see the paused row above', 'wait');
       log.textContent = '';
     } else if (job.status === 'failed') {
       setStatus('inst-status', 'failed — fix and retry', 'bad');
       log.innerHTML = 'The failed row is above. <button onclick="retryInstall()">Retry</button>';
+      renderTranscript(job);
     } else {
       setStatus('inst-status', 'stopped', 'mut');
       document.getElementById('btn-inst').disabled = false;
@@ -358,6 +418,30 @@ async function refreshInstall() {
   } else {
     setStatus('inst-status', 'installing…', 'wait');
   }
+}
+// Full transcript: every step's complete log, built ONCE at terminal state.
+// Nothing is ever removed — the whole run stays readable after completion.
+function renderTranscript(job) {
+  const wrap = document.getElementById('inst-transcript-wrap');
+  wrap.hidden = false;
+  document.getElementById('inst-transcript').textContent = job.steps.map(s =>
+    '=== ' + s.label + ' [' + s.status + '] ===\n' +
+    (s.log || []).join('\n')).join('\n\n');
+}
+async function copyScript() {
+  // Combined admin script (headless fallback): recorded privileged commands.
+  let data;
+  try { data = await api('/api/install/script'); }
+  catch (e) { console.error('install/script', e); return; }
+  const pre = document.getElementById('script-pre');
+  pre.hidden = false;
+  if (!data.script) {
+    pre.textContent = 'No admin commands recorded yet — start the install first.';
+    return;
+  }
+  pre.textContent = data.script;
+  try { await navigator.clipboard.writeText(data.script); pre.textContent += '\n(copied)'; }
+  catch (e) { console.error('clipboard', e); }
 }
 
 // --- page load: restore unlocks the server still remembers -----------------

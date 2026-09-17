@@ -242,6 +242,23 @@ class WorkspaceStepTests(unittest.TestCase):
 
 
 class PropagateTests(unittest.TestCase):
+    def test_collect_script(self):
+        job = {"steps": [
+            {"id": "a", "log": ["$ sudo apt-get update", "plain noise",
+                                "$ sudo apt-get install -y docker-ce",
+                                "$ sudo apt-get update"]},
+            {"id": "b", "log": ["$ docker network create foo"]},
+        ]}
+        script = install.collect_privileged_script(job)
+        # Deduped, sudo-prefixed lines only, runnable header present.
+        self.assertIn("set -e", script.splitlines()[3])
+        self.assertEqual(script.count("apt-get update"), 2)  # echo + command
+        self.assertNotIn("plain noise", script)
+        self.assertNotIn("docker network create", script)
+
+    def test_collect_empty(self):
+        self.assertEqual(install.collect_privileged_script({"steps": []}), "")
+
     def test_terminal_becomes_waiting(self):
         result = install._propagate({"ok": False, "changed": False, "log": [],
                                      "need_terminal": True,

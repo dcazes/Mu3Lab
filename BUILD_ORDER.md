@@ -109,7 +109,9 @@ thresholds not pins; docker floor ≥24 + compose plugin; `blocking` flags +
 > (routers, app installers) still arrives in Phases 8/11; the status screen
 > + health API ship now because card ③ must end on a working :8787. React
 > builds as the unprivileged user with per-step log tails — background tech,
-> never user-facing.
+> never user-facing. Privilege: ONE pkexec worker per job (ctl/elevate.py),
+> combined copy-paste script headless. UI: keyed in-place row updates (open
+> logs never snap shut), always-visible tails, full transcript at job end.
 
 | # | File | Contains | Test / gate |
 |---|------|----------|-------------|

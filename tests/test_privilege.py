@@ -14,6 +14,7 @@ DEBUG: Fake _exec as `lambda argv: (0, "ok")`; force paths with _sudo_fresh /
 import inspect
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -77,6 +78,73 @@ class NoSecretsTests(unittest.TestCase):
                 self.assertNotIn("password", param.lower(), name)
                 self.assertNotIn("secret", param.lower(), name)
                 self.assertNotIn("token", param.lower(), name)
+
+
+class SessionTests(unittest.TestCase):
+    def tearDown(self):
+        privilege.release_elevation()
+
+    def test_fresh_sudo_needs_no_worker(self):
+        with unittest.mock.patch.object(
+                privilege, "has_fresh_sudo", return_value=True):
+            mode = privilege.ensure_elevation(_silent)
+        self.assertEqual(mode, "sudo")
+        self.assertIsNone(privilege._worker)
+
+    def test_worker_spawned_once(self):
+        made: list[str] = []
+        class FakeWorker:
+            def start(self, log=None):
+                made.append("spawn")
+                return True
+            def alive(self):
+                return True
+        with unittest.mock.patch.object(
+                privilege, "has_fresh_sudo", return_value=False), \
+             unittest.mock.patch.object(
+                privilege, "has_polkit_agent", return_value=True), \
+             unittest.mock.patch("ctl.elevate.Worker", FakeWorker):
+            self.assertEqual(privilege.ensure_elevation(_silent), "worker")
+            # Second call reuses; no second spawn.
+            self.assertEqual(privilege.ensure_elevation(_silent), "worker")
+        self.assertEqual(made, ["spawn"])
+
+    def test_cancelled_dialog_falls_back(self):
+        class DeadWorker:
+            def start(self, log=None):
+                return False
+        with unittest.mock.patch.object(
+                privilege, "has_fresh_sudo", return_value=False), \
+             unittest.mock.patch.object(
+                privilege, "has_polkit_agent", return_value=True), \
+             unittest.mock.patch("ctl.elevate.Worker", DeadWorker):
+            logged: list[str] = []
+            mode = privilege.ensure_elevation(logged.append)
+        self.assertEqual(mode, "terminal")
+
+    def test_run_prefers_live_worker(self):
+        class LiveWorker:
+            def alive(self):
+                return True
+            def run(self, argv, timeout=300):
+                return 0, "via-worker"
+        privilege._worker = LiveWorker()
+        logged: list[str] = []
+        result = privilege.run_privileged(["apt-get", "update"], logged.append)
+        self.assertTrue(result["ok"])
+        self.assertIn("via-worker", logged[-1])
+
+    def test_release_stops_worker(self):
+        stopped: list[str] = []
+        class LiveWorker:
+            def alive(self):
+                return True
+            def stop(self):
+                stopped.append("stop")
+        privilege._worker = LiveWorker()
+        privilege.release_elevation()
+        self.assertEqual(stopped, ["stop"])
+        self.assertIsNone(privilege._worker)
 
 
 if __name__ == "__main__":

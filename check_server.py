@@ -186,7 +186,10 @@ def _install_worker(state: State) -> None:
             job["events"].append({"type": "error",
                                   "detail": f"installer crashed: {exc}"})
     finally:
-        # Wipe any supplied key the moment the job stops being interactive.
+        # Wipe any supplied key the moment the job stops being interactive,
+        # and stop the elevated worker (no lingering root process).
+        from ctl import privilege as _priv
+        _priv.release_elevation()
         with state.lock:
             job["inputs"].pop("tailscale_authkey", None)
         emit({"type": "summary", "phase": "done", "status": job["status"]})
@@ -253,6 +256,14 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/tests/events":
             with state.lock:
                 self._json({"events": list(state.test_events)})
+        elif self.path == "/api/install/script":
+            # Combined admin script (headless fallback): every privileged
+            # command recorded so far, as one `sudo bash` script.
+            from ctl import install as _install
+            with state.lock:
+                job = state.install_job
+                script = _install.collect_privileged_script(job) if job else ""
+            self._json({"script": script})
         elif self.path == "/api/install/state":
             # GET alias (the page polls state/events with GET; POST works too).
             with state.lock:

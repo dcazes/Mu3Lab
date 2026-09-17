@@ -841,6 +841,16 @@ def run_job(job: dict, ctx: dict) -> None:
     ctx["wait_input"] blocks the join step until the UI supplies a key or a
     continue signal; ctx["stopped"] aborts between steps."""
     job["status"] = "running"
+    # ONE elevation for the whole job (single system dialog, not per step).
+    # ensure_elevation() is a no-op when sudo is already fresh; any worker it
+    # spawns is released in the finally at the end of this function.
+    from ctl import privilege as _priv
+    mode = _priv.ensure_elevation(
+        lambda line: ctx["emit"]({"type": "log", "id": "_install_",
+                                  "line": line}))
+    ctx["emit"]({"type": "log", "id": "_install_",
+                 "line": f"elevation mode: {mode} "
+                         f"({'no dialogs expected' if mode != 'terminal' else 'terminal commands will be shown'})"})
     start_at = next((i for i, s in enumerate(job["steps"])
                      if s["status"] not in ("ready",)), 0)
     for step in job["steps"][start_at:]:
@@ -931,6 +941,26 @@ def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
         step["error"] = result.get("error", "unknown error")
         ctx["emit"]({"type": "step", "id": step["id"], "status": "failed",
                      "error": step["error"]})
+
+
+def collect_privileged_script(job: dict) -> str:
+    """Assemble every recorded admin command into ONE copy-paste script.
+
+    Source of truth: step logs' `$ sudo ...` lines (written by
+    privilege.run_privileged for every elevation, worker or direct).
+    Headless-session fallback: run the output with `sudo bash script.sh`.
+    Empty string when nothing privileged has run yet.
+    """
+    seen: list[str] = []
+    for step in job.get("steps", []):
+        for line in step.get("log", []):
+            text = line.strip()
+            if text.startswith("$ sudo ") and text[7:] not in seen:
+                seen.append(text[7:])
+    if not seen:
+        return ""
+    from ctl import elevate
+    return elevate.build_combined_script(seen)
 
 
 def new_job() -> dict:
