@@ -99,6 +99,11 @@
     <details id="inst-transcript-wrap" hidden><summary>full install transcript</summary><pre id="inst-transcript"></pre></details>
     <details><summary>admin commands recorded so far</summary><pre id="script-pre">Nothing recorded yet — start the install first.</pre></details>
     <div id="inst-log" class="mut"></div>
+    <div id="inst-complete" hidden style="border:2px solid var(--ok); border-radius:8px; padding:.8rem 1rem; margin-top:.8rem;">
+      <strong>All done!</strong>
+      <span id="inst-complete-detail">Mu3Lab is ready.</span><br>
+      <a id="real-dashboard-link" href="http://127.0.0.1:8787" target="_blank" rel="noopener">Open the real dashboard</a>
+    </div>
   </div>
 </section>
 
@@ -459,6 +464,7 @@ async function refreshInstall() {
       setStatus('inst-status', 'done — infrastructure installed', 'ok');
       log.textContent = '';
       renderTranscript(job);
+      renderCompletion(job);
       // End-of-job note from the installer (e.g. terminal re-login tip).
       api('/api/install/events').then(d => {
         const s = (d.events || []).find(e => e.type === 'summary' && e.detail);
@@ -488,6 +494,23 @@ function renderTranscript(job) {
   document.getElementById('inst-transcript').textContent = job.steps.map(s =>
     '=== ' + s.label + ' [' + s.status + '] ===\n' +
     (s.log || []).join('\n')).join('\n\n');
+}
+function renderCompletion(job) {
+  const serve = job.steps.find(s => s.id === 'serve');
+  const text = (serve && (serve.log || []).join('\n')) || '';
+  // Only accept the hostname-shaped URL emitted by Tailscale Serve. If it is
+  // absent, the local dashboard remains a truthful fallback for this machine.
+  const match = text.match(/https:\/\/[A-Za-z0-9.-]+\.ts\.net\/?/);
+  const link = document.getElementById('real-dashboard-link');
+  const detail = document.getElementById('inst-complete-detail');
+  if (match) {
+    link.href = match[0];
+    detail.textContent = ' Your private dashboard is ready on the tailnet.';
+  } else {
+    link.href = 'http://127.0.0.1:8787';
+    detail.textContent = ' Open it locally now; the private tailnet URL was not returned by Tailscale.';
+  }
+  document.getElementById('inst-complete').hidden = false;
 }
 async function copyScript() {
   // Combined admin script (headless fallback): recorded privileged commands.

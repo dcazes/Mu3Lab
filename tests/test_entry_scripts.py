@@ -36,3 +36,11 @@ class EntryScriptTests(unittest.TestCase):
         self.assertIn("Host prerequisites are ready.", page)
         self.assertIn("btn-inst').disabled = false", page)
         self.assertNotIn("Everything above is already installed — nothing to do.", page)
+
+    def test_install_completion_points_to_real_dashboard(self):
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("All done!", page)
+        self.assertIn("real-dashboard-link", page)
+        self.assertIn("ts\\.net", page)
