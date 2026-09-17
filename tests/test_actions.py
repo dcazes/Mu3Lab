@@ -201,5 +201,24 @@ class DockerCmdTests(unittest.TestCase):
             "mu3lab-docker-cfg", ""))
 
 
+class ComposeTests(unittest.TestCase):
+    def test_extra_compose_file_is_appended_after_base(self):
+        seen: list[list[str]] = []
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "ok"
+        project = Path("/srv/mu3lab/projects/vaultwarden")
+        with patch.object(actions, "docker_cmd", fake):
+            actions.compose_up(project, _silent,
+                               extra_files=[project / "docker-compose.tailnet.yml"])
+        self.assertEqual(seen[0], [
+            "docker", "compose",
+            "-f", "/srv/mu3lab/projects/vaultwarden/docker-compose.yml",
+            "-f", "/srv/mu3lab/projects/vaultwarden/docker-compose.tailnet.yml",
+            "--project-directory", "/srv/mu3lab/projects/vaultwarden",
+            "up", "-d",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

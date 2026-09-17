@@ -1,0 +1,7 @@
+# Applied only after Tailscale is joined and this machine's MagicDNS name is
+# known. Vaultwarden rejects an empty DOMAIN, so local first-run intentionally
+# uses the base Compose file without this override.
+services:
+  vaultwarden:
+    environment:
+      DOMAIN: ${VAULTWARDEN_DOMAIN:?Vaultwarden requires a private HTTPS URL}

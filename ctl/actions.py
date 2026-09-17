@@ -95,18 +95,21 @@ def docker_cmd(argv: list[str], log: Callable[[str], None],
 
 
 def compose_up(projdir: Path, log: Callable[[str], None],
-               timeout: int = 300, env: dict[str, str] | None = None) -> tuple[int, str]:
+               timeout: int = 300, env: dict[str, str] | None = None,
+               extra_files: list[Path] | None = None) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
     Uses -f/--project-directory flags instead of cwd= so `sg -c` (single
-    string, no shell games beyond one quoted layer) stays exact.
+    string, no shell games beyond one quoted layer) stays exact. Extra files
+    are reviewed service-owned overrides, never browser-provided paths.
     """
+    files = [projdir / "docker-compose.yml"] + list(extra_files or [])
+    argv = ["docker", "compose"]
+    for compose_file in files:
+        argv.extend(["-f", str(compose_file)])
+    argv.extend(["--project-directory", str(projdir), "up", "-d"])
     return docker_cmd(
-        ["docker", "compose",
-         "-f", str(projdir / "docker-compose.yml"),
-         "--project-directory", str(projdir),
-         "up", "-d"],
-        log, timeout=timeout, env=env)
+        argv, log, timeout=timeout, env=env)
 
 
 def apt_update(log: Callable[[str], None]) -> dict:

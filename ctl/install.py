@@ -874,9 +874,23 @@ def _serve_port_check(port: str) -> dict:
 
 
 def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("vaultwarden_serve")
+    domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
+    if not domain:
+        return {"ok": False,
+                "error": "Tailscale did not provide a valid MagicDNS name for Vaultwarden."}
+    projdir = ctx["root"] / "core" / "vaultwarden"
+    rc, out = actions.compose_up(
+        projdir, log,
+        env={"MU3LAB_DATA_ROOT": str(RuntimePaths().data),
+             "VAULTWARDEN_DOMAIN": domain},
+        extra_files=[projdir / "docker-compose.tailnet.yml"])
+    log(out or f"(exit {rc})")
+    if rc != 0:
+        return {"ok": False,
+                "error": "Vaultwarden could not apply its private HTTPS URL (see log)."}
     return _tailscale_serve_port(VAULTWARDEN_SERVE_PORT,
-                                 f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}",
-                                 ctx["log_fn"]("vaultwarden_serve"))
+                                 f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}", log)
 
 
 def fix_authentik_serve(check: dict, ctx: dict) -> dict:
@@ -926,6 +940,14 @@ def _tailscale_dns_name_for_install() -> str:
         return str(data.get("Self", {}).get("DNSName", "")).rstrip(".")
     except (OSError, ValueError, TypeError):
         return ""
+
+
+def vaultwarden_tailnet_domain(dns_name: str) -> str:
+    """Build Vaultwarden's final private URL, rejecting local/bare values."""
+    name = dns_name.rstrip(".")
+    if not re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name):
+        return ""
+    return f"https://{name}:{VAULTWARDEN_SERVE_PORT}"
 
 
 def fix_authentik_setup(check: dict, ctx: dict) -> dict:

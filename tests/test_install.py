@@ -77,6 +77,34 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
 
+class VaultwardenDomainTests(unittest.TestCase):
+    def test_local_compose_omits_domain(self):
+        compose = (Path(__file__).resolve().parents[1] / "core" /
+                   "vaultwarden" / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertNotIn("DOMAIN:", compose)
+
+    def test_tailnet_domain_requires_magicdns_and_https(self):
+        self.assertEqual(
+            install.vaultwarden_tailnet_domain("mu3lab-1.example.ts.net."),
+            "https://mu3lab-1.example.ts.net:8443")
+        self.assertEqual(install.vaultwarden_tailnet_domain("mu3lab.local"), "")
+        self.assertEqual(install.vaultwarden_tailnet_domain("https://bad.ts.net"), "")
+
+    def test_private_route_applies_tailnet_override(self):
+        ctx = _ctx()
+        with patch("ctl.install._tailscale_dns_name_for_install",
+                   return_value="mu3lab-1.example.ts.net"), \
+             patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up, \
+             patch("ctl.install.privilege.run_privileged",
+                   return_value={"ok": True}):
+            result = install.fix_vaultwarden_serve({}, ctx)
+        self.assertTrue(result["ok"])
+        self.assertEqual(up.call_args.kwargs["env"]["VAULTWARDEN_DOMAIN"],
+                         "https://mu3lab-1.example.ts.net:8443")
+        self.assertEqual(up.call_args.kwargs["extra_files"], [
+            Path("/nonexistent/core/vaultwarden/docker-compose.tailnet.yml")])
+
+
 class DockerFixTests(unittest.TestCase):
     def _check(self, state):
         return {"name": "docker", "status": "missing", "detail": state,
