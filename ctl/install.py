@@ -58,8 +58,8 @@ def tailscale_key_url(distro: str, codename: str) -> str:
 CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
 SERVE_PORT = "19460"      # `tailscale serve --bg` proxies this local port
 TS_HOSTNAME = "mu3lab"
-TAILSCALE_JOIN_TIMEOUT = "45s"  # enough time for initial control-plane registration
-TAILSCALE_WORKER_TIMEOUT = 55    # bounds the worker beyond the CLI's own join window
+TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
+TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
 
 
 # ---------------------------------------------------------------------------
@@ -214,12 +214,21 @@ def _venv_check(root: Path) -> dict:
 
 def _runtime_layout_check(root: Path) -> dict:
     """Check the approved persistent-data root without creating it."""
-    paths = RuntimePaths()
-    required = (paths.data, paths.backups, paths.secrets, paths.runtime, paths.projects)
-    if any(not path.is_dir() for path in required):
+    paths = RuntimePaths(root)
+    user_paths = (paths.data, paths.backups, paths.runtime, paths.projects)
+    try:
+        missing = [path for path in user_paths if not path.is_dir()]
+        # Secrets are deliberately root-only. Checking the directory itself
+        # must not require the operator to read its contents.
+        secrets_ready = paths.secrets.is_dir()
+        accessible = [path for path in user_paths
+                      if not os.access(path, os.R_OK | os.X_OK)]
+    except OSError:
+        missing, secrets_ready, accessible = list(user_paths), False, list(user_paths)
+    if missing or not secrets_ready or accessible:
         return {"name": "runtime_layout", "status": "missing",
-                "detail": "Persistent runtime layout is missing.",
-                "action": "step 3 creates /srv/mu3lab with safe permissions.",
+                "detail": "Persistent runtime layout is missing or inaccessible to the operator.",
+                "action": "step 3 repairs /srv/mu3lab ownership and permissions.",
                 "state": "missing", "blocking": False}
     return {"name": "runtime_layout", "status": "ok",
             "detail": "Persistent runtime layout is ready.", "action": "",
@@ -780,7 +789,7 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     immediately and is never persisted or sent back as a credential.
     """
     log = ctx["log_fn"]("tailscale_join")
-    log("$ tailscale up --hostname=mu3lab --timeout=45s  (waiting up to 45 seconds for login URL)")
+    log("$ tailscale up --hostname=mu3lab --timeout=120s  (waiting up to 120 seconds for login URL)")
     result = privilege.run_privileged(
         ["tailscale", "up", "--hostname=" + TS_HOSTNAME,
          "--timeout=" + TAILSCALE_JOIN_TIMEOUT], log,

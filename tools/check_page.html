@@ -425,7 +425,7 @@ async function refreshInstall() {
   for (const s of job.steps) {
     document.getElementById('imark-' + s.id).innerHTML = INST_MARKS[s.status] || '?';
     const liveDetail = s.id === 'tailscale_join' && s.status === 'installing'
-      ? 'Starting Tailscale and requesting the login link (up to 45 seconds)…'
+      ? 'Starting Tailscale and requesting the login link (up to 120 seconds)…'
       : (s.detail || '');
     document.getElementById('idet-' + s.id).textContent = liveDetail;
     document.getElementById('ierr-' + s.id).innerHTML = s.error

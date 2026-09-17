@@ -326,8 +326,8 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_tailscale_join(
                 {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
         run.assert_called_once_with(
-            ["tailscale", "up", "--hostname=mu3lab", "--timeout=45s"],
-            unittest.mock.ANY, timeout=55)
+            ["tailscale", "up", "--hostname=mu3lab", "--timeout=120s"],
+            unittest.mock.ANY, timeout=130)
         opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
         self.assertTrue(result["waiting"])
         self.assertEqual(result["prompt"]["login_url"],
