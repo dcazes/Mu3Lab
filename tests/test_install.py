@@ -290,6 +290,7 @@ class SgFallbackTests(unittest.TestCase):
     def test_networks_denied_proceeds(self):
         # denied probes no longer fail: fix_networks runs through docker_cmd
         # (sg when needed). Only a genuinely dead daemon fails.
+        # (sg when needed). Only a genuinely dead daemon fails.
         check = {"name": "docker_networks", "status": "missing",
                  "detail": "x", "action": "y", "state": "denied",
                  "blocking": False}
@@ -304,6 +305,22 @@ class SgFallbackTests(unittest.TestCase):
             result = install.fix_networks_router(check, self._ctx())
         self.assertTrue(result.get("ok"))
         self.assertTrue(any("mu3lab_backend" in cmd for cmd in created))
+
+    def test_verify_uses_sg_path(self):
+        # REGRESSION (the incident): fix ran through sg successfully while
+        # verify probed the raw socket → red on existing networks. The check
+        # must use docker_cmd (sg-aware) like the fix does.
+        def fake_cmd(argv, log=None, timeout=300):
+            joined = " ".join(argv)
+            if "network inspect" in joined:
+                return 0, "exists"  # all present via sg
+            if argv[:2] == ["docker", "info"]:
+                return 0, "ok"
+            return 0, ""
+        with unittest.mock.patch("ctl.install.actions.docker_cmd",
+                                 side_effect=fake_cmd):
+            check = install._networks_check(self._ctx())
+        self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
 
     def test_full_dispatch_coverage(self):
         # Every state any step check can emit must map to a real fix.

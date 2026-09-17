@@ -274,6 +274,13 @@ def load_progress(state: State, path: Path = STATE_FILE) -> str:
     return "restored" if (state.tests_green or state.preflight_passed) else "none"
 
 
+def response_headers(content_type: str, length: int) -> dict[str, str]:
+    """Headers for every response. no-store is load-bearing (see _json)."""
+    return {"Content-Type": content_type,
+            "Cache-Control": "no-store",
+            "Content-Length": str(length)}
+
+
 class Handler(BaseHTTPRequestHandler):
     """Routes. server_version is pinned down to avoid fingerprint noise."""
 
@@ -283,8 +290,9 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj: dict, status: int = 200) -> None:
         body = json.dumps(obj).encode()
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
+        for key, value in response_headers("application/json",
+                                           len(body)).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -305,8 +313,9 @@ class Handler(BaseHTTPRequestHandler):
                             "hint": "tools/check_page.html not found"}, 500)
                 return
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(page)))
+            for key, value in response_headers("text/html; charset=utf-8",
+                                               len(page)).items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(page)
         elif self.path == "/api/state":

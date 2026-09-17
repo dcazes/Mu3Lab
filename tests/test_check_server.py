@@ -64,6 +64,14 @@ class GateTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_response_headers_no_store(self):
+        # A cached page against a newer server once produced a "mixed"
+        # dashboard that blamed the user for a version skew. Every response
+        # carries no-store; asserted here, not by clicking around.
+        import check_server
+        headers = check_server.response_headers("text/html", 10)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(headers["Content-Length"], "10")
     def test_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "progress.json"

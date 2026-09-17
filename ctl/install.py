@@ -577,24 +577,25 @@ TERMINAL_LOGIN_FYI = (
 
 
 def _networks_check(ctx: dict) -> dict:
-    """Shared-network presence, probed RAW (no sg): the check must report the
-    process's true access. missing/denied both fix the same way (docker_cmd
-    adds sg when needed), so both are non-blocking work items."""
-    rc, out = actions.privilege._exec(["docker", "info"])
+    """Shared-network presence, probed the SAME way the fix executes.
+
+    Symmetry rule (learned the hard way): a step verifies with the transport
+    it fixes with. The fix runs through actions.docker_cmd (sg when the
+    process lacks the group), so the check does too — otherwise a stale
+    checker reports failure on networks that exist. Raw-socket honesty
+    belongs to card ②'s preflight probes, never to install verification.
+    """
+    rc, out = actions.docker_cmd(["docker", "info"],
+                                 lambda line: None)
     if rc != 0:
-        if "permission denied" in out.lower():
-            return {"name": "docker_networks", "status": "missing",
-                    "detail": "Docker unreachable from this process; fixes run "
-                              "with on-demand group access.",
-                    "action": "step 3 proceeds without logout.",
-                    "state": "denied", "blocking": False}
         return {"name": "docker_networks", "status": "missing",
-                "detail": "Docker daemon not reachable.",
-                "action": "step 3 starts it.", "state": "missing",
-                "blocking": False}
+                "detail": "Docker not usable yet: " + (out or "unknown cause"),
+                "action": "step 3 proceeds via on-demand group access.",
+                "state": "denied", "blocking": False}
     missing = [net for net in preflight.MU3LAB_NETWORKS
-               if actions.privilege._exec(
-                   ["docker", "network", "inspect", net])[0] != 0]
+               if actions.docker_cmd(
+                   ["docker", "network", "inspect", net],
+                   lambda line: None)[0] != 0]
     if missing:
         return {"name": "docker_networks", "status": "missing",
                 "detail": f"Missing networks: {', '.join(missing)}.",
