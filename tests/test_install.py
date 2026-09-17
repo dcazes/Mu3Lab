@@ -62,6 +62,20 @@ class DispatchTests(unittest.TestCase):
         for step in job["steps"]:
             self.assertEqual(step["status"], "pending")
 
+    def test_runtime_layout_check_uses_persistent_root_not_checkout(self):
+        step = next(meta for meta in install.STEPS if meta["id"] == "runtime_layout")
+        with patch("ctl.install._runtime_layout_check", return_value={"state": "ready"}) as check:
+            step["check"](_ctx())
+        self.assertEqual(check.call_args.args[0], install.RuntimePaths().root)
+
+    def test_tailscale_serve_uses_privilege_boundary(self):
+        with patch("ctl.install.privilege.run_privileged", return_value={"ok": True}) as run:
+            result = install.fix_serve({}, _ctx())
+        self.assertTrue(result["ok"])
+        self.assertEqual(run.call_args.args[0],
+                         ["tailscale", "serve", "--bg", install.SERVE_PORT])
+        self.assertEqual(run.call_args.kwargs["timeout"], 60)
+
 
 class DockerFixTests(unittest.TestCase):
     def _check(self, state):

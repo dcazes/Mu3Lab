@@ -819,14 +819,19 @@ def fix_serve(check: dict, ctx: dict) -> dict:
     `serve --help` is authoritative — the verify below catches any drift).
     """
     log = ctx["log_fn"]("serve")
-    log(f"$ tailscale serve --bg {SERVE_PORT}  (proxies local :{SERVE_PORT})")
-    try:
-        proc = subprocess.run(["tailscale", "serve", "--bg", SERVE_PORT],
-                              capture_output=True, text=True, timeout=60)
-    except OSError as exc:
-        return {"ok": False, "error": f"tailscale serve failed: {exc}"}
-    log((proc.stdout + proc.stderr).strip() or "(serving)")
-    if proc.returncode != 0:
+    # `tailscale serve` changes daemon configuration. Some installations
+    # require root unless an operator was configured explicitly, so it must
+    # use the same audited elevation boundary as every other host mutation.
+    result = privilege.run_privileged(
+        ["tailscale", "serve", "--bg", SERVE_PORT], log, timeout=60)
+    if result.get("need_terminal"):
+        return {"waiting": True, "prompt": {
+            "kind": "terminal",
+            "title": "Tailscale needs one administrator command",
+            "body": "Run this command, then press Retry.",
+            "terminal_command": result["terminal_command"],
+        }}
+    if not result.get("ok"):
         return {"ok": False, "error": "tailscale serve failed (see log)."}
     return {"ok": True}
 
@@ -954,7 +959,9 @@ STEPS = [
          "blocking": False})(_tailscale_pkg_check(ctx)),
      "fix": fix_tailscale_join},
     {"id": "runtime_layout", "label": "Persistent data layout",
-     "check": lambda ctx: _runtime_layout_check(ctx["root"]),
+     # `ctx["root"]` is the Git checkout. Persistent state is deliberately
+     # outside it, at RuntimePaths().root (/srv/mu3lab).
+     "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
      "fix": fix_runtime_layout},
     {"id": "docker_networks", "label": "Shared networks",
      "check": _networks_check, "fix": fix_networks_router},
