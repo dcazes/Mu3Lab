@@ -361,17 +361,44 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
     """
     log = ctx["log_fn"]("dashboard_build")
     dashdir = ctx["root"] / "dashboard"
-    if not (dashdir / "node_modules").is_dir():
-        log("$ npm ci  (in dashboard/)")
-        try:
-            proc = subprocess.run(["npm", "ci"], capture_output=True, text=True,
-                                  timeout=900, cwd=str(dashdir))
-        except OSError as exc:
-            return {"ok": False, "error": f"npm ci failed: {exc} (is Node installed?)"}
-        for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
+    # The 5-line tail once hid the real cause (missing lockfile); on failure
+    # log every "npm error" line plus a wider tail, and always name the npm
+    # debug log so the cause is one copy-paste away.
+    def _log_failure(proc, what: str) -> dict:
+        lines = (proc.stdout + proc.stderr).strip().splitlines()
+        error_lines = [line for line in lines if "npm error" in line.lower()]
+        log(f"$ {what} failed:")
+        for line in (error_lines + lines[-30:])[:40]:
             log(line)
-        if proc.returncode != 0:
-            return {"ok": False, "error": "npm ci failed (see log); check network and retry."}
+        log("Full npm log: ~/.npm/_logs/ (latest debug-*.log)")
+        return {"ok": False, "error": f"{what} failed (see log)."}
+    if not (dashdir / "node_modules").is_dir():
+        if (dashdir / "package-lock.json").is_file():
+            log("$ npm ci  (in dashboard/)")
+            try:
+                proc = subprocess.run(["npm", "ci"], capture_output=True,
+                                      text=True, timeout=900, cwd=str(dashdir))
+            except OSError as exc:
+                return {"ok": False,
+                        "error": f"npm ci failed: {exc} (is Node installed?)"}
+            if proc.returncode != 0:
+                return _log_failure(proc, "npm ci")
+            for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
+                log(line)
+        else:
+            # No lockfile (shouldn't happen — repo commits one): npm install
+            # resolves fresh instead of failing like `ci` would.
+            log("$ npm install  (no lockfile; resolving fresh)")
+            try:
+                proc = subprocess.run(["npm", "install"], capture_output=True,
+                                      text=True, timeout=900, cwd=str(dashdir))
+            except OSError as exc:
+                return {"ok": False,
+                        "error": f"npm install failed: {exc} (is Node installed?)"}
+            if proc.returncode != 0:
+                return _log_failure(proc, "npm install")
+            for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
+                log(line)
     log("$ npm run build  (in dashboard/)")
     try:
         proc = subprocess.run(["npm", "run", "build"], capture_output=True,
