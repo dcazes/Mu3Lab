@@ -1,0 +1,52 @@
+name: mu3lab-firecrawl
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    networks: [mu3lab_backend]
+
+  postgres:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      POSTGRES_DB: firecrawl
+      POSTGRES_USER: firecrawl
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/firecrawl/postgres:/var/lib/postgresql/data
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firecrawl -d firecrawl"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ghcr.io/firecrawl/firecrawl:2.11.334-production
+    restart: unless-stopped
+    ports: ["127.0.0.1:3002:3002"]
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      HOST: 0.0.0.0
+      INTERNAL_PORT: "3002"
+      REDIS_URL: redis://redis:6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: firecrawl
+      POSTGRES_USER: firecrawl
+    networks: [mu3lab_frontend, mu3lab_backend]
+    depends_on:
+      redis: {condition: service_started}
+      postgres: {condition: service_healthy}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

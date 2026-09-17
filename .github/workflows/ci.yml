@@ -32,9 +32,22 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import yaml
-          for path in (Path('services.yaml'), Path('catalog.yaml'), *Path('core').glob('*/docker-compose.yml')):
+          for path in (Path('services.yaml'), Path('catalog.yaml'),
+                       *Path('core').glob('*/docker-compose.yml'),
+                       *Path('apps').glob('*/docker-compose.yml')):
               yaml.safe_load(path.read_text(encoding='utf-8'))
           PY
+      - name: Validate Compose interpolation
+        run: |
+          for compose_file in core/*/docker-compose.yml apps/*/docker-compose.yml; do
+            MU3LAB_ENV_FILE=/dev/null \
+            AUTHENTIK_ENV_FILE=/dev/null \
+            AUTHENTIK_TAG=2026.5.0 \
+            AUTHENTIK_SECRET_KEY=ci-placeholder \
+            AUTHENTIK_POSTGRESQL__PASSWORD=ci-placeholder \
+            MU3LAB_DATA_ROOT=/srv/mu3lab/data \
+              docker compose -f "$compose_file" config --quiet
+          done
       - name: Scan tracked files for accidental private environment files
         run: |
           ! git ls-files | grep -E '(^|/)\.env$'

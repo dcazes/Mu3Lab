@@ -1,6 +1,4 @@
 """Mu3Lab :: check_server.py
-RETIRE AT PHASE 11 (React dashboard + real API replace this file entirely).
-
 WHAT: Zero-dependency local dashboard for the fresh-user check flow. Serves
       one static page (tools/check_page.html) plus a tiny JSON API that runs
       the unit suite and the host preflight behind three GATED cards:
@@ -478,11 +476,35 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/install/continue":
             # "Check again" for login-URL / relogin waits: wake the runner to
             # re-poll (join status, group liveness).
+            restart_manual = False
             with state.lock:
                 if state.install_job is None:
                     self._json({"error": "no job"}, 409)
                     return
+                waiting = next((step for step in state.install_job["steps"]
+                                if step.get("status") == "waiting"), None)
+                if waiting and (waiting.get("prompt") or {}).get("kind") == "manual_setup":
+                    state.install_job["inputs"][f"{waiting['id']}_confirmed"] = True
+                    marker = {
+                        "vaultwarden_setup": "vaultwarden_account",
+                        "authentik_setup": "authentik_admin",
+                        "authentik_users": "authentik_users",
+                        "dashboard_protection": "dashboard_protection",
+                    }.get(waiting["id"])
+                    if marker:
+                        from ctl import bootstrap_state as _bootstrap_state
+                        _bootstrap_state.confirm(marker)
+                    restart_manual = True
                 state.install_input.set()
+            if restart_manual:
+                with state.lock:
+                    thread = state.install_thread
+                    if thread is None or not thread.is_alive():
+                        state.install_stop.clear()
+                        state.install_input.clear()
+                        state.install_thread = threading.Thread(
+                            target=_install_worker, args=(state,), daemon=True)
+                        state.install_thread.start()
             self._json({"continued": True})
         elif self.path == "/api/install/kill":
             with state.lock:

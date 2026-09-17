@@ -1,14 +1,10 @@
 # Mu3Lab user-facing curated catalog.  Deployment facts remain in services.yaml.
 schema_version: 1
 profiles:
-  - id: local-ai
-    name: Local AI
-    description: A private, free-first AI workspace with local models and an optional routed provider.
-    services: [ollama, litellm, open-webui, freellmapi]
-  - id: research
-    name: Research
-    description: A research workspace that remains unavailable until it supports a safe identity model.
-    services: [surfsense]
+  - id: core-suite
+    name: Core suite
+    description: "The essential Mu3Lab platform: local AI, routing, crawling, and research services."
+    services: [ollama, freellmapi, litellm, open-webui, firecrawl, surfsense]
 
 services:
   ollama:
@@ -36,8 +32,39 @@ services:
     resource_guidance: Optional; requires an explicit provider configuration.
     integrations: [litellm]
   surfsense:
-    summary: Research workspace pending a supported true-SSO integration.
+    summary: Research workspace with its own local account; Vaultwarden can help store and fill its credentials.
     category: Research
-    stage_label: Blocked by identity policy
-    resource_guidance: Not offered until upstream provides a supported identity hook.
+    stage_label: Core · local account
+    resource_guidance: Requires LiteLLM, Ollama, and Firecrawl. This is not true SSO.
     integrations: [litellm, ollama]
+  firecrawl:
+    summary: Private crawling and web extraction service used by SurfSense.
+    category: Research dependency
+    stage_label: Core
+    resource_guidance: Browser and queue sidecars can use substantial memory during crawls.
+    integrations: [surfsense]
+  actual-budget:
+    summary: Private household budgeting and financial planning.
+    category: Optional finance
+    stage_label: Optional
+    resource_guidance: Lightweight service; state must be backed up.
+  immich:
+    summary: Private photo and video management.
+    category: Optional media
+    stage_label: Optional
+    resource_guidance: Media storage and machine-learning jobs can be resource intensive.
+  mealie:
+    summary: Private recipes and meal planning.
+    category: Optional home
+    stage_label: Optional
+    resource_guidance: Lightweight service.
+  adventurelog:
+    summary: Private travel and adventure planning.
+    category: Optional travel
+    stage_label: Optional
+    resource_guidance: Lightweight service with persistent trip data.
+  paperless-ngx:
+    summary: Private document management and OCR.
+    category: Optional documents
+    stage_label: Optional
+    resource_guidance: Storage and OCR usage grow with your document library.

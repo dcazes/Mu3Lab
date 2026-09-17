@@ -18,7 +18,7 @@ REGISTRY_PATH = ROOT / "services.yaml"
 VALID_AUTH = frozenset({"oidc", "proxy", "local", "excluded"})
 VALID_LIFECYCLE = frozenset({"always_on", "shared", "optional"})
 VALID_ACTIONS = frozenset({"start", "stop", "restart", "update"})
-VALID_STAGES = frozenset({"foundation", "planned", "blocked"})
+VALID_STAGES = frozenset({"foundation", "core", "optional", "blocked"})
 VALID_ROUTES = frozenset({"ready", "pending", "unavailable"})
 
 
@@ -36,6 +36,7 @@ class Service:
     lifecycle: str
     compose_dir: str
     https_port: int
+    private_https_port: int | None
     health: dict[str, Any]
     auth: str
     profiles: tuple[str, ...]
@@ -47,6 +48,10 @@ class Service:
     stage: str = "planned"
     images: tuple[str, ...] = ()
     route: str = "pending"
+    required: bool = False
+    identity_note: str = ""
+    resource_guidance: str = ""
+    setup_action: str = ""
 
     @property
     def is_blocked(self) -> bool:
@@ -64,12 +69,16 @@ class Service:
         """Return browser-safe metadata with no paths outside the checkout/secrets."""
         return {"id": self.id, "name": self.name, "category": self.category,
                 "lifecycle": self.lifecycle, "https_port": self.https_port,
+                "private_https_port": self.private_https_port,
                 "auth": self.auth, "profiles": list(self.profiles),
                 "dependencies": list(self.dependencies),
                 "availability": self.availability,
                 "blocked_reason": self.blocked_reason,
                 "stage": self.stage, "route": self.route,
                 "routable": self.route == "ready",
+                "required": self.required, "identity_note": self.identity_note,
+                "resource_guidance": self.resource_guidance,
+                "setup_action": self.setup_action,
                 "mcp": {"exposed": bool(self.mcp.get("exposed", False)),
                         "risk": self.mcp.get("risk", "")}}
 
@@ -94,6 +103,9 @@ def _service(item: dict[str, Any]) -> Service:
     port = _required(item, "https_port")
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise RegistryError(f"service {service_id}: https_port must be a TCP port")
+    private_port = item.get("private_https_port")
+    if private_port is not None and (not isinstance(private_port, int) or not 1 <= private_port <= 65535):
+        raise RegistryError(f"service {service_id}: private_https_port must be a TCP port")
     compose_dir = _required(item, "compose_dir")
     if not isinstance(compose_dir, str) or compose_dir.startswith("/") or ".." in Path(compose_dir).parts:
         raise RegistryError(f"service {service_id}: unsafe compose_dir")
@@ -119,13 +131,17 @@ def _service(item: dict[str, Any]) -> Service:
         raise RegistryError(f"service {service_id}: blocked stage requires blocked availability")
     return Service(id=service_id, name=_required(item, "name"),
                    category=_required(item, "category"), lifecycle=lifecycle,
-                   compose_dir=compose_dir, https_port=port, health=health,
+                   compose_dir=compose_dir, https_port=port, private_https_port=private_port, health=health,
                    auth=auth, profiles=profiles,
                    dependencies=tuple(item.get("dependencies", [])),
                    availability=item.get("availability", "available"),
                    blocked_reason=item.get("blocked_reason", ""),
                    backup=dict(item.get("backup", {})), mcp=dict(item.get("mcp", {})),
-                   stage=stage, images=images, route=route)
+                   stage=stage, images=images, route=route,
+                   required=bool(item.get("required", False)),
+                   identity_note=str(item.get("identity_note", "")),
+                   resource_guidance=str(item.get("resource_guidance", "")),
+                   setup_action=str(item.get("setup_action", "")))
 
 
 class Registry:

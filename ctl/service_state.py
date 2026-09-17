@@ -8,6 +8,7 @@ WHY: The browser must never infer service state from a hard-coded card or a
 from __future__ import annotations
 
 import json
+import shutil
 import socket
 import subprocess
 import urllib.error
@@ -34,7 +35,8 @@ def public_url(service: Service, dns_name: str) -> str:
     """Build a tailnet URL only after the manifest declares a verified route."""
     if not dns_name or service.route != "ready":
         return ""
-    suffix = "" if service.https_port == 443 else f":{service.https_port}"
+    port = service.private_https_port or service.https_port
+    suffix = "" if port == 443 else f":{port}"
     return f"https://{dns_name}{suffix}"
 
 
@@ -61,18 +63,101 @@ def _healthy(service: Service) -> tuple[bool, str]:
         return False, f"unreachable: {exc.reason if isinstance(exc, urllib.error.URLError) else exc}"
 
 
+def _tailnet_route_present(port: int) -> bool:
+    """Check only the local Tailscale Serve configuration, never a URL input."""
+    try:
+        proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True,
+                              text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if proc.returncode != 0:
+        return False
+    output = proc.stdout
+    return f":{port}" in output or f"https={port}" in output
+
+
+def _compose_state(compose_file: Path) -> str:
+    """Read the curated Compose project's state without mutating it."""
+    if shutil.which("docker") is None:
+        return "unknown"
+    try:
+        proc = subprocess.run(["docker", "compose", "-f", str(compose_file),
+                               "ps", "--all", "--format", "json"],
+                              capture_output=True, text=True, timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return "absent"
+    try:
+        rows = json.loads(proc.stdout)
+        if isinstance(rows, dict):
+            rows = [rows]
+        states = {str(row.get("State", "")).lower() for row in rows if isinstance(row, dict)}
+    except (ValueError, TypeError):
+        rows = []
+        for line in proc.stdout.splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        states = {str(row.get("State", "")).lower() for row in rows}
+    if "running" in states:
+        return "running"
+    return "stopped"
+
+
 def status(service: Service, dns_name: str, root: Path) -> dict:
     """Return browser-safe service state without starting, stopping, or logging in."""
     compose_file = service.compose_path(root) / "docker-compose.yml"
     if service.is_blocked:
-        state, detail = "blocked", service.blocked_reason
+        lifecycle_state, detail = "blocked", service.blocked_reason
     elif not compose_file.is_file():
-        state, detail = "not_installed", "Curated stack has not been added to this checkout yet."
+        lifecycle_state, detail = "planned", "This curated stack is not installed yet."
     else:
+        compose_state = _compose_state(compose_file)
         ok, detail = _healthy(service)
-        state = "healthy" if ok else "stopped_or_unhealthy"
-    route_ready = service.route == "ready" and state == "healthy"
-    return {**service.public(), "state": state, "detail": detail,
-            "url": public_url(service, dns_name),
+        if ok:
+            lifecycle_state = "ready"
+        elif compose_state == "absent":
+            lifecycle_state = "planned"
+            detail = "This curated stack is not installed yet."
+        elif compose_state == "stopped":
+            lifecycle_state = "stopped"
+            detail = "Compose project is installed but not running."
+        elif compose_state == "running":
+            lifecycle_state = "starting"
+        else:
+            lifecycle_state = "needs_attention"
+    route_verified = service.route == "ready" or (
+        service.private_https_port is not None and _tailnet_route_present(service.private_https_port)
+    )
+    healthy = lifecycle_state == "ready"
+    health_state = "healthy" if healthy else ("starting" if lifecycle_state == "starting" else "unknown")
+    route_state = "verified" if route_verified and healthy else service.route
+    route_ready = route_state == "verified"
+    # A healthy process is not yet a usable app unless its declared private
+    # route has also been verified. Keep that distinction visible so the UI
+    # cannot call a merely-installed service "ready".
+    if healthy and not route_ready:
+        lifecycle_state = "needs_setup"
+    setup_state = "configured" if lifecycle_state == "ready" else ("blocked" if lifecycle_state == "blocked" else "needs_setup")
+    url = public_url(service, dns_name)
+    if route_ready and not url and dns_name:
+        port = service.private_https_port or service.https_port
+        url = f"https://{dns_name}" + ("" if port == 443 else f":{port}")
+    return {**service.public(), "state": lifecycle_state, "detail": detail,
+            "lifecycle_state": lifecycle_state, "health_state": health_state,
+            "setup_state": setup_state, "route_state": route_state,
+            "identity_mode": service.auth, "backup_state": "declared" if service.backup else "not_declared",
+            "last_job_id": "", "last_error": detail if lifecycle_state == "needs_attention" else "",
+            "user_action": ("Review health diagnostics" if lifecycle_state == "needs_attention" else
+                            "Start this service" if lifecycle_state == "stopped" else
+                            "Wait for the health check" if lifecycle_state == "starting" else
+                            "Open securely" if route_ready else
+                            "Private HTTPS route pending" if healthy else
+                            service.setup_action or detail),
+            "url": url,
             "route_ready": route_ready,
             "compose_present": compose_file.is_file()}

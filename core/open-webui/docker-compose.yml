@@ -1,0 +1,26 @@
+name: mu3lab-open-webui
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.11.1
+    restart: unless-stopped
+    ports: ["127.0.0.1:8084:8080"]
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      WEBUI_AUTH: "True"
+      ENABLE_LOGIN_FORM: "true"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/open-webui:/app/backend/data
+    networks: [mu3lab_frontend, mu3lab_backend]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

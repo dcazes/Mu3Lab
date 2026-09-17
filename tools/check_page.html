@@ -100,9 +100,11 @@
     <details><summary>admin commands recorded so far</summary><pre id="script-pre">Nothing recorded yet — start the install first.</pre></details>
     <div id="inst-log" class="mut"></div>
     <div id="inst-complete" hidden style="border:2px solid var(--ok); border-radius:8px; padding:.8rem 1rem; margin-top:.8rem;">
-      <strong>All done!</strong>
-      <span id="inst-complete-detail">Mu3Lab is ready.</span><br>
-      <a id="real-dashboard-link" href="http://127.0.0.1:8787" target="_blank" rel="noopener">Open the real dashboard</a>
+      <strong>All done — bootstrap foundation complete</strong>
+      <span id="inst-complete-detail">Mu3Lab is ready.</span>
+      <ul id="inst-complete-checklist"><li>Vaultwarden account confirmed</li><li>Tailscale and private service routes verified</li><li>Authentik administrator and users confirmed</li><li>Mu3Lab dashboard protection confirmed</li></ul>
+      <strong>Next: open the Mu3Lab dashboard to install the core application suite.</strong><br>
+      <a id="real-dashboard-link" href="#" target="_blank" rel="noopener" hidden>Open the protected dashboard</a>
     </div>
   </div>
 </section>
@@ -395,6 +397,14 @@ function promptHtml(step) {
       '<span class="mut">New to Tailscale? ' + link(p.signup_url, 'Sign up free') +
       ', then come back here.</span></div>';
   }
+  if (p.kind === 'manual_setup') {
+    return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
+      escapeHtml(p.body) + '<br>' +
+      (p.url ? '<strong><a href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener">Open setup page</a></strong> ' +
+        '<code class="act">' + escapeHtml(p.url) + '</code> ' +
+        '<button onclick="copyText(\'' + escapeHtml(p.url).replace(/'/g, '&#39;') + '\')">Copy URL</button><br>' : '') +
+      '<button onclick="sendContinue()">' + escapeHtml(p.check_label || 'I completed this — check again') + '</button></div>';
+  }
   let html = '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
     escapeHtml(p.body);
   if (p.commands) html += '<br>' + p.commands.map(c => '<code class="act">' + escapeHtml(c) + '</code>').join(' ');
@@ -499,17 +509,18 @@ function renderTranscript(job) {
 function renderCompletion(job, tailnetUrl) {
   const serve = job.steps.find(s => s.id === 'serve');
   const text = (serve && (serve.log || []).join('\n')) || '';
-  // Only accept the hostname-shaped URL emitted by Tailscale Serve. If it is
-  // absent, the local dashboard remains a truthful fallback for this machine.
+  // Only accept the hostname-shaped URL emitted by Tailscale Serve. A
+  // bootstrap that cannot prove private access is not complete.
   const match = text.match(/https:\/\/[A-Za-z0-9.-]+\.ts\.net\/?/);
   const link = document.getElementById('real-dashboard-link');
   const detail = document.getElementById('inst-complete-detail');
   if (tailnetUrl || match) {
     link.href = tailnetUrl || match[0];
+    link.hidden = false;
     detail.textContent = ' Your private dashboard is ready on the tailnet.';
   } else {
-    link.href = 'http://127.0.0.1:8787';
-    detail.textContent = ' Open it locally now; the private tailnet URL was not returned by Tailscale.';
+    link.hidden = true;
+    detail.textContent = ' The bootstrap did not return a verified private dashboard URL. Retry the final access check.';
   }
   document.getElementById('inst-complete').hidden = false;
 }

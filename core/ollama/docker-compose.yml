@@ -1,0 +1,23 @@
+name: mu3lab-ollama
+
+services:
+  ollama:
+    image: ollama/ollama:0.34.1
+    restart: unless-stopped
+    ports: ["127.0.0.1:11434:11434"]
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: 24h
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/ollama:/root/.ollama
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

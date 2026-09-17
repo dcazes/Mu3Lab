@@ -1,9 +1,8 @@
 """Mu3Lab :: ctl/app.py
 
-WHAT: Real-dashboard backend (port 8787). Minimal milestone: GET /api/health,
-      GET /api/status, plus static serving of dashboard/dist/ with SPA
-      fallback. No preflight/infra routes here — those live behind the check
-      dashboard until later phases merge the two.
+WHAT: Real-dashboard backend (port 8787). It exposes read-only host, identity,
+      catalog, lifecycle, job, and backup projections plus the authenticated
+      core-suite setup action, and serves the routed React shell.
 WHY:  Card ③ must end with something answering on :8787, or Caddy and
       Tailscale Serve stack on an empty port. Health + static is the smallest
       honest "dashboard works".
@@ -24,12 +23,13 @@ from pathlib import Path
 import psutil
 import yaml
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ctl import __version__  # noqa: F401 (re-exported for /api/health)
 from ctl.backups import readiness as backup_readiness
+from ctl.core_setup import CORE_ORDER, plan as core_plan, start as start_core_setup
 from ctl.jobs import JobStore
 from ctl.registry import RegistryError, load as load_registry
 from ctl.runtime import RuntimePaths
@@ -129,14 +129,98 @@ def backups() -> dict:
 
 
 @app.get("/api/identity")
-def identity() -> dict:
-    """Report identity posture without pretending tailnet access is SSO."""
+def identity(request: Request) -> dict:
+    """Report Authentik identity headers without trusting browser claims."""
+    username = request.headers.get("x-authentik-username", "").strip()
+    groups = tuple(value.strip() for value in request.headers.get("x-authentik-groups", "").split(",") if value.strip())
+    authenticated = bool(username)
+    operator = authenticated and "mu3lab-operators" in groups
     return {
         "ok": True,
-        "control_plane_auth": "not_configured",
-        "detail": "Tailnet access is private, but Authentik protection and role mapping are not configured yet.",
-        "writes_enabled": False,
+        "control_plane_auth": "authentik_forward_auth" if authenticated else "not_configured",
+        "username": username,
+        "groups": list(groups),
+        "detail": ("Authenticated through Authentik." if operator else
+                   "Tailnet access is private, but Authentik protection and operator role mapping are not configured yet."),
+        "writes_enabled": operator,
     }
+
+
+@app.get("/api/setup/core")
+def core_setup() -> dict:
+    """Describe the mandatory suite without claiming it is runnable early."""
+    try:
+        registry = load_registry()
+    except RegistryError as exc:
+        return {"ok": False, "ready_to_run": False, "error": str(exc), "services": []}
+    execution = core_plan(ROOT)
+    store = JobStore.runtime()
+    current_job = next((job for job in (store.jobs() if store else [])
+                        if job["service_id"] == "core-suite"), None)
+    return {"ok": True, "ready_to_run": execution["ready"],
+            "services": list(CORE_ORDER),
+            "missing_manifests": execution["missing"],
+            "current_job": current_job,
+            "next_action": "Set up the core application suite" if execution["ready"] else "Core service manifests are still being prepared"}
+
+
+@app.get("/api/connections/providers")
+def provider_metadata(request: Request) -> dict:
+    """List provider labels only; encrypted keys never cross this boundary."""
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    try:
+        from ctl.provider_secrets import metadata
+        return {"ok": True, "providers": metadata()}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+
+
+@app.post("/api/connections/providers")
+async def save_provider(request: Request) -> dict:
+    """Accept one provider key without ever echoing or logging its value."""
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    try:
+        payload = await request.json()
+        provider_id = str(payload.get("provider_id", ""))
+        label = str(payload.get("label", ""))
+        api_key = str(payload.get("api_key", ""))
+        from ctl.provider_secrets import save
+        result = save(provider_id, label, api_key)
+    except (ValueError, TypeError, AttributeError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    audit_job = store.create(kind="wiring", service_id="provider-accounts",
+                             action="save", actor=identity_data["username"],
+                             detail=f"provider:{result['id']}")
+    store.transition(audit_job["id"], "succeeded", actor=identity_data["username"],
+                     detail="Provider credential stored in encrypted local storage.")
+    return {"ok": True, "provider": result}
+
+
+@app.post("/api/setup/core")
+def start_core(request: Request) -> dict:
+    """Start the one guided core-suite job for an Authentik operator."""
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    execution = core_plan(ROOT)
+    if not execution["ready"]:
+        return JSONResponse({"ok": False, "error": execution["error"],
+                             "missing_manifests": execution["missing"]}, status_code=409)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    active = [job for job in store.jobs() if job["service_id"] == "core-suite" and job["state"] in {"queued", "running"}]
+    if active:
+        return JSONResponse({"ok": False, "error": "core setup is already running", "job": active[0]}, status_code=409)
+    job = start_core_setup(store, identity_data["username"], ROOT)
+    return {"ok": True, "job": job}
 
 
 @app.get("/api/jobs")

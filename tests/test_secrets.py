@@ -70,6 +70,26 @@ class RootEnvTests(unittest.TestCase):
             self.assertEqual(len(made), 2)
             self.assertEqual(len(added), 2)
 
+    def test_authentik_env_returns_names_not_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, added = secrets.ensure_authentik_env(
+                Path(tmp), token_factory=lambda: "secret-value")
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertIn("AUTHENTIK_SECRET_KEY", added)
+            self.assertNotIn("secret-value", repr(added))
+            self.assertEqual(secrets.read_runtime_env(path)["AUTHENTIK_SECRET_KEY"], "secret-value")
+
+    @unittest.skipUnless(__import__("importlib.util").util.find_spec("cryptography"),
+                         "cryptography is installed by the control-plane requirements")
+    def test_provider_credentials_are_encrypted_and_write_only(self):
+        from ctl.provider_secrets import metadata, save
+        from ctl.runtime import RuntimePaths
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            self.assertEqual(save("openai", "Main provider", "sk-super-secret", paths)["id"], "openai")
+            self.assertEqual(metadata(paths)[0]["label"], "Main provider")
+            self.assertNotIn("sk-super-secret", (paths.runtime / "provider-connections.enc").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

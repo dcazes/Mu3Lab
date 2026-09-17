@@ -41,6 +41,6 @@ class EntryScriptTests(unittest.TestCase):
         page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn("All done!", page)
+        self.assertIn("All done", page)
         self.assertIn("real-dashboard-link", page)
         self.assertIn("ts\\.net", page)

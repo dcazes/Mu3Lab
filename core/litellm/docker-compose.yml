@@ -1,0 +1,25 @@
+name: mu3lab-litellm
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.92.0
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports: ["127.0.0.1:4000:4000"]
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      OLLAMA_API_BASE: http://ollama:11434
+      STORE_MODEL_IN_DB: "false"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

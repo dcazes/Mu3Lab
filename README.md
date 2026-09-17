@@ -24,24 +24,25 @@ management:
   than silently rolling back.
 - Vaultwarden is excluded from MCP exposure. MCP capabilities are curated and
   policy-bound, with read-only defaults.
-- SurfSense is tracked as blocked until it has a supported native SSO or
-  trusted-identity integration; Mu3Lab will not fork it or replay passwords.
+- SurfSense is offered only as a local-account application. Mu3Lab will not
+  fork it, write its database, automate a browser, or replay passwords;
+  Vaultwarden may be used by the operator to store and fill its credentials.
 
 ## Current development state
 
-The bootstrapper and registry-backed dashboard foundation are active work.
+The identity-first bootstrapper and registry-backed dashboard foundation are
+active work.
 `services.yaml` is the deployment source of truth and `catalog.yaml` is the
-user-facing curated catalog. The permanent dashboard has Home, Apps, AI & MCP,
-Identity & backup, and System views. It truthfully distinguishes foundation,
-planned, and policy-blocked services, and never offers a browser route until
-that route is actually published through the tailnet.
+user-facing curated catalog. The permanent dashboard has Home, My Apps,
+Connections, Security & Backups, and System views. It truthfully distinguishes
+foundation, core, optional, and policy-blocked services, and never offers a
+browser route until that route is actually published through the tailnet.
 
-The control plane currently remains deliberately read-only: durable,
-secret-redacted SQLite job and audit storage exists under
-`/srv/mu3lab/runtime`, but Compose lifecycle, backup, restore, and wiring
-actions stay disabled until Authentik protection and role mapping are active.
-Authentik and Vaultwarden Compose definitions are included, while the first
-complete AI slice (Ollama, LiteLLM, and Open WebUI) is still being brought in.
+The control plane keeps durable, secret-redacted SQLite job and audit storage
+under `/srv/mu3lab/runtime`. The first guided core-suite executor is now wired
+for the fixed Ollama → LiteLLM → Open WebUI / Firecrawl → SurfSense sequence;
+it requires Authentik operator headers, stops at the first failed health check,
+and never accepts provider credentials as part of the bootstrap.
 
 ## Developer checks
 

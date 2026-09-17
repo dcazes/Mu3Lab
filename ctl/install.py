@@ -1,7 +1,8 @@
 """Mu3Lab :: ctl/install.py
 
-WHAT: Card-③ execution engine. Ordered remediation steps (host deps → node →
-      venv → docker → tailscale → caddy → join → serve), each check-first:
+WHAT: Card-③ execution engine. Ordered identity-first remediation steps
+      (host → Docker → runtime → local Vaultwarden → Tailscale → Authentik →
+      protected dashboard), each check-first:
       `ready` states are SKIPPED, every other state maps to exactly one fix.
       Long user actions (docker-group relogin, tailscale join) surface as
       `waiting` prompts instead of failures; resume continues from them.
@@ -55,8 +56,12 @@ def tailscale_key_url(distro: str, codename: str) -> str:
     """GPG key URL for the Tailscale apt repo; pure and unit-testable."""
     family = "debian" if distro == "debian" else "ubuntu"
     return f"https://pkgs.tailscale.com/stable/{family}/{codename}.gpg"
-CADDY_PORT = 19460        # minimal Caddyfile serves the dashboard here
-SERVE_PORT = "19460"      # `tailscale serve --bg` proxies this local port
+CADDY_PORT = 19460        # Caddy dashboard listener on loopback
+AUTHENTIK_PROXY_PORT = 19461
+VAULTWARDEN_PROXY_PORT = 19462
+SERVE_PORT = "19460"      # dashboard HTTPS listener on the tailnet
+VAULTWARDEN_SERVE_PORT = "8443"
+AUTHENTIK_SERVE_PORT = "8444"
 TS_HOSTNAME = "mu3lab"
 TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
 TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
@@ -104,14 +109,32 @@ DISPATCH = {
     ("docker_networks", "missing"): "create_networks",
     ("docker_networks", "denied"): "report_denied",
     ("docker_networks", "ready"): "skip",
+    ("caddy", "down"): "caddy_up",
+    ("caddy", "ready"): "skip",
+    ("vaultwarden", "down"): "vaultwarden_up",
+    ("vaultwarden", "ready"): "skip",
+    ("vaultwarden_setup", "needs_user"): "manual_vaultwarden",
+    ("vaultwarden_setup", "ready"): "skip",
     ("tailscale_pkg", "absent"): "tailscale_install",
     ("tailscale_pkg", "daemon_down"): "tailscale_start",
     ("tailscale_pkg", "unjoined"): "skip",   # join is the NEXT step's job
     ("tailscale_pkg", "ready"): "skip",
-    ("caddy", "down"): "caddy_up",
-    ("caddy", "ready"): "skip",
     ("tailscale_join", "unjoined"): "guided_join",
     ("tailscale_join", "ready"): "skip",
+    ("vaultwarden_serve", "unshared"): "share_vaultwarden",
+    ("vaultwarden_serve", "ready"): "skip",
+    ("authentik", "down"): "authentik_up",
+    ("authentik", "ready"): "skip",
+    ("authentik_serve", "unshared"): "share_authentik",
+    ("authentik_serve", "ready"): "skip",
+    ("authentik_setup", "needs_user"): "manual_authentik",
+    ("authentik_setup", "ready"): "skip",
+    ("authentik_users", "needs_user"): "manual_authentik_users",
+    ("authentik_users", "ready"): "skip",
+    ("dashboard_protection", "needs_user"): "manual_dashboard_protection",
+    ("dashboard_protection", "needs_apply"): "apply_dashboard_protection",
+    ("dashboard_protection", "needs_attention"): "manual_dashboard_protection",
+    ("dashboard_protection", "ready"): "skip",
     ("serve", "unshared"): "share_tailnet",
     ("serve", "ready"): "skip",
 }
@@ -721,7 +744,10 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     if not (projdir / "docker-compose.yml").is_file():
         return {"ok": False,
                 "error": "core/ingress/docker-compose.yml missing from checkout."}
-    rc, out = actions.compose_up(projdir, log)
+    runtime_caddy = RuntimePaths().projects / "ingress" / "Caddyfile"
+    source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
+    rc, out = actions.compose_up(projdir, log,
+                                 env={"MU3LAB_CADDYFILE": str(source_caddy)})
     log(out or f"(exit {rc})")
     if rc != 0:
         return {"ok": False, "error": "docker compose up failed (see log)."}
@@ -745,6 +771,228 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     return {"ok": False,
             "error": f"Caddy container started but :{CADDY_PORT} never "
                      f"answered (see `docker logs ingress-caddy-1`)."}
+
+
+def _manual_prompt(title: str, body: str, url: str, done: str) -> dict:
+    """Return a safe human step; URLs are destinations only, never secrets."""
+    return {"kind": "manual_setup", "title": title, "body": body,
+            "url": url, "done_label": done,
+            "copy_url": url, "check_label": "I completed this — check again"}
+
+
+def _runtime_marker(step: str, ctx: dict) -> bool:
+    from ctl import bootstrap_state
+    return bootstrap_state.is_complete(step, inputs=ctx.get("inputs", {}))
+
+
+def _compose_health(port: int, url: str) -> dict:
+    if not _tcp_open(port):
+        return {"status": "missing", "state": "down",
+                "detail": f"Service is not answering on loopback :{port}."}
+    import urllib.request as _url
+    try:
+        with _url.urlopen(url, timeout=5) as response:
+            if 200 <= response.status < 400:
+                return {"status": "ok", "state": "ready", "detail": f"Service is healthy on :{port}."}
+    except OSError as exc:
+        return {"status": "missing", "state": "down", "detail": str(exc)}
+    return {"status": "missing", "state": "down", "detail": f"Health check failed on :{port}."}
+
+
+def _vaultwarden_check(ctx: dict) -> dict:
+    return _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
+
+
+def fix_vaultwarden(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("vaultwarden")
+    projdir = ctx["root"] / "core" / "vaultwarden"
+    rc, out = actions.compose_up(projdir, log, env={"MU3LAB_DATA_ROOT": str(RuntimePaths().data)})
+    log(out or f"(exit {rc})")
+    if rc != 0:
+        return {"ok": False, "error": "Vaultwarden could not start (see log)."}
+    return {"ok": True}
+
+
+def check_vaultwarden_setup(ctx: dict) -> dict:
+    if _runtime_marker("vaultwarden_account", ctx):
+        return {"status": "ok", "state": "ready", "detail": "First Vaultwarden account confirmed by the operator."}
+    return {"status": "waiting", "state": "needs_user",
+            "detail": "Create the first Vaultwarden account in the local setup page."}
+
+
+def fix_vaultwarden_setup(check: dict, ctx: dict) -> dict:
+    return {"waiting": True, "prompt": _manual_prompt(
+        "Create your first Vaultwarden account",
+        "Vaultwarden is running locally. Create the first account in its official UI. Mu3Lab never receives or stores the master password. After saving it, return here and check again.",
+        f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}/", "I created the account")}
+
+
+def _tailscale_serve_port(port: str, target: str, log: Callable[[str], None]) -> dict:
+    result = privilege.run_privileged(
+        ["tailscale", "serve", "--bg", f"--https={port}", target], log, timeout=60)
+    if result.get("need_terminal"):
+        return {"waiting": True, "prompt": {"kind": "terminal",
+                "title": "Tailscale needs one administrator command",
+                "body": "Run this command, then press Retry.",
+                "terminal_command": result["terminal_command"]}}
+    return {"ok": bool(result.get("ok")), "error": "Tailscale Serve could not publish this route."}
+
+
+def _serve_port_check(port: str) -> dict:
+    try:
+        result = subprocess.run(["tailscale", "serve", "status"], capture_output=True,
+                                text=True, timeout=10)
+    except OSError:
+        return {"status": "missing", "state": "unshared", "detail": "Tailscale Serve is unavailable."}
+    ready = result.returncode == 0 and (f":{port}" in result.stdout or f"https={port}" in result.stdout)
+    return {"status": "ok" if ready else "missing", "state": "ready" if ready else "unshared",
+            "detail": f"Private HTTPS route {'is' if ready else 'is not'} published on :{port}."}
+
+
+def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
+    return _tailscale_serve_port(VAULTWARDEN_SERVE_PORT,
+                                 f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}",
+                                 ctx["log_fn"]("vaultwarden_serve"))
+
+
+def fix_authentik_serve(check: dict, ctx: dict) -> dict:
+    return _tailscale_serve_port(AUTHENTIK_SERVE_PORT,
+                                 f"http://127.0.0.1:{AUTHENTIK_PROXY_PORT}",
+                                 ctx["log_fn"]("authentik_serve"))
+
+
+def _authentik_check(ctx: dict) -> dict:
+    return _compose_health(9001, "http://127.0.0.1:9001/-/health/ready/")
+
+
+def fix_authentik(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("authentik")
+    from ctl import secrets as _secrets
+    env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
+    if added:
+        log("generated Authentik runtime configuration: " + ", ".join(added))
+    generated = _secrets.read_runtime_env(env_file)
+    values = {"AUTHENTIK_ENV_FILE": str(env_file),
+              "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.5.0"),
+              "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
+              "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", "")}
+    # Compose needs these values for interpolation. actions.compose_up passes
+    # them in the process environment but never includes env values in logs.
+    rc, out = actions.compose_up(ctx["root"] / "core" / "authentik", log, env=values)
+    log(out or f"(exit {rc})")
+    if rc != 0:
+        return {"ok": False, "error": "Authentik could not start (see log)."}
+    return {"ok": True}
+
+
+def check_authentik_setup(ctx: dict) -> dict:
+    if _runtime_marker("authentik_admin", ctx):
+        return {"status": "ok", "state": "ready", "detail": "Authentik administrator confirmed by the operator."}
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    return {"status": "waiting", "state": "needs_user",
+            "detail": "Create the first Authentik administrator in the official setup flow.",
+            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/flow/initial-setup/"}
+
+
+def _tailscale_dns_name_for_install() -> str:
+    try:
+        proc = subprocess.run(["tailscale", "status", "--json"], capture_output=True,
+                              text=True, timeout=5)
+        data = json.loads(proc.stdout) if proc.returncode == 0 else {}
+        return str(data.get("Self", {}).get("DNSName", "")).rstrip(".")
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+def fix_authentik_setup(check: dict, ctx: dict) -> dict:
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    return {"waiting": True, "prompt": _manual_prompt(
+        "Create the Authentik administrator",
+        "Open Authentik’s official first-run page and create the administrator. Mu3Lab never receives or stores that password. Then create the Mu3Lab operator group and users when prompted in the next step.",
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/flow/initial-setup/", "I created the administrator")}
+
+
+def check_authentik_users(ctx: dict) -> dict:
+    if _runtime_marker("authentik_users", ctx):
+        return {"status": "ok", "state": "ready", "detail": "Initial Authentik users confirmed by the operator."}
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    return {"status": "waiting", "state": "needs_user",
+            "detail": "Create the initial household/operator users and operator group.",
+            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/identity/users"}
+
+
+def fix_authentik_users(check: dict, ctx: dict) -> dict:
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    return {"waiting": True, "prompt": _manual_prompt(
+        "Create your initial Mu3Lab users",
+        "In Authentik, create the household/operator users who should manage this Mu3Lab host. Keep public registration disabled. Then return and check again.",
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/identity/users", "I created the users")}
+
+
+def check_dashboard_protection(ctx: dict) -> dict:
+    if _runtime_marker("dashboard_protection", ctx):
+        target = RuntimePaths().projects / "ingress" / "Caddyfile"
+        if not target.is_file():
+            return {"status": "missing", "state": "needs_apply",
+                    "detail": "Dashboard protection was confirmed; applying the verified Caddy policy."}
+        verdict = _dashboard_access_probe()
+        if verdict["state"] == "ready":
+            return verdict
+        return {"status": "waiting", "state": "needs_attention", "detail": verdict["detail"]}
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    return {"status": "waiting", "state": "needs_user",
+            "detail": "Create the Mu3Lab dashboard provider/application in Authentik, then confirm it here.",
+            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/core/applications"}
+
+
+def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
+    if _runtime_marker("dashboard_protection", ctx):
+        source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
+        target = RuntimePaths().projects / "ingress" / "Caddyfile"
+        if target.is_file():
+            host = _tailscale_dns_name_for_install() or "127.0.0.1"
+            return {"waiting": True, "prompt": _manual_prompt(
+                "Verify the protected dashboard",
+                "Open an anonymous browser window and confirm the dashboard redirects to Authentik. Then sign in as a Mu3Lab operator and confirm the dashboard loads. Return here and check again.",
+                f"https://{host}:{SERVE_PORT}/", "I verified the protected dashboard")}
+        target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        log = ctx["log_fn"]("dashboard_protection")
+        rc, out = actions.compose_up(ctx["root"] / "core" / "ingress", log,
+                                     env={"MU3LAB_CADDYFILE": str(target)})
+        log(out or f"(exit {rc})")
+        return {"ok": rc == 0, "error": "Caddy could not apply dashboard protection." if rc else ""}
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    return {"waiting": True, "prompt": _manual_prompt(
+        "Protect the Mu3Lab dashboard",
+        "In Authentik, create a Proxy Provider in Forward auth (single application) mode, create an application named Mu3Lab, bind the provider, and add the embedded outpost if Authentik asks. Use the private dashboard URL as the external host. Then test an anonymous browser window: it must redirect to Authentik, and a signed-in operator must return to Mu3Lab. This step configures access in front of the dashboard; it does not expose Vaultwarden. Mu3Lab will not mark the dashboard protected until this human step is complete.",
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/core/applications", "I protected and tested the dashboard")}
+
+
+def _dashboard_access_probe() -> dict:
+    """Require an unauthenticated request to be denied by the auth gate."""
+    import urllib.error as _url_error
+    import urllib.request as _url_request
+
+    class _NoRedirect(_url_request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            return None
+
+    opener = _url_request.build_opener(_NoRedirect)
+    try:
+        with opener.open(f"http://127.0.0.1:{CADDY_PORT}/", timeout=5) as response:
+            if response.status in (401, 403):
+                return {"status": "ok", "state": "ready", "detail": "Anonymous dashboard access is denied by Authentik."}
+            return {"status": "missing", "state": "needs_attention",
+                    "detail": f"Dashboard returned HTTP {response.status} without authentication."}
+    except _url_error.HTTPError as exc:
+        if exc.code in (302, 303, 307, 308, 401, 403):
+            return {"status": "ok", "state": "ready", "detail": "Anonymous dashboard access is denied by Authentik."}
+        return {"status": "missing", "state": "needs_attention",
+                "detail": f"Dashboard protection probe returned HTTP {exc.code}."}
+    except OSError as exc:
+        return {"status": "missing", "state": "needs_attention",
+                "detail": f"Dashboard protection probe could not reach Caddy: {exc}"}
 
 
 def _join_prompt(login_url: str) -> dict:
@@ -946,10 +1194,19 @@ STEPS = [
      "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access")},
     {"id": "docker_session", "label": "Docker login session",
      "check": _docker_session_check, "fix": fix_docker_session},
+    {"id": "runtime_layout", "label": "Persistent data layout",
+     "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
+     "fix": fix_runtime_layout},
+    {"id": "docker_networks", "label": "Shared networks",
+     "check": _networks_check, "fix": fix_networks_router},
+    {"id": "caddy", "label": "Private ingress",
+     "check": _caddy_check, "fix": fix_caddy},
+    {"id": "vaultwarden", "label": "Vaultwarden password manager",
+     "check": _vaultwarden_check, "fix": fix_vaultwarden},
+    {"id": "vaultwarden_setup", "label": "Vaultwarden first account",
+     "check": check_vaultwarden_setup, "fix": fix_vaultwarden_setup},
     {"id": "tailscale_pkg", "label": "Tailscale app",
      "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg,
-     # Installed + daemon running is this step's whole job; connecting is the
-     # tailscale_join step's job (same verify-tolerance pattern as docker).
      "verify_ok_states": ("ready", "unjoined")},
     {"id": "tailscale_join", "label": "Tailscale connection",
      "check": lambda ctx: (lambda r: {
@@ -958,17 +1215,24 @@ STEPS = [
          "state": ("ready" if r["state"] == "ready" else "unjoined"),
          "blocking": False})(_tailscale_pkg_check(ctx)),
      "fix": fix_tailscale_join},
-    {"id": "runtime_layout", "label": "Persistent data layout",
-     # `ctx["root"]` is the Git checkout. Persistent state is deliberately
-     # outside it, at RuntimePaths().root (/srv/mu3lab).
-     "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
-     "fix": fix_runtime_layout},
-    {"id": "docker_networks", "label": "Shared networks",
-     "check": _networks_check, "fix": fix_networks_router},
-    {"id": "caddy", "label": "Caddy",
-     "check": _caddy_check, "fix": fix_caddy},
-    {"id": "serve", "label": "Phone access (sharing)",
+    {"id": "vaultwarden_serve", "label": "Vaultwarden private access",
+     "check": lambda ctx: _serve_port_check(VAULTWARDEN_SERVE_PORT),
+     "fix": fix_vaultwarden_serve},
+    {"id": "authentik", "label": "Authentik identity service",
+     "check": _authentik_check, "fix": fix_authentik},
+    {"id": "authentik_serve", "label": "Authentik private access",
+     "check": lambda ctx: _serve_port_check(AUTHENTIK_SERVE_PORT),
+     "fix": fix_authentik_serve},
+    {"id": "authentik_setup", "label": "Authentik administrator",
+     "check": check_authentik_setup, "fix": fix_authentik_setup},
+    {"id": "authentik_users", "label": "Authentik initial users",
+     "check": check_authentik_users, "fix": fix_authentik_users},
+    # Publish the private dashboard route before the operator tests the
+    # Authentik gate; the route is tailnet-only while the gate is configured.
+    {"id": "serve", "label": "Mu3Lab private dashboard route",
      "check": _serve_check, "fix": fix_serve},
+    {"id": "dashboard_protection", "label": "Protect the Mu3Lab dashboard",
+     "check": check_dashboard_protection, "fix": fix_dashboard_protection},
 ]
 
 

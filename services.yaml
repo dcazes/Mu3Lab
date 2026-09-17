@@ -25,6 +25,8 @@ services:
     stage: foundation
     images: ["caddy:2.10.2-alpine"]
     route: ready
+    required: true
+    setup_action: "Private ingress is installed and checked by the bootstrapper."
     backup: {volumes: [caddy-data, caddy-config]}
 
   - id: authentik
@@ -33,12 +35,15 @@ services:
     lifecycle: always_on
     compose_dir: core/authentik
     https_port: 9001
+    private_https_port: 8444
     health: {kind: http, url: "http://127.0.0.1:9001/-/health/ready/"}
     auth: excluded
     profiles: [cpu, nvidia, amd]
     stage: foundation
     images: ["postgres:16-alpine", "ghcr.io/goauthentik/server:2026.5.0"]
     route: pending
+    required: true
+    setup_action: "Create the Authentik administrator and Mu3Lab application."
     backup: {database: authentik, volumes: [authentik-media, authentik-templates]}
 
   - id: vaultwarden
@@ -47,12 +52,16 @@ services:
     lifecycle: always_on
     compose_dir: core/vaultwarden
     https_port: 8081
+    private_https_port: 8443
     health: {kind: http, url: "http://127.0.0.1:8081/alive"}
     auth: excluded
     profiles: [cpu, nvidia, amd]
     stage: foundation
     images: ["vaultwarden/server:1.34.3-alpine"]
     route: pending
+    required: true
+    setup_action: "Create the first Vaultwarden account locally, then use its private tailnet URL."
+    identity_note: "Independent Vaultwarden login; never Authentik-gated."
     backup: {binds: [data]}
     mcp: {exposed: false}
 
@@ -65,8 +74,12 @@ services:
     health: {kind: http, url: "http://127.0.0.1:11434/"}
     auth: proxy
     profiles: [cpu, nvidia, amd]
-    stage: planned
+    stage: core
+    required: true
     route: pending
+    images: ["ollama/ollama:0.34.1"]
+    setup_action: "Install the local model runner and verify the selected CPU/GPU profile."
+    resource_guidance: "Model downloads determine disk and memory use."
     backup: {binds: [data]}
     mcp: {exposed: true, risk: read}
 
@@ -79,8 +92,12 @@ services:
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: planned
+    stage: core
+    required: true
     route: pending
+    setup_action: "Connect Ollama and optional provider routes, then run a test request."
+    resource_guidance: "Low host overhead; provider and model choice determines usage."
+    images: ["ghcr.io/berriai/litellm:v1.92.0"]
     dependencies: [ollama]
     backup: {binds: [config]}
     mcp: {exposed: true, risk: read}
@@ -94,8 +111,12 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8084/health"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: planned
+    stage: core
+    required: true
     route: pending
+    setup_action: "Connect Open WebUI to the verified LiteLLM endpoint."
+    resource_guidance: "Moderate memory use; model work happens upstream."
+    images: ["ghcr.io/open-webui/open-webui:v0.11.1"]
     dependencies: [litellm]
     backup: {binds: [data]}
 
@@ -108,8 +129,12 @@ services:
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
     auth: proxy
     profiles: [cpu, nvidia, amd]
-    stage: planned
+    stage: core
+    required: true
     route: pending
+    setup_action: "Add one or more FreeLLMAPI provider keys, or leave it unconfigured."
+    resource_guidance: "Optional provider route inside the mandatory core suite."
+    images: ["ghcr.io/tashfeenahmed/freellmapi:v0.11.0"]
     backup: {binds: [data]}
 
   - id: surfsense
@@ -119,11 +144,108 @@ services:
     compose_dir: apps/surfsense
     https_port: 3929
     health: {kind: tcp, port: 3929}
-    auth: excluded
+    auth: local
     profiles: [cpu, nvidia, amd]
-    dependencies: [litellm, ollama]
-    availability: blocked
-    stage: blocked
-    route: unavailable
-    blocked_reason: "No supported Authentik/OIDC or trusted-proxy identity integration."
+    dependencies: [litellm, ollama, firecrawl]
+    availability: available
+    stage: core
+    required: true
+    route: pending
+    identity_note: "Own local account; Vaultwarden may store/fill credentials. This is not true SSO."
+    setup_action: "Create the first SurfSense account in SurfSense and save it in Vaultwarden if desired."
+    resource_guidance: "Requires LiteLLM, Ollama, Firecrawl, and its stateful dependencies."
+    images: ["ghcr.io/modsetter/surfsense-backend:0.0.31", "ghcr.io/modsetter/surfsense-web:0.0.31", "pgvector/pgvector:pg17", "redis:8.2-alpine"]
     backup: {database: surfsense, binds: [object-store]}
+
+  - id: firecrawl
+    name: Firecrawl
+    category: research
+    lifecycle: shared
+    compose_dir: apps/firecrawl
+    https_port: 3002
+    health: {kind: http, url: "http://127.0.0.1:3002/"}
+    auth: proxy
+    profiles: [cpu, nvidia, amd]
+    stage: core
+    required: true
+    route: pending
+    dependencies: []
+    setup_action: "Verify the local crawler service for SurfSense."
+    resource_guidance: "Browser and queue sidecars can use substantial memory during crawls."
+    images: ["ghcr.io/firecrawl/firecrawl:2.11.334-production", "postgres:16.4-alpine", "redis:7.4-alpine"]
+    backup: {binds: [data]}
+
+  - id: actual-budget
+    name: Actual Budget
+    category: finance
+    lifecycle: optional
+    compose_dir: apps/actual-budget
+    https_port: 5006
+    health: {kind: http, url: "http://127.0.0.1:5006/"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    stage: optional
+    route: pending
+    setup_action: "Install only when you want private budgeting."
+    resource_guidance: "Lightweight personal finance service."
+    backup: {binds: [data]}
+
+  - id: immich
+    name: Immich
+    category: media
+    lifecycle: optional
+    compose_dir: apps/immich
+    https_port: 2283
+    health: {kind: http, url: "http://127.0.0.1:2283/api/server/ping"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    stage: optional
+    route: pending
+    setup_action: "Install only when you want private photo management."
+    resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
+    backup: {binds: [library, database]}
+
+  - id: mealie
+    name: Mealie
+    category: home
+    lifecycle: optional
+    compose_dir: apps/mealie
+    https_port: 9925
+    health: {kind: http, url: "http://127.0.0.1:9925/api/app/about"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    stage: optional
+    route: pending
+    setup_action: "Install only when you want private recipe and meal planning."
+    resource_guidance: "Lightweight service."
+    backup: {binds: [data]}
+
+  - id: adventurelog
+    name: AdventureLog
+    category: travel
+    lifecycle: optional
+    compose_dir: apps/adventurelog
+    https_port: 8015
+    health: {kind: http, url: "http://127.0.0.1:8015/"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    stage: optional
+    route: pending
+    setup_action: "Install only when you want private travel planning."
+    resource_guidance: "Lightweight service with persistent trip data."
+    backup: {binds: [data]}
+
+  - id: paperless-ngx
+    name: Paperless-ngx
+    category: documents
+    lifecycle: optional
+    compose_dir: apps/paperless-ngx
+    https_port: 8000
+    health: {kind: http, url: "http://127.0.0.1:8000/api/"}
+    auth: oidc
+    profiles: [cpu, nvidia, amd]
+    stage: optional
+    route: pending
+    setup_action: "Install only when you want private document management."
+    resource_guidance: "Storage and OCR usage grow with your document library."
+    backup: {binds: [data, media, consume, export]}

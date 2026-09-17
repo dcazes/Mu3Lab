@@ -1,0 +1,11 @@
+model_list:
+  - model_name: local
+    litellm_params:
+      model: openai/llama3.2:3b
+      api_base: os.environ/OLLAMA_API_BASE
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  drop_params: true

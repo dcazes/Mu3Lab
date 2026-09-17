@@ -300,14 +300,20 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
     def test_step_order(self):
-        # A real login refresh is mandatory before Docker-backed work; tailnet
-        # connection is established before runtime, ingress, and sharing.
+        # Identity-first bootstrap: Vaultwarden is initialized locally before
+        # the tailnet and Authentik are introduced.
         ids = [m["id"] for m in install.STEPS]
         self.assertLess(ids.index("docker"), ids.index("docker_session"))
-        self.assertLess(ids.index("docker_session"), ids.index("tailscale_join"))
-        self.assertLess(ids.index("tailscale_join"), ids.index("serve"))
-        self.assertLess(ids.index("tailscale_join"), ids.index("docker_networks"))
+        self.assertLess(ids.index("docker_session"), ids.index("runtime_layout"))
+        self.assertLess(ids.index("runtime_layout"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
+        self.assertLess(ids.index("caddy"), ids.index("vaultwarden"))
+        self.assertLess(ids.index("vaultwarden"), ids.index("vaultwarden_setup"))
+        self.assertLess(ids.index("vaultwarden_setup"), ids.index("tailscale_join"))
+        self.assertLess(ids.index("tailscale_join"), ids.index("vaultwarden_serve"))
+        self.assertLess(ids.index("vaultwarden_serve"), ids.index("authentik"))
+        self.assertLess(ids.index("authentik_setup"), ids.index("dashboard_protection"))
+        self.assertLess(ids.index("serve"), ids.index("dashboard_protection"))
 
     def test_pkg_verify_tolerates_unjoined(self):
         # Installing must not flunk itself on the NEXT step's job.
@@ -451,6 +457,14 @@ class DockerSessionTests(unittest.TestCase):
             "serve": ["unshared", "ready"],
             "docker_networks": ["missing", "denied", "ready"],
             "caddy": ["down", "ready"],
+            "vaultwarden": ["down", "ready"],
+            "vaultwarden_setup": ["needs_user", "ready"],
+            "vaultwarden_serve": ["unshared", "ready"],
+            "authentik": ["down", "ready"],
+            "authentik_serve": ["unshared", "ready"],
+            "authentik_setup": ["needs_user", "ready"],
+            "authentik_users": ["needs_user", "ready"],
+            "dashboard_protection": ["needs_user", "needs_apply", "needs_attention", "ready"],
         }
         step_ids = {m["id"] for m in install.STEPS}
         self.assertEqual(set(states), step_ids)

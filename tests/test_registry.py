@@ -8,20 +8,22 @@ import unittest
 from pathlib import Path
 
 import yaml
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ctl.registry import RegistryError, load
 from ctl.backups import Retention
 from ctl.runtime import RuntimePaths
-from ctl.service_state import public_url
+from ctl.service_state import public_url, status as service_status
 
 
 class RegistryTests(unittest.TestCase):
-    def test_checked_in_registry_loads_and_surfsense_is_explicitly_blocked(self):
+    def test_checked_in_registry_loads_and_surfsense_is_explicitly_local_account(self):
         registry = load()
-        self.assertEqual(registry.get("surfsense").availability, "blocked")
-        self.assertIn("supported", registry.get("surfsense").blocked_reason)
+        self.assertEqual(registry.get("surfsense").availability, "available")
+        self.assertEqual(registry.get("surfsense").auth, "local")
+        self.assertIn("not true SSO", registry.get("surfsense").identity_note)
         self.assertFalse(registry.get("vaultwarden").mcp.get("exposed", False))
 
     def test_rejects_compose_path_escape(self):
@@ -62,6 +64,17 @@ class RegistryTests(unittest.TestCase):
         authentik = (root / "core/authentik/.env.example").read_text(encoding="utf-8")
         self.assertNotIn("AUTHENTIK_TAG=latest", authentik)
 
+    def test_core_suite_has_a_compose_manifest_and_pinned_registry_images(self):
+        registry = load()
+        root = Path(__file__).resolve().parents[1]
+        core = [service for service in registry.services if service.required and service.stage == "core"]
+        self.assertEqual({service.id for service in core},
+                         {"ollama", "freellmapi", "litellm", "open-webui", "firecrawl", "surfsense"})
+        for service in core:
+            self.assertTrue((service.compose_path(root) / "docker-compose.yml").is_file(), service.id)
+            self.assertTrue(service.images, service.id)
+            self.assertTrue(all(":latest" not in image and ":main" not in image for image in service.images))
+
     def test_ingress_matches_tailnet_host_headers_on_loopback(self):
         caddyfile = (Path(__file__).resolve().parents[1] / "core/ingress/Caddyfile").read_text(
             encoding="utf-8"
@@ -77,3 +90,15 @@ class RegistryTests(unittest.TestCase):
         profile_ids = {service_id for profile in catalog["profiles"]
                        for service_id in profile["services"]}
         self.assertTrue(profile_ids.issubset({service.id for service in registry.services}))
+
+    def test_healthy_service_without_private_route_needs_setup(self):
+        service = load().get("litellm")
+        root = Path(__file__).resolve().parents[1]
+        with patch("ctl.service_state._compose_state", return_value="running"), \
+             patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")), \
+             patch("ctl.service_state._tailnet_route_present", return_value=False):
+            state = service_status(service, "", root)
+        self.assertEqual(state["lifecycle_state"], "needs_setup")
+        self.assertEqual(state["health_state"], "healthy")
+        self.assertEqual(state["route_state"], "pending")
+        self.assertEqual(state["user_action"], "Private HTTPS route pending")

@@ -1,0 +1,68 @@
+name: mu3lab-surfsense
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      POSTGRES_USER: surfsense
+      POSTGRES_DB: surfsense
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/postgres:/var/lib/postgresql/data
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surfsense -d surfsense"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    image: ghcr.io/modsetter/surfsense-backend:0.0.31
+    restart: unless-stopped
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      SERVICE_ROLE: api
+      PYTHONPATH: /app
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
+    networks: [mu3lab_backend]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/ready"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+
+  frontend:
+    image: ghcr.io/modsetter/surfsense-web:0.0.31
+    restart: unless-stopped
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      AUTH_TYPE: LOCAL
+      SURFSENSE_BACKEND_INTERNAL_URL: http://backend:8000
+    ports: ["127.0.0.1:3929:3000"]
+    networks: [mu3lab_frontend, mu3lab_backend]
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

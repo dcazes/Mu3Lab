@@ -1,0 +1,25 @@
+name: mu3lab-freellmapi
+
+services:
+  freellmapi:
+    image: ghcr.io/tashfeenahmed/freellmapi:v0.11.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:3001:3001"]
+    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/freellmapi:/app/server/data
+    networks: [mu3lab_frontend, mu3lab_backend]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/ping').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}
