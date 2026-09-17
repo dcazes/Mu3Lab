@@ -304,12 +304,47 @@ def check_tailscale(binary_present: bool, daemon_active: bool,
                    state="ready")
 
 
+def _port_owner(port: int) -> dict | None:
+    """Best-effort owner of a loopback listener: {pid, process, ours}.
+
+    Parses `ss -tlnp` (no privilege needed for own sockets; foreign ones may
+    show pid "-"). `ours` is True when the command line belongs to this Mu3Lab
+    checkout (uvicorn ctl.app / mu3lab-ctl) — only OUR processes are ever
+    stoppable from the dashboard (see /api/service/stop).
+    """
+    rc, out = _run(["ss", "-tlnp"])
+    if rc != 0:
+        return None
+    pid: int | None = None
+    process = ""
+    for line in out.splitlines():
+        if f"127.0.0.1:{port}" not in line and f"[::1]:{port}" not in line:
+            continue
+        match = re.search(r'users:\(\("([^"]+)",pid=(\d+)', line)
+        if match:
+            process, pid = match.group(1), int(match.group(2))
+            break
+    if pid is None:
+        return {"pid": None, "process": process or "unknown", "ours": False}
+    ours = False
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode(
+            errors="replace").replace("\x00", " ")
+        ours = ("ctl.app" in cmdline or "mu3lab-ctl" in cmdline) and str(ROOT) in cmdline
+        process = cmdline.split()[0] if cmdline.split() else process
+    except OSError:
+        pass  # foreign user process: owner known, cmdline unreadable
+    return {"pid": pid, "process": process, "ours": ours}
+
+
 def check_ports(connect_fn=None) -> dict:
     """Probe that Step-0/1 ports are free (or already ours).
 
     `connect_fn(port) -> bool` defaults to a real loopback connect; tests
     inject a stub. A port that ACCEPTS a connection is reported "in use" —
-    on a clean box all four must be free.
+    on a clean box all four must be free. Busy ports carry an `owners` map
+    (see _port_owner) so the dashboard can offer a Stop button for OUR
+    service instead of a dead-end error.
     """
     if connect_fn is None:
         def connect_fn(port: int) -> bool:
@@ -321,11 +356,15 @@ def check_ports(connect_fn=None) -> dict:
                 sock.close()
     busy = [port for port in CHECK_PORTS if connect_fn(port)]
     if busy:
-        return _result("ports", "fail",
-                       f"Ports already in use: {', '.join(map(str, busy))}.",
-                       "Stop the conflicting processes or change ports before installing.")
-    return _result("ports", "ok",
-                   f"Ports free ({', '.join(map(str, CHECK_PORTS))}).")
+        owners = {str(port): _port_owner(port) for port in busy}
+        return {"name": "ports", "status": "fail",
+                "detail": f"Ports already in use: {', '.join(map(str, busy))}.",
+                "action": ("Stop our dashboard service below, or free the "
+                           "ports before installing."),
+                "state": "blocked", "blocking": True, "owners": owners}
+    return {"name": "ports", "status": "ok",
+            "detail": f"Ports free ({', '.join(map(str, CHECK_PORTS))}).",
+            "action": "", "state": "ready", "blocking": True}
 
 
 def check_bundle(root: Path = ROOT) -> dict:

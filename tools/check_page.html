@@ -60,6 +60,11 @@
 
 <section class="card locked" id="card-preflight">
   <h2>② Preflight <span class="status mut" id="pre-status">locked — needs green tests</span></h2>
+  <div id="dash-banner" hidden style="border:2px solid var(--ok); border-radius:8px; padding:.6rem 1rem; margin-bottom:.6rem;">
+    <strong>Real dashboard already running.</strong>
+    <a href="http://127.0.0.1:8787" target="_blank" rel="noopener">Open it</a>
+    <span class="mut">(started automatically at boot — that is normal once installed)</span>
+  </div>
   <p><button id="btn-pre" onclick="runPreflight()" disabled>Run preflight</button></p>
   <h3>Must pass before install</h3>
   <table id="pre-block" hidden>
@@ -210,9 +215,40 @@ async function refreshTests() {
 function preRow(c, showAction) {
   const mark = c.status === 'ok' ? '<span class="ok">PASS</span>'
     : c.status === 'missing' ? '<span class="wait">TODO</span>' : '<span class="bad">FAIL</span>';
-  const fix = (showAction && c.action) ? '<br><code class="act">' + escapeHtml(c.action) + '</code>' : '';
+  let fix = (showAction && c.action) ? '<br><code class="act">' + escapeHtml(c.action) + '</code>' : '';
+  // Our own service holding a port: offer Stop instead of a dead end.
+  // Foreign processes are only NAMED (never killed from here).
+  if (c.owners) {
+    for (const [port, o] of Object.entries(c.owners)) {
+      if (!o) continue;
+      if (o.ours) {
+        fix += '<br><span class="mut">Port ' + port + ' is our dashboard service (pid ' +
+          o.pid + ').</span><br><button onclick="stopService(\'once\')">Stop it</button> ' +
+          '<button onclick="stopService(\'disable\')">Stop + no autostart</button>';
+      } else if (o.pid) {
+        fix += '<br><span class="mut">Port ' + port + ' held by ' +
+          escapeHtml(o.process || 'unknown') + ' (pid ' + o.pid +
+          ') — not ours, stopping it is your call in a terminal.</span>';
+      }
+    }
+  }
   return '<tr><td>' + c.name + '</td><td>' + mark + '</td><td>' +
     escapeHtml(c.detail) + fix + '</td></tr>';
+}
+async function stopService(mode) {
+  // Stops ONLY mu3lab-ctl (server refuses anything else). Re-probes after.
+  try { await postJSON('/api/service/stop', {mode: mode}); }
+  catch (e) { console.error('service/stop', e); alert('Stop failed: ' + e.message); return; }
+  runPreflight();
+  checkDashboardBanner();
+}
+// no-cors probe: response is opaque (unreadable) but success vs network
+// error still tells us whether :8787 answers. No CORS config needed.
+async function checkDashboardBanner() {
+  try {
+    await fetch('http://127.0.0.1:8787/api/health', {mode: 'no-cors'});
+    document.getElementById('dash-banner').hidden = false;
+  } catch (e) { document.getElementById('dash-banner').hidden = true; }
 }
 async function runPreflight() {
   setStatus('pre-status', 'probing…', 'wait');
@@ -471,6 +507,7 @@ async function copyScript() {
   if (st.code_version === undefined || st.code_version < 3) {
     document.getElementById('stale-banner').hidden = false;
   }
+  checkDashboardBanner();
 })();
 </script>
 </body>

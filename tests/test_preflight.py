@@ -201,6 +201,49 @@ class PortTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertIn("8787", result["detail"])
 
+    def test_busy_names_owner(self):
+        # Busy ports carry an owners map so the UI can offer Stop for OURS.
+        # /proc reads are stubbed: fixture PIDs must never depend on which
+        # real processes happen to exist on the test box.
+        from unittest.mock import MagicMock, patch as _patch
+        ss_out = ('State Recv-Q Local Address:Port Process\n'
+                  'LISTEN 0 128 127.0.0.1:8787 '
+                  'users:(("uvicorn",pid=4242,fd=13))')
+        fake_path = MagicMock()
+        fake_path.return_value.read_bytes.return_value = (
+            b"/home/dak/Desktop/Mu3Lab/.venv/bin/python ctl.app:app")
+        with _patch("ctl.preflight._run", return_value=(0, ss_out)), \
+             _patch("ctl.preflight.Path", fake_path):
+            with _patch("ctl.preflight.ROOT", Path("/home/dak/Desktop/Mu3Lab")):
+                result = preflight.check_ports(
+                    connect_fn=lambda port: port == 8787)
+        owner = result["owners"]["8787"]
+        self.assertEqual(owner["pid"], 4242)
+        self.assertTrue(owner["ours"])
+
+    def test_foreign_owner_not_ours(self):
+        from unittest.mock import MagicMock, patch as _patch
+        ss_out = ('State Recv-Q Local Address:Port Process\n'
+                  'LISTEN 0 128 127.0.0.1:8787 '
+                  'users:(("something",pid=4243,fd=3))')
+        fake_path = MagicMock()
+        fake_path.return_value.read_bytes.side_effect = OSError("denied")
+        with _patch("ctl.preflight._run", return_value=(0, ss_out)), \
+             _patch("ctl.preflight.Path", fake_path):
+            result = preflight.check_ports(
+                connect_fn=lambda port: port == 8787)
+        owner = result["owners"]["8787"]
+        self.assertEqual(owner["pid"], 4243)
+        self.assertFalse(owner["ours"])
+
+    def test_ss_missing_still_reports(self):
+        from unittest.mock import patch as _patch
+        with _patch("ctl.preflight._run", return_value=(127, "no ss")):
+            result = preflight.check_ports(connect_fn=lambda port: True)
+        self.assertEqual(result["status"], "fail")
+        for owner in result["owners"].values():
+            self.assertIsNone(owner)
+
     def test_future_untouched(self):
         # 4000 (LiteLLM, later) must NOT be probed even when busy.
         seen: list[int] = []

@@ -256,8 +256,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/tests/events":
             with state.lock:
                 self._json({"events": list(state.test_events)})
-        elif self.path == "/api/install/script":
-            # Combined admin script (headless fallback): every privileged
+        elif self.path == "/api/install/script":            # Combined admin script (headless fallback): every privileged
             # command recorded so far, as one `sudo bash` script.
             from ctl import install as _install
             with state.lock:
@@ -426,6 +425,34 @@ class Handler(BaseHTTPRequestHandler):
                     target=_install_worker, args=(state,), daemon=True)
                 state.install_thread.start()
             self._json({"retried": True})
+        elif self.path == "/api/service/stop":
+            # Stop OUR dashboard service ONLY (mu3lab-ctl, user scope — no
+            # privilege involved). Refuses anything else: the dashboard must
+            # never kill arbitrary processes. Body: {"mode": "once"|"disable"}
+            # ("disable" also turns off start-at-boot).
+            try:
+                payload = json.loads(self._body.decode() or "{}")
+            except (ValueError, AttributeError):
+                self._json({"error": "bad request",
+                            "hint": 'send JSON {"mode": "once"|"disable"}'}, 400)
+                return
+            mode = payload.get("mode", "once")
+            if mode not in ("once", "disable"):
+                self._json({"error": "bad request",
+                            "hint": 'mode must be "once" or "disable"'}, 400)
+                return
+            import subprocess as _sp
+            stop = _sp.run(["systemctl", "--user", "stop", "mu3lab-ctl"],
+                           capture_output=True, text=True, timeout=30)
+            if stop.returncode != 0:
+                self._json({"error": "stop failed",
+                            "hint": (stop.stdout + stop.stderr).strip()
+                            or "is mu3lab-ctl running?"}, 500)
+                return
+            if mode == "disable":
+                _sp.run(["systemctl", "--user", "disable", "mu3lab-ctl"],
+                        capture_output=True, timeout=30)
+            self._json({"stopped": True, "autostart_off": mode == "disable"})
         else:
             self._json({"error": "not found"}, 404)
 
