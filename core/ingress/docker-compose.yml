@@ -13,7 +13,6 @@ services:
     image: caddy:2.10.2-alpine
     restart: unless-stopped
     network_mode: host
-    env_file: ${INGRESS_ENV_FILE:-.env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

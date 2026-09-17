@@ -343,7 +343,7 @@ def check_tailscale(binary_present: bool, daemon_active: bool,
     if not joined:
         return _result("tailscale", "missing",
                        "Installed, but not connected to your tailnet yet.",
-                       "step 3 guides the connection (sign in or paste a key).",
+                       "step 3 guides the normal browser-based Tailscale login.",
                        state="unjoined")
     return _result("tailscale", "ok", "Installed, service running, tailnet connected.",
                    state="ready")
@@ -465,6 +465,22 @@ def _port_owner(port: int) -> dict | None:
             process, pid = match.group(1), int(match.group(2))
             break
     if pid is None:
+        # Host-network Compose containers often hide their PID from an
+        # unprivileged `ss` invocation. Confirm ownership through Compose
+        # labels, but only when the working directory is this checkout.
+        project_by_port = {19460: "ingress", 9001: "authentik", 8081: "vaultwarden"}
+        project = project_by_port.get(port)
+        if project:
+            names_rc, names = _run([
+                "docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
+                "--format", "{{.Names}}"])
+            for name in names.splitlines() if names_rc == 0 else []:
+                label_rc, working_dir = _run([
+                    "docker", "inspect", "--format",
+                    "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}",
+                    name.strip()])
+                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "core" / project).resolve():
+                    return {"pid": None, "process": name.strip(), "ours": True}
         return {"pid": None, "process": process or "unknown", "ours": False}
     ours = False
     try:
