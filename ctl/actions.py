@@ -195,6 +195,20 @@ def write_root_bytes(path: str, data: bytes, log: Callable[[str], None],
     return _ok(lines)
 
 
+def remove_root_file(path: str, log: Callable[[str], None]) -> dict:
+    """Remove one installer-owned file through the normal privilege boundary.
+
+    This is intentionally narrower than cleaning an APT directory.  It lets
+    a fresh reinstall repair stale Mu3Lab repository definitions whose keys
+    were removed, without touching unrelated user repositories.
+    """
+    lines: list[str] = []
+    res = privilege.run_privileged(["rm", "-f", path], lines.append)
+    if res.get("need_terminal"):
+        return _fail(lines, terminal_command=res["terminal_command"])
+    return _ok(lines) if res["ok"] else _fail(lines)
+
+
 def systemctl_enable_now(unit: str, log: Callable[[str], None],
                          user_scope: bool = False) -> dict:
     """`systemctl enable --now <unit>` (system scope) or --user variant."""

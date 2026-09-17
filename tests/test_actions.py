@@ -102,7 +102,9 @@ class SystemTests(unittest.TestCase):
         def _no_elevate(*args, **kwargs):
             raise AssertionError("must not elevate")
         with patch.object(actions.privilege, "_exec", fake), \
-             patch.object(actions.privilege, "run_privileged", _no_elevate):
+             patch.object(actions.privilege, "run_privileged", _no_elevate), \
+             patch("shutil.which", return_value="/usr/bin/sg"), \
+             patch("ctl.preflight._db_has_group", return_value=True):
             result = actions.docker_network_create("mu3lab_backend", _silent,
                                                    internal=True)
         self.assertTrue(result["ok"])
@@ -123,6 +125,18 @@ class SystemTests(unittest.TestCase):
         self.assertIn(["chown", "root:tester", "/srv/mu3lab"], seen)
         self.assertNotIn("/srv/mu3lab/secrets", seen[-1])
 
+    def test_remove_root_file_uses_exact_path(self):
+        seen: list[list[str]] = []
+        def fake(argv, log):
+            seen.append(argv)
+            return _privileged_ok(argv, log)
+        with patch.object(actions.privilege, "run_privileged", fake):
+            result = actions.remove_root_file(
+                "/etc/apt/sources.list.d/docker.list", _silent)
+        self.assertTrue(result["ok"])
+        self.assertEqual(seen[0], ["rm", "-f",
+                                   "/etc/apt/sources.list.d/docker.list"])
+
 
 class DockerCmdTests(unittest.TestCase):
     """Selection contract for the docker choke point: live group → direct;
@@ -133,10 +147,14 @@ class DockerCmdTests(unittest.TestCase):
         def fake(argv, timeout=300, env=None):
             seen.append(argv)
             return 0, "ok"
-        import grp as _grp
-        gids = [g.gr_gid for g in _grp.getgrall() if g.gr_name == "docker"]
+        # Step 1 must run before Docker is installed.  Do not make this unit
+        # test depend on the host's /etc/group (a fresh host has no docker
+        # group yet).
+        docker_gid = 4242
         with patch.object(actions.privilege, "_exec", fake), \
-             patch("os.getgroups", return_value=gids or [0]):
+             patch("os.getgroups", return_value=[docker_gid]), \
+             patch("grp.getgrgid") as getgrgid:
+            getgrgid.return_value.gr_name = "docker"
             rc, _ = actions.docker_cmd(["docker", "info"], _silent)
         self.assertEqual(rc, 0)
         self.assertEqual(seen[0][:2], ["docker", "info"])
@@ -173,10 +191,10 @@ class DockerCmdTests(unittest.TestCase):
         def fake(argv, timeout=300, env=None):
             seen.append(env or {})
             return 0, "ok"
-        import grp as _grp
-        gids = [g.gr_gid for g in _grp.getgrall() if g.gr_name == "docker"]
         with patch.object(actions.privilege, "_exec", fake), \
-             patch("os.getgroups", return_value=gids or [0]):
+             patch("os.getgroups", return_value=[4242]), \
+             patch("grp.getgrgid") as getgrgid:
+            getgrgid.return_value.gr_name = "docker"
             actions.docker_cmd(["docker", "info"], _silent)
         self.assertIn("DOCKER_CONFIG", seen[0])
         self.assertNotIn(".docker", seen[0]["DOCKER_CONFIG"].replace(

@@ -183,6 +183,40 @@ def _tcp_open(port: int) -> bool:
         sock.close()
 
 
+def _repair_managed_apt_keys(log: Callable[[str], None]) -> dict:
+    """Refresh keys for every Mu3Lab APT source that is currently present.
+
+    ``apt-get update`` validates all configured sources, not only the source
+    needed by the current install step.  A test reset can therefore leave a
+    valid ``docker.list`` or ``nodesource.list`` beside a deleted keyring and
+    make an otherwise unrelated Node/Tailscale step fail.  Repair only the
+    three source files owned by Mu3Lab; unrelated repositories are untouched.
+    """
+    managed = [
+        (Path("/etc/apt/sources.list.d/nodesource.list"),
+         NODESOURCE_KEY_URL, Path("/etc/apt/keyrings/nodesource.gpg"), "644"),
+        (Path("/etc/apt/sources.list.d/docker.list"),
+         DOCKER_KEY_URL.format(slug=_distro_slug()),
+         Path("/etc/apt/keyrings/docker.asc"), "644"),
+        (Path("/etc/apt/sources.list.d/tailscale.list"),
+         tailscale_key_url(_distro_slug(), _repo_codename() or "noble"),
+         Path("/etc/apt/keyrings/tailscale.gpg"), "644"),
+    ]
+    for source, url, keyring, mode in managed:
+        if not source.is_file():
+            continue
+        tmp = Path("/tmp") / f"mu3lab-repair-{keyring.name}"
+        res = actions.fetch_url(url, tmp, log)
+        if not res["ok"]:
+            return _propagate(res)
+        res = actions.write_root_bytes(str(keyring), tmp.read_bytes(), log,
+                                       mode=mode)
+        if not res["ok"]:
+            return _propagate(res)
+        log(f"repaired signing key for {source.name}")
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Fix implementations. Each takes (check, ctx) and returns a result dict:
 # {"ok": True} | {"ok": False, "error"} | {"waiting": True, "prompt": {...}}.
@@ -194,6 +228,16 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
     missing = [pkg for pkg in BASE_PACKAGES if not _dpkg_present(pkg)]
     if not missing:
         return {"ok": True, "skipped": True}
+    # A previous Mu3Lab install may have left our repo definitions behind
+    # after a test reset removed their keyrings.  Repair only the files owned
+    # by this installer before the first apt update; the Node/Docker steps
+    # recreate them with freshly downloaded keys.
+    for repo_file in ("/etc/apt/sources.list.d/nodesource.list",
+                      "/etc/apt/sources.list.d/docker.list",
+                      "/etc/apt/sources.list.d/tailscale.list"):
+        res = actions.remove_root_file(repo_file, ctx["log_fn"]("host_base"))
+        if not res["ok"]:
+            return _propagate(res)
     res = actions.apt_update(ctx["log_fn"]("host_base"))
     if not res["ok"]:
         return _propagate(res)
@@ -203,6 +247,9 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
 
 def fix_node(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("node")
+    res = _repair_managed_apt_keys(log)
+    if not res["ok"]:
+        return _propagate(res)
     key_dest = Path("/tmp/mu3lab-nodesource.gpg")
     res = actions.fetch_url(NODESOURCE_KEY_URL, key_dest, log)
     if not res["ok"]:
@@ -561,6 +608,9 @@ def fix_docker(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("docker")
     state = check.get("state", "")
     if state == "absent":
+        res = _repair_managed_apt_keys(log)
+        if not res["ok"]:
+            return _propagate(res)
         slug = _distro_slug()
         codename = _repo_codename()
         key_tmp = Path("/tmp/mu3lab-docker.asc")
@@ -591,6 +641,9 @@ def fix_docker(check: dict, ctx: dict) -> dict:
         if not res["ok"]:
             return _propagate(res)
     elif state == "old_engine":
+        res = _repair_managed_apt_keys(log)
+        if not res["ok"]:
+            return _propagate(res)
         res = actions.apt_update(log)
         if not res["ok"]:
             return _propagate(res)
@@ -711,6 +764,9 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("tailscale_pkg")
     state = check.get("state", "")
     if state == "absent":
+        res = _repair_managed_apt_keys(log)
+        if not res["ok"]:
+            return _propagate(res)
         distro = _distro_slug()
         codename = _repo_codename() or "noble"
         key_tmp = Path("/tmp/mu3lab-tailscale.gpg")
