@@ -286,13 +286,14 @@ class WorkspaceStepTests(unittest.TestCase):
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
     def test_step_order(self):
-        # No logout choreography left: networks + Caddy follow the engine
-        # (sg covers authorization), then the guided join, sharing last.
+        # A real login refresh is mandatory before Docker-backed work; tailnet
+        # connection is established before runtime, ingress, and sharing.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("docker"), ids.index("docker_networks"))
-        self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
-        self.assertLess(ids.index("caddy"), ids.index("tailscale_join"))
+        self.assertLess(ids.index("docker"), ids.index("docker_session"))
+        self.assertLess(ids.index("docker_session"), ids.index("tailscale_join"))
         self.assertLess(ids.index("tailscale_join"), ids.index("serve"))
+        self.assertLess(ids.index("tailscale_join"), ids.index("docker_networks"))
+        self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
 
     def test_pkg_verify_tolerates_unjoined(self):
         # Installing must not flunk itself on the NEXT step's job.
@@ -324,22 +325,24 @@ class WorkspaceStepTests(unittest.TestCase):
             "https://pkgs.tailscale.com/stable/debian/bookworm.gpg")
 
 
-class SgFallbackTests(unittest.TestCase):
-    """No logout/relogin choreography: DB members proceed via `sg`.
-
-    These replace the deleted CheckpointTests (restart rows, relogin
-    prompts). If docker access needs anything beyond sg + usermod, these
-    tests — not a new waiting row — are where that logic lands.
-    """
+class DockerSessionTests(unittest.TestCase):
+    """The user-visible Docker boundary requires a real re-login."""
     def _ctx(self):
         return {"root": Path("/nonexistent"),
                 "log_fn": lambda step: lambda line: None,
                 "inputs": {}, "wait_input": lambda step: {},
                 "stopped": lambda: False}
 
-    def test_no_checkpoint_step(self):
+    def test_relogin_checkpoint_exists(self):
         ids = [m["id"] for m in install.STEPS]
-        self.assertNotIn("restart_checkpoint", ids)
+        self.assertIn("docker_session", ids)
+
+    def test_missing_session_waits_without_running_docker(self):
+        result = install.fix_docker_session(
+            {"state": "relogin_required"}, self._ctx())
+        self.assertTrue(result.get("waiting"))
+        self.assertEqual(result["prompt"]["kind"], "docker_relogin")
+        self.assertIn("Log out and back in", result["prompt"]["body"])
 
     def test_networks_denied_proceeds(self):
         # denied probes no longer fail: fix_networks runs through docker_cmd
@@ -390,6 +393,7 @@ class SgFallbackTests(unittest.TestCase):
             "docker": ["absent", "daemon_down", "unverified", "old_engine",
                        "no_compose", "no_access", "stale_login", "no_group",
                        "no_networks", "ready"],
+            "docker_session": ["relogin_required", "ready"],
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],

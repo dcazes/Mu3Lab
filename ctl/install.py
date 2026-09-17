@@ -95,6 +95,8 @@ DISPATCH = {
     ("docker", "no_group"): "docker_group",
     ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",
+    ("docker_session", "relogin_required"): "wait_for_relogin",
+    ("docker_session", "ready"): "skip",
     ("docker_networks", "missing"): "create_networks",
     ("docker_networks", "denied"): "report_denied",
     ("docker_networks", "ready"): "skip",
@@ -589,13 +591,33 @@ def _group_live() -> bool:
         return False
 
 
-# FYI shown at job end (not a gate): direct `docker` in the user's OWN
-# terminals still needs one login cycle to pick up the group. The installer
-# itself never waits for this (sg covers execution).
-TERMINAL_LOGIN_FYI = (
-    "Tip: log out and back in once at your convenience so bare `docker` "
-    "works in your own terminals too — the install above needed no logout."
-)
+def _docker_session_check(ctx: dict) -> dict:
+    """Require a fresh login after Docker group membership changes.
+
+    `sg docker` is intentionally not accepted as proof here: it would let the
+    bootstrap continue in a process whose normal operator session is still
+    wrong. A fresh desktop/SSH login is the supported boundary.
+    """
+    if _group_live():
+        return {"name": "docker_session", "status": "ok",
+                "detail": "Current session has Docker group access.",
+                "action": "", "state": "ready", "blocking": False}
+    return {"name": "docker_session", "status": "missing",
+            "detail": "Docker membership was added, but this login session has not refreshed.",
+            "action": "Log out and back in, reopen the bootstrap dashboard, then retry.",
+            "state": "relogin_required", "blocking": False}
+
+
+def fix_docker_session(check: dict, ctx: dict) -> dict:
+    """Pause safely for the real OS-session transition; never bypass it."""
+    return {"waiting": True, "prompt": {
+        "kind": "docker_relogin",
+        "title": "Log out and back in to activate Docker access",
+        "body": ("Mu3Lab added your account to the Docker group. Log out and back in "
+                 "now, reopen the local bootstrap dashboard with ./install.sh, then "
+                 "choose Retry. No Docker-backed stack has been started yet."),
+        "terminal_command": "./install.sh",
+    }}
 
 
 def _networks_check(ctx: dict) -> dict:
@@ -875,9 +897,6 @@ STEPS = [
     {"id": "root_env", "label": "Secret keys file",
      "check": lambda ctx: _env_check(ctx["root"]),
      "fix": fix_root_env},
-    {"id": "runtime_layout", "label": "Persistent data layout",
-     "check": lambda ctx: _runtime_layout_check(ctx["root"]),
-     "fix": fix_runtime_layout},
     {"id": "service", "label": "Dashboard service",
      "check": lambda ctx: _service_check(ctx["root"]),
      "fix": fix_service},
@@ -887,15 +906,13 @@ STEPS = [
      # authorization never blocks because fixes run via sg when needed.
      # Verify passes while any of these hold (the step's own work is done).
      "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access")},
+    {"id": "docker_session", "label": "Docker login session",
+     "check": _docker_session_check, "fix": fix_docker_session},
     {"id": "tailscale_pkg", "label": "Tailscale app",
      "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg,
      # Installed + daemon running is this step's whole job; connecting is the
      # tailscale_join step's job (same verify-tolerance pattern as docker).
      "verify_ok_states": ("ready", "unjoined")},
-    {"id": "docker_networks", "label": "Shared networks",
-     "check": _networks_check, "fix": fix_networks_router},
-    {"id": "caddy", "label": "Caddy",
-     "check": _caddy_check, "fix": fix_caddy},
     {"id": "tailscale_join", "label": "Tailscale connection",
      "check": lambda ctx: (lambda r: {
          "name": "tailscale_join", "status": "ok" if r["state"] == "ready" else "missing",
@@ -903,6 +920,13 @@ STEPS = [
          "state": ("ready" if r["state"] == "ready" else "unjoined"),
          "blocking": False})(_tailscale_pkg_check(ctx)),
      "fix": fix_tailscale_join},
+    {"id": "runtime_layout", "label": "Persistent data layout",
+     "check": lambda ctx: _runtime_layout_check(ctx["root"]),
+     "fix": fix_runtime_layout},
+    {"id": "docker_networks", "label": "Shared networks",
+     "check": _networks_check, "fix": fix_networks_router},
+    {"id": "caddy", "label": "Caddy",
+     "check": _caddy_check, "fix": fix_caddy},
     {"id": "serve", "label": "Phone access (sharing)",
      "check": _serve_check, "fix": fix_serve},
 ]
@@ -1001,7 +1025,7 @@ def run_job(job: dict, ctx: dict) -> None:
         _finish_step(job, ctx, step, {"ok": True})
     job["status"] = "ready"
     ctx["emit"]({"type": "summary", "phase": "done", "status": "ready",
-                 "detail": TERMINAL_LOGIN_FYI})
+                 "detail": "Bootstrap checks completed; continue in the private dashboard."})
 
 
 def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
