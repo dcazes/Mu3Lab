@@ -108,5 +108,50 @@ class ProgressTests(unittest.TestCase):
             self.assertNotIn("events", json.loads(text))
 
 
+class WorkerLivenessTests(unittest.TestCase):
+    def test_worker_completes_without_wedging_lock(self):
+        # REGRESSION: save_progress() once ran INSIDE `with state.lock`
+        # while taking the same non-reentrant lock → the worker froze at
+        # job end holding it, and EVERY endpoint hung forever ("step 1
+        # stalls indefinitely"). This runs the real worker tail (buffering,
+        # summary detection, save, lock release) against a 3-line FAKE
+        # runner — never the real suite (a self-hosted full run fork-bombs:
+        # every nested level spawns another level).
+        import json as _json
+        import os as _os
+        import threading
+        import check_server
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "fake_runner.py"
+            fake.write_text(
+                "import json\n"
+                "print(json.dumps({'type': 'summary', 'phase': 'start', 'total': 1}))\n"
+                "print(json.dumps({'type': 'test', 'id': 'x.Y.z', 'outcome': 'pass', 'detail': ''}))\n"
+                "print(json.dumps({'type': 'summary', 'phase': 'done', 'ran': 1, 'ok': 1, 'failed': 0, 'errored': 0, 'skipped': 0}))\n",
+                encoding="utf-8")
+            env = dict(_os.environ, MU3LAB_TEST_RUNNER=str(fake))
+            fake_file = Path(tmp) / "progress.json"
+            state = State()
+            state.test_run = {"status": "running"}
+            with unittest.mock.patch.object(check_server, "STATE_FILE",
+                                            fake_file), \
+                 unittest.mock.patch.dict(_os.environ, {"MU3LAB_TEST_RUNNER": str(fake)}):
+                thread = threading.Thread(
+                    target=check_server._test_worker,
+                    args=(state, sys.executable), daemon=True)
+                thread.start()
+                thread.join(timeout=30)
+            self.assertFalse(thread.is_alive(),
+                             "worker hung — suspected lock self-deadlock")
+        acquired = state.lock.acquire(timeout=5)
+        try:
+            self.assertTrue(acquired, "state.lock still held after worker end")
+        finally:
+            if acquired:
+                state.lock.release()
+        self.assertTrue(state.tests_green)
+        self.assertIsNone(state.test_run)
+
+
 if __name__ == "__main__":
     unittest.main()

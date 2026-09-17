@@ -90,8 +90,7 @@ DISPATCH = {
     ("docker", "unverified"): "docker_start",
     ("docker", "old_engine"): "docker_upgrade",
     ("docker", "no_compose"): "docker_compose_plugin",
-    ("docker", "no_access"): "docker_group",
-    ("docker", "stale_login"): "docker_group",
+    ("docker", "no_access"): "docker_group",    ("docker", "stale_login"): "docker_group",
     ("docker", "no_group"): "docker_group",
     ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",

@@ -90,11 +90,15 @@ def _test_worker(state: State, python: str) -> None:
     """Background thread: spawn the JSON runner, buffer its lines into state.
 
     Fixed argv, shell=False — no user input anywhere near this call, so no
-    injection surface. Kills the child on TEST_TIMEOUT.
+    injection surface. Kills the child on TEST_TIMEOUT. The runner path
+    honors MU3LAB_TEST_RUNNER (tests only): the regression test points it at
+    a 3-line fake so the suite never runs itself recursively.
     """
+    runner = os.environ.get("MU3LAB_TEST_RUNNER",
+                            str(ROOT / "tools" / "run_tests.py"))
     try:
         proc = subprocess.Popen(
-            [python, str(ROOT / "tools" / "run_tests.py")],
+            [python, runner],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, cwd=str(ROOT),
         )
@@ -125,6 +129,8 @@ def _test_worker(state: State, python: str) -> None:
                 if len(state.test_events) > MAX_EVENTS:
                     del state.test_events[:len(state.test_events) - MAX_EVENTS]
         rc = proc.wait(timeout=TEST_TIMEOUT)
+        if proc.stdout is not None:
+            proc.stdout.close()
     except subprocess.TimeoutExpired:
         proc.kill()
         rc = 124
@@ -140,7 +146,10 @@ def _test_worker(state: State, python: str) -> None:
         state.tests_green = (rc == 0 and summary is not None
                              and not summary.get("failed") and not summary.get("errored"))
         state.test_run = None
-        save_progress(state)
+    # OUTSIDE the lock on purpose: save_progress() takes state.lock itself,
+    # and threading.Lock is not reentrant — nesting here self-deadlocks the
+    # worker forever and wedges every endpoint (the indefinite stall).
+    save_progress(state)
 
 
 def _install_worker(state: State) -> None:
