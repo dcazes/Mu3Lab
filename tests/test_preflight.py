@@ -278,6 +278,7 @@ class PortTests(unittest.TestCase):
         owner = result["owners"]["8787"]
         self.assertEqual(owner["pid"], 4242)
         self.assertTrue(owner["ours"])
+        self.assertEqual(owner["port_info"]["service"], "Mu3Lab control plane")
 
     def test_foreign_owner_not_ours(self):
         from unittest.mock import MagicMock, patch as _patch
@@ -323,6 +324,29 @@ class PortTests(unittest.TestCase):
         self.assertTrue(result["owners"]["8081"]["ours"])
         self.assertEqual(result["owners"]["8081"]["process"],
                          "vaultwarden-vaultwarden-1")
+        self.assertIn("private HTTPS URL on port 8443",
+                      result["owners"]["8081"]["port_info"]["access"])
+
+    def test_compose_owner_matches_the_container_publishing_that_port(self):
+        ss_out = "LISTEN 0 4096 127.0.0.1:9001 0.0.0.0:*"
+        root = Path("/home/dak/Desktop/Mu3Lab")
+        inspected: list[str] = []
+        def fake_run(argv, timeout=10):
+            if argv[:2] == ["ss", "-tlnp"]:
+                return 0, ss_out
+            if argv[:2] == ["docker", "ps"]:
+                return 0, ("authentik-worker-1\t\n"
+                           "authentik-server-1\t127.0.0.1:9001->9000/tcp")
+            if argv[:2] == ["docker", "inspect"]:
+                inspected.append(argv[-1])
+                return 0, str(root / "core" / "authentik")
+            return 1, "unexpected command"
+        from unittest.mock import patch as _patch
+        with _patch("ctl.preflight._run", side_effect=fake_run), \
+             _patch("ctl.preflight.ROOT", root):
+            result = preflight.check_ports(connect_fn=lambda port: port == 9001)
+        self.assertEqual(result["owners"]["9001"]["process"], "authentik-server-1")
+        self.assertEqual(inspected, ["authentik-server-1"])
 
     def test_ss_missing_still_reports(self):
         from unittest.mock import patch as _patch

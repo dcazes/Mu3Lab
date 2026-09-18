@@ -27,6 +27,18 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertIn("password", prompt["body"].lower())
         self.assertIn("check", prompt["check_label"].lower())
 
+    def test_authentik_setup_uses_version_stable_private_root(self):
+        host = "mu3lab-3.example.ts.net"
+        ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
+        with patch("ctl.install._tailscale_dns_name_for_install", return_value=host), \
+             patch("ctl.install._runtime_marker", return_value=False):
+            prompt = install.fix_authentik_setup({}, ctx)["prompt"]
+            check = install.check_authentik_setup(ctx)
+        expected = f"https://{host}:{install.AUTHENTIK_SERVE_PORT}/"
+        self.assertEqual(prompt["url"], expected)
+        self.assertEqual(check["setup_url"], expected)
+        self.assertNotIn("initial-setup", prompt["url"])
+
     def test_identity_steps_are_before_final_dashboard_route(self):
         ids = [step["id"] for step in install.STEPS]
         self.assertLess(ids.index("vaultwarden_setup"), ids.index("tailscale_join"))

@@ -1049,7 +1049,10 @@ def check_authentik_setup(ctx: dict) -> dict:
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
     return {"status": "waiting", "state": "needs_user",
             "detail": "Create the first Authentik administrator in the official setup flow.",
-            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/flow/initial-setup/"}
+            # Authentik 2026.5 routes its root itself to first-run setup. Do
+            # not hard-code its version-sensitive internal flow path: a
+            # direct legacy flow URL is explicitly denied by this release.
+            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/"}
 
 
 def _tailscale_dns_name_for_install() -> str:
@@ -1075,7 +1078,7 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
     return {"waiting": True, "prompt": _manual_prompt(
         "Create the Authentik administrator",
         "Open Authentik’s official first-run page and create the administrator. Mu3Lab never receives or stores that password. Then create the Mu3Lab operator group and users when prompted in the next step.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/flow/initial-setup/", "I created the administrator")}
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}/", "I created the administrator")}
 
 
 def check_authentik_users(ctx: dict) -> dict:

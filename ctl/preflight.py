@@ -50,6 +50,24 @@ BLOCKING = frozenset({"os", "arch", "python", "ports"})
 # Step-0/1 failure. See BUILD_ORDER Phase 2 gate discussion.
 CHECK_PORTS = (8787, 19460, 9001, 8081)
 
+# Listener inventory for the bootstrap UI. These are all loopback-only
+# implementation ports; public-facing addresses are private Tailscale Serve
+# routes and must never be mistaken for localhost entrypoints.
+PORT_INFO = {
+    8787: {"service": "Mu3Lab control plane",
+           "purpose": "Private dashboard backend",
+           "access": "Internal only — reached through Caddy and the private dashboard URL."},
+    19460: {"service": "Caddy private ingress",
+            "purpose": "Routes the private Mu3Lab dashboard",
+            "access": "Internal only — Tailscale Serve publishes the dashboard securely."},
+    9001: {"service": "Authentik identity service",
+           "purpose": "Authentik's loopback-only application origin",
+           "access": "Internal only — use Authentik's private HTTPS URL on port 8444."},
+    8081: {"service": "Vaultwarden password manager",
+           "purpose": "Vaultwarden's loopback-only application origin",
+           "access": "Internal only — use Vaultwarden's private HTTPS URL on port 8443."},
+}
+
 # Docker networks Step 1a must create before any compose project starts.
 MU3LAB_NETWORKS = ("mu3lab_frontend", "mu3lab_backend", "mu3lab_mcp")
 
@@ -486,14 +504,26 @@ def _port_owner(port: int) -> dict | None:
         if project:
             names_rc, names = _docker_probe([
                 "ps", "--filter", f"label=com.docker.compose.project={project}",
-                "--format", "{{.Names}}"])
-            for name in names.splitlines() if names_rc == 0 else []:
+                "--format", "{{.Names}}\t{{.Ports}}"])
+            candidates: list[str] = []
+            fallback: list[str] = []
+            for line in names.splitlines() if names_rc == 0 else []:
+                name, _, published = line.partition("\t")
+                if not name:
+                    continue
+                fallback.append(name)
+                if f":{port}->" in published:
+                    candidates.append(name)
+            # Host-network containers have no Docker ``Ports`` field. For
+            # those single-container projects, the labelled project remains a
+            # safe ownership fallback.
+            for name in candidates or fallback:
                 label_rc, working_dir = _docker_probe([
                     "inspect", "--format",
                     "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}",
-                    name.strip()])
+                    name])
                 if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "core" / project).resolve():
-                    return {"pid": None, "process": name.strip(), "ours": True}
+                    return {"pid": None, "process": name, "ours": True}
         return {"pid": None, "process": process or "unknown", "ours": False}
     ours = False
     try:
@@ -526,6 +556,10 @@ def check_ports(connect_fn=None) -> dict:
     busy = [port for port in CHECK_PORTS if connect_fn(port)]
     if busy:
         owners = {str(port): _port_owner(port) for port in busy}
+        for port in busy:
+            owner = owners.get(str(port))
+            if owner and owner.get("ours"):
+                owner["port_info"] = PORT_INFO[port]
         # Our own autostarted dashboard is EXPECTED here post-install (it
         # starts at boot by design): report it as info, not a conflict.
         # Only foreign holders block.

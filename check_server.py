@@ -40,7 +40,7 @@ MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
 STATE_FILE = ROOT / ".state" / "check-progress.json"
-CODE_VERSION = 4      # bump on ANY api/report-shape change (invalidates disk)
+CODE_VERSION = 5      # bump on ANY api/report-shape change (invalidates disk)
 
 
 def tailnet_dashboard_url() -> str:

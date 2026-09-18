@@ -242,9 +242,18 @@ function preRow(c, showAction) {
     for (const [port, o] of Object.entries(c.owners)) {
       if (!o) continue;
       if (o.ours) {
-        fix += '<br><span class="mut">Port ' + port + ' is our dashboard service (pid ' +
-          o.pid + ').</span><br><button onclick="stopService(\'once\')">Stop it</button> ' +
-          '<button onclick="stopService(\'disable\')">Stop + no autostart</button>';
+        const info = o.port_info || {};
+        fix += '<br><strong>Port ' + port + ' — ' + escapeHtml(info.service || 'Mu3Lab service') +
+          '</strong><br><span class="mut">' + escapeHtml(info.purpose || 'Mu3Lab-owned listener') +
+          (info.access ? '<br>' + escapeHtml(info.access) : '') +
+          (o.pid ? '<br>Process id: ' + escapeHtml(o.pid) : '') +
+          '</span>';
+        // Only the control plane has a safe, scoped stop endpoint. Compose
+        // origins are deliberately not individually stoppable from preflight.
+        if (port === '8787') {
+          fix += '<br><button onclick="stopService(\'once\')">Stop it</button> ' +
+            '<button onclick="stopService(\'disable\')">Stop + no autostart</button>';
+        }
       } else if (o.pid) {
         fix += '<br><span class="mut">Port ' + port + ' held by ' +
           escapeHtml(o.process || 'unknown') + ' (pid ' + o.pid +
