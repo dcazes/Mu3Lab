@@ -5,7 +5,7 @@
 #        host vars, and per-app routes arrive with the apps (later phases) —
 #        adding them now would ship untested security config.
 # DEBUG: `docker exec <caddy> caddy validate --config /etc/caddy/Caddyfile
-#        --adapter caddyfile`; `curl -f http://127.0.0.1:19460/`.
+#        --adapter caddyfile`; `curl -i http://127.0.0.1:19460/__mu3lab_caddy_health`.
 {
 	auto_https off
 	admin off
@@ -18,7 +18,12 @@
 # when the tailnet hostname is forwarded by Serve.
 :19460 {
 	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:8787
+	handle /__mu3lab_caddy_health {
+		respond 204
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8787
+	}
 }
 
 # Authentik first-run UI. It is intentionally not protected by forward auth:

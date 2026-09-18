@@ -203,9 +203,10 @@ class CaddyFixTests(unittest.TestCase):
             root = Path(tmp)
             self._projdir(root)
             calls = {"n": 0}
+            requests = []
 
             class FakeResp:
-                status = 200
+                status = 204
 
                 def __enter__(self):
                     return self
@@ -213,15 +214,22 @@ class CaddyFixTests(unittest.TestCase):
                 def __exit__(self, *args):
                     return False
 
+            class FakeOpener:
+                def open(self, request, timeout=3):
+                    requests.append(request)
+                    return FakeResp()
+
             with patch("ctl.install.actions.compose_up",
                        return_value=(0, "up")), \
                  patch("ctl.install._tcp_open",
                        side_effect=lambda port: calls.__setitem__(
                            "n", calls["n"] + 1) or calls["n"] >= 2), \
-                 patch.object(_url, "urlopen", return_value=FakeResp()):
+                 patch.object(_url, "build_opener",
+                              return_value=FakeOpener()):
                 result = install.fix_caddy({"state": "down"}, self._ctx(root))
             self.assertTrue(result.get("ok"))
             self.assertGreaterEqual(calls["n"], 2)
+            self.assertTrue(requests[0].full_url.endswith(install.CADDY_HEALTH_PATH))
 
     def test_times_out_honestly(self):
         import tempfile

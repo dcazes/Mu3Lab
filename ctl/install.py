@@ -60,6 +60,7 @@ def tailscale_key_url(distro: str, codename: str) -> str:
     family = "debian" if distro == "debian" else "ubuntu"
     return f"https://pkgs.tailscale.com/stable/{family}/{codename}.gpg"
 CADDY_PORT = 19460        # Caddy dashboard listener on loopback
+CADDY_HEALTH_PATH = "/__mu3lab_caddy_health"
 AUTHENTIK_PROXY_PORT = 19461
 VAULTWARDEN_PROXY_PORT = 19462
 SERVE_PORT = "19460"      # dashboard HTTPS listener on the tailnet
@@ -185,6 +186,26 @@ def _tcp_open(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
     finally:
         sock.close()
+
+
+def _caddy_health_status() -> int:
+    """Probe Caddy's own local health handler, not its upstream dashboard."""
+    import urllib.error as _url_error
+    import urllib.request as _url
+
+    class _NoRedirect(_url.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            return None
+
+    request = _url.Request(
+        f"http://127.0.0.1:{CADDY_PORT}{CADDY_HEALTH_PATH}")
+    try:
+        with _url.build_opener(_NoRedirect).open(request, timeout=5) as response:
+            return int(response.status)
+    except _url_error.HTTPError as exc:
+        return exc.code
+    except OSError:
+        return 0
 
 
 def _repair_managed_apt_keys(log: Callable[[str], None]) -> dict:
@@ -1294,19 +1315,13 @@ def _caddy_check(ctx: dict) -> dict:
                 "detail": f"Nothing listening on :{CADDY_PORT}.",
                 "action": "step 3 starts Caddy.", "state": "down",
                 "blocking": False}
-    import urllib.request as _url
-    try:
-        with _url.urlopen(f"http://127.0.0.1:{CADDY_PORT}/", timeout=5) as resp:
-            code = resp.status
-    except OSError:
-        code = 0
-    if code == 0:
+    if _caddy_health_status() != 204:
         return {"name": "caddy", "status": "missing",
-                "detail": f"Port :{CADDY_PORT} busy but not answering HTTP.",
+                "detail": f"Caddy health endpoint on :{CADDY_PORT} is not answering.",
                 "action": "step 3 restarts Caddy.", "state": "down",
                 "blocking": False}
     return {"name": "caddy", "status": "ok",
-            "detail": f"Caddy answering on :{CADDY_PORT}.",
+            "detail": f"Caddy health endpoint answering on :{CADDY_PORT}.",
             "action": "", "state": "ready", "blocking": False}
 
 
