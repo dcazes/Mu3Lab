@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl.jobs import redact
+from ctl.jobs import redact, redact_data
 from ctl.runtime import RuntimePaths
 
 WORKFLOW_VERSION = 1
@@ -25,6 +25,14 @@ PHASES = (
     ("verification", "Verified handoff", "Prove that the user-facing platform works."),
 )
 VALID_STATES = frozenset({"pending", "running", "waiting_for_user", "verified", "failed", "skipped"})
+TRANSITIONS = {
+    "pending": frozenset({"running", "waiting_for_user", "verified", "failed", "skipped"}),
+    "running": frozenset({"waiting_for_user", "verified", "failed", "pending"}),
+    "waiting_for_user": frozenset({"running", "verified", "failed", "pending"}),
+    "failed": frozenset({"running", "pending"}),
+    "verified": frozenset({"running", "pending"}),
+    "skipped": frozenset({"running", "pending"}),
+}
 
 
 def _now() -> str:
@@ -82,8 +90,15 @@ class ProvisioningStore:
             raise ValueError("invalid provisioning state")
         self.initialize()
         now = _now()
-        payload = json.dumps(inputs or {}, sort_keys=True)
+        payload = json.dumps(redact_data(inputs or {}), sort_keys=True)
         with self._connect() as conn:
+            row = conn.execute("""
+                SELECT actual_state FROM provisioning_steps
+                WHERE workflow_version = ? AND phase_id = ?
+            """, (WORKFLOW_VERSION, phase_id)).fetchone()
+            current = str(row["actual_state"]) if row else "pending"
+            if state != current and state not in TRANSITIONS[current]:
+                raise ValueError(f"invalid provisioning transition: {current} -> {state}")
             conn.execute("""
                 UPDATE provisioning_steps
                 SET actual_state = ?, attempts = attempts + ?, detail = ?, error = ?,

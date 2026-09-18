@@ -55,16 +55,15 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
     # records provider names/keys privately; the runtime verifier refuses to
     # claim chat readiness until the pinned FreeLLMAPI image accepts it.
     free_config = {
-        "schema_version": 1,
         "keys": [{"platform": item["id"], "key": item["api_key"],
                   "label": item["label"], "enabled": True} for item in providers],
-        "routing": {"strategy": "smartest", "keySelectionStrategy": "least-remaining"},
+        "routing": {"strategy": "smartest"},
     }
     free_config_path = _write_private(
         project_root / "freellmapi" / "freellmapi.config.json",
         json.dumps(free_config, sort_keys=True, separators=(",", ":")) + "\n",
     )
-    free_env["FREEAPI_CONFIG_PATH"] = "/mu3lab/config/providers.yaml"
+    free_env["FREEAPI_CONFIG_PATH"] = "/mu3lab/config/freellmapi.config.json"
     free_env.setdefault("FREELLMAPI_SERVICE_KEY", service_key)
     _write_private(free_env_path, _env_text(free_env))
 

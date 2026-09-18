@@ -1,9 +1,8 @@
 <!DOCTYPE html>
 <!--
   Mu3Lab :: tools/check_page.html
-  WHAT:  The zero-install check dashboard. Three gated cards:
-         1 tests (grouped table) -> 2 preflight (blockers vs step-3 list)
-         -> 3 install (live remediation: check first, fix the gap only).
+  WHAT:  The zero-install check dashboard. The user flow is host check then
+         install. Unit tests remain available as optional developer diagnostics.
   WHY:   Fresh users see status instead of tracebacks. No framework, no build
          step, no npm: one static file served by check_server.py (stdlib).
          Deleted at Phase 11 (React dashboard replaces it).
@@ -49,7 +48,7 @@
 </head>
 <body>
 <h1>Mu3Lab — fresh checkout check</h1>
-<p class="mut">Cards unlock in order. Nothing here installs anything.
+<p class="mut">Check this computer, then install only what is missing.
   <span id="build-tag"></span></p>
 <div id="stale-banner" hidden style="border:2px solid var(--bad); border-radius:8px; padding:.8rem 1rem; margin-bottom:1rem;">
   <strong>Outdated server.</strong> This page is newer than the running check
@@ -58,7 +57,8 @@
 </div>
 
 <section class="card" id="card-tests">
-  <h2>① Unit tests <span class="status mut" id="tests-status">idle</span></h2>
+  <h2>Developer diagnostics (optional) <span class="status mut" id="tests-status">idle</span></h2>
+  <p class="mut">These tests are for contributors and release CI. They are not required to install Mu3Lab.</p>
   <p><button id="btn-tests" onclick="runTests()">Run tests</button>
      <button id="btn-kill" onclick="killTests()" disabled>Kill</button></p>
   <div class="bar"><div id="tests-bar"></div></div>
@@ -69,19 +69,19 @@
   <details><summary>raw test lines</summary><pre id="tests-log">not run yet</pre></details>
 </section>
 
-<section class="card locked" id="card-preflight">
-  <h2>② Preflight <span class="status mut" id="pre-status">locked — needs green tests</span></h2>
+<section class="card" id="card-preflight">
+  <h2>① Check this computer <span class="status mut" id="pre-status">ready</span></h2>
   <div id="dash-banner" hidden style="border:2px solid var(--ok); border-radius:8px; padding:.6rem 1rem; margin-bottom:.6rem;">
     <strong>Real dashboard already running.</strong>
     <a href="http://127.0.0.1:8787" target="_blank" rel="noopener">Open it</a>
     <span class="mut">(started automatically at boot — that is normal once installed)</span>
   </div>
-  <p><button id="btn-pre" onclick="runPreflight()" disabled>Run preflight</button></p>
+  <p><button id="btn-pre" onclick="runPreflight()">Check compatibility</button></p>
   <h3>Must pass before install</h3>
   <table id="pre-block" hidden>
     <tr><th>check</th><th>result</th><th>detail / fix</th></tr>
   </table>
-  <h3>Step ③ will provide</h3>
+  <h3>Install will provide</h3>
   <table id="pre-provided" hidden>
     <tr><th>check</th><th>result</th><th>detail</th></tr>
   </table>
@@ -89,9 +89,9 @@
 </section>
 
 <section class="card locked" id="card-install">
-  <h2>③ Install <span class="status mut" id="inst-status">locked — needs preflight pass</span></h2>
+  <h2>② Install <span class="status mut" id="inst-status">locked — needs host check</span></h2>
   <div id="inst-body">
-    <p id="inst-intro" class="mut">This list appears after card ② runs — it will
+    <p id="inst-intro" class="mut">This list appears after the host check runs — it will
        name only the pieces missing on <em>your</em> machine, nothing else.</p>
     <ol id="inst-manifest" hidden></ol>
     <p id="inst-note" hidden>If anything above needs administrator permission,
@@ -110,7 +110,7 @@
     <div id="inst-complete" hidden style="border:2px solid var(--ok); border-radius:8px; padding:.8rem 1rem; margin-top:.8rem;">
       <strong>All done — bootstrap foundation complete</strong>
       <span id="inst-complete-detail">Mu3Lab is ready.</span>
-      <ul id="inst-complete-checklist"><li>Vaultwarden account confirmed</li><li>Tailscale and private service routes verified</li><li>Authentik administrator and users confirmed</li><li>Mu3Lab dashboard protection confirmed</li></ul>
+      <ul id="inst-complete-checklist"><li>Vaultwarden account confirmed</li><li>Tailscale and private service routes verified</li><li>Authentik owner confirmed</li><li>Mu3Lab dashboard protection confirmed</li></ul>
       <strong>Next: open the Mu3Lab dashboard to install the core application suite.</strong><br>
       <a id="real-dashboard-link" href="#" target="_blank" rel="noopener" hidden>Open the protected dashboard</a>
     </div>
@@ -648,7 +648,7 @@ async function copyScript() {
   let st;
   try { st = await api('/api/state'); }
   catch (e) { console.error('state', e); return; }
-  if (st.tests_green) unlock('card-preflight', 'btn-pre', 'pre-status', 'ready (re-run to refresh)');
+  unlock('card-preflight', 'btn-pre', 'pre-status', st.preflight_report ? 'ready (re-run to refresh)' : 'ready');
   if (st.preflight_passed && st.preflight_report) {
     unlock('card-install', 'btn-inst', 'inst-status', 'ready');
     renderManifest(st.preflight_report);

@@ -64,9 +64,11 @@ CADDY_PORT = 19460        # Caddy dashboard listener on loopback
 CADDY_HEALTH_PATH = "/__mu3lab_caddy_health"
 AUTHENTIK_PROXY_PORT = 19461
 VAULTWARDEN_PROXY_PORT = 19462
+OPEN_WEBUI_PROXY_PORT = 19463
 SERVE_PORT = "19460"      # dashboard HTTPS listener on the tailnet
 VAULTWARDEN_SERVE_PORT = "8443"
 AUTHENTIK_SERVE_PORT = "8444"
+OPEN_WEBUI_SERVE_PORT = "8445"
 TS_HOSTNAME = "mu3lab"
 TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
 TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
@@ -134,10 +136,10 @@ DISPATCH = {
     ("authentik", "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
+    ("open_webui_serve", "unshared"): "share_open_webui",
+    ("open_webui_serve", "ready"): "skip",
     ("authentik_setup", "needs_user"): "manual_authentik",
     ("authentik_setup", "ready"): "skip",
-    ("authentik_users", "needs_user"): "manual_authentik_users",
-    ("authentik_users", "ready"): "skip",
     ("dashboard_protection", "needs_user"): "manual_dashboard_protection",
     ("dashboard_protection", "needs_apply"): "apply_dashboard_protection",
     ("dashboard_protection", "needs_attention"): "manual_dashboard_protection",
@@ -456,19 +458,20 @@ def _env_check(root: Path) -> dict:
 
 
 def _service_check(root: Path) -> dict:
-    """mu3lab-ctl unit rendered, enabled, and answering /api/health?
+    """Web and durable-worker units installed and healthy?
     States: no_unit | inactive | unhealthy | ready."""
     import urllib.request as _url
-    unit_path = Path.home() / ".config" / "systemd" / "user" / "mu3lab-ctl.service"
-    if not unit_path.is_file():
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    units = ("mu3lab-ctl.service", "mu3lab-worker.service")
+    if any(not (unit_dir / unit).is_file() for unit in units):
         return {"name": "service", "status": "missing",
-                "detail": "Startup entry not installed.",
+                "detail": "Control-plane startup entries are not installed.",
                 "action": "step 3 installs and starts it.",
                 "state": "no_unit", "blocking": False}
     try:
-        proc = subprocess.run(["systemctl", "--user", "is-active", "mu3lab-ctl"],
-                              capture_output=True, text=True, timeout=15)
-        active = proc.returncode == 0
+        active = all(subprocess.run(
+            ["systemctl", "--user", "is-active", unit], capture_output=True,
+            text=True, timeout=15).returncode == 0 for unit in units)
     except OSError:
         active = False
     if not active:
@@ -598,20 +601,23 @@ def fix_root_env(check: dict, ctx: dict) -> dict:
 
 
 def fix_service(check: dict, ctx: dict) -> dict:
-    """Render unit → linger → reload → enable → start → poll /api/health."""
+    """Render web/worker units → linger → enable → start → verify web health."""
     import urllib.request as _url
     log = ctx["log_fn"]("service")
     state = check.get("state", "")
-    unit_path = Path.home() / ".config" / "systemd" / "user" / "mu3lab-ctl.service"
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_names = ("mu3lab-ctl.service", "mu3lab-worker.service")
     if state == "no_unit":
-        template = ctx["root"] / "deploy" / "mu3lab-ctl.service"
-        if not template.is_file():
-            return {"ok": False, "error": "deploy/mu3lab-ctl.service missing from checkout"}
-        rendered = template.read_text(encoding="utf-8").replace(
-            "@MU3LAB_ROOT@", str(ctx["root"]))
-        unit_path.parent.mkdir(parents=True, exist_ok=True)
-        unit_path.write_text(rendered, encoding="utf-8")
-        log(f"rendered {unit_path}")
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        for unit_name in unit_names:
+            template = ctx["root"] / "deploy" / unit_name
+            if not template.is_file():
+                return {"ok": False, "error": f"deploy/{unit_name} missing from checkout"}
+            rendered = template.read_text(encoding="utf-8").replace(
+                "@MU3LAB_ROOT@", str(ctx["root"]))
+            unit_path = unit_dir / unit_name
+            unit_path.write_text(rendered, encoding="utf-8")
+            log(f"rendered {unit_path}")
         res = actions.privilege.run_privileged(
             ["loginctl", "enable-linger", getpass.getuser()], log)
         if res.get("need_terminal") or not res.get("ok"):
@@ -620,15 +626,17 @@ def fix_service(check: dict, ctx: dict) -> dict:
         rc, out = actions.privilege._exec(
             ["systemctl", "--user", "daemon-reload"])
         log("$ systemctl --user daemon-reload")
-        rc, out = actions.privilege._exec(
-            ["systemctl", "--user", "enable", "mu3lab-ctl.service"])
-        log("$ systemctl --user enable mu3lab-ctl.service")
-        rc, out = actions.privilege._exec(
-            ["systemctl", "--user", "restart", "mu3lab-ctl.service"])
-        log("$ systemctl --user restart mu3lab-ctl.service")
-        log(out or f"(exit {rc})")
-        if rc != 0:
-            return {"ok": False, "error": "could not start mu3lab-ctl (see log)"}
+        for unit_name in unit_names:
+            rc, out = actions.privilege._exec(
+                ["systemctl", "--user", "enable", unit_name])
+            log(f"$ systemctl --user enable {unit_name}")
+            if rc == 0:
+                rc, out = actions.privilege._exec(
+                    ["systemctl", "--user", "restart", unit_name])
+                log(f"$ systemctl --user restart {unit_name}")
+            log(out or f"(exit {rc})")
+            if rc != 0:
+                return {"ok": False, "error": f"could not start {unit_name} (see log)"}
         import time as _time
         for _attempt in range(30):
             try:
@@ -822,6 +830,7 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
 
 
 def fix_caddy(check: dict, ctx: dict) -> dict:
+    from ctl import secrets as _secrets
     log = ctx["log_fn"]("caddy")
     projdir = ctx["root"] / "core" / "ingress"
     if not (projdir / "docker-compose.yml").is_file():
@@ -839,8 +848,12 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
             _update_progress(ctx, "caddy", phase="starting_ingress",
                              activity=clean[:180], timeout_seconds=300)
 
+    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    if not ingress_token:
+        return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     rc, out = actions.compose_up(projdir, log,
-                                 env={"MU3LAB_CADDYFILE": str(source_caddy)},
+                                 env={"MU3LAB_CADDYFILE": str(source_caddy),
+                                      "MU3LAB_INGRESS_TOKEN": ingress_token},
                                  on_output=compose_activity)
     log(out or f"(exit {rc})")
     if rc != 0:
@@ -1101,6 +1114,13 @@ def fix_authentik_serve(check: dict, ctx: dict) -> dict:
                                  ctx["log_fn"]("authentik_serve"))
 
 
+def fix_open_webui_serve(check: dict, ctx: dict) -> dict:
+    """Reserve Open WebUI's stable private origin before core reconciliation."""
+    return _tailscale_serve_port(OPEN_WEBUI_SERVE_PORT,
+                                 f"http://127.0.0.1:{OPEN_WEBUI_PROXY_PORT}",
+                                 ctx["log_fn"]("open_webui_serve"))
+
+
 def _authentik_check(ctx: dict) -> dict:
     return _compose_health(9001, "http://127.0.0.1:9001/-/health/ready/")
 
@@ -1179,15 +1199,13 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
 
 
 def check_authentik_setup(ctx: dict) -> dict:
-    if _runtime_marker("authentik_admin", ctx):
-        return {"status": "ok", "state": "ready", "detail": "Authentik administrator confirmed by the operator."}
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
     setup_pending = _authentik_initial_setup_pending()
-    detail = ("Create the first Authentik administrator in the official setup flow."
-              if setup_pending else
-              "Authentik is showing its sign-in flow. Sign in with the administrator "
-              "you created, or use the recovery button if no password was chosen.")
-    return {"status": "waiting", "state": "needs_user", "detail": detail,
+    if not setup_pending:
+        return {"status": "ok", "state": "ready",
+                "detail": "Authentik owner account exists; authenticated access is verified at dashboard handoff."}
+    return {"status": "waiting", "state": "needs_user",
+            "detail": "Create the first Authentik administrator in the official setup flow.",
             # Authentik 2026.5 routes its root itself to first-run setup. Do
             # not hard-code its version-sensitive internal flow path: a
             # direct legacy flow URL is explicitly denied by this release.
@@ -1243,8 +1261,8 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
         "shows a sign-in page and you do not know the administrator password, "
         "you can deliberately reset only the built-in akadmin account below. "
         "After a recovery reset, sign in and change the temporary password "
-        "before continuing.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/", "I created or changed the administrator password") | {
+        "before continuing. Mu3Lab will detect when the owner account exists.",
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}/", "Check owner account again") | {
             "recovery_action": "reset_authentik_admin",
             "recovery_username": "akadmin",
         }}
@@ -1262,23 +1280,6 @@ def reset_authentik_admin_password(ctx: dict) -> dict:
         return result
     return {"ok": True, "username": "akadmin",
             "temporary_password": temporary_password}
-
-
-def check_authentik_users(ctx: dict) -> dict:
-    if _runtime_marker("authentik_users", ctx):
-        return {"status": "ok", "state": "ready", "detail": "Initial Authentik users confirmed by the operator."}
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {"status": "waiting", "state": "needs_user",
-            "detail": "Create the initial household/operator users and operator group.",
-            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/identity/users"}
-
-
-def fix_authentik_users(check: dict, ctx: dict) -> dict:
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {"waiting": True, "prompt": _manual_prompt(
-        "Create your initial Mu3Lab users",
-        "In Authentik, create the household/operator users who should manage this Mu3Lab host. Keep public registration disabled. Then return and check again.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/identity/users", "I created the users")}
 
 
 def check_dashboard_protection(ctx: dict) -> dict:
@@ -1307,6 +1308,10 @@ def check_dashboard_protection(ctx: dict) -> dict:
 
 
 def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
+    from ctl import secrets as _secrets
+    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    if not ingress_token:
+        return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     if _runtime_marker("dashboard_protection", ctx):
         source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
         target = RuntimePaths().projects / "ingress" / "Caddyfile"
@@ -1320,7 +1325,8 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         log = ctx["log_fn"]("dashboard_protection")
         rc, out = actions.compose_up(ctx["root"] / "core" / "ingress", log,
-                                     env={"MU3LAB_CADDYFILE": str(target)})
+                                     env={"MU3LAB_CADDYFILE": str(target),
+                                          "MU3LAB_INGRESS_TOKEN": ingress_token})
         log(out or f"(exit {rc})")
         return {"ok": rc == 0, "error": "Caddy could not apply dashboard protection." if rc else ""}
     host = _tailscale_dns_name_for_install()
@@ -1356,7 +1362,8 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
 
     ingress_result["rc"], ingress_result["out"] = actions.compose_up(
         ctx["root"] / "core" / "ingress", log,
-        env={"MU3LAB_CADDYFILE": str(target)}, on_output=ingress_activity)
+        env={"MU3LAB_CADDYFILE": str(target),
+             "MU3LAB_INGRESS_TOKEN": ingress_token}, on_output=ingress_activity)
     log(str(ingress_result.get("out") or f"(exit {ingress_result['rc']})"))
     if int(ingress_result.get("rc", 1)) != 0:
         return {"ok": False, "error": "Caddy could not apply the Authentik protection policy."}
@@ -1713,10 +1720,11 @@ STEPS = [
     {"id": "authentik_serve", "label": "Authentik private access",
      "check": lambda ctx: _serve_port_check(AUTHENTIK_SERVE_PORT),
      "fix": fix_authentik_serve},
+    {"id": "open_webui_serve", "label": "Open WebUI private route",
+     "check": lambda ctx: _serve_port_check(OPEN_WEBUI_SERVE_PORT),
+     "fix": fix_open_webui_serve},
     {"id": "authentik_setup", "label": "Authentik administrator",
      "check": check_authentik_setup, "fix": fix_authentik_setup},
-    {"id": "authentik_users", "label": "Authentik initial users",
-     "check": check_authentik_users, "fix": fix_authentik_users},
     # Publish the private dashboard route before the operator tests the
     # Authentik gate; the route is tailnet-only while the gate is configured.
     {"id": "serve", "label": "Mu3Lab private dashboard route",

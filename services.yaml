@@ -2,7 +2,7 @@
 #
 # This file is the deployment source of truth.  Catalog copy lives in
 # catalog.yaml; neither file may contain credentials or user data.
-schema_version: 1
+schema_version: 2
 settings:
   runtime_root: /srv/mu3lab
   dashboard_port: 8787
@@ -14,14 +14,15 @@ settings:
 
 services:
   - id: ingress
+    maturity: supported
     name: Caddy ingress
     category: infrastructure
     lifecycle: always_on
     compose_dir: core/ingress
     https_port: 443
-    health: {kind: http, url: "http://127.0.0.1:19460/"}
+    health: {kind: http, url: "http://127.0.0.1:19460/__mu3lab_caddy_health"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: foundation
     images: ["caddy:2.10.2-alpine"]
     route: ready
@@ -30,6 +31,7 @@ services:
     backup: {volumes: [caddy-data, caddy-config]}
 
   - id: authentik
+    maturity: supported
     name: Authentik
     category: infrastructure
     lifecycle: always_on
@@ -38,7 +40,7 @@ services:
     private_https_port: 8444
     health: {kind: http, url: "http://127.0.0.1:9001/-/health/ready/"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: foundation
     images: ["postgres:16-alpine", "ghcr.io/goauthentik/server:2026.5.0"]
     route: pending
@@ -47,6 +49,7 @@ services:
     backup: {database: authentik, volumes: [authentik-media, authentik-templates]}
 
   - id: vaultwarden
+    maturity: supported
     name: Vaultwarden
     category: infrastructure
     lifecycle: always_on
@@ -55,7 +58,7 @@ services:
     private_https_port: 8443
     health: {kind: http, url: "http://127.0.0.1:8081/alive"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: foundation
     images: ["vaultwarden/server:1.34.3-alpine"]
     route: pending
@@ -66,6 +69,7 @@ services:
     mcp: {exposed: false}
 
   - id: ollama
+    maturity: supported
     name: Ollama
     category: ai
     lifecycle: shared
@@ -73,18 +77,19 @@ services:
     https_port: 11434
     health: {kind: http, url: "http://127.0.0.1:11434/"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: core
     required: true
     route: pending
     images: ["ollama/ollama:0.34.1"]
-    setup_action: "Install the local model runner and verify the selected CPU/GPU profile."
+    setup_action: "Install and verify the supported CPU model-runner profile."
     resource_guidance: "Model downloads determine disk and memory use."
     backup: {binds: [data]}
     identity_note: "Internal-only embedding and tiny-model runner; no browser or MCP route."
     mcp: {exposed: false}
 
   - id: litellm
+    maturity: supported
     name: LiteLLM
     category: ai
     lifecycle: shared
@@ -92,7 +97,7 @@ services:
     https_port: 4000
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: core
     required: true
     route: pending
@@ -105,14 +110,16 @@ services:
     mcp: {exposed: false}
 
   - id: open-webui
+    maturity: supported
     name: Open WebUI
     category: ai
     lifecycle: optional
     compose_dir: core/open-webui
     https_port: 8084
+    private_https_port: 8445
     health: {kind: http, url: "http://127.0.0.1:8084/health"}
     auth: oidc
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: core
     required: true
     route: pending
@@ -123,6 +130,7 @@ services:
     backup: {binds: [data]}
 
   - id: freellmapi
+    maturity: supported
     name: FreeLLMAPI
     category: ai
     lifecycle: optional
@@ -130,7 +138,7 @@ services:
     https_port: 3001
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
+    profiles: [cpu]
     stage: core
     required: true
     route: pending
@@ -140,6 +148,7 @@ services:
     backup: {binds: [data]}
 
   - id: surfsense
+    maturity: planned
     name: SurfSense
     category: research
     lifecycle: optional
@@ -149,9 +158,10 @@ services:
     auth: local
     profiles: [cpu, nvidia, amd]
     dependencies: [litellm, ollama, firecrawl]
-    availability: available
-    stage: core
-    required: true
+    availability: blocked
+    stage: blocked
+    required: false
+    blocked_reason: "Planned: the full migrations, worker, zero-cache, proxy, backup, and functional-test contract is not yet implemented."
     route: pending
     identity_note: "Own local account; Vaultwarden may store/fill credentials. This is not true SSO."
     setup_action: "Create the first SurfSense account in SurfSense and save it in Vaultwarden if desired."
@@ -160,6 +170,7 @@ services:
     backup: {database: surfsense, binds: [object-store]}
 
   - id: firecrawl
+    maturity: planned
     name: Firecrawl
     category: research
     lifecycle: shared
@@ -168,8 +179,10 @@ services:
     health: {kind: http, url: "http://127.0.0.1:3002/"}
     auth: excluded
     profiles: [cpu, nvidia, amd]
-    stage: core
-    required: true
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Planned: the full worker, Playwright, queue, database, backup, and real-scrape contract is not yet implemented."
+    required: false
     route: pending
     dependencies: []
     setup_action: "Verify the local crawler service for SurfSense."
@@ -178,6 +191,7 @@ services:
     backup: {binds: [data]}
 
   - id: actual-budget
+    maturity: planned
     name: Actual Budget
     category: finance
     lifecycle: optional
@@ -195,6 +209,7 @@ services:
     backup: {binds: [data]}
 
   - id: immich
+    maturity: planned
     name: Immich
     category: media
     lifecycle: optional
@@ -212,6 +227,7 @@ services:
     backup: {binds: [library, database]}
 
   - id: mealie
+    maturity: planned
     name: Mealie
     category: home
     lifecycle: optional
@@ -229,6 +245,7 @@ services:
     backup: {binds: [data]}
 
   - id: adventurelog
+    maturity: planned
     name: AdventureLog
     category: travel
     lifecycle: optional
@@ -246,6 +263,7 @@ services:
     backup: {binds: [data]}
 
   - id: paperless-ngx
+    maturity: planned
     name: Paperless-ngx
     category: documents
     lifecycle: optional

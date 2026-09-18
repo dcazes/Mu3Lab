@@ -40,6 +40,25 @@ class ProvisioningStoreTests(unittest.TestCase):
         self.assertEqual(summary["waiting"]["phase_id"], "configuration")
         self.assertFalse(summary["complete"])
 
+    def test_structured_inputs_are_redacted_before_sqlite(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            ProvisioningStore(database).update(
+                "configuration", "running",
+                inputs={"provider": {"api_key": "must-not-persist", "label": "safe"}})
+            with sqlite3.connect(database) as conn:
+                stored = conn.execute("SELECT inputs_json FROM provisioning_steps WHERE phase_id = 'configuration'").fetchone()[0]
+        self.assertNotIn("must-not-persist", stored)
+        self.assertIn("safe", stored)
+
+    def test_illegal_state_regression_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store.update("core", "verified")
+            with self.assertRaises(ValueError):
+                store.update("core", "waiting_for_user")
+
 
 @unittest.skipUnless(__import__("importlib.util").util.find_spec("cryptography"),
                      "cryptography is installed by control-plane requirements")

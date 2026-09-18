@@ -23,17 +23,17 @@ from check_server import (State, can_open_install, can_reset_authentik_admin, ca
 
 
 class GateTests(unittest.TestCase):
-    def test_locked(self):
+    def test_preflight_does_not_require_developer_tests(self):
         ok, reason = can_run_preflight(State())
-        self.assertFalse(ok)
-        self.assertIn("card", reason)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
 
-    def test_locked_running(self):
+    def test_preflight_remains_available_while_diagnostics_run(self):
         state = State()
         state.tests_green = True
         state.test_run = {"status": "running"}
         ok, _ = can_run_preflight(state)
-        self.assertFalse(ok)
+        self.assertTrue(ok)
 
     def test_open(self):
         state = State()
@@ -54,15 +54,13 @@ class GateTests(unittest.TestCase):
         ok, _ = can_open_install(state)
         self.assertTrue(ok)
 
-    def test_reset(self):
-        # Mirrors the server: a new test run clears downstream flags, so the
-        # chain re-locks instead of coasting on stale green.
+    def test_failed_developer_diagnostics_do_not_lock_preflight(self):
         state = State()
         state.tests_green = True
         state.preflight_passed = True
         state.tests_green = False  # what POST /api/tests/run does first
         ok, _ = can_run_preflight(state)
-        self.assertFalse(ok)
+        self.assertTrue(ok)
 
     def test_authentik_recovery_only_at_the_explicit_setup_wait(self):
         self.assertFalse(can_reset_authentik_admin(None))

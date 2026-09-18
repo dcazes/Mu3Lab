@@ -20,6 +20,7 @@ VALID_LIFECYCLE = frozenset({"always_on", "shared", "optional"})
 VALID_ACTIONS = frozenset({"start", "stop", "restart", "update"})
 VALID_STAGES = frozenset({"foundation", "core", "optional", "blocked"})
 VALID_ROUTES = frozenset({"ready", "pending", "unavailable"})
+VALID_MATURITY = frozenset({"supported", "experimental", "planned"})
 
 
 class RegistryError(ValueError):
@@ -31,6 +32,7 @@ class Service:
     """One curated, non-user-supplied Compose service definition."""
 
     id: str
+    maturity: str
     name: str
     category: str
     lifecycle: str
@@ -68,6 +70,7 @@ class Service:
     def public(self) -> dict[str, Any]:
         """Return browser-safe metadata with no paths outside the checkout/secrets."""
         return {"id": self.id, "name": self.name, "category": self.category,
+                "maturity": self.maturity,
                 "lifecycle": self.lifecycle, "https_port": self.https_port,
                 "private_https_port": self.private_https_port,
                 "auth": self.auth, "profiles": list(self.profiles),
@@ -116,9 +119,14 @@ def _service(item: dict[str, Any]) -> Service:
     if not set(profiles).issubset({"cpu", "nvidia", "amd"}):
         raise RegistryError(f"service {service_id}: unsupported hardware profile")
     stage = item.get("stage", "planned")
+    maturity = _required(item, "maturity")
     route = item.get("route", "pending")
     if stage not in VALID_STAGES:
         raise RegistryError(f"service {service_id}: unsupported stage {stage!r}")
+    if maturity not in VALID_MATURITY:
+        raise RegistryError(f"service {service_id}: unsupported maturity {maturity!r}")
+    if maturity == "planned" and item.get("availability") != "blocked":
+        raise RegistryError(f"service {service_id}: planned maturity must be blocked")
     if route not in VALID_ROUTES:
         raise RegistryError(f"service {service_id}: unsupported route state {route!r}")
     images = tuple(item.get("images", []))
@@ -129,7 +137,7 @@ def _service(item: dict[str, Any]) -> Service:
         raise RegistryError(f"service {service_id}: images must be pinned and never use latest")
     if stage == "blocked" and item.get("availability") != "blocked":
         raise RegistryError(f"service {service_id}: blocked stage requires blocked availability")
-    return Service(id=service_id, name=_required(item, "name"),
+    return Service(id=service_id, maturity=maturity, name=_required(item, "name"),
                    category=_required(item, "category"), lifecycle=lifecycle,
                    compose_dir=compose_dir, https_port=port, private_https_port=private_port, health=health,
                    auth=auth, profiles=profiles,
@@ -178,8 +186,8 @@ def load(path: Path = REGISTRY_PATH) -> Registry:
         raise RegistryError(f"cannot read registry: {exc}") from exc
     except yaml.YAMLError as exc:
         raise RegistryError(f"invalid registry YAML: {exc}") from exc
-    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
-        raise RegistryError("registry schema_version must be 1")
+    if not isinstance(raw, dict) or raw.get("schema_version") != 2:
+        raise RegistryError("registry schema_version must be 2")
     raw_services = raw.get("services")
     if not isinstance(raw_services, list) or not raw_services:
         raise RegistryError("registry services must be a non-empty list")

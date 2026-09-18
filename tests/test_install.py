@@ -195,6 +195,7 @@ class CaddyFixTests(unittest.TestCase):
         projdir = root / "core" / "ingress"
         projdir.mkdir(parents=True)
         (projdir / "docker-compose.yml").touch()
+        (root / ".env").write_text("MU3LAB_INGRESS_TOKEN=test-only-token\n", encoding="utf-8")
         return projdir
 
     def test_waits_for_port(self):
@@ -624,8 +625,8 @@ class DockerSessionTests(unittest.TestCase):
             "vaultwarden_serve": ["unshared", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
+            "open_webui_serve": ["unshared", "ready"],
             "authentik_setup": ["needs_user", "ready"],
-            "authentik_users": ["needs_user", "ready"],
             "dashboard_protection": ["needs_user", "needs_apply", "needs_attention", "ready"],
         }
         step_ids = {m["id"] for m in install.STEPS}

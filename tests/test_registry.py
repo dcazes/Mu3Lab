@@ -19,9 +19,9 @@ from ctl.service_state import public_url, status as service_status
 
 
 class RegistryTests(unittest.TestCase):
-    def test_checked_in_registry_loads_and_surfsense_is_explicitly_local_account(self):
+    def test_checked_in_registry_marks_surfsense_planned_and_local_account(self):
         registry = load()
-        self.assertEqual(registry.get("surfsense").availability, "available")
+        self.assertEqual(registry.get("surfsense").availability, "blocked")
         self.assertEqual(registry.get("surfsense").auth, "local")
         self.assertIn("not true SSO", registry.get("surfsense").identity_note)
         self.assertFalse(registry.get("vaultwarden").mcp.get("exposed", False))
@@ -29,7 +29,7 @@ class RegistryTests(unittest.TestCase):
     def test_rejects_compose_path_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "services.yaml"
-            path.write_text("""schema_version: 1\nservices:\n  - id: bad\n    name: Bad\n    category: test\n    lifecycle: optional\n    compose_dir: ../outside\n    https_port: 1\n    health: {kind: tcp, port: 1}\n    auth: proxy\n    profiles: [cpu]\n""", encoding="utf-8")
+            path.write_text("""schema_version: 2\nservices:\n  - id: bad\n    maturity: supported\n    name: Bad\n    category: test\n    lifecycle: optional\n    compose_dir: ../outside\n    https_port: 1\n    health: {kind: tcp, port: 1}\n    auth: proxy\n    profiles: [cpu]\n""", encoding="utf-8")
             with self.assertRaisesRegex(RegistryError, "unsafe compose_dir"):
                 load(path)
 
@@ -69,7 +69,7 @@ class RegistryTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.required and service.stage == "core"]
         self.assertEqual({service.id for service in core},
-                         {"ollama", "freellmapi", "litellm", "open-webui", "firecrawl", "surfsense"})
+                         {"ollama", "freellmapi", "litellm", "open-webui"})
         for service in core:
             self.assertTrue((service.compose_path(root) / "docker-compose.yml").is_file(), service.id)
             self.assertTrue(service.images, service.id)
@@ -82,6 +82,10 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
+        self.assertIn("X-Mu3Lab-Proxy-Token", caddyfile)
+
+    def test_ingress_health_uses_dedicated_caddy_endpoint(self):
+        self.assertTrue(load().get("ingress").health["url"].endswith("/__mu3lab_caddy_health"))
 
     def test_dashboard_catalog_uses_curated_service_ids(self):
         root = Path(__file__).resolve().parents[1]
