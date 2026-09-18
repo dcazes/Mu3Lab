@@ -34,7 +34,8 @@ class BootstrapIdentityTests(unittest.TestCase):
         host = "mu3lab-3.example.ts.net"
         ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
         with patch("ctl.install._tailscale_dns_name_for_install", return_value=host), \
-             patch("ctl.install._runtime_marker", return_value=False):
+             patch("ctl.install._runtime_marker", return_value=False), \
+             patch("ctl.install._authentik_initial_setup_pending", return_value=True):
             prompt = install.fix_authentik_setup({}, ctx)["prompt"]
             check = install.check_authentik_setup(ctx)
         expected = f"https://{host}/"

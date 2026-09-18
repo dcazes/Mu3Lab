@@ -1329,14 +1329,14 @@ def check_dashboard_protection(ctx: dict) -> dict:
         if not target.is_file():
             return {"status": "missing", "state": "needs_apply",
                     "detail": "Dashboard protection was confirmed; applying the verified Caddy policy."}
-        verdict = _dashboard_access_probe(host)
+        verdict = _dashboard_access_probe_with_retry(host)
         if verdict["state"] == "ready":
             return verdict
         return {"status": "waiting", "state": "needs_attention", "detail": verdict["detail"]}
     host = host or "127.0.0.1"
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     if target.is_file():
-        verdict = _dashboard_access_probe(host)
+        verdict = _dashboard_access_probe_with_retry(host)
         if verdict["state"] == "ready":
             return {"status": "waiting", "state": "needs_user",
                     "detail": "Authentik protection is active; verify one signed-in dashboard request, then confirm.",
@@ -1345,6 +1345,17 @@ def check_dashboard_protection(ctx: dict) -> dict:
     return {"status": "waiting", "state": "needs_apply",
             "detail": "Mu3Lab will create the Authentik provider, application, and embedded-outpost assignment automatically.",
             "setup_url": tailnet_https_origin(host, DASHBOARD_SERVE_PORT)}
+
+
+def _dashboard_access_probe_with_retry(host: str | None = None) -> dict:
+    """Allow Caddy a brief bind interval after a container recreation."""
+    verdict = _dashboard_access_probe(host)
+    for _ in range(5):
+        if verdict["state"] == "ready" or "Connection refused" not in verdict.get("detail", ""):
+            break
+        time.sleep(1)
+        verdict = _dashboard_access_probe(host)
+    return verdict
 
 
 def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
