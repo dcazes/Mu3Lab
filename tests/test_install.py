@@ -75,7 +75,8 @@ class DispatchTests(unittest.TestCase):
             result = install.fix_serve({}, _ctx())
         self.assertTrue(result["ok"])
         self.assertEqual(run.call_args.args[0],
-                         ["tailscale", "serve", "--bg", install.SERVE_PORT])
+                         ["tailscale", "serve", "--bg", "--https=8446",
+                          "http://127.0.0.1:19460"])
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
     def test_service_check_names_a_failed_worker_without_blaming_dashboard(self):
@@ -318,11 +319,11 @@ class AuthentikReadinessTests(unittest.TestCase):
     def test_dashboard_probe_rejects_localhost_auth_redirect(self):
         host = "mu3lab.example.ts.net"
         self.assertTrue(install._authentik_redirect_is_expected(
-            f"https://{host}:8444/application/o/authorize/", host))
+            f"https://{host}/application/o/authorize/", host))
         self.assertFalse(install._authentik_redirect_is_expected(
             "http://localhost/application/o/authorize/", host))
         self.assertFalse(install._authentik_redirect_is_expected(
-            f"https://{host}/application/o/authorize/", host))
+            f"https://{host}:8444/application/o/authorize/", host))
 
 
 class VaultwardenReadinessTests(unittest.TestCase):

@@ -20,6 +20,7 @@ services:
     lifecycle: always_on
     compose_dir: core/ingress
     https_port: 443
+    private_https_port: 8446
     health: {kind: http, url: "http://127.0.0.1:19460/__mu3lab_caddy_health"}
     auth: excluded
     profiles: [cpu]
@@ -37,7 +38,7 @@ services:
     lifecycle: always_on
     compose_dir: core/authentik
     https_port: 9001
-    private_https_port: 8444
+    private_https_port: 443
     health: {kind: http, url: "http://127.0.0.1:9001/-/health/ready/"}
     auth: excluded
     profiles: [cpu]

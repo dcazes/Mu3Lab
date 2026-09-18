@@ -37,7 +37,7 @@ class BootstrapIdentityTests(unittest.TestCase):
              patch("ctl.install._runtime_marker", return_value=False):
             prompt = install.fix_authentik_setup({}, ctx)["prompt"]
             check = install.check_authentik_setup(ctx)
-        expected = f"https://{host}:{install.AUTHENTIK_SERVE_PORT}/"
+        expected = f"https://{host}/"
         self.assertEqual(prompt["url"], expected)
         self.assertEqual(check["setup_url"], expected)
         self.assertNotIn("initial-setup", prompt["url"])
@@ -72,8 +72,8 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertIn("slug: mu3lab", content)
         self.assertIn("name: mu3lab-operators", content)
         self.assertIn("authentik_policies.policybinding", content)
-        self.assertIn('authentik_host: "https://mu3lab-4.taile2cc7a.ts.net:8444"', content)
-        self.assertIn('authentik_host_browser: "https://mu3lab-4.taile2cc7a.ts.net:8444"', content)
+        self.assertIn('authentik_host: "https://mu3lab-4.taile2cc7a.ts.net"', content)
+        self.assertIn('authentik_host_browser: "https://mu3lab-4.taile2cc7a.ts.net"', content)
         self.assertNotIn("password", content.lower())
         self.assertNotIn("client_secret", content.lower())
 

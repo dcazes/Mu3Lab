@@ -54,7 +54,7 @@ def tailnet_dashboard_url() -> str:
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return ""
     if re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name):
-        return "https://" + name + "/"
+        return "https://" + name + ":8446/"
     return ""
 
 

@@ -62,7 +62,7 @@ PORT_INFO = {
             "access": "Internal only — Tailscale Serve publishes the dashboard securely."},
     9001: {"service": "Authentik identity service",
            "purpose": "Authentik's loopback-only application origin",
-           "access": "Internal only — use Authentik's private HTTPS URL on port 8444."},
+           "access": "Internal only — use Authentik's private HTTPS URL on standard HTTPS (443)."},
     8081: {"service": "Vaultwarden password manager",
            "purpose": "Vaultwarden's loopback-only application origin",
            "access": "Internal only — use Vaultwarden's private HTTPS URL on port 8443."},

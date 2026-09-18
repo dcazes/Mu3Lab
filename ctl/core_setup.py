@@ -216,7 +216,7 @@ def _configure_open_webui_identity(runtime: RuntimePaths) -> str:
     origin = f"https://{host}:8445"
     values.update({
         "WEBUI_URL": origin,
-        "OPENID_PROVIDER_URL": f"https://{host}:8444/application/o/mu3lab-open-webui/.well-known/openid-configuration/",
+        "OPENID_PROVIDER_URL": f"https://{host}/application/o/mu3lab-open-webui/.well-known/openid-configuration/",
         "OPENID_REDIRECT_URI": f"{origin}/oauth/oidc/callback",
         "OAUTH_PROVIDER_NAME": "Mu3Lab",
         "OAUTH_SCOPES": "openid email profile",
@@ -270,7 +270,7 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     oidc_deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
     while time.monotonic() < oidc_deadline:
         discovery_status, discovery = _http_json(
-            f"https://{host}:8444/application/o/mu3lab-open-webui/.well-known/openid-configuration/")
+            f"https://{host}/application/o/mu3lab-open-webui/.well-known/openid-configuration/")
         webui_status, webui_config = _http_json(f"https://{host}:8445/api/config")
         if (discovery_status == 200 and discovery.get("authorization_endpoint")
                 and webui_status == 200 and "oidc" in json.dumps(webui_config).lower()):

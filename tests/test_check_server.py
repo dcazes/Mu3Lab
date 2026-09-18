@@ -84,7 +84,7 @@ class ProgressTests(unittest.TestCase):
             run.return_value.returncode = 0
             run.return_value.stdout = payload
             self.assertEqual(check_server.tailnet_dashboard_url(),
-                             "https://mu3lab-1.taile2cc7a.ts.net/")
+                             "https://mu3lab-1.taile2cc7a.ts.net:8446/")
 
     def test_build_identity_shape(self):
         # /api/state answers "which exact code" (short HEAD + dirty flag)

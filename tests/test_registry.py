@@ -39,7 +39,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(public_url(service, "mu3lab.example.ts.net"), "")
         ingress = load().get("ingress")
         self.assertEqual(public_url(ingress, "mu3lab.example.ts.net"),
-                         "https://mu3lab.example.ts.net")
+                         "https://mu3lab.example.ts.net:8446")
 
     def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
         registry = load()

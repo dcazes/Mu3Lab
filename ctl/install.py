@@ -65,9 +65,11 @@ CADDY_HEALTH_PATH = "/__mu3lab_caddy_health"
 AUTHENTIK_PROXY_PORT = 19461
 VAULTWARDEN_PROXY_PORT = 19462
 OPEN_WEBUI_PROXY_PORT = 19463
-SERVE_PORT = "19460"      # dashboard HTTPS listener on the tailnet
+# Authentik must own standard HTTPS. Its browser UI creates API and WebSocket
+# URLs from the public origin and does not reliably preserve a high port.
+AUTHENTIK_SERVE_PORT = "443"
+DASHBOARD_SERVE_PORT = "8446"
 VAULTWARDEN_SERVE_PORT = "8443"
-AUTHENTIK_SERVE_PORT = "8444"
 OPEN_WEBUI_SERVE_PORT = "8445"
 TS_HOSTNAME = "mu3lab"
 TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
@@ -1154,7 +1156,8 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
                 "error": "Tailscale did not provide a valid MagicDNS name for Authentik configuration."}
     blueprint = write_dashboard_blueprint(
         RuntimePaths().root, dns_name,
-        f"https://{dns_name}:{AUTHENTIK_SERVE_PORT}")
+        tailnet_https_origin(dns_name, AUTHENTIK_SERVE_PORT).rstrip("/"),
+        tailnet_https_origin(dns_name, DASHBOARD_SERVE_PORT).rstrip("/"))
     log("rendered the Authentik dashboard Blueprint (no credentials)")
     env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
     if added:
@@ -1217,6 +1220,12 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
     return {"ok": True}
 
 
+def tailnet_https_origin(host: str, port: str) -> str:
+    """Return a private HTTPS origin, omitting the standard HTTPS port."""
+    host = host.rstrip(".")
+    return f"https://{host}/" if port == "443" else f"https://{host}:{port}/"
+
+
 def check_authentik_setup(ctx: dict) -> dict:
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
     setup_pending = _authentik_initial_setup_pending()
@@ -1228,7 +1237,7 @@ def check_authentik_setup(ctx: dict) -> dict:
             # Authentik 2026.5 routes its root itself to first-run setup. Do
             # not hard-code its version-sensitive internal flow path: a
             # direct legacy flow URL is explicitly denied by this release.
-            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/"}
+            "setup_url": tailnet_https_origin(host, AUTHENTIK_SERVE_PORT)}
 
 
 def _authentik_initial_setup_pending() -> bool:
@@ -1281,7 +1290,7 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
         "you can deliberately reset only the built-in akadmin account below. "
         "After a recovery reset, sign in and change the temporary password "
         "before continuing. Mu3Lab will detect when the owner account exists.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/", "Check owner account again") | {
+        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT), "Check owner account again") | {
             "recovery_action": "reset_authentik_admin",
             "recovery_username": "akadmin",
         }}
@@ -1319,11 +1328,11 @@ def check_dashboard_protection(ctx: dict) -> dict:
         if verdict["state"] == "ready":
             return {"status": "waiting", "state": "needs_user",
                     "detail": "Authentik protection is active; verify one signed-in dashboard request, then confirm.",
-                    "setup_url": f"https://{host}/"}
+                    "setup_url": tailnet_https_origin(host, DASHBOARD_SERVE_PORT)}
         return {"status": "missing", "state": "needs_attention", "detail": verdict["detail"]}
     return {"status": "waiting", "state": "needs_apply",
             "detail": "Mu3Lab will create the Authentik provider, application, and embedded-outpost assignment automatically.",
-            "setup_url": f"https://{host}/"}
+            "setup_url": tailnet_https_origin(host, DASHBOARD_SERVE_PORT)}
 
 
 def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
@@ -1339,7 +1348,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             return {"waiting": True, "prompt": _manual_prompt(
                 "Verify the protected dashboard",
                 "Open the protected dashboard in an anonymous browser window. It must redirect to the private Authentik HTTPS page, not localhost or an HTTP URL. Sign in as a Mu3Lab operator and confirm the dashboard loads, then return here and check again.",
-                f"https://{host}/", "I verified the protected dashboard")}
+                tailnet_https_origin(host, DASHBOARD_SERVE_PORT), "I verified the protected dashboard")}
         target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         log = ctx["log_fn"]("dashboard_protection")
@@ -1359,7 +1368,8 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     from ctl.authentik_blueprints import write_dashboard_blueprint
     blueprint = write_dashboard_blueprint(
         RuntimePaths().root, host,
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}")
+        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT).rstrip("/"),
+        tailnet_https_origin(host, DASHBOARD_SERVE_PORT).rstrip("/"))
     log = ctx["log_fn"]("dashboard_protection")
     _update_progress(ctx, "dashboard_protection", phase="configuring_identity",
                      activity="Waiting for Authentik to publish the generated provider and embedded outpost.",
@@ -1397,7 +1407,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             return {"waiting": True, "prompt": _manual_prompt(
                 "Verify the protected Mu3Lab dashboard",
                 "Mu3Lab created the Authentik provider, application, and embedded outpost automatically. Open the protected dashboard in an anonymous window; it must redirect to the private Authentik HTTPS page, not localhost or an HTTP URL. Sign in as a Mu3Lab operator and confirm the dashboard loads. Mu3Lab never receives the Authentik password.",
-                f"https://{host}/", "I verified the protected dashboard")}
+                tailnet_https_origin(host, DASHBOARD_SERVE_PORT), "I verified the protected dashboard")}
         _update_progress(ctx, "dashboard_protection", phase="waiting_for_identity",
                          activity="Waiting for Authentik to publish the generated provider to the embedded outpost.",
                          timeout_seconds=180)
@@ -1419,7 +1429,7 @@ def _authentik_redirect_is_expected(location: str | None,
     except ValueError:
         return False
     return (parsed.scheme == "https" and parsed.hostname == expected_host and
-            port == int(AUTHENTIK_SERVE_PORT) and bool(parsed.path))
+            port in (None, 443) and bool(parsed.path))
 
 
 def _dashboard_access_probe(host: str | None = None) -> dict:
@@ -1450,7 +1460,7 @@ def _dashboard_access_probe(host: str | None = None) -> dict:
         return {"status": "missing", "state": "needs_attention",
                 "detail": (f"Dashboard returned HTTP {status} with an unexpected "
                            "authentication redirect; expected private Authentik "
-                           f"at https://{(host or 'the tailnet host')}:{AUTHENTIK_SERVE_PORT}.")}
+                           f"at {tailnet_https_origin(host or 'the tailnet host', AUTHENTIK_SERVE_PORT)}.")}
 
     try:
         with opener.open(request, timeout=5) as response:
@@ -1580,17 +1590,18 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
 
 
 def fix_serve(check: dict, ctx: dict) -> dict:
-    """Expose Caddy's port on the tailnet (`tailscale serve --bg <port>`).
+    """Publish the dashboard on a nonstandard private port.
 
-    Flag shape per Tailscale docs (serve <local-port>, --bg backgrounds it;
-    `serve --help` is authoritative — the verify below catches any drift).
+    Authentik owns tailnet HTTPS :443 because its browser UI requires a
+    standard HTTPS origin for API and WebSocket requests.
     """
     log = ctx["log_fn"]("serve")
     # `tailscale serve` changes daemon configuration. Some installations
     # require root unless an operator was configured explicitly, so it must
     # use the same audited elevation boundary as every other host mutation.
     result = privilege.run_privileged(
-        ["tailscale", "serve", "--bg", SERVE_PORT], log, timeout=60)
+        ["tailscale", "serve", "--bg", f"--https={DASHBOARD_SERVE_PORT}",
+         f"http://127.0.0.1:{CADDY_PORT}"], log, timeout=60)
     if result.get("need_terminal"):
         return {"waiting": True, "prompt": {
             "kind": "terminal",
@@ -1656,9 +1667,9 @@ def _caddy_check(ctx: dict) -> dict:
 
 def _serve_check(ctx: dict) -> dict:
     rc, out = actions.privilege._exec(["tailscale", "serve", "status"])
-    if rc == 0 and SERVE_PORT in out:
+    if rc == 0 and f":{DASHBOARD_SERVE_PORT}" in out:
         return {"name": "serve", "status": "ok",
-                "detail": f"Tailnet serving local :{SERVE_PORT}.",
+                "detail": f"Tailnet serving the dashboard on :{DASHBOARD_SERVE_PORT}.",
                 "action": "", "state": "ready", "blocking": False}
     return {"name": "serve", "status": "missing",
             "detail": "Tailnet sharing not configured yet.",
