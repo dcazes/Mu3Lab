@@ -15,6 +15,9 @@
 			reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
 			forward_auth 127.0.0.1:9001 {
 				uri /outpost.goauthentik.io/auth/caddy
+				header_up Host {http.request.host}
+				header_up X-Forwarded-Host {http.request.host}
+				header_up X-Forwarded-Proto https
 				copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid X-Authentik-Jwt X-Authentik-Meta-Jwks X-Authentik-Meta-Outpost X-Authentik-Meta-Provider X-Authentik-Meta-App X-Authentik-Meta-Version
 				trusted_proxies private_ranges
 			}
@@ -26,6 +29,8 @@
 :19461 {
 	bind 127.0.0.1
 	reverse_proxy 127.0.0.1:9001 {
+		header_up Host {http.request.host}
+		header_up X-Forwarded-Host {http.request.host}
 		header_up X-Forwarded-Proto https
 	}
 }

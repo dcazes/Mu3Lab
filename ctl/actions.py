@@ -173,10 +173,69 @@ def docker_cmd_stream(argv: list[str], log: Callable[[str], None], *,
     return rc, "\n".join(lines).strip()
 
 
+def docker_cmd_with_stdin(argv: list[str], stdin_data: str,
+                          log: Callable[[str], None], *,
+                          timeout: int = 60) -> tuple[int, str]:
+    """Run one installer-owned Docker command with private standard input.
+
+    This is deliberately separate from :func:`docker_cmd`: its input must
+    never be reflected in the command log, environment, or returned output.
+    It exists for tools such as Authentik's interactive password-reset command
+    whose supported interface reads the new value from standard input.
+    """
+    log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv)
+        + "  (private input supplied securely)")
+    command = _docker_invocation(argv)
+    if command is None:
+        return 1, ("docker unavailable: no live group and no DB membership "
+                   "(installer should have added you — report this)")
+    try:
+        proc = _subprocess.Popen(
+            command, stdin=_subprocess.PIPE, stdout=_subprocess.PIPE,
+            stderr=_subprocess.STDOUT, text=True,
+            env={**_os.environ, **_docker_config_env()},
+        )
+        output, _ = proc.communicate(stdin_data, timeout=timeout)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return 124, "docker command timed out"
+    except OSError as exc:
+        return 126, f"{command[0]}: {exc}"
+    # Callers provide secrets through stdin.  Do not let an unexpected child
+    # echo turn a diagnostic into a credential leak.
+    return proc.returncode, output.replace(stdin_data, "[redacted]").strip()
+
+
+def reset_authentik_admin_password(password: str,
+                                   log: Callable[[str], None]) -> dict:
+    """Set a one-time password for the built-in ``akadmin`` account.
+
+    Authentik documents ``ak changepassword akadmin`` as its recovery path.
+    The generated password is sent twice on stdin for Django's confirmation
+    prompt.  It is intentionally neither logged nor retained here.
+    """
+    if not password or "\n" in password or "\r" in password:
+        return {"ok": False, "error": "invalid temporary password"}
+    rc, output = docker_cmd_with_stdin(
+        ["docker", "exec", "-i", "authentik-server-1", "ak",
+         "changepassword", "akadmin"],
+        password + "\n" + password + "\n", log, timeout=90)
+    if rc != 0:
+        # Django's output can include installation details.  The bootstrap
+        # needs only an actionable, non-sensitive result.
+        return {"ok": False,
+                "error": "Authentik could not reset the akadmin password. "
+                         "Confirm its server container is healthy, then retry."}
+    log("Authentik akadmin password reset; temporary password was not logged.")
+    return {"ok": True}
+
+
 def compose_up(projdir: Path, log: Callable[[str], None],
                timeout: int = 300, env: dict[str, str] | None = None,
                extra_files: list[Path] | None = None,
                wait_timeout: int | None = None,
+               recreate: bool = False,
                on_output: Callable[[str], None] | None = None) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
@@ -189,12 +248,30 @@ def compose_up(projdir: Path, log: Callable[[str], None],
     for compose_file in files:
         argv.extend(["-f", str(compose_file)])
     argv.extend(["--project-directory", str(projdir), "up", "-d"])
+    if recreate:
+        argv.append("--force-recreate")
     if wait_timeout is not None:
         argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
     if on_output:
         return docker_cmd_stream(argv, log, timeout=timeout, env=env,
                                  on_output=on_output)
     return docker_cmd(argv, log, timeout=timeout, env=env)
+
+
+def compose_exec(projdir: Path, service: str, argv: list[str],
+                 log: Callable[[str], None], *, timeout: int = 300,
+                 env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Run a fixed, reviewed command inside one curated Compose service.
+
+    Callers must supply a service name and argument list from source code; no
+    browser input reaches this function.  It exists for idempotent model
+    preparation without reopening a shell escape hatch in the control plane.
+    """
+    if not service or not argv or any(not isinstance(value, str) for value in argv):
+        return 2, "invalid reviewed compose exec request"
+    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
+               "--project-directory", str(projdir), "exec", "-T", service, *argv]
+    return docker_cmd(command, log, timeout=timeout, env=env)
 
 
 def docker_container_statuses(project: str) -> tuple[int, str]:

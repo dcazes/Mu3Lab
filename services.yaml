@@ -72,7 +72,7 @@ services:
     compose_dir: core/ollama
     https_port: 11434
     health: {kind: http, url: "http://127.0.0.1:11434/"}
-    auth: proxy
+    auth: excluded
     profiles: [cpu, nvidia, amd]
     stage: core
     required: true
@@ -81,7 +81,8 @@ services:
     setup_action: "Install the local model runner and verify the selected CPU/GPU profile."
     resource_guidance: "Model downloads determine disk and memory use."
     backup: {binds: [data]}
-    mcp: {exposed: true, risk: read}
+    identity_note: "Internal-only embedding and tiny-model runner; no browser or MCP route."
+    mcp: {exposed: false}
 
   - id: litellm
     name: LiteLLM
@@ -90,7 +91,7 @@ services:
     compose_dir: core/litellm
     https_port: 4000
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
-    auth: oidc
+    auth: excluded
     profiles: [cpu, nvidia, amd]
     stage: core
     required: true
@@ -100,7 +101,8 @@ services:
     images: ["ghcr.io/berriai/litellm:v1.92.0"]
     dependencies: [ollama]
     backup: {binds: [config]}
-    mcp: {exposed: true, risk: read}
+    identity_note: "Internal-only model gateway; user access is through Open WebUI or the future authenticated MCP gateway."
+    mcp: {exposed: false}
 
   - id: open-webui
     name: Open WebUI
@@ -127,12 +129,12 @@ services:
     compose_dir: apps/freellmapi
     https_port: 3001
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
-    auth: proxy
+    auth: excluded
     profiles: [cpu, nvidia, amd]
     stage: core
     required: true
     route: pending
-    setup_action: "Add one or more FreeLLMAPI provider keys, or leave it unconfigured."
+    setup_action: "Mu3Lab manages provider configuration privately; it is never a user-facing app."
     resource_guidance: "Optional provider route inside the mandatory core suite."
     images: ["ghcr.io/tashfeenahmed/freellmapi:v0.11.0"]
     backup: {binds: [data]}
@@ -164,7 +166,7 @@ services:
     compose_dir: apps/firecrawl
     https_port: 3002
     health: {kind: http, url: "http://127.0.0.1:3002/"}
-    auth: proxy
+    auth: excluded
     profiles: [cpu, nvidia, amd]
     stage: core
     required: true
@@ -184,7 +186,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:5006/"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: optional
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
     route: pending
     setup_action: "Install only when you want private budgeting."
     resource_guidance: "Lightweight personal finance service."
@@ -199,7 +203,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:2283/api/server/ping"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: optional
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
     route: pending
     setup_action: "Install only when you want private photo management."
     resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
@@ -214,7 +220,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:9925/api/app/about"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: optional
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
     route: pending
     setup_action: "Install only when you want private recipe and meal planning."
     resource_guidance: "Lightweight service."
@@ -229,7 +237,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8015/"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: optional
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
     route: pending
     setup_action: "Install only when you want private travel planning."
     resource_guidance: "Lightweight service with persistent trip data."
@@ -244,7 +254,9 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8000/api/"}
     auth: oidc
     profiles: [cpu, nvidia, amd]
-    stage: optional
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
     route: pending
     setup_action: "Install only when you want private document management."
     resource_guidance: "Storage and OCR usage grow with your document library."

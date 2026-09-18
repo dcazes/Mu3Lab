@@ -34,6 +34,7 @@
   pre { background: #f6f8fa; padding: .6rem; overflow-x: auto; font-size: .82rem; max-height: 300px; overflow-y: auto; }
   pre.tail { max-height: 9em; margin: .4rem 0; }
   .prompt { border-left: 3px solid var(--wait); padding: .4rem .6rem; margin: .4rem 0; background: #fff8e6; }
+  .recovery { margin: .55rem 0; padding: .55rem .65rem; border: 1px solid var(--bad); border-radius: 6px; background: #fff; }
   code.act { background: #f6f8fa; padding: .1rem .3rem; font-size: .85rem; }
   .spin { display: inline-block; animation: spin .8s linear infinite; }
   .step-progress { margin: .45rem 0 .55rem 1.25rem; max-width: 620px; border: 1px solid var(--line); border-radius: 7px; padding: .45rem .55rem; background: #fff; }
@@ -335,6 +336,18 @@ function renderManifest(report) {
 }
 // --- card 3: install (live: start/poll/prompts) ------------------------------
 let instTimer = null;
+let continueInFlight = false;
+function startInstallPolling() {
+  if (!instTimer) instTimer = setInterval(refreshInstall, 1000);
+}
+function stopInstallPolling() {
+  if (instTimer) clearInterval(instTimer);
+  instTimer = null;
+}
+// A recovery password is intentionally memory-only. Refreshing the local
+// bootstrap page clears it; the user can issue a new reset if needed.
+let authentikRecovery = null;
+let authentikRecoveryError = '';
 async function postJSON(path, body) {
   const res = await fetch(path, {method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -368,14 +381,40 @@ async function startInstall() {
     document.getElementById('btn-inst').disabled = false;
     return;
   }
-  instTimer = setInterval(refreshInstall, 1000);
+  startInstallPolling();
 }
 async function killInstall() {
   try { await api('/api/install/kill', 'POST'); } catch (e) { console.error('install/kill', e); }
 }
 async function sendContinue() {
-  try { await postJSON('/api/install/continue'); }
-  catch (e) { console.error('install/continue', e); }
+  if (continueInFlight) return;
+  continueInFlight = true;
+  setStatus('inst-status', 'checking the completed setup…', 'wait');
+  // A manual step intentionally pauses the worker.  Keep the page live while
+  // the server re-checks it, so the next step is visible without a refresh.
+  startInstallPolling();
+  try {
+    await postJSON('/api/install/continue');
+    await refreshInstall();
+  } catch (e) {
+    console.error('install/continue', e);
+    await refreshInstall();
+  } finally {
+    continueInFlight = false;
+  }
+}
+async function resetAuthentikAdmin() {
+  if (!confirm('Reset the built-in Authentik administrator (akadmin) password? This invalidates the current password.')) return;
+  authentikRecoveryError = '';
+  try {
+    const result = await postJSON('/api/install/authentik-admin/reset');
+    authentikRecovery = result;
+    await refreshInstall();
+  } catch (e) {
+    console.error('authentik/reset', e);
+    authentikRecoveryError = e.message || 'Password reset failed.';
+    await refreshInstall();
+  }
 }
 async function copyText(value) {
   try {
@@ -393,7 +432,7 @@ async function retryInstall() {
   document.getElementById('inst-rows').innerHTML = '';
   document.getElementById('btn-inst').disabled = true;
   document.getElementById('btn-instop').disabled = false;
-  instTimer = setInterval(refreshInstall, 1000);
+  startInstallPolling();
 }
 function promptHtml(step) {
   const p = step.prompt;
@@ -414,12 +453,28 @@ function promptHtml(step) {
       ', then come back here.</span></div>';
   }
   if (p.kind === 'manual_setup') {
+    let recovery = '';
+    if (p.recovery_action === 'reset_authentik_admin') {
+      if (authentikRecovery) {
+        recovery = '<div class="recovery"><strong>Temporary recovery password — copy it now</strong><br>' +
+          'Username: <code class="act">' + escapeHtml(authentikRecovery.username) + '</code> ' +
+          '<button onclick="copyText(\'' + escapeHtml(authentikRecovery.username).replace(/'/g, '&#39;') + '\')">Copy username</button><br>' +
+          'Password: <code class="act">' + escapeHtml(authentikRecovery.temporary_password) + '</code> ' +
+          '<button onclick="copyText(\'' + escapeHtml(authentikRecovery.temporary_password).replace(/'/g, '&#39;') + '\')">Copy password</button><br>' +
+          '<span class="bad">Sign in, change this temporary password in Authentik, then use the confirmation button below. This value disappears if this page is refreshed and is never saved by Mu3Lab.</span></div>';
+      } else {
+        recovery = '<button onclick="resetAuthentikAdmin()">Reset existing administrator password</button> ' +
+          '<span class="mut">Use only when Authentik shows sign-in and no administrator password is known.</span>';
+      }
+      if (authentikRecoveryError) recovery += '<br><span class="bad">' + escapeHtml(authentikRecoveryError) + '</span>';
+    }
+    const openLabel = /protected dashboard/i.test(p.title || '') ? 'Open protected dashboard' : 'Open setup page';
     return '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
       escapeHtml(p.body) + '<br>' +
-      (p.url ? '<strong><a href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener">Open setup page</a></strong> ' +
+      (p.url ? '<strong><a href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener">' + openLabel + '</a></strong> ' +
         '<code class="act">' + escapeHtml(p.url) + '</code> ' +
         '<button onclick="copyText(\'' + escapeHtml(p.url).replace(/'/g, '&#39;') + '\')">Copy URL</button><br>' : '') +
-      '<button onclick="sendContinue()">' + escapeHtml(p.check_label || 'I completed this — check again') + '</button></div>';
+      recovery + '<br><button onclick="sendContinue()">' + escapeHtml(authentikRecovery ? 'I changed the temporary password — check again' : (p.check_label || 'I completed this — check again')) + '</button></div>';
   }
   let html = '<div class="prompt"><strong>' + escapeHtml(p.title) + '</strong><br>' +
     escapeHtml(p.body);
@@ -505,8 +560,8 @@ async function refreshInstall() {
     }
   }
   const log = document.getElementById('inst-log');
-  if (['ready', 'failed', 'waiting', 'cancelled'].includes(job.status)) {
-    clearInterval(instTimer);
+  if (['ready', 'failed', 'cancelled'].includes(job.status)) {
+    stopInstallPolling();
     document.getElementById('btn-instop').disabled = true;
     if (job.status === 'ready') {
       setStatus('inst-status', 'done — infrastructure installed', 'ok');
@@ -519,9 +574,6 @@ async function refreshInstall() {
         const s = (d.events || []).find(e => e.type === 'summary' && e.detail);
         if (s) document.getElementById('inst-log').textContent = s.detail;
       }).catch(e => console.error('install/events', e));
-    } else if (job.status === 'waiting') {
-      setStatus('inst-status', 'needs you — see the paused row above', 'wait');
-      log.textContent = '';
     } else if (job.status === 'failed') {
       setStatus('inst-status', 'failed — fix and retry', 'bad');
       log.innerHTML = 'The failed row is above. <button onclick="retryInstall()">Retry</button>';
@@ -530,6 +582,13 @@ async function refreshInstall() {
       setStatus('inst-status', 'stopped', 'mut');
       document.getElementById('btn-inst').disabled = false;
     }
+  } else if (job.status === 'waiting') {
+    // Keep polling: the confirmation button resumes the worker and the UI
+    // should observe the resulting verification and next prompt immediately.
+    document.getElementById('btn-instop').disabled = false;
+    setStatus('inst-status', continueInFlight ? 'checking the completed setup…' :
+      'needs you — see the paused row above', 'wait');
+    log.textContent = '';
   } else {
     const joining = job.steps.some(s => s.id === 'tailscale_join' && s.status === 'installing');
     const authentik = job.steps.find(s => s.id === 'authentik' &&
@@ -600,7 +659,7 @@ async function copyScript() {
     if (['queued', 'running', 'waiting'].includes(st.install_job.status)) {
       document.getElementById('btn-inst').disabled = true;
       document.getElementById('btn-instop').disabled = false;
-      instTimer = setInterval(refreshInstall, 1000);
+      startInstallPolling();
     }
   }
   // Stale-server tripwire: servers predating the version field can't serve

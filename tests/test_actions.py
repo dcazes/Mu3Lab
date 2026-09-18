@@ -14,7 +14,7 @@ DEBUG: Patch target is `ctl.actions.privilege` (module attribute) so production
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -142,6 +142,19 @@ class DockerCmdTests(unittest.TestCase):
     """Selection contract for the docker choke point: live group → direct;
     DB-member-only → `sg docker -c`; neither → clean error, nothing runs."""
 
+    def test_authentik_reset_supplies_password_only_on_stdin(self):
+        password = "Mu3Lab-test-password"
+        proc = MagicMock()
+        proc.communicate.return_value = ("Password changed successfully", "")
+        proc.returncode = 0
+        lines: list[str] = []
+        with patch("ctl.actions._docker_invocation", return_value=["docker", "exec"]), \
+             patch("ctl.actions._subprocess.Popen", return_value=proc):
+            result = actions.reset_authentik_admin_password(password, lines.append)
+        self.assertTrue(result["ok"])
+        proc.communicate.assert_called_once_with(password + "\n" + password + "\n", timeout=90)
+        self.assertNotIn(password, "\n".join(lines))
+
     def test_direct_with_live_group(self):
         seen: list = []
         def fake(argv, timeout=300, env=None):
@@ -228,6 +241,22 @@ class ComposeTests(unittest.TestCase):
         with patch.object(actions, "docker_cmd", fake):
             actions.compose_up(project, _silent, wait_timeout=600)
         self.assertEqual(seen[0][-4:], ["-d", "--wait", "--wait-timeout", "600"])
+
+    def test_exec_uses_curated_project_and_never_a_shell(self):
+        seen: list[list[str]] = []
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "ok"
+        project = Path("/srv/mu3lab/projects/ollama")
+        with patch.object(actions, "docker_cmd", fake):
+            rc, _ = actions.compose_exec(
+                project, "ollama", ["ollama", "pull", "nomic-embed-text"], _silent)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen[0], [
+            "docker", "compose", "-f", "/srv/mu3lab/projects/ollama/docker-compose.yml",
+            "--project-directory", "/srv/mu3lab/projects/ollama", "exec", "-T",
+            "ollama", "ollama", "pull", "nomic-embed-text",
+        ])
 
     def test_project_status_probe_uses_compose_label(self):
         seen: list[list[str]] = []

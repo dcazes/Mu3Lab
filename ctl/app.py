@@ -31,6 +31,7 @@ from ctl import __version__  # noqa: F401 (re-exported for /api/health)
 from ctl.backups import readiness as backup_readiness
 from ctl.core_setup import CORE_ORDER, plan as core_plan, start as start_core_setup
 from ctl.jobs import JobStore
+from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError, load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.service_state import status as service_status, tailnet_dns_name
@@ -128,6 +129,15 @@ def backups() -> dict:
     return {"ok": True, **backup_readiness()}
 
 
+@app.get("/api/provisioning")
+def provisioning() -> dict:
+    """Return durable first-run state, never transient browser progress."""
+    store = ProvisioningStore.runtime()
+    if store is None:
+        return {"ok": True, "available": False, "complete": False, "phases": []}
+    return {"available": True, **store.summary()}
+
+
 @app.get("/api/identity")
 def identity(request: Request) -> dict:
     """Report Authentik identity headers without trusting browser claims."""
@@ -157,9 +167,12 @@ def core_setup() -> dict:
     store = JobStore.runtime()
     current_job = next((job for job in (store.jobs() if store else [])
                         if job["service_id"] == "core-suite"), None)
+    provisioning_store = ProvisioningStore.runtime()
+    provisioned = provisioning_store.summary() if provisioning_store else None
     return {"ok": True, "ready_to_run": execution["ready"],
             "services": list(CORE_ORDER),
             "missing_manifests": execution["missing"],
+            "capacity": execution["capacity"], "provisioning": provisioned,
             "current_job": current_job,
             "next_action": "Set up the core application suite" if execution["ready"] else "Core service manifests are still being prepared"}
 
@@ -200,7 +213,32 @@ async def save_provider(request: Request) -> dict:
                              detail=f"provider:{result['id']}")
     store.transition(audit_job["id"], "succeeded", actor=identity_data["username"],
                      detail="Provider credential stored in encrypted local storage.")
-    return {"ok": True, "provider": result}
+    # Materialize the private gateway configuration synchronously. The
+    # browser receives only a status; credentials never leave this process.
+    reconciliation = None
+    try:
+        from ctl.core_wiring import configure
+        wiring = configure()
+        provisioning = ProvisioningStore.runtime()
+        if provisioning:
+            provisioning.update("configuration", "running",
+                                detail="Provider saved; preparing private AI routing.")
+        active = [job for job in store.jobs() if job["service_id"] == "core-suite"
+                  and job["state"] in {"queued", "running"}]
+        if not active:
+            reconciliation = start_core_setup(store, identity_data["username"], ROOT)
+            if provisioning:
+                provisioning.update("configuration", "running",
+                                    detail="Provider configuration saved; reconciling live AI routing.")
+    except ValueError:
+        # The user can enroll providers before the core service credentials
+        # exist. They will be picked up during the first reconciliation.
+        wiring = {"chat_configured": False, "provider_count": 1}
+    return {"ok": True, "provider": result,
+            "routing": {"configured": bool(wiring["chat_configured"]),
+                        "provider_count": int(wiring["provider_count"]),
+                        "detail": "Credential saved privately; Mu3Lab is verifying live routing before calling chat ready."},
+            "reconciliation_job": reconciliation}
 
 
 @app.post("/api/setup/core")

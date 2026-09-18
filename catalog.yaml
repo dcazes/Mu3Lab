@@ -10,25 +10,25 @@ services:
   ollama:
     summary: Local model runner for lightweight inference and embeddings.
     category: AI foundation
-    stage_label: Planned
+    stage_label: Core · internal only
     resource_guidance: Starts small; model downloads determine disk and RAM use.
     integrations: [litellm]
   litellm:
     summary: OpenAI-compatible model gateway with a free-first routing policy.
     category: AI routing
-    stage_label: Planned
+    stage_label: Core · internal only
     resource_guidance: Low host overhead; depends on configured providers.
     integrations: [ollama, freellmapi, open-webui]
   open-webui:
     summary: Private AI chat UI routed through LiteLLM.
     category: AI workspace
-    stage_label: Planned
+    stage_label: Core · Authentik sign-in pending verification
     resource_guidance: Moderate memory use; model work happens upstream.
     integrations: [litellm]
   freellmapi:
     summary: Optional free-inference provider; never selected over a paid route automatically.
     category: AI provider
-    stage_label: Planned
+    stage_label: Core · internal only
     resource_guidance: Optional; requires an explicit provider configuration.
     integrations: [litellm]
   surfsense:
@@ -46,25 +46,25 @@ services:
   actual-budget:
     summary: Private household budgeting and financial planning.
     category: Optional finance
-    stage_label: Optional
+    stage_label: Planned · not included in this release
     resource_guidance: Lightweight service; state must be backed up.
   immich:
     summary: Private photo and video management.
     category: Optional media
-    stage_label: Optional
+    stage_label: Planned · not included in this release
     resource_guidance: Media storage and machine-learning jobs can be resource intensive.
   mealie:
     summary: Private recipes and meal planning.
     category: Optional home
-    stage_label: Optional
+    stage_label: Planned · not included in this release
     resource_guidance: Lightweight service.
   adventurelog:
     summary: Private travel and adventure planning.
     category: Optional travel
-    stage_label: Optional
+    stage_label: Planned · not included in this release
     resource_guidance: Lightweight service with persistent trip data.
   paperless-ngx:
     summary: Private document management and OCR.
     category: Optional documents
-    stage_label: Optional
+    stage_label: Planned · not included in this release
     resource_guidance: Storage and OCR usage grow with your document library.

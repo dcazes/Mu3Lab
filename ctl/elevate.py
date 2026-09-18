@@ -63,11 +63,13 @@ RUNNER = "\n".join([
 class Worker:
     """A single elevated command runner. Not thread-safe: one job owns one."""
 
-    def __init__(self, spawn: list[str] | None = None) -> None:
+    def __init__(self, spawn: list[str] | None = None,
+                 start_timeout: float = 60.0) -> None:
         # spawn: full argv to launch the runner. Production passes
         # ["pkexec", "python3", "-c", RUNNER, cmd_fifo, res_fifo] (built in
         # start()); tests pass plain ["python3", ...] (same protocol, no auth).
         self._spawn = spawn
+        self._start_timeout = start_timeout
         self._proc: subprocess.Popen | None = None
         self._dir = ""
         self._cmd_fd = -1
@@ -95,28 +97,26 @@ class Worker:
         except OSError:
             self.stop()
             return False
-        # Handshake order avoids FIFO deadlock: runner opens cmd-RDONLY and
-        # res-WRONLY at startup; we open the complements here. If pkexec died
-        # (dialog cancelled), poll() is already set → fail fast, no hang.
+        # Open both ends read/write and non-blocking in the unprivileged
+        # process.  This is intentional: opening the response FIFO read-only
+        # can block forever while pkexec is waiting for the native password
+        # dialog.  Holding a local write end also prevents an early EOF; the
+        # bounded handshake below decides whether the elevated runner really
+        # came up.
         import time as _time
-        deadline = _time.time() + 60
-        while self._proc.poll() is None and _time.time() < deadline:
-            try:
-                self._cmd_fd = os.open(cmd_fifo, os.O_WRONLY | os.O_NONBLOCK)
-                break
-            except OSError:
-                _time.sleep(0.2)
-        else:
-            self.stop()
-            return False
+        deadline = _time.monotonic() + self._start_timeout
         try:
-            # Blocking read end; the runner holds the write end open.
-            self._res_file = open(res_fifo, "r")
+            self._cmd_fd = os.open(cmd_fifo, os.O_RDWR | os.O_NONBLOCK)
+            os.set_blocking(self._cmd_fd, True)
+            res_fd = os.open(res_fifo, os.O_RDWR | os.O_NONBLOCK)
+            os.set_blocking(res_fd, True)
+            self._res_file = os.fdopen(res_fd, "r", buffering=1)
         except OSError:
             self.stop()
             return False
         # Ping proves the loop is alive (not just the process).
-        answer = self._request(["true"], timeout=10)
+        answer = self._request(["true"], timeout=10,
+                               response_timeout=max(0.1, deadline - _time.monotonic()))
         if answer is None or answer.get("rc") != 0:
             self.stop()
             return False
@@ -124,7 +124,8 @@ class Worker:
             log("elevated worker ready (one system dialog covered this install)")
         return True
 
-    def _request(self, argv: list[str], timeout: int = 300) -> dict | None:
+    def _request(self, argv: list[str], timeout: int = 300,
+                 response_timeout: float | None = None) -> dict | None:
         """One round-trip. None on protocol/IO failure (caller treats as dead)."""
         import select as _select
         with self._lock:
@@ -135,8 +136,8 @@ class Worker:
                          (json.dumps({"id": rid, "argv": argv,
                                       "timeout": timeout}) + "\n").encode())
                 # Bounded wait: a wedged runner must not hang the install.
-                ready, _, _ = _select.select([self._res_file], [], [],
-                                             timeout + 10)
+                wait_for = timeout + 10 if response_timeout is None else response_timeout
+                ready, _, _ = _select.select([self._res_file], [], [], wait_for)
                 if not ready:
                     return None
                 line = self._res_file.readline()  # type: ignore[union-attr]

@@ -20,7 +20,9 @@ export interface BackupReadiness { state?: string; detail?: string; repository_p
 export interface SystemResponse { ok: boolean; cpu_percent: number; docker_ready: boolean; tailnet_dns_name: string; runtime_root: string; memory: Metric; disk: Metric; backup: BackupReadiness; }
 export interface IntegrationsResponse { ok: boolean; policy: string; integrations: { source: string; destination: string; kind: string }[]; }
 export interface IdentityResponse { ok: boolean; control_plane_auth: string; username?: string; groups?: string[]; detail: string; writes_enabled: boolean; }
-export interface CoreSetupResponse { ok: boolean; ready_to_run: boolean; services: string[]; missing_manifests: string[]; current_job?: Job | null; next_action: string; }
+export interface CoreSetupResponse { ok: boolean; ready_to_run: boolean; services: string[]; missing_manifests: string[]; current_job?: Job | null; next_action: string; capacity?: { ok: boolean; reasons?: string[]; disk_free?: number; memory_total?: number; docker_ready?: boolean }; provisioning?: ProvisioningResponse | null; }
+export interface ProvisioningPhase { phase_id: string; label: string; actual_state: string; detail: string; error: string; updated_at: string; attempts: number; }
+export interface ProvisioningResponse { ok: boolean; available: boolean; complete: boolean; phases: ProvisioningPhase[]; waiting?: ProvisioningPhase | null; blocked?: ProvisioningPhase | null; }
 export interface ProviderMetadata { id: string; label: string; updated_at: string; }
 export interface ProviderMetadataResponse { ok: boolean; providers: ProviderMetadata[]; }
 export interface Job { id: string; kind: string; service_id: string; action: string; state: string; actor: string; created_at: string; updated_at: string; detail: string; }

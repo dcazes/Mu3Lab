@@ -32,6 +32,8 @@
 :19461 {
 	bind 127.0.0.1
 	reverse_proxy 127.0.0.1:9001 {
+		header_up Host {http.request.host}
+		header_up X-Forwarded-Host {http.request.host}
 		header_up X-Forwarded-Proto https
 	}
 }

@@ -40,7 +40,7 @@ MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
 STATE_FILE = ROOT / ".state" / "check-progress.json"
-CODE_VERSION = 5      # bump on ANY api/report-shape change (invalidates disk)
+CODE_VERSION = 7      # bump on ANY api/report-shape change (invalidates disk)
 
 
 def tailnet_dashboard_url() -> str:
@@ -96,6 +96,15 @@ def can_open_install(state: State) -> tuple[bool, str]:
     if not state.preflight_passed:
         return False, "run card ② first: install unlocks on green preflight"
     return True, ""
+
+
+def can_reset_authentik_admin(job: dict | None) -> bool:
+    """Limit administrator recovery to its explicit paused setup checkpoint."""
+    waiting = next((step for step in (job or {}).get("steps", [])
+                    if step.get("status") == "waiting"), None)
+    return bool(waiting and waiting.get("id") == "authentik_setup"
+                and (waiting.get("prompt") or {}).get("recovery_action")
+                == "reset_authentik_admin")
 
 
 def _test_worker(state: State, python: str) -> None:
@@ -517,6 +526,14 @@ class Handler(BaseHTTPRequestHandler):
                     restart_manual = True
                 state.install_input.set()
             if restart_manual:
+                # The manual-step worker normally exits before this handler
+                # runs, but synchronize the hand-off so a fast confirmation
+                # cannot observe the old thread as still alive and lose the
+                # resume request.
+                with state.lock:
+                    thread = state.install_thread
+                if thread is not None and thread.is_alive():
+                    thread.join(timeout=2.0)
                 with state.lock:
                     thread = state.install_thread
                     if thread is None or not thread.is_alive():
@@ -525,7 +542,40 @@ class Handler(BaseHTTPRequestHandler):
                         state.install_thread = threading.Thread(
                             target=_install_worker, args=(state,), daemon=True)
                         state.install_thread.start()
-            self._json({"continued": True})
+            with state.lock:
+                job = state.install_job
+                active_waiting = next((step["id"] for step in job["steps"]
+                                       if step.get("status") == "waiting"), None)
+                status = job["status"]
+            self._json({"continued": True, "status": status,
+                        "waiting_step": active_waiting})
+        elif self.path == "/api/install/authentik-admin/reset":
+            # This is intentionally available only at the manual Authentik
+            # administrator checkpoint.  It resets exactly akadmin and
+            # returns the one-time value directly to this local browser; the
+            # value is never put in the job, logs, or saved progress.
+            with state.lock:
+                job = state.install_job
+                allowed = can_reset_authentik_admin(job)
+            if not allowed:
+                self._json({"error": "unavailable",
+                            "hint": "Authentik administrator recovery is available only at its setup step."}, 409)
+                return
+            from ctl import install as _install
+            def log(line: str) -> None:
+                with state.lock:
+                    for step in job["steps"]:
+                        if step["id"] == "authentik_setup":
+                            step["log"].append(line)
+                            break
+            result = _install.reset_authentik_admin_password(
+                {"log_fn": lambda _step: log})
+            if not result.get("ok"):
+                self._json({"error": "reset failed", "hint": result.get("error", "try again")}, 502)
+                return
+            self._json({"ok": True, "username": result["username"],
+                        "temporary_password": result["temporary_password"],
+                        "next": "Sign in to Authentik and change this temporary password before continuing."})
         elif self.path == "/api/install/kill":
             with state.lock:
                 thread = state.install_thread

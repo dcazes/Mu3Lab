@@ -12,6 +12,7 @@ DEBUG: Patch target is `ctl.install.actions` attributes (module looked up at
 """
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -280,17 +281,74 @@ class AuthentikReadinessTests(unittest.TestCase):
         ctx = _ctx()
         ctx["progress"] = lambda step, update: None
         env_file = Path("/tmp/authentik.env")
-        with patch("ctl.install._authentik_containers", return_value=[]), \
+        with patch("ctl.install._tailscale_dns_name_for_install",
+                   return_value="mu3lab.example.ts.net"), \
+             patch("ctl.authentik_blueprints.write_dashboard_blueprint",
+                   return_value=Path("/tmp/authentik-dashboard.yaml")), \
+             patch("ctl.install._authentik_containers", return_value=[]), \
              patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up, \
              patch("ctl.install.time.sleep", return_value=None):
-            # Patch the imported module directly: fix_authentik imports it
-            # locally to avoid a bootstrap-time dependency cycle.
+            # Patch imported dependencies directly: fix_authentik imports
+            # secrets and the blueprint writer locally to avoid bootstrap-time
+            # dependency cycles, and it requires a valid MagicDNS name before
+            # Compose can be started.
             with patch("ctl.secrets.ensure_authentik_env", return_value=(env_file, [])), \
                  patch("ctl.secrets.read_runtime_env", return_value={}):
                 result = install.fix_authentik({"state": "down"}, ctx)
         self.assertTrue(result["ok"])
         self.assertEqual(up.call_args.kwargs["wait_timeout"],
                          install.AUTHENTIK_READINESS_TIMEOUT)
+
+    def test_dashboard_probe_rejects_localhost_auth_redirect(self):
+        host = "mu3lab.example.ts.net"
+        self.assertTrue(install._authentik_redirect_is_expected(
+            f"https://{host}:8444/application/o/authorize/", host))
+        self.assertFalse(install._authentik_redirect_is_expected(
+            "http://localhost/application/o/authorize/", host))
+        self.assertFalse(install._authentik_redirect_is_expected(
+            f"https://{host}/application/o/authorize/", host))
+
+
+class VaultwardenReadinessTests(unittest.TestCase):
+    """Container start must not be mistaken for Rocket application readiness."""
+
+    def test_connection_reset_is_retried_until_ready(self):
+        events: list[dict] = []
+        ctx = _ctx()
+        ctx["progress"] = lambda step, update: events.append(update)
+        checks = iter([
+            {"status": "missing", "state": "down", "detail": "Connection reset by peer"},
+            {"status": "ok", "state": "ready", "detail": "healthy"},
+        ])
+        with patch("ctl.install._vaultwarden_check",
+                   side_effect=lambda ctx: next(checks)), \
+             patch("ctl.install.time.sleep", return_value=None):
+            result = install._compose_readiness(
+                ctx, {"id": "vaultwarden"},
+                lambda: install._vaultwarden_check(ctx), "Vaultwarden", 60)
+        self.assertTrue(result["ok"])
+        self.assertTrue(any("Connection reset" in e["activity"] for e in events))
+        self.assertTrue(any(e["phase"] == "ready" for e in events))
+
+    def test_account_check_requires_a_real_local_user(self):
+        import sqlite3
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "data" / "vaultwarden"
+            data.mkdir(parents=True)
+            database = data / "db.sqlite3"
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE users (id INTEGER)")
+            connection.commit()
+            connection.close()
+            fake_paths = type("Paths", (), {"data": Path(tmp) / "data"})()
+            with patch("ctl.install.RuntimePaths", return_value=fake_paths):
+                self.assertFalse(install._vaultwarden_account_exists())
+                connection = sqlite3.connect(database)
+                connection.execute("INSERT INTO users VALUES (1)")
+                connection.commit()
+                connection.close()
+                self.assertTrue(install._vaultwarden_account_exists())
 
 
 class WorkspaceStepTests(unittest.TestCase):
@@ -452,6 +510,32 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertEqual(result["prompt"]["login_url"],
                          "https://login.tailscale.com/a/from-status")
 
+    def test_tailscale_join_polls_status_before_cli_timeout(self):
+        # A real tailscale up can stay alive while the browser approval is
+        # pending.  The installer must surface AuthURL without waiting for
+        # the full 120-second CLI timeout.
+        class PendingThread:
+            def __init__(self, target, **_kwargs):
+                self._target = target
+                self._alive = True
+            def start(self):
+                self._alive = True
+            def join(self, timeout=None):
+                return None
+            def is_alive(self):
+                return self._alive
+
+        with patch("ctl.install.threading.Thread", PendingThread), \
+             patch("ctl.install._tailscale_auth_url",
+                   return_value="https://login.tailscale.com/a/live"), \
+             patch("ctl.install.webbrowser.open", return_value=True) as opened:
+            result = install.fix_tailscale_join(
+                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        self.assertTrue(result["waiting"])
+        self.assertEqual(result["prompt"]["login_url"],
+                         "https://login.tailscale.com/a/live")
+        opened.assert_called_once_with("https://login.tailscale.com/a/live", new=2)
+
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com
         # after the dotted form failed a real install). Never trust memory.
@@ -605,6 +689,75 @@ class PropagateTests(unittest.TestCase):
         self.assertIsNone(step["prompt"])
         self.assertIn("skipped", step["detail"])
         self.assertEqual(step["log"], ["old line"])
+
+    def test_success_keeps_verification_detail(self):
+        events: list[dict] = []
+        ctx = {"emit": events.append}
+        step = {"id": "vaultwarden_setup", "label": "Vaultwarden",
+                "status": "waiting", "log": [], "prompt": {"kind": "manual_setup"},
+                "error": "", "detail": ""}
+        job = {"status": "running", "steps": [step], "events": []}
+        install._finish_step(job, ctx, step, {
+            "ok": True,
+            "detail": "Vaultwarden account detected in its local database.",
+        })
+        self.assertEqual(step["status"], "ready")
+        self.assertEqual(step["detail"],
+                         "Vaultwarden account detected in its local database.")
+        self.assertIsNone(step["prompt"])
+
+
+class RunnerTests(unittest.TestCase):
+    def test_tailscale_resume_rechecks_after_browser_approval(self):
+        # Regression: the pre-approval `check` was reused after the browser
+        # approval. If tailscale up had already timed out, its stale result
+        # kept the step waiting even though a fresh status probe was ready.
+        entered_wait = threading.Event()
+        release_wait = threading.Event()
+        checks = iter([
+            {"status": "missing", "state": "unjoined", "detail": "login needed"},
+            {"status": "ok", "state": "ready", "detail": "tailnet connected"},
+            {"status": "ok", "state": "ready", "detail": "tailnet connected"},
+        ])
+        fixes = []
+
+        def check(_ctx):
+            return next(checks)
+
+        def fix(value, _ctx):
+            fixes.append(value)
+            return {"waiting": True,
+                    "prompt": {"kind": "tailscale_login", "title": "login"}}
+
+        meta = {"id": "tailscale_join", "label": "Tailscale connection",
+                "check": check, "fix": fix}
+        step = {"id": "tailscale_join", "label": "Tailscale connection",
+                "status": "pending", "log": [], "prompt": None,
+                "error": "", "detail": ""}
+        job = {"id": "job", "status": "queued", "steps": [step],
+               "events": []}
+
+        def wait_input(_step):
+            entered_wait.set()
+            release_wait.wait(timeout=2)
+            return {}
+
+        events = []
+        ctx = {"emit": events.append, "stopped": lambda: False,
+               "wait_input": wait_input}
+        with patch.object(install, "STEPS", [meta]), \
+             patch("ctl.install.privilege.ensure_elevation", return_value="worker"):
+            worker = threading.Thread(target=install.run_job, args=(job, ctx))
+            worker.start()
+            self.assertTrue(entered_wait.wait(timeout=2))
+            release_wait.set()
+            worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(job["status"], "ready")
+        self.assertEqual(len(fixes), 1)
+        self.assertEqual(fixes[0]["state"], "unjoined")
+        self.assertEqual(step["detail"], "tailnet connected")
 
 
 if __name__ == "__main__":

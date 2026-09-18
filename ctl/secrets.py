@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
 CORE_ENV_KEYS = {
-    "freellmapi": ("ENCRYPTION_KEY",),
+    "freellmapi": ("ENCRYPTION_KEY", "FREELLMAPI_SERVICE_KEY", "FREELLMAPI_ADMIN_PASSWORD"),
     "litellm": ("LITELLM_MASTER_KEY",),
     "open-webui": ("WEBUI_SECRET_KEY", "LITELLM_MASTER_KEY"),
     "firecrawl": ("POSTGRES_PASSWORD", "TEST_API_KEY"),
@@ -97,7 +97,9 @@ def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
         # Keep common routing inputs local to SurfSense and not in Git.
         if service_id == "surfsense":
             values.setdefault("LLM_API_BASE_URL", "http://litellm:4000/v1")
+            values.setdefault("LLM_MODEL", "mu3lab-chat")
             values.setdefault("EMBEDDING_API_BASE_URL", "http://ollama:11434")
+            values.setdefault("EMBEDDING_MODEL", "nomic-embed-text")
             values.setdefault("FIRECRAWL_API_URL", "http://api:3002")
         target.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
         os.chmod(target, 0o600)

@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import check_server
-from check_server import (State, can_open_install, can_run_preflight,
+from check_server import (State, can_open_install, can_reset_authentik_admin, can_run_preflight,
                           load_progress, save_progress)
 
 
@@ -63,6 +63,20 @@ class GateTests(unittest.TestCase):
         state.tests_green = False  # what POST /api/tests/run does first
         ok, _ = can_run_preflight(state)
         self.assertFalse(ok)
+
+    def test_authentik_recovery_only_at_the_explicit_setup_wait(self):
+        self.assertFalse(can_reset_authentik_admin(None))
+        self.assertFalse(can_reset_authentik_admin({"steps": [{
+            "id": "authentik_setup", "status": "waiting", "prompt": {},
+        }]}))
+        self.assertFalse(can_reset_authentik_admin({"steps": [{
+            "id": "vaultwarden_setup", "status": "waiting", "prompt": {
+                "recovery_action": "reset_authentik_admin"},
+        }]}))
+        self.assertTrue(can_reset_authentik_admin({"steps": [{
+            "id": "authentik_setup", "status": "waiting", "prompt": {
+                "recovery_action": "reset_authentik_admin"},
+        }]}))
 
 
 class ProgressTests(unittest.TestCase):
