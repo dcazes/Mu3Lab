@@ -1077,7 +1077,7 @@ def fix_vaultwarden_setup(check: dict, ctx: dict) -> dict:
     return {"waiting": True, "prompt": _manual_prompt(
         "Create your first Vaultwarden account",
         "Vaultwarden is running locally. Create the first account in its official UI. Mu3Lab never receives or stores the master password. After saving it, return here and check again.",
-        f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}/", "I created the account")}
+        f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}/#/signup", "I created the account")}
 
 
 def _tailscale_serve_port(port: str, target: str, log: Callable[[str], None]) -> dict:

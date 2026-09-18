@@ -328,6 +328,10 @@ class AuthentikReadinessTests(unittest.TestCase):
 class VaultwardenReadinessTests(unittest.TestCase):
     """Container start must not be mistaken for Rocket application readiness."""
 
+    def test_first_account_prompt_opens_the_signup_screen(self):
+        result = install.fix_vaultwarden_setup({}, _ctx())
+        self.assertEqual(result["prompt"]["url"], "http://127.0.0.1:19462/#/signup")
+
     def test_connection_reset_is_retried_until_ready(self):
         events: list[dict] = []
         ctx = _ctx()
