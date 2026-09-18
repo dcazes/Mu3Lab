@@ -22,11 +22,9 @@ POLL_SECONDS = 2
 
 
 def run() -> int:
-    store = JobStore.runtime()
-    if store is None:
-        raise SystemExit("Mu3Lab runtime is not initialized")
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     stopping = False
+    waiting_for_runtime_reported = False
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -35,6 +33,18 @@ def run() -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     while not stopping:
+        # The unit can be installed before the privileged runtime-layout step
+        # finishes.  That is an expected bootstrap state, not a crash: wait
+        # quietly for the directory rather than creating a systemd restart
+        # loop and falsely making the dashboard-service step look broken.
+        store = JobStore.runtime()
+        if store is None:
+            if not waiting_for_runtime_reported:
+                print("Mu3Lab worker is waiting for the runtime layout", flush=True)
+                waiting_for_runtime_reported = True
+            time.sleep(POLL_SECONDS)
+            continue
+        waiting_for_runtime_reported = False
         job = store.claim(worker_id)
         if job is None:
             time.sleep(POLL_SECONDS)

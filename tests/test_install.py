@@ -12,6 +12,7 @@ DEBUG: Patch target is `ctl.install.actions` attributes (module looked up at
 """
 
 import sys
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -76,6 +77,20 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0],
                          ["tailscale", "serve", "--bg", install.SERVE_PORT])
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
+
+    def test_service_check_names_a_failed_worker_without_blaming_dashboard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            unit_dir = home / ".config" / "systemd" / "user"
+            unit_dir.mkdir(parents=True)
+            for unit in ("mu3lab-ctl.service", "mu3lab-worker.service"):
+                (unit_dir / unit).touch()
+            with patch("ctl.install.Path.home", return_value=home), \
+                 patch("ctl.install._user_service_active", side_effect=(True, False)):
+                check = install._service_check(Path("/unused"))
+        self.assertEqual(check["state"], "inactive")
+        self.assertIn("Dashboard is running", check["detail"])
+        self.assertIn("workflow worker", check["detail"])
 
 
 class VaultwardenDomainTests(unittest.TestCase):
@@ -446,8 +461,10 @@ class WorkspaceStepTests(unittest.TestCase):
         # Identity-first bootstrap: Vaultwarden is initialized locally before
         # the tailnet and Authentik are introduced.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("docker"), ids.index("runtime_layout"))
-        self.assertLess(ids.index("runtime_layout"), ids.index("docker_networks"))
+        self.assertLess(ids.index("root_env"), ids.index("runtime_layout"))
+        self.assertLess(ids.index("runtime_layout"), ids.index("service"))
+        self.assertLess(ids.index("service"), ids.index("docker"))
+        self.assertLess(ids.index("docker"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
         self.assertLess(ids.index("caddy"), ids.index("vaultwarden"))
         self.assertLess(ids.index("vaultwarden"), ids.index("vaultwarden_setup"))

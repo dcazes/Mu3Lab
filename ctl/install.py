@@ -457,6 +457,16 @@ def _env_check(root: Path) -> dict:
             "action": "", "state": "ready", "blocking": False}
 
 
+def _user_service_active(unit: str) -> bool:
+    """Return whether one user-level service is active, without raising."""
+    try:
+        return subprocess.run(["systemctl", "--user", "is-active", unit],
+                              capture_output=True, text=True,
+                              timeout=15).returncode == 0
+    except OSError:
+        return False
+
+
 def _service_check(root: Path) -> dict:
     """Web and durable-worker units installed and healthy?
     States: no_unit | inactive | unhealthy | ready."""
@@ -468,16 +478,17 @@ def _service_check(root: Path) -> dict:
                 "detail": "Control-plane startup entries are not installed.",
                 "action": "step 3 installs and starts it.",
                 "state": "no_unit", "blocking": False}
-    try:
-        active = all(subprocess.run(
-            ["systemctl", "--user", "is-active", unit], capture_output=True,
-            text=True, timeout=15).returncode == 0 for unit in units)
-    except OSError:
-        active = False
-    if not active:
+    dashboard_active = _user_service_active("mu3lab-ctl.service")
+    worker_active = _user_service_active("mu3lab-worker.service")
+    if not dashboard_active:
         return {"name": "service", "status": "missing",
-                "detail": "Startup entry present but not running.",
-                "action": "step 3 starts it.", "state": "inactive",
+                "detail": "Dashboard startup entry is present but the dashboard is not running.",
+                "action": "step 3 starts the dashboard service.", "state": "inactive",
+                "blocking": False}
+    if not worker_active:
+        return {"name": "service", "status": "missing",
+                "detail": "Dashboard is running, but the background workflow worker is not.",
+                "action": "step 3 restarts the workflow worker.", "state": "inactive",
                 "blocking": False}
     try:
         with _url.urlopen("http://127.0.0.1:8787/api/health", timeout=5) as resp:
@@ -641,13 +652,21 @@ def fix_service(check: dict, ctx: dict) -> dict:
         for _attempt in range(30):
             try:
                 with _url.urlopen("http://127.0.0.1:8787/api/health", timeout=2) as resp:
-                    if resp.status == 200:
-                        log("dashboard answering on :8787")
+                    if (resp.status == 200
+                            and _user_service_active("mu3lab-ctl.service")
+                            and _user_service_active("mu3lab-worker.service")):
+                        log("dashboard and workflow worker are running")
                         return {"ok": True}
             except OSError:
                 pass
             _time.sleep(2)
-        return {"ok": False, "error": "service started but :8787 never answered"}
+        dashboard_active = _user_service_active("mu3lab-ctl.service")
+        worker_active = _user_service_active("mu3lab-worker.service")
+        if not dashboard_active:
+            return {"ok": False, "error": "dashboard service did not stay running"}
+        if not worker_active:
+            return {"ok": False, "error": "background workflow worker did not stay running"}
+        return {"ok": False, "error": "dashboard service started but :8787 never answered"}
     return {"ok": True, "skipped": True}
 
 
@@ -1677,7 +1696,12 @@ STEPS = [
     {"id": "root_env", "label": "Secret keys file",
      "check": lambda ctx: _env_check(ctx["root"]),
      "fix": fix_root_env},
-    {"id": "service", "label": "Dashboard service",
+    # The worker service needs this root for its durable SQLite queue.  It is
+    # deliberately created before the service is started, not after Docker.
+    {"id": "runtime_layout", "label": "Persistent data layout",
+     "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
+     "fix": fix_runtime_layout},
+    {"id": "service", "label": "Dashboard and workflow services",
      "check": lambda ctx: _service_check(ctx["root"]),
      "fix": fix_service},
     {"id": "docker", "label": "Docker engine",
@@ -1686,9 +1710,6 @@ STEPS = [
      # authorization never blocks because fixes run via sg when needed.
      # Verify passes while any of these hold (the step's own work is done).
      "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access")},
-    {"id": "runtime_layout", "label": "Persistent data layout",
-     "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
-     "fix": fix_runtime_layout},
     {"id": "docker_networks", "label": "Shared networks",
      "check": _networks_check, "fix": fix_networks_router},
     {"id": "caddy", "label": "Private ingress",
