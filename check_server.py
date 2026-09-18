@@ -40,7 +40,7 @@ MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
 STATE_FILE = ROOT / ".state" / "check-progress.json"
-CODE_VERSION = 3      # bump on ANY api/report-shape change (invalidates disk)
+CODE_VERSION = 4      # bump on ANY api/report-shape change (invalidates disk)
 
 
 def tailnet_dashboard_url() -> str:
@@ -193,6 +193,24 @@ def _install_worker(state: State) -> None:
                                       "line": line[:2000]})
         return _log
 
+    def progress(step_id: str, update: dict) -> None:
+        """Store a small, structured live-status snapshot for one step.
+
+        Browser polling remains deliberately simple and resilient to refreshes;
+        it reads this state once per second instead of inferring progress from
+        raw Docker output.  Timestamps are server-owned so elapsed time stays
+        correct even if the page reloads.
+        """
+        with state.lock:
+            for step in job["steps"]:
+                if step["id"] == step_id:
+                    existing = step.get("progress") or {}
+                    started_at = existing.get("started_at", time.time())
+                    step["progress"] = {**existing, **update,
+                                        "started_at": started_at,
+                                        "updated_at": time.time()}
+                    break
+
     def wait_input(step_id: str) -> dict:
         # Blocks until the UI posts a key/continue (or kill). Returns a COPY
         # so later wipes can't race the runner.
@@ -203,7 +221,8 @@ def _install_worker(state: State) -> None:
 
     ctx = {"root": ROOT, "log_fn": log_fn, "inputs": job["inputs"],
            "wait_input": wait_input,
-           "stopped": state.install_stop.is_set, "emit": emit}
+           "stopped": state.install_stop.is_set, "emit": emit,
+           "progress": progress}
     try:
         install.run_job(job, ctx)
     except Exception as exc:  # noqa: BLE001 (job must end, never hang)
@@ -225,7 +244,8 @@ def _serialize_job(job: dict | None) -> dict | None:
     return {"id": job["id"], "status": job["status"],
             "steps": [{"id": s["id"], "label": s["label"], "status": s["status"],
                        "log": s["log"][-50:], "prompt": s.get("prompt"),
-                       "error": s.get("error", ""), "detail": s.get("detail", "")}
+                       "error": s.get("error", ""), "detail": s.get("detail", ""),
+                       "progress": s.get("progress")}
                       for s in job["steps"]]}
 
 

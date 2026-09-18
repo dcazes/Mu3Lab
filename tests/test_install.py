@@ -237,6 +237,54 @@ class CaddyFixTests(unittest.TestCase):
             self.assertIn("19460", result.get("error", ""))
 
 
+class AuthentikReadinessTests(unittest.TestCase):
+    """First boot is long but normal; transient HTTP resets must not fail it."""
+
+    def test_connection_reset_is_retried_until_ready(self):
+        events: list[dict] = []
+        ctx = _ctx()
+        ctx["progress"] = lambda step, update: events.append(update)
+        checks = iter([
+            {"status": "missing", "state": "down", "detail": "Connection reset by peer"},
+            {"status": "missing", "state": "down", "detail": "Connection refused"},
+            {"status": "ok", "state": "ready", "detail": "healthy"},
+        ])
+        containers = [[
+            {"name": "authentik-server-1", "status": "Up 1 minute (health: starting)"},
+            {"name": "authentik-worker-1", "status": "Up 1 minute (healthy)"},
+        ]]
+        with patch("ctl.install._authentik_check", side_effect=lambda ctx: next(checks)), \
+             patch("ctl.install._authentik_containers", side_effect=containers * 3), \
+             patch("time.sleep", return_value=None):
+            result = install._authentik_readiness(ctx, {"id": "authentik"})
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(e["phase"] == "ready" for e in events))
+        self.assertTrue(any("Connection reset" in e["activity"] for e in events))
+
+    def test_exited_container_fails_with_actionable_reason(self):
+        with patch("ctl.install._authentik_containers", return_value=[
+                {"name": "authentik-server-1", "status": "Exited (1)"}]):
+            result = install._authentik_readiness(_ctx(), {"id": "authentik"})
+        self.assertFalse(result["ok"])
+        self.assertIn("exited", result["error"].lower())
+
+    def test_first_start_uses_compose_health_wait(self):
+        ctx = _ctx()
+        ctx["progress"] = lambda step, update: None
+        env_file = Path("/tmp/authentik.env")
+        with patch("ctl.install._authentik_containers", return_value=[]), \
+             patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up, \
+             patch("ctl.install.time.sleep", return_value=None):
+            # Patch the imported module directly: fix_authentik imports it
+            # locally to avoid a bootstrap-time dependency cycle.
+            with patch("ctl.secrets.ensure_authentik_env", return_value=(env_file, [])), \
+                 patch("ctl.secrets.read_runtime_env", return_value={}):
+                result = install.fix_authentik({"state": "down"}, ctx)
+        self.assertTrue(result["ok"])
+        self.assertEqual(up.call_args.kwargs["wait_timeout"],
+                         install.AUTHENTIK_READINESS_TIMEOUT)
+
+
 class WorkspaceStepTests(unittest.TestCase):
     def _ctx(self, root):
         return {"root": root, "log_fn": lambda step: lambda line: None,

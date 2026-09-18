@@ -17,8 +17,11 @@ DEBUG: Return shape is ALWAYS {"ok", "changed", "log"[, "terminal_command"]}.
 from __future__ import annotations
 
 import os as _os
+import queue as _queue
 import shlex as _shlex
 import subprocess as _subprocess
+import threading as _threading
+import time as _time
 from collections.abc import Callable
 from pathlib import Path
 import urllib.request
@@ -71,32 +74,110 @@ def docker_cmd(argv: list[str], log: Callable[[str], None],
       `sg` ships in stock Ubuntu's login package; probed, not assumed).
     - neither → (1, message) without executing anything.
     """
-    import getpass as _gp
-    import shutil as _sh
-    from ctl import preflight as _pre
     log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
     command_env = _docker_config_env()
     if env:
         command_env.update(env)
+    command = _docker_invocation(argv)
+    if command is None:
+        return 1, ("docker unavailable: no live group and no DB membership "
+                   "(installer should have added you — report this)")
+    return privilege._exec(command, timeout=timeout, env=command_env)
+
+
+def _docker_invocation(argv: list[str]) -> list[str] | None:
+    """Return the direct/``sg`` Docker command without running it.
+
+    Kept separate so streaming and buffered Docker commands use exactly the
+    same group-access policy.  It is deliberately internal: callers still go
+    through ``docker_cmd`` or ``docker_cmd_stream`` for logging and isolation.
+    """
+    import getpass as _gp
+    import shutil as _sh
+    from ctl import preflight as _pre
     try:
-        live = privilege._exec  # resolved late for test patching
         import grp as _grp
         live_groups = [_grp.getgrgid(gid).gr_name for gid in _os.getgroups()]
     except OSError:
         live_groups = []
     if "docker" in live_groups:
-        return privilege._exec(argv, timeout=timeout, env=command_env)
+        return argv
     if _sh.which("sg") and _pre._db_has_group(_gp.getuser(), "docker"):
-        return privilege._exec(
-            ["sg", "docker", "-c", _shlex.join(argv)],
-            timeout=timeout, env=command_env)
-    return 1, ("docker unavailable: no live group and no DB membership "
-               "(installer should have added you — report this)")
+        return ["sg", "docker", "-c", _shlex.join(argv)]
+    return None
+
+
+def docker_cmd_stream(argv: list[str], log: Callable[[str], None], *,
+                      timeout: int = 300, env: dict[str, str] | None = None,
+                      on_output: Callable[[str], None] | None = None) -> tuple[int, str]:
+    """Run a Docker command while forwarding bounded, line-oriented output.
+
+    ``subprocess.run(capture_output=True)`` is appropriate for short probes,
+    but makes a first image pull look frozen.  This helper is intentionally
+    limited to installer-owned Docker commands.  It never invokes a shell and
+    keeps the same group and isolated-DOCKER_CONFIG rules as ``docker_cmd``.
+    """
+    log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
+    command = _docker_invocation(argv)
+    if command is None:
+        return 1, ("docker unavailable: no live group and no DB membership "
+                   "(installer should have added you — report this)")
+    command_env = _docker_config_env()
+    if env:
+        command_env.update(env)
+    try:
+        proc = _subprocess.Popen(command, stdout=_subprocess.PIPE,
+                                 stderr=_subprocess.STDOUT, text=True,
+                                 bufsize=1, env={**_os.environ, **command_env})
+    except OSError as exc:
+        return 126, f"{command[0]}: {exc}"
+    assert proc.stdout is not None
+    lines: list[str] = []
+    inbox: _queue.Queue[str | None] = _queue.Queue()
+
+    def read_output() -> None:
+        try:
+            for line in proc.stdout:
+                inbox.put(line.rstrip())
+        finally:
+            inbox.put(None)
+
+    reader = _threading.Thread(target=read_output, daemon=True)
+    reader.start()
+    deadline = _time.monotonic() + timeout
+    finished = False
+    while not finished:
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            proc.kill()
+            proc.wait()
+            return 124, "docker compose timed out"
+        try:
+            line = inbox.get(timeout=min(1.0, remaining))
+        except _queue.Empty:
+            if proc.poll() is not None:
+                finished = True
+            continue
+        if line is None:
+            finished = True
+            continue
+        # Docker progress can be extremely verbose.  The complete command
+        # output remains diagnostic material, while a caller receives each
+        # bounded line promptly for a useful current-activity indicator.
+        line = line[:2000]
+        lines.append(line)
+        log(line)
+        if on_output:
+            on_output(line)
+    rc = proc.wait()
+    return rc, "\n".join(lines).strip()
 
 
 def compose_up(projdir: Path, log: Callable[[str], None],
                timeout: int = 300, env: dict[str, str] | None = None,
-               extra_files: list[Path] | None = None) -> tuple[int, str]:
+               extra_files: list[Path] | None = None,
+               wait_timeout: int | None = None,
+               on_output: Callable[[str], None] | None = None) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
     Uses -f/--project-directory flags instead of cwd= so `sg -c` (single
@@ -108,8 +189,25 @@ def compose_up(projdir: Path, log: Callable[[str], None],
     for compose_file in files:
         argv.extend(["-f", str(compose_file)])
     argv.extend(["--project-directory", str(projdir), "up", "-d"])
-    return docker_cmd(
-        argv, log, timeout=timeout, env=env)
+    if wait_timeout is not None:
+        argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
+    if on_output:
+        return docker_cmd_stream(argv, log, timeout=timeout, env=env,
+                                 on_output=on_output)
+    return docker_cmd(argv, log, timeout=timeout, env=env)
+
+
+def docker_container_statuses(project: str) -> tuple[int, str]:
+    """Return compact status lines for one Compose project, without logging.
+
+    This is a read-only progress probe.  It deliberately uses Docker labels
+    rather than re-evaluating a Compose file, so it works while the project is
+    still starting and does not need to receive service environment values.
+    """
+    return docker_cmd([
+        "docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
+        "--format", "{{.Names}}\t{{.Status}}",
+    ], lambda _line: None, timeout=15)
 
 
 def apt_update(log: Callable[[str], None]) -> dict:

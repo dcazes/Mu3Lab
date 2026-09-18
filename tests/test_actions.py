@@ -219,6 +219,27 @@ class ComposeTests(unittest.TestCase):
             "up", "-d",
         ])
 
+    def test_wait_flags_are_explicit_and_reviewable(self):
+        seen: list[list[str]] = []
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "ok"
+        project = Path("/srv/mu3lab/projects/authentik")
+        with patch.object(actions, "docker_cmd", fake):
+            actions.compose_up(project, _silent, wait_timeout=600)
+        self.assertEqual(seen[0][-4:], ["-d", "--wait", "--wait-timeout", "600"])
+
+    def test_project_status_probe_uses_compose_label(self):
+        seen: list[list[str]] = []
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "server\tUp 5 seconds"
+        with patch.object(actions, "docker_cmd", fake):
+            rc, out = actions.docker_container_statuses("authentik")
+        self.assertEqual(rc, 0)
+        self.assertIn("label=com.docker.compose.project=authentik", seen[0])
+        self.assertIn("Up", out)
+
 
 if __name__ == "__main__":
     unittest.main()

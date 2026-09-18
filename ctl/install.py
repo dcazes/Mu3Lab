@@ -30,6 +30,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
@@ -67,6 +68,9 @@ AUTHENTIK_SERVE_PORT = "8444"
 TS_HOSTNAME = "mu3lab"
 TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
 TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
+AUTHENTIK_READINESS_TIMEOUT = 600  # first migrations can legitimately take minutes
+AUTHENTIK_READINESS_INTERVAL = 5
+AUTHENTIK_HTTP_GRACE_TIMEOUT = 60  # Compose health passed; allow host port to settle
 
 
 # ---------------------------------------------------------------------------
@@ -823,6 +827,79 @@ def _compose_health(port: int, url: str) -> dict:
     return {"status": "missing", "state": "down", "detail": f"Health check failed on :{port}."}
 
 
+def _update_progress(ctx: dict, step_id: str, *, phase: str, activity: str,
+                     timeout_seconds: int | None = None,
+                     containers: list[dict] | None = None) -> None:
+    """Publish factual long-step progress when the bootstrap server supports it.
+
+    The pure installer remains usable outside check_server.py, so progress is
+    an optional context capability rather than a hidden global dependency.
+    """
+    publish = ctx.get("progress")
+    if callable(publish):
+        publish(step_id, {"phase": phase, "activity": activity,
+                          "timeout_seconds": timeout_seconds,
+                          "containers": containers or []})
+
+
+def _authentik_containers(ctx: dict) -> list[dict]:
+    """Read container state from Docker's Compose label without secrets."""
+    rc, output = actions.docker_container_statuses("authentik")
+    if rc != 0:
+        return []
+    containers = []
+    for line in output.splitlines():
+        name, _, status = line.partition("\t")
+        if name:
+            containers.append({"name": name, "status": status or "unknown"})
+    return containers
+
+
+def _authentik_readiness(ctx: dict, step: dict,
+                         timeout: int = AUTHENTIK_READINESS_TIMEOUT) -> dict:
+    """Wait honestly for the first Authentik boot, including migrations.
+
+    Compose only promises that containers have started.  Authentik's own
+    health checks plus its HTTP readiness endpoint are the actual completion
+    condition.  Connection resets are expected while the server is warming
+    up, so this retries through the supplied bounded grace period unless a
+    container exits.
+    """
+    started = time.monotonic()
+    previous = ""
+    while True:
+        if ctx.get("stopped", lambda: False)():
+            return {"ok": False, "error": "Authentik readiness wait was stopped."}
+        containers = _authentik_containers(ctx)
+        summary = "; ".join(f"{item['name']}: {item['status']}" for item in containers)
+        if any("Exited" in item["status"] or "Dead" in item["status"] for item in containers):
+            return {"ok": False,
+                    "error": "Authentik container exited during startup: " + summary}
+        health = _authentik_check(ctx)
+        elapsed = int(time.monotonic() - started)
+        if health.get("status") == "ok":
+            _update_progress(ctx, step["id"], phase="ready",
+                             activity="Authentik is healthy and accepting requests.",
+                             timeout_seconds=timeout,
+                             containers=containers)
+            return {"ok": True}
+        phase = ("Waiting for Authentik's web service" if containers else
+                 "Waiting for Authentik containers to appear")
+        activity = health.get("detail", "Authentik is still starting.")
+        if summary and summary != previous:
+            activity = summary + " — " + activity
+            previous = summary
+        _update_progress(ctx, step["id"], phase=phase, activity=activity,
+                         timeout_seconds=timeout,
+                         containers=containers)
+        if elapsed >= timeout:
+            minutes = max(1, (timeout + 59) // 60)
+            return {"ok": False,
+                    "error": f"Authentik did not become ready within {minutes} minute(s). "
+                             + (summary or health.get("detail", "No container status was available."))}
+        time.sleep(AUTHENTIK_READINESS_INTERVAL)
+
+
 def _vaultwarden_check(ctx: dict) -> dict:
     return _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
 
@@ -916,10 +993,53 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
               "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", "")}
     # Compose needs these values for interpolation. actions.compose_up passes
     # them in the process environment but never includes env values in logs.
-    rc, out = actions.compose_up(ctx["root"] / "core" / "authentik", log, env=values)
-    log(out or f"(exit {rc})")
+    _update_progress(ctx, "authentik", phase="pulling_images",
+                     activity="Pulling reviewed Authentik images and creating containers.",
+                     timeout_seconds=AUTHENTIK_READINESS_TIMEOUT)
+
+    def compose_activity(line: str) -> None:
+        # Progress output is Docker-controlled; retain only a concise current
+        # activity line in state while the complete bounded log stays below.
+        clean = re.sub(r"\s+", " ", line).strip()
+        if clean:
+            _update_progress(ctx, "authentik", phase="pulling_images",
+                             activity=clean[:180],
+                             timeout_seconds=AUTHENTIK_READINESS_TIMEOUT)
+
+    result: dict[str, object] = {}
+
+    def start_and_wait() -> None:
+        # Docker Compose's documented --wait is the primary completion
+        # signal: it waits for the declared container health checks rather
+        # than merely reporting that processes were created.
+        result["rc"], result["out"] = actions.compose_up(
+            ctx["root"] / "core" / "authentik", log, env=values,
+            timeout=1200, wait_timeout=AUTHENTIK_READINESS_TIMEOUT,
+            on_output=compose_activity)
+
+    worker = threading.Thread(target=start_and_wait, daemon=True)
+    worker.start()
+    while worker.is_alive():
+        containers = _authentik_containers(ctx)
+        if containers:
+            _update_progress(ctx, "authentik", phase="waiting_for_health_checks",
+                             activity="Docker is waiting for Authentik health checks.",
+                             timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
+                             containers=containers)
+        time.sleep(2)
+    worker.join()
+    rc = int(result.get("rc", 1))
+    out = str(result.get("out", ""))
+    # Streaming compose output was already added to the step log; only the
+    # non-streaming error fallback belongs here.
+    if not out:
+        log(f"(exit {rc})")
     if rc != 0:
         return {"ok": False, "error": "Authentik could not start (see log)."}
+    _update_progress(ctx, "authentik", phase="containers_started",
+                     activity="Containers started; waiting for Authentik readiness.",
+                     timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
+                     containers=_authentik_containers(ctx))
     return {"ok": True}
 
 
@@ -1263,7 +1383,9 @@ STEPS = [
      "check": lambda ctx: _serve_port_check(VAULTWARDEN_SERVE_PORT),
      "fix": fix_vaultwarden_serve},
     {"id": "authentik", "label": "Authentik identity service",
-     "check": _authentik_check, "fix": fix_authentik},
+     "check": _authentik_check, "fix": fix_authentik,
+     "readiness": lambda ctx, step: _authentik_readiness(
+         ctx, step, timeout=AUTHENTIK_HTTP_GRACE_TIMEOUT)},
     {"id": "authentik_serve", "label": "Authentik private access",
      "check": lambda ctx: _serve_port_check(AUTHENTIK_SERVE_PORT),
      "fix": fix_authentik_serve},
@@ -1354,6 +1476,13 @@ def run_job(job: dict, ctx: dict) -> None:
             return
         step["status"] = "verifying"
         ctx["emit"]({"type": "step", "id": step["id"], "status": "verifying"})
+        readiness = meta.get("readiness")
+        if callable(readiness):
+            readiness_result = readiness(ctx, step)
+            if not readiness_result.get("ok"):
+                _finish_step(job, ctx, step, readiness_result)
+                job["status"] = "failed"
+                return
         try:
             verify = meta["check"](ctx)
         except Exception as exc:  # noqa: BLE001
@@ -1394,12 +1523,16 @@ def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
             step["detail"] = "already done — skipped"
         else:
             step["detail"] = ""
+        if step.get("progress"):
+            step["progress"]["phase"] = "complete"
         ctx["emit"]({"type": "step", "id": step["id"], "status": "ready",
                      "skipped": bool(result.get("skipped"))})
     else:
         step["status"] = "failed"
         step["error"] = result.get("error", "unknown error")
         step["prompt"] = None
+        if step.get("progress"):
+            step["progress"]["phase"] = "failed"
         ctx["emit"]({"type": "step", "id": step["id"], "status": "failed",
                      "error": step["error"]})
 
@@ -1428,6 +1561,7 @@ def new_job() -> dict:
     """Blank job with one entry per STEPS id (UI renders rows from this)."""
     return {"id": "", "status": "queued",
             "steps": [{"id": m["id"], "label": m["label"], "status": "pending",
-                       "log": [], "prompt": None, "error": "", "detail": ""}
+                       "log": [], "prompt": None, "error": "", "detail": "",
+                       "progress": None}
                       for m in STEPS],
             "events": [], "inputs": {}}

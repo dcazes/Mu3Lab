@@ -133,6 +133,18 @@ class ProgressTests(unittest.TestCase):
             # …and events/logs (potentially huge) are excluded by shape.
             self.assertNotIn("events", json.loads(text))
 
+    def test_install_state_includes_structured_progress_not_raw_secrets(self):
+        job = {"id": "job", "status": "running", "steps": [{
+            "id": "authentik", "label": "Authentik", "status": "verifying",
+            "log": ["safe diagnostic"], "prompt": None, "error": "", "detail": "",
+            "progress": {"phase": "waiting_for_health_checks", "started_at": 1,
+                         "updated_at": 2, "timeout_seconds": 600,
+                         "activity": "server: starting", "containers": []},
+        }]}
+        data = check_server._serialize_job(job)
+        self.assertEqual(data["steps"][0]["progress"]["timeout_seconds"], 600)
+        self.assertNotIn("log", data["steps"][0]["progress"])
+
 
 class WorkerLivenessTests(unittest.TestCase):
     def test_worker_completes_without_wedging_lock(self):

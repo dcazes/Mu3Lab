@@ -36,6 +36,13 @@
   .prompt { border-left: 3px solid var(--wait); padding: .4rem .6rem; margin: .4rem 0; background: #fff8e6; }
   code.act { background: #f6f8fa; padding: .1rem .3rem; font-size: .85rem; }
   .spin { display: inline-block; animation: spin .8s linear infinite; }
+  .step-progress { margin: .45rem 0 .55rem 1.25rem; max-width: 620px; border: 1px solid var(--line); border-radius: 7px; padding: .45rem .55rem; background: #fff; }
+  .step-progress-head { display: flex; justify-content: space-between; gap: .75rem; font-size: .84rem; color: var(--mut); }
+  .step-progress-track { overflow: hidden; height: 7px; margin: .35rem 0; background: #eaeef2; border-radius: 4px; }
+  .step-progress-fill { height: 100%; width: 34%; border-radius: 4px; background: var(--wait); animation: progress-slide 1.35s ease-in-out infinite; }
+  .step-progress-activity { font-size: .84rem; word-break: break-word; }
+  .container-progress { margin: .35rem 0 0; padding-left: 1rem; color: var(--mut); font-size: .8rem; }
+  @keyframes progress-slide { 0% { transform: translateX(-125%); } 100% { transform: translateX(360%); } }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -430,10 +437,31 @@ function ensureInstRows(job) {
     ' <span class="mut" id="idet-' + s.id + '"></span>' +
     '<div id="ierr-' + s.id + '"></div>' +
     '<div id="iprompt-' + s.id + '"></div>' +
+    '<div id="iprogress-' + s.id + '"></div>' +
     '<pre class="tail" id="itail-' + s.id + '" hidden></pre>' +
     '<details id="ifull-' + s.id + '" hidden><summary>full log</summary><pre id="ilog-' +
     s.id + '"></pre></details></div>').join('');
   document.getElementById('inst-transcript-wrap').hidden = true;
+}
+function elapsedText(startedAt) {
+  if (!startedAt) return '';
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - Number(startedAt)));
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? minutes + 'm ' + (seconds % 60) + 's' : seconds + 's';
+}
+function renderStepProgress(step) {
+  const target = document.getElementById('iprogress-' + step.id);
+  const p = step.progress;
+  if (!p || ['complete', 'failed'].includes(p.phase)) { target.innerHTML = ''; return; }
+  const max = p.timeout_seconds ? 'maximum ' + Math.ceil(p.timeout_seconds / 60) + 'm' : '';
+  const containers = (p.containers || []).map(c =>
+    '<li><code>' + escapeHtml(c.name) + '</code>: ' + escapeHtml(c.status) + '</li>').join('');
+  target.innerHTML = '<div class="step-progress" role="status" aria-live="polite">' +
+    '<div class="step-progress-head"><strong>' + escapeHtml(p.phase || 'Working') +
+    '</strong><span>' + elapsedText(p.started_at) + (max ? ' elapsed · ' + max : '') + '</span></div>' +
+    '<div class="step-progress-track"><div class="step-progress-fill"></div></div>' +
+    '<div class="step-progress-activity">' + escapeHtml(p.activity || 'Working…') + '</div>' +
+    (containers ? '<ul class="container-progress">' + containers + '</ul>' : '') + '</div>';
 }
 async function refreshInstall() {
   let st;
@@ -451,6 +479,7 @@ async function refreshInstall() {
     document.getElementById('ierr-' + s.id).innerHTML = s.error
       ? '<span class="bad">' + escapeHtml(s.error) + '</span>' : '';
     document.getElementById('iprompt-' + s.id).innerHTML = promptHtml(s);
+    renderStepProgress(s);
     // Append-only log sync: never rewrite, so open states and scroll survive.
     const shown = instLines[s.id] || 0;
     const lines = s.log || [];
@@ -494,7 +523,10 @@ async function refreshInstall() {
     }
   } else {
     const joining = job.steps.some(s => s.id === 'tailscale_join' && s.status === 'installing');
-    setStatus('inst-status', joining ? 'waiting for Tailscale login link…' : 'installing…', 'wait');
+    const authentik = job.steps.find(s => s.id === 'authentik' &&
+      ['installing', 'verifying'].includes(s.status));
+    setStatus('inst-status', joining ? 'waiting for Tailscale login link…' :
+      (authentik ? 'starting Authentik…' : 'installing…'), 'wait');
   }
 }
 // Full transcript: every step's complete log, built ONCE at terminal state.
