@@ -1094,12 +1094,24 @@ def _tailscale_serve_port(port: str, target: str, log: Callable[[str], None]) ->
 
 
 def _serve_port_check(port: str) -> dict:
+    """Verify a Tailscale Serve HTTPS listener, including default port 443."""
     try:
         result = subprocess.run(["tailscale", "serve", "status"], capture_output=True,
                                 text=True, timeout=10)
     except OSError:
         return {"status": "missing", "state": "unshared", "detail": "Tailscale Serve is unavailable."}
-    ready = result.returncode == 0 and (f":{port}" in result.stdout or f"https={port}" in result.stdout)
+    from urllib.parse import urlsplit
+    expected_port = int(port)
+    published_ports = set()
+    for token in result.stdout.split():
+        if not token.startswith("https://"):
+            continue
+        try:
+            parsed_port = urlsplit(token.rstrip("(")).port
+        except ValueError:
+            continue
+        published_ports.add(parsed_port or 443)
+    ready = result.returncode == 0 and expected_port in published_ports
     return {"status": "ok" if ready else "missing", "state": "ready" if ready else "unshared",
             "detail": f"Private HTTPS route {'is' if ready else 'is not'} published on :{port}."}
 

@@ -35,6 +35,20 @@ def _ok(*args, **kwargs):
 
 
 class DispatchTests(unittest.TestCase):
+    def test_serve_check_accepts_standard_https_without_explicit_port(self):
+        with patch("ctl.install.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "https://mu3lab.example.ts.net (tailnet only)\n"
+            result = install._serve_port_check("443")
+        self.assertEqual(result["state"], "ready")
+
+    def test_serve_check_requires_explicit_nonstandard_port(self):
+        with patch("ctl.install.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "https://mu3lab.example.ts.net (tailnet only)\n"
+            result = install._serve_port_check("8444")
+        self.assertEqual(result["state"], "unshared")
+
     def test_every_state_maps(self):
         # Every dispatchable (step, state) pair resolves; typos surface as
         # "unknown" instead of silently skipping.
