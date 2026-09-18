@@ -8,7 +8,6 @@ WHY: The browser must never infer service state from a hard-coded card or a
 from __future__ import annotations
 
 import json
-import shutil
 import socket
 import subprocess
 import urllib.error
@@ -76,24 +75,19 @@ def _tailnet_route_present(port: int) -> bool:
     return f":{port}" in output or f"https={port}" in output
 
 
-def _compose_state(compose_file: Path) -> str:
-    """Read the curated Compose project's state without mutating it."""
-    if shutil.which("docker") is None:
-        return "unknown"
+def _compose_state(compose_file: Path, run=subprocess.run) -> str:
+    """Read containers by Compose labels without evaluating private env files."""
     try:
-        proc = subprocess.run(["docker", "compose", "-f", str(compose_file),
-                               "ps", "--all", "--format", "json"],
-                              capture_output=True, text=True, timeout=8)
+        proc = run([
+            "docker", "ps", "--all",
+            "--filter", f"label=com.docker.compose.project.working_dir={compose_file.parent.resolve()}",
+            "--format", "{{json .}}",
+        ], capture_output=True, text=True, timeout=8)
     except (OSError, subprocess.SubprocessError):
         return "unknown"
     if proc.returncode != 0 or not proc.stdout.strip():
         return "absent"
     try:
-        rows = json.loads(proc.stdout)
-        if isinstance(rows, dict):
-            rows = [rows]
-        states = {str(row.get("State", "")).lower() for row in rows if isinstance(row, dict)}
-    except (ValueError, TypeError):
         rows = []
         for line in proc.stdout.splitlines():
             try:
@@ -103,7 +97,9 @@ def _compose_state(compose_file: Path) -> str:
             if isinstance(row, dict):
                 rows.append(row)
         states = {str(row.get("State", "")).lower() for row in rows}
-    if "running" in states:
+    except (ValueError, TypeError):
+        return "unknown"
+    if states and states == {"running"}:
         return "running"
     return "stopped"
 
@@ -118,7 +114,7 @@ def status(service: Service, dns_name: str, root: Path) -> dict:
     else:
         compose_state = _compose_state(compose_file)
         ok, detail = _healthy(service)
-        if ok:
+        if ok and compose_state == "running":
             lifecycle_state = "ready"
         elif compose_state == "absent":
             lifecycle_state = "planned"

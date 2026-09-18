@@ -6,10 +6,10 @@
 # DEBUG: `.venv/bin/pip install --dry-run -r ctl/requirements.txt` resolves
 #        versions without installing anything.
 
-fastapi>=0.115
-uvicorn[standard]>=0.30
-docker>=7.1
-pyyaml>=6.0
-psutil>=6.0
-httpx>=0.27
-cryptography>=43.0
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+docker==7.2.0
+pyyaml==6.0.3
+psutil==7.2.2
+httpx==0.28.1
+cryptography==50.0.1

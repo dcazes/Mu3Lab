@@ -11,6 +11,7 @@ services:
       PORT: "3001"
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/freellmapi:/app/server/data
+      - ${MU3LAB_FREELLMAPI_CONFIG:-./freellmapi.config.json}:/mu3lab/config/freellmapi.config.json:ro
     networks: [mu3lab_frontend, mu3lab_backend]
     extra_hosts: ["host.docker.internal:host-gateway"]
     security_opt: [no-new-privileges:true]

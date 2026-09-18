@@ -48,6 +48,18 @@ def _local_worker() -> elevate.Worker:
 
 
 class WorkerTests(unittest.TestCase):
+    def test_start_is_bounded_when_pkexec_never_starts_runner(self):
+        # Simulate a pkexec process waiting for an auth dialog.  The parent
+        # must not block forever opening the response FIFO in that case.
+        import time
+        worker = elevate.Worker(
+            spawn=[sys.executable, "-c", "import time; time.sleep(5)"],
+            start_timeout=0.2)
+        started = time.monotonic()
+        self.assertFalse(worker.start())
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertFalse(worker.alive())
+
     def test_roundtrip(self):
         worker = _local_worker()
         self.assertTrue(worker.start())

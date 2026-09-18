@@ -44,3 +44,18 @@ class EntryScriptTests(unittest.TestCase):
         self.assertIn("All done", page)
         self.assertIn("real-dashboard-link", page)
         self.assertIn("ts\\.net", page)
+
+    def test_manual_install_resume_keeps_polling_and_shows_checking(self):
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("checking the completed setup", page)
+        self.assertIn("startInstallPolling()", page)
+        self.assertIn("['ready', 'failed', 'cancelled']", page)
+        self.assertIn("continueInFlight", page)
+
+    def test_protected_dashboard_prompt_names_its_destination(self):
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Open protected dashboard", page)

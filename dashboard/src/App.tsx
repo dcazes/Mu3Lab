@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, AuditResponse, CatalogResponse, CoreSetupResponse, Health, IdentityResponse, IntegrationsResponse, JobsResponse, ServicesResponse, SystemResponse } from './api';
+import { api, AuditResponse, CatalogResponse, CoreSetupResponse, Health, IdentityResponse, IntegrationsResponse, JobsResponse, ProvisioningResponse, ServicesResponse, SystemResponse } from './api';
 import { AiMcpPanel, AppsPanel, HomePanel, ProtectionPanel, SystemPanel } from './panels';
 
 type Tab = 'home' | 'apps' | 'connections' | 'security' | 'system';
@@ -9,7 +9,7 @@ const tabs: { id: Tab; label: string; group?: string; path: string }[] = [
   { id: 'security', label: 'Security & Backups', group: 'Protection', path: '/security' },
   { id: 'system', label: 'System', group: 'Host', path: '/system' },
 ];
-type DashboardData = { health: Health; services: ServicesResponse; catalog: CatalogResponse; system: SystemResponse; integrations: IntegrationsResponse; identity: IdentityResponse; jobs: JobsResponse; audit: AuditResponse; core: CoreSetupResponse };
+type DashboardData = { health: Health; services: ServicesResponse; catalog: CatalogResponse; system: SystemResponse; integrations: IntegrationsResponse; identity: IdentityResponse; jobs: JobsResponse; audit: AuditResponse; core: CoreSetupResponse; provisioning: ProvisioningResponse };
 function routeTab(path: string): Tab { if (path === '/' || path === '') return 'home'; if (path.startsWith('/apps')) return 'apps'; if (path.startsWith('/connections')) return 'connections'; if (path.startsWith('/security')) return 'security'; if (path.startsWith('/system')) return 'system'; return 'home'; }
 function knownRoute(path: string, services: { id: string }[]): boolean {
   if (['/', '/apps', '/connections', '/connections/providers', '/connections/mcp', '/security', '/security/identity', '/security/backups', '/system', '/system/diagnostics'].includes(path)) return true;
@@ -23,13 +23,13 @@ export default function App() {
   useEffect(() => { const sync = () => { setLocationPath(window.location.pathname); setTab(routeTab(window.location.pathname)); }; window.addEventListener('popstate', sync); return () => window.removeEventListener('popstate', sync); }, []);
   useEffect(() => {
     let active = true;
-    const load = () => Promise.all([api<Health>('/api/health'), api<ServicesResponse>('/api/services'), api<CatalogResponse>('/api/catalog'), api<SystemResponse>('/api/system'), api<IntegrationsResponse>('/api/integrations'), api<IdentityResponse>('/api/identity'), api<JobsResponse>('/api/jobs'), api<AuditResponse>('/api/audit'), api<CoreSetupResponse>('/api/setup/core')]).then(([health, services, catalog, system, integrations, identity, jobs, audit, core]) => {
-      if (active) { setData({ health, services, catalog, system, integrations, identity, jobs, audit, core }); setError(''); }
+    const load = () => Promise.all([api<Health>('/api/health'), api<ServicesResponse>('/api/services'), api<CatalogResponse>('/api/catalog'), api<SystemResponse>('/api/system'), api<IntegrationsResponse>('/api/integrations'), api<IdentityResponse>('/api/identity'), api<JobsResponse>('/api/jobs'), api<AuditResponse>('/api/audit'), api<CoreSetupResponse>('/api/setup/core'), api<ProvisioningResponse>('/api/provisioning')]).then(([health, services, catalog, system, integrations, identity, jobs, audit, core, provisioning]) => {
+      if (active) { setData({ health, services, catalog, system, integrations, identity, jobs, audit, core, provisioning }); setError(''); }
     }).catch((reason: unknown) => active && setError(reason instanceof Error ? reason.message : String(reason)));
     load(); const timer = window.setInterval(load, 10000); return () => { active = false; window.clearInterval(timer); };
   }, []);
   const content = !data ? <div className="loading">Connecting to the Mu3Lab control plane…</div> : !knownRoute(locationPath, data.services.services) ? <section className="panel"><p className="eyebrow">NOT FOUND</p><h2>This dashboard page does not exist</h2><p>Use the sidebar to return to a supported Mu3Lab area.</p><a className="primary-action" href="/" onClick={event => { event.preventDefault(); navigate('/'); }}>Return home →</a></section> : (() => {
-    if (tab === 'home') return <HomePanel services={data.services.services} system={data.system} identity={data.identity} jobs={data.jobs} core={data.core} />;
+    if (tab === 'home') return <HomePanel services={data.services.services} system={data.system} identity={data.identity} jobs={data.jobs} core={data.core} provisioning={data.provisioning} />;
     if (tab === 'apps') return <AppsPanel key={locationPath} services={data.services.services} catalog={data.catalog} />;
     if (tab === 'connections') return <AiMcpPanel integrations={data.integrations} services={data.services.services} />;
     if (tab === 'security') return <ProtectionPanel identity={data.identity} backup={data.system.backup} audit={data.audit} />;

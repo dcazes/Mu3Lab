@@ -5,9 +5,10 @@ Mu3Lab is a curated, private homelab control plane for Debian 12+ and Ubuntu
 management:
 
 1. `./install.sh` (or `./check.sh`) opens a temporary local bootstrap dashboard at
-   `127.0.0.1:8799`. It runs tests, measures the host, installs only missing
-   dependencies, and pauses for required human actions such as the normal
-   Tailscale web login and Docker-group re-login.
+   `127.0.0.1:8799`. It checks host compatibility, installs only missing
+   dependencies, and pauses for unavoidable human actions such as the normal
+   Tailscale web login. Developer unit tests are available separately and never
+   block an end-user install.
 2. The React control plane is the permanent dashboard. It is intended to be
    reached through private Tailscale HTTPS, manages only Mu3Lab's curated
    services, and never treats arbitrary Docker projects as trusted apps.
@@ -22,11 +23,10 @@ management:
 - Updates are reviewed/pinned and manually initiated. Failed operations stop
   the affected stack, preserve diagnostics, and offer a guided restore rather
   than silently rolling back.
-- Vaultwarden is excluded from MCP exposure. MCP capabilities are curated and
-  policy-bound, with read-only defaults.
-- SurfSense is offered only as a local-account application. Mu3Lab will not
-  fork it, write its database, automate a browser, or replay passwords;
-  Vaultwarden may be used by the operator to store and fill its credentials.
+- Vaultwarden is excluded from MCP exposure. No MCP endpoint is shipped yet.
+- SurfSense and Firecrawl are planned, not installable or ready. They remain
+  hidden behind a blocked maturity state until their full upstream deployment,
+  backup, route, and functional-test contracts exist.
 
 ## Current development state
 
@@ -38,11 +38,12 @@ Connections, Security & Backups, and System views. It truthfully distinguishes
 foundation, core, optional, and policy-blocked services, and never offers a
 browser route until that route is actually published through the tailnet.
 
-The control plane keeps durable, secret-redacted SQLite job and audit storage
-under `/srv/mu3lab/runtime`. The first guided core-suite executor is now wired
-for the fixed Ollama → LiteLLM → Open WebUI / Firecrawl → SurfSense sequence;
-it requires Authentik operator headers, stops at the first failed health check,
-and never accepts provider credentials as part of the bootstrap.
+The control plane keeps leased, resumable, secret-redacted SQLite jobs and
+structured events under `/srv/mu3lab/runtime`; a persistent worker reclaims
+expired work after a restart. The supported AI slice is Ollama, FreeLLMAPI,
+LiteLLM, and Open WebUI. It verifies generated provider configuration, streamed
+chat, embedding dimensions, the private Open WebUI route, and Authentik OIDC
+discovery before reporting the slice verified.
 
 ## Developer checks
 
@@ -65,9 +66,10 @@ The CI workflow runs the Python suite, dashboard build, and YAML validation.
 └── projects/
 ```
 
-Local encrypted Restic backups use a default retention policy of 7 daily,
-4 weekly, and 12 monthly snapshots. A restore must always be explicitly
-confirmed.
+The intended local encrypted Restic policy is 7 daily, 4 weekly, and 12 monthly
+snapshots. Backups currently report `not_configured` until a real repository is
+initialized, and `verified` only after snapshot and integrity-check metadata
+exist. Scheduled backup and restore execution are not shipped yet.
 
 ## License
 

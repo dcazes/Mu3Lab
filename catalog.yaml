@@ -1,70 +1,8 @@
-# Mu3Lab user-facing curated catalog.  Deployment facts remain in services.yaml.
+# Mu3Lab bundle definitions. Per-service copy and deployment facts are generated
+# from the typed services.yaml manifest so the UI cannot drift from reality.
 schema_version: 1
 profiles:
   - id: core-suite
     name: Core suite
-    description: "The essential Mu3Lab platform: local AI, routing, crawling, and research services."
-    services: [ollama, freellmapi, litellm, open-webui, firecrawl, surfsense]
-
-services:
-  ollama:
-    summary: Local model runner for lightweight inference and embeddings.
-    category: AI foundation
-    stage_label: Planned
-    resource_guidance: Starts small; model downloads determine disk and RAM use.
-    integrations: [litellm]
-  litellm:
-    summary: OpenAI-compatible model gateway with a free-first routing policy.
-    category: AI routing
-    stage_label: Planned
-    resource_guidance: Low host overhead; depends on configured providers.
-    integrations: [ollama, freellmapi, open-webui]
-  open-webui:
-    summary: Private AI chat UI routed through LiteLLM.
-    category: AI workspace
-    stage_label: Planned
-    resource_guidance: Moderate memory use; model work happens upstream.
-    integrations: [litellm]
-  freellmapi:
-    summary: Optional free-inference provider; never selected over a paid route automatically.
-    category: AI provider
-    stage_label: Planned
-    resource_guidance: Optional; requires an explicit provider configuration.
-    integrations: [litellm]
-  surfsense:
-    summary: Research workspace with its own local account; Vaultwarden can help store and fill its credentials.
-    category: Research
-    stage_label: Core · local account
-    resource_guidance: Requires LiteLLM, Ollama, and Firecrawl. This is not true SSO.
-    integrations: [litellm, ollama]
-  firecrawl:
-    summary: Private crawling and web extraction service used by SurfSense.
-    category: Research dependency
-    stage_label: Core
-    resource_guidance: Browser and queue sidecars can use substantial memory during crawls.
-    integrations: [surfsense]
-  actual-budget:
-    summary: Private household budgeting and financial planning.
-    category: Optional finance
-    stage_label: Optional
-    resource_guidance: Lightweight service; state must be backed up.
-  immich:
-    summary: Private photo and video management.
-    category: Optional media
-    stage_label: Optional
-    resource_guidance: Media storage and machine-learning jobs can be resource intensive.
-  mealie:
-    summary: Private recipes and meal planning.
-    category: Optional home
-    stage_label: Optional
-    resource_guidance: Lightweight service.
-  adventurelog:
-    summary: Private travel and adventure planning.
-    category: Optional travel
-    stage_label: Optional
-    resource_guidance: Lightweight service with persistent trip data.
-  paperless-ngx:
-    summary: Private document management and OCR.
-    category: Optional documents
-    stage_label: Optional
-    resource_guidance: Storage and OCR usage grow with your document library.
+    description: "The supported Mu3Lab AI slice: local embeddings, external-provider routing, and private chat."
+    services: [ollama, freellmapi, litellm, open-webui]

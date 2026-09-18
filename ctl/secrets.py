@@ -18,11 +18,10 @@ from pathlib import Path
 
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
 CORE_ENV_KEYS = {
-    "freellmapi": ("ENCRYPTION_KEY",),
+    "freellmapi": ("ENCRYPTION_KEY", "FREELLMAPI_SERVICE_KEY", "FREELLMAPI_ADMIN_PASSWORD"),
     "litellm": ("LITELLM_MASTER_KEY",),
-    "open-webui": ("WEBUI_SECRET_KEY", "LITELLM_MASTER_KEY"),
-    "firecrawl": ("POSTGRES_PASSWORD", "TEST_API_KEY"),
-    "surfsense": ("DB_PASSWORD", "SECRET_KEY", "DATABASE_URL", "REDIS_URL"),
+    "open-webui": ("WEBUI_SECRET_KEY", "LITELLM_MASTER_KEY", "OPENAI_API_KEY",
+                   "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET"),
 }
 
 
@@ -84,21 +83,10 @@ def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
                 continue
             if key == "LITELLM_MASTER_KEY" and shared.get(key):
                 values[key] = shared[key]
-            elif key == "DATABASE_URL":
-                password = values.get("DB_PASSWORD") or shared.get("DB_PASSWORD") or token_factory()
-                shared["DB_PASSWORD"] = password
-                values[key] = f"postgresql+asyncpg://surfsense:{password}@db:5432/surfsense"
-            elif key == "REDIS_URL":
-                values[key] = "redis://redis:6379/0"
             else:
                 values[key] = token_factory()
             if key == "LITELLM_MASTER_KEY":
                 shared[key] = values[key]
-        # Keep common routing inputs local to SurfSense and not in Git.
-        if service_id == "surfsense":
-            values.setdefault("LLM_API_BASE_URL", "http://litellm:4000/v1")
-            values.setdefault("EMBEDDING_API_BASE_URL", "http://ollama:11434")
-            values.setdefault("FIRECRAWL_API_URL", "http://api:3002")
         target.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
         os.chmod(target, 0o600)
         paths[service_id] = target
@@ -109,8 +97,10 @@ def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
     open_webui = read_runtime_env(paths["open-webui"])
     if open_webui.get("LITELLM_MASTER_KEY") != litellm.get("LITELLM_MASTER_KEY"):
         open_webui["LITELLM_MASTER_KEY"] = litellm["LITELLM_MASTER_KEY"]
-        paths["open-webui"].write_text("\n".join(f"{key}={value}" for key, value in open_webui.items()) + "\n", encoding="utf-8")
-        os.chmod(paths["open-webui"], 0o600)
+    if open_webui.get("OPENAI_API_KEY") != litellm.get("LITELLM_MASTER_KEY"):
+        open_webui["OPENAI_API_KEY"] = litellm["LITELLM_MASTER_KEY"]
+    paths["open-webui"].write_text("\n".join(f"{key}={value}" for key, value in open_webui.items()) + "\n", encoding="utf-8")
+    os.chmod(paths["open-webui"], 0o600)
     return paths
 
 

@@ -1,8 +1,8 @@
 """Mu3Lab :: check_server.py
 WHAT: Zero-dependency local dashboard for the fresh-user check flow. Serves
-      one static page (tools/check_page.html) plus a tiny JSON API that runs
-      the unit suite and the host preflight behind three GATED cards:
-      ① tests → ② preflight → ③ install (remediate-only: check first,
+      one static page (tools/check_page.html) plus a tiny JSON API. Developer
+      tests are optional diagnostics; the user path is host check → install:
+      ① preflight → ② install (remediate-only: check first,
       fix exactly the gap, skip what's ready; waiting rows need you).
 WHY:  The real dashboard needs .venv + npm build + install.sh to exist. This
       scaffold needs only system python3 (stdlib), so `git clone` + one
@@ -20,6 +20,7 @@ DEBUG: All state is in-memory (see State). Restarting the server resets the
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -40,7 +41,7 @@ MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
 STATE_FILE = ROOT / ".state" / "check-progress.json"
-CODE_VERSION = 5      # bump on ANY api/report-shape change (invalidates disk)
+CODE_VERSION = 8      # bump on ANY api/report-shape change (invalidates disk)
 
 
 def tailnet_dashboard_url() -> str:
@@ -60,8 +61,8 @@ def tailnet_dashboard_url() -> str:
 class State:
     """In-memory progression flags + latest results. One instance per process.
 
-    tests_green_this_session gates card ②; preflight_passed gates card ③
-    (passed = zero FAILs among BLOCKING checks; TODOs are card ③'s list).
+    Unit tests are optional developer diagnostics. preflight_passed gates the
+    install card (passed = zero FAILs among BLOCKING checks).
     A restart clears both — by design (see module docstring).
     """
 
@@ -83,11 +84,8 @@ class State:
 
 
 def can_run_preflight(state: State) -> tuple[bool, str]:
-    """Pure gate for card ②. Factored for tests (no HTTP involved)."""
-    if state.test_run is not None:
-        return False, "tests still running — wait for the suite to finish"
-    if not state.tests_green:
-        return False, "run card ① first: preflight unlocks on a green suite"
+    """Preflight is always available; developer tests never gate users."""
+    del state
     return True, ""
 
 
@@ -96,6 +94,15 @@ def can_open_install(state: State) -> tuple[bool, str]:
     if not state.preflight_passed:
         return False, "run card ② first: install unlocks on green preflight"
     return True, ""
+
+
+def can_reset_authentik_admin(job: dict | None) -> bool:
+    """Limit administrator recovery to its explicit paused setup checkpoint."""
+    waiting = next((step for step in (job or {}).get("steps", [])
+                    if step.get("status") == "waiting"), None)
+    return bool(waiting and waiting.get("id") == "authentik_setup"
+                and (waiting.get("prompt") or {}).get("recovery_action")
+                == "reset_authentik_admin")
 
 
 def _test_worker(state: State, python: str) -> None:
@@ -261,6 +268,25 @@ def _repo_head() -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
+def _source_fingerprint() -> str:
+    """Hash install-relevant working-tree content, including uncommitted edits."""
+    digest = hashlib.sha256()
+    suffixes = {".py", ".sh", ".html", ".yaml", ".yml", ".toml", ".json", ".ts", ".tsx"}
+    ignored = {".git", ".venv", "node_modules", "dist", "__pycache__", ".state"}
+    try:
+        files = sorted(path for path in ROOT.rglob("*")
+                       if path.is_file() and path.suffix in suffixes
+                       and not ignored.intersection(path.relative_to(ROOT).parts))
+        for path in files:
+            digest.update(str(path.relative_to(ROOT)).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    except OSError:
+        return ""
+    return digest.hexdigest()
+
+
 def build_identity() -> dict:
     """Answerable build stamp for /api/state + page footer: short HEAD and
     dirty flag. Added so "which code is answering?" never again needs a
@@ -276,6 +302,7 @@ def build_identity() -> dict:
         except OSError:
             dirty = False
     return {"head": head[:12], "dirty": dirty,
+            "source_fingerprint": _source_fingerprint()[:12],
             "code_version": CODE_VERSION}
 
 
@@ -289,6 +316,7 @@ def save_progress(state: State, path: Path = STATE_FILE) -> None:
     with state.lock:
         payload = {"code_version": state.code_version,
                    "repo_head": _repo_head(),
+                   "source_fingerprint": _source_fingerprint(),
                    "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "tests_green": state.tests_green,
                    "tests_summary": state.tests_summary,
@@ -314,6 +342,9 @@ def load_progress(state: State, path: Path = STATE_FILE) -> str:
         return "stale"
     head = _repo_head()
     if head and payload.get("repo_head") and payload["repo_head"] != head:
+        return "stale"
+    fingerprint = _source_fingerprint()
+    if fingerprint and payload.get("source_fingerprint") != fingerprint:
         return "stale"
     with state.lock:
         state.tests_green = bool(payload.get("tests_green"))
@@ -416,8 +447,6 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 state.test_events = []
                 state.tests_green = False
-                state.preflight_passed = False  # new suite invalidates chain
-                state.preflight_report = None
                 state.test_run = {"status": "running"}
             thread = threading.Thread(target=_test_worker,
                                       args=(state, sys.executable),
@@ -505,18 +534,17 @@ class Handler(BaseHTTPRequestHandler):
                                 if step.get("status") == "waiting"), None)
                 if waiting and (waiting.get("prompt") or {}).get("kind") == "manual_setup":
                     state.install_job["inputs"][f"{waiting['id']}_confirmed"] = True
-                    marker = {
-                        "vaultwarden_setup": "vaultwarden_account",
-                        "authentik_setup": "authentik_admin",
-                        "authentik_users": "authentik_users",
-                        "dashboard_protection": "dashboard_protection",
-                    }.get(waiting["id"])
-                    if marker:
-                        from ctl import bootstrap_state as _bootstrap_state
-                        _bootstrap_state.confirm(marker)
                     restart_manual = True
                 state.install_input.set()
             if restart_manual:
+                # The manual-step worker normally exits before this handler
+                # runs, but synchronize the hand-off so a fast confirmation
+                # cannot observe the old thread as still alive and lose the
+                # resume request.
+                with state.lock:
+                    thread = state.install_thread
+                if thread is not None and thread.is_alive():
+                    thread.join(timeout=2.0)
                 with state.lock:
                     thread = state.install_thread
                     if thread is None or not thread.is_alive():
@@ -525,7 +553,40 @@ class Handler(BaseHTTPRequestHandler):
                         state.install_thread = threading.Thread(
                             target=_install_worker, args=(state,), daemon=True)
                         state.install_thread.start()
-            self._json({"continued": True})
+            with state.lock:
+                job = state.install_job
+                active_waiting = next((step["id"] for step in job["steps"]
+                                       if step.get("status") == "waiting"), None)
+                status = job["status"]
+            self._json({"continued": True, "status": status,
+                        "waiting_step": active_waiting})
+        elif self.path == "/api/install/authentik-admin/reset":
+            # This is intentionally available only at the manual Authentik
+            # administrator checkpoint.  It resets exactly akadmin and
+            # returns the one-time value directly to this local browser; the
+            # value is never put in the job, logs, or saved progress.
+            with state.lock:
+                job = state.install_job
+                allowed = can_reset_authentik_admin(job)
+            if not allowed:
+                self._json({"error": "unavailable",
+                            "hint": "Authentik administrator recovery is available only at its setup step."}, 409)
+                return
+            from ctl import install as _install
+            def log(line: str) -> None:
+                with state.lock:
+                    for step in job["steps"]:
+                        if step["id"] == "authentik_setup":
+                            step["log"].append(line)
+                            break
+            result = _install.reset_authentik_admin_password(
+                {"log_fn": lambda _step: log})
+            if not result.get("ok"):
+                self._json({"error": "reset failed", "hint": result.get("error", "try again")}, 502)
+                return
+            self._json({"ok": True, "username": result["username"],
+                        "temporary_password": result["temporary_password"],
+                        "next": "Sign in to Authentik and change this temporary password before continuing."})
         elif self.path == "/api/install/kill":
             with state.lock:
                 thread = state.install_thread
@@ -599,7 +660,7 @@ def main(argv: list[str] | None = None) -> int:
     restored = load_progress(server.state)
     url = f"http://127.0.0.1:{args.port}"
     print(f"Mu3Lab check dashboard: {url}")
-    print("Cards unlock in order: ① tests → ② preflight → ③ install.")
+    print("User flow: ① host check → ② install. Developer tests are optional.")
     if restored == "restored":
         print("Previous progress restored (cards ①② unlocks kept).")
     elif restored == "stale":

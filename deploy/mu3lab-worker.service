@@ -1,0 +1,14 @@
+[Unit]
+Description=Mu3Lab Durable Workflow Worker
+After=network-online.target docker.service mu3lab-ctl.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=@MU3LAB_ROOT@
+ExecStart=@MU3LAB_ROOT@/.venv/bin/python -m ctl.worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

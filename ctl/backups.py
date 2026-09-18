@@ -7,6 +7,7 @@ WHY: Git is not a database or personal-data backup system. Backups remain
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,10 +30,36 @@ class Retention:
 
 
 def readiness(paths: RuntimePaths = RuntimePaths(), retention: Retention = Retention()) -> dict:
-    """Report non-mutating local backup readiness; never reveals repository secrets."""
+    """Report verified backup facts, never infer protection from a directory.
+
+    Restic creates a ``config`` file only after repository initialization.
+    Mu3Lab writes verification metadata only after a snapshot and ``restic
+    check`` succeed.  Merely installing Restic or creating the parent folder
+    therefore remains ``not_configured``.
+    """
     repository = paths.backups
-    return {"engine": "restic", "available": shutil.which("restic") is not None,
-            "repository_path": str(repository), "repository_present": repository.is_dir(),
+    engine_available = shutil.which("restic") is not None
+    repository_present = (repository / "config").is_file()
+    verification_path = paths.runtime / "backup-verification.json"
+    verification: dict = {}
+    try:
+        loaded = json.loads(verification_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            verification = loaded
+    except (OSError, ValueError):
+        pass
+    snapshot_ok = bool(verification.get("snapshot_id"))
+    integrity_ok = bool(verification.get("integrity_checked_at"))
+    if not engine_available or not repository_present:
+        state = "not_configured"
+    elif snapshot_ok and integrity_ok:
+        state = "verified"
+    else:
+        state = "local_only"
+    return {"engine": "restic", "available": engine_available,
+            "repository_path": str(repository), "repository_present": repository_present,
             "retention": {"daily": retention.daily, "weekly": retention.weekly,
                           "monthly": retention.monthly},
-            "state": "ready" if repository.is_dir() and shutil.which("restic") else "not_configured"}
+            "snapshot_present": snapshot_ok, "integrity_verified": integrity_ok,
+            "last_verified_at": str(verification.get("integrity_checked_at", "")),
+            "off_device": False, "state": state}

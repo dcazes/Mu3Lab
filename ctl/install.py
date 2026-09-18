@@ -26,6 +26,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -63,15 +64,18 @@ CADDY_PORT = 19460        # Caddy dashboard listener on loopback
 CADDY_HEALTH_PATH = "/__mu3lab_caddy_health"
 AUTHENTIK_PROXY_PORT = 19461
 VAULTWARDEN_PROXY_PORT = 19462
+OPEN_WEBUI_PROXY_PORT = 19463
 SERVE_PORT = "19460"      # dashboard HTTPS listener on the tailnet
 VAULTWARDEN_SERVE_PORT = "8443"
 AUTHENTIK_SERVE_PORT = "8444"
+OPEN_WEBUI_SERVE_PORT = "8445"
 TS_HOSTNAME = "mu3lab"
 TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
 TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
 AUTHENTIK_READINESS_TIMEOUT = 600  # first migrations can legitimately take minutes
 AUTHENTIK_READINESS_INTERVAL = 5
 AUTHENTIK_HTTP_GRACE_TIMEOUT = 60  # Compose health passed; allow host port to settle
+VAULTWARDEN_HTTP_GRACE_TIMEOUT = 60  # Rocket may bind just after Compose starts
 
 
 # ---------------------------------------------------------------------------
@@ -132,10 +136,10 @@ DISPATCH = {
     ("authentik", "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
+    ("open_webui_serve", "unshared"): "share_open_webui",
+    ("open_webui_serve", "ready"): "skip",
     ("authentik_setup", "needs_user"): "manual_authentik",
     ("authentik_setup", "ready"): "skip",
-    ("authentik_users", "needs_user"): "manual_authentik_users",
-    ("authentik_users", "ready"): "skip",
     ("dashboard_protection", "needs_user"): "manual_dashboard_protection",
     ("dashboard_protection", "needs_apply"): "apply_dashboard_protection",
     ("dashboard_protection", "needs_attention"): "manual_dashboard_protection",
@@ -260,6 +264,8 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
     missing = [pkg for pkg in BASE_PACKAGES if not _dpkg_present(pkg)]
     if not missing:
         return {"ok": True, "skipped": True}
+    _update_progress(ctx, "host_base", phase="preparing_packages",
+                     activity="Preparing the host package sources.", timeout_seconds=600)
     # A previous Mu3Lab install may have left our repo definitions behind
     # after a test reset removed their keyrings. Remove only the legacy files
     # owned by this installer before the first apt update.
@@ -275,16 +281,22 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
     res = actions.apt_update(ctx["log_fn"]("host_base"))
     if not res["ok"]:
         return _propagate(res)
+    _update_progress(ctx, "host_base", phase="installing_packages",
+                     activity="Installing the required host packages.", timeout_seconds=600)
     res = actions.apt_install(missing, ctx["log_fn"]("host_base"))
     return _propagate(res)
 
 
 def fix_node(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("node")
+    _update_progress(ctx, "node", phase="preparing_repository",
+                     activity="Preparing the signed Node.js LTS repository.", timeout_seconds=600)
     res = _repair_managed_apt_keys(log)
     if not res["ok"]:
         return _propagate(res)
     key_dest = Path("/tmp/mu3lab-nodesource.gpg")
+    _update_progress(ctx, "node", phase="downloading_key",
+                     activity="Downloading the Node.js repository signing key.", timeout_seconds=600)
     res = actions.fetch_url(NODESOURCE_KEY_URL, key_dest, log)
     if not res["ok"]:
         return _propagate(res)
@@ -297,9 +309,13 @@ def fix_node(check: dict, ctx: dict) -> dict:
                                   NODESOURCE_LIST + "\n", log)
     if not res["ok"]:
         return _propagate(res)
+    _update_progress(ctx, "node", phase="refreshing_packages",
+                     activity="Refreshing package metadata for Node.js.", timeout_seconds=600)
     res = actions.apt_update(log)
     if not res["ok"]:
         return _propagate(res)
+    _update_progress(ctx, "node", phase="installing_package",
+                     activity="Installing the current supported Node.js LTS.", timeout_seconds=600)
     return _propagate(actions.apt_install(["nodejs"], log))
 
 
@@ -442,19 +458,20 @@ def _env_check(root: Path) -> dict:
 
 
 def _service_check(root: Path) -> dict:
-    """mu3lab-ctl unit rendered, enabled, and answering /api/health?
+    """Web and durable-worker units installed and healthy?
     States: no_unit | inactive | unhealthy | ready."""
     import urllib.request as _url
-    unit_path = Path.home() / ".config" / "systemd" / "user" / "mu3lab-ctl.service"
-    if not unit_path.is_file():
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    units = ("mu3lab-ctl.service", "mu3lab-worker.service")
+    if any(not (unit_dir / unit).is_file() for unit in units):
         return {"name": "service", "status": "missing",
-                "detail": "Startup entry not installed.",
+                "detail": "Control-plane startup entries are not installed.",
                 "action": "step 3 installs and starts it.",
                 "state": "no_unit", "blocking": False}
     try:
-        proc = subprocess.run(["systemctl", "--user", "is-active", "mu3lab-ctl"],
-                              capture_output=True, text=True, timeout=15)
-        active = proc.returncode == 0
+        active = all(subprocess.run(
+            ["systemctl", "--user", "is-active", unit], capture_output=True,
+            text=True, timeout=15).returncode == 0 for unit in units)
     except OSError:
         active = False
     if not active:
@@ -482,6 +499,8 @@ def fix_pip_deps(check: dict, ctx: dict) -> dict:
     venv_pip = ctx["root"] / ".venv" / "bin" / "pip"
     if not venv_pip.exists():
         return {"ok": False, "error": "no venv pip (venv step must run first)"}
+    _update_progress(ctx, "pip_deps", phase="installing_packages",
+                     activity="Installing control-plane packages into the project virtualenv.", timeout_seconds=600)
     log("$ .venv/bin/pip install -r ctl/requirements.txt")
     try:
         proc = subprocess.run([str(venv_pip), "install", "-r",
@@ -511,6 +530,8 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
     """
     log = ctx["log_fn"]("dashboard_build")
     dashdir = ctx["root"] / "dashboard"
+    _update_progress(ctx, "dashboard_build", phase="preparing_build",
+                     activity="Preparing the dashboard dependency/build step.", timeout_seconds=900)
     # The 5-line tail once hid the real cause (missing lockfile); on failure
     # log every "npm error" line plus a wider tail, and always name the npm
     # debug log so the cause is one copy-paste away.
@@ -524,6 +545,8 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
         return {"ok": False, "error": f"{what} failed (see log)."}
     if not (dashdir / "node_modules").is_dir():
         if (dashdir / "package-lock.json").is_file():
+            _update_progress(ctx, "dashboard_build", phase="downloading_packages",
+                             activity="Downloading the locked dashboard packages.", timeout_seconds=900)
             log("$ npm ci  (in dashboard/)")
             try:
                 proc = subprocess.run(["npm", "ci"], capture_output=True,
@@ -539,6 +562,8 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
             # No lockfile (shouldn't happen — repo commits one): npm install
             # resolves fresh instead of failing like `ci` would.
             log("$ npm install  (no lockfile; resolving fresh)")
+            _update_progress(ctx, "dashboard_build", phase="downloading_packages",
+                             activity="Downloading dashboard packages.", timeout_seconds=900)
             try:
                 proc = subprocess.run(["npm", "install"], capture_output=True,
                                       text=True, timeout=900, cwd=str(dashdir))
@@ -549,6 +574,8 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
                 return _log_failure(proc, "npm install")
             for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
                 log(line)
+    _update_progress(ctx, "dashboard_build", phase="building_dashboard",
+                     activity="Compiling the dashboard interface.", timeout_seconds=900)
     log("$ npm run build  (in dashboard/)")
     try:
         proc = subprocess.run(["npm", "run", "build"], capture_output=True,
@@ -574,20 +601,23 @@ def fix_root_env(check: dict, ctx: dict) -> dict:
 
 
 def fix_service(check: dict, ctx: dict) -> dict:
-    """Render unit → linger → reload → enable → start → poll /api/health."""
+    """Render web/worker units → linger → enable → start → verify web health."""
     import urllib.request as _url
     log = ctx["log_fn"]("service")
     state = check.get("state", "")
-    unit_path = Path.home() / ".config" / "systemd" / "user" / "mu3lab-ctl.service"
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_names = ("mu3lab-ctl.service", "mu3lab-worker.service")
     if state == "no_unit":
-        template = ctx["root"] / "deploy" / "mu3lab-ctl.service"
-        if not template.is_file():
-            return {"ok": False, "error": "deploy/mu3lab-ctl.service missing from checkout"}
-        rendered = template.read_text(encoding="utf-8").replace(
-            "@MU3LAB_ROOT@", str(ctx["root"]))
-        unit_path.parent.mkdir(parents=True, exist_ok=True)
-        unit_path.write_text(rendered, encoding="utf-8")
-        log(f"rendered {unit_path}")
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        for unit_name in unit_names:
+            template = ctx["root"] / "deploy" / unit_name
+            if not template.is_file():
+                return {"ok": False, "error": f"deploy/{unit_name} missing from checkout"}
+            rendered = template.read_text(encoding="utf-8").replace(
+                "@MU3LAB_ROOT@", str(ctx["root"]))
+            unit_path = unit_dir / unit_name
+            unit_path.write_text(rendered, encoding="utf-8")
+            log(f"rendered {unit_path}")
         res = actions.privilege.run_privileged(
             ["loginctl", "enable-linger", getpass.getuser()], log)
         if res.get("need_terminal") or not res.get("ok"):
@@ -596,15 +626,17 @@ def fix_service(check: dict, ctx: dict) -> dict:
         rc, out = actions.privilege._exec(
             ["systemctl", "--user", "daemon-reload"])
         log("$ systemctl --user daemon-reload")
-        rc, out = actions.privilege._exec(
-            ["systemctl", "--user", "enable", "mu3lab-ctl.service"])
-        log("$ systemctl --user enable mu3lab-ctl.service")
-        rc, out = actions.privilege._exec(
-            ["systemctl", "--user", "restart", "mu3lab-ctl.service"])
-        log("$ systemctl --user restart mu3lab-ctl.service")
-        log(out or f"(exit {rc})")
-        if rc != 0:
-            return {"ok": False, "error": "could not start mu3lab-ctl (see log)"}
+        for unit_name in unit_names:
+            rc, out = actions.privilege._exec(
+                ["systemctl", "--user", "enable", unit_name])
+            log(f"$ systemctl --user enable {unit_name}")
+            if rc == 0:
+                rc, out = actions.privilege._exec(
+                    ["systemctl", "--user", "restart", unit_name])
+                log(f"$ systemctl --user restart {unit_name}")
+            log(out or f"(exit {rc})")
+            if rc != 0:
+                return {"ok": False, "error": f"could not start {unit_name} (see log)"}
         import time as _time
         for _attempt in range(30):
             try:
@@ -624,6 +656,8 @@ def fix_venv(check: dict, ctx: dict) -> dict:
     venv_py = ctx["root"] / ".venv" / "bin" / "python"
     if venv_py.exists():
         return {"ok": True, "skipped": True}
+    _update_progress(ctx, "venv", phase="creating_environment",
+                     activity="Creating the isolated Python environment.", timeout_seconds=300)
     log("$ python3 -m venv .venv")
     try:
         proc = subprocess.run(["python3", "-m", "venv", str(ctx["root"] / ".venv")],
@@ -641,6 +675,8 @@ def fix_docker(check: dict, ctx: dict) -> dict:
     """Dispatch on the granular docker state — exactly one remedy each."""
     log = ctx["log_fn"]("docker")
     state = check.get("state", "")
+    _update_progress(ctx, "docker", phase="preparing_engine",
+                     activity="Preparing Docker and its signed package source.", timeout_seconds=900)
     if state == "absent":
         res = _repair_managed_apt_keys(log)
         if not res["ok"]:
@@ -664,6 +700,8 @@ def fix_docker(check: dict, ctx: dict) -> dict:
         res = actions.apt_update(log)
         if not res["ok"]:
             return _propagate(res)
+        _update_progress(ctx, "docker", phase="installing_engine",
+                         activity="Downloading and installing Docker Engine.", timeout_seconds=900)
         res = actions.apt_install(DOCKER_PACKAGES, log)
         if not res["ok"]:
             return _propagate(res)
@@ -756,6 +794,8 @@ def fix_networks(check: dict, ctx: dict) -> dict:
 def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("tailscale_pkg")
     state = check.get("state", "")
+    _update_progress(ctx, "tailscale_pkg", phase="preparing_package",
+                     activity="Preparing the signed Tailscale package source.", timeout_seconds=600)
     if state == "absent":
         res = _repair_managed_apt_keys(log)
         if not res["ok"]:
@@ -780,6 +820,8 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
         res = actions.apt_update(log)
         if not res["ok"]:
             return _propagate(res)
+        _update_progress(ctx, "tailscale_pkg", phase="installing_package",
+                         activity="Downloading and installing Tailscale.", timeout_seconds=600)
         res = actions.apt_install(["tailscale"], log)
         if not res["ok"]:
             return _propagate(res)
@@ -788,6 +830,7 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
 
 
 def fix_caddy(check: dict, ctx: dict) -> dict:
+    from ctl import secrets as _secrets
     log = ctx["log_fn"]("caddy")
     projdir = ctx["root"] / "core" / "ingress"
     if not (projdir / "docker-compose.yml").is_file():
@@ -795,8 +838,23 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
                 "error": "core/ingress/docker-compose.yml missing from checkout."}
     runtime_caddy = RuntimePaths().projects / "ingress" / "Caddyfile"
     source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
+    _update_progress(ctx, "caddy", phase="pulling_images",
+                     activity="Pulling the reviewed Caddy image and starting private ingress.",
+                     timeout_seconds=300)
+
+    def compose_activity(line: str) -> None:
+        clean = re.sub(r"\s+", " ", line).strip()
+        if clean:
+            _update_progress(ctx, "caddy", phase="starting_ingress",
+                             activity=clean[:180], timeout_seconds=300)
+
+    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    if not ingress_token:
+        return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     rc, out = actions.compose_up(projdir, log,
-                                 env={"MU3LAB_CADDYFILE": str(source_caddy)})
+                                 env={"MU3LAB_CADDYFILE": str(source_caddy),
+                                      "MU3LAB_INGRESS_TOKEN": ingress_token},
+                                 on_output=compose_activity)
     log(out or f"(exit {rc})")
     if rc != 0:
         return {"ok": False, "error": "docker compose up failed (see log)."}
@@ -804,22 +862,14 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     # listens — without this poll, verify races the boot every time
     # (the exact failure seen live: container Started, port not yet bound).
     import time as _time
-    import urllib.request as _url
     for _ in range(30):
-        sock_ok = _tcp_open(CADDY_PORT)
-        if sock_ok:
-            try:
-                with _url.urlopen(f"http://127.0.0.1:{CADDY_PORT}/",
-                                  timeout=3) as resp:
-                    if resp.status == 200:
-                        log(f"Caddy answering on :{CADDY_PORT}")
-                        return {"ok": True}
-            except OSError:
-                pass
+        if _tcp_open(CADDY_PORT) and _caddy_health_status() == 204:
+            log(f"Caddy health endpoint answering on :{CADDY_PORT}")
+            return {"ok": True}
         _time.sleep(2)
     return {"ok": False,
-            "error": f"Caddy container started but :{CADDY_PORT} never "
-                     f"answered (see `docker logs ingress-caddy-1`)."}
+            "error": f"Caddy container started but its health endpoint on "
+                     f":{CADDY_PORT} never answered (see `docker logs ingress-caddy-1`)."}
 
 
 def _manual_prompt(title: str, body: str, url: str, done: str) -> dict:
@@ -846,6 +896,36 @@ def _compose_health(port: int, url: str) -> dict:
     except OSError as exc:
         return {"status": "missing", "state": "down", "detail": str(exc)}
     return {"status": "missing", "state": "down", "detail": f"Health check failed on :{port}."}
+
+
+def _compose_readiness(ctx: dict, step: dict, check: Callable[[], dict],
+                      service_name: str, timeout: int) -> dict:
+    """Wait for an already-started service to answer its real health check.
+
+    Compose ``up -d`` reports container creation/start, not application
+    readiness. A short connection reset during Rocket/Caddy startup is
+    expected and must not turn a successful install into a false failure.
+    """
+    started = time.monotonic()
+    while True:
+        if ctx.get("stopped", lambda: False)():
+            return {"ok": False, "error": f"{service_name} readiness wait was stopped."}
+        health = check()
+        if health.get("status") == "ok":
+            _update_progress(ctx, step["id"], phase="ready",
+                             activity=f"{service_name} is healthy and accepting requests.",
+                             timeout_seconds=timeout)
+            return {"ok": True}
+        elapsed = int(time.monotonic() - started)
+        _update_progress(ctx, step["id"], phase="waiting_for_health_checks",
+                         activity=health.get("detail", f"Waiting for {service_name} to become ready."),
+                         timeout_seconds=timeout)
+        if elapsed >= timeout:
+            return {"ok": False,
+                    "error": f"{service_name} did not become ready within "
+                             f"{max(1, (timeout + 59) // 60)} minute(s): "
+                             + health.get("detail", "health check failed")}
+        time.sleep(2)
 
 
 def _update_progress(ctx: dict, step_id: str, *, phase: str, activity: str,
@@ -925,10 +1005,41 @@ def _vaultwarden_check(ctx: dict) -> dict:
     return _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
 
 
+def _vaultwarden_account_exists() -> bool:
+    """Read only whether Vaultwarden has at least one local user account."""
+    import sqlite3
+    database = RuntimePaths().data / "vaultwarden" / "db.sqlite3"
+    if not database.is_file():
+        return False
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True,
+                                     timeout=2)
+        count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        connection.close()
+        return int(count) > 0
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        # The manual row remains waiting if the database is still being
+        # initialized or its schema is not readable yet. Never infer success
+        # from a stale acknowledgement alone.
+        return False
+
+
 def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("vaultwarden")
     projdir = ctx["root"] / "core" / "vaultwarden"
-    rc, out = actions.compose_up(projdir, log, env={"MU3LAB_DATA_ROOT": str(RuntimePaths().data)})
+    _update_progress(ctx, "vaultwarden", phase="pulling_images",
+                     activity="Pulling the reviewed Vaultwarden image and starting the password manager.",
+                     timeout_seconds=300)
+
+    def compose_activity(line: str) -> None:
+        clean = re.sub(r"\s+", " ", line).strip()
+        if clean:
+            _update_progress(ctx, "vaultwarden", phase="starting_service",
+                             activity=clean[:180], timeout_seconds=300)
+
+    rc, out = actions.compose_up(
+        projdir, log, env={"MU3LAB_DATA_ROOT": str(RuntimePaths().data)},
+        on_output=compose_activity)
     log(out or f"(exit {rc})")
     if rc != 0:
         return {"ok": False, "error": "Vaultwarden could not start (see log)."}
@@ -936,8 +1047,9 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
 
 
 def check_vaultwarden_setup(ctx: dict) -> dict:
-    if _runtime_marker("vaultwarden_account", ctx):
-        return {"status": "ok", "state": "ready", "detail": "First Vaultwarden account confirmed by the operator."}
+    if _vaultwarden_account_exists():
+        return {"status": "ok", "state": "ready",
+                "detail": "Vaultwarden account detected in its local database."}
     return {"status": "waiting", "state": "needs_user",
             "detail": "Create the first Vaultwarden account in the local setup page."}
 
@@ -978,6 +1090,8 @@ def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
         return {"ok": False,
                 "error": "Tailscale did not provide a valid MagicDNS name for Vaultwarden."}
     projdir = ctx["root"] / "core" / "vaultwarden"
+    _update_progress(ctx, "vaultwarden_serve", phase="applying_private_url",
+                     activity="Applying Vaultwarden's private HTTPS origin.", timeout_seconds=300)
     rc, out = actions.compose_up(
         projdir, log,
         env={"MU3LAB_DATA_ROOT": str(RuntimePaths().data),
@@ -992,9 +1106,19 @@ def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
 
 
 def fix_authentik_serve(check: dict, ctx: dict) -> dict:
+    _update_progress(ctx, "authentik_serve", phase="publishing_private_url",
+                     activity="Publishing Authentik on its private Tailscale HTTPS route.",
+                     timeout_seconds=120)
     return _tailscale_serve_port(AUTHENTIK_SERVE_PORT,
                                  f"http://127.0.0.1:{AUTHENTIK_PROXY_PORT}",
                                  ctx["log_fn"]("authentik_serve"))
+
+
+def fix_open_webui_serve(check: dict, ctx: dict) -> dict:
+    """Reserve Open WebUI's stable private origin before core reconciliation."""
+    return _tailscale_serve_port(OPEN_WEBUI_SERVE_PORT,
+                                 f"http://127.0.0.1:{OPEN_WEBUI_PROXY_PORT}",
+                                 ctx["log_fn"]("open_webui_serve"))
 
 
 def _authentik_check(ctx: dict) -> dict:
@@ -1004,6 +1128,15 @@ def _authentik_check(ctx: dict) -> dict:
 def fix_authentik(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("authentik")
     from ctl import secrets as _secrets
+    from ctl.authentik_blueprints import write_dashboard_blueprint
+    dns_name = _tailscale_dns_name_for_install()
+    if not dns_name:
+        return {"ok": False,
+                "error": "Tailscale did not provide a valid MagicDNS name for Authentik configuration."}
+    blueprint = write_dashboard_blueprint(
+        RuntimePaths().root, dns_name,
+        f"https://{dns_name}:{AUTHENTIK_SERVE_PORT}")
+    log("rendered the Authentik dashboard Blueprint (no credentials)")
     env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
     if added:
         log("generated Authentik runtime configuration: " + ", ".join(added))
@@ -1011,7 +1144,8 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
     values = {"AUTHENTIK_ENV_FILE": str(env_file),
               "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.5.0"),
               "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
-              "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", "")}
+              "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", ""),
+              "AUTHENTIK_BLUEPRINTS_DIR": str(blueprint.parent)}
     # Compose needs these values for interpolation. actions.compose_up passes
     # them in the process environment but never includes env values in logs.
     _update_progress(ctx, "authentik", phase="pulling_images",
@@ -1065,15 +1199,39 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
 
 
 def check_authentik_setup(ctx: dict) -> dict:
-    if _runtime_marker("authentik_admin", ctx):
-        return {"status": "ok", "state": "ready", "detail": "Authentik administrator confirmed by the operator."}
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
+    setup_pending = _authentik_initial_setup_pending()
+    if not setup_pending:
+        return {"status": "ok", "state": "ready",
+                "detail": "Authentik owner account exists; authenticated access is verified at dashboard handoff."}
     return {"status": "waiting", "state": "needs_user",
             "detail": "Create the first Authentik administrator in the official setup flow.",
             # Authentik 2026.5 routes its root itself to first-run setup. Do
             # not hard-code its version-sensitive internal flow path: a
             # direct legacy flow URL is explicitly denied by this release.
             "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/"}
+
+
+def _authentik_initial_setup_pending() -> bool:
+    """Whether Authentik's unauthenticated root still redirects to setup.
+
+    This is a read-only, version-tolerant clue for the human-facing prompt.
+    It is not used as proof of an authenticated login; that proof belongs to
+    the later protected-dashboard check.
+    """
+    import http.client
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", AUTHENTIK_PROXY_PORT,
+                                                timeout=5)
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        location = response.getheader("Location", "")
+        connection.close()
+        return response.status in {301, 302, 303, 307, 308} and location.startswith("/setup")
+    except (OSError, http.client.HTTPException):
+        # The setup row already follows a healthy-service row.  If a transient
+        # local probe fails, preserve the safe first-run instructions.
+        return True
 
 
 def _tailscale_dns_name_for_install() -> str:
@@ -1098,44 +1256,62 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
     return {"waiting": True, "prompt": _manual_prompt(
         "Create the Authentik administrator",
-        "Open Authentik’s official first-run page and create the administrator. Mu3Lab never receives or stores that password. Then create the Mu3Lab operator group and users when prompted in the next step.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/", "I created the administrator")}
+        "Open Authentik’s official first-run page and create the administrator. "
+        "Mu3Lab never receives or stores that password. If Authentik instead "
+        "shows a sign-in page and you do not know the administrator password, "
+        "you can deliberately reset only the built-in akadmin account below. "
+        "After a recovery reset, sign in and change the temporary password "
+        "before continuing. Mu3Lab will detect when the owner account exists.",
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}/", "Check owner account again") | {
+            "recovery_action": "reset_authentik_admin",
+            "recovery_username": "akadmin",
+        }}
 
 
-def check_authentik_users(ctx: dict) -> dict:
-    if _runtime_marker("authentik_users", ctx):
-        return {"status": "ok", "state": "ready", "detail": "Initial Authentik users confirmed by the operator."}
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {"status": "waiting", "state": "needs_user",
-            "detail": "Create the initial household/operator users and operator group.",
-            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/identity/users"}
-
-
-def fix_authentik_users(check: dict, ctx: dict) -> dict:
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {"waiting": True, "prompt": _manual_prompt(
-        "Create your initial Mu3Lab users",
-        "In Authentik, create the household/operator users who should manage this Mu3Lab host. Keep public registration disabled. Then return and check again.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/identity/users", "I created the users")}
+def reset_authentik_admin_password(ctx: dict) -> dict:
+    """Generate and apply a one-time recovery password without persisting it."""
+    # Token output contains no whitespace and is sufficiently long for a
+    # temporary administrator credential.  It lives only in this call and its
+    # HTTPS-local API response; never in job state, logs, or disk.
+    temporary_password = "Mu3Lab-" + secrets.token_urlsafe(24)
+    result = actions.reset_authentik_admin_password(
+        temporary_password, ctx["log_fn"]("authentik_setup"))
+    if not result.get("ok"):
+        return result
+    return {"ok": True, "username": "akadmin",
+            "temporary_password": temporary_password}
 
 
 def check_dashboard_protection(ctx: dict) -> dict:
+    host = _tailscale_dns_name_for_install()
     if _runtime_marker("dashboard_protection", ctx):
         target = RuntimePaths().projects / "ingress" / "Caddyfile"
         if not target.is_file():
             return {"status": "missing", "state": "needs_apply",
                     "detail": "Dashboard protection was confirmed; applying the verified Caddy policy."}
-        verdict = _dashboard_access_probe()
+        verdict = _dashboard_access_probe(host)
         if verdict["state"] == "ready":
             return verdict
         return {"status": "waiting", "state": "needs_attention", "detail": verdict["detail"]}
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {"status": "waiting", "state": "needs_user",
-            "detail": "Create the Mu3Lab dashboard provider/application in Authentik, then confirm it here.",
-            "setup_url": f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/core/applications"}
+    host = host or "127.0.0.1"
+    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    if target.is_file():
+        verdict = _dashboard_access_probe(host)
+        if verdict["state"] == "ready":
+            return {"status": "waiting", "state": "needs_user",
+                    "detail": "Authentik protection is active; verify one signed-in dashboard request, then confirm.",
+                    "setup_url": f"https://{host}/"}
+        return {"status": "missing", "state": "needs_attention", "detail": verdict["detail"]}
+    return {"status": "waiting", "state": "needs_apply",
+            "detail": "Mu3Lab will create the Authentik provider, application, and embedded-outpost assignment automatically.",
+            "setup_url": f"https://{host}/"}
 
 
 def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
+    from ctl import secrets as _secrets
+    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    if not ingress_token:
+        return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     if _runtime_marker("dashboard_protection", ctx):
         source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
         target = RuntimePaths().projects / "ingress" / "Caddyfile"
@@ -1143,23 +1319,91 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             host = _tailscale_dns_name_for_install() or "127.0.0.1"
             return {"waiting": True, "prompt": _manual_prompt(
                 "Verify the protected dashboard",
-                "Open an anonymous browser window and confirm the dashboard redirects to Authentik. Then sign in as a Mu3Lab operator and confirm the dashboard loads. Return here and check again.",
-                f"https://{host}:{SERVE_PORT}/", "I verified the protected dashboard")}
+                "Open the protected dashboard in an anonymous browser window. It must redirect to the private Authentik HTTPS page, not localhost or an HTTP URL. Sign in as a Mu3Lab operator and confirm the dashboard loads, then return here and check again.",
+                f"https://{host}/", "I verified the protected dashboard")}
         target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         log = ctx["log_fn"]("dashboard_protection")
         rc, out = actions.compose_up(ctx["root"] / "core" / "ingress", log,
-                                     env={"MU3LAB_CADDYFILE": str(target)})
+                                     env={"MU3LAB_CADDYFILE": str(target),
+                                          "MU3LAB_INGRESS_TOKEN": ingress_token})
         log(out or f"(exit {rc})")
         return {"ok": rc == 0, "error": "Caddy could not apply dashboard protection." if rc else ""}
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {"waiting": True, "prompt": _manual_prompt(
-        "Protect the Mu3Lab dashboard",
-        "In Authentik, create a Proxy Provider in Forward auth (single application) mode, create an application named Mu3Lab, bind the provider, and add the embedded outpost if Authentik asks. Use the private dashboard URL as the external host. Then test an anonymous browser window: it must redirect to Authentik, and a signed-in operator must return to Mu3Lab. This step configures access in front of the dashboard; it does not expose Vaultwarden. Mu3Lab will not mark the dashboard protected until this human step is complete.",
-        f"https://{host}:{AUTHENTIK_SERVE_PORT}/if/admin/#/core/applications", "I protected and tested the dashboard")}
+    host = _tailscale_dns_name_for_install()
+    if not host:
+        return {"ok": False, "error": "Tailscale MagicDNS name is unavailable; cannot create a private Authentik application."}
+
+    # Authentik already watches /blueprints/custom. The authentik step mounts
+    # this directory before starting the worker, so do not restart Compose
+    # here: a restart would generate another discovery event and can race two
+    # otherwise-idempotent Blueprint applies.
+    from ctl.authentik_blueprints import write_dashboard_blueprint
+    blueprint = write_dashboard_blueprint(
+        RuntimePaths().root, host,
+        f"https://{host}:{AUTHENTIK_SERVE_PORT}")
+    log = ctx["log_fn"]("dashboard_protection")
+    _update_progress(ctx, "dashboard_protection", phase="configuring_identity",
+                     activity="Waiting for Authentik to publish the generated provider and embedded outpost.",
+                     timeout_seconds=240)
+
+    source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
+    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    _update_progress(ctx, "dashboard_protection", phase="starting_auth_gate",
+                     activity="Starting Caddy with the Authentik forward-auth gate.", timeout_seconds=240)
+    ingress_result: dict[str, object] = {}
+
+    def ingress_activity(line: str) -> None:
+        clean = re.sub(r"\s+", " ", line).strip()
+        if clean:
+            _update_progress(ctx, "dashboard_protection", phase="starting_auth_gate",
+                             activity=clean[:180], timeout_seconds=240)
+
+    ingress_result["rc"], ingress_result["out"] = actions.compose_up(
+        ctx["root"] / "core" / "ingress", log,
+        env={"MU3LAB_CADDYFILE": str(target),
+             "MU3LAB_INGRESS_TOKEN": ingress_token}, on_output=ingress_activity)
+    log(str(ingress_result.get("out") or f"(exit {ingress_result['rc']})"))
+    if int(ingress_result.get("rc", 1)) != 0:
+        return {"ok": False, "error": "Caddy could not apply the Authentik protection policy."}
+
+    # Blueprint discovery is asynchronous. Wait for the actual security
+    # property, not a container-start message. Then ask for one browser-based
+    # signed-in verification; the user never configures a provider manually.
+    started = time.monotonic()
+    while time.monotonic() - started < 180:
+        verdict = _dashboard_access_probe(host)
+        if verdict["state"] == "ready":
+            return {"waiting": True, "prompt": _manual_prompt(
+                "Verify the protected Mu3Lab dashboard",
+                "Mu3Lab created the Authentik provider, application, and embedded outpost automatically. Open the protected dashboard in an anonymous window; it must redirect to the private Authentik HTTPS page, not localhost or an HTTP URL. Sign in as a Mu3Lab operator and confirm the dashboard loads. Mu3Lab never receives the Authentik password.",
+                f"https://{host}/", "I verified the protected dashboard")}
+        _update_progress(ctx, "dashboard_protection", phase="waiting_for_identity",
+                         activity="Waiting for Authentik to publish the generated provider to the embedded outpost.",
+                         timeout_seconds=180)
+        time.sleep(3)
+    return {"ok": False,
+            "error": "Authentik did not publish the generated dashboard provider within 3 minutes; configuration and logs were preserved."}
 
 
-def _dashboard_access_probe() -> dict:
+def _authentik_redirect_is_expected(location: str | None,
+                                    host: str | None = None) -> bool:
+    """Accept only a private HTTPS redirect to this install's Authentik."""
+    from urllib.parse import urlsplit
+    expected_host = (host or _tailscale_dns_name_for_install() or "").rstrip(".").lower()
+    if not location or not expected_host:
+        return False
+    parsed = urlsplit(location)
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return (parsed.scheme == "https" and parsed.hostname == expected_host and
+            port == int(AUTHENTIK_SERVE_PORT) and bool(parsed.path))
+
+
+def _dashboard_access_probe(host: str | None = None) -> dict:
     """Require an unauthenticated request to be denied by the auth gate."""
     import urllib.error as _url_error
     import urllib.request as _url_request
@@ -1169,14 +1413,38 @@ def _dashboard_access_probe() -> dict:
             return None
 
     opener = _url_request.build_opener(_NoRedirect)
+    request = _url_request.Request(
+        f"http://127.0.0.1:{CADDY_PORT}/",
+        headers={
+            # Caddy is loopback-bound, but Authentik selects the forward-auth
+            # provider by the original tailnet host. A loopback Host header is
+            # not a valid security test and correctly returns 404.
+            "Host": host or (_tailscale_dns_name_for_install() or "127.0.0.1"),
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    def redirect_verdict(status: int, headers) -> dict:  # noqa: ANN001
+        location = headers.get("Location")
+        if _authentik_redirect_is_expected(location, host):
+            return {"status": "ok", "state": "ready",
+                    "detail": "Anonymous dashboard access redirects to private Authentik."}
+        return {"status": "missing", "state": "needs_attention",
+                "detail": (f"Dashboard returned HTTP {status} with an unexpected "
+                           "authentication redirect; expected private Authentik "
+                           f"at https://{(host or 'the tailnet host')}:{AUTHENTIK_SERVE_PORT}.")}
+
     try:
-        with opener.open(f"http://127.0.0.1:{CADDY_PORT}/", timeout=5) as response:
+        with opener.open(request, timeout=5) as response:
             if response.status in (401, 403):
                 return {"status": "ok", "state": "ready", "detail": "Anonymous dashboard access is denied by Authentik."}
+            if response.status in (302, 303, 307, 308):
+                return redirect_verdict(response.status, response.headers)
             return {"status": "missing", "state": "needs_attention",
                     "detail": f"Dashboard returned HTTP {response.status} without authentication."}
     except _url_error.HTTPError as exc:
-        if exc.code in (302, 303, 307, 308, 401, 403):
+        if exc.code in (302, 303, 307, 308):
+            return redirect_verdict(exc.code, exc.headers)
+        if exc.code in (401, 403):
             return {"status": "ok", "state": "ready", "detail": "Anonymous dashboard access is denied by Authentik."}
         return {"status": "missing", "state": "needs_attention",
                 "detail": f"Dashboard protection probe returned HTTP {exc.code}."}
@@ -1222,26 +1490,68 @@ def _tailscale_auth_url() -> str:
 def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     """Join through the installer's existing Polkit worker.
 
-    The worker already owns the one native password dialog. Its captured
-    output is inspected for Tailscale's one-time login URL; the URL is opened
-    immediately and is never persisted or sent back as a credential.
+    ``tailscale up`` can keep running while the operator approves the device,
+    so waiting for its captured stdout would hide the login URL for the whole
+    CLI timeout.  Run the bounded privileged command in one thread while the
+    installer polls the local daemon's status in this thread.  The URL is
+    opened as soon as the daemon exposes it, and the same command is reused
+    when the operator presses ``Check again``.
     """
     log = ctx["log_fn"]("tailscale_join")
-    log("$ tailscale up --hostname=mu3lab --timeout=120s  (waiting up to 120 seconds for login URL)")
-    result = privilege.run_privileged(
-        ["tailscale", "up", "--hostname=" + TS_HOSTNAME,
-         "--timeout=" + TAILSCALE_JOIN_TIMEOUT], log,
-        timeout=TAILSCALE_WORKER_TIMEOUT)
-    out = result.get("output", "")
+    command = ["tailscale", "up", "--hostname=" + TS_HOSTNAME,
+               "--timeout=" + TAILSCALE_JOIN_TIMEOUT]
+    state = ctx.setdefault("_tailscale_join_state", {})
+    thread = state.get("thread")
+    if thread is None:
+        log("$ tailscale up --hostname=mu3lab --timeout=120s  (waiting for login link)")
+        state["result"] = None
+
+        def run_join() -> None:
+            state["result"] = privilege.run_privileged(
+                command, log, timeout=TAILSCALE_WORKER_TIMEOUT)
+
+        thread = threading.Thread(target=run_join, daemon=True,
+                                  name="mu3lab-tailscale-join")
+        state["thread"] = thread
+        thread.start()
+        # Unit-test fakes complete immediately; this also avoids an
+        # unnecessary polling interval for a fast already-authorized join.
+        thread.join(timeout=0.2)
+
     import re as _re
+    # If the command completed quickly, use its result now.  Otherwise keep
+    # polling the daemon while it waits for the browser approval.  This makes
+    # the manual prompt appear as soon as AuthURL exists instead of after 120s.
+    while thread.is_alive():
+        if ctx.get("stopped", lambda: False)():
+            return {"ok": False, "error": "Tailscale join was stopped."}
+        _update_progress(ctx, "tailscale_join", phase="waiting_for_login",
+                         activity="Waiting for Tailscale to provide the approval link.",
+                         timeout_seconds=TAILSCALE_WORKER_TIMEOUT)
+        time.sleep(1)
+        login_url = _tailscale_auth_url()
+        if login_url:
+            if not state.get("opened"):
+                try:
+                    webbrowser.open(login_url, new=2)
+                    log("opened the Tailscale login page in the default browser")
+                except Exception as exc:  # noqa: BLE001
+                    log(f"could not open browser automatically: {exc}")
+                state["opened"] = True
+            return {"waiting": True, "prompt": _join_prompt(login_url)}
+
+    result = state.get("result") or {"ok": False, "output": ""}
+    out = result.get("output", "")
     match = _re.search(r"https://login\.tailscale\.com/[A-Za-z0-9/_-]+", out)
     login_url = match.group(0).rstrip(".,);") if match else _tailscale_auth_url()
     if login_url:
-        try:
-            webbrowser.open(login_url, new=2)
-            log("opened the Tailscale login page in the default browser")
-        except Exception as exc:  # noqa: BLE001 - link remains in the prompt
-            log(f"could not open browser automatically: {exc}")
+        if not state.get("opened"):
+            try:
+                webbrowser.open(login_url, new=2)
+                log("opened the Tailscale login page in the default browser")
+            except Exception as exc:  # noqa: BLE001
+                log(f"could not open browser automatically: {exc}")
+            state["opened"] = True
         return {"waiting": True, "prompt": _join_prompt(login_url)}
     if result.get("need_terminal"):
         return {"waiting": True, "prompt": _join_prompt("")}
@@ -1384,7 +1694,10 @@ STEPS = [
     {"id": "caddy", "label": "Private ingress",
      "check": _caddy_check, "fix": fix_caddy},
     {"id": "vaultwarden", "label": "Vaultwarden password manager",
-     "check": _vaultwarden_check, "fix": fix_vaultwarden},
+     "check": _vaultwarden_check, "fix": fix_vaultwarden,
+     "readiness": lambda ctx, step: _compose_readiness(
+         ctx, step, lambda: _vaultwarden_check(ctx), "Vaultwarden",
+         VAULTWARDEN_HTTP_GRACE_TIMEOUT)},
     {"id": "vaultwarden_setup", "label": "Vaultwarden first account",
      "check": check_vaultwarden_setup, "fix": fix_vaultwarden_setup},
     {"id": "tailscale_pkg", "label": "Tailscale app",
@@ -1407,10 +1720,11 @@ STEPS = [
     {"id": "authentik_serve", "label": "Authentik private access",
      "check": lambda ctx: _serve_port_check(AUTHENTIK_SERVE_PORT),
      "fix": fix_authentik_serve},
+    {"id": "open_webui_serve", "label": "Open WebUI private route",
+     "check": lambda ctx: _serve_port_check(OPEN_WEBUI_SERVE_PORT),
+     "fix": fix_open_webui_serve},
     {"id": "authentik_setup", "label": "Authentik administrator",
      "check": check_authentik_setup, "fix": fix_authentik_setup},
-    {"id": "authentik_users", "label": "Authentik initial users",
-     "check": check_authentik_users, "fix": fix_authentik_users},
     # Publish the private dashboard route before the operator tests the
     # Authentik gate; the route is tailnet-only while the gate is configured.
     {"id": "serve", "label": "Mu3Lab private dashboard route",
@@ -1444,6 +1758,7 @@ def run_job(job: dict, ctx: dict) -> None:
             job["status"] = "cancelled"
             return
         meta = next(m for m in STEPS if m["id"] == step["id"])
+        was_waiting = step["status"] == "waiting"
         step["status"] = "installing"
         ctx["emit"]({"type": "step", "id": step["id"], "status": "installing"})
         try:
@@ -1454,7 +1769,11 @@ def run_job(job: dict, ctx: dict) -> None:
             return
         action = fix_for_state(step["id"], check.get("state", ""))
         if action == "skip" or check.get("status") == "ok":
-            _finish_step(job, ctx, step, {"ok": True, "skipped": True})
+            _finish_step(job, ctx, step, {
+                "ok": True,
+                "skipped": not was_waiting,
+                "detail": check.get("detail", ""),
+            })
             continue
         if action == "unknown":
             _finish_step(job, ctx, step, {"ok": False,
@@ -1479,7 +1798,22 @@ def run_job(job: dict, ctx: dict) -> None:
                 if ctx["stopped"]():
                     job["status"] = "cancelled"
                     return
-                result = meta["fix"](check, ctx)  # retry after browser approval
+                # Approval can finish while the worker is paused.  The check
+                # captured before the browser flow is therefore stale; a
+                # fresh probe must decide whether the step is already ready
+                # before reusing the join fix and its old worker result.
+                try:
+                    check = meta["check"](ctx)
+                except Exception as exc:  # noqa: BLE001
+                    _finish_step(job, ctx, step,
+                                 {"ok": False, "error": f"resume check crashed: {exc}"})
+                    job["status"] = "failed"
+                    return
+                if check.get("status") == "ok" or fix_for_state(
+                        step["id"], check.get("state", "")) == "skip":
+                    result = {"ok": True, "detail": check.get("detail", "")}
+                else:
+                    result = meta["fix"](check, ctx)  # retry after browser approval
                 if result.get("waiting"):
                     _finish_step(job, ctx, step, result)
                     job["status"] = "waiting"
@@ -1517,10 +1851,49 @@ def run_job(job: dict, ctx: dict) -> None:
                                                    + verify.get("detail", "")})
             job["status"] = "failed"
             return
-        _finish_step(job, ctx, step, {"ok": True})
+        _finish_step(job, ctx, step, {
+            "ok": True,
+            "detail": verify.get("detail", ""),
+        })
+    # The bootstrap and dashboard now share a durable workflow record.  The
+    # early bootstrap UI may still be closed or refreshed, but the real
+    # dashboard can always explain exactly what remains after hand-off.
+    from ctl.provisioning import ProvisioningStore
+    provisioning = ProvisioningStore.runtime()
+    if provisioning:
+        provisioning.update("foundation", "verified",
+                            detail="Host foundation, private ingress, and tailnet route are ready.")
+        provisioning.update("identity", "verified",
+                            detail="Dashboard identity protection was verified through Authentik.")
+        provisioning.update("core", "pending",
+                            detail="Core platform reconciliation will start automatically.")
+        provisioning.update("configuration", "pending",
+                            detail="Inference-provider enrollment will be requested only after core services start.")
+        provisioning.update("verification", "pending",
+                            detail="Mu3Lab will verify routes and application contracts before handoff.")
+    # There is no second "install core" decision. The bootstrap already has
+    # the user-approved elevation session and has established every required
+    # host dependency, so it launches one resumable core job automatically.
+    try:
+        from ctl.core_setup import start as start_core_setup
+        from ctl.jobs import JobStore
+        store = JobStore.runtime()
+        if store is not None:
+            existing = [item for item in store.jobs()
+                        if item["service_id"] == "core-suite" and item["state"] in {
+                            "queued", "running", "waiting_for_confirmation", "succeeded"}]
+            if not existing:
+                start_core_setup(store, "bootstrap", ctx["root"])
+                ctx["emit"]({"type": "log", "id": "_install_",
+                             "line": "started durable core-platform reconciliation"})
+    except Exception as exc:  # noqa: BLE001 - dashboard exposes the durable error path
+        if provisioning:
+            provisioning.update("core", "failed", error="Could not launch core reconciliation.")
+        ctx["emit"]({"type": "log", "id": "_install_",
+                     "line": f"core-platform launch deferred: {type(exc).__name__}"})
     job["status"] = "ready"
     ctx["emit"]({"type": "summary", "phase": "done", "status": "ready",
-                 "detail": "Bootstrap checks completed; continue in the private dashboard."})
+                 "detail": "Foundation complete; Mu3Lab is finishing its durable core setup in the private dashboard."})
 
 
 def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
@@ -1540,7 +1913,7 @@ def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
         if result.get("skipped"):
             step["detail"] = "already done — skipped"
         else:
-            step["detail"] = ""
+            step["detail"] = result.get("detail", "")
         if step.get("progress"):
             step["progress"]["phase"] = "complete"
         ctx["emit"]({"type": "step", "id": step["id"], "status": "ready",

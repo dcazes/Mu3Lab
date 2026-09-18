@@ -8,6 +8,8 @@ services:
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]
     environment:
       OPENAI_API_BASE_URL: http://litellm:4000/v1
+      ENABLE_OPENAI_API: "true"
+      ENABLE_OLLAMA_API: "false"
       WEBUI_AUTH: "True"
       ENABLE_LOGIN_FORM: "true"
     volumes:

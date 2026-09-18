@@ -67,7 +67,12 @@ def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = Runti
     records.append(record)
     cipher = _cipher(paths)
     _, store_path = _paths(paths)
-    store_path.write_bytes(cipher.encrypt(json.dumps(records).encode("utf-8")))
+    # An interrupted credential update must leave either the old ciphertext or
+    # the complete new ciphertext, never a truncated secret store.
+    temporary = store_path.with_suffix(".enc.tmp")
+    temporary.write_bytes(cipher.encrypt(json.dumps(records).encode("utf-8")))
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, store_path)
     os.chmod(store_path, 0o600)
     return {"id": provider_id, "label": label.strip(), "updated_at": record["updated_at"]}
 
@@ -76,3 +81,15 @@ def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     """Return provider ids and labels only; never return encrypted values."""
     return [{key: item[key] for key in ("id", "label", "updated_at")}
             for item in _read(paths) if all(key in item for key in ("id", "label", "updated_at"))]
+
+
+def records(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
+    """Return private records for Mu3Lab's internal configuration renderer.
+
+    This is intentionally not imported by an HTTP handler.  It forms the one
+    narrow bridge between encrypted user credentials and generated root-only
+    service configuration.
+    """
+    return [{key: str(item[key]) for key in ("id", "label", "api_key", "updated_at")}
+            for item in _read(paths)
+            if all(key in item for key in ("id", "label", "api_key", "updated_at"))]

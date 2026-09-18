@@ -13,6 +13,8 @@ services:
     image: caddy:2.10.2-alpine
     restart: unless-stopped
     network_mode: host
+    environment:
+      MU3LAB_INGRESS_TOKEN: ${MU3LAB_INGRESS_TOKEN:?MU3LAB_INGRESS_TOKEN is required}
     volumes:
       - ${MU3LAB_CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
