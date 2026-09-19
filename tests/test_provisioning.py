@@ -73,7 +73,10 @@ class CoreWiringTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
-            save("example", "Example provider", "user-provider-secret", paths)
+            save("groq", "Groq provider", "user-provider-secret", paths)
+            from ctl.control_state import ControlState
+            ControlState(paths.runtime / "control-plane.sqlite3").set_provider(
+                "groq", "Groq provider", state="verified", verified=True)
             result = configure(paths)
             self.assertTrue(result["chat_configured"])
             self.assertEqual(result["provider_count"], 1)

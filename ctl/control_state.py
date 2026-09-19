@@ -22,8 +22,9 @@ INSTALL_STATES = frozenset({
 })
 MCP_STATES = frozenset({
     "unavailable", "disabled", "starting", "live", "degraded",
-    "authentication_required", "incompatible", "failed",
+    "authentication_required", "incompatible", "failed", "stopped",
 })
+PROVIDER_STATES = frozenset({"saved", "verifying", "verified", "degraded", "disabled", "unsupported_legacy"})
 
 
 def _now() -> str:
@@ -77,6 +78,19 @@ class ControlState:
                 last_error_json TEXT NOT NULL DEFAULT '{}',
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provider_connections (
+                provider_id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                state TEXT NOT NULL DEFAULT 'saved',
+                model_samples_json TEXT NOT NULL DEFAULT '[]',
+                last_attempt_at TEXT NOT NULL DEFAULT '',
+                last_verified_at TEXT NOT NULL DEFAULT '',
+                last_error_json TEXT NOT NULL DEFAULT '{}',
+                active_job_id TEXT NOT NULL DEFAULT '',
+                config_revision INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
         """)
         return conn
 
@@ -125,6 +139,60 @@ class ControlState:
             except (TypeError, ValueError):
                 result[key] = {}
         return result
+
+    def provider(self, provider_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM provider_connections WHERE provider_id = ?", (provider_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["enabled"] = bool(result["enabled"])
+        for column, fallback in (("model_samples_json", []), ("last_error_json", {})):
+            key = column.removesuffix("_json")
+            try:
+                result[key] = json.loads(result.pop(column))
+            except (TypeError, ValueError):
+                result[key] = fallback
+        return result
+
+    def providers(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT provider_id FROM provider_connections ORDER BY updated_at DESC").fetchall()
+        return [item for row in rows if (item := self.provider(str(row["provider_id"]))) is not None]
+
+    def set_provider(self, provider_id: str, label: str, *, enabled: bool = True,
+                     state: str = "saved", models: list[str] | None = None,
+                     error: dict[str, Any] | None = None, attempted: bool = False,
+                     verified: bool = False, job_id: str = "") -> dict[str, Any]:
+        if not provider_id or state not in PROVIDER_STATES or not label:
+            raise ValueError("invalid provider connection state")
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("""
+                INSERT INTO provider_connections
+                (provider_id, label, enabled, state, model_samples_json, last_attempt_at,
+                 last_verified_at, last_error_json, active_job_id, config_revision, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                ON CONFLICT(provider_id) DO UPDATE SET label = excluded.label,
+                    enabled = excluded.enabled, state = excluded.state,
+                    model_samples_json = CASE WHEN excluded.model_samples_json != '[]'
+                        THEN excluded.model_samples_json ELSE provider_connections.model_samples_json END,
+                    last_attempt_at = CASE WHEN excluded.last_attempt_at != ''
+                        THEN excluded.last_attempt_at ELSE provider_connections.last_attempt_at END,
+                    last_verified_at = CASE WHEN excluded.last_verified_at != ''
+                        THEN excluded.last_verified_at ELSE provider_connections.last_verified_at END,
+                    last_error_json = excluded.last_error_json,
+                    active_job_id = excluded.active_job_id,
+                    config_revision = provider_connections.config_revision + 1,
+                    updated_at = excluded.updated_at
+            """, (provider_id, label, int(enabled), state,
+                  json.dumps(models or [], sort_keys=True), now if attempted else "",
+                  now if verified else "", json.dumps(error or {}, sort_keys=True), job_id, now))
+        return self.provider(provider_id) or {}
+
+    def delete_provider(self, provider_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM provider_connections WHERE provider_id = ?", (provider_id,))
 
     def set_installation(self, service_id: str, state: str, *, job_id: str = "",
                          manifest_version: str = "", image_digests: dict[str, str] | None = None,

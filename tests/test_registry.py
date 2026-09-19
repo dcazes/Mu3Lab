@@ -19,11 +19,18 @@ from ctl.service_state import public_url, status as service_status
 
 
 class RegistryTests(unittest.TestCase):
-    def test_checked_in_registry_marks_surfsense_planned_and_local_account(self):
+    def test_checked_in_registry_marks_surfsense_installable_and_local_account(self):
         registry = load()
-        self.assertEqual(registry.get("surfsense").availability, "blocked")
+        self.assertEqual(registry.get("surfsense").availability, "available")
+        self.assertEqual(registry.get("surfsense").stage, "optional")
         self.assertEqual(registry.get("surfsense").auth, "local")
-        self.assertIn("not true SSO", registry.get("surfsense").identity_note)
+        self.assertIn("not SSO", registry.get("surfsense").identity_note)
+        compose = registry.get("surfsense").compose_path(Path(__file__).resolve().parents[1]) / "docker-compose.yml"
+        compose_text = compose.read_text(encoding="utf-8")
+        self.assertNotIn("docker.sock", compose_text)
+        image_lines = [line.strip() for line in compose_text.splitlines() if line.strip().startswith("image:")]
+        self.assertTrue(image_lines)
+        self.assertTrue(all("@sha256:" in line for line in image_lines))
         self.assertFalse(registry.get("vaultwarden").mcp.get("exposed", False))
 
     def test_rejects_compose_path_escape(self):

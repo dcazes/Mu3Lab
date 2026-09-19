@@ -44,7 +44,7 @@ class RegistryV3Tests(unittest.TestCase):
         registry = load()
         optional = [service for service in registry.services if service.stage == "optional"]
         self.assertEqual({service.id for service in optional},
-                         {"mealie", "actual-budget", "immich", "adventurelog", "paperless-ngx"})
+                         {"surfsense", "mealie", "actual-budget", "immich", "adventurelog", "paperless-ngx"})
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
@@ -73,6 +73,12 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(second.count(":19467 {"), 1)
 
+    def test_surfsense_route_is_authentik_gated_before_local_login(self):
+        block = render("{\n  admin off\n}\n", [load().get("surfsense")])
+        self.assertIn(":19464 {", block)
+        self.assertIn("forward_auth 127.0.0.1:9001", block)
+        self.assertIn("reverse_proxy 127.0.0.1:3929", block)
+
 
 class InstallationWorkflowTests(unittest.TestCase):
     def test_optional_install_executes_the_bounded_stage_contract(self):
@@ -92,7 +98,7 @@ class InstallationWorkflowTests(unittest.TestCase):
                  patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")), \
                  patch("ctl.service_ops.actions.docker_image_digest",
                        return_value=(0, 'ghcr.io/mealie-recipes/mealie@sha256:abc')), \
-                 patch("ctl.service_ops.actions.compose_up", return_value=(0, "started")), \
+                patch("ctl.service_ops.actions.compose_up", return_value=(0, "started")), \
                  patch("ctl.service_ops._wait_healthy", return_value=(True, "HTTP 200")), \
                  patch("ctl.service_ops.apply_route", return_value=(True, "ready")), \
                  patch("ctl.service_state.tailnet_dns_name", return_value=""):
@@ -104,6 +110,12 @@ class InstallationWorkflowTests(unittest.TestCase):
             for stage in ("validate_service", "materialize_runtime", "pull_images", "resolve_digests",
                           "start_service", "verify_application", "configure_route", "finalize"):
                 self.assertIn(stage, stages)
+
+    def test_surfsense_install_allows_bounded_migration_and_zero_cache_startup(self):
+        compose = (ROOT / "apps/surfsense/docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("condition: service_completed_successfully", compose)
+        self.assertIn('SANDBOX_ENABLED: "FALSE"', compose)
+        self.assertNotIn("docker.sock", compose)
 
 
 if __name__ == "__main__":

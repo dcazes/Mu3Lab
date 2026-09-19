@@ -54,14 +54,18 @@ def _read(paths: RuntimePaths) -> list[dict[str, str]]:
 
 def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
     """Upsert one credential and return metadata only."""
+    from ctl.provider_catalog import get
+    provider = get(provider_id)
+    provider_id = provider.id
+    label = label.strip() or provider.name
     if not PROVIDER_ID.fullmatch(provider_id):
         raise ProviderSecretError("provider id must be a short lowercase slug")
-    if not label.strip() or len(label.strip()) > 64:
-        raise ProviderSecretError("provider label is required and must be at most 64 characters")
+    if len(label) > 64:
+        raise ProviderSecretError("provider label must be at most 64 characters")
     if not api_key or len(api_key) > 4096:
         raise ProviderSecretError("provider credential is required and too long")
     records = _read(paths)
-    record = {"id": provider_id, "label": label.strip(), "api_key": api_key,
+    record = {"id": provider_id, "label": label, "api_key": api_key,
               "updated_at": datetime.now(UTC).isoformat(timespec="seconds")}
     records = [item for item in records if item.get("id") != provider_id]
     records.append(record)
@@ -74,7 +78,23 @@ def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = Runti
     os.chmod(temporary, 0o600)
     os.replace(temporary, store_path)
     os.chmod(store_path, 0o600)
-    return {"id": provider_id, "label": label.strip(), "updated_at": record["updated_at"]}
+    return {"id": provider_id, "label": label, "updated_at": record["updated_at"]}
+
+
+def delete(provider_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
+    """Delete one credential atomically without exposing any other record."""
+    records = _read(paths)
+    retained = [item for item in records if item.get("id") != provider_id]
+    if len(retained) == len(records):
+        return False
+    cipher = _cipher(paths)
+    _, store_path = _paths(paths)
+    temporary = store_path.with_suffix(".enc.tmp")
+    temporary.write_bytes(cipher.encrypt(json.dumps(retained).encode("utf-8")))
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, store_path)
+    os.chmod(store_path, 0o600)
+    return True
 
 
 def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:

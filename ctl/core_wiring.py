@@ -51,6 +51,12 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
         raise ValueError("core service credentials have not been initialized")
 
     providers = records(paths)
+    from ctl.control_state import ControlState
+    state = ControlState.runtime(paths)
+    if state:
+        providers = [item for item in providers
+                     if (connection := state.provider(item["id"]))
+                     and connection["enabled"] and connection["state"] in {"verifying", "verified"}]
     # This is the Mu3Lab-owned, supported declarative hand-off.  The adapter
     # records provider names/keys privately; the runtime verifier refuses to
     # claim chat readiness until the pinned FreeLLMAPI image accepts it.

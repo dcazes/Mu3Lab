@@ -27,6 +27,11 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
     servers: list[dict[str, Any]] = []
     for server in load_catalog(registry):
         service = services[server.service_id]
+        installation = persisted.installation(service.id) if persisted else None
+        # MCP is an enhancement for an application the operator has actually
+        # installed, never an alternate application installer.
+        if not installation or not installation.get("installed_at"):
+            continue
         app_state = service_states.get(service.id, "unknown")
         runtime = persisted.mcp_server(server.id) if persisted else None
         enabled = bool(runtime and runtime["enabled"])
@@ -35,6 +40,8 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             state = "unavailable"
             error = ("No public MCP is currently available for this app." if server.status == "not_available"
                      else "Candidate requires a completed security/runtime review.")
+        elif app_state == "stopped":
+            state, error = "stopped", "Start the application before installing or verifying its MCP integration."
         elif service.is_blocked or app_state in {"blocked", "planned", "not_installed", "config_required"}:
             state, error = "unavailable", service.blocked_reason or "Install the application first."
         elif missing:
@@ -56,6 +63,7 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             "enabled": enabled, "state": state, "error": error,
             "review": {"status": server.status, "repository": server.repository,
                        "revision": server.revision, "preferred": server.preferred},
+            "last_verified_at": str((runtime or {}).get("last_verified_at", "")),
             "auth": {"type": "service-credential" if server.credentials else "none",
                      "scopes": list(manifest.get("scopes", [])), "configured": not missing},
             "configuration": [{key: value for key, value in field.items() if key != "env"} | {
@@ -67,7 +75,7 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             "tools": tools,
         })
     summary_states = ("live", "degraded", "authentication_required", "disabled", "unavailable",
-                      "starting", "incompatible", "failed")
+                      "starting", "incompatible", "failed", "stopped")
     summary = {state: sum(item["state"] == state for item in servers) for state in summary_states}
     return {"ok": True, "servers": servers, "summary": summary,
             "policy": "Application data only; infrastructure lifecycle and Vaultwarden are excluded."}

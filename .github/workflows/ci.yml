@@ -34,14 +34,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import yaml
-          for path in (Path('services.yaml'), Path('catalog.yaml'),
-                       *Path('core').glob('*/docker-compose.yml'),
-                       *Path('apps').glob('*/docker-compose.yml')):
+          for path in (Path('services.yaml'), Path('catalog.yaml'), Path('mcp-catalog.yaml'),
+                       *Path('core').glob('**/docker-compose.yml'),
+                       *Path('apps').glob('**/docker-compose.yml')):
               yaml.safe_load(path.read_text(encoding='utf-8'))
           PY
       - name: Validate Compose interpolation
         run: |
-          for compose_file in core/*/docker-compose.yml apps/*/docker-compose.yml; do
+          while IFS= read -r compose_file; do
             MU3LAB_ENV_FILE=/dev/null \
             AUTHENTIK_ENV_FILE=/dev/null \
             AUTHENTIK_TAG=2026.5.0 \
@@ -49,8 +49,28 @@ jobs:
             AUTHENTIK_POSTGRESQL__PASSWORD=ci-placeholder \
             MU3LAB_INGRESS_TOKEN=ci-placeholder \
             MU3LAB_DATA_ROOT=/srv/mu3lab/data \
+            DB_PASSWORD=ci-placeholder \
+            SECRET_KEY=ci-placeholder \
+            ZERO_ADMIN_PASSWORD=ci-placeholder \
+            SEARXNG_SECRET=ci-placeholder \
+            SURFSENSE_PUBLIC_URL=https://example.ts.net:8447 \
+            POSTGRES_PASSWORD=ci-placeholder \
+            DJANGO_ADMIN_USERNAME=ci-operator \
+            DJANGO_ADMIN_EMAIL=operator@example.test \
+            DJANGO_ADMIN_PASSWORD=ci-placeholder \
+            PAPERLESS_ADMIN_USER=ci-operator \
+            PAPERLESS_ADMIN_MAIL=operator@example.test \
+            PAPERLESS_ADMIN_PASSWORD=ci-placeholder \
+            PAPERLESS_DBPASS=ci-placeholder \
+            PAPERLESS_SECRET_KEY=ci-placeholder \
+            ACTUAL_PASSWORD=ci-placeholder \
+            ACTUAL_BUDGET_SYNC_ID=ci-placeholder \
+            MCP_AUTH_TOKEN=ci-placeholder \
+            MEALIE_API_TOKEN=ci-placeholder \
+            IMMICH_API_KEY=ci-placeholder \
+            PAPERLESS_API_KEY=ci-placeholder \
               docker compose -f "$compose_file" config --quiet
-          done
+          done < <(find core apps -name docker-compose.yml -type f | sort)
       - name: Scan tracked files for accidental private environment files
         run: |
           ! git ls-files | grep -E '(^|/)\.env$'

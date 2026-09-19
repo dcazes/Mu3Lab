@@ -23,9 +23,9 @@ management:
 - Install-time images are resolved to immutable digests. Automated update,
   backup, and restore execution are intentionally deferred until after the MVP.
 - Vaultwarden and infrastructure lifecycle are always excluded from MCP exposure.
-- SurfSense and Firecrawl are planned, not installable or ready. They remain
-  hidden behind a blocked maturity state until their full upstream deployment,
-  backup, route, and functional-test contracts exist.
+- SurfSense is installable through a reviewed v0.0.40 stack with its privileged
+  sandbox disabled. Its tailnet route is Authentik-gated and SurfSense then uses
+  a separate local account. Firecrawl remains blocked pending its full contract.
 
 ## Current development state
 
@@ -53,12 +53,14 @@ reviewed CPU, NVIDIA, or AMD Ollama runtime contract; apps that do not use
 acceleration ignore it. Basic application logs are bounded and redacted before
 reaching the browser. Update execution is deferred from the MVP.
 
-Connections includes reviewed application-data MCP integrations for Mealie,
-Actual Budget, Immich, and Paperless-ngx. Operators provide write-only app
-credentials, then Mu3Lab starts the isolated integration, performs live MCP
-tool discovery, and registers the verified endpoint with Open WebUI. Firecrawl
-and SurfSense candidates remain unavailable while their parent applications are
-blocked; AdventureLog currently has no suitable public MCP server.
+Provider Accounts accepts a curated eight-provider allowlist, stores one
+write-only encrypted credential per provider, and reports live verification and
+model samples from the FreeLLMAPI route. Advanced Integrations shows MCP cards
+only for installed applications. Operators provide write-only app credentials,
+then Mu3Lab installs the isolated integration, discovers its live tools, and
+registers the endpoint with Open WebUI. SurfSense is the first official MCP
+reference: the operator creates an `ss_pat_…` token in SurfSense and completes
+the remaining installation and Chat connection from the dashboard.
 
 ## Developer checks
 

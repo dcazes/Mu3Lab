@@ -32,17 +32,23 @@ export interface IdentityResponse { ok: boolean; control_plane_auth: string; use
 export interface CoreSetupResponse { ok: boolean; ready_to_run: boolean; services: string[]; missing_manifests: string[]; current_job?: Job | null; next_action: string; capacity?: { ok: boolean; reasons?: string[]; disk_free?: number; memory_total?: number; docker_ready?: boolean }; provisioning?: ProvisioningResponse | null; }
 export interface ProvisioningPhase { phase_id: string; label: string; actual_state: string; detail: string; error: string; updated_at: string; attempts: number; }
 export interface ProvisioningResponse { ok: boolean; available: boolean; complete: boolean; phases: ProvisioningPhase[]; waiting?: ProvisioningPhase | null; blocked?: ProvisioningPhase | null; }
-export interface ProviderMetadata { id: string; label: string; updated_at: string; }
+export interface ProviderCatalogItem { id: string; name: string; key_hint: string; prefix: string; instructions: string; example_models: string[]; }
+export interface ProviderMetadata { id: string; name: string; label: string; enabled: boolean; state: 'saved' | 'verifying' | 'verified' | 'degraded' | 'disabled' | 'unsupported_legacy'; key_hint: string; credential_indicator: string; model_samples: string[]; models_are_examples: boolean; last_attempt_at: string; last_verified_at: string; updated_at: string; active_job_id: string; error: string; supported: boolean; }
 export interface ProviderMetadataResponse { ok: boolean; providers: ProviderMetadata[]; }
 export interface Job { id: string; kind: string; service_id: string; action: string; state: string; actor: string; created_at: string; updated_at: string; detail: string; step_id?: string; error_code?: string; }
 export interface JobsResponse { ok: boolean; available: boolean; jobs: Job[]; }
 export interface AuditEvent { id: number; job_id: string | null; actor: string; event: string; created_at: string; detail: string; }
 export interface AuditResponse { ok: boolean; available: boolean; events: AuditEvent[]; }
 
-export async function api<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: 'application/json' } });
+export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, { headers: { Accept: 'application/json' }, signal });
   if (!res.ok) throw new Error(`GET ${path}: HTTP ${res.status}`);
   return res.json() as Promise<T>;
+}
+
+async function errorMessage(res: Response, method: string, path: string): Promise<string> {
+  try { const body = await res.json() as { error?: string }; if (body.error) return body.error; } catch { /* use HTTP fallback */ }
+  return `${method} ${path}: HTTP ${res.status}`;
 }
 
 let csrfToken: Promise<string> | null = null;
@@ -54,28 +60,35 @@ function csrf(): Promise<string> {
 export async function postApi<T>(path: string): Promise<T> {
   const token = await csrf();
   const res = await fetch(path, { method: 'POST', headers: { Accept: 'application/json', 'Idempotency-Key': crypto.randomUUID(), 'X-Mu3Lab-CSRF': token } });
-  if (!res.ok) throw new Error(`POST ${path}: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, 'POST', path));
   return res.json() as Promise<T>;
 }
 
 export async function postJsonApi<T>(path: string, body: unknown): Promise<T> {
   const token = await csrf();
   const res = await fetch(path, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID(), 'X-Mu3Lab-CSRF': token }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`POST ${path}: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, 'POST', path));
   return res.json() as Promise<T>;
 }
 
 export async function putJsonApi<T>(path: string, body: unknown): Promise<T> {
   const token = await csrf();
   const res = await fetch(path, { method: 'PUT', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Mu3Lab-CSRF': token }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`PUT ${path}: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(await errorMessage(res, 'PUT', path));
+  return res.json() as Promise<T>;
+}
+
+export async function deleteApi<T>(path: string): Promise<T> {
+  const token = await csrf();
+  const res = await fetch(path, { method: 'DELETE', headers: { Accept: 'application/json', 'Idempotency-Key': crypto.randomUUID(), 'X-Mu3Lab-CSRF': token } });
+  if (!res.ok) throw new Error(await errorMessage(res, 'DELETE', path));
   return res.json() as Promise<T>;
 }
 
 export interface ServiceLogsResponse { ok: boolean; service_id: string; container: string; lines: string[]; }
 export interface JobDetailResponse { ok: boolean; job: Job; events: AuditEvent[]; }
 export interface UpdateResponse { ok: boolean; repository: string; current_version: string; latest_version: string; release_url: string; published_at: string; release_name: string; notes: string; update_available: boolean; update_enabled: boolean; blocked_reason: string; checked_at: number; }
-export interface McpServer { id: string; name: string; service_id: string; kind: string; transport: string; app_state: string; enabled: boolean; state: 'live' | 'degraded' | 'authentication_required' | 'disabled' | 'unavailable' | 'starting' | 'incompatible' | 'failed'; error?: string | null; auth: { type: string; scopes: string[]; configured: boolean }; review?: { status: string; repository: string; revision: string; preferred: boolean }; configuration?: ServiceConfigField[]; tools: Array<{ id: string; title: string; risk: string; enabled: boolean }>; }
+export interface McpServer { id: string; name: string; service_id: string; kind: string; transport: string; app_state: string; enabled: boolean; state: 'live' | 'degraded' | 'authentication_required' | 'disabled' | 'unavailable' | 'starting' | 'incompatible' | 'failed' | 'stopped'; error?: string | null; last_verified_at?: string; auth: { type: string; scopes: string[]; configured: boolean }; review?: { status: string; repository: string; revision: string; preferred: boolean }; configuration?: ServiceConfigField[]; tools: Array<{ id: string; title: string; risk: string; enabled: boolean }>; }
 export interface McpRegistryResponse { ok: boolean; servers: McpServer[]; summary: Record<string, number>; policy: string; }
 export interface ChatStatus { ok: boolean; ready: boolean; url: string; authentication: string; mcp_enabled_count: number; detail: string; }
 export interface SystemConfig { ok: boolean; compute_mode: 'auto' | 'cpu' | 'nvidia' | 'amd'; resolved_compute_mode: 'cpu' | 'nvidia' | 'amd'; available_modes: string[]; updated_at: string; updated_by: string; }

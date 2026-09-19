@@ -79,6 +79,16 @@ def _materialize(service: Service, root: Path) -> Path:
     elif service.id == "paperless-ngx":
         values.setdefault("PAPERLESS_DBPASS", token_secrets.token_urlsafe(36))
         values.setdefault("PAPERLESS_SECRET_KEY", token_secrets.token_urlsafe(48))
+    elif service.id == "surfsense":
+        values.setdefault("DB_USER", "surfsense")
+        values.setdefault("DB_NAME", "surfsense")
+        values.setdefault("DB_PASSWORD", token_secrets.token_urlsafe(36))
+        values.setdefault("SECRET_KEY", token_secrets.token_urlsafe(48))
+        values.setdefault("ZERO_ADMIN_PASSWORD", token_secrets.token_urlsafe(36))
+        values.setdefault("SEARXNG_SECRET", token_secrets.token_urlsafe(36))
+        values.setdefault("AUTH_TYPE", "LOCAL")
+        values.setdefault("REGISTRATION_ENABLED", "TRUE")
+        values.setdefault("SANDBOX_ENABLED", "FALSE")
     try:
         from ctl.service_state import tailnet_dns_name
         dns_name = tailnet_dns_name()
@@ -122,6 +132,8 @@ def _materialize(service: Service, root: Path) -> Path:
             values.setdefault("SITE_URL", public_url)
         elif service.id == "paperless-ngx":
             values.setdefault("PAPERLESS_URL", public_url)
+        elif service.id == "surfsense":
+            values.setdefault("SURFSENSE_PUBLIC_URL", public_url)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
     return target
@@ -257,7 +269,9 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_installation(service.id, "starting", job_id=job_id,
                                manifest_version="3", image_digests=image_snapshot)
     _event(store, job_id, "start_service", "Starting application containers.")
-    rc, output = actions.compose_up(project, log, wait_timeout=120)
+    wait_timeout = 900 if service.id == "surfsense" else 120
+    rc, output = actions.compose_up(project, log, timeout=wait_timeout + 300,
+                                    wait_timeout=wait_timeout)
     if rc:
         _fail(store, state, job_id, service.id, actor, "start_service",
               "compose_start_failed", f"Application start failed: {output}")

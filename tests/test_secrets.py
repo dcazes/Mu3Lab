@@ -94,9 +94,9 @@ class RootEnvTests(unittest.TestCase):
         from ctl.runtime import RuntimePaths
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            self.assertEqual(save("openai", "Main provider", "sk-super-secret", paths)["id"], "openai")
+            self.assertEqual(save("groq", "Main provider", "gsk_super-secret", paths)["id"], "groq")
             self.assertEqual(metadata(paths)[0]["label"], "Main provider")
-            self.assertNotIn("sk-super-secret", (paths.runtime / "provider-connections.enc").read_text())
+            self.assertNotIn("gsk_super-secret", (paths.runtime / "provider-connections.enc").read_text())
 
 
 if __name__ == "__main__":

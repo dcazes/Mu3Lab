@@ -25,6 +25,9 @@ def write(server, submitted: dict[str, Any]) -> None:
             continue
         if not isinstance(value, str) or not value or "\n" in value or "\r" in value or len(value) > 2048:
             raise ValueError(f"{key} must be a non-empty single-line value")
+        prefix = str(field.get("prefix", ""))
+        if prefix and not value.startswith(prefix):
+            raise ValueError(f"{key} must use the expected {prefix}… format")
         values[str(field["env"])] = value
     missing = [str(field["key"]) for field in server.credentials
                if field.get("required") and not values.get(str(field["env"]))]

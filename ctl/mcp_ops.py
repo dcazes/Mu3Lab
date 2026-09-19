@@ -21,7 +21,7 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 
-SUPPORTED_ACTIONS = frozenset({"enable", "disable", "verify"})
+SUPPORTED_ACTIONS = frozenset({"enable", "install", "restart", "disable", "verify"})
 
 
 def _materialize(server, root: Path) -> Path:
@@ -89,10 +89,11 @@ def _decode_rpc_response(payload: bytes, content_type: str) -> dict:
 
 
 def _rpc_request(url: str, method: str, request_id: int, *, token: str = "",
-                 session_id: str = "") -> tuple[dict, str]:
-    params = ({"protocolVersion": "2025-03-26", "capabilities": {},
-               "clientInfo": {"name": "mu3lab-verifier", "version": "1"}}
-              if method == "initialize" else {})
+                 session_id: str = "", params: dict | None = None) -> tuple[dict, str]:
+    if params is None:
+        params = ({"protocolVersion": "2025-03-26", "capabilities": {},
+                   "clientInfo": {"name": "mu3lab-verifier", "version": "1"}}
+                  if method == "initialize" else {})
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
@@ -170,6 +171,13 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, str | bool
     ]
     if not tools:
         raise ValueError("MCP server returned no tools")
+    if getattr(server, "id", "") == "surfsense-official":
+        check, _ = _rpc_request(url, "tools/call", 3, token=token, session_id=session_id,
+                                params={"name": "surfsense_list_workspaces",
+                                        "arguments": {"response_format": "json"}})
+        result = check.get("result", {})
+        if not isinstance(result, dict) or result.get("isError"):
+            raise ValueError("SurfSense rejected the token or workspace API check")
     return tools
 
 
@@ -203,12 +211,65 @@ def _register_open_webui(catalog, state: ControlState, root: Path, log) -> tuple
     temporary.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(env_path)
+    project = root / "core" / "open-webui"
+    runtime_env = {"MU3LAB_ENV_FILE": str(env_path), "MU3LAB_DATA_ROOT": str(RuntimePaths().data)}
     rc, output = actions.compose_up(
-        root / "core" / "open-webui", log,
-        env={"MU3LAB_ENV_FILE": str(env_path), "MU3LAB_DATA_ROOT": str(RuntimePaths().data)},
+        project, log,
+        env=runtime_env,
         recreate=True, wait_timeout=120,
     )
+    if rc:
+        return False, output
+    # OpenWebUI persists configuration in its own configuration model. The
+    # environment is only a first-run default, so explicitly upsert that
+    # reviewed value from inside the application runtime. The secret never
+    # appears in argv, logs, or Mu3Lab's database.
+    sync_script = (
+        "import asyncio,json,os; "
+        "from open_webui.models.config import Config; "
+        "value=json.loads(os.environ.get('TOOL_SERVER_CONNECTIONS','[]')); "
+        "asyncio.run(Config.upsert({'tool_server.connections':value}))"
+    )
+    rc, output = actions.compose_exec(project, "open-webui", ["python", "-c", sync_script], log,
+                                      timeout=60, env=runtime_env)
+    if rc:
+        return False, output or "Open WebUI rejected the curated tool-server configuration."
+    # Restart once more so the runtime MCP manager consumes the persisted
+    # connection list rather than merely storing it for a future boot.
+    rc, output = actions.compose_up(project, log, env=runtime_env, recreate=True, wait_timeout=120)
     return rc == 0, output
+
+
+def _verify_from_open_webui(server, root: Path, log) -> tuple[bool, str]:
+    """Use OpenWebUI's own MCP client to prove the registered tools load."""
+    project = root / "core" / "open-webui"
+    script = """
+import asyncio
+import sys
+from open_webui.models.config import Config
+from open_webui.utils.mcp.client import MCPClient
+
+async def verify(server_id):
+    rows = await Config.get('tool_server.connections', []) or []
+    row = next((item for item in rows if (item.get('info') or {}).get('id') == server_id), None)
+    if not row:
+        return 2
+    token = row.get('key') if row.get('auth_type') == 'bearer' else None
+    headers = {'Authorization': f'Bearer {token}'} if token else None
+    client = MCPClient()
+    try:
+        await client.connect(row['url'], headers=headers)
+        tools = await client.list_tool_specs()
+        return 0 if tools else 3
+    finally:
+        await client.disconnect()
+
+raise SystemExit(asyncio.run(verify(sys.argv[1])))
+""".strip()
+    rc, output = actions.compose_exec(project, "open-webui",
+                                      ["python", "-c", script, server.id], log, timeout=60)
+    return rc == 0, output or ("Open WebUI tool discovery passed." if rc == 0 else
+                              "Open WebUI could not discover the registered MCP tools.")
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
@@ -290,6 +351,13 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
                              error={"message": redact(detail)})
         store.transition(job_id, "failed", actor=actor, detail=redact(detail),
                          error_code="open_webui_registration_failed", step_id="register")
+        return
+    ok, detail = _verify_from_open_webui(server, root, log)
+    if not ok:
+        state.set_mcp_server(server.id, server.service_id, enabled=True, state="incompatible",
+                             error={"message": redact(detail)})
+        store.transition(job_id, "failed", actor=actor, detail=redact(detail),
+                         error_code="open_webui_tool_discovery_failed", step_id="verify_open_webui")
         return
     store.transition(job_id, "succeeded", actor=actor,
                      detail=f"{server.name} is live and registered with Open WebUI.",

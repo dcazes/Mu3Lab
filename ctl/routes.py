@@ -16,6 +16,27 @@ END = "# END MU3LAB GENERATED APP ROUTES"
 
 def _block(service: Service) -> str:
     assert service.proxy_port is not None
+    if service.id == "surfsense":
+        return f"""
+:{service.proxy_port} {{
+\tbind 127.0.0.1
+\troute {{
+\t\treverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+\t\tforward_auth 127.0.0.1:9001 {{
+\t\t\turi /outpost.goauthentik.io/auth/caddy
+\t\t\theader_up Host {{http.request.host}}
+\t\t\theader_up X-Forwarded-Host {{http.request.host}}
+\t\t\theader_up X-Forwarded-Proto https
+\t\t\tcopy_headers X-Authentik-Username X-Authentik-Email X-Authentik-Name X-Authentik-Groups
+\t\t\ttrusted_proxies private_ranges
+\t\t}}
+\t\treverse_proxy 127.0.0.1:{service.https_port} {{
+\t\t\theader_up X-Forwarded-Proto https
+\t\t\theader_up X-Forwarded-Host {{http.request.host}}
+\t\t}}
+\t}}
+}}
+""".strip()
     return f"""
 :{service.proxy_port} {{
 \tbind 127.0.0.1

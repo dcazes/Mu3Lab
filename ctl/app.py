@@ -47,6 +47,7 @@ from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl import actions
 from ctl import service_config
+from ctl.provider_catalog import catalog as provider_catalog, get as get_provider, prefix_warning
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dashboard" / "dist"
@@ -371,20 +372,46 @@ def core_setup() -> dict:
 @app.get("/api/connections/providers")
 @app.get("/api/v1/providers")
 def provider_metadata(request: Request) -> dict:
-    """List provider labels only; encrypted keys never cross this boundary."""
+    """List safe connection state; encrypted keys never cross this boundary."""
     identity_data = identity(request)
     if not identity_data["writes_enabled"]:
         return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
     try:
-        from ctl.provider_secrets import metadata
-        return {"ok": True, "providers": metadata()}
+        from ctl.provider_ops import migrate_legacy
+        state = ControlState.runtime()
+        if state is None:
+            raise ValueError("provider state is not initialized")
+        migrate_legacy(state)
+        providers = []
+        for item in state.providers():
+            try:
+                definition = get_provider(str(item["provider_id"]))
+                hint = definition.key_hint
+                name = definition.name
+                examples = list(definition.example_models)
+                supported = True
+            except ValueError:
+                hint, name, examples, supported = "Unknown legacy format", str(item["label"]), [], False
+            providers.append({
+                "id": item["provider_id"], "name": name, "label": item["label"],
+                "enabled": item["enabled"], "state": item["state"], "key_hint": hint,
+                "credential_indicator": hint.replace("…", "••••"),
+                "model_samples": item["model_samples"] or examples,
+                "models_are_examples": not bool(item["model_samples"]),
+                "last_attempt_at": item["last_attempt_at"],
+                "last_verified_at": item["last_verified_at"],
+                "updated_at": item["updated_at"], "active_job_id": item["active_job_id"],
+                "error": (item["last_error"] or {}).get("message", ""), "supported": supported,
+            })
+        return {"ok": True, "providers": providers}
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
 
 
 @app.post("/api/connections/providers")
 @app.post("/api/v1/providers")
-async def save_provider(request: Request) -> dict:
+@app.post("/api/v1/providers/{provider_id}")
+async def save_provider(request: Request, provider_id: str = "") -> dict:
     """Accept one provider key without ever echoing or logging its value."""
     identity_data = identity(request)
     if not identity_data["writes_enabled"]:
@@ -400,50 +427,96 @@ async def save_provider(request: Request) -> dict:
         return {"ok": True, "duplicate": True, "job": previous}
     try:
         payload = await request.json()
-        provider_id = str(payload.get("provider_id", ""))
-        label = str(payload.get("label", ""))
+        provider_id = provider_id or str(payload.get("provider_id", ""))
+        definition = get_provider(provider_id)
+        provider_id = definition.id
+        label = str(payload.get("label", "")).strip() or definition.name
         api_key = str(payload.get("api_key", ""))
         from ctl.provider_secrets import save
         result = save(provider_id, label, api_key)
     except (ValueError, TypeError, AttributeError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-    audit_job = store.create(kind="wiring", service_id="provider-accounts",
+    warning = prefix_warning(provider_id, api_key)
+    control = ControlState.runtime()
+    if control:
+        control.set_provider(result["id"], result["label"], enabled=True, state="verifying")
+    audit_job = store.create(kind="wiring", service_id=f"provider:{result['id']}",
                              action="save", actor=identity_data["username"],
                              detail=f"provider:{result['id']}",
                              idempotency_key=idempotency_key or None)
-    if audit_job["state"] == "queued":
-        store.transition(audit_job["id"], "running", actor=identity_data["username"],
-                         detail="Applying encrypted provider metadata.")
-        store.transition(audit_job["id"], "succeeded", actor=identity_data["username"],
-                         detail="Provider credential stored in encrypted local storage.")
-    # Materialize the private gateway configuration synchronously. The
-    # browser receives only a status; credentials never leave this process.
-    reconciliation = None
+    if control:
+        control.set_provider(result["id"], result["label"], enabled=True, state="verifying",
+                             attempted=True, job_id=str(audit_job["id"]))
+    return {"ok": True, "provider": result, "job": audit_job, "warning": warning,
+            "routing": {"configured": False,
+                        "detail": "Credential saved privately; the durable worker is verifying model discovery and streamed routing."}}
+
+
+@app.get("/api/v1/providers/catalog")
+def providers_catalog(request: Request) -> dict:
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    return {"ok": True, "providers": provider_catalog()}
+
+
+async def _provider_action(provider_id: str, action: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
     try:
-        from ctl.core_wiring import configure
-        wiring = configure()
-        provisioning = ProvisioningStore.runtime()
-        if provisioning:
-            provisioning.update("configuration", "running",
-                                detail="Provider saved; preparing private AI routing.")
-        active = [job for job in store.jobs() if job["service_id"] == "core-suite"
-                  and job["state"] in {"queued", "running"}]
-        if not active:
-            reconciliation = start_core_setup(
-                store, identity_data["username"], ROOT,
-                idempotency_key=f"provider-reconcile:{result['id']}:{result['updated_at']}")
-            if provisioning:
-                provisioning.update("configuration", "running",
-                                    detail="Provider configuration saved; reconciling live AI routing.")
-    except ValueError:
-        # The user can enroll providers before the core service credentials
-        # exist. They will be picked up during the first reconciliation.
-        wiring = {"chat_configured": False, "provider_count": 1}
-    return {"ok": True, "provider": result,
-            "routing": {"configured": bool(wiring["chat_configured"]),
-                        "provider_count": int(wiring["provider_count"]),
-                        "detail": "Credential saved privately; Mu3Lab is verifying live routing before calling chat ready."},
-            "reconciliation_job": reconciliation}
+        provider = get_provider(provider_id)
+    except ValueError as exc:
+        state = ControlState.runtime()
+        legacy = state.provider(provider_id) if state else None
+        if action != "remove" or not legacy or legacy.get("state") != "unsupported_legacy":
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+        provider = None
+    state = ControlState.runtime()
+    resolved_id = provider.id if provider else provider_id
+    if state is None or not state.provider(resolved_id):
+        return JSONResponse({"ok": False, "error": "provider connection does not exist"}, status_code=404)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    try:
+        job = store.create(kind="wiring", service_id=f"provider:{resolved_id}", action=action,
+                           actor=identity_data["username"], detail=f"Operator requested provider {action}.",
+                           idempotency_key=request.headers.get("idempotency-key") or None)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/v1/providers/{provider_id}/verify")
+async def verify_provider(provider_id: str, request: Request) -> dict:
+    return await _provider_action(provider_id, "verify", request)
+
+
+@app.post("/api/v1/providers/{provider_id}/enable")
+async def enable_provider(provider_id: str, request: Request) -> dict:
+    return await _provider_action(provider_id, "enable", request)
+
+
+@app.post("/api/v1/providers/{provider_id}/disable")
+async def disable_provider(provider_id: str, request: Request) -> dict:
+    return await _provider_action(provider_id, "disable", request)
+
+
+@app.delete("/api/v1/providers/{provider_id}")
+async def remove_provider(provider_id: str, request: Request) -> dict:
+    return await _provider_action(provider_id, "remove", request)
+
+
+@app.get("/api/v1/providers/{provider_id}/models")
+def provider_models(provider_id: str, request: Request) -> dict:
+    result = provider_metadata(request)
+    if isinstance(result, JSONResponse):
+        return result
+    provider = next((item for item in result["providers"] if item["id"] == provider_id), None)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "provider connection does not exist"}, status_code=404)
+    return {"ok": True, "provider_id": provider_id, "models": provider["model_samples"],
+            "examples": provider["models_are_examples"]}
 
 
 @app.post("/api/setup/core")
@@ -651,6 +724,7 @@ def mcp_tools(server_id: str, request: Request) -> dict:
 
 
 @app.put("/api/v1/mcp/servers/{server_id}/configuration")
+@app.post("/api/v1/mcp/servers/{server_id}/credentials")
 async def put_mcp_configuration(server_id: str, request: Request) -> dict:
     identity_data = identity(request)
     if not identity_data["writes_enabled"] or not _mutation_allowed(request):
@@ -705,6 +779,16 @@ async def enable_mcp(server_id: str, request: Request) -> dict:
     return await _queue_mcp_action(server_id, "enable", request)
 
 
+@app.post("/api/v1/mcp/servers/{server_id}/install")
+async def install_mcp(server_id: str, request: Request) -> dict:
+    return await _queue_mcp_action(server_id, "install", request)
+
+
+@app.post("/api/v1/mcp/servers/{server_id}/restart")
+async def restart_mcp(server_id: str, request: Request) -> dict:
+    return await _queue_mcp_action(server_id, "restart", request)
+
+
 @app.post("/api/v1/mcp/servers/{server_id}/disable")
 async def disable_mcp(server_id: str, request: Request) -> dict:
     return await _queue_mcp_action(server_id, "disable", request)
@@ -713,6 +797,24 @@ async def disable_mcp(server_id: str, request: Request) -> dict:
 @app.post("/api/v1/mcp/servers/{server_id}/verify")
 async def verify_mcp(server_id: str, request: Request) -> dict:
     return await _queue_mcp_action(server_id, "verify", request)
+
+
+@app.get("/api/v1/mcp/servers/{server_id}/logs")
+def mcp_logs(server_id: str, request: Request, tail: int = 120) -> dict:
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    registry = load_registry()
+    server = next((item for item in load_mcp_catalog(registry) if item.id == server_id), None)
+    if not server:
+        return JSONResponse({"ok": False, "error": "unknown MCP server"}, status_code=404)
+    project = RuntimePaths().projects / f"mcp-{server.id}"
+    if not (project / "docker-compose.yml").is_file():
+        return JSONResponse({"ok": False, "error": "MCP runtime is not installed"}, status_code=409)
+    output_lines: list[str] = []
+    rc, output = actions.compose_logs(project, output_lines.append, tail=max(20, min(tail, 500)))
+    return JSONResponse({"ok": rc == 0, "server_id": server.id,
+                         "lines": [redact(line) for line in output[-40000:].splitlines()]},
+                        status_code=200 if rc == 0 else 500)
 
 
 @app.get("/api/v1/chat/status")

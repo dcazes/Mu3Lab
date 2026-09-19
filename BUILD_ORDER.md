@@ -12,23 +12,18 @@ source of truth for current implementation status.
 - [x] x86-64 CPU/NVIDIA/AMD preflight classification; ARM is rejected for v1.
 - [x] `/srv/mu3lab` runtime layout and a registry-backed read-only dashboard.
 - [x] Pinned Compose templates for Caddy, Authentik, and Vaultwarden.
-- [x] SurfSense explicitly classified as blocked, not as SSO-capable.
+- [x] SurfSense classified as an Authentik-gated, local-account application;
+  its non-privileged stack and official MCP are installable from the dashboard.
 
-## Next implementation gates
+## Remaining implementation gates
 
-1. Make the Docker logout/login checkpoint enforce the supported operator
-   session transition, then finish core Compose environment rendering and
-   health-gated startup.
-2. Configure the single MagicDNS hostname through Tailscale Serve and Caddy;
-   expose only declared tailnet HTTPS routes and verify them from the tailnet.
-3. Add Authentik protection to the permanent dashboard before any mutating
-   lifecycle endpoint exists.
-4. Persist resumable, append-only, secret-free setup/lifecycle/backup jobs
-   under `/srv/mu3lab/runtime`.
-5. Implement encrypted Restic snapshots and a typed-confirmation restore flow
+1. Run the provider, SurfSense, and SurfSense MCP live acceptance path on a
+   clean supported host and retain the resulting release/digest evidence.
+2. Promote each remaining application MCP only after its installed-app,
+   credential, tool-discovery, and OpenWebUI registration checks pass.
+3. Implement encrypted Restic snapshots and a typed-confirmation restore flow
    for Authentik, Vaultwarden, and LiteLLM configuration.
-6. Add the Ollama → LiteLLM → Open WebUI vertical slice, including resource
-   profiles, connection tests, free-first routing, and MCP authorization tests.
+4. Add update execution only after the backup/restore contract is operational.
 
 No optional service is considered supported merely because it appears in the
 catalog. It becomes supported only after every gate above that applies to it is

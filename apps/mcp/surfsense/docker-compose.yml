@@ -1,0 +1,29 @@
+name: mu3lab-mcp-surfsense
+services:
+  surfsense-mcp:
+    image: mu3lab/surfsense-mcp:c139e191a831
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SURFSENSE_BASE_URL: http://surfsense-proxy
+      SURFSENSE_MCP_TRANSPORT: streamable-http
+      SURFSENSE_MCP_HOST: 0.0.0.0
+      SURFSENSE_MCP_PORT: 8080
+    ports: ["127.0.0.1:8817:8080"]
+    networks: [mu3lab_backend, mu3lab_mcp]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

@@ -18,6 +18,7 @@ from ctl.core_setup import execute_claimed
 from ctl.jobs import JobStore
 from ctl.service_ops import execute_claimed as execute_service_claimed
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
+from ctl.provider_ops import execute_claimed as execute_provider_claimed
 
 ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
@@ -66,6 +67,8 @@ def run() -> int:
                 execute_claimed(store, job, worker_id, ROOT)
             elif str(job.get("service_id") or "").startswith("mcp:"):
                 execute_mcp_claimed(store, job, worker_id, ROOT)
+            elif str(job.get("service_id") or "").startswith("provider:"):
+                execute_provider_claimed(store, job, worker_id, ROOT)
             else:
                 execute_service_claimed(store, job, worker_id, ROOT)
         except Exception as exc:  # final containment for all future dispatchers

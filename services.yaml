@@ -154,7 +154,7 @@ services:
     backup: {binds: [data]}
 
   - id: surfsense
-    maturity: planned
+    maturity: supported
     name: SurfSense
     category: research
     lifecycle: optional
@@ -162,19 +162,28 @@ services:
     https_port: 3929
     private_https_port: 8447
     proxy_port: 19464
-    health: {kind: tcp, port: 3929}
+    health: {kind: http, url: "http://127.0.0.1:3929/"}
     auth: local
-    dependencies: [litellm, ollama, firecrawl]
-    availability: blocked
-    stage: blocked
+    dependencies: [litellm, ollama]
+    availability: available
+    stage: optional
     required: false
-    blocked_reason: "Planned: the full migrations, worker, zero-cache, proxy, backup, and functional-test contract is not yet implemented."
     route: pending
-    identity_note: "Own local account; Vaultwarden may store/fill credentials. This is not true SSO."
-    setup_action: "Create the first SurfSense account in SurfSense and save it in Vaultwarden if desired."
-    resource_guidance: "Requires LiteLLM, Ollama, Firecrawl, and its stateful dependencies."
-    images: ["ghcr.io/modsetter/surfsense-backend:0.0.31", "ghcr.io/modsetter/surfsense-web:0.0.31", "pgvector/pgvector:pg17", "redis:8.2-alpine"]
-    backup: {database: surfsense, binds: [object-store]}
+    identity_note: "Authentik protects the private route, then SurfSense uses a separate local account. This is intentionally not SSO. Create the first local account, then consider disabling registration."
+    setup_action: "Install SurfSense, open its secure route, and create a separate local account after Authentik."
+    resource_guidance: "Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is disabled."
+    configuration:
+      - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Allow new local accounts", default: true}
+    images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
+    update: {repository: MODSetter/SurfSense, current_version: "v0.0.40"}
+    backup: {database: surfsense, binds: [object-store, zero-cache]}
+    mcp:
+      kind: official
+      endpoint: http://surfsense-mcp:8080/mcp
+      auth: personal-api-token
+      scopes: [workspace-read, knowledge-read, knowledge-write, scraper-run]
+      exposed: false
+      tools: []
 
   - id: firecrawl
     maturity: planned

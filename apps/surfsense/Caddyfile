@@ -1,0 +1,18 @@
+{
+	admin off
+}
+
+:80 {
+	request_body {
+		max_size 5GB
+	}
+	reverse_proxy /auth/callback* frontend:3000
+	reverse_proxy /auth/* backend:8000
+	reverse_proxy /users/* backend:8000
+	reverse_proxy /api/v1/* backend:8000 {
+		flush_interval -1
+	}
+	reverse_proxy /zero/context backend:8000
+	reverse_proxy /zero/* zero-cache:4848
+	reverse_proxy /* frontend:3000
+}

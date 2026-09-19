@@ -82,15 +82,18 @@ servers:
   - id: surfsense-official
     service_id: surfsense
     name: SurfSense MCP
-    status: review_required
+    status: accepted
     preferred: true
     provenance: official
     repository: https://github.com/ModSetter/SurfSense
-    revision: 51a2f5f41a3ed5fafa3ba7d3221118a0a8b02789
-    transport: stdio
-    endpoint: ""
-    compose_dir: ""
-    credentials: []
+    revision: c139e191a831bab76b9afc4f9b2063f2175be109
+    package: surfsense-mcp@0.1.0
+    transport: streamable-http
+    endpoint: http://surfsense-mcp:8080/mcp
+    local_health: http://127.0.0.1:8817/health
+    compose_dir: apps/mcp/surfsense
+    credentials:
+      - {key: api_token, env: MCP_AUTH_TOKEN, type: secret, label: "SurfSense personal API token (ss_pat_…)", required: true, prefix: "ss_pat_"}
 
   - id: adventurelog
     service_id: adventurelog

@@ -38,7 +38,7 @@ Native Authentik OIDC is preferred. Authentik proxy/forward-auth protects access
 in front of a service but does not create or authenticate the service's own user
 session. Therefore Authentik and a local service password never need to match.
 
-SurfSense is included in the core suite as a **local-account** application. Its
+SurfSense is included as an optional **local-account** application. Its
 current upstream release has local email/password and Google OAuth, but no
 supported Authentik OIDC/SAML, trusted-header, or external provisioning
 integration. Mu3Lab will not fork it, automate browsers, write its database, or
@@ -63,13 +63,13 @@ checked before being marked verified.
    tailnet URL.
 3. Add authenticated, audited lifecycle jobs and the fixed core-suite executor
    to the React control plane.
-4. Deliver the complete mandatory slice: Ollama, FreeLLMAPI, LiteLLM, Open WebUI,
-   Firecrawl, and SurfSense. Routing is free-first; paid routes require an
-   explicit user choice, and SurfSense remains local-account only.
+4. Deliver the mandatory AI slice: Ollama, FreeLLMAPI, LiteLLM, and Open WebUI.
+   SurfSense is an optional Authentik-gated app with a separate local account;
+   Firecrawl remains blocked until its deployment contract is complete.
 5. Add optional curated applications one at a time only after their manifest,
    auth classification, health checks, storage/backup plan, resource profile,
    integration verification, and MCP policy are complete.
 
-MCP tools are curated and policy-bound: reads are allowed by default, drafts
-are visibly labeled, writes need confirmation, destructive operations require
-typed confirmation, and privileged host operations are never autonomous.
+MCP tools are curated application-data integrations and privileged host
+operations are never exposed. Tool risk remains recorded in the MVP; explicit
+write and destructive-action confirmation is a later policy layer.
