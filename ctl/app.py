@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 import hmac
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 import psutil
@@ -33,11 +34,19 @@ from fastapi.staticfiles import StaticFiles
 from ctl import __version__  # noqa: F401 (re-exported for /api/health)
 from ctl.backups import readiness as backup_readiness
 from ctl.core_setup import CORE_ORDER, plan as core_plan, start as start_core_setup
-from ctl.jobs import JobStore
+from ctl.jobs import JobStore, redact
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError, load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.service_state import status as service_status, tailnet_dns_name
+from ctl.releases import latest as latest_release
+from ctl.mcp_registry import snapshot as mcp_snapshot
+from ctl.mcp_catalog import load as load_mcp_catalog
+from ctl import mcp_config
+from ctl.service_state import compose_states, status as service_status, tailnet_dns_name, tailnet_serve_ports
+from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
+from ctl.control_state import COMPUTE_MODES, ControlState
+from ctl import actions
+from ctl import service_config
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dashboard" / "dist"
@@ -101,26 +110,66 @@ def health() -> dict:
 @app.get("/api/status")
 def status() -> dict:
     """Compatibility summary derived from the curated registry, not constants."""
-    services = list_services()["services"]
+    services = _service_snapshot()["services"]
     return {"version": __version__, "components": [
         {"id": item["id"], "label": item["name"], "detail": item["detail"]}
         for item in services
     ]}
 
 
-@app.get("/api/services")
-@app.get("/api/v1/services")
-def list_services() -> dict:
+def _service_snapshot(request: Request | None = None) -> dict:
     """Read the curated catalog and project live, non-mutating service health."""
     try:
         registry = load_registry()
     except RegistryError as exc:
         return {"ok": False, "error": str(exc), "services": []}
     dns_name = tailnet_dns_name()
+    route_ports = tailnet_serve_ports()
+    project_states = compose_states()
+    store = JobStore.runtime()
+    jobs = store.jobs(limit=100) if store else []
+    control_state = ControlState.runtime()
+    operator = bool(request and identity(request)["writes_enabled"])
+    with ThreadPoolExecutor(max_workers=min(8, len(registry.services))) as pool:
+        statuses = list(pool.map(
+            lambda service: service_status(service, dns_name, ROOT, route_ports, project_states),
+            registry.services))
+    result = []
+    for service, item in zip(registry.services, statuses, strict=True):
+        # Traversing the protected dashboard through Authentik is stronger
+        # evidence than a static manifest route flag.
+        if service.id == "authentik" and operator and item["health_state"] == "healthy":
+            item.update({"state": "ready", "lifecycle_state": "ready",
+                         "setup_state": "configured", "route_state": "verified",
+                         "route_ready": True, "user_action": "Open securely"})
+        latest = next((job for job in jobs if job["service_id"] == service.id), None)
+        installation = control_state.installation(service.id) if control_state else None
+        missing_config = service_config.missing_required(service)
+        if missing_config and service.stage == "optional" and not installation:
+            item["state"] = "config_required"
+            item["lifecycle_state"] = "config_required"
+            item["detail"] = "Complete the required app configuration before installation."
+            item["missing_configuration"] = missing_config
+        if installation and service.stage == "optional":
+            persisted = str(installation["state"])
+            if persisted in {"queued", "installing", "starting", "verifying", "failed", "config_required"}:
+                item["state"] = persisted
+                item["lifecycle_state"] = persisted
+            item["installation"] = installation
+            item["route_state"] = installation["route_state"]
+            item["last_error"] = installation.get("last_error", {})
+        item["last_job"] = latest
+        item["last_job_id"] = str(latest["id"]) if latest else ""
+        item["allowed_actions"] = allowed_actions(service, str(item["state"])) if operator else []
+        result.append(item)
     return {"ok": True, "version": __version__, "tailnet_dns_name": dns_name,
-            "runtime": RuntimePaths().as_dict(),
-            "services": [service_status(service, dns_name, ROOT)
-                         for service in registry.services]}
+            "runtime": RuntimePaths().as_dict(), "services": result}
+
+
+@app.get("/api/services")
+@app.get("/api/v1/services")
+def list_services(request: Request) -> dict:
+    return _service_snapshot(request)
 
 
 @app.get("/api/integrations")
@@ -181,6 +230,58 @@ def system() -> dict:
         "runtime_root": str(RuntimePaths().root),
         "backup": backup_readiness(),
     }
+
+
+def _detected_compute_mode() -> str:
+    """Resolve the host accelerator without changing drivers or containers."""
+    from ctl.compute import detect
+    return detect()
+
+
+def _system_config_response() -> dict:
+    state = ControlState.runtime()
+    configured = state.system_config() if state else {
+        "compute_mode": "auto", "updated_at": "", "updated_by": "",
+    }
+    detected = _detected_compute_mode()
+    selected = str(configured["compute_mode"])
+    available = ["auto", "cpu"]
+    if detected not in available:
+        available.append(detected)
+    return {"ok": True, **configured,
+            "resolved_compute_mode": detected if selected == "auto" else selected,
+            "available_modes": available}
+
+
+@app.get("/api/v1/system/config")
+def system_config(request: Request) -> dict:
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    return _system_config_response()
+
+
+@app.put("/api/v1/system/config")
+async def update_system_config(request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    try:
+        payload = await request.json()
+        mode = str(payload.get("compute_mode", ""))
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse({"ok": False, "error": "invalid JSON configuration"}, status_code=400)
+    if mode not in COMPUTE_MODES:
+        return JSONResponse({"ok": False,
+                             "error": "compute_mode must be auto, cpu, nvidia, or amd"},
+                            status_code=422)
+    state = ControlState.runtime()
+    store = JobStore.runtime()
+    if state is None or store is None:
+        return JSONResponse({"ok": False, "error": "runtime state is not initialized"}, status_code=503)
+    state.set_compute_mode(mode, identity_data["username"])
+    store.record_audit(actor=identity_data["username"], event="system.compute_mode.changed",
+                       detail=f"System compute mode changed to {mode}.")
+    return _system_config_response()
 
 
 @app.get("/api/backups")
@@ -254,12 +355,17 @@ def core_setup() -> dict:
                         if job["service_id"] == "core-suite"), None)
     provisioning_store = ProvisioningStore.runtime()
     provisioned = provisioning_store.summary() if provisioning_store else None
-    return {"ok": True, "ready_to_run": execution["ready"],
+    waiting = (provisioned or {}).get("waiting") if provisioned else None
+    waiting_for_provider = bool(current_job and current_job.get("state") == "waiting_for_confirmation"
+                                and waiting and waiting.get("phase_id") == "configuration")
+    return {"ok": True, "ready_to_run": execution["ready"] and not waiting_for_provider,
             "services": list(CORE_ORDER),
             "missing_manifests": execution["missing"],
             "capacity": execution["capacity"], "provisioning": provisioned,
             "current_job": current_job,
-            "next_action": "Set up the core application suite" if execution["ready"] else "Core service manifests are still being prepared"}
+            "next_action": ("Add an inference provider to finish chat verification" if waiting_for_provider else
+                            "Set up the core application suite" if execution["ready"] else
+                            "Core service manifests are still being prepared")}
 
 
 @app.get("/api/connections/providers")
@@ -366,6 +472,271 @@ def start_core(request: Request) -> dict:
     job = start_core_setup(store, identity_data["username"], ROOT,
                            idempotency_key=idempotency_key or None)
     return {"ok": True, "job": job}
+
+
+@app.post("/api/v1/services/{service_id}/actions")
+async def service_action(service_id: str, request: Request) -> dict:
+    """Queue one allowlisted service lifecycle action for the durable worker."""
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    try:
+        payload = await request.json()
+        action = str(payload.get("action", ""))
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse({"ok": False, "error": "invalid JSON action"}, status_code=400)
+    if action not in SUPPORTED_ACTIONS:
+        return JSONResponse({"ok": False, "error": "unsupported service action"}, status_code=400)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    if service.is_blocked:
+        return JSONResponse({"ok": False, "error": service.blocked_reason}, status_code=409)
+    if action == "stop" and service.lifecycle == "always_on":
+        return JSONResponse({"ok": False, "error": "always-on infrastructure cannot be stopped"}, status_code=409)
+    if not (service.compose_path(ROOT) / "docker-compose.yml").is_file():
+        return JSONResponse({"ok": False, "error": "service manifest is not deployable"}, status_code=409)
+    current = service_status(service, tailnet_dns_name(), ROOT)
+    control_state = ControlState.runtime()
+    installed = control_state.installation(service.id) if control_state else None
+    current_state = str(installed["state"]) if installed else str(current["state"])
+    if service_config.missing_required(service):
+        current_state = "config_required"
+    if action not in allowed_actions(service, current_state):
+        return JSONResponse({"ok": False,
+                             "error": "action is not valid for the current service state"},
+                            status_code=409)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    idempotency_key = request.headers.get("idempotency-key", "")
+    previous = store.by_idempotency_key(idempotency_key)
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
+    try:
+        job = store.create(kind="lifecycle", service_id=service.id, action=action,
+                           actor=identity_data["username"],
+                           detail=f"Operator requested {action} for {service.name}.",
+                           idempotency_key=idempotency_key or None)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    if control_state and job.get("state") == "queued":
+        control_state.set_installation(service.id, "queued", job_id=str(job["id"]))
+    return {"ok": True, "job": job}
+
+
+@app.get("/api/v1/services/{service_id}/logs")
+def service_logs(service_id: str, request: Request, tail: int = 120,
+                 container: str = "") -> dict:
+    """Return bounded, redacted logs for a curated Compose service."""
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    runtime_project = project_path(service, ROOT)
+    compose_path = runtime_project / "docker-compose.yml"
+    if not compose_path.is_file():
+        return JSONResponse({"ok": False, "error": "service manifest is not deployable"}, status_code=409)
+    try:
+        definition = yaml.safe_load(compose_path.read_text(encoding="utf-8")) or {}
+        known = set((definition.get("services") or {}).keys())
+    except (OSError, yaml.YAMLError, AttributeError):
+        known = set()
+    if container and container not in known:
+        return JSONResponse({"ok": False, "error": "unknown service container"}, status_code=400)
+    lines: list[str] = []
+    rc, output = actions.compose_logs(runtime_project, lines.append,
+                                      tail=max(20, min(tail, 500)), container=container)
+    safe_lines = [redact(line) for line in output[-40000:].splitlines()]
+    return JSONResponse({"ok": rc == 0, "service_id": service.id,
+                         "container": container, "lines": safe_lines},
+                        status_code=200 if rc == 0 else 500)
+
+
+@app.get("/api/v1/services/{service_id}/configuration")
+def get_service_configuration(service_id: str, request: Request) -> dict:
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    return {"ok": True, "service_id": service.id,
+            "fields": service_config.read(service)}
+
+
+@app.put("/api/v1/services/{service_id}/configuration")
+async def put_service_configuration(service_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    try:
+        payload = await request.json()
+        fields = service_config.write(service, payload.get("values", {}))
+    except (ValueError, TypeError, AttributeError, OSError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=identity_data["username"],
+                           event="service.configuration.changed",
+                           detail=f"Typed configuration updated for {service.id}.")
+    return {"ok": True, "service_id": service.id, "fields": fields,
+            "restart_required": bool((RuntimePaths().projects / service.id / "docker-compose.yml").is_file())}
+
+
+@app.get("/api/v1/services/{service_id}/updates")
+def service_updates(service_id: str, request: Request) -> dict:
+    """Check the curated upstream repository for its latest stable release."""
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    repository = str(service.update.get("repository", ""))
+    if not repository:
+        return JSONResponse({"ok": False, "error": "no reviewed upstream release source"}, status_code=409)
+    try:
+        release = latest_release(repository, str(service.update.get("current_version", "")))
+    except (ValueError, RuntimeError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    backup = backup_readiness()
+    reason = ("A verified service snapshot is required before updating."
+              if backup.get("state") != "verified" else
+              service.blocked_reason if service.is_blocked else
+              "Update execution remains disabled until the restore executor is available.")
+    return {"ok": True, **release, "update_enabled": False,
+            "blocked_reason": reason}
+
+
+@app.get("/api/v1/jobs/{job_id}")
+def job_detail(job_id: str, request: Request) -> dict:
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    job = next((item for item in store.jobs(limit=100) if item["id"] == job_id), None)
+    if not job:
+        return JSONResponse({"ok": False, "error": "job not found"}, status_code=404)
+    return {"ok": True, "job": job, "events": store.events(job_id)}
+
+
+@app.get("/api/v1/mcp/servers")
+def mcp_servers(request: Request) -> dict:
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    registry = load_registry()
+    states = {item["id"]: item["state"] for item in _service_snapshot(request)["services"]}
+    return mcp_snapshot(registry, states)
+
+
+@app.get("/api/v1/mcp/servers/{server_id}/tools")
+def mcp_tools(server_id: str, request: Request) -> dict:
+    result = mcp_servers(request)
+    if isinstance(result, JSONResponse):
+        return result
+    server = next((item for item in result["servers"] if item["id"] == server_id), None)
+    if not server:
+        return JSONResponse({"ok": False, "error": "unknown MCP server"}, status_code=404)
+    return {"ok": True, "server_id": server_id, "state": server["state"],
+            "tools": server["tools"]}
+
+
+@app.put("/api/v1/mcp/servers/{server_id}/configuration")
+async def put_mcp_configuration(server_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    registry = load_registry()
+    server = next((item for item in load_mcp_catalog(registry) if item.id == server_id), None)
+    if not server:
+        return JSONResponse({"ok": False, "error": "unknown MCP server"}, status_code=404)
+    try:
+        payload = await request.json()
+        mcp_config.write(server, payload.get("values", {}))
+    except (ValueError, TypeError, AttributeError, OSError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=identity_data["username"], event="mcp.configuration.changed",
+                           detail=f"Write-only credentials updated for {server.id}.")
+    states = {item["id"]: item["state"] for item in _service_snapshot(request)["services"]}
+    refreshed = mcp_snapshot(registry, states)
+    result = next(item for item in refreshed["servers"] if item["id"] == server_id)
+    return {"ok": True, "server": result}
+
+
+async def _queue_mcp_action(server_id: str, action: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    registry = load_registry()
+    server = next((item for item in load_mcp_catalog(registry) if item.id == server_id), None)
+    if not server:
+        return JSONResponse({"ok": False, "error": "unknown MCP server"}, status_code=404)
+    if server.status != "accepted" or not server.compose_dir:
+        return JSONResponse({"ok": False, "error": "MCP server has not passed runtime review"}, status_code=409)
+    states = {item["id"]: item["state"] for item in _service_snapshot(request)["services"]}
+    if states.get(server.service_id) not in {"ready", "running", "degraded"}:
+        return JSONResponse({"ok": False, "error": "install and verify the application first"}, status_code=409)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    try:
+        job = store.create(kind="wiring", service_id=f"mcp:{server.id}", action=action,
+                           actor=identity_data["username"],
+                           detail=f"Operator requested MCP {action} for {server.service_id}.",
+                           idempotency_key=request.headers.get("idempotency-key") or None)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/v1/mcp/servers/{server_id}/enable")
+async def enable_mcp(server_id: str, request: Request) -> dict:
+    return await _queue_mcp_action(server_id, "enable", request)
+
+
+@app.post("/api/v1/mcp/servers/{server_id}/disable")
+async def disable_mcp(server_id: str, request: Request) -> dict:
+    return await _queue_mcp_action(server_id, "disable", request)
+
+
+@app.post("/api/v1/mcp/servers/{server_id}/verify")
+async def verify_mcp(server_id: str, request: Request) -> dict:
+    return await _queue_mcp_action(server_id, "verify", request)
+
+
+@app.get("/api/v1/chat/status")
+def chat_status(request: Request) -> dict:
+    """Return the curated Open WebUI frame target only to an operator."""
+    if not identity(request)["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    dns_name = tailnet_dns_name()
+    try:
+        service = load_registry().get("open-webui")
+        state = service_status(service, dns_name, ROOT, tailnet_serve_ports())
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    ready = (state["health_state"] == "healthy" and bool(dns_name)
+             and bool(state.get("route_ready")))
+    url = f"https://{dns_name}:8445" if dns_name else ""
+    mcp = mcp_snapshot(load_registry(), {
+        item["id"]: item["state"] for item in _service_snapshot(request)["services"]
+    })
+    return {"ok": True, "ready": ready, "url": url,
+            "authentication": "trusted_header",
+            "mcp_enabled_count": sum(1 for item in mcp["servers"] if item["enabled"]),
+            "detail": "Open WebUI is ready." if ready else
+                      "Install and verify the core suite before opening Chat."}
 
 
 @app.get("/api/jobs")

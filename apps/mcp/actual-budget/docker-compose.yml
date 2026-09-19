@@ -1,0 +1,19 @@
+name: mu3lab-mcp-actual-budget
+services:
+  actual-budget-mcp:
+    image: ghcr.io/agigante80/actual-mcp-server:0.22.4
+    restart: unless-stopped
+    environment:
+      ACTUAL_SERVER_URL: http://actual-server:5006
+      ACTUAL_PASSWORD: ${ACTUAL_PASSWORD:?ACTUAL_PASSWORD is required}
+      ACTUAL_BUDGET_SYNC_ID: ${ACTUAL_BUDGET_SYNC_ID:?ACTUAL_BUDGET_SYNC_ID is required}
+      MCP_SSE_AUTHORIZATION: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+      MCP_TRANSPORT_MODE: --http
+    ports: ["127.0.0.1:8813:3600"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/mcp/actual-budget:/app/data
+    networks: [mu3lab_backend, mu3lab_mcp]
+    security_opt: [no-new-privileges:true]
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

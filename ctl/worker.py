@@ -16,6 +16,8 @@ from pathlib import Path
 
 from ctl.core_setup import execute_claimed
 from ctl.jobs import JobStore
+from ctl.service_ops import execute_claimed as execute_service_claimed
+from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 
 ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
@@ -60,7 +62,12 @@ def run() -> int:
         heartbeat_thread = threading.Thread(target=maintain_lease, daemon=True)
         heartbeat_thread.start()
         try:
-            execute_claimed(store, job, worker_id, ROOT)
+            if job.get("service_id") == "core-suite":
+                execute_claimed(store, job, worker_id, ROOT)
+            elif str(job.get("service_id") or "").startswith("mcp:"):
+                execute_mcp_claimed(store, job, worker_id, ROOT)
+            else:
+                execute_service_claimed(store, job, worker_id, ROOT)
         except Exception as exc:  # final containment for all future dispatchers
             try:
                 store.transition(str(job["id"]), "failed", actor=worker_id,

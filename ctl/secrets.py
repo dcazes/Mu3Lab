@@ -18,6 +18,9 @@ from pathlib import Path
 
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
 CORE_ENV_KEYS = {
+    # Ollama has no private values today, but it still participates in the
+    # common runtime-environment contract used by the core executor.
+    "ollama": (),
     "freellmapi": ("ENCRYPTION_KEY", "FREELLMAPI_SERVICE_KEY", "FREELLMAPI_ADMIN_PASSWORD"),
     "litellm": ("LITELLM_MASTER_KEY",),
     "open-webui": ("WEBUI_SECRET_KEY", "LITELLM_MASTER_KEY", "OPENAI_API_KEY",
@@ -63,8 +66,24 @@ def read_runtime_env(path: Path) -> dict[str, str]:
         if "=" in line and not line.lstrip().startswith("#"):
             key, _, value = line.partition("=")
             if key.strip():
-                values[key.strip()] = value.strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] == "'":
+                    value = value[1:-1].replace("\\'", "'").replace("\\\\", "\\")
+                elif len(value) >= 2 and value[0] == value[-1] == '"':
+                    value = value[1:-1]
+                values[key.strip()] = value
     return values
+
+
+def runtime_env_text(values: dict[str, str]) -> str:
+    """Serialize literal Compose dotenv values without accidental interpolation."""
+    lines = []
+    for key, value in values.items():
+        if not key or any(char in key for char in "=\r\n") or "\r" in value or "\n" in value:
+            raise ValueError("runtime environment entries must be single-line key/value pairs")
+        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+        lines.append(f"{key}='{escaped}'")
+    return "\n".join(lines) + "\n"
 
 
 def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
@@ -87,7 +106,7 @@ def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
                 values[key] = token_factory()
             if key == "LITELLM_MASTER_KEY":
                 shared[key] = values[key]
-        target.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+        target.write_text(runtime_env_text(values), encoding="utf-8")
         os.chmod(target, 0o600)
         paths[service_id] = target
         if values.get("LITELLM_MASTER_KEY"):

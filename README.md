@@ -20,10 +20,9 @@ management:
 - Persistent data lives under `/srv/mu3lab`, not in the Git checkout.
 - Git contains definitions and safe defaults, never application data, backups,
   or unencrypted secrets.
-- Updates are reviewed/pinned and manually initiated. Failed operations stop
-  the affected stack, preserve diagnostics, and offer a guided restore rather
-  than silently rolling back.
-- Vaultwarden is excluded from MCP exposure. No MCP endpoint is shipped yet.
+- Install-time images are resolved to immutable digests. Automated update,
+  backup, and restore execution are intentionally deferred until after the MVP.
+- Vaultwarden and infrastructure lifecycle are always excluded from MCP exposure.
 - SurfSense and Firecrawl are planned, not installable or ready. They remain
   hidden behind a blocked maturity state until their full upstream deployment,
   backup, route, and functional-test contracts exist.
@@ -42,8 +41,24 @@ The control plane keeps leased, resumable, secret-redacted SQLite jobs and
 structured events under `/srv/mu3lab/runtime`; a persistent worker reclaims
 expired work after a restart. The supported AI slice is Ollama, FreeLLMAPI,
 LiteLLM, and Open WebUI. It verifies generated provider configuration, streamed
-chat, embedding dimensions, the private Open WebUI route, and Authentik OIDC
-discovery before reporting the slice verified.
+chat, embedding dimensions, the private Open WebUI route, and Authentik
+trusted-header identity before reporting the slice verified. The dashboard also
+provides a full-screen Chat view backed by that protected Open WebUI instance.
+
+Authenticated operators can install supported optional apps and manage them
+from their detail pages. Install, start, stop, restart, retry, and MCP runtime
+requests are durable jobs; the worker resolves every Compose path and command
+from checked-in registries. The single host-wide compute setting selects the
+reviewed CPU, NVIDIA, or AMD Ollama runtime contract; apps that do not use
+acceleration ignore it. Basic application logs are bounded and redacted before
+reaching the browser. Update execution is deferred from the MVP.
+
+Connections includes reviewed application-data MCP integrations for Mealie,
+Actual Budget, Immich, and Paperless-ngx. Operators provide write-only app
+credentials, then Mu3Lab starts the isolated integration, performs live MCP
+tool discovery, and registers the verified endpoint with Open WebUI. Firecrawl
+and SurfSense candidates remain unavailable while their parent applications are
+blocked; AdventureLog currently has no suitable public MCP server.
 
 ## Developer checks
 

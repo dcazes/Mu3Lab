@@ -1,0 +1,32 @@
+name: mu3lab-mealie
+
+services:
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.22.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:9925:9000"]
+    environment:
+      BASE_URL: ${MEALIE_BASE_URL:-http://127.0.0.1:9925}
+      ALLOW_SIGNUP: ${MEALIE_ALLOW_SIGNUP:-true}
+      TZ: ${TZ:-America/Toronto}
+      OIDC_AUTH_ENABLED: ${MEALIE_OIDC_ENABLED:-false}
+      OIDC_SIGNUP_ENABLED: ${MEALIE_OIDC_SIGNUP_ENABLED:-true}
+      OIDC_CONFIGURATION_URL: ${MEALIE_OIDC_CONFIGURATION_URL:-}
+      OIDC_CLIENT_ID: ${MEALIE_OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${MEALIE_OIDC_CLIENT_SECRET:-}
+      OIDC_ADMIN_GROUP: ${MEALIE_OIDC_ADMIN_GROUP:-mu3lab-operators}
+      OIDC_USER_GROUP: ${MEALIE_OIDC_USER_GROUP:-mu3lab-users}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/mealie:/app/data
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/api/app/about', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 30s
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

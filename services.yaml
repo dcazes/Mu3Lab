@@ -2,7 +2,7 @@
 #
 # This file is the deployment source of truth.  Catalog copy lives in
 # catalog.yaml; neither file may contain credentials or user data.
-schema_version: 2
+schema_version: 3
 settings:
   runtime_root: /srv/mu3lab
   dashboard_port: 8787
@@ -21,11 +21,12 @@ services:
     compose_dir: core/ingress
     https_port: 443
     private_https_port: 8446
+    proxy_port: 19460
     health: {kind: http, url: "http://127.0.0.1:19460/__mu3lab_caddy_health"}
     auth: excluded
-    profiles: [cpu]
     stage: foundation
     images: ["caddy:2.10.2-alpine"]
+    update: {repository: caddyserver/caddy, current_version: v2.10.2}
     route: ready
     required: true
     setup_action: "Private ingress is installed and checked by the bootstrapper."
@@ -39,11 +40,12 @@ services:
     compose_dir: core/authentik
     https_port: 9001
     private_https_port: 443
+    proxy_port: 19461
     health: {kind: http, url: "http://127.0.0.1:9001/-/health/ready/"}
     auth: excluded
-    profiles: [cpu]
     stage: foundation
     images: ["postgres:16-alpine", "ghcr.io/goauthentik/server:2026.5.0"]
+    update: {repository: goauthentik/authentik, current_version: "2026.5.0"}
     route: pending
     required: true
     setup_action: "Create the Authentik administrator and Mu3Lab application."
@@ -57,11 +59,12 @@ services:
     compose_dir: core/vaultwarden
     https_port: 8081
     private_https_port: 8443
+    proxy_port: 19462
     health: {kind: http, url: "http://127.0.0.1:8081/alive"}
     auth: excluded
-    profiles: [cpu]
     stage: foundation
     images: ["vaultwarden/server:1.34.3-alpine"]
+    update: {repository: dani-garcia/vaultwarden, current_version: "1.34.3"}
     route: pending
     required: true
     setup_action: "Create the first Vaultwarden account locally, then use its private tailnet URL."
@@ -78,12 +81,13 @@ services:
     https_port: 11434
     health: {kind: http, url: "http://127.0.0.1:11434/"}
     auth: excluded
-    profiles: [cpu]
+    compute: {applies: true}
     stage: core
     required: true
     route: pending
     images: ["ollama/ollama:0.34.1"]
-    setup_action: "Install and verify the supported CPU model-runner profile."
+    update: {repository: ollama/ollama, current_version: v0.34.1}
+    setup_action: "Install and verify the model runner using the host-wide compute setting."
     resource_guidance: "Model downloads determine disk and memory use."
     backup: {binds: [data]}
     identity_note: "Internal-only embedding and tiny-model runner; no browser or MCP route."
@@ -98,13 +102,13 @@ services:
     https_port: 4000
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
     auth: excluded
-    profiles: [cpu]
     stage: core
     required: true
     route: pending
     setup_action: "Connect Ollama and optional provider routes, then run a test request."
     resource_guidance: "Low host overhead; provider and model choice determines usage."
     images: ["ghcr.io/berriai/litellm:v1.92.0"]
+    update: {repository: BerriAI/litellm, current_version: v1.92.0}
     dependencies: [ollama]
     backup: {binds: [config]}
     identity_note: "Internal-only model gateway; user access is through Open WebUI or the future authenticated MCP gateway."
@@ -118,15 +122,16 @@ services:
     compose_dir: core/open-webui
     https_port: 8084
     private_https_port: 8445
+    proxy_port: 19463
     health: {kind: http, url: "http://127.0.0.1:8084/health"}
-    auth: oidc
-    profiles: [cpu]
+    auth: trusted_header
     stage: core
     required: true
     route: pending
     setup_action: "Connect Open WebUI to the verified LiteLLM endpoint."
     resource_guidance: "Moderate memory use; model work happens upstream."
     images: ["ghcr.io/open-webui/open-webui:v0.11.1"]
+    update: {repository: open-webui/open-webui, current_version: v0.11.1}
     dependencies: [litellm]
     backup: {binds: [data]}
 
@@ -139,13 +144,13 @@ services:
     https_port: 3001
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
     auth: excluded
-    profiles: [cpu]
     stage: core
     required: true
     route: pending
     setup_action: "Mu3Lab manages provider configuration privately; it is never a user-facing app."
     resource_guidance: "Optional provider route inside the mandatory core suite."
     images: ["ghcr.io/tashfeenahmed/freellmapi:v0.11.0"]
+    update: {repository: TashfeenAhmed/FreeLLMAPI, current_version: v0.11.0}
     backup: {binds: [data]}
 
   - id: surfsense
@@ -155,9 +160,10 @@ services:
     lifecycle: optional
     compose_dir: apps/surfsense
     https_port: 3929
+    private_https_port: 8447
+    proxy_port: 19464
     health: {kind: tcp, port: 3929}
     auth: local
-    profiles: [cpu, nvidia, amd]
     dependencies: [litellm, ollama, firecrawl]
     availability: blocked
     stage: blocked
@@ -179,7 +185,6 @@ services:
     https_port: 3002
     health: {kind: http, url: "http://127.0.0.1:3002/"}
     auth: excluded
-    profiles: [cpu, nvidia, amd]
     stage: blocked
     availability: blocked
     blocked_reason: "Planned: the full worker, Playwright, queue, database, backup, and real-scrape contract is not yet implemented."
@@ -192,91 +197,140 @@ services:
     backup: {binds: [data]}
 
   - id: actual-budget
-    maturity: planned
+    maturity: supported
     name: Actual Budget
     category: finance
     lifecycle: optional
     compose_dir: apps/actual-budget
     https_port: 5006
+    private_https_port: 8448
+    proxy_port: 19465
     health: {kind: http, url: "http://127.0.0.1:5006/"}
     auth: oidc
-    profiles: [cpu, nvidia, amd]
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
+    stage: optional
+    availability: available
     route: pending
     setup_action: "Install only when you want private budgeting."
     resource_guidance: "Lightweight personal finance service."
+    configuration:
+      - {key: oidc_enforced, env: ACTUAL_OPENID_ENFORCE, type: boolean, label: "Require Authentik login", default: false}
+      - {key: user_creation, env: ACTUAL_USER_CREATION_MODE, type: enum, label: "OIDC user creation", options: [manual, login], default: login}
+    images: ["docker.io/actualbudget/actual-server:26.9.0"]
     backup: {binds: [data]}
+    update: {repository: actualbudget/actual, current_version: "v26.9.0"}
+    mcp:
+      kind: adapter
+      endpoint: http://127.0.0.1:8813/mcp
+      auth: service-token
+      scopes: [budget-read, transaction-write]
+      exposed: false
+      tools:
+        - {id: actual.budget_summary, title: Read budget summary, risk: read}
+        - {id: actual.transactions, title: Read transactions, risk: read}
+        - {id: actual.prepare_transaction, title: Prepare transaction, risk: draft}
+        - {id: actual.create_transaction, title: Create approved transaction, risk: write}
 
   - id: immich
-    maturity: planned
+    maturity: supported
     name: Immich
     category: media
     lifecycle: optional
     compose_dir: apps/immich
     https_port: 2283
+    private_https_port: 8449
+    proxy_port: 19466
     health: {kind: http, url: "http://127.0.0.1:2283/api/server/ping"}
-    auth: oidc
-    profiles: [cpu, nvidia, amd]
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
+    auth: local
+    stage: optional
+    availability: available
     route: pending
     setup_action: "Install only when you want private photo management."
     resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
+    identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    images: ["ghcr.io/immich-app/immich-server:v3.2.2", "ghcr.io/immich-app/immich-machine-learning:v3.2.2", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
+    update: {repository: immich-app/immich, current_version: "v3.2.2"}
     backup: {binds: [library, database]}
 
   - id: mealie
-    maturity: planned
+    maturity: supported
     name: Mealie
     category: home
     lifecycle: optional
     compose_dir: apps/mealie
     https_port: 9925
+    private_https_port: 8450
+    proxy_port: 19467
     health: {kind: http, url: "http://127.0.0.1:9925/api/app/about"}
     auth: oidc
-    profiles: [cpu, nvidia, amd]
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
+    stage: optional
+    availability: available
     route: pending
     setup_action: "Install only when you want private recipe and meal planning."
     resource_guidance: "Lightweight service."
+    configuration:
+      - {key: allow_signup, env: MEALIE_ALLOW_SIGNUP, type: boolean, label: "Allow local signup", default: true}
+      - {key: oidc_enabled, env: MEALIE_OIDC_ENABLED, type: boolean, label: "Enable Authentik login", default: true}
     backup: {binds: [data]}
+    images: ["ghcr.io/mealie-recipes/mealie:v3.22.0"]
+    update: {repository: mealie-recipes/mealie, current_version: "v3.22.0"}
+    mcp:
+      kind: adapter
+      endpoint: http://127.0.0.1:8814/mcp
+      auth: api-token
+      scopes: [recipes-read, shopping-read, shopping-write]
+      exposed: false
+      tools:
+        - {id: mealie.search_recipes, title: Search recipes, risk: read}
+        - {id: mealie.shopping_lists, title: Read shopping lists, risk: read}
+        - {id: mealie.add_shopping_item, title: Add shopping-list item, risk: write}
+        - {id: mealie.mark_purchased, title: Mark item purchased, risk: write}
 
   - id: adventurelog
-    maturity: planned
+    maturity: supported
     name: AdventureLog
     category: travel
     lifecycle: optional
     compose_dir: apps/adventurelog
     https_port: 8015
+    private_https_port: 8451
+    proxy_port: 19468
     health: {kind: http, url: "http://127.0.0.1:8015/"}
-    auth: oidc
-    profiles: [cpu, nvidia, amd]
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
+    auth: local
+    stage: optional
+    availability: available
     route: pending
     setup_action: "Install only when you want private travel planning."
     resource_guidance: "Lightweight service with persistent trip data."
+    identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    configuration:
+      - {key: admin_username, env: DJANGO_ADMIN_USERNAME, type: string, label: "Administrator username", required: true}
+      - {key: admin_email, env: DJANGO_ADMIN_EMAIL, type: string, label: "Administrator email", required: true}
+      - {key: admin_password, env: DJANGO_ADMIN_PASSWORD, type: secret, label: "Administrator password", required: true}
+    images: ["ghcr.io/seanmorley15/adventurelog:v0.13.0", "postgis/postgis:16-3.5"]
+    update: {repository: seanmorley15/AdventureLog, current_version: "v0.13.0"}
     backup: {binds: [data]}
 
   - id: paperless-ngx
-    maturity: planned
+    maturity: supported
     name: Paperless-ngx
     category: documents
     lifecycle: optional
     compose_dir: apps/paperless-ngx
     https_port: 8000
+    private_https_port: 8452
+    proxy_port: 19469
     health: {kind: http, url: "http://127.0.0.1:8000/api/"}
-    auth: oidc
-    profiles: [cpu, nvidia, amd]
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Planned only: this release has no reviewed deployment or integration contract."
+    auth: local
+    stage: optional
+    availability: available
     route: pending
     setup_action: "Install only when you want private document management."
     resource_guidance: "Storage and OCR usage grow with your document library."
+    identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    configuration:
+      - {key: admin_username, env: PAPERLESS_ADMIN_USER, type: string, label: "Administrator username", required: true}
+      - {key: admin_email, env: PAPERLESS_ADMIN_MAIL, type: string, label: "Administrator email", required: true}
+      - {key: admin_password, env: PAPERLESS_ADMIN_PASSWORD, type: secret, label: "Administrator password", required: true}
+    images: ["ghcr.io/paperless-ngx/paperless-ngx:3.1.3", "docker.io/valkey/valkey:9.0.1-alpine", "docker.io/library/postgres:18.0-alpine"]
+    update: {repository: paperless-ngx/paperless-ngx, current_version: "v3.1.3"}
     backup: {binds: [data, media, consume, export]}

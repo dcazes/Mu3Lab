@@ -1,0 +1,108 @@
+schema_version: 1
+reviewed_at: "2026-09-19"
+servers:
+  - id: mealie-community
+    service_id: mealie
+    name: Mealie MCP
+    status: accepted
+    preferred: true
+    provenance: community
+    repository: https://github.com/2fst4u/mealie-mcp
+    revision: 4728c5c68810105fa54f6ff2482a0414430f6f65
+    package: mealie-mcp@0.2.105
+    transport: openapi-bridge
+    endpoint: http://mealie-mcp:8000
+    local_health: http://127.0.0.1:8814/openapi.json
+    compose_dir: apps/mcp/mealie
+    credentials:
+      - {key: api_token, env: MEALIE_API_TOKEN, type: secret, label: "Mealie API token", required: true}
+
+  - id: actual-budget-community
+    service_id: actual-budget
+    name: Actual Budget MCP
+    status: accepted
+    preferred: true
+    provenance: community
+    repository: https://github.com/agigante80/actual-mcp-server
+    revision: 941483c07df79ea814a9176469fe3667d78f6c02
+    image: ghcr.io/agigante80/actual-mcp-server:0.22.4
+    transport: streamable-http
+    endpoint: http://actual-budget-mcp:3600/http
+    local_health: http://127.0.0.1:8813/health
+    compose_dir: apps/mcp/actual-budget
+    credentials:
+      - {key: password, env: ACTUAL_PASSWORD, type: secret, label: "Actual server password", required: true}
+      - {key: sync_id, env: ACTUAL_BUDGET_SYNC_ID, type: string, label: "Budget Sync ID", required: true}
+
+  - id: immich-community
+    service_id: immich
+    name: Immich MCP
+    status: accepted
+    preferred: true
+    provenance: community
+    repository: https://github.com/barryw/ImmichMCP
+    revision: 1fb31c38724ef5f80b348c7e1b103fdcce7a9142
+    image: ghcr.io/barryw/immichmcp:v3.3.3
+    transport: streamable-http
+    endpoint: http://immich-mcp:5000/mcp
+    local_health: http://127.0.0.1:8815/health/ready
+    compose_dir: apps/mcp/immich
+    credentials:
+      - {key: api_key, env: IMMICH_API_KEY, type: secret, label: "Immich API key", required: true}
+
+  - id: paperless-community
+    service_id: paperless-ngx
+    name: Paperless-ngx MCP
+    status: accepted
+    preferred: true
+    provenance: community
+    repository: https://github.com/cubinet-code/paperless-ngx-mcp
+    revision: b83d992e000df5456b21e35b5c61bfa3283ac959
+    package: paperless-ngx-mcp@3.1.1
+    transport: streamable-http
+    endpoint: http://paperless-mcp:3000/mcp
+    local_health: http://127.0.0.1:8816/mcp
+    compose_dir: apps/mcp/paperless-ngx
+    credentials:
+      - {key: api_key, env: PAPERLESS_API_KEY, type: secret, label: "Paperless API token", required: true}
+
+  - id: firecrawl-official
+    service_id: firecrawl
+    name: Firecrawl MCP
+    status: review_required
+    preferred: true
+    provenance: official
+    repository: https://github.com/firecrawl/firecrawl-mcp-server
+    revision: 387352ef94f684df4623c467374c6948aa1a3604
+    transport: stdio
+    endpoint: ""
+    compose_dir: ""
+    credentials: []
+
+  - id: surfsense-official
+    service_id: surfsense
+    name: SurfSense MCP
+    status: review_required
+    preferred: true
+    provenance: official
+    repository: https://github.com/ModSetter/SurfSense
+    revision: 51a2f5f41a3ed5fafa3ba7d3221118a0a8b02789
+    transport: stdio
+    endpoint: ""
+    compose_dir: ""
+    credentials: []
+
+  - id: adventurelog
+    service_id: adventurelog
+    name: AdventureLog MCP
+    status: not_available
+    preferred: false
+    provenance: none
+    repository: ""
+    revision: ""
+    transport: none
+    endpoint: ""
+    compose_dir: ""
+    credentials: []
+
+excluded_services: [vaultwarden, ingress, authentik, ollama, litellm, open-webui, freellmapi]

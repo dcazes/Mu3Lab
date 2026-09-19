@@ -26,6 +26,14 @@ def _ctx_inputs():
 
 
 class RootEnvTests(unittest.TestCase):
+    def test_runtime_env_roundtrips_compose_sensitive_characters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            value = "cash$money # literal and it's private\\path"
+            path.write_text(secrets.runtime_env_text({"TOKEN": value}), encoding="utf-8")
+            self.assertEqual(secrets.read_runtime_env(path)["TOKEN"], value)
+            self.assertIn("TOKEN='", path.read_text(encoding="utf-8"))
+
     def test_creates_with_both_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             values, added = secrets.ensure_root_env(

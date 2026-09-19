@@ -1,0 +1,72 @@
+name: mu3lab-immich
+
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v3.2.2
+    restart: unless-stopped
+    ports: ["127.0.0.1:2283:2283"]
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/immich/library:/data
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      redis: {condition: service_healthy}
+      database: {condition: service_healthy}
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2283/api/server/ping').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 8s
+      retries: 30
+      start_period: 45s
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v3.2.2
+    restart: unless-stopped
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
+    volumes: [model-cache:/cache]
+    networks: [mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+
+  redis:
+    image: docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf
+    restart: unless-stopped
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  database:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/immich/postgres:/var/lib/postgresql/data
+    shm_size: 128mb
+    networks: [mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  model-cache:
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

@@ -96,7 +96,7 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(profile_ids.issubset({service.id for service in registry.services}))
 
     def test_healthy_service_without_private_route_needs_setup(self):
-        service = load().get("litellm")
+        service = load().get("open-webui")
         root = Path(__file__).resolve().parents[1]
         with patch("ctl.service_state._compose_state", return_value="running"), \
              patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")), \
@@ -106,3 +106,13 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(state["health_state"], "healthy")
         self.assertEqual(state["route_state"], "pending")
         self.assertEqual(state["user_action"], "Private HTTPS route pending")
+
+    def test_healthy_internal_service_does_not_require_a_browser_route(self):
+        service = load().get("litellm")
+        root = Path(__file__).resolve().parents[1]
+        with patch("ctl.service_state._compose_state", return_value="running"), \
+             patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")):
+            state = service_status(service, "", root)
+        self.assertEqual(state["lifecycle_state"], "ready")
+        self.assertEqual(state["route_state"], "not_required")
+        self.assertFalse(state["route_ready"])

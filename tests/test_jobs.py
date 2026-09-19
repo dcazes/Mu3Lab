@@ -67,6 +67,27 @@ class JobStoreTests(unittest.TestCase):
             store.append_event(job["id"], "step.started", "password=never-store-this")
             self.assertNotIn("never-store-this", store.events(job["id"])[0]["detail"])
 
+    def test_background_heartbeat_does_not_clear_current_step(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "db.sqlite3")
+            job = store.create(kind="lifecycle", service_id="core-suite", action="install",
+                               actor="operator")
+            store.claim("worker")
+            self.assertTrue(store.heartbeat(job["id"], "worker", step_id="open-webui"))
+            self.assertTrue(store.heartbeat(job["id"], "worker"))
+            current = next(item for item in store.jobs() if item["id"] == job["id"])
+            self.assertEqual(current["step_id"], "open-webui")
+
+    def test_event_window_keeps_the_most_recent_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "db.sqlite3")
+            job = store.create(kind="lifecycle", service_id="core-suite", action="install",
+                               actor="operator")
+            for index in range(5):
+                store.append_event(job["id"], "log", f"line {index}")
+            events = store.events(job["id"], limit=2)
+            self.assertEqual([event["detail"] for event in events], ["line 3", "line 4"])
+
     def test_terminal_jobs_cannot_return_to_running(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "db.sqlite3")

@@ -8,6 +8,7 @@ WHY: The browser must never infer service state from a hard-coded card or a
 from __future__ import annotations
 
 import json
+import re
 import socket
 import subprocess
 import urllib.error
@@ -15,6 +16,7 @@ import urllib.request
 from pathlib import Path
 
 from ctl.registry import Service
+from ctl.runtime import RuntimePaths
 
 
 def tailnet_dns_name(run=subprocess.run) -> str:
@@ -75,6 +77,19 @@ def _tailnet_route_present(port: int) -> bool:
     return f":{port}" in output or f"https={port}" in output
 
 
+def tailnet_serve_ports() -> set[int]:
+    """Read Tailscale Serve once and return configured HTTPS ports."""
+    try:
+        proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True,
+                              text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if proc.returncode != 0:
+        return set()
+    return {int(value) for value in re.findall(
+        r"(?::|https=)(\d{2,5})", proc.stdout)}
+
+
 def _compose_state(compose_file: Path, run=subprocess.run) -> str:
     """Read containers by Compose labels without evaluating private env files."""
     try:
@@ -104,15 +119,41 @@ def _compose_state(compose_file: Path, run=subprocess.run) -> str:
     return "stopped"
 
 
-def status(service: Service, dns_name: str, root: Path) -> dict:
+def compose_states(run=subprocess.run) -> dict[str, str]:
+    """Inspect all Compose working directories with one bounded Docker call."""
+    try:
+        proc = run([
+            "docker", "ps", "--all",
+            "--format", '{{.Label "com.docker.compose.project.working_dir"}}\t{{.State}}',
+        ], capture_output=True, text=True, timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    collected: dict[str, list[str]] = {}
+    for line in proc.stdout.splitlines():
+        directory, separator, state = line.partition("\t")
+        if not separator or not directory:
+            continue
+        collected.setdefault(str(Path(directory).resolve()), []).append(state.lower())
+    return {directory: ("running" if states and set(states) == {"running"} else "stopped")
+            for directory, states in collected.items()}
+
+
+def status(service: Service, dns_name: str, root: Path,
+           route_ports: set[int] | None = None,
+           project_states: dict[str, str] | None = None) -> dict:
     """Return browser-safe service state without starting, stopping, or logging in."""
-    compose_file = service.compose_path(root) / "docker-compose.yml"
+    runtime_file = RuntimePaths().projects / service.id / "docker-compose.yml"
+    compose_file = (runtime_file if service.stage == "optional" and runtime_file.is_file()
+                    else service.compose_path(root) / "docker-compose.yml")
     if service.is_blocked:
         lifecycle_state, detail = "blocked", service.blocked_reason
     elif not compose_file.is_file():
         lifecycle_state, detail = "planned", "This curated stack is not installed yet."
     else:
-        compose_state = _compose_state(compose_file)
+        compose_state = ((project_states or {}).get(str(compose_file.parent.resolve()), "absent")
+                         if project_states is not None else _compose_state(compose_file))
         ok, detail = _healthy(service)
         if ok and compose_state == "running":
             lifecycle_state = "ready"
@@ -126,17 +167,20 @@ def status(service: Service, dns_name: str, root: Path) -> dict:
             lifecycle_state = "starting"
         else:
             lifecycle_state = "needs_attention"
-    route_verified = service.route == "ready" or (
-        service.private_https_port is not None and _tailnet_route_present(service.private_https_port)
-    )
+    route_required = service.private_https_port is not None
+    route_verified = not route_required or service.route == "ready" or (
+        route_required and
+        (service.private_https_port in route_ports if route_ports is not None
+         else _tailnet_route_present(service.private_https_port)))
     healthy = lifecycle_state == "ready"
     health_state = "healthy" if healthy else ("starting" if lifecycle_state == "starting" else "unknown")
-    route_state = "verified" if route_verified and healthy else service.route
-    route_ready = route_state == "verified"
+    route_state = ("not_required" if not route_required else
+                   "verified" if route_verified and healthy else service.route)
+    route_ready = route_required and route_state == "verified"
     # A healthy process is not yet a usable app unless its declared private
     # route has also been verified. Keep that distinction visible so the UI
     # cannot call a merely-installed service "ready".
-    if healthy and not route_ready:
+    if healthy and route_required and not route_ready:
         lifecycle_state = "needs_setup"
     setup_state = "configured" if lifecycle_state == "ready" else ("blocked" if lifecycle_state == "blocked" else "needs_setup")
     url = public_url(service, dns_name)
@@ -156,4 +200,5 @@ def status(service: Service, dns_name: str, root: Path) -> dict:
                             service.setup_action or detail),
             "url": url,
             "route_ready": route_ready,
-            "compose_present": compose_file.is_file()}
+            "compose_present": (runtime_file.is_file() if service.stage == "optional"
+                                else compose_file.is_file())}

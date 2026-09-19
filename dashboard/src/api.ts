@@ -1,17 +1,25 @@
 export interface Health { ok: boolean; version: string; }
 
-export type LifecycleState = 'planned' | 'installing' | 'installed' | 'needs_setup' | 'configured' | 'starting' | 'ready' | 'stopped' | 'updating' | 'needs_attention' | 'blocked';
+export type LifecycleState = 'planned' | 'not_installed' | 'config_required' | 'queued' | 'installing' | 'installed' | 'needs_setup' | 'configured' | 'starting' | 'verifying' | 'running' | 'ready' | 'stopped' | 'updating' | 'degraded' | 'failed' | 'needs_attention' | 'blocked';
 export interface Service {
   id: string; name: string; category: string; lifecycle: 'always_on' | 'shared' | 'optional'; https_port: number; private_https_port?: number;
   maturity: 'supported' | 'experimental' | 'planned';
-  auth: 'oidc' | 'proxy' | 'local' | 'excluded'; profiles: string[]; dependencies: string[];
+  auth: 'oidc' | 'proxy' | 'trusted_header' | 'local' | 'excluded'; profiles: string[]; dependencies: string[];
   availability: 'available' | 'blocked'; blocked_reason: string; stage: 'foundation' | 'core' | 'optional' | 'blocked';
   route: 'ready' | 'pending' | 'unavailable'; routable: boolean; required: boolean; identity_note: string;
   resource_guidance: string; setup_action: string; mcp: { exposed: boolean; risk: string };
   state: LifecycleState; lifecycle_state: LifecycleState; health_state: string; setup_state: string; route_state: string;
   identity_mode: string; backup_state: string; last_job_id: string; last_error: string; user_action: string;
   detail: string; url: string; route_ready: boolean; compose_present: boolean;
+  // These fields were added with the v1 operator surface. Keep them optional
+  // while an already-running control plane is being upgraded: the static
+  // dashboard can be refreshed before the Python process is restarted.
+  allowed_actions?: Array<'install' | 'retry_setup' | 'start' | 'stop' | 'restart'>; last_job?: Job | null;
+  update?: { repository: string; current_version: string };
+  configuration?: ServiceConfigField[];
 }
+export interface ServiceConfigField { key: string; type: 'string' | 'boolean' | 'integer' | 'enum' | 'secret'; label?: string; required?: boolean; default?: string | boolean | number; options?: string[]; value?: string | boolean | number | null; secret_present?: boolean; }
+export interface ServiceConfigResponse { ok: boolean; service_id: string; fields: ServiceConfigField[]; restart_required?: boolean; }
 export interface ServicesResponse { ok: boolean; tailnet_dns_name: string; services: Service[]; }
 export interface CatalogProfile { id: string; name: string; description: string; services: string[]; }
 export interface CatalogService { summary: string; category?: string; stage_label?: string; resource_guidance?: string; integrations?: string[]; }
@@ -26,7 +34,7 @@ export interface ProvisioningPhase { phase_id: string; label: string; actual_sta
 export interface ProvisioningResponse { ok: boolean; available: boolean; complete: boolean; phases: ProvisioningPhase[]; waiting?: ProvisioningPhase | null; blocked?: ProvisioningPhase | null; }
 export interface ProviderMetadata { id: string; label: string; updated_at: string; }
 export interface ProviderMetadataResponse { ok: boolean; providers: ProviderMetadata[]; }
-export interface Job { id: string; kind: string; service_id: string; action: string; state: string; actor: string; created_at: string; updated_at: string; detail: string; }
+export interface Job { id: string; kind: string; service_id: string; action: string; state: string; actor: string; created_at: string; updated_at: string; detail: string; step_id?: string; error_code?: string; }
 export interface JobsResponse { ok: boolean; available: boolean; jobs: Job[]; }
 export interface AuditEvent { id: number; job_id: string | null; actor: string; event: string; created_at: string; detail: string; }
 export interface AuditResponse { ok: boolean; available: boolean; events: AuditEvent[]; }
@@ -56,3 +64,18 @@ export async function postJsonApi<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) throw new Error(`POST ${path}: HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
+
+export async function putJsonApi<T>(path: string, body: unknown): Promise<T> {
+  const token = await csrf();
+  const res = await fetch(path, { method: 'PUT', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Mu3Lab-CSRF': token }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`PUT ${path}: HTTP ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
+export interface ServiceLogsResponse { ok: boolean; service_id: string; container: string; lines: string[]; }
+export interface JobDetailResponse { ok: boolean; job: Job; events: AuditEvent[]; }
+export interface UpdateResponse { ok: boolean; repository: string; current_version: string; latest_version: string; release_url: string; published_at: string; release_name: string; notes: string; update_available: boolean; update_enabled: boolean; blocked_reason: string; checked_at: number; }
+export interface McpServer { id: string; name: string; service_id: string; kind: string; transport: string; app_state: string; enabled: boolean; state: 'live' | 'degraded' | 'authentication_required' | 'disabled' | 'unavailable' | 'starting' | 'incompatible' | 'failed'; error?: string | null; auth: { type: string; scopes: string[]; configured: boolean }; review?: { status: string; repository: string; revision: string; preferred: boolean }; configuration?: ServiceConfigField[]; tools: Array<{ id: string; title: string; risk: string; enabled: boolean }>; }
+export interface McpRegistryResponse { ok: boolean; servers: McpServer[]; summary: Record<string, number>; policy: string; }
+export interface ChatStatus { ok: boolean; ready: boolean; url: string; authentication: string; mcp_enabled_count: number; detail: string; }
+export interface SystemConfig { ok: boolean; compute_mode: 'auto' | 'cpu' | 'nvidia' | 'amd'; resolved_compute_mode: 'cpu' | 'nvidia' | 'amd'; available_modes: string[]; updated_at: string; updated_by: string; }

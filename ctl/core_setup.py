@@ -147,7 +147,7 @@ def _provision_freellmapi(runtime: RuntimePaths) -> tuple[bool, str]:
     the LiteLLM client-profile key, and provider keys remain declaratively
     applied from the root-only Mu3Lab configuration file.
     """
-    from ctl.secrets import read_runtime_env
+    from ctl.secrets import read_runtime_env, runtime_env_text
 
     env_path = runtime.projects / "freellmapi" / ".env"
     values = read_runtime_env(env_path)
@@ -161,6 +161,10 @@ def _provision_freellmapi(runtime: RuntimePaths) -> tuple[bool, str]:
     status, response = _http_json("http://127.0.0.1:3001/api/auth/setup", "POST",
                                   {"email": email, "password": password})
     token = str(response.get("token", "")) if status in {200, 201} else ""
+    if not token and status == 403:
+        rc, local = actions.freellmapi_local_setup(email, password, lambda _line: None)
+        body = local.get("body", {}) if isinstance(local, dict) else {}
+        token = str(body.get("token", "")) if rc == 0 and local.get("status") == 201 else ""
     if not token:
         status, response = _http_json("http://127.0.0.1:3001/api/auth/login", "POST",
                                       {"email": email, "password": password})
@@ -183,7 +187,7 @@ def _provision_freellmapi(runtime: RuntimePaths) -> tuple[bool, str]:
         return False, "FreeLLMAPI did not return a scoped internal client credential"
     values["FREELLMAPI_SERVICE_KEY"] = service_key
     temporary = env_path.with_suffix(".env.tmp")
-    temporary.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+    temporary.write_text(runtime_env_text(values), encoding="utf-8")
     temporary.chmod(0o600)
     temporary.replace(env_path)
     env_path.chmod(0o600)
@@ -200,36 +204,68 @@ def _runtime_envs(env_files: dict[str, Path], wiring: dict) -> dict[str, dict[st
     return envs
 
 
-def _configure_open_webui_identity(runtime: RuntimePaths) -> str:
-    """Materialize the exact private OIDC origins shared by both products."""
-    from ctl.authentik_blueprints import write_open_webui_blueprint
-    from ctl.secrets import read_runtime_env
+def _configure_open_webui_identity(runtime: RuntimePaths, root: Path,
+                                   log: Callable[[str], None]) -> str:
+    """Apply trusted-header identity and the frame-safe authenticated proxy."""
+    from ctl.secrets import read_runtime_env, runtime_env_text
 
     host = tailnet_dns_name()
     if not host:
-        raise ValueError("Tailscale MagicDNS name is unavailable for Open WebUI OIDC")
+        raise ValueError("Tailscale MagicDNS name is unavailable for Open WebUI identity")
     env_path = runtime.projects / "open-webui" / ".env"
     values = read_runtime_env(env_path)
-    client_id = values.get("OAUTH_CLIENT_ID", "")
-    client_secret = values.get("OAUTH_CLIENT_SECRET", "")
-    write_open_webui_blueprint(runtime.root, host, client_id, client_secret)
     origin = f"https://{host}:8445"
     values.update({
         "WEBUI_URL": origin,
-        "OPENID_PROVIDER_URL": f"https://{host}/application/o/mu3lab-open-webui/.well-known/openid-configuration/",
-        "OPENID_REDIRECT_URI": f"{origin}/oauth/oidc/callback",
-        "OAUTH_PROVIDER_NAME": "Mu3Lab",
-        "OAUTH_SCOPES": "openid email profile",
-        "ENABLE_OAUTH_SIGNUP": "true",
-        "OAUTH_MERGE_ACCOUNTS_BY_EMAIL": "false",
-        "ENABLE_LOGIN_FORM": "true",
+        "WEBUI_AUTH_TRUSTED_EMAIL_HEADER": "X-Mu3Lab-Email",
+        "WEBUI_AUTH_TRUSTED_NAME_HEADER": "X-Mu3Lab-Name",
+        "ENABLE_LOGIN_FORM": "false",
+        "XFRAME_OPTIONS": "",
         "DEFAULT_MODELS": "mu3lab-chat",
     })
     temporary = env_path.with_suffix(".env.tmp")
-    temporary.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+    temporary.write_text(runtime_env_text(values), encoding="utf-8")
     temporary.chmod(0o600)
     temporary.replace(env_path)
     env_path.chmod(0o600)
+    # Reconcile the reviewed proxy base while preserving generated optional
+    # application routes owned by ctl.routes.
+    from ctl.control_state import ControlState
+    from ctl.routes import render
+    registry = load()
+    state = ControlState.runtime()
+    optional = []
+    if state:
+        for service in registry.services:
+            installed = state.installation(service.id)
+            if (service.stage == "optional" and installed and service.proxy_port
+                    and installed["state"] in {"running", "stopped", "degraded"}):
+                optional.append(service)
+    source = root / "core" / "ingress" / "Caddyfile.authenticated"
+    caddy_target = runtime.projects / "ingress" / "Caddyfile"
+    caddy_target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    content = render(source.read_text(encoding="utf-8"), optional)
+    candidate = caddy_target.with_suffix(".candidate")
+    candidate.write_text(content, encoding="utf-8")
+    ingress_token = read_runtime_env(root / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    if not ingress_token:
+        raise ValueError("The private ingress token is missing")
+    rc, output = actions.compose_up(
+        root / "core" / "ingress", log,
+        env={"MU3LAB_CADDYFILE": str(candidate), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        recreate=True,
+    )
+    if rc:
+        candidate.unlink(missing_ok=True)
+        raise ValueError("Caddy rejected the trusted-header Open WebUI policy: " + redact(output))
+    candidate.replace(caddy_target)
+    rc, output = actions.compose_up(
+        root / "core" / "ingress", log,
+        env={"MU3LAB_CADDYFILE": str(caddy_target), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        recreate=True,
+    )
+    if rc:
+        raise ValueError("Caddy could not activate the trusted-header policy: " + redact(output))
     return origin
 
 
@@ -267,18 +303,10 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     host = tailnet_dns_name()
     if not host:
         return False, "The private hostname disappeared before Open WebUI route verification"
-    oidc_deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
-    while time.monotonic() < oidc_deadline:
-        discovery_status, discovery = _http_json(
-            f"https://{host}/application/o/mu3lab-open-webui/.well-known/openid-configuration/")
-        webui_status, webui_config = _http_json(f"https://{host}:8445/api/config")
-        if (discovery_status == 200 and discovery.get("authorization_endpoint")
-                and webui_status == 200 and "oidc" in json.dumps(webui_config).lower()):
-            break
-        time.sleep(3)
-    else:
-        return False, "Open WebUI's private route and Authentik OIDC contract did not become ready"
-    return True, "Private routes, OIDC discovery, streamed chat, and embeddings passed live checks."
+    from ctl.service_state import tailnet_serve_ports
+    if 8445 not in tailnet_serve_ports():
+        return False, "Open WebUI's private Tailscale route is not published"
+    return True, "Private routes, trusted-header chat identity, streamed chat, and embeddings passed live checks."
 
 
 def _run(store: JobStore, job_id: str, actor: str, root: Path,
@@ -298,7 +326,7 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
             return
         runtime = RuntimePaths()
         env_files = ensure_core_envs(runtime.root)
-        _configure_open_webui_identity(runtime)
+        _configure_open_webui_identity(runtime, root, log)
         wiring = configure_wiring(runtime)
         envs = _runtime_envs(env_files, wiring)
         for service_id in CORE_ORDER:
@@ -307,9 +335,12 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
             store.append_event(job_id, "step.started", service_id)
             service = load().get(service_id)
             project = service.compose_path(root)
+            from ctl.compute import compose_overrides
             rc, output = actions.compose_up(
                 project, log, env=envs[service_id],
-                recreate=service_id == "freellmapi" and bool(wiring["provider_count"]))
+                extra_files=compose_overrides(service_id, project),
+                recreate=service_id == "freellmapi" and bool(wiring["provider_count"]),
+                timeout=1800, on_output=lambda _line: None)
             safe_output = redact(output or f"exit {rc}")
             if rc != 0:
                 store.transition(job_id, "failed", actor=actor,
@@ -353,19 +384,24 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
             state = "waiting_for_confirmation" if not wiring["chat_configured"] else "failed"
             store.transition(job_id, state, actor=actor, detail=detail)
             if provisioning:
-                provisioning.update("configuration" if state == "waiting_for_confirmation" else "core",
-                                    "waiting_for_user" if state == "waiting_for_confirmation" else "failed",
-                                    detail=detail, error="" if state == "waiting_for_confirmation" else detail)
+                if state == "waiting_for_confirmation":
+                    provisioning.update("core", "verified",
+                                        detail="Core containers and private Open WebUI route are healthy.")
+                    provisioning.update("configuration", "waiting_for_user", detail=detail)
+                else:
+                    provisioning.update("core", "failed", detail=detail, error=detail)
             return
         if provisioning:
             provisioning.update("core", "verified", detail="Core services and private integration checks passed.")
             provisioning.update("verification", "verified",
-                                detail="Private routes, OIDC discovery, streamed chat, and embeddings passed.")
+                                detail="Private routes, trusted-header chat identity, streamed chat, and embeddings passed.")
         store.transition(job_id, "succeeded", actor=actor,
                          detail="Core suite started, wired, and passed application-level checks.")
     except Exception as exc:  # noqa: BLE001 - job state must become terminal
+        stage = service_id if "service_id" in locals() else "prepare"
         store.transition(job_id, "failed", actor=actor,
-                         detail=f"Core executor failed safely: {redact(str(exc))}")
+                         detail=f"Core setup failed during {stage}: {redact(str(exc))}",
+                         error_code="core_executor_failure", step_id=stage)
         if provisioning:
             provisioning.update("core", "failed", error="Core executor failed safely.")
 

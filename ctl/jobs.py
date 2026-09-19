@@ -211,9 +211,10 @@ class JobStore:
         expires = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
         with self._connect() as conn:
             result = conn.execute("""
-                UPDATE jobs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?, step_id = ?
+                UPDATE jobs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?,
+                    step_id = CASE WHEN ? != '' THEN ? ELSE step_id END
                 WHERE id = ? AND state = 'running' AND lease_owner = ?
-            """, (now, expires, now, step_id[:64], job_id, worker_id))
+            """, (now, expires, now, step_id[:64], step_id[:64], job_id, worker_id))
         return result.rowcount == 1
 
     def append_event(self, job_id: str, event: str, detail: str) -> None:
@@ -229,9 +230,9 @@ class JobStore:
         with self._connect() as conn:
             rows = conn.execute("""
                 SELECT id, job_id, event, created_at, detail FROM job_events
-                WHERE job_id = ? ORDER BY id ASC LIMIT ?
+                WHERE job_id = ? ORDER BY id DESC LIMIT ?
             """, (job_id, max(1, min(limit, 1000)))).fetchall()
-        return [dict(row) for row in rows]
+        return [dict(row) for row in reversed(rows)]
 
     def jobs(self, limit: int = 30) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -270,3 +271,17 @@ class JobStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT id, job_id, actor, event, created_at, detail FROM audit ORDER BY id DESC LIMIT ?", (max(1, min(limit, 100)),)).fetchall()
         return [dict(row) for row in rows]
+
+    def record_audit(self, *, actor: str, event: str, detail: str = "",
+                     job_id: str | None = None) -> None:
+        """Append a non-job configuration audit record after authorization."""
+        if not actor or not event or len(event) > 96:
+            raise ValueError("invalid audit record")
+        with self._connect() as conn:
+            if job_id and not conn.execute(
+                    "SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone():
+                raise KeyError(job_id)
+            conn.execute(
+                "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                (job_id, actor, event, _now(), redact(detail)),
+            )

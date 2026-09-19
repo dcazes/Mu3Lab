@@ -47,8 +47,23 @@
 
 :19463 {
 	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:8084 {
-		header_up X-Forwarded-Proto https
-		header_up X-Forwarded-Host {http.request.host}
+	route {
+		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+		forward_auth 127.0.0.1:9001 {
+			uri /outpost.goauthentik.io/auth/caddy
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			copy_headers X-Authentik-Email X-Authentik-Name X-Authentik-Groups
+			trusted_proxies private_ranges
+		}
+		reverse_proxy 127.0.0.1:8084 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Mu3Lab-Email {http.request.header.X-Authentik-Email}
+			header_up X-Mu3Lab-Name {http.request.header.X-Authentik-Name}
+			header_down -X-Frame-Options
+			header_down Content-Security-Policy "frame-ancestors https://*.ts.net:8446"
+		}
 	}
 }

@@ -15,7 +15,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY_PATH = ROOT / "services.yaml"
-VALID_AUTH = frozenset({"oidc", "proxy", "local", "excluded"})
+VALID_AUTH = frozenset({"oidc", "proxy", "trusted_header", "local", "excluded"})
 VALID_LIFECYCLE = frozenset({"always_on", "shared", "optional"})
 VALID_ACTIONS = frozenset({"start", "stop", "restart", "update"})
 VALID_STAGES = frozenset({"foundation", "core", "optional", "blocked"})
@@ -39,9 +39,11 @@ class Service:
     compose_dir: str
     https_port: int
     private_https_port: int | None
+    proxy_port: int | None
     health: dict[str, Any]
     auth: str
     profiles: tuple[str, ...]
+    compute: dict[str, Any] = field(default_factory=dict)
     dependencies: tuple[str, ...] = ()
     availability: str = "available"
     blocked_reason: str = ""
@@ -54,6 +56,8 @@ class Service:
     identity_note: str = ""
     resource_guidance: str = ""
     setup_action: str = ""
+    update: dict[str, Any] = field(default_factory=dict)
+    configuration: tuple[dict[str, Any], ...] = ()
 
     @property
     def is_blocked(self) -> bool:
@@ -73,7 +77,9 @@ class Service:
                 "maturity": self.maturity,
                 "lifecycle": self.lifecycle, "https_port": self.https_port,
                 "private_https_port": self.private_https_port,
+                "proxy_port": self.proxy_port,
                 "auth": self.auth, "profiles": list(self.profiles),
+                "compute": self.compute,
                 "dependencies": list(self.dependencies),
                 "availability": self.availability,
                 "blocked_reason": self.blocked_reason,
@@ -82,8 +88,13 @@ class Service:
                 "required": self.required, "identity_note": self.identity_note,
                 "resource_guidance": self.resource_guidance,
                 "setup_action": self.setup_action,
+                "update": {"repository": str(self.update.get("repository", "")),
+                           "current_version": str(self.update.get("current_version", ""))},
                 "mcp": {"exposed": bool(self.mcp.get("exposed", False)),
-                        "risk": self.mcp.get("risk", "")}}
+                        "risk": self.mcp.get("risk", "")},
+                "configuration": [{key: value for key, value in field.items()
+                                   if key not in {"env"}}
+                                  for field in self.configuration]}
 
 
 def _required(item: dict[str, Any], key: str) -> Any:
@@ -109,13 +120,21 @@ def _service(item: dict[str, Any]) -> Service:
     private_port = item.get("private_https_port")
     if private_port is not None and (not isinstance(private_port, int) or not 1 <= private_port <= 65535):
         raise RegistryError(f"service {service_id}: private_https_port must be a TCP port")
+    proxy_port = item.get("proxy_port")
+    if proxy_port is not None and (not isinstance(proxy_port, int) or not 1 <= proxy_port <= 65535):
+        raise RegistryError(f"service {service_id}: proxy_port must be a TCP port")
+    if private_port is not None and proxy_port is None:
+        # Schema v2 used static proxy assignments. Preserve compatibility for
+        # existing fixtures, while schema v3 entries declare the port.
+        legacy_proxy = {443: 19461, 8443: 19462, 8445: 19463, 8446: 19460}
+        proxy_port = legacy_proxy.get(private_port)
     compose_dir = _required(item, "compose_dir")
     if not isinstance(compose_dir, str) or compose_dir.startswith("/") or ".." in Path(compose_dir).parts:
         raise RegistryError(f"service {service_id}: unsafe compose_dir")
     health = _required(item, "health")
     if not isinstance(health, dict) or health.get("kind") not in {"http", "tcp"}:
         raise RegistryError(f"service {service_id}: health.kind must be http or tcp")
-    profiles = tuple(_required(item, "profiles"))
+    profiles = tuple(item.get("profiles", []))
     if not set(profiles).issubset({"cpu", "nvidia", "amd"}):
         raise RegistryError(f"service {service_id}: unsupported hardware profile")
     stage = item.get("stage", "planned")
@@ -137,10 +156,28 @@ def _service(item: dict[str, Any]) -> Service:
         raise RegistryError(f"service {service_id}: images must be pinned and never use latest")
     if stage == "blocked" and item.get("availability") != "blocked":
         raise RegistryError(f"service {service_id}: blocked stage requires blocked availability")
+    configuration = item.get("configuration", [])
+    if not isinstance(configuration, list):
+        raise RegistryError(f"service {service_id}: configuration must be a list")
+    seen_config: set[str] = set()
+    for field_item in configuration:
+        if not isinstance(field_item, dict):
+            raise RegistryError(f"service {service_id}: invalid configuration field")
+        key = field_item.get("key")
+        env_name = field_item.get("env")
+        field_type = field_item.get("type")
+        if (not isinstance(key, str) or not key.replace("_", "").isalnum()
+                or not isinstance(env_name, str) or not env_name.replace("_", "").isalnum()
+                or field_type not in {"string", "boolean", "integer", "enum", "secret"}):
+            raise RegistryError(f"service {service_id}: invalid configuration contract")
+        if key in seen_config:
+            raise RegistryError(f"service {service_id}: duplicate configuration key {key}")
+        seen_config.add(key)
     return Service(id=service_id, maturity=maturity, name=_required(item, "name"),
                    category=_required(item, "category"), lifecycle=lifecycle,
-                   compose_dir=compose_dir, https_port=port, private_https_port=private_port, health=health,
-                   auth=auth, profiles=profiles,
+                   compose_dir=compose_dir, https_port=port, private_https_port=private_port,
+                   proxy_port=proxy_port, health=health,
+                   auth=auth, profiles=profiles, compute=dict(item.get("compute", {})),
                    dependencies=tuple(item.get("dependencies", [])),
                    availability=item.get("availability", "available"),
                    blocked_reason=item.get("blocked_reason", ""),
@@ -149,7 +186,9 @@ def _service(item: dict[str, Any]) -> Service:
                    required=bool(item.get("required", False)),
                    identity_note=str(item.get("identity_note", "")),
                    resource_guidance=str(item.get("resource_guidance", "")),
-                   setup_action=str(item.get("setup_action", "")))
+                   setup_action=str(item.get("setup_action", "")),
+                   update=dict(item.get("update", {})),
+                   configuration=tuple(dict(field_item) for field_item in configuration))
 
 
 class Registry:
@@ -165,6 +204,13 @@ class Registry:
             unknown = set(service.dependencies) - self._by_id.keys()
             if unknown:
                 raise RegistryError(f"service {service.id}: unknown dependencies {sorted(unknown)}")
+        ports = [service.private_https_port for service in services
+                 if service.private_https_port is not None]
+        if len(ports) != len(set(ports)):
+            raise RegistryError("private HTTPS ports must be unique")
+        proxy_ports = [service.proxy_port for service in services if service.proxy_port is not None]
+        if len(proxy_ports) != len(set(proxy_ports)):
+            raise RegistryError("Caddy loopback ports must be unique")
 
     def get(self, service_id: str) -> Service:
         """Find one curated service or raise a safe lookup error."""
@@ -186,8 +232,8 @@ def load(path: Path = REGISTRY_PATH) -> Registry:
         raise RegistryError(f"cannot read registry: {exc}") from exc
     except yaml.YAMLError as exc:
         raise RegistryError(f"invalid registry YAML: {exc}") from exc
-    if not isinstance(raw, dict) or raw.get("schema_version") != 2:
-        raise RegistryError("registry schema_version must be 2")
+    if not isinstance(raw, dict) or raw.get("schema_version") not in {2, 3}:
+        raise RegistryError("registry schema_version must be 2 or 3")
     raw_services = raw.get("services")
     if not isinstance(raw_services, list) or not raw_services:
         raise RegistryError("registry services must be a non-empty list")

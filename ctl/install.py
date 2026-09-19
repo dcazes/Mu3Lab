@@ -1914,16 +1914,25 @@ def run_job(job: dict, ctx: dict) -> None:
     from ctl.provisioning import ProvisioningStore
     provisioning = ProvisioningStore.runtime()
     if provisioning:
-        provisioning.update("foundation", "verified",
-                            detail="Host foundation, private ingress, and tailnet route are ready.")
-        provisioning.update("identity", "verified",
-                            detail="Dashboard identity protection was verified through Authentik.")
-        provisioning.update("core", "pending",
-                            detail="Core platform reconciliation will start automatically.")
-        provisioning.update("configuration", "pending",
-                            detail="Inference-provider enrollment will be requested only after core services start.")
-        provisioning.update("verification", "pending",
-                            detail="Mu3Lab will verify routes and application contracts before handoff.")
+        current = {item["phase_id"]: item["actual_state"]
+                   for item in provisioning.summary()["phases"]}
+        if current.get("foundation") != "verified":
+            provisioning.update("foundation", "verified",
+                                detail="Host foundation, private ingress, and tailnet route are ready.")
+        if current.get("identity") != "verified":
+            provisioning.update("identity", "verified",
+                                detail="Dashboard identity protection was verified through Authentik.")
+        # A late bootstrap completion must never erase progress made by the
+        # durable worker while the bootstrap page was still open.
+        if current.get("core") == "pending":
+            provisioning.update("core", "pending",
+                                detail="Core platform reconciliation will start automatically.")
+        if current.get("configuration") == "pending":
+            provisioning.update("configuration", "pending",
+                                detail="Inference-provider enrollment will be requested only after core services start.")
+        if current.get("verification") == "pending":
+            provisioning.update("verification", "pending",
+                                detail="Mu3Lab will verify routes and application contracts before handoff.")
     # There is no second "install core" decision. The bootstrap already has
     # the user-approved elevation session and has established every required
     # host dependency, so it launches one resumable core job automatically.

@@ -1,0 +1,17 @@
+name: mu3lab-mcp-mealie
+services:
+  mealie-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      MEALIE_BASE_URL: http://mealie:9000
+      MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:?MEALIE_API_TOKEN is required}
+      MEALIE_ALLOWED_UPLOAD_DIRS: ""
+    ports: ["127.0.0.1:8814:8000"]
+    networks: [mu3lab_backend, mu3lab_mcp]
+    security_opt: [no-new-privileges:true]
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

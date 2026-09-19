@@ -17,6 +17,7 @@ DEBUG: Return shape is ALWAYS {"ok", "changed", "log"[, "terminal_command"]}.
 from __future__ import annotations
 
 import os as _os
+import json as _json
 import queue as _queue
 import shlex as _shlex
 import subprocess as _subprocess
@@ -231,6 +232,37 @@ def reset_authentik_admin_password(password: str,
     return {"ok": True}
 
 
+def freellmapi_local_setup(email: str, password: str,
+                           log: Callable[[str], None]) -> tuple[int, dict]:
+    """Claim a fresh FreeLLMAPI from inside its container's loopback boundary.
+
+    Upstream intentionally requires a setup code when the socket peer is not
+    loopback. Docker port publishing makes a host request appear remote, so the
+    reviewed first-run call runs inside the container. Credentials travel only
+    on stdin and the one-time session token is returned only to the caller.
+    """
+    if not email or not password or "\n" in email or "\n" in password:
+        return 2, {}
+    script = (
+        "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',async()=>{"
+        "try{const r=await fetch('http://127.0.0.1:3001/api/auth/setup',{method:'POST',"
+        "headers:{'content-type':'application/json'},body:d});const b=await r.json();"
+        "process.stdout.write(JSON.stringify({status:r.status,body:b}))}"
+        "catch(e){process.exit(1)}})"
+    )
+    payload = _json.dumps({"email": email, "password": password}, separators=(",", ":")) + "\n"
+    rc, output = docker_cmd_with_stdin(
+        ["docker", "exec", "-i", "mu3lab-freellmapi-freellmapi-1",
+         "node", "-e", script], payload, log, timeout=30)
+    if rc:
+        return rc, {}
+    try:
+        decoded = _json.loads(output)
+    except (TypeError, ValueError):
+        return 1, {}
+    return 0, decoded if isinstance(decoded, dict) else {}
+
+
 def compose_up(projdir: Path, log: Callable[[str], None],
                timeout: int = 300, env: dict[str, str] | None = None,
                extra_files: list[Path] | None = None,
@@ -243,7 +275,11 @@ def compose_up(projdir: Path, log: Callable[[str], None],
     string, no shell games beyond one quoted layer) stays exact. Extra files
     are reviewed service-owned overrides, never browser-provided paths.
     """
-    files = [projdir / "docker-compose.yml"] + list(extra_files or [])
+    files = [projdir / "docker-compose.yml"]
+    digest_override = projdir / "docker-compose.digest.yml"
+    if digest_override.is_file():
+        files.append(digest_override)
+    files += list(extra_files or [])
     argv = ["docker", "compose"]
     for compose_file in files:
         argv.extend(["-f", str(compose_file)])
@@ -256,6 +292,30 @@ def compose_up(projdir: Path, log: Callable[[str], None],
         return docker_cmd_stream(argv, log, timeout=timeout, env=env,
                                  on_output=on_output)
     return docker_cmd(argv, log, timeout=timeout, env=env)
+
+
+def compose_config(projdir: Path, log: Callable[[str], None], *,
+                   env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Validate one materialized curated project before any image pull."""
+    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
+               "--project-directory", str(projdir), "config", "--quiet"]
+    return docker_cmd(command, log, timeout=60, env=env)
+
+
+def compose_pull(projdir: Path, log: Callable[[str], None], *,
+                 timeout: int = 1800,
+                 env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Pull images declared by one curated, already-validated Compose file."""
+    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
+               "--project-directory", str(projdir), "pull"]
+    return docker_cmd_stream(command, log, timeout=timeout, env=env)
+
+
+def compose_images(projdir: Path, log: Callable[[str], None]) -> tuple[int, str]:
+    """Return resolved image IDs for audit after a successful curated pull."""
+    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
+               "--project-directory", str(projdir), "images", "--format", "json"]
+    return docker_cmd(command, log, timeout=60)
 
 
 def compose_exec(projdir: Path, service: str, argv: list[str],
@@ -274,6 +334,45 @@ def compose_exec(projdir: Path, service: str, argv: list[str],
     return docker_cmd(command, log, timeout=timeout, env=env)
 
 
+def compose_action(projdir: Path, action: str, log: Callable[[str], None],
+                   *, timeout: int = 600,
+                   env: dict[str, str] | None = None,
+                   extra_files: list[Path] | None = None) -> tuple[int, str]:
+    """Run one allowlisted lifecycle verb for a reviewed Compose project."""
+    verbs = {
+        "start": ["up", "-d"],
+        "stop": ["stop"],
+        "restart": ["up", "-d", "--force-recreate"],
+    }
+    if action not in verbs:
+        return 2, "unsupported curated lifecycle action"
+    files = [projdir / "docker-compose.yml"]
+    digest_override = projdir / "docker-compose.digest.yml"
+    if digest_override.is_file():
+        files.append(digest_override)
+    files += list(extra_files or [])
+    command = ["docker", "compose"]
+    for compose_file in files:
+        command.extend(["-f", str(compose_file)])
+    command.extend(["--project-directory", str(projdir), *verbs[action]])
+    return docker_cmd_stream(command, log, timeout=timeout, env=env)
+
+
+def compose_logs(projdir: Path, log: Callable[[str], None], *,
+                 tail: int = 120, container: str = "") -> tuple[int, str]:
+    """Return bounded logs without accepting paths or arbitrary arguments."""
+    bounded = max(20, min(int(tail), 500))
+    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml")]
+    digest_override = projdir / "docker-compose.digest.yml"
+    if digest_override.is_file():
+        command.extend(["-f", str(digest_override)])
+    command.extend(["--project-directory", str(projdir), "logs", "--no-color",
+                    "--tail", str(bounded)])
+    if container:
+        command.append(container)
+    return docker_cmd(command, log, timeout=30)
+
+
 def docker_container_statuses(project: str) -> tuple[int, str]:
     """Return compact status lines for one Compose project, without logging.
 
@@ -285,6 +384,15 @@ def docker_container_statuses(project: str) -> tuple[int, str]:
         "docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
         "--format", "{{.Names}}\t{{.Status}}",
     ], lambda _line: None, timeout=15)
+
+
+def docker_image_digest(image: str) -> tuple[int, str]:
+    """Resolve one manifest-owned image reference to its immutable repo digest."""
+    if not image or any(char.isspace() for char in image):
+        return 2, "invalid curated image reference"
+    return docker_cmd([
+        "docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image,
+    ], lambda _line: None, timeout=30)
 
 
 def apt_update(log: Callable[[str], None]) -> dict:
@@ -457,6 +565,21 @@ def docker_network_create(name: str, log: Callable[[str], None],
     if rc != 0:
         return _fail(lines)
     return _ok(lines)
+
+
+def tailscale_serve(port: int, loopback_port: int,
+                    log: Callable[[str], None]) -> dict:
+    """Publish one registry-owned loopback listener through Tailscale Serve."""
+    if not (1 <= int(port) <= 65535 and 1 <= int(loopback_port) <= 65535):
+        return _fail(["invalid curated Tailscale route"])
+    argv = ["tailscale", "serve", "--bg", f"--https={int(port)}",
+            f"http://127.0.0.1:{int(loopback_port)}"]
+    result = privilege.run_privileged(argv, log, timeout=60)
+    if result.get("need_terminal"):
+        return _fail(["Tailscale Serve requires an administrator command."],
+                     terminal_command=result["terminal_command"])
+    return _ok(["Private HTTPS route published."], changed=True) if result.get("ok") else _fail(
+        ["Tailscale Serve could not publish the curated route."])
 
 
 def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> dict:

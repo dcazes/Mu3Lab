@@ -1,0 +1,51 @@
+name: mu3lab-adventurelog
+
+services:
+  app:
+    image: ghcr.io/seanmorley15/adventurelog:v0.13.0
+    restart: unless-stopped
+    environment:
+      SITE_URL: ${SITE_URL:-http://127.0.0.1:8015}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PGHOST: db
+      POSTGRES_DB: adventurelog
+      POSTGRES_USER: adventure
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      DJANGO_ADMIN_USERNAME: ${DJANGO_ADMIN_USERNAME:?DJANGO_ADMIN_USERNAME is required}
+      DJANGO_ADMIN_PASSWORD: ${DJANGO_ADMIN_PASSWORD:?DJANGO_ADMIN_PASSWORD is required}
+      DJANGO_ADMIN_EMAIL: ${DJANGO_ADMIN_EMAIL:?DJANGO_ADMIN_EMAIL is required}
+      PORT: "3000"
+    ports: ["127.0.0.1:8015:80"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/adventurelog/media:/code/media
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/health')\""]
+      interval: 20s
+      timeout: 8s
+      retries: 20
+      start_period: 90s
+
+  db:
+    image: postgis/postgis:16-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: adventurelog
+      POSTGRES_USER: adventure
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/adventurelog/postgres:/var/lib/postgresql/data
+    networks: [mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adventure -d adventurelog"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

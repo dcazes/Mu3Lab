@@ -1,0 +1,33 @@
+name: mu3lab-actual-budget
+
+services:
+  actual-server:
+    image: docker.io/actualbudget/actual-server:26.9.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:5006:5006"]
+    environment:
+      ACTUAL_PORT: "5006"
+      ACTUAL_UPLOAD_FILE_SYNC_SIZE_LIMIT_MB: "20"
+      ACTUAL_UPLOAD_SYNC_ENCRYPTED_FILE_SYNC_SIZE_LIMIT_MB: "50"
+      ACTUAL_UPLOAD_FILE_SIZE_LIMIT_MB: "20"
+      ACTUAL_OPENID_DISCOVERY_URL: ${ACTUAL_OPENID_DISCOVERY_URL:-}
+      ACTUAL_OPENID_CLIENT_ID: ${ACTUAL_OPENID_CLIENT_ID:-}
+      ACTUAL_OPENID_CLIENT_SECRET: ${ACTUAL_OPENID_CLIENT_SECRET:-}
+      ACTUAL_OPENID_SERVER_HOSTNAME: ${ACTUAL_OPENID_SERVER_HOSTNAME:-}
+      ACTUAL_OPENID_AUTH_METHOD: openid
+      ACTUAL_OPENID_ENFORCE: ${ACTUAL_OPENID_ENFORCE:-false}
+      ACTUAL_USER_CREATION_MODE: ${ACTUAL_USER_CREATION_MODE:-login}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/actual-budget:/data
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5006/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 20s
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

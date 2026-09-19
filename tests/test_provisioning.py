@@ -14,6 +14,7 @@ from ctl.core_setup import _provision_freellmapi
 from ctl.core_wiring import configure
 from ctl.provider_secrets import records, save
 from ctl.provisioning import ProvisioningStore
+from ctl.secrets import ensure_core_envs
 from ctl.runtime import RuntimePaths
 from ctl.secrets import ensure_core_envs
 
@@ -63,6 +64,11 @@ class ProvisioningStoreTests(unittest.TestCase):
 @unittest.skipUnless(__import__("importlib.util").util.find_spec("cryptography"),
                      "cryptography is installed by control-plane requirements")
 class CoreWiringTests(unittest.TestCase):
+    def test_core_environment_contract_includes_ollama(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = ensure_core_envs(Path(tmp), token_factory=lambda: "generated")
+        self.assertEqual(set(paths), {"ollama", "freellmapi", "litellm", "open-webui"})
+
     def test_provider_key_reaches_only_private_generated_adapter_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
@@ -94,8 +100,9 @@ class CoreWiringTests(unittest.TestCase):
             with patch("ctl.core_setup._http_json", side_effect=lambda *args, **kwargs: next(responses)):
                 ok, _detail = _provision_freellmapi(paths)
             self.assertTrue(ok)
-            env = (paths.projects / "freellmapi" / ".env").read_text(encoding="utf-8")
-            self.assertIn("FREELLMAPI_SERVICE_KEY=sk-cp-private-gateway-key", env)
+            from ctl.secrets import read_runtime_env
+            env = read_runtime_env(paths.projects / "freellmapi" / ".env")
+            self.assertEqual(env["FREELLMAPI_SERVICE_KEY"], "sk-cp-private-gateway-key")
 
     def test_freellmapi_never_mints_a_second_key_after_resume(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,3 +113,20 @@ class CoreWiringTests(unittest.TestCase):
             ok, detail = _provision_freellmapi(paths)
             self.assertTrue(ok)
             self.assertIn("already exists", detail)
+
+    def test_freellmapi_uses_container_loopback_for_first_setup(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
+            responses = iter([
+                (403, {"error": {"type": "setup_code_required"}}),
+                (200, []),
+                (201, {"key": "sk-cp-private-gateway-key"}),
+            ])
+            local = (0, {"status": 201, "body": {"token": "dashboard-session"}})
+            with patch("ctl.core_setup._http_json", side_effect=lambda *args, **kwargs: next(responses)), \
+                 patch("ctl.core_setup.actions.freellmapi_local_setup", return_value=local) as setup:
+                ok, _detail = _provision_freellmapi(paths)
+            self.assertTrue(ok)
+            setup.assert_called_once()
