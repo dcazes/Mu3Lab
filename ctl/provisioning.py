@@ -16,11 +16,15 @@ from typing import Any
 from ctl.jobs import redact, redact_data
 from ctl.runtime import RuntimePaths
 
-WORKFLOW_VERSION = 1
+WORKFLOW_VERSION = 2
 PHASES = (
-    ("foundation", "Host foundation", "Install the host and private-network foundation."),
-    ("identity", "Private identity", "Create the Mu3Lab owner and private sign-in."),
+    ("foundation", "Host prerequisites and Docker", "Install the host runtime and private application networks."),
+    ("vaultwarden", "Vaultwarden owner", "Verify the independent private password-vault owner account."),
+    ("tailscale", "Tailscale and HTTPS routes", "Verify the tailnet connection and private HTTPS routes."),
+    ("identity", "Authentik owner", "Create the Mu3Lab identity owner and operator mapping."),
+    ("dashboard_protection", "Protected dashboard", "Prove that Authentik protects the dashboard."),
     ("core", "Core platform", "Start and configure the curated core services."),
+    ("open_webui_admin", "Open WebUI administrator", "Initialize the first Open WebUI administrator."),
     ("configuration", "Provider configuration", "Validate external inference access."),
     ("verification", "Verified handoff", "Prove that the user-facing platform works."),
 )
@@ -81,6 +85,26 @@ class ProvisioningStore:
                     (workflow_version, phase_id, desired_state, actual_state, updated_at, detail)
                     VALUES (?, ?, 'verified', 'pending', ?, ?)
                 """, (WORKFLOW_VERSION, phase_id, now, detail))
+            legacy = {str(row["phase_id"]): str(row["actual_state"])
+                      for row in conn.execute("""SELECT phase_id, actual_state FROM provisioning_steps
+                                                 WHERE workflow_version = 1""").fetchall()}
+            if legacy:
+                mappings = {
+                    "foundation": ("foundation", "vaultwarden", "tailscale"),
+                    "identity": ("identity", "dashboard_protection"),
+                    "core": ("core",), "configuration": ("configuration",),
+                    "verification": ("verification",),
+                }
+                for old, targets in mappings.items():
+                    if legacy.get(old) not in {"verified", "skipped"}:
+                        continue
+                    for target in targets:
+                        conn.execute("""UPDATE provisioning_steps SET actual_state = 'verified',
+                                        detail = ?, updated_at = ?
+                                        WHERE workflow_version = ? AND phase_id = ?
+                                          AND actual_state = 'pending'""",
+                                     ("Verified by the completed version 1 workflow.", now,
+                                      WORKFLOW_VERSION, target))
 
     def update(self, phase_id: str, state: str, *, detail: str = "",
                error: str = "", inputs: dict[str, Any] | None = None) -> None:

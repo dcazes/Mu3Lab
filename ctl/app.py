@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 import hmac
 import hashlib
+import re
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
@@ -42,18 +43,21 @@ from ctl.releases import latest as latest_release
 from ctl.mcp_registry import snapshot as mcp_snapshot
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl import mcp_config
-from ctl.service_state import compose_states, status as service_status, tailnet_dns_name, tailnet_serve_ports
+from ctl.service_state import compose_snapshot, status as service_status, tailnet_dns_name, tailnet_serve_ports
 from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl import actions
 from ctl import service_config
 from ctl.provider_catalog import catalog as provider_catalog, get as get_provider, prefix_warning
+from ctl import workflow_secrets
+from ctl.install_batches import InstallBatchStore
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dashboard" / "dist"
 CATALOG = ROOT / "catalog.yaml"
 
 app = FastAPI(title="Mu3Lab control plane", version=__version__)
+_EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _ingress_token() -> str:
@@ -126,12 +130,12 @@ def _service_snapshot(request: Request | None = None) -> dict:
         return {"ok": False, "error": str(exc), "services": []}
     dns_name = tailnet_dns_name()
     route_ports = tailnet_serve_ports()
-    project_states = compose_states()
+    project_states, container_snapshots = compose_snapshot()
     store = JobStore.runtime()
     jobs = store.jobs(limit=100) if store else []
     control_state = ControlState.runtime()
     operator = bool(request and identity(request)["writes_enabled"])
-    with ThreadPoolExecutor(max_workers=min(8, len(registry.services))) as pool:
+    with ThreadPoolExecutor(max_workers=min(4, len(registry.services))) as pool:
         statuses = list(pool.map(
             lambda service: service_status(service, dns_name, ROOT, route_ports, project_states),
             registry.services))
@@ -145,6 +149,7 @@ def _service_snapshot(request: Request | None = None) -> dict:
                          "route_ready": True, "user_action": "Open securely"})
         latest = next((job for job in jobs if job["service_id"] == service.id), None)
         installation = control_state.installation(service.id) if control_state else None
+        initialization = control_state.initialization(service.id) if control_state else None
         missing_config = service_config.missing_required(service)
         if missing_config and service.stage == "optional" and not installation:
             item["state"] = "config_required"
@@ -159,6 +164,14 @@ def _service_snapshot(request: Request | None = None) -> dict:
             item["installation"] = installation
             item["route_state"] = installation["route_state"]
             item["last_error"] = installation.get("last_error", {})
+        item["initialization"] = initialization or {
+            "mode": service.account.get("mode", "none"),
+            "state": "pending" if service.account.get("mode", "none") != "none" else "not_required",
+        }
+        compose_dir = (RuntimePaths().projects / service.id if service.stage == "optional"
+                       and (RuntimePaths().projects / service.id / "docker-compose.yml").is_file()
+                       else service.compose_path(ROOT))
+        item["containers"] = container_snapshots.get(str(compose_dir.resolve()), [])
         item["last_job"] = latest
         item["last_job_id"] = str(latest["id"]) if latest else ""
         item["allowed_actions"] = allowed_actions(service, str(item["state"])) if operator else []
@@ -223,6 +236,7 @@ def system() -> dict:
     return {
         "ok": True,
         "cpu_percent": psutil.cpu_percent(interval=None),
+        "uptime_seconds": max(0, int(__import__("time").time() - psutil.boot_time())),
         "memory": {"total": memory.total, "used": memory.used,
                    "percent": memory.percent},
         "disk": {"total": disk.total, "used": disk.used, "percent": disk.percent},
@@ -308,6 +322,14 @@ def identity(request: Request) -> dict:
     """Trust Authentik headers only across the authenticated Caddy hop."""
     trusted = _trusted_proxy(request)
     username = request.headers.get("x-authentik-username", "").strip() if trusted else ""
+    subject_id = request.headers.get("x-authentik-uid", "").strip() if trusted else ""
+    email = request.headers.get("x-authentik-email", "").strip() if trusted else ""
+    display_name = request.headers.get("x-authentik-name", "").strip() if trusted else ""
+    if email and _EMAIL.fullmatch(email):
+        local, domain = email.rsplit("@", 1)
+        email = f"{local}@{domain.lower()}"
+    else:
+        email = ""
     # Authentik's proxy provider serializes groups with a pipe delimiter.
     groups = tuple(value.strip() for value in request.headers.get("x-authentik-groups", "").split("|")
                    if value.strip()) if trusted else ()
@@ -321,10 +343,23 @@ def identity(request: Request) -> dict:
             bootstrap_state.confirm("dashboard_protection")
         except OSError:
             pass
+        try:
+            provisioning_store = ProvisioningStore.runtime()
+            if provisioning_store:
+                current = {item["phase_id"]: item["actual_state"]
+                           for item in provisioning_store.summary()["phases"]}
+                if current.get("dashboard_protection") != "verified":
+                    provisioning_store.update("dashboard_protection", "verified",
+                                              detail="Authenticated operator session verified through Authentik.")
+        except (OSError, ValueError):
+            pass
     return {
         "ok": True,
         "control_plane_auth": "authentik_forward_auth" if authenticated else "not_configured",
         "username": username,
+        "subject_id": subject_id,
+        "email": email,
+        "display_name": display_name,
         "groups": list(groups),
         "detail": ("Authenticated through Authentik." if operator else
                    "Tailnet access is private, but Authentik protection and operator role mapping are not configured yet."),
@@ -544,6 +579,18 @@ def start_core(request: Request) -> dict:
         return JSONResponse({"ok": False, "error": "core setup is already running", "job": active[0]}, status_code=409)
     job = start_core_setup(store, identity_data["username"], ROOT,
                            idempotency_key=idempotency_key or None)
+    if identity_data.get("subject_id") and identity_data.get("email"):
+        try:
+            workflow_secrets.save_job_identity(
+                str(job["id"]), owner_uid=str(identity_data["subject_id"]),
+                email=str(identity_data["email"]), username=str(identity_data["username"]),
+                display_name=str(identity_data.get("display_name") or identity_data["username"]))
+        except workflow_secrets.WorkflowSecretError as exc:
+            store.transition(str(job["id"]), "failed", actor=identity_data["username"],
+                             detail="Encrypted account-bootstrap storage is unavailable.",
+                             error_code="bootstrap_contract_unavailable",
+                             step_id="account_preflight")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
     return {"ok": True, "job": job}
 
 
@@ -566,6 +613,15 @@ async def service_action(service_id: str, request: Request) -> dict:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
     if service.is_blocked:
         return JSONResponse({"ok": False, "error": service.blocked_reason}, status_code=409)
+    if (action in {"install", "retry_setup"}
+            and service.account.get("mode") == "environment_bootstrap"
+            and (not identity_data.get("subject_id") or not identity_data.get("email"))):
+        return JSONResponse({"ok": False, "error": {
+            "code": "identity_email_missing", "stage": "account_preflight",
+            "message": "A verified Authentik email is required. Sign out, sign back in, and retry.",
+            "retryable": True,
+            "recommended_action": "Refresh the Authentik session and retry installation.",
+        }}, status_code=409)
     if action == "stop" and service.lifecycle == "always_on":
         return JSONResponse({"ok": False, "error": "always-on infrastructure cannot be stopped"}, status_code=409)
     if not (service.compose_path(ROOT) / "docker-compose.yml").is_file():
@@ -596,7 +652,159 @@ async def service_action(service_id: str, request: Request) -> dict:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
     if control_state and job.get("state") == "queued":
         control_state.set_installation(service.id, "queued", job_id=str(job["id"]))
+    if action in {"install", "retry_setup"} and identity_data.get("subject_id") and identity_data.get("email"):
+        try:
+            workflow_secrets.save_job_identity(
+                str(job["id"]), owner_uid=str(identity_data["subject_id"]),
+                email=str(identity_data["email"]), username=str(identity_data["username"]),
+                display_name=str(identity_data.get("display_name") or identity_data["username"]))
+        except workflow_secrets.WorkflowSecretError as exc:
+            store.transition(str(job["id"]), "failed", actor=identity_data["username"],
+                             detail="Encrypted account-bootstrap storage is unavailable.",
+                             error_code="bootstrap_contract_unavailable",
+                             step_id="account_preflight")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
     return {"ok": True, "job": job}
+
+
+@app.post("/api/v1/services/install-batch")
+async def create_install_batch(request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    if not identity_data.get("subject_id") or not identity_data.get("email"):
+        return JSONResponse({"ok": False, "error": "A verified Authentik UID and email are required."},
+                            status_code=409)
+    try:
+        payload = await request.json()
+        service_ids = payload.get("service_ids", [])
+        if not isinstance(service_ids, list) or not all(isinstance(item, str) for item in service_ids):
+            raise ValueError("service_ids must be a list of curated application IDs")
+        batches = InstallBatchStore.runtime()
+        jobs_store = JobStore.runtime()
+        control = ControlState.runtime()
+        if not batches or not jobs_store or not control:
+            raise RuntimeError("runtime state is not initialized")
+        result = batches.create(
+            load_registry(), service_ids, actor=str(identity_data["username"]),
+            owner_uid=str(identity_data["subject_id"]),
+            identity={"owner_uid": str(identity_data["subject_id"]),
+                      "email": str(identity_data["email"]),
+                      "username": str(identity_data["username"]),
+                      "display_name": str(identity_data.get("display_name") or identity_data["username"])},
+            idempotency_key=request.headers.get("idempotency-key", ""),
+            jobs=jobs_store, control=control)
+        return {"ok": True, "batch": result}
+    except (ValueError, RegistryError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    except RuntimeError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+
+
+@app.get("/api/v1/service-install-batches/{batch_id}")
+def get_install_batch(batch_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    batches = InstallBatchStore.runtime()
+    batch = batches.get(batch_id) if batches else None
+    if not batch or batch["owner_uid"] != identity_data.get("subject_id"):
+        return JSONResponse({"ok": False, "error": "batch not found"}, status_code=404)
+    return {"ok": True, "batch": batch}
+
+
+@app.get("/api/v1/service-install-batches")
+def latest_install_batch(request: Request) -> dict:
+    identity_data = identity(request)
+    owner_uid = str(identity_data.get("subject_id") or "")
+    if not identity_data["writes_enabled"] or not owner_uid:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    batches = InstallBatchStore.runtime()
+    return {"ok": True, "batch": batches.latest(owner_uid) if batches else None}
+
+
+@app.post("/api/v1/service-install-batches/{batch_id}/resume")
+def resume_install_batch(batch_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    batches, jobs_store = InstallBatchStore.runtime(), JobStore.runtime()
+    batch = batches.get(batch_id) if batches else None
+    if not batch or batch["owner_uid"] != identity_data.get("subject_id"):
+        return JSONResponse({"ok": False, "error": "batch not found"}, status_code=404)
+    try:
+        return {"ok": True, "batch": batches.resume(batch_id, jobs_store)}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+
+
+@app.post("/api/v1/service-install-batches/{batch_id}/cancel")
+def cancel_install_batch(batch_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    batches = InstallBatchStore.runtime()
+    batch = batches.get(batch_id) if batches else None
+    if not batch or batch["owner_uid"] != identity_data.get("subject_id"):
+        return JSONResponse({"ok": False, "error": "batch not found"}, status_code=404)
+    jobs_store = JobStore.runtime()
+    if not jobs_store or not batches.cancel(batch_id, jobs_store):
+        return JSONResponse({"ok": False, "error": "batch cannot be cancelled"}, status_code=409)
+    return {"ok": True, "batch": batches.get(batch_id)}
+
+
+@app.get("/api/v1/credential-handoffs")
+def credential_handoffs(request: Request) -> dict:
+    identity_data = identity(request)
+    owner_uid = str(identity_data.get("subject_id") or "")
+    if not identity_data["writes_enabled"] or not owner_uid:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    state = ControlState.runtime()
+    expired = workflow_secrets.cleanup()
+    if state:
+        state.expire_handoffs(expired)
+    secret_metadata = {item["id"]: item for item in workflow_secrets.metadata(owner_uid)}
+    records = []
+    for item in state.handoffs(owner_uid) if state else []:
+        if item["state"] == "available" and item["id"] in secret_metadata:
+            records.append({**item, **secret_metadata[item["id"]]})
+    return {"ok": True, "handoffs": records}
+
+
+def _sensitive_response(payload: dict, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers={
+        "Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer",
+    })
+
+
+@app.post("/api/v1/credential-handoffs/{handoff_id}/reveal")
+def reveal_credential(handoff_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    owner_uid = str(identity_data.get("subject_id") or "")
+    if not identity_data["writes_enabled"] or not owner_uid or not _mutation_allowed(request):
+        return _sensitive_response({"ok": False, "error": "operator mutation verification failed"}, 403)
+    credential = workflow_secrets.reveal(handoff_id, owner_uid)
+    if not credential:
+        return _sensitive_response({"ok": False, "error": "credential is unavailable or expired"}, 404)
+    return _sensitive_response({"ok": True, "credential": credential})
+
+
+@app.post("/api/v1/credential-handoffs/{handoff_id}/confirm")
+def confirm_credential(handoff_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    owner_uid = str(identity_data.get("subject_id") or "")
+    if not identity_data["writes_enabled"] or not owner_uid or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    state = ControlState.runtime()
+    if not state or not state.confirm_handoff(handoff_id, owner_uid):
+        return JSONResponse({"ok": False, "error": "credential handoff not found"}, status_code=404)
+    workflow_secrets.delete(handoff_id, owner_uid)
+    state_store = JobStore.runtime()
+    if state_store:
+        state_store.record_audit(actor=str(identity_data["username"]),
+                                 event="credential_handoff.confirmed",
+                                 detail="Generated application credential was confirmed saved and removed.")
+    return {"ok": True, "state": "confirmed"}
 
 
 @app.get("/api/v1/services/{service_id}/logs")
@@ -629,6 +837,45 @@ def service_logs(service_id: str, request: Request, tail: int = 120,
                         status_code=200 if rc == 0 else 500)
 
 
+@app.post("/api/v1/services/{service_id}/initialization/confirm")
+def confirm_service_initialization(service_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    mode = str(service.account.get("mode", "none"))
+    if mode not in {"oidc_first_login", "browser_registration", "local_account_manual", "manual_owner", "trusted_header"}:
+        return JSONResponse({"ok": False, "error": "this application does not use manual initialization"},
+                            status_code=409)
+    control = ControlState.runtime()
+    if not control:
+        return JSONResponse({"ok": False, "error": "runtime state is not initialized"}, status_code=503)
+    installation = control.installation(service.id)
+    if not installation or installation["state"] not in {"running", "stopped", "degraded"}:
+        return JSONResponse({"ok": False, "error": "install the application before confirming setup"},
+                            status_code=409)
+    result = control.set_initialization(service.id, mode, "ready",
+                                        job_id=str(installation.get("last_job_id", "")),
+                                        owner_uid=str(identity_data.get("subject_id") or ""))
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=str(identity_data["username"]),
+                           event="service.initialization.confirmed",
+                           detail=f"Operator confirmed supported first-user setup for {service.id}.")
+    if service.id == "open-webui":
+        provisioning_store = ProvisioningStore.runtime()
+        if provisioning_store:
+            try:
+                provisioning_store.update("open_webui_admin", "verified",
+                                          detail="The operator confirmed the first Open WebUI administrator session.")
+            except ValueError:
+                pass
+    return {"ok": True, "initialization": result}
+
+
 @app.get("/api/v1/services/{service_id}/configuration")
 def get_service_configuration(service_id: str, request: Request) -> dict:
     if not identity(request)["writes_enabled"]:
@@ -637,8 +884,10 @@ def get_service_configuration(service_id: str, request: Request) -> dict:
         service = load_registry().get(service_id)
     except RegistryError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    managed = {str(field["key"]) for field in service.configuration if field.get("managed")}
     return {"ok": True, "service_id": service.id,
-            "fields": service_config.read(service)}
+            "fields": [field for field in service_config.read(service)
+                       if str(field["key"]) not in managed]}
 
 
 @app.put("/api/v1/services/{service_id}/configuration")
@@ -652,7 +901,13 @@ async def put_service_configuration(service_id: str, request: Request) -> dict:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
     try:
         payload = await request.json()
-        fields = service_config.write(service, payload.get("values", {}))
+        values = payload.get("values", {})
+        managed = {str(field["key"]) for field in service.configuration if field.get("managed")}
+        if isinstance(values, dict) and set(values).intersection(managed):
+            return JSONResponse({"ok": False, "error": "managed account fields cannot be changed here"},
+                                status_code=422)
+        fields = [field for field in service_config.write(service, values)
+                  if str(field["key"]) not in managed]
     except (ValueError, TypeError, AttributeError, OSError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=422)
     store = JobStore.runtime()

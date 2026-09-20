@@ -48,6 +48,13 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         waiting_for_runtime_reported = False
+        try:
+            from ctl.install_batches import InstallBatchStore
+            batches = InstallBatchStore.runtime()
+            if batches:
+                batches.reconcile(store)
+        except Exception as exc:
+            print(f"Mu3Lab batch reconciliation deferred safely: {exc}", flush=True)
         job = store.claim(worker_id)
         if job is None:
             time.sleep(POLL_SECONDS)
@@ -81,6 +88,19 @@ def run() -> int:
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=2)
+            try:
+                from ctl.install_batches import InstallBatchStore
+                batches = InstallBatchStore.runtime()
+                if batches:
+                    batches.advance_for_job(str(job["id"]), store)
+                from ctl import workflow_secrets
+                from ctl.control_state import ControlState
+                expired = workflow_secrets.cleanup()
+                control = ControlState.runtime()
+                if control:
+                    control.expire_handoffs(expired)
+            except Exception as exc:  # batch recovery will reconcile on next API/worker pass
+                print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
     return 0
 
 

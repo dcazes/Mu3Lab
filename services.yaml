@@ -2,7 +2,7 @@
 #
 # This file is the deployment source of truth.  Catalog copy lives in
 # catalog.yaml; neither file may contain credentials or user data.
-schema_version: 3
+schema_version: 4
 settings:
   runtime_root: /srv/mu3lab
   dashboard_port: 8787
@@ -134,6 +134,10 @@ services:
     update: {repository: open-webui/open-webui, current_version: v0.11.1}
     dependencies: [litellm]
     backup: {binds: [data]}
+    account:
+      mode: trusted_header
+      handoff: true
+      user_action: "Use Authentik for normal sign-in; save the generated recovery credential when offered."
 
   - id: freellmapi
     maturity: supported
@@ -184,6 +188,10 @@ services:
       scopes: [workspace-read, knowledge-read, knowledge-write, scraper-run]
       exposed: false
       tools: []
+    account:
+      mode: local_account_manual
+      handoff: false
+      user_action: "Open SurfSense after installation and create its separate local account."
 
   - id: firecrawl
     maturity: planned
@@ -238,6 +246,10 @@ services:
         - {id: actual.transactions, title: Read transactions, risk: read}
         - {id: actual.prepare_transaction, title: Prepare transaction, risk: draft}
         - {id: actual.create_transaction, title: Create approved transaction, risk: write}
+    account:
+      mode: oidc_first_login
+      handoff: false
+      user_action: "The installing operator must complete the first Authentik login to become the server owner."
 
   - id: immich
     maturity: supported
@@ -259,6 +271,10 @@ services:
     images: ["ghcr.io/immich-app/immich-server:v3.2.2", "ghcr.io/immich-app/immich-machine-learning:v3.2.2", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
     update: {repository: immich-app/immich, current_version: "v3.2.2"}
     backup: {binds: [library, database]}
+    account:
+      mode: browser_registration
+      handoff: false
+      user_action: "Open Immich and create the first administrator with your Authentik email."
 
   - id: mealie
     maturity: supported
@@ -293,6 +309,10 @@ services:
         - {id: mealie.shopping_lists, title: Read shopping lists, risk: read}
         - {id: mealie.add_shopping_item, title: Add shopping-list item, risk: write}
         - {id: mealie.mark_purchased, title: Mark item purchased, risk: write}
+    account:
+      mode: oidc_first_login
+      handoff: false
+      user_action: "Open Mealie and complete the first Authentik login."
 
   - id: adventurelog
     maturity: supported
@@ -311,10 +331,14 @@ services:
     setup_action: "Install only when you want private travel planning."
     resource_guidance: "Lightweight service with persistent trip data."
     identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    account:
+      mode: environment_bootstrap
+      handoff: true
+      user_action: "Save the generated administrator credential after installation."
     configuration:
-      - {key: admin_username, env: DJANGO_ADMIN_USERNAME, type: string, label: "Administrator username", required: true}
-      - {key: admin_email, env: DJANGO_ADMIN_EMAIL, type: string, label: "Administrator email", required: true}
-      - {key: admin_password, env: DJANGO_ADMIN_PASSWORD, type: secret, label: "Administrator password", required: true}
+      - {key: admin_username, env: DJANGO_ADMIN_USERNAME, type: string, managed: true}
+      - {key: admin_email, env: DJANGO_ADMIN_EMAIL, type: string, managed: true}
+      - {key: admin_password, env: DJANGO_ADMIN_PASSWORD, type: secret, managed: true}
     images: ["ghcr.io/seanmorley15/adventurelog:v0.13.0", "postgis/postgis:16-3.5"]
     update: {repository: seanmorley15/AdventureLog, current_version: "v0.13.0"}
     backup: {binds: [data]}
@@ -336,10 +360,14 @@ services:
     setup_action: "Install only when you want private document management."
     resource_guidance: "Storage and OCR usage grow with your document library."
     identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    account:
+      mode: environment_bootstrap
+      handoff: true
+      user_action: "Save the generated administrator credential after installation."
     configuration:
-      - {key: admin_username, env: PAPERLESS_ADMIN_USER, type: string, label: "Administrator username", required: true}
-      - {key: admin_email, env: PAPERLESS_ADMIN_MAIL, type: string, label: "Administrator email", required: true}
-      - {key: admin_password, env: PAPERLESS_ADMIN_PASSWORD, type: secret, label: "Administrator password", required: true}
+      - {key: admin_username, env: PAPERLESS_ADMIN_USER, type: string, managed: true}
+      - {key: admin_email, env: PAPERLESS_ADMIN_MAIL, type: string, managed: true}
+      - {key: admin_password, env: PAPERLESS_ADMIN_PASSWORD, type: secret, managed: true}
     images: ["ghcr.io/paperless-ngx/paperless-ngx:3.1.3", "docker.io/valkey/valkey:9.0.1-alpine", "docker.io/library/postgres:18.0-alpine"]
     update: {repository: paperless-ngx/paperless-ngx, current_version: "v3.1.3"}
     backup: {binds: [data, media, consume, export]}

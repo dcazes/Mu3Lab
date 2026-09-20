@@ -17,6 +17,9 @@ export interface Service {
   allowed_actions?: Array<'install' | 'retry_setup' | 'start' | 'stop' | 'restart'>; last_job?: Job | null;
   update?: { repository: string; current_version: string };
   configuration?: ServiceConfigField[];
+  account?: { mode: string; handoff: boolean; user_action: string };
+  initialization?: { mode: string; state: string; job_id?: string; verified_at?: string; last_error?: Record<string, unknown> };
+  containers?: Array<{ service: string; name: string; state: string; status: string; health: string; image: string }>;
 }
 export interface ServiceConfigField { key: string; type: 'string' | 'boolean' | 'integer' | 'enum' | 'secret'; label?: string; required?: boolean; default?: string | boolean | number; options?: string[]; value?: string | boolean | number | null; secret_present?: boolean; }
 export interface ServiceConfigResponse { ok: boolean; service_id: string; fields: ServiceConfigField[]; restart_required?: boolean; }
@@ -26,9 +29,9 @@ export interface CatalogService { summary: string; category?: string; stage_labe
 export interface CatalogResponse { ok: boolean; profiles: CatalogProfile[]; services: Record<string, CatalogService>; }
 export interface Metric { total: number; used: number; percent: number; }
 export interface BackupReadiness { state?: string; detail?: string; repository_present?: boolean; integrity_verified?: boolean; snapshot_present?: boolean; off_device?: boolean; last_verified_at?: string; [key: string]: unknown; }
-export interface SystemResponse { ok: boolean; cpu_percent: number; docker_ready: boolean; tailnet_dns_name: string; runtime_root: string; memory: Metric; disk: Metric; backup: BackupReadiness; }
+export interface SystemResponse { ok: boolean; cpu_percent: number; uptime_seconds?: number; docker_ready: boolean; tailnet_dns_name: string; runtime_root: string; memory: Metric; disk: Metric; backup: BackupReadiness; }
 export interface IntegrationsResponse { ok: boolean; policy: string; integrations: { source: string; destination: string; kind: string }[]; }
-export interface IdentityResponse { ok: boolean; control_plane_auth: string; username?: string; groups?: string[]; detail: string; writes_enabled: boolean; }
+export interface IdentityResponse { ok: boolean; control_plane_auth: string; username?: string; subject_id?: string; email?: string; display_name?: string; groups?: string[]; detail: string; writes_enabled: boolean; }
 export interface CoreSetupResponse { ok: boolean; ready_to_run: boolean; services: string[]; missing_manifests: string[]; current_job?: Job | null; next_action: string; capacity?: { ok: boolean; reasons?: string[]; disk_free?: number; memory_total?: number; docker_ready?: boolean }; provisioning?: ProvisioningResponse | null; }
 export interface ProvisioningPhase { phase_id: string; label: string; actual_state: string; detail: string; error: string; updated_at: string; attempts: number; }
 export interface ProvisioningResponse { ok: boolean; available: boolean; complete: boolean; phases: ProvisioningPhase[]; waiting?: ProvisioningPhase | null; blocked?: ProvisioningPhase | null; }
@@ -47,7 +50,7 @@ export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 async function errorMessage(res: Response, method: string, path: string): Promise<string> {
-  try { const body = await res.json() as { error?: string }; if (body.error) return body.error; } catch { /* use HTTP fallback */ }
+  try { const body = await res.json() as { error?: string | { message?: string; recommended_action?: string } }; if (typeof body.error === 'string') return body.error; if (body.error?.message) return `${body.error.message}${body.error.recommended_action ? ` ${body.error.recommended_action}` : ''}`; } catch { /* use HTTP fallback */ }
   return `${method} ${path}: HTTP ${res.status}`;
 }
 
@@ -92,3 +95,7 @@ export interface McpServer { id: string; name: string; service_id: string; kind:
 export interface McpRegistryResponse { ok: boolean; servers: McpServer[]; summary: Record<string, number>; policy: string; }
 export interface ChatStatus { ok: boolean; ready: boolean; url: string; authentication: string; mcp_enabled_count: number; detail: string; }
 export interface SystemConfig { ok: boolean; compute_mode: 'auto' | 'cpu' | 'nvidia' | 'amd'; resolved_compute_mode: 'cpu' | 'nvidia' | 'amd'; available_modes: string[]; updated_at: string; updated_by: string; }
+export interface InstallBatchItem { batch_id: string; service_id: string; ordinal: number; explicitly_selected: number; state: string; job_id: string; error_json?: string; started_at: string; completed_at: string; }
+export interface InstallBatch { id: string; actor: string; state: 'queued' | 'running' | 'paused' | 'succeeded' | 'cancelled'; current_ordinal: number; created_at: string; updated_at: string; error?: { code?: string; message?: string }; items: InstallBatchItem[]; }
+export interface CredentialHandoff { id: string; service_id: string; job_id: string; state: string; created_at: string; expires_at: string; login_url: string; }
+export interface CredentialReveal extends CredentialHandoff { username: string; email: string; password: string; }

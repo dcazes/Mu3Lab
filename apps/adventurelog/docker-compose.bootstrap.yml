@@ -1,0 +1,6 @@
+services:
+  app:
+    environment:
+      DJANGO_ADMIN_USERNAME: ${MU3LAB_BOOTSTRAP_USERNAME:?bootstrap username is required}
+      DJANGO_ADMIN_PASSWORD: ${MU3LAB_BOOTSTRAP_PASSWORD:?bootstrap password is required}
+      DJANGO_ADMIN_EMAIL: ${MU3LAB_BOOTSTRAP_EMAIL:?bootstrap email is required}

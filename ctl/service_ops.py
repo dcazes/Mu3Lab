@@ -9,6 +9,7 @@ import shutil
 import time
 import urllib.error
 import urllib.request
+import re
 from pathlib import Path
 
 import yaml
@@ -20,6 +21,7 @@ from ctl.registry import RegistryError, Service, load
 from ctl.routes import apply as apply_route
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl import workflow_secrets
 
 SUPPORTED_ACTIONS = frozenset({"install", "retry_setup", "start", "stop", "restart"})
 
@@ -89,6 +91,10 @@ def _materialize(service: Service, root: Path) -> Path:
         values.setdefault("AUTH_TYPE", "LOCAL")
         values.setdefault("REGISTRATION_ENABLED", "TRUE")
         values.setdefault("SANDBOX_ENABLED", "FALSE")
+        values.setdefault("EMBEDDING_MODEL", "litellm://ollama/nomic-embed-text")
+        values.setdefault("EMBEDDING_BASE_URL", "http://ollama:11434")
+        # v0.0.40 also reads this legacy spelling in selected code paths.
+        values.setdefault("EMBEDDING_API_BASE_URL", "http://ollama:11434")
     try:
         from ctl.service_state import tailnet_dns_name
         dns_name = tailnet_dns_name()
@@ -159,6 +165,78 @@ def _wait_healthy(service: Service, timeout: int = 180) -> tuple[bool, str]:
     return False, last
 
 
+def _surfsense_embedding_preflight(store: JobStore, job_id: str, root: Path) -> tuple[bool, str]:
+    """Verify SurfSense's fixed internal Ollama embedding dependency."""
+    _event(store, job_id, "embedding_check", "Verifying the curated Ollama embedding model.")
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        return False, f"Ollama is not available for SurfSense embeddings: {exc}"
+    names = {str(item.get("name", "")).split(":", 1)[0]
+             for item in payload.get("models", []) if isinstance(item, dict)}
+    if "nomic-embed-text" not in names:
+        _event(store, job_id, "embedding_model_pull", "Pulling the required local embedding model.")
+        ollama = load().get("ollama")
+        project = ollama.compose_path(root)
+        rc, _ = actions.compose_exec(project, "ollama",
+                                     ["ollama", "pull", "nomic-embed-text"],
+                                     lambda line: store.append_event(job_id, "log", line),
+                                     timeout=600)
+        if rc:
+            return False, "The required Ollama embedding model could not be prepared."
+    request = urllib.request.Request(
+        "http://127.0.0.1:11434/api/embeddings", method="POST",
+        data=json.dumps({"model": "nomic-embed-text", "prompt": "Mu3Lab readiness"}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        vector = result.get("embedding")
+        if not isinstance(vector, list) or not vector:
+            return False, "Ollama returned no embedding vector."
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        return False, f"The local embedding probe failed: {exc}"
+    return True, "Ollama embedding model is ready."
+
+
+def _account_username(identity: dict[str, str]) -> str:
+    candidate = identity.get("username", "") or identity.get("email", "").split("@", 1)[0]
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate).strip("-.")[:64]
+    return value or "mu3lab-admin"
+
+
+def _fresh_account_storage(service_id: str) -> bool:
+    data = RuntimePaths().data
+    directory = (data / "paperless" / "postgres" if service_id == "paperless-ngx"
+                 else data / "adventurelog" / "postgres")
+    try:
+        return not directory.exists() or not any(directory.iterdir())
+    except OSError:
+        return False
+
+
+def _verify_bootstrap_account(service_id: str, project: Path,
+                              log) -> tuple[bool, str]:
+    """Use the pinned Django application's own model layer to verify creation."""
+    if service_id == "paperless-ngx":
+        container, variable = "webserver", "PAPERLESS_ADMIN_USER"
+    elif service_id == "adventurelog":
+        container, variable = "app", "DJANGO_ADMIN_USERNAME"
+    else:
+        return True, "No automatic account verification required."
+    code = (
+        "import os; from django.contrib.auth import get_user_model; "
+        f"u=get_user_model().objects.filter(username=os.environ.get('{variable}','')).first(); "
+        "print('MU3LAB_ACCOUNT_OK' if u and u.is_superuser else 'MU3LAB_ACCOUNT_MISSING')"
+    )
+    rc, output = actions.compose_exec(project, container,
+                                      ["python", "manage.py", "shell", "-c", code],
+                                      log, timeout=90)
+    return rc == 0 and "MU3LAB_ACCOUNT_OK" in output, output
+
+
 def _image_snapshot(output: str) -> dict[str, str]:
     """Accept Compose's object-per-line or array JSON formats."""
     rows: list[dict] = []
@@ -217,6 +295,13 @@ def _fail(store: JobStore, state: ControlState | None, job_id: str, service_id: 
              "retryable": True, "recommended_action": "Review the app logs and retry setup."}
     if state and service_id:
         state.set_installation(service_id, "failed", job_id=job_id, error=error)
+        try:
+            current = state.initialization(service_id)
+            if current and current["state"] in {"pending", "initializing"}:
+                state.set_initialization(service_id, str(current["mode"]), "failed",
+                                         job_id=job_id, error=error)
+        except ValueError:
+            pass
     store.transition(job_id, "failed", actor=actor, detail=safe,
                      error_code=code, step_id=stage)
 
@@ -224,6 +309,8 @@ def _fail(store: JobStore, state: ControlState | None, job_id: str, service_id: 
 def _install(store: JobStore, state: ControlState | None, job: dict,
              service: Service, registry, actor: str, root: Path) -> None:
     job_id = str(job["id"])
+    account_mode = str(service.account.get("mode", "none"))
+    account_identity = workflow_secrets.job_identity(job_id)
     if service.stage != "optional":
         _fail(store, state, job_id, service.id, actor, "validate_service",
               "install_not_optional", "This service is installed by the core-suite workflow.")
@@ -235,6 +322,20 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
               "configuration_required",
               "Required configuration is missing: " + ", ".join(missing))
         return
+    if account_mode == "environment_bootstrap" and not account_identity:
+        _fail(store, state, job_id, service.id, actor, "account_preflight",
+              "identity_email_missing",
+              "A verified Authentik email is required. Sign out, sign back in, and retry.")
+        return
+    if state:
+        initialization_state = ("initializing" if account_mode == "environment_bootstrap"
+                                else "awaiting_user" if account_mode in {
+                                    "oidc_first_login", "browser_registration", "local_account_manual"
+                                } else "not_required")
+        state.set_initialization(service.id, account_mode, initialization_state,
+                                 job_id=job_id,
+                                 owner_uid=str((account_identity or {}).get("owner_uid", "")))
+    prior_installation = state.installation(service.id) if state else None
     if state:
         state.set_installation(service.id, "installing", job_id=job_id)
     _event(store, job_id, "validate_service", "Curated service contract accepted.")
@@ -245,6 +346,12 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         _fail(store, state, job_id, service.id, actor, "materialize_runtime",
               "materialize_failed", f"Runtime project could not be prepared: {exc}")
         return
+    if service.id == "surfsense":
+        ready, detail = _surfsense_embedding_preflight(store, job_id, root)
+        if not ready:
+            _fail(store, state, job_id, service.id, actor, "embedding_check",
+                  "embedding_probe_failed", detail)
+            return
     log = lambda line: store.append_event(job_id, "log", line)
     _event(store, job_id, "validate_configuration", "Validating generated Compose configuration.")
     rc, output = actions.compose_config(project, log)
@@ -270,12 +377,49 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
                                manifest_version="3", image_digests=image_snapshot)
     _event(store, job_id, "start_service", "Starting application containers.")
     wait_timeout = 900 if service.id == "surfsense" else 120
-    rc, output = actions.compose_up(project, log, timeout=wait_timeout + 300,
-                                    wait_timeout=wait_timeout)
+    bootstrap_env: dict[str, str] | None = None
+    bootstrap_files: list[Path] = []
+    password = ""
+    fresh_account = account_mode == "environment_bootstrap" and _fresh_account_storage(service.id)
+    if fresh_account and account_identity:
+        password = workflow_secrets.generate_password()
+        bootstrap_env = {
+            "MU3LAB_BOOTSTRAP_USERNAME": _account_username(account_identity),
+            "MU3LAB_BOOTSTRAP_EMAIL": account_identity["email"],
+            "MU3LAB_BOOTSTRAP_PASSWORD": password,
+        }
+        bootstrap_files = [project / "docker-compose.bootstrap.yml"]
+        _event(store, job_id, "account_bootstrap", "Creating the initial application administrator.")
+    elif account_mode == "environment_bootstrap" and state:
+        state.set_initialization(service.id, account_mode, "existing_account", job_id=job_id,
+                                 owner_uid=str((account_identity or {}).get("owner_uid", "")))
+    from ctl.compute import compose_overrides
+    rc, output = actions.compose_up(
+        project, log, timeout=wait_timeout + 300, wait_timeout=wait_timeout,
+        env=bootstrap_env, extra_files=[*compose_overrides(service.id, project), *bootstrap_files],
+        recreate=bool(prior_installation))
     if rc:
         _fail(store, state, job_id, service.id, actor, "start_service",
               "compose_start_failed", f"Application start failed: {output}")
         return
+    if fresh_account:
+        account_verified, account_detail = _verify_bootstrap_account(service.id, project, log)
+        _event(store, job_id, "account_cleanup",
+               "Removing bootstrap variables from the running application container.")
+        rc, output = actions.compose_up(
+            project, log, timeout=wait_timeout + 300, wait_timeout=wait_timeout,
+            extra_files=compose_overrides(service.id, project), recreate=True)
+        if rc:
+            _fail(store, state, job_id, service.id, actor, "account_cleanup",
+                  "account_verification_failed",
+                  f"The administrator was created but its bootstrap environment could not be removed: {output}")
+            return
+        if not account_verified:
+            _fail(store, state, job_id, service.id, actor, "account_verification",
+                  "account_verification_failed",
+                  "The application became healthy but did not confirm the generated administrator account. "
+                  + redact(account_detail))
+            return
     if state:
         state.set_installation(service.id, "verifying", job_id=job_id,
                                manifest_version="3", image_digests=image_snapshot)
@@ -295,6 +439,22 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_installation(service.id, "running", job_id=job_id,
                                manifest_version="3", image_digests=image_snapshot,
                                route_state="ready")
+    if fresh_account and account_identity and state:
+        host = ""
+        try:
+            from ctl.service_state import tailnet_dns_name
+            host = tailnet_dns_name()
+        except (OSError, ValueError):
+            pass
+        login_url = f"https://{host}:{service.private_https_port}" if host and service.private_https_port else ""
+        handoff = workflow_secrets.create_handoff(
+            service_id=service.id, job_id=job_id, owner_uid=account_identity["owner_uid"],
+            username=bootstrap_env["MU3LAB_BOOTSTRAP_USERNAME"], email=account_identity["email"],
+            password=password, login_url=login_url)
+        state.add_handoff(handoff["id"], service.id, job_id, account_identity["owner_uid"],
+                          handoff["created_at"], handoff["expires_at"])
+        state.set_initialization(service.id, account_mode, "ready", job_id=job_id,
+                                 owner_uid=account_identity["owner_uid"], handoff_id=handoff["id"])
     _event(store, job_id, "finalize", "Application and private route verified.")
     store.transition(job_id, "succeeded", actor=actor,
                      detail=f"{service.name} installed and verified.", step_id="finalize")

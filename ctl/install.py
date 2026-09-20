@@ -1919,14 +1919,26 @@ def run_job(job: dict, ctx: dict) -> None:
         if current.get("foundation") != "verified":
             provisioning.update("foundation", "verified",
                                 detail="Host foundation, private ingress, and tailnet route are ready.")
+        if current.get("vaultwarden") != "verified":
+            provisioning.update("vaultwarden", "verified",
+                                detail="Vaultwarden owner and private route were confirmed during bootstrap.")
+        if current.get("tailscale") != "verified":
+            provisioning.update("tailscale", "verified",
+                                detail="Tailscale and private HTTPS routing passed bootstrap checks.")
         if current.get("identity") != "verified":
             provisioning.update("identity", "verified",
                                 detail="Dashboard identity protection was verified through Authentik.")
+        if current.get("dashboard_protection") != "verified":
+            provisioning.update("dashboard_protection", "verified",
+                                detail="An Authentik-protected dashboard request was verified.")
         # A late bootstrap completion must never erase progress made by the
         # durable worker while the bootstrap page was still open.
         if current.get("core") == "pending":
             provisioning.update("core", "pending",
                                 detail="Core platform reconciliation will start automatically.")
+        if current.get("open_webui_admin") == "pending":
+            provisioning.update("open_webui_admin", "pending",
+                                detail="The first Open WebUI administrator will be initialized during core setup.")
         if current.get("configuration") == "pending":
             provisioning.update("configuration", "pending",
                                 detail="Inference-provider enrollment will be requested only after core services start.")

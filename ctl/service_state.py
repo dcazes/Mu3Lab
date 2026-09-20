@@ -140,6 +140,40 @@ def compose_states(run=subprocess.run) -> dict[str, str]:
             for directory, states in collected.items()}
 
 
+def compose_snapshot(run=subprocess.run) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
+    """Inspect all Compose projects and safe container fields in one Docker call."""
+    try:
+        proc = run([
+            "docker", "ps", "--all", "--format",
+            '{{.Label "com.docker.compose.project.working_dir"}}\t'
+            '{{.Label "com.docker.compose.service"}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Image}}',
+        ], capture_output=True, text=True, timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return {}, {}
+    if proc.returncode != 0:
+        return {}, {}
+    containers: dict[str, list[dict[str, str]]] = {}
+    states: dict[str, list[str]] = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 6 or not parts[0]:
+            continue
+        directory = str(Path(parts[0]).resolve())
+        state = parts[3].lower()
+        states.setdefault(directory, []).append(state)
+        health = "unknown"
+        match = re.search(r"\((healthy|unhealthy|health: starting)\)", parts[4].lower())
+        if match:
+            health = match.group(1).replace("health: ", "")
+        containers.setdefault(directory, []).append({
+            "service": parts[1], "name": parts[2], "state": state,
+            "status": parts[4], "health": health, "image": parts[5],
+        })
+    project_states = {directory: ("running" if values and set(values) == {"running"} else "stopped")
+                      for directory, values in states.items()}
+    return project_states, containers
+
+
 def status(service: Service, dns_name: str, root: Path,
            route_ports: set[int] | None = None,
            project_states: dict[str, str] | None = None) -> dict:

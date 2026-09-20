@@ -13,7 +13,7 @@ const tabs: { id: Tab; label: string; group?: string; path: string }[] = [
 type DashboardData = { health: Health; services: ServicesResponse; catalog: CatalogResponse; system: SystemResponse; integrations: IntegrationsResponse; identity: IdentityResponse; jobs: JobsResponse; audit: AuditResponse; core: CoreSetupResponse; provisioning: ProvisioningResponse; chat: ChatStatus };
 const emptyData: DashboardData = {
   health: { ok: false, version: '' }, services: { ok: false, tailnet_dns_name: '', services: [] }, catalog: { ok: false, profiles: [], services: {} },
-  system: { ok: false, cpu_percent: 0, docker_ready: false, tailnet_dns_name: '', runtime_root: '', memory: { total: 0, used: 0, percent: 0 }, disk: { total: 0, used: 0, percent: 0 }, backup: {} },
+  system: { ok: false, cpu_percent: 0, uptime_seconds: 0, docker_ready: false, tailnet_dns_name: '', runtime_root: '', memory: { total: 0, used: 0, percent: 0 }, disk: { total: 0, used: 0, percent: 0 }, backup: {} },
   integrations: { ok: false, policy: '', integrations: [] }, identity: { ok: false, control_plane_auth: 'not_configured', detail: 'Identity status unavailable.', writes_enabled: false },
   jobs: { ok: false, available: false, jobs: [] }, audit: { ok: false, available: false, events: [] },
   core: { ok: false, ready_to_run: false, services: [], missing_manifests: [], next_action: 'Core status unavailable.' }, provisioning: { ok: false, available: false, complete: false, phases: [] },

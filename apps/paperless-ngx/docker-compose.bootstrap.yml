@@ -1,0 +1,6 @@
+services:
+  webserver:
+    environment:
+      PAPERLESS_ADMIN_USER: ${MU3LAB_BOOTSTRAP_USERNAME:?bootstrap username is required}
+      PAPERLESS_ADMIN_PASSWORD: ${MU3LAB_BOOTSTRAP_PASSWORD:?bootstrap password is required}
+      PAPERLESS_ADMIN_MAIL: ${MU3LAB_BOOTSTRAP_EMAIL:?bootstrap email is required}

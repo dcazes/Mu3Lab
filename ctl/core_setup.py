@@ -23,6 +23,9 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import ensure_core_envs
 from ctl.service_state import status as service_status, tailnet_dns_name
 from ctl.core_wiring import EMBEDDING_MODEL, configure as configure_wiring
+from ctl import workflow_secrets
+from ctl.control_state import ControlState
+from ctl.secrets import read_runtime_env, runtime_env_text
 
 CORE_ORDER = ("ollama", "freellmapi", "litellm", "open-webui")
 HEALTH_TIMEOUT_SECONDS = 120
@@ -326,6 +329,24 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
             return
         runtime = RuntimePaths()
         env_files = ensure_core_envs(runtime.root)
+        account_identity = workflow_secrets.job_identity(job_id)
+        open_webui_data = runtime.data / "open-webui" / "webui.db"
+        open_webui_bootstrap: dict[str, str] | None = None
+        if not open_webui_data.exists() and account_identity:
+            password = workflow_secrets.generate_password()
+            open_webui_bootstrap = {"WEBUI_ADMIN_EMAIL": account_identity["email"],
+                                    "WEBUI_ADMIN_PASSWORD": password,
+                                    "WEBUI_ADMIN_NAME": account_identity.get("display_name") or account_identity["username"]}
+            env_path = runtime.projects / "open-webui" / ".env"
+            values = read_runtime_env(env_path)
+            values.update(open_webui_bootstrap)
+            env_path.write_text(runtime_env_text(values), encoding="utf-8")
+            env_path.chmod(0o600)
+        elif not open_webui_data.exists():
+            control = ControlState.runtime()
+            if control:
+                control.set_initialization("open-webui", "trusted_header", "awaiting_user",
+                                           job_id=job_id)
         _configure_open_webui_identity(runtime, root, log)
         wiring = configure_wiring(runtime)
         envs = _runtime_envs(env_files, wiring)
@@ -359,6 +380,41 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
                 return
             log(f"{service_id}: compose start completed")
             store.append_event(job_id, "step.verified", service_id)
+            if service_id == "open-webui" and open_webui_bootstrap and account_identity:
+                env_path = runtime.projects / "open-webui" / ".env"
+                values = read_runtime_env(env_path)
+                for key in ("WEBUI_ADMIN_EMAIL", "WEBUI_ADMIN_PASSWORD", "WEBUI_ADMIN_NAME"):
+                    values.pop(key, None)
+                env_path.write_text(runtime_env_text(values), encoding="utf-8")
+                env_path.chmod(0o600)
+                envs = _runtime_envs(env_files, wiring)
+                rc, _ = actions.compose_up(project, log, env=envs[service_id], recreate=True,
+                                           timeout=600)
+                if rc:
+                    store.transition(job_id, "failed", actor=actor,
+                                     detail="Open WebUI administrator was created, but bootstrap variables could not be removed.",
+                                     error_code="account_verification_failed", step_id="account_cleanup")
+                    return
+                host = tailnet_dns_name()
+                handoff = workflow_secrets.create_handoff(
+                    service_id="open-webui", job_id=job_id,
+                    owner_uid=account_identity["owner_uid"], username=account_identity["email"],
+                    email=account_identity["email"], password=open_webui_bootstrap["WEBUI_ADMIN_PASSWORD"],
+                    login_url=f"https://{host}:8445" if host else "")
+                control = ControlState.runtime()
+                if control:
+                    control.add_handoff(handoff["id"], "open-webui", job_id,
+                                        account_identity["owner_uid"], handoff["created_at"],
+                                        handoff["expires_at"])
+                    control.set_initialization("open-webui", "trusted_header", "ready",
+                                               job_id=job_id, owner_uid=account_identity["owner_uid"],
+                                               handoff_id=handoff["id"])
+                if provisioning:
+                    provisioning.update("open_webui_admin", "verified",
+                                        detail="The Authentik operator was initialized as Open WebUI administrator.")
+            elif service_id == "open-webui" and provisioning:
+                provisioning.update("open_webui_admin", "waiting_for_user",
+                                    detail="Open Chat once through Authentik to create the first administrator, then confirm setup.")
             if service_id == "ollama":
                 rc, output = actions.compose_exec(
                     project, "ollama", ["ollama", "pull", EMBEDDING_MODEL], log,

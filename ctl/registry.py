@@ -21,6 +21,11 @@ VALID_ACTIONS = frozenset({"start", "stop", "restart", "update"})
 VALID_STAGES = frozenset({"foundation", "core", "optional", "blocked"})
 VALID_ROUTES = frozenset({"ready", "pending", "unavailable"})
 VALID_MATURITY = frozenset({"supported", "experimental", "planned"})
+VALID_ACCOUNT_MODES = frozenset({
+    "none", "existing_bootstrap", "manual_owner", "trusted_header",
+    "oidc_first_login", "environment_bootstrap", "browser_registration",
+    "local_account_manual", "internal",
+})
 
 
 class RegistryError(ValueError):
@@ -58,6 +63,7 @@ class Service:
     setup_action: str = ""
     update: dict[str, Any] = field(default_factory=dict)
     configuration: tuple[dict[str, Any], ...] = ()
+    account: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_blocked(self) -> bool:
@@ -92,9 +98,14 @@ class Service:
                            "current_version": str(self.update.get("current_version", ""))},
                 "mcp": {"exposed": bool(self.mcp.get("exposed", False)),
                         "risk": self.mcp.get("risk", "")},
+                "account": {
+                    "mode": str(self.account.get("mode", "none")),
+                    "handoff": bool(self.account.get("handoff", False)),
+                    "user_action": str(self.account.get("user_action", "")),
+                },
                 "configuration": [{key: value for key, value in field.items()
-                                   if key not in {"env"}}
-                                  for field in self.configuration]}
+                                   if key not in {"env", "managed"}}
+                                  for field in self.configuration if not field.get("managed")]}
 
 
 def _required(item: dict[str, Any], key: str) -> Any:
@@ -173,6 +184,9 @@ def _service(item: dict[str, Any]) -> Service:
         if key in seen_config:
             raise RegistryError(f"service {service_id}: duplicate configuration key {key}")
         seen_config.add(key)
+    account = item.get("account", {"mode": "none"})
+    if not isinstance(account, dict) or account.get("mode", "none") not in VALID_ACCOUNT_MODES:
+        raise RegistryError(f"service {service_id}: invalid account contract")
     return Service(id=service_id, maturity=maturity, name=_required(item, "name"),
                    category=_required(item, "category"), lifecycle=lifecycle,
                    compose_dir=compose_dir, https_port=port, private_https_port=private_port,
@@ -188,7 +202,8 @@ def _service(item: dict[str, Any]) -> Service:
                    resource_guidance=str(item.get("resource_guidance", "")),
                    setup_action=str(item.get("setup_action", "")),
                    update=dict(item.get("update", {})),
-                   configuration=tuple(dict(field_item) for field_item in configuration))
+                   configuration=tuple(dict(field_item) for field_item in configuration),
+                   account=dict(account))
 
 
 class Registry:
@@ -232,8 +247,8 @@ def load(path: Path = REGISTRY_PATH) -> Registry:
         raise RegistryError(f"cannot read registry: {exc}") from exc
     except yaml.YAMLError as exc:
         raise RegistryError(f"invalid registry YAML: {exc}") from exc
-    if not isinstance(raw, dict) or raw.get("schema_version") not in {2, 3}:
-        raise RegistryError("registry schema_version must be 2 or 3")
+    if not isinstance(raw, dict) or raw.get("schema_version") not in {2, 3, 4}:
+        raise RegistryError("registry schema_version must be 2, 3, or 4")
     raw_services = raw.get("services")
     if not isinstance(raw_services, list) or not raw_services:
         raise RegistryError("registry services must be a non-empty list")

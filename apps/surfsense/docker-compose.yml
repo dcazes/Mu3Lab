@@ -187,6 +187,7 @@ services:
     networks:
       mu3lab_backend:
         aliases: [surfsense-proxy]
+      surfsense_edge: {}
     depends_on:
       frontend: {condition: service_started}
       backend: {condition: service_healthy}
@@ -199,3 +200,4 @@ services:
 
 networks:
   mu3lab_backend: {external: true}
+  surfsense_edge: {}
