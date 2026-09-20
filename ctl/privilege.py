@@ -141,6 +141,14 @@ def run_privileged(argv: list[str], log: Callable[[str], None],
         rc, out = (_exec(["pkexec"] + argv) if timeout == 300
                    else _exec(["pkexec"] + argv, timeout=timeout))
         log(out or f"(exit {rc}, no output)")
+        # A background worker has no reliable way to surface a polkit dialog.
+        # Convert a timed-out dialog into the same explicit terminal fallback
+        # used when no polkit agent exists, instead of returning a generic
+        # command failure with no recovery path.
+        if rc == 124:
+            return {"ok": False, "need_terminal": True,
+                    "terminal_command": quote_terminal(argv),
+                    "output": out}
         return {"ok": rc == 0, "rc": rc, "output": out}
     return {"ok": False, "need_terminal": True,
             "terminal_command": quote_terminal(argv)}

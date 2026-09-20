@@ -116,5 +116,11 @@ def apply(registry: Registry, current: Service, root: Path,
         return False, output or "Caddy could not activate the stable route file."
     published = actions.tailscale_serve(current.private_https_port, current.proxy_port, log)
     if not published.get("ok"):
+        terminal_command = published.get("terminal_command")
+        if terminal_command:
+            return False, (
+                "Administrator action required before this route can be published. "
+                f"Run `{terminal_command}` once, then retry the installation."
+            )
         return False, str(published.get("log", ["Tailscale Serve failed."])[-1])
     return True, "Private HTTPS route published."
