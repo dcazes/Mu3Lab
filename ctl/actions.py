@@ -578,13 +578,13 @@ def tailscale_serve(port: int, loopback_port: int,
     # (`tailscale set --operator=<user>`). Try that supported unprivileged path
     # first so a background worker does not invoke a polkit dialog needlessly.
     try:
-        direct = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        direct = _subprocess.run(argv, capture_output=True, text=True, timeout=60)
         direct_output = (direct.stdout + direct.stderr).strip()
         if direct.returncode == 0:
             log(direct_output or "Private HTTPS route published.")
             return _ok(["Private HTTPS route published."], changed=True)
         log(direct_output or f"(exit {direct.returncode}, no output)")
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, _subprocess.TimeoutExpired) as exc:
         log(str(exc))
     result = privilege.run_privileged(argv, log, timeout=60)
     if result.get("need_terminal"):
