@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppsPanel, HomePanel } from './panels';
 import type { Service } from './api';
@@ -18,7 +18,7 @@ const services = [service('ingress', 'Caddy', 'foundation'), service('ollama', '
 
 describe('dashboard organization', () => {
   beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ state: 'not_connected', events: [], error: '' }) })); });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('groups Home apps and removes the duplicate wiring panel', () => {
     render(<HomePanel services={services} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
@@ -34,5 +34,27 @@ describe('dashboard organization', () => {
     const groups = document.querySelector('.apps-sections');
     expect(Array.from(groups?.querySelectorAll(':scope > section > h2') || []).map(item => item.textContent))
       .toEqual(['Productivity apps', 'AI Integration', 'Foundation', 'Blocked and planned']);
+  });
+
+  it('reconciles a completed reset when its response is lost', async () => {
+    const batch = { id: 'batch', actor: 'operator', state: 'cancelled' as const, current_ordinal: 0,
+      created_at: '', updated_at: '', items: [{ batch_id: 'batch', service_id: 'nextcloud', ordinal: 0,
+        explicitly_selected: 1, state: 'failed', job_id: 'job', started_at: '', completed_at: '' }] };
+    let batchReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/api/v1/service-install-batches' && (!init?.method || init.method === 'GET')) {
+        batchReads += 1;
+        return { ok: true, json: async () => batchReads === 1 ? { ok: true, batch, current_job: null } : { ok: true, batch: null, current_job: null } };
+      }
+      if (path === '/api/v1/session') return { ok: true, json: async () => ({ csrf_token: 'token' }) };
+      if (path === '/api/v1/service-install-batches/batch/reset') throw new TypeError('Failed to fetch');
+      return { ok: false, json: async () => ({ error: 'not found' }) };
+    }));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<AppsPanel services={services} catalog={{ ok: true, profiles: [], services: {} }} />);
+    const reset = await screen.findByRole('button', { name: 'Reset failed installation' });
+    fireEvent.click(reset);
+    await waitFor(() => expect(screen.getByText('Installation reset completed. Select apps to try again.')).toBeInTheDocument());
+    expect(screen.queryByText('INSTALLATION BATCH')).not.toBeInTheDocument();
   });
 });
