@@ -963,6 +963,23 @@ def cancel_install_batch(batch_id: str, request: Request) -> dict:
     return {"ok": True, "batch": batches.get(batch_id)}
 
 
+@app.post("/api/v1/service-install-batches/{batch_id}/reset")
+def reset_install_batch(batch_id: str, request: Request) -> dict:
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    batches, jobs_store = InstallBatchStore.runtime(), JobStore.runtime()
+    batch = batches.get(batch_id) if batches else None
+    if not batch or batch["owner_uid"] != identity_data.get("subject_id"):
+        return JSONResponse({"ok": False, "error": "batch not found"}, status_code=404)
+    if not jobs_store:
+        return JSONResponse({"ok": False, "error": "job store unavailable"}, status_code=503)
+    try:
+        return {"ok": True, "batch": batches.reset(batch_id, jobs_store)}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+
+
 @app.get("/api/v1/credential-handoffs")
 def credential_handoffs(request: Request) -> dict:
     identity_data = identity(request)

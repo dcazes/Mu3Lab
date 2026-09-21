@@ -105,6 +105,30 @@ class BatchPersistenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 batches.plan(load(), ["paperless-ngx", "paperless-ngx"], control)
 
+    def test_cancelled_batch_can_reset_failed_item_with_a_new_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            paths.runtime.mkdir(parents=True)
+            control = ControlState(paths.runtime / "control-plane.sqlite3")
+            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
+            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            identity = {"owner_uid": "uid", "email": "operator@example.test",
+                        "username": "operator", "display_name": "Operator"}
+            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
+                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
+                batch = batches.create(load(), ["paperless-ngx"],
+                                       actor="operator", owner_uid="uid", identity=identity,
+                                       idempotency_key="request-reset", jobs=jobs, control=control)
+                failed_job = jobs.get(batch["items"][0]["job_id"])
+                jobs.transition(failed_job["id"], "failed", actor="worker",
+                                detail="temporary start failure", error_code="compose_failed")
+                batches.advance_for_job(failed_job["id"], jobs)
+                batches.cancel(batch["id"], jobs)
+                reset = batches.reset(batch["id"], jobs)
+            self.assertEqual(reset["state"], "running")
+            self.assertEqual(reset["items"][0]["state"], "queued")
+            self.assertNotEqual(reset["items"][0]["job_id"], failed_job["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

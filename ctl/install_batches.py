@@ -101,7 +101,8 @@ class InstallBatchStore:
             visit(service_id)
         return [(service_id, service_id in requested_set) for service_id in order]
 
-    def _enqueue(self, batch_id: str, ordinal: int, actor: str, jobs: JobStore) -> dict[str, Any]:
+    def _enqueue(self, batch_id: str, ordinal: int, actor: str, jobs: JobStore,
+                 *, force_new: bool = False) -> dict[str, Any]:
         with self._connect() as conn:
             item = conn.execute("""
                 SELECT service_id FROM install_batch_items
@@ -109,9 +110,11 @@ class InstallBatchStore:
             """, (batch_id, ordinal)).fetchone()
         if not item:
             raise ValueError("batch item not found")
+        idempotency_key = (f"batch:{batch_id}:{ordinal}:retry:{uuid4().hex}"
+                           if force_new else f"batch:{batch_id}:{ordinal}")
         job = jobs.create(kind="lifecycle", service_id=str(item["service_id"]), action="install",
                           actor=actor, detail="Queued by a reviewed application install batch.",
-                          idempotency_key=f"batch:{batch_id}:{ordinal}")
+                          idempotency_key=idempotency_key)
         identity = workflow_secrets.job_identity(f"batch:{batch_id}")
         if identity:
             workflow_secrets.save_job_identity(str(job["id"]), **identity)
@@ -279,4 +282,30 @@ class InstallBatchStore:
             conn.execute("""UPDATE install_batches SET state = 'running', error_json = '{}',
                             current_ordinal = ?, updated_at = ? WHERE id = ?""",
                          (failed["ordinal"], now, batch_id))
+        return self.get(batch_id) or {}
+
+    def reset(self, batch_id: str, jobs: JobStore) -> dict[str, Any]:
+        """Reset a terminal/paused batch from its first unfinished app.
+
+        This preserves the batch and its successful items, but creates a new
+        child job for the failed item so a prior idempotency key cannot strand
+        the retry on the old terminal job. No application data is removed.
+        """
+        batch = self.get(batch_id)
+        if not batch or batch["state"] not in {"paused", "cancelled"}:
+            raise ValueError("batch is not resettable")
+        first = next((item for item in batch["items"] if item["state"] != "succeeded"), None)
+        if not first:
+            raise ValueError("batch has no unfinished application")
+        ordinal = int(first["ordinal"])
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("""UPDATE install_batch_items
+                            SET state = 'pending', job_id = '', error_json = '{}',
+                                started_at = '', completed_at = ''
+                            WHERE batch_id = ? AND ordinal >= ?""", (batch_id, ordinal))
+            conn.execute("""UPDATE install_batches SET state = 'queued', error_json = '{}',
+                            current_ordinal = ?, updated_at = ? WHERE id = ?""",
+                         (ordinal, now, batch_id))
+        self._enqueue(batch_id, ordinal, str(batch["actor"]), jobs, force_new=True)
         return self.get(batch_id) or {}
