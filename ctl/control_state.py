@@ -118,6 +118,16 @@ class ControlState:
             );
             CREATE INDEX IF NOT EXISTS credential_handoffs_owner
                 ON credential_handoffs(owner_uid, state, expires_at);
+            CREATE TABLE IF NOT EXISTS calendar_connections (
+                owner_uid TEXT PRIMARY KEY,
+                username_hint TEXT NOT NULL,
+                selected_calendar_id TEXT NOT NULL DEFAULT '',
+                calendars_json TEXT NOT NULL DEFAULT '[]',
+                state TEXT NOT NULL DEFAULT 'connected',
+                last_error TEXT NOT NULL DEFAULT '',
+                last_success_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
         """)
         return conn
 
@@ -150,6 +160,49 @@ class ControlState:
                     updated_at = excluded.updated_at, updated_by = excluded.updated_by
             """, (json.dumps(mode), now, actor))
         return {"compute_mode": mode, "updated_at": now, "updated_by": actor}
+
+    def calendar_connection(self, owner_uid: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM calendar_connections WHERE owner_uid = ?",
+                               (owner_uid,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["calendars"] = json.loads(result.pop("calendars_json"))
+        except (TypeError, ValueError):
+            result["calendars"] = []
+        return result
+
+    def set_calendar_connection(self, owner_uid: str, username_hint: str,
+                                calendars: list[dict[str, str]], selected_id: str,
+                                *, state: str = "connected", error: str = "",
+                                success: bool = False) -> dict[str, Any]:
+        if not owner_uid or len(owner_uid) > 256 or not selected_id:
+            raise ValueError("invalid calendar connection metadata")
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("""
+                INSERT INTO calendar_connections
+                (owner_uid, username_hint, selected_calendar_id, calendars_json,
+                 state, last_error, last_success_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_uid) DO UPDATE SET
+                    username_hint = excluded.username_hint,
+                    selected_calendar_id = excluded.selected_calendar_id,
+                    calendars_json = excluded.calendars_json,
+                    state = excluded.state,
+                    last_error = excluded.last_error,
+                    last_success_at = CASE WHEN excluded.last_success_at != ''
+                        THEN excluded.last_success_at ELSE calendar_connections.last_success_at END,
+                    updated_at = excluded.updated_at
+            """, (owner_uid, username_hint, selected_id, json.dumps(calendars, sort_keys=True),
+                  state, error, now if success else "", now))
+        return self.calendar_connection(owner_uid) or {}
+
+    def delete_calendar_connection(self, owner_uid: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM calendar_connections WHERE owner_uid = ?", (owner_uid,))
 
     def installation(self, service_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -190,7 +243,8 @@ class ControlState:
     def set_provider(self, provider_id: str, label: str, *, enabled: bool = True,
                      state: str = "saved", models: list[str] | None = None,
                      error: dict[str, Any] | None = None, attempted: bool = False,
-                     verified: bool = False, job_id: str = "") -> dict[str, Any]:
+                     verified: bool = False, job_id: str = "",
+                     replace_models: bool = False) -> dict[str, Any]:
         if not provider_id or state not in PROVIDER_STATES or not label:
             raise ValueError("invalid provider connection state")
         now = _now()
@@ -202,7 +256,9 @@ class ControlState:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 ON CONFLICT(provider_id) DO UPDATE SET label = excluded.label,
                     enabled = excluded.enabled, state = excluded.state,
-                    model_samples_json = CASE WHEN excluded.model_samples_json != '[]'
+                    model_samples_json = CASE WHEN ? = 1
+                        THEN excluded.model_samples_json
+                        WHEN excluded.model_samples_json != '[]'
                         THEN excluded.model_samples_json ELSE provider_connections.model_samples_json END,
                     last_attempt_at = CASE WHEN excluded.last_attempt_at != ''
                         THEN excluded.last_attempt_at ELSE provider_connections.last_attempt_at END,
@@ -214,7 +270,8 @@ class ControlState:
                     updated_at = excluded.updated_at
             """, (provider_id, label, int(enabled), state,
                   json.dumps(models or [], sort_keys=True), now if attempted else "",
-                  now if verified else "", json.dumps(error or {}, sort_keys=True), job_id, now))
+                  now if verified else "", json.dumps(error or {}, sort_keys=True), job_id, now,
+                  int(replace_models)))
         return self.provider(provider_id) or {}
 
     def delete_provider(self, provider_id: str) -> None:

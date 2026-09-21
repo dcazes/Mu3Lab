@@ -27,3 +27,39 @@
 .chat-shell > a { position: absolute; right: 12px; bottom: 12px; padding: 7px 9px; border-radius: 7px; color: #eef0ff; background: #343967e8; text-decoration: none; font-size: 11px; }
 .chat-context { position: absolute; z-index: 2; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 8px 12px; border: 1px solid #3e4b78; border-radius: 9px; color: #eef0ff; background: #171e35f2; box-shadow: 0 8px 30px #0008; font-size: 12px; }
 .chat-context a { color: #aebcff; white-space: nowrap; }
+
+/* Compact catalog and grouped Home workspace. */
+.apps-sections { gap: 18px; }
+.app-list { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.app-card { min-height: 58px; padding: 8px 10px; }
+.apps-layout { display: block; }
+.app-dock-groups { display: grid; gap: 14px; margin-bottom: 12px; }
+.app-dock-group h3 { margin: 0 0 7px; color: #aeb8d1; font-size: 12px; font-weight: 650; }
+.app-dock { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; overflow: visible; padding: 0; }
+.app-dock > button { display: grid; grid-template-columns: 31px minmax(0, 1fr); justify-items: start; align-items: center; gap: 8px; min-height: 56px; padding: 8px 10px; font-size: 11px; text-align: left; }
+.app-dock > button span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-phase-list { grid-template-columns: repeat(2, minmax(210px, 1fr)); column-gap: 24px; }
+.calendar-widget header { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.calendar-widget header button { border: 1px solid #3a4566; border-radius: 7px; padding: 6px 8px; color: #dfe3f5; background: #20273c; }
+.calendar-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 12px; }
+.calendar-events > div { display: grid; gap: 3px; padding: 9px; border-radius: 8px; background: #11172a; }
+.calendar-events time, .calendar-events small { color: #9da8c2; font-size: 11px; }
+.calendar-events b { font-size: 12px; }
+.connections-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.routing-panel { grid-column: 1 / -1; }
+.routing-stages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 18px 0; }
+.routing-stage { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; padding: 10px; border-radius: 8px; background: #20274a; }
+.routing-stage > span { grid-row: 1 / 3; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #3a4072; color: #dfe2ff; font-size: 11px; }
+.routing-stage b { font-size: 12px; }.routing-stage small { color: #9da8c2; font-size: 10px; }
+.routing-stage.muted { opacity: .55; }.routing-stage.ready { border: 1px solid #3d7653; }
+.calendar-connected label { display: grid; gap: 5px; color: #b7c1da; font-size: 12px; }
+.calendar-connected select { padding: 8px; border: 1px solid #3a4566; border-radius: 7px; color: #eef0ff; background: #101528; }
+
+@media (max-width: 760px) {
+  .connections-grid, .setup-phase-list { grid-template-columns: 1fr; }
+  .routing-stages { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .app-dock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .routing-stages { grid-template-columns: 1fr; }
+}

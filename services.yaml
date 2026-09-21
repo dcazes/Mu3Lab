@@ -371,3 +371,28 @@ services:
     images: ["ghcr.io/paperless-ngx/paperless-ngx:3.1.3", "docker.io/valkey/valkey:9.0.1-alpine", "docker.io/library/postgres:18.0-alpine"]
     update: {repository: paperless-ngx/paperless-ngx, current_version: "v3.1.3"}
     backup: {binds: [data, media, consume, export]}
+
+  - id: nextcloud
+    maturity: supported
+    name: Nextcloud
+    category: productivity
+    lifecycle: optional
+    compose_dir: apps/nextcloud
+    https_port: 8085
+    private_https_port: 8453
+    proxy_port: 19470
+    health: {kind: http, url: "http://127.0.0.1:8085/status.php"}
+    auth: oidc
+    stage: optional
+    availability: available
+    route: pending
+    setup_action: "Install private files and calendar with Authentik sign-in."
+    resource_guidance: "Stores files and calendar data locally; storage use grows with uploaded content."
+    identity_note: "Use Authentik for normal sign-in. A generated local administrator remains available through ?direct=1 for recovery."
+    images: ["nextcloud:33.0.5-apache", "postgres:16-alpine", "redis:8-alpine"]
+    update: {repository: nextcloud/server, current_version: "v33.0.5"}
+    backup: {database: nextcloud, binds: [html, postgres]}
+    account:
+      mode: environment_bootstrap
+      handoff: true
+      user_action: "Use Authentik normally and save the generated recovery administrator credential."

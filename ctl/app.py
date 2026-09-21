@@ -60,6 +60,14 @@ app = FastAPI(title="Mu3Lab control plane", version=__version__)
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
+@app.on_event("startup")
+def _reconcile_provisioning_on_startup() -> None:
+    """Refresh durable milestones once when the control plane starts."""
+    store = ProvisioningStore.runtime()
+    if store:
+        store.reconcile_runtime()
+
+
 def _ingress_token() -> str:
     """Read the local proxy-hop token without exposing it through the API."""
     try:
@@ -312,7 +320,10 @@ def provisioning() -> dict:
     """Return durable first-run state, never transient browser progress."""
     store = ProvisioningStore.runtime()
     if store is None:
-        return {"ok": True, "available": False, "complete": False, "phases": []}
+        return {"ok": True, "available": False, "complete": False, "phases": [],
+                "progress": {"completed": 0, "total": 0},
+                "next_action": {"kind": "bootstrap", "label": "Run ./install"}}
+    store.reconcile_runtime()
     return {"available": True, **store.summary()}
 
 
@@ -377,6 +388,93 @@ def session(request: Request) -> dict:
     return {"ok": True, "csrf_token": token}
 
 
+def _calendar_owner(request: Request, *, write: bool = False) -> tuple[dict, str] | JSONResponse:
+    identity_data = identity(request)
+    owner_uid = str(identity_data.get("subject_id") or "")
+    if not owner_uid:
+        return JSONResponse({"ok": False, "error": "authenticated subject required"}, status_code=403)
+    if write and (not identity_data["writes_enabled"] or not _mutation_allowed(request)):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    return identity_data, owner_uid
+
+
+@app.get("/api/v1/calendar/connection")
+def calendar_connection(request: Request) -> dict:
+    auth = _calendar_owner(request)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    state = ControlState.runtime()
+    if state is None:
+        return JSONResponse({"ok": False, "error": "calendar state is unavailable"}, status_code=503)
+    installation = state.installation("nextcloud")
+    if not installation or installation.get("state") not in {"running", "stopped", "degraded"}:
+        return {"ok": True, "state": "not_installed", "username_hint": "",
+                "selected_calendar_id": "", "calendars": [], "last_success_at": "", "error": ""}
+    from ctl.nextcloud_calendar import public_connection
+    return public_connection(owner_uid, state)
+
+
+@app.post("/api/v1/calendar/connection")
+async def save_calendar_connection(request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    from ctl.nextcloud_calendar import CalendarError, connect
+    try:
+        payload = await request.json()
+        username = str(payload.get("username", "")).strip()
+        app_password = str(payload.get("app_password", ""))
+        return connect(owner_uid, username, app_password)
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)}, status_code=400)
+    except (ValueError, TypeError, AttributeError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
+@app.put("/api/v1/calendar/connection")
+async def select_calendar_connection(request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    state = ControlState.runtime()
+    if state is None:
+        return JSONResponse({"ok": False, "error": "calendar state is unavailable"}, status_code=503)
+    from ctl.nextcloud_calendar import CalendarError, select
+    try:
+        payload = await request.json()
+        return select(owner_uid, str(payload.get("calendar_id", "")), state)
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)}, status_code=400)
+
+
+@app.delete("/api/v1/calendar/connection")
+def delete_calendar_connection(request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    from ctl.nextcloud_calendar import disconnect
+    disconnect(owner_uid)
+    return {"ok": True}
+
+
+@app.get("/api/v1/calendar/events")
+def calendar_events(request: Request) -> dict:
+    auth = _calendar_owner(request)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        from ctl.nextcloud_calendar import CalendarError, events
+        return events(owner_uid)
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
+                            status_code=401 if exc.state == "authentication_expired" else 503)
+
+
 @app.get("/api/setup/core")
 @app.get("/api/v1/setup/core")
 def core_setup() -> dict:
@@ -390,6 +488,8 @@ def core_setup() -> dict:
     current_job = next((job for job in (store.jobs() if store else [])
                         if job["service_id"] == "core-suite"), None)
     provisioning_store = ProvisioningStore.runtime()
+    if provisioning_store:
+        provisioning_store.reconcile_runtime()
     provisioned = provisioning_store.summary() if provisioning_store else None
     waiting = (provisioned or {}).get("waiting") if provisioned else None
     waiting_for_provider = bool(current_job and current_job.get("state") == "waiting_for_confirmation"
@@ -437,6 +537,9 @@ def provider_metadata(request: Request) -> dict:
                 "last_verified_at": item["last_verified_at"],
                 "updated_at": item["updated_at"], "active_job_id": item["active_job_id"],
                 "error": (item["last_error"] or {}).get("message", ""), "supported": supported,
+                "error_code": (item["last_error"] or {}).get("code", ""),
+                "recommended_action": (item["last_error"] or {}).get("recommended_action", ""),
+                "routed_via": (item["last_error"] or {}).get("routed_via", ""),
             })
         return {"ok": True, "providers": providers}
     except ValueError as exc:
@@ -591,6 +694,27 @@ def start_core(request: Request) -> dict:
                              error_code="bootstrap_contract_unavailable",
                              step_id="account_preflight")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/v1/jobs/core-verify")
+def verify_core(request: Request) -> dict:
+    """Queue live contract checks without reinstalling healthy services."""
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"]:
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
+    if not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "same-origin CSRF verification failed"}, status_code=403)
+    store = JobStore.runtime()
+    if store is None:
+        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
+    active = next((job for job in store.jobs() if job["service_id"] == "core-suite"
+                   and job["state"] in {"queued", "running"}), None)
+    if active:
+        return JSONResponse({"ok": False, "error": "core work is already running", "job": active}, status_code=409)
+    from ctl.core_setup import start_verify
+    job = start_verify(store, identity_data["username"],
+                       request.headers.get("idempotency-key") or None)
     return {"ok": True, "job": job}
 
 

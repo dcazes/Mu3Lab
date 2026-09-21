@@ -130,6 +130,8 @@ DISPATCH = {
     ("tailscale_pkg", "daemon_down"): "tailscale_start",
     ("tailscale_pkg", "unjoined"): "skip",   # join is the NEXT step's job
     ("tailscale_pkg", "ready"): "skip",
+    ("tailscale_operator", "missing"): "set_operator",
+    ("tailscale_operator", "ready"): "skip",
     ("tailscale_join", "unjoined"): "guided_join",
     ("tailscale_join", "ready"): "skip",
     ("vaultwarden_serve", "unshared"): "share_vaultwarden",
@@ -1083,9 +1085,9 @@ def fix_vaultwarden_setup(check: dict, ctx: dict) -> dict:
 
 
 def _tailscale_serve_port(port: str, target: str, log: Callable[[str], None]) -> dict:
-    result = privilege.run_privileged(
-        ["tailscale", "serve", "--bg", f"--https={port}", target], log, timeout=60)
-    if result.get("need_terminal"):
+    loopback_port = int(target.rsplit(":", 1)[-1])
+    result = actions.tailscale_serve(int(port), loopback_port, log)
+    if result.get("terminal_command"):
         return {"waiting": True, "prompt": {"kind": "terminal",
                 "title": "Tailscale needs one administrator command",
                 "body": "Run this command, then press Retry.",
@@ -1617,13 +1619,8 @@ def fix_serve(check: dict, ctx: dict) -> dict:
     standard HTTPS origin for API and WebSocket requests.
     """
     log = ctx["log_fn"]("serve")
-    # `tailscale serve` changes daemon configuration. Some installations
-    # require root unless an operator was configured explicitly, so it must
-    # use the same audited elevation boundary as every other host mutation.
-    result = privilege.run_privileged(
-        ["tailscale", "serve", "--bg", f"--https={DASHBOARD_SERVE_PORT}",
-         f"http://127.0.0.1:{CADDY_PORT}"], log, timeout=60)
-    if result.get("need_terminal"):
+    result = actions.tailscale_serve(int(DASHBOARD_SERVE_PORT), CADDY_PORT, log)
+    if result.get("terminal_command"):
         return {"waiting": True, "prompt": {
             "kind": "terminal",
             "title": "Tailscale needs one administrator command",
@@ -1668,6 +1665,40 @@ def _tailscale_pkg_check(ctx: dict) -> dict:
     # Shared probe (same anti-drift contract as docker above).
     from ctl import preflight as _pre
     return _pre.gather_tailscale(exec_fn=actions.privilege._exec)
+
+
+def _tailscale_operator_check(ctx: dict) -> dict:
+    """Check whether this local user is Tailscale's configured operator.
+
+    ``tailscale debug prefs`` is a read-only LocalAPI query. The operator
+    preference is persisted by tailscaled, so later bootstrap runs can skip
+    this one-time privileged setup instead of prompting again.
+    """
+    user = getpass.getuser()
+    rc, output = actions.privilege._exec(["tailscale", "debug", "prefs"])
+    configured = ""
+    if rc == 0:
+        try:
+            configured = str(json.loads(output).get("OperatorUser", ""))
+        except (TypeError, ValueError):
+            configured = ""
+    if configured == user:
+        return {"name": "tailscale_operator", "status": "ok",
+                "detail": f"Tailscale operator is configured for {user}.",
+                "action": "", "state": "ready", "blocking": False}
+    return {"name": "tailscale_operator", "status": "missing",
+            "detail": "Tailscale still requires administrator access for this user.",
+            "action": "step 3 grants this user persistent Tailscale operator access.",
+            "state": "missing", "blocking": False}
+
+
+def fix_tailscale_operator(check: dict, ctx: dict) -> dict:
+    """Grant the bootstrap user persistent access to tailscaled once."""
+    user = getpass.getuser()
+    result = privilege.run_privileged(
+        ["tailscale", "set", f"--operator={user}"],
+        ctx["log_fn"]("tailscale_operator"), timeout=60)
+    return _propagate(result)
 
 
 def _caddy_check(ctx: dict) -> dict:
@@ -1756,6 +1787,8 @@ STEPS = [
     {"id": "tailscale_pkg", "label": "Tailscale app",
      "check": _tailscale_pkg_check, "fix": fix_tailscale_pkg,
      "verify_ok_states": ("ready", "unjoined")},
+    {"id": "tailscale_operator", "label": "Tailscale operator access",
+     "check": _tailscale_operator_check, "fix": fix_tailscale_operator},
     {"id": "tailscale_join", "label": "Tailscale connection",
      "check": lambda ctx: (lambda r: {
          "name": "tailscale_join", "status": "ok" if r["state"] == "ready" else "missing",

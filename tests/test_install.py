@@ -85,12 +85,25 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(check.call_args.args[0], install.RuntimePaths().root)
 
     def test_tailscale_serve_uses_privilege_boundary(self):
-        with patch("ctl.install.privilege.run_privileged", return_value={"ok": True}) as run:
+        with patch("ctl.install.actions.tailscale_serve", return_value={"ok": True}) as run:
             result = install.fix_serve({}, _ctx())
         self.assertTrue(result["ok"])
+        run.assert_called_once_with(8446, 19460, unittest.mock.ANY)
+
+    def test_tailscale_operator_check_skips_when_persisted(self):
+        output = '{"OperatorUser":"dak"}'
+        with patch("ctl.install.getpass.getuser", return_value="dak"), \
+             patch("ctl.install.actions.privilege._exec", return_value=(0, output)):
+            result = install._tailscale_operator_check(_ctx())
+        self.assertEqual(result["state"], "ready")
+
+    def test_tailscale_operator_fix_sets_user_once(self):
+        with patch("ctl.install.getpass.getuser", return_value="dak"), \
+             patch("ctl.install.privilege.run_privileged", return_value={"ok": True}) as run:
+            result = install.fix_tailscale_operator({}, _ctx())
+        self.assertTrue(result["ok"])
         self.assertEqual(run.call_args.args[0],
-                         ["tailscale", "serve", "--bg", "--https=8446",
-                          "http://127.0.0.1:19460"])
+                         ["tailscale", "set", "--operator=dak"])
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
     def test_service_check_names_a_failed_worker_without_blaming_dashboard(self):
@@ -488,6 +501,7 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertLess(ids.index("caddy"), ids.index("vaultwarden"))
         self.assertLess(ids.index("vaultwarden"), ids.index("vaultwarden_setup"))
         self.assertLess(ids.index("vaultwarden_setup"), ids.index("tailscale_join"))
+        self.assertLess(ids.index("tailscale_operator"), ids.index("tailscale_join"))
         self.assertLess(ids.index("tailscale_join"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("vaultwarden_serve"), ids.index("authentik"))
         self.assertLess(ids.index("authentik_setup"), ids.index("dashboard_protection"))
@@ -658,6 +672,7 @@ class DockerSessionTests(unittest.TestCase):
             "caddy": ["down", "ready"],
             "vaultwarden": ["down", "ready"],
             "vaultwarden_setup": ["needs_user", "ready"],
+            "tailscale_operator": ["missing", "ready"],
             "vaultwarden_serve": ["unshared", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],

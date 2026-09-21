@@ -102,6 +102,43 @@ class RegistryTests(unittest.TestCase):
                        for service_id in profile["services"]}
         self.assertTrue(profile_ids.issubset({service.id for service in registry.services}))
 
+    def test_nextcloud_is_curated_productivity_with_unique_private_ports(self):
+        registry = load()
+        service = registry.get("nextcloud")
+        self.assertEqual(service.stage, "optional")
+        self.assertEqual(service.category, "productivity")
+        self.assertEqual(service.private_https_port, 8453)
+        self.assertEqual(service.proxy_port, 19470)
+        self.assertEqual(service.account["mode"], "environment_bootstrap")
+        ports = [item.private_https_port for item in registry.services if item.private_https_port]
+        proxies = [item.proxy_port for item in registry.services if item.proxy_port]
+        self.assertEqual(len(ports), len(set(ports)))
+        self.assertEqual(len(proxies), len(set(proxies)))
+
+    def test_nextcloud_materialization_generates_private_runtime_secrets_and_oidc(self):
+        from ctl.secrets import read_runtime_env
+        from ctl.service_ops import _fresh_account_storage, _materialize
+        root = Path(__file__).resolve().parents[1]
+        service = load().get("nextcloud")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
+                project = _materialize(service, root)
+                self.assertTrue(_fresh_account_storage("nextcloud"))
+            values = read_runtime_env(project / ".env")
+            self.assertEqual(values["NEXTCLOUD_OIDC_CLIENT_ID"], "mu3lab-nextcloud")
+            self.assertTrue(values["NEXTCLOUD_DB_PASSWORD"])
+            self.assertTrue(values["NEXTCLOUD_REDIS_PASSWORD"])
+            self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
+            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-nextcloud.yaml"
+            self.assertIn("/apps/user_oidc/code", blueprint.read_text(encoding="utf-8"))
+            config = paths.data / "nextcloud" / "html" / "config" / "config.php"
+            config.parent.mkdir(parents=True)
+            config.write_text("<?php", encoding="utf-8")
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths):
+                self.assertFalse(_fresh_account_storage("nextcloud"))
+
     def test_healthy_service_without_private_route_needs_setup(self):
         service = load().get("open-webui")
         root = Path(__file__).resolve().parents[1]

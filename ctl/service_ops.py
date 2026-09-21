@@ -81,6 +81,11 @@ def _materialize(service: Service, root: Path) -> Path:
     elif service.id == "paperless-ngx":
         values.setdefault("PAPERLESS_DBPASS", token_secrets.token_urlsafe(36))
         values.setdefault("PAPERLESS_SECRET_KEY", token_secrets.token_urlsafe(48))
+    elif service.id == "nextcloud":
+        values.setdefault("NEXTCLOUD_DB_PASSWORD", token_secrets.token_urlsafe(36))
+        values.setdefault("NEXTCLOUD_REDIS_PASSWORD", token_secrets.token_urlsafe(36))
+        values.setdefault("NEXTCLOUD_OIDC_CLIENT_ID", "mu3lab-nextcloud")
+        values.setdefault("NEXTCLOUD_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
     elif service.id == "surfsense":
         values.setdefault("DB_USER", "surfsense")
         values.setdefault("DB_NAME", "surfsense")
@@ -138,6 +143,19 @@ def _materialize(service: Service, root: Path) -> Path:
             values.setdefault("SITE_URL", public_url)
         elif service.id == "paperless-ngx":
             values.setdefault("PAPERLESS_URL", public_url)
+        elif service.id == "nextcloud":
+            values.setdefault("NEXTCLOUD_TRUSTED_DOMAINS", f"{dns_name} localhost 127.0.0.1")
+            values.setdefault("NEXTCLOUD_TRUSTED_PROXIES", "127.0.0.1")
+            values.setdefault("NEXTCLOUD_OVERWRITEHOST", f"{dns_name}:{service.private_https_port}")
+            values.setdefault("NEXTCLOUD_OVERWRITECLIURL", public_url)
+            from ctl.authentik_blueprints import write_oidc_application_blueprint
+            write_oidc_application_blueprint(
+                RuntimePaths().root, dns_name, service_id="nextcloud", name="Nextcloud",
+                private_port=service.private_https_port,
+                client_id=values["NEXTCLOUD_OIDC_CLIENT_ID"],
+                client_secret=values["NEXTCLOUD_OIDC_CLIENT_SECRET"],
+                redirect_paths=("/apps/user_oidc/code",),
+            )
         elif service.id == "surfsense":
             values.setdefault("SURFSENSE_PUBLIC_URL", public_url)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
@@ -209,6 +227,10 @@ def _account_username(identity: dict[str, str]) -> str:
 
 def _fresh_account_storage(service_id: str) -> bool:
     data = RuntimePaths().data
+    if service_id == "nextcloud":
+        # This file is written only after Nextcloud commits its initial account
+        # and configuration. A partially populated database is not sufficient.
+        return not (data / "nextcloud" / "html" / "config" / "config.php").is_file()
     directory = (data / "paperless" / "postgres" if service_id == "paperless-ngx"
                  else data / "adventurelog" / "postgres")
     try:
@@ -218,12 +240,21 @@ def _fresh_account_storage(service_id: str) -> bool:
 
 
 def _verify_bootstrap_account(service_id: str, project: Path,
-                              log) -> tuple[bool, str]:
+                              log, expected_username: str = "") -> tuple[bool, str]:
     """Use the pinned Django application's own model layer to verify creation."""
     if service_id == "paperless-ngx":
         container, variable = "webserver", "PAPERLESS_ADMIN_USER"
     elif service_id == "adventurelog":
         container, variable = "app", "DJANGO_ADMIN_USERNAME"
+    elif service_id == "nextcloud":
+        rc, output = actions.compose_exec(
+            project, "app", ["runuser", "-u", "www-data", "--", "php", "occ",
+                             "user:list", "--output=json"], log, timeout=90)
+        try:
+            users = json.loads(output[output.index("{"):]) if rc == 0 else {}
+        except (ValueError, json.JSONDecodeError):
+            users = {}
+        return rc == 0 and expected_username in users, output
     else:
         return True, "No automatic account verification required."
     code = (
@@ -235,6 +266,42 @@ def _verify_bootstrap_account(service_id: str, project: Path,
                                       ["python", "manage.py", "shell", "-c", code],
                                       log, timeout=90)
     return rc == 0 and "MU3LAB_ACCOUNT_OK" in output, output
+
+
+def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
+    """Install the pinned apps and configure the curated Authentik provider."""
+    env = read_runtime_env(project / ".env")
+    client_id = env.get("NEXTCLOUD_OIDC_CLIENT_ID", "")
+    client_secret = env.get("NEXTCLOUD_OIDC_CLIENT_SECRET", "")
+    host = env.get("NEXTCLOUD_OVERWRITEHOST", "").split(":", 1)[0]
+    if not client_id or not client_secret or not host:
+        return False, "Nextcloud OIDC runtime values are incomplete."
+    occ = ["runuser", "-u", "www-data", "--", "php", "occ"]
+    for app_id in ("calendar", "user_oidc"):
+        rc, output = actions.compose_exec(project, "app", [*occ, "app:install", app_id], log, timeout=300)
+        if rc and "already installed" not in output.lower():
+            return False, f"Nextcloud could not install {app_id}: {redact(output)}"
+        rc, output = actions.compose_exec(project, "app", [*occ, "app:enable", app_id], log, timeout=120)
+        if rc:
+            return False, f"Nextcloud could not enable {app_id}: {redact(output)}"
+    rc, output = actions.compose_exec(project, "app", [*occ, "app:list", "--output=json"], log, timeout=120)
+    try:
+        app_state = json.loads(output[output.index("{"):]) if rc == 0 else {}
+    except (ValueError, json.JSONDecodeError):
+        app_state = {}
+    enabled = app_state.get("enabled", {}) if isinstance(app_state, dict) else {}
+    if str(enabled.get("calendar", "")) != "6.5.4" or str(enabled.get("user_oidc", "")) != "8.11.0":
+        return False, "Nextcloud Calendar 6.5.4 and user_oidc 8.11.0 must both be enabled."
+    discovery = f"https://{host}/application/o/mu3lab-nextcloud/.well-known/openid-configuration"
+    command = [*occ, "user_oidc:provider", "mu3lab", f"--clientid={client_id}",
+               f"--clientsecret={client_secret}", f"--discoveryuri={discovery}"]
+    rc, output = actions.compose_exec(project, "app", command, log, timeout=120)
+    if rc:
+        return False, "Nextcloud could not configure its Authentik provider: " + redact(output)
+    rc, output = actions.compose_exec(project, "app", [*occ, "user_oidc:provider", "mu3lab"], log, timeout=120)
+    if rc or client_id not in output:
+        return False, "Nextcloud did not confirm the Authentik provider configuration."
+    return True, "Calendar and Authentik sign-in are configured."
 
 
 def _image_snapshot(output: str) -> dict[str, str]:
@@ -403,7 +470,8 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
               "compose_start_failed", f"Application start failed: {output}")
         return
     if fresh_account:
-        account_verified, account_detail = _verify_bootstrap_account(service.id, project, log)
+        account_verified, account_detail = _verify_bootstrap_account(
+            service.id, project, log, str(bootstrap_env.get("MU3LAB_BOOTSTRAP_USERNAME", "")))
         _event(store, job_id, "account_cleanup",
                "Removing bootstrap variables from the running application container.")
         rc, output = actions.compose_up(
@@ -429,6 +497,13 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         _fail(store, state, job_id, service.id, actor, "verify_application",
               "health_check_failed", f"Application did not become healthy: {detail}")
         return
+    if service.id == "nextcloud":
+        _event(store, job_id, "configure_application", "Configuring Calendar and Authentik sign-in.")
+        configured, detail = _configure_nextcloud(project, log)
+        if not configured:
+            _fail(store, state, job_id, service.id, actor, "configure_application",
+                  "nextcloud_configuration_failed", detail)
+            return
     _event(store, job_id, "configure_route", "Publishing private HTTPS route.")
     routed, detail = apply_route(registry, service, root, log)
     if not routed:

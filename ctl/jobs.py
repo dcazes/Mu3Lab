@@ -33,7 +33,7 @@ _PRIVATE_DIAGNOSTIC = re.compile(
     r"|\b(?:\d{1,3}\.){3}\d{1,3}\b"
     r")"
 )
-_SAFE_KINDS = frozenset({"lifecycle", "backup", "restore", "wiring", "update"})
+_SAFE_KINDS = frozenset({"lifecycle", "backup", "restore", "wiring", "update", "verification"})
 _SAFE_STATES = frozenset({"queued", "running", "waiting_for_confirmation", "succeeded", "failed", "cancelled"})
 _TRANSITIONS = {
     "queued": frozenset({"running", "waiting_for_confirmation", "failed", "cancelled"}),

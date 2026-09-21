@@ -12,12 +12,19 @@ class Provider:
     key_hint: str
     prefix: str = ""
     instructions: str = ""
-    example_models: tuple[str, ...] = ()
+    probe_models: tuple[str, ...] = ()
 
     def public(self) -> dict:
         value = asdict(self)
-        value["example_models"] = list(self.example_models)
+        value["probe_models"] = list(self.probe_models)
+        # Compatibility alias for dashboards that predate routed probes.
+        value["example_models"] = list(self.probe_models)
         return value
+
+    @property
+    def example_models(self) -> tuple[str, ...]:
+        """Compatibility alias used by an already-running dashboard backend."""
+        return self.probe_models
 
 
 PROVIDERS = (

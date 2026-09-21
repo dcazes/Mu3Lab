@@ -44,7 +44,8 @@ class RegistryV3Tests(unittest.TestCase):
         registry = load()
         optional = [service for service in registry.services if service.stage == "optional"]
         self.assertEqual({service.id for service in optional},
-                         {"surfsense", "mealie", "actual-budget", "immich", "adventurelog", "paperless-ngx"})
+                         {"surfsense", "mealie", "actual-budget", "immich", "adventurelog",
+                          "paperless-ngx", "nextcloud"})
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())

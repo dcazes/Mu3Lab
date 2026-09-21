@@ -42,7 +42,7 @@ class ProviderCatalogTests(unittest.TestCase):
             state.set_provider("groq", "Groq", enabled=False, state="disabled")
             self.assertEqual(configure(paths)["provider_count"], 0)
 
-    def test_successful_provider_verification_resumes_waiting_core_job(self):
+    def test_successful_provider_verification_queues_verification_only_job(self):
         from ctl.provider_ops import execute_claimed
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "control.sqlite3"
@@ -54,22 +54,58 @@ class ProviderCatalogTests(unittest.TestCase):
             provider = store.create(kind="wiring", service_id="provider:groq", action="verify", actor="owner")
             claimed = store.claim("worker")
             self.assertEqual(claimed["id"], provider["id"])
+            from ctl.provider_ops import StreamProbe
             with patch("ctl.provider_ops.ControlState.runtime", return_value=state), \
-                 patch("ctl.provider_ops._verify", return_value=(True, "passed", ["model-a"])):
+                 patch("ctl.provider_ops._verify", return_value=StreamProbe(
+                     True, 200, "groq/model-a", "model-a", "", "passed")), \
+                 patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])):
                 execute_claimed(store, claimed, "worker", Path(tmp))
             jobs = store.jobs(limit=10)
             self.assertTrue(any(item["service_id"] == "core-suite" and item["state"] == "queued"
+                                and item["action"] == "verify" for item in jobs))
+            self.assertTrue(any(item["id"] == core["id"] and item["state"] == "cancelled"
                                 for item in jobs))
 
-    def test_model_samples_use_freellmapi_openai_owned_by_shape(self):
-        from ctl.provider_ops import _samples
+    def test_model_catalog_does_not_infer_provider_from_owned_by(self):
+        from ctl.provider_ops import _available_models
         payload = {"data": [
-            {"id": "model-a", "owned_by": "groq", "available": True},
-            {"id": "model-b", "owned_by": "nvidia", "available": True},
+            {"id": "model-a", "owned_by": "freellmapi", "available": True},
+            {"id": "model-b", "owned_by": "freellmapi", "available": True},
             {"id": "model-c", "owned_by": "groq", "available": False},
         ]}
         with patch("ctl.provider_ops._request_json", return_value=(200, payload)):
-            self.assertEqual(_samples("groq", "internal-key"), ["model-a"])
+            self.assertEqual(_available_models("internal-key"), ["model-a", "model-b"])
+
+    def test_groq_verification_uses_routed_via_not_owned_by(self):
+        from ctl.provider_ops import StreamProbe, _verify
+        with patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])), \
+             patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}), \
+             patch("ctl.provider_ops._available_models", return_value=["llama-3.3-70b-versatile"]), \
+             patch("ctl.provider_ops._probe_stream", return_value=StreamProbe(
+                 True, 200, "groq/llama-3.3-70b-versatile", "llama-3.3-70b-versatile", "", "done")):
+            result = _verify("groq", Path("."), lambda _line: None)
+        self.assertTrue(result.success)
+        self.assertEqual(result.routed_via.split("/", 1)[0], "groq")
+
+    def test_verification_classifies_catalog_and_route_failures(self):
+        from ctl.provider_ops import ModelCatalogUnavailable, StreamProbe, _verify
+        common = [patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])),
+                  patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"})]
+        with common[0], common[1], patch("ctl.provider_ops._available_models", return_value=[]):
+            self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code,
+                             "catalog_mismatch")
+        with patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])), \
+             patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}), \
+             patch("ctl.provider_ops._available_models", side_effect=ModelCatalogUnavailable("offline")):
+            self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code,
+                             "gateway_unavailable")
+        with patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])), \
+             patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}), \
+             patch("ctl.provider_ops._available_models", return_value=["llama-3.3-70b-versatile"]), \
+             patch("ctl.provider_ops._probe_stream", return_value=StreamProbe(
+                 True, 200, "openrouter/llama", "llama-3.3-70b-versatile", "", "done")):
+            self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code,
+                             "provider_route_mismatch")
 
 
 class SurfSenseContractTests(unittest.TestCase):

@@ -1,0 +1,79 @@
+name: mu3lab-nextcloud
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: ${NEXTCLOUD_DB_PASSWORD:?NEXTCLOUD_DB_PASSWORD is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/postgres:/var/lib/postgresql/data
+    networks: [mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}"]
+    networks: [mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDISCLI_AUTH ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDISCLI_AUTH: ${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}
+
+  app:
+    image: nextcloud:33.0.5-apache
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports: ["127.0.0.1:8085:80"]
+    environment: &nextcloud_environment
+      POSTGRES_HOST: db
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: ${NEXTCLOUD_DB_PASSWORD:?NEXTCLOUD_DB_PASSWORD is required}
+      REDIS_HOST: redis
+      REDIS_HOST_PASSWORD: ${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NEXTCLOUD_TRUSTED_DOMAINS:?NEXTCLOUD_TRUSTED_DOMAINS is required}
+      TRUSTED_PROXIES: ${NEXTCLOUD_TRUSTED_PROXIES:-127.0.0.1}
+      OVERWRITEHOST: ${NEXTCLOUD_OVERWRITEHOST:?NEXTCLOUD_OVERWRITEHOST is required}
+      OVERWRITEPROTOCOL: https
+      OVERWRITECLIURL: ${NEXTCLOUD_OVERWRITECLIURL:?NEXTCLOUD_OVERWRITECLIURL is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/status.php"]
+      interval: 15s
+      timeout: 8s
+      retries: 40
+      start_period: 90s
+
+  cron:
+    image: nextcloud:33.0.5-apache
+    restart: unless-stopped
+    entrypoint: /cron.sh
+    depends_on:
+      app: {condition: service_healthy}
+    environment: *nextcloud_environment
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
+    networks: [mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

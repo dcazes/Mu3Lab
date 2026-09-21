@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import stat
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -16,7 +17,6 @@ from ctl.provider_secrets import records, save
 from ctl.provisioning import ProvisioningStore
 from ctl.secrets import ensure_core_envs
 from ctl.runtime import RuntimePaths
-from ctl.secrets import ensure_core_envs
 
 
 class ProvisioningStoreTests(unittest.TestCase):
@@ -59,6 +59,48 @@ class ProvisioningStoreTests(unittest.TestCase):
             store.update("core", "verified")
             with self.assertRaises(ValueError):
                 store.update("core", "waiting_for_user")
+
+    def test_progress_and_next_action_cover_all_nine_phases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            for phase in ("foundation", "vaultwarden", "tailscale", "identity",
+                          "dashboard_protection", "core"):
+                store.update(phase, "verified")
+            summary = store.summary()
+        self.assertEqual(summary["progress"], {"completed": 6, "total": 9})
+        self.assertEqual(summary["next_action"]["href"], "/chat")
+
+    def test_existing_open_webui_admin_is_reconciled_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            database = paths.data / "open-webui" / "webui.db"
+            database.parent.mkdir(parents=True)
+            with sqlite3.connect(database) as conn:
+                conn.execute('CREATE TABLE "user" (id TEXT, role TEXT)')
+                conn.execute('CREATE TABLE "auth" (id TEXT)')
+                conn.execute('INSERT INTO "user" VALUES (?, ?)', ("1", "admin"))
+                conn.execute('INSERT INTO "auth" VALUES (?)', ("1",))
+            store = ProvisioningStore(paths.runtime / "control-plane.sqlite3")
+            store.reconcile_runtime(paths)
+            phase = next(item for item in store.summary()["phases"]
+                         if item["phase_id"] == "open_webui_admin")
+        self.assertEqual(phase["actual_state"], "verified")
+
+    def test_open_webui_admin_requires_a_matching_authentication_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            database = paths.data / "open-webui" / "webui.db"
+            database.parent.mkdir(parents=True)
+            with sqlite3.connect(database) as conn:
+                conn.execute('CREATE TABLE "user" (id TEXT, role TEXT)')
+                conn.execute('CREATE TABLE "auth" (id TEXT)')
+                conn.execute('INSERT INTO "user" VALUES (?, ?)', ("admin-id", "admin"))
+                conn.execute('INSERT INTO "auth" VALUES (?)', ("other-user",))
+            store = ProvisioningStore(paths.runtime / "control-plane.sqlite3")
+            store.reconcile_runtime(paths)
+            phase = next(item for item in store.summary()["phases"]
+                         if item["phase_id"] == "open_webui_admin")
+        self.assertEqual(phase["actual_state"], "pending")
 
 
 @unittest.skipUnless(__import__("importlib.util").util.find_spec("cryptography"),
@@ -133,3 +175,23 @@ class CoreWiringTests(unittest.TestCase):
                 ok, _detail = _provision_freellmapi(paths)
             self.assertTrue(ok)
             setup.assert_called_once()
+
+    def test_verification_only_job_never_pulls_or_recreates_services(self):
+        from unittest.mock import patch
+        from ctl.core_setup import execute_claimed
+        from ctl.jobs import JobStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "control.sqlite3")
+            queued = store.create(kind="verification", service_id="core-suite",
+                                  action="verify", actor="owner")
+            claimed = store.claim("worker")
+            self.assertEqual(claimed["id"], queued["id"])
+            with patch("ctl.core_setup.ProvisioningStore.runtime", return_value=None), \
+                 patch("ctl.core_setup.configure_wiring", return_value={}), \
+                 patch("ctl.core_setup._verify_platform", return_value=(True, "verified")), \
+                 patch("ctl.core_setup.actions.compose_pull") as pull, \
+                 patch("ctl.core_setup.actions.compose_up") as up:
+                execute_claimed(store, claimed, "worker", Path(tmp))
+            self.assertEqual(store.get(queued["id"])["state"], "succeeded")
+            pull.assert_not_called()
+            up.assert_not_called()

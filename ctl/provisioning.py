@@ -146,8 +146,62 @@ class ProvisioningStore:
             label, default_detail = labels[value["phase_id"]]
             phases.append({**value, "label": label,
                            "detail": value["detail"] or default_detail})
-        verified = all(item["actual_state"] in {"verified", "skipped"} for item in phases)
+        completed = sum(item["actual_state"] in {"verified", "skipped"} for item in phases)
+        verified = completed == len(phases)
         blocked = next((item for item in phases if item["actual_state"] == "failed"), None)
         waiting = next((item for item in phases if item["actual_state"] == "waiting_for_user"), None)
+        incomplete = next((item for item in phases if item["actual_state"] not in {"verified", "skipped"}), None)
+        if incomplete is None:
+            next_action = {"kind": "none", "label": "Platform ready"}
+        elif incomplete["phase_id"] in {"foundation", "vaultwarden", "tailscale", "identity", "dashboard_protection"}:
+            next_action = {"kind": "bootstrap", "label": "Resume ./install"}
+        elif incomplete["phase_id"] == "core":
+            next_action = {"kind": "job", "label": "Install missing core services",
+                           "endpoint": "/api/setup/core"}
+        elif incomplete["phase_id"] == "open_webui_admin":
+            next_action = {"kind": "link", "label": "Open Open WebUI setup", "href": "/chat"}
+        elif incomplete["phase_id"] == "configuration":
+            next_action = {"kind": "link", "label": "Add or repair a provider",
+                           "href": "/connections/providers"}
+        else:
+            next_action = {"kind": "job", "label": "Verify platform",
+                           "endpoint": "/api/v1/jobs/core-verify"}
         return {"ok": True, "workflow_version": WORKFLOW_VERSION, "complete": verified,
-                "blocked": blocked, "waiting": waiting, "phases": phases}
+                "blocked": blocked, "waiting": waiting, "phases": phases,
+                "progress": {"completed": completed, "total": len(phases)},
+                "next_action": next_action}
+
+    def reconcile_runtime(self, paths: RuntimePaths = RuntimePaths()) -> None:
+        """Advance durable milestones from local authoritative evidence."""
+        self.initialize()
+        current = {item["phase_id"]: item["actual_state"] for item in self.summary()["phases"]}
+        database = paths.data / "open-webui" / "webui.db"
+        if current.get("open_webui_admin") not in {"verified", "skipped"} and database.is_file():
+            try:
+                conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+                tables = {str(row[0]) for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+                admins = int(conn.execute(
+                    'SELECT COUNT(*) FROM "user" AS u JOIN "auth" AS a ON a.id = u.id '
+                    'WHERE u.role = ?', ("admin",)).fetchone()[0]) if {"user", "auth"}.issubset(tables) else 0
+                conn.close()
+                if admins > 0:
+                    self.update("open_webui_admin", "verified",
+                                detail="Existing Open WebUI administrator verified from local account state.")
+            except (OSError, sqlite3.Error, TypeError, ValueError):
+                pass
+        try:
+            from ctl.control_state import ControlState
+            control = ControlState.runtime(paths)
+            providers = control.providers() if control else []
+            if any(item.get("enabled") and item.get("state") == "verified" for item in providers):
+                if current.get("configuration") not in {"verified", "skipped"}:
+                    self.update("configuration", "verified",
+                                detail="An enabled inference provider passed streamed routing verification.")
+            elif current.get("configuration") in {"pending", "running", "waiting_for_user"}:
+                degraded = next((item for item in providers if item.get("state") == "degraded"), None)
+                detail = ("A saved provider needs attention before chat can be verified." if degraded
+                          else "Add and verify an inference provider to finish chat setup.")
+                self.update("configuration", "waiting_for_user", detail=detail)
+        except (OSError, sqlite3.Error, ValueError):
+            pass

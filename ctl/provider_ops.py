@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from ctl import actions
 from ctl.control_state import ControlState
-from ctl.core_setup import _stream_chat_ok
 from ctl.core_wiring import configure
 from ctl.jobs import JobStore, redact
 from ctl.provider_catalog import get
@@ -33,30 +33,85 @@ def _request_json(url: str, key: str) -> tuple[int, dict]:
         return 0, {}
 
 
-def _samples(provider_id: str, key: str) -> list[str]:
+@dataclass(frozen=True)
+class StreamProbe:
+    success: bool
+    http_status: int
+    routed_via: str
+    model: str
+    error_code: str
+    detail: str
+
+
+class ModelCatalogUnavailable(RuntimeError):
+    """The local FreeLLMAPI catalog could not be read."""
+
+
+def _available_models(key: str) -> list[str]:
     status, payload = _request_json("http://127.0.0.1:3001/v1/models", key)
     if status != 200:
-        return []
+        raise ModelCatalogUnavailable(f"FreeLLMAPI model discovery returned HTTP {status or 'unavailable'}.")
     rows = payload.get("data", []) if isinstance(payload, dict) else []
     result: list[str] = []
     for item in rows:
         if not isinstance(item, dict):
-            continue
-        # FreeLLMAPI's OpenAI-compatible model response identifies an
-        # ungrouped provider with `owned_by`; older/projected responses may
-        # expose `platform` or `platforms`. Accept all reviewed shapes while
-        # refusing unavailable catalog rows as verified access.
-        platforms = item.get("platforms") or [item.get("platform") or item.get("owned_by")]
-        if provider_id not in platforms:
             continue
         if item.get("available") is False:
             continue
         model_id = str(item.get("id", ""))
         if model_id and model_id not in result:
             result.append(model_id)
-        if len(result) == 3:
-            break
     return result
+
+
+def _probe_stream(model: str, key: str) -> StreamProbe:
+    payload = {"model": model, "messages": [{"role": "user", "content": "Reply with OK."}],
+               "max_tokens": 4, "temperature": 0, "stream": True}
+    request = urllib.request.Request(
+        "http://127.0.0.1:3001/v1/chat/completions", method="POST",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Accept": "text/event-stream", "Content-Type": "application/json",
+                 "Authorization": f"Bearer {key}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            routed = response.headers.get("X-Routed-Via", "")
+            completed = False
+            saw_delta = False
+            received = 0
+            while received < 1024 * 1024:
+                line = response.readline()
+                if not line:
+                    break
+                received += len(line)
+                value = line.strip()
+                if value == b"data: [DONE]":
+                    completed = saw_delta
+                    break
+                if value.startswith(b"data:"):
+                    try:
+                        event = json.loads(value[5:].strip())
+                        saw_delta = isinstance(event.get("choices"), list)
+                    except (ValueError, AttributeError):
+                        continue
+            if not completed:
+                return StreamProbe(False, response.status, routed, model, "stream_failed",
+                                   "FreeLLMAPI opened a stream but did not complete it.")
+            return StreamProbe(True, response.status, routed, model, "", "Stream completed.")
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            code = "credential_rejected"
+            detail = "The provider rejected authorization for this request."
+        elif exc.code == 429:
+            code = "rate_limited_or_quota"
+            detail = "The provider is currently rate limited or out of quota."
+        else:
+            code = "stream_failed"
+            detail = f"FreeLLMAPI returned HTTP {exc.code} during the streamed probe."
+        return StreamProbe(False, exc.code, exc.headers.get("X-Routed-Via", ""), model, code, detail)
+    except (OSError, urllib.error.URLError):
+        return StreamProbe(False, 0, "", model, "gateway_unavailable",
+                           "FreeLLMAPI was unavailable during provider verification.")
 
 
 def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
@@ -80,20 +135,35 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
     return bool(service_key), ("Provider gateway reconciled." if service_key else "FreeLLMAPI service key is unavailable."), []
 
 
-def _verify(provider_id: str, root: Path, log) -> tuple[bool, str, list[str]]:
+def _verify(provider_id: str, root: Path, log) -> StreamProbe:
     ok, detail, _ = _reconcile(root, log)
     if not ok:
-        return False, detail, []
+        return StreamProbe(False, 0, "", "", "gateway_unavailable", detail)
     key = read_runtime_env(RuntimePaths().projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")
-    models = _samples(provider_id, key)
-    if not models:
-        return False, "FreeLLMAPI did not report a usable model for this provider key.", []
-    payload = {"model": models[0], "messages": [{"role": "user", "content": "Reply with OK."}],
-               "max_tokens": 4, "temperature": 0}
-    if not _stream_chat_ok("http://127.0.0.1:3001/v1/chat/completions", payload,
-                           {"Authorization": f"Bearer {key}"}):
-        return False, "The provider did not complete a streamed test request through FreeLLMAPI.", models
-    return True, "Provider model discovery and streamed routing passed.", models
+    try:
+        available = set(_available_models(key))
+    except ModelCatalogUnavailable as exc:
+        return StreamProbe(False, 0, "", "", "gateway_unavailable", str(exc))
+    candidates = [model for model in get(provider_id).probe_models if model in available]
+    if not candidates:
+        return StreamProbe(False, 200, "", "", "catalog_mismatch",
+                           "None of Mu3Lab's curated probe models are present in this FreeLLMAPI catalog.")
+    last = StreamProbe(False, 0, "", "", "stream_failed", "No provider probe completed.")
+    for model in candidates:
+        probe = _probe_stream(model, key)
+        last = probe
+        if not probe.success:
+            if probe.error_code in {"credential_rejected", "rate_limited_or_quota", "gateway_unavailable"}:
+                return probe
+            continue
+        routed_provider = probe.routed_via.split("/", 1)[0].strip().lower()
+        if routed_provider == provider_id:
+            return StreamProbe(True, probe.http_status, probe.routed_via, model, "",
+                               f"Streamed routing passed through {probe.routed_via}.")
+        last = StreamProbe(False, probe.http_status, probe.routed_via, model,
+                           "provider_route_mismatch",
+                           f"The test completed through {probe.routed_via or 'an unidentified provider'}, not {provider_id}.")
+    return last
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
@@ -133,29 +203,48 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
     if action == "enable":
         action = "verify"
     state.set_provider(provider.id, label, enabled=True, state="verifying", attempted=True, job_id=job_id)
-    ok, detail, models = _verify(provider.id, root, log)
-    if ok:
-        state.set_provider(provider.id, label, enabled=True, state="verified", models=models,
+    probe = _verify(provider.id, root, log)
+    if probe.success:
+        state.set_provider(provider.id, label, enabled=True, state="verified", models=[probe.model],
                            attempted=True, verified=True, job_id="")
-        store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
-        waiting_core = next((item for item in store.jobs(limit=100)
-                             if item.get("service_id") == "core-suite"
-                             and item.get("state") == "waiting_for_confirmation"), None)
+        _reconcile(root, log)
+        provisioning = __import__("ctl.provisioning", fromlist=["ProvisioningStore"]).ProvisioningStore.runtime()
+        if provisioning:
+            provisioning.update("configuration", "verified", detail=f"{provider.name} streamed routing passed.")
+        store.transition(job_id, "succeeded", actor=actor, detail=probe.detail, step_id="complete")
+        core_jobs = [item for item in store.jobs(limit=100)
+                     if item.get("service_id") == "core-suite"]
+        waiting_core = next((item for item in core_jobs
+                             if item.get("state") == "waiting_for_confirmation"), None)
         if waiting_core:
-            store.retry(str(waiting_core["id"]), actor=actor,
-                        idempotency_key=f"provider-verified:{provider.id}:{job_id}")
+            store.transition(str(waiting_core["id"]), "cancelled", actor=actor,
+                             detail="Superseded by verification-only checks after provider setup.")
+        if not any(item.get("state") in {"queued", "running"} for item in core_jobs):
+            store.create(kind="verification", service_id="core-suite", action="verify", actor=actor,
+                         detail="Verify live platform contracts after provider setup.",
+                         idempotency_key=f"provider-verified:{provider.id}:{job_id}")
     else:
-        error = {"code": "provider_verification_failed", "message": redact(detail),
-                 "recommended_action": "Check the key, replace it if needed, then verify again."}
-        state.set_provider(provider.id, label, enabled=True, state="degraded", models=models,
-                           error=error, attempted=True, job_id="")
+        recommendations = {
+            "credential_rejected": "Replace the rejected key, then verify again.",
+            "rate_limited_or_quota": "Check provider quota or wait for its rate limit to reset, then verify again.",
+            "gateway_unavailable": "Confirm FreeLLMAPI is healthy, then verify again.",
+            "catalog_mismatch": "Review the provider's suggested models or update the curated catalog.",
+            "provider_route_mismatch": "Disable competing routes for this model, then verify this provider again.",
+            "stream_failed": "Open the verification job details, then retry the streamed check.",
+        }
+        recommendation = recommendations.get(probe.error_code, "Review the verification details and try again.")
+        error = {"code": probe.error_code, "message": redact(probe.detail),
+                 "recommended_action": recommendation, "routed_via": probe.routed_via,
+                 "model": probe.model, "http_status": probe.http_status}
+        state.set_provider(provider.id, label, enabled=True, state="degraded", models=[],
+                           error=error, attempted=True, job_id=job_id, replace_models=True)
         # Re-render without the degraded credential so it cannot remain routable.
         try:
             _reconcile(root, log)
         except (OSError, ValueError):
             pass
-        store.transition(job_id, "failed", actor=actor, detail=detail,
-                         error_code="provider_verification_failed", step_id="verify")
+        store.transition(job_id, "failed", actor=actor, detail=probe.detail,
+                         error_code=probe.error_code, step_id="verify")
 
 
 def migrate_legacy(state: ControlState) -> None:

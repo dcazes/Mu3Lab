@@ -1,0 +1,5 @@
+services:
+  app:
+    environment:
+      NEXTCLOUD_ADMIN_USER: ${MU3LAB_BOOTSTRAP_USERNAME:?bootstrap username is required}
+      NEXTCLOUD_ADMIN_PASSWORD: ${MU3LAB_BOOTSTRAP_PASSWORD:?bootstrap password is required}

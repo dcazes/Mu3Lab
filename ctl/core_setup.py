@@ -471,13 +471,50 @@ def start(store: JobStore, actor: str, root: Path,
                         idempotency_key=idempotency_key)
 
 
+def start_verify(store: JobStore, actor: str,
+                 idempotency_key: str | None = None) -> dict[str, str]:
+    """Queue contract verification without pulling or recreating services."""
+    return store.create(kind="verification", service_id="core-suite", action="verify",
+                        actor=actor, detail="Verify live core platform contracts",
+                        idempotency_key=idempotency_key)
+
+
+def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
+    provisioning = ProvisioningStore.runtime()
+    store.transition(job_id, "running", actor=actor,
+                     detail="Live platform verification started.", step_id="verify")
+    try:
+        runtime = RuntimePaths()
+        wiring = configure_wiring(runtime)
+        ok, detail = _verify_platform(runtime, wiring)
+        if not ok:
+            if provisioning:
+                provisioning.update("verification", "failed", detail=detail, error=detail)
+            store.transition(job_id, "failed", actor=actor, detail=detail,
+                             error_code="platform_verification_failed", step_id="verify")
+            return
+        if provisioning:
+            provisioning.update("core", "verified", detail="Core services remain configured and reachable.")
+            provisioning.update("verification", "verified", detail=detail)
+        store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+    except Exception as exc:  # noqa: BLE001 - durable jobs must terminate safely
+        detail = "Platform verification failed safely: " + redact(str(exc))
+        if provisioning:
+            provisioning.update("verification", "failed", error=detail)
+        store.transition(job_id, "failed", actor=actor, detail=detail,
+                         error_code="platform_verification_failed", step_id="verify")
+
+
 def execute_claimed(store: JobStore, job: dict, worker_id: str,
                     root: Path) -> None:
     """Dispatch one already-claimed, allowlisted core job."""
-    if job.get("service_id") != "core-suite" or job.get("action") != "install":
+    if job.get("service_id") != "core-suite" or job.get("action") not in {"install", "verify"}:
         store.transition(str(job["id"]), "failed", actor=worker_id,
                          detail="The worker rejected an unsupported job.",
                          error_code="unsupported_job")
+        return
+    if job.get("action") == "verify":
+        _run_verify(store, str(job["id"]), str(job.get("actor") or "system"))
         return
     _run(store, str(job["id"]), str(job.get("actor") or "system"), root,
          worker_id=worker_id)
