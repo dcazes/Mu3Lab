@@ -149,6 +149,21 @@ class RegistryTests(unittest.TestCase):
             with patch("ctl.service_ops.RuntimePaths", return_value=paths):
                 self.assertTrue(_fresh_account_storage("nextcloud"))
 
+    def test_multi_container_apps_keep_generic_backing_hostnames_private(self):
+        root = Path(__file__).resolve().parents[1]
+        generic_aliases: set[str] = set()
+        private_networks = {"adventurelog": "adventurelog_internal", "paperless-ngx": "paperless_internal",
+                            "nextcloud": "nextcloud_internal", "surfsense": "surfsense_internal",
+                            "immich": "immich_internal"}
+        for service_id, private_network in private_networks.items():
+            compose = yaml.safe_load((root / load().get(service_id).compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
+            self.assertIn(private_network, compose["networks"], service_id)
+            for _name, contract in compose["services"].items():
+                networks = contract.get("networks", [])
+                backend = networks.get("mu3lab_backend", {}) if isinstance(networks, dict) else {}
+                generic_aliases.update(backend.get("aliases", []) if isinstance(backend, dict) else [])
+        self.assertFalse({"db", "redis", "broker", "app"}.intersection(generic_aliases))
+
     def test_healthy_service_without_private_route_needs_setup(self):
         service = load().get("open-webui")
         root = Path(__file__).resolve().parents[1]

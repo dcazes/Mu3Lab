@@ -9,13 +9,14 @@ export interface Service {
   route: 'ready' | 'pending' | 'unavailable'; routable: boolean; required: boolean; identity_note: string;
   resource_guidance: string; setup_action: string; mcp: { exposed: boolean; risk: string };
   state: LifecycleState; lifecycle_state: LifecycleState; health_state: string; setup_state: string; route_state: string;
+  installation_state?: 'not_installed' | 'partial' | 'installed' | 'restore_available' | 'failed_setup'; operational_state?: string; recommended_action?: string;
   identity_mode: string; backup_state: string; last_job_id: string; last_error: string; user_action: string;
   detail: string; url: string; route_ready: boolean; compose_present: boolean;
   ui?: { state: 'ready' | 'route_pending' | 'unavailable'; url: string | null; label: string; authentication: string; reason: string | null };
   // These fields were added with the v1 operator surface. Keep them optional
   // while an already-running control plane is being upgraded: the static
   // dashboard can be refreshed before the Python process is restarted.
-  allowed_actions?: Array<'install' | 'retry_setup' | 'start' | 'stop' | 'restart'>; last_job?: Job | null;
+  allowed_actions?: Array<'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair'>; last_job?: Job | null;
   update?: { repository: string; current_version: string };
   configuration?: ServiceConfigField[];
   account?: { mode: string; handoff: boolean; user_action: string };
@@ -40,7 +41,8 @@ export interface ProvisioningResponse { ok: boolean; available: boolean; complet
 export interface ProviderCatalogItem { id: string; name: string; key_hint: string; prefix: string; instructions: string; probe_models?: string[]; example_models: string[]; }
 export interface ProviderMetadata { id: string; name: string; label: string; enabled: boolean; state: 'saved' | 'verifying' | 'verified' | 'degraded' | 'disabled' | 'unsupported_legacy'; key_hint: string; credential_indicator: string; model_samples: string[]; models_are_examples: boolean; last_attempt_at: string; last_verified_at: string; updated_at: string; active_job_id: string; error: string; error_code?: string; recommended_action?: string; routed_via?: string; supported: boolean; }
 export interface CalendarConnection { ok: boolean; state: 'not_installed' | 'not_connected' | 'connected' | 'authentication_expired' | 'unavailable'; username_hint: string; selected_calendar_id: string; calendars: Array<{ id: string; name: string }>; last_success_at: string; error: string; }
-export interface CalendarEvent { id: string; title: string; start: string; end: string; all_day: boolean; }
+export interface CalendarAuthorization { ok: boolean; state: 'awaiting_user' | 'pending' | 'connected' | 'expired' | 'failed'; authorization_id?: string; login_url?: string; expires_at?: string; poll_after_ms?: number; connection?: CalendarConnection; error?: string; }
+export interface CalendarEvent { id: string; title: string; start: string; end: string; all_day: boolean; editable?: boolean; }
 export interface CalendarEvents { ok: boolean; state: string; calendar?: { id: string; name: string }; fetched_at?: string; events: CalendarEvent[]; error?: string; }
 export interface ProviderMetadataResponse { ok: boolean; providers: ProviderMetadata[]; }
 export interface Job { id: string; kind: string; service_id: string; action: string; state: string; actor: string; created_at: string; updated_at: string; detail: string; step_id?: string; error_code?: string; }
@@ -101,7 +103,7 @@ export interface McpRegistryResponse { ok: boolean; servers: McpServer[]; summar
 export interface ChatStatus { ok: boolean; ready: boolean; url: string; authentication: string; mcp_enabled_count: number; detail: string; }
 export interface SystemConfig { ok: boolean; compute_mode: 'auto' | 'cpu' | 'nvidia' | 'amd'; resolved_compute_mode: 'cpu' | 'nvidia' | 'amd'; available_modes: string[]; updated_at: string; updated_by: string; }
 export interface InstallBatchItem { batch_id: string; service_id: string; ordinal: number; explicitly_selected: number; state: string; job_id: string; error_json?: string; started_at: string; completed_at: string; }
-export interface InstallBatch { id: string; actor: string; state: 'queued' | 'running' | 'paused' | 'succeeded' | 'cancelled'; current_ordinal: number; created_at: string; updated_at: string; error?: { code?: string; message?: string }; items: InstallBatchItem[]; }
+export interface InstallBatch { id: string; actor: string; state: 'queued' | 'running' | 'paused' | 'succeeded' | 'cancelled' | 'completed_with_failures' | 'resetting' | 'reset_failed' | 'reset'; current_ordinal: number; created_at: string; updated_at: string; error?: { code?: string; message?: string }; items: InstallBatchItem[]; }
 export interface InstallBatchEvent { id: number; job_id: string; event: string; created_at: string; detail: string; }
 export interface InstallBatchJob { id: string; state: string; step_id: string; detail: string; events: InstallBatchEvent[]; }
 export interface InstallBatchResponse { ok: boolean; batch: InstallBatch | null; current_job?: InstallBatchJob | null; reset?: boolean; }

@@ -15,7 +15,11 @@ services:
     depends_on:
       redis: {condition: service_healthy}
       database: {condition: service_healthy}
-    networks: [mu3lab_frontend, mu3lab_backend]
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [immich-server]
+      immich_internal: {}
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2283/api/server/ping').then(r=>{if(!r.ok)process.exit(1)})"]
@@ -32,13 +36,13 @@ services:
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
     volumes: [model-cache:/cache]
-    networks: [mu3lab_backend]
+    networks: [immich_internal]
     security_opt: [no-new-privileges:true]
 
   redis:
     image: docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf
     restart: unless-stopped
-    networks: [mu3lab_backend]
+    networks: [immich_internal]
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
@@ -56,7 +60,7 @@ services:
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/immich/postgres:/var/lib/postgresql/data
     shm_size: 128mb
-    networks: [mu3lab_backend]
+    networks: [immich_internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -70,3 +74,4 @@ volumes:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  immich_internal: {internal: true}

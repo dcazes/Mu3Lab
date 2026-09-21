@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/paperless/redis:/data
-    networks: [mu3lab_backend]
+    networks: [paperless_internal]
     security_opt: [no-new-privileges:true]
 
   db:
@@ -18,7 +18,7 @@ services:
       POSTGRES_DB: paperless
       POSTGRES_USER: paperless
       POSTGRES_PASSWORD: ${PAPERLESS_DBPASS:?PAPERLESS_DBPASS is required}
-    networks: [mu3lab_backend]
+    networks: [paperless_internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U paperless -d paperless"]
@@ -46,7 +46,11 @@ services:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/paperless/media:/usr/src/paperless/media
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/paperless/export:/usr/src/paperless/export
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/paperless/consume:/usr/src/paperless/consume
-    networks: [mu3lab_frontend, mu3lab_backend]
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [paperless-webserver]
+      paperless_internal: {}
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/"]
@@ -58,3 +62,4 @@ services:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  paperless_internal: {internal: true}

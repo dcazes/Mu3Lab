@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import UTC, date, datetime, timedelta
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
 from icalendar import Calendar, Event
@@ -15,12 +17,16 @@ import recurring_ical_events
 from ctl import calendar_secrets
 from ctl.control_state import ControlState
 from ctl.runtime import RuntimePaths
+from ctl.secrets import read_runtime_env
 
 BASE = "http://127.0.0.1:8085"
 DAV = "DAV:"
 CALDAV = "urn:ietf:params:xml:ns:caldav"
 _CACHE: dict[str, tuple[datetime, dict]] = {}
 _EVENT_CACHE: dict[str, tuple[datetime, dict[str, dict[str, str]]]] = {}
+_AUTHORIZATIONS: dict[str, dict[str, str | float]] = {}
+_AUTH_LOCK = threading.RLock()
+_AUTH_TTL_SECONDS = 20 * 60
 
 
 class CalendarError(ValueError):
@@ -33,9 +39,145 @@ def _safe_href(username: str, href: str) -> str:
     parsed = urlsplit(href)
     path = unquote(parsed.path)
     prefix = f"/remote.php/dav/calendars/{username}/"
-    if parsed.scheme or parsed.netloc or not path.startswith(prefix) or ".." in path.split("/"):
+    # A DAV server may send a relative URL, but it may never cause Mu3Lab to
+    # contact another host or escape the selected user's calendar collection.
+    if (parsed.scheme or parsed.netloc or parsed.query or parsed.fragment or
+            not path.startswith(prefix) or ".." in path.split("/") or "//" in path):
         raise CalendarError("unavailable", "Nextcloud returned an unsafe calendar path.")
     return path
+
+
+def _expected_origin(paths: RuntimePaths = RuntimePaths()) -> str:
+    values = read_runtime_env(paths.projects / "nextcloud" / ".env")
+    origin = str(values.get("NEXTCLOUD_OVERWRITECLIURL", "")).rstrip("/")
+    parsed = urlsplit(origin)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise CalendarError("not_installed", "Nextcloud's private HTTPS route is not configured yet.")
+    return f"https://{parsed.netloc}"
+
+
+def _local_login_path(value: str, origin: str, *, allow_poll: bool = False) -> str:
+    """Validate a Login Flow URL and convert it to a safe localhost path."""
+    parsed = urlsplit(value)
+    expected = urlsplit(origin)
+    if (parsed.scheme != "https" or parsed.netloc != expected.netloc or
+            parsed.username or parsed.password or not parsed.path.startswith("/")):
+        raise CalendarError("unavailable", "Nextcloud returned an unexpected authorization URL.")
+    if not allow_poll and not parsed.path.startswith("/index.php/login/v2/"):
+        raise CalendarError("unavailable", "Nextcloud returned an invalid login-flow URL.")
+    if allow_poll and not parsed.path.startswith("/index.php/login/v2/"):
+        raise CalendarError("unavailable", "Nextcloud returned an invalid login-flow poll endpoint.")
+    return urlunsplit(("", "", parsed.path, parsed.query, ""))
+
+
+def _canonical_username(username: str, app_password: str) -> str:
+    try:
+        response = httpx.get(f"{BASE}/ocs/v2.php/cloud/user", params={"format": "json"},
+                             headers={"OCS-APIRequest": "true"}, auth=(username, app_password), timeout=20)
+    except httpx.HTTPError as exc:
+        raise CalendarError("unavailable", "Nextcloud calendar is temporarily unavailable.") from exc
+    if response.status_code in {401, 403}:
+        raise CalendarError("authentication_expired", "Nextcloud rejected the generated app credential.")
+    try:
+        value = response.json()
+        canonical = str(value["ocs"]["data"]["id"])
+    except (TypeError, ValueError, KeyError) as exc:
+        raise CalendarError("unavailable", "Nextcloud did not identify the signed-in calendar user.") from exc
+    if not canonical or len(canonical) > 256:
+        raise CalendarError("unavailable", "Nextcloud returned an invalid calendar user identifier.")
+    return canonical
+
+
+def start_authorization(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
+    """Start official Login Flow v2 without exposing an app password to the UI."""
+    if not owner_uid or len(owner_uid) > 256:
+        raise CalendarError("not_connected", "An authenticated subject is required.")
+    origin = _expected_origin(paths)
+    try:
+        response = httpx.post(f"{BASE}/index.php/login/v2", timeout=20)
+    except httpx.HTTPError as exc:
+        raise CalendarError("unavailable", "Nextcloud calendar is temporarily unavailable.") from exc
+    if response.status_code not in {200, 201}:
+        raise CalendarError("unavailable", f"Nextcloud authorization returned HTTP {response.status_code}.")
+    try:
+        payload = response.json()
+        login = str(payload["login"])
+        poll = payload["poll"]
+        endpoint = str(poll["endpoint"])
+        token = str(poll["token"])
+    except (TypeError, ValueError, KeyError) as exc:
+        raise CalendarError("unavailable", "Nextcloud returned an invalid authorization response.") from exc
+    _local_login_path(login, origin)
+    local_endpoint = _local_login_path(endpoint, origin, allow_poll=True)
+    if not token or len(token) > 4096:
+        raise CalendarError("unavailable", "Nextcloud returned an invalid authorization token.")
+    authorization_id = uuid.uuid4().hex
+    expires_at = time.time() + _AUTH_TTL_SECONDS
+    with _AUTH_LOCK:
+        _AUTHORIZATIONS[authorization_id] = {
+            "owner_uid": owner_uid, "poll_path": local_endpoint, "token": token,
+            "origin": origin, "expires_at": expires_at,
+        }
+    # Return the verified public URL, never the server-side poll token.
+    return {"ok": True, "state": "awaiting_user", "authorization_id": authorization_id,
+            "login_url": login, "expires_at": datetime.fromtimestamp(expires_at, UTC).isoformat(),
+            "poll_after_ms": 2000}
+
+
+def cancel_authorization(owner_uid: str, authorization_id: str) -> None:
+    with _AUTH_LOCK:
+        pending = _AUTHORIZATIONS.get(authorization_id)
+        if not pending or pending.get("owner_uid") != owner_uid:
+            raise CalendarError("not_found", "Calendar authorization was not found.")
+        _AUTHORIZATIONS.pop(authorization_id, None)
+
+
+def poll_authorization(owner_uid: str, authorization_id: str,
+                       paths: RuntimePaths = RuntimePaths()) -> dict:
+    with _AUTH_LOCK:
+        pending = dict(_AUTHORIZATIONS.get(authorization_id) or {})
+    if not pending or pending.get("owner_uid") != owner_uid:
+        raise CalendarError("not_found", "Calendar authorization was not found.")
+    if float(pending.get("expires_at", 0)) <= time.time():
+        with _AUTH_LOCK:
+            _AUTHORIZATIONS.pop(authorization_id, None)
+        return {"ok": True, "state": "expired"}
+    try:
+        response = httpx.post(f"{BASE}{pending['poll_path']}", data={"token": str(pending["token"])}, timeout=20)
+    except httpx.HTTPError as exc:
+        raise CalendarError("unavailable", "Nextcloud calendar is temporarily unavailable.") from exc
+    if response.status_code == 404:
+        # Preserve the opaque authorization id while the browser waits.  The
+        # dashboard must keep polling the same server-side record, but it
+        # never receives the Login Flow token itself.
+        return {
+            "ok": True,
+            "state": "pending",
+            "authorization_id": authorization_id,
+            "expires_at": datetime.fromtimestamp(float(pending["expires_at"]), UTC).isoformat(),
+            "poll_after_ms": 2000,
+        }
+    if response.status_code != 200:
+        with _AUTH_LOCK:
+            _AUTHORIZATIONS.pop(authorization_id, None)
+        return {"ok": True, "state": "failed", "error": "Nextcloud authorization was not approved."}
+    try:
+        payload = response.json()
+        server = str(payload["server"])
+        login_name = str(payload["loginName"])
+        app_password = str(payload["appPassword"])
+    except (TypeError, ValueError, KeyError) as exc:
+        raise CalendarError("unavailable", "Nextcloud returned an invalid completed authorization.") from exc
+    if urlsplit(server).scheme != "https" or urlsplit(server).netloc != urlsplit(str(pending["origin"])).netloc:
+        raise CalendarError("unavailable", "Nextcloud returned an unexpected authorization server.")
+    canonical = _canonical_username(login_name, app_password)
+    try:
+        result = connect(owner_uid, canonical, app_password, paths)
+    finally:
+        # The password must never remain in the temporary approval record.
+        with _AUTH_LOCK:
+            _AUTHORIZATIONS.pop(authorization_id, None)
+    return {"ok": True, "state": "connected", "connection": result}
 
 
 def discover(username: str, app_password: str) -> list[dict[str, str]]:
@@ -129,12 +271,27 @@ def select(owner_uid: str, calendar_id: str, state: ControlState) -> dict:
     return public_connection(owner_uid, state)
 
 
-def disconnect(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> None:
+def disconnect(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
+    """Revoke the generated credential where possible, then forget it locally."""
+    warning = ""
+    secret = calendar_secrets.get(owner_uid, paths)
+    if secret:
+        try:
+            response = httpx.delete(f"{BASE}/ocs/v2.php/core/apppassword",
+                                    params={"format": "json"},
+                                    headers={"OCS-APIRequest": "true"},
+                                    auth=(secret["username"], secret["app_password"]), timeout=20)
+            if response.status_code not in {200, 204}:
+                warning = "Nextcloud could not confirm remote app-password revocation; the local connection was removed."
+        except httpx.HTTPError:
+            warning = "Nextcloud was unavailable, so remote app-password revocation could not be confirmed; the local connection was removed."
     calendar_secrets.delete(owner_uid, paths)
     state = ControlState.runtime(paths)
     if state:
         state.delete_calendar_connection(owner_uid)
     _CACHE.pop(owner_uid, None)
+    _EVENT_CACHE.pop(owner_uid, None)
+    return {"ok": True, "warning": warning}
 
 
 def _iso(value) -> tuple[str, bool]:
@@ -146,8 +303,9 @@ def _iso(value) -> tuple[str, bool]:
     raise ValueError("unsupported calendar time")
 
 
-def _event_id(uid: str) -> str:
-    return hashlib.sha256(uid.encode()).hexdigest()[:20]
+def _event_id(uid: str, occurrence: str = "") -> str:
+    """Opaque per-occurrence ID; recurring instances must not collide."""
+    return hashlib.sha256(f"{uid}|{occurrence}".encode()).hexdigest()[:20]
 
 
 def _calendar_context(owner_uid: str, paths: RuntimePaths) -> tuple[ControlState, dict, dict, dict]:
@@ -237,6 +395,7 @@ def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
         try:
             parsed = Calendar.from_ical(node.text)
             occurrences = recurring_ical_events.of(parsed).between(now, end)
+            series_recurring = any(component.get("RRULE") is not None for component in parsed.walk("VEVENT"))
         except (ValueError, TypeError) as exc:
             raise CalendarError("unavailable", "Nextcloud returned an invalid calendar event.") from exc
         for event in occurrences:
@@ -246,13 +405,19 @@ def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
             uid = str(event.get("UID", ""))
             if not uid:
                 continue
-            event_id = _event_id(uid)
+            # recurring_ical_events may add a recurrence-id to its projected
+            # copy of an otherwise ordinary VEVENT.  The source calendar's
+            # RRULE is the reliable signal for Home's simple-edit boundary.
+            recurring = series_recurring
+            event_id = _event_id(uid, start)
             etag_node = response_node.find(f".//{{{DAV}}}getetag")
             resources[event_id] = {"href": _safe_href(secret["username"], href_node.text), "uid": uid,
-                                   "etag": str(etag_node.text or "") if etag_node is not None else ""}
+                                   "etag": str(etag_node.text or "") if etag_node is not None else "",
+                                   "editable": "false" if recurring else "true"}
             rows.append({"id": event_id,
                          "title": str(event.get("SUMMARY", "Untitled event"))[:256],
-                         "start": start, "end": finish, "all_day": all_day})
+                         "start": start, "end": finish, "all_day": all_day,
+                         "editable": not recurring})
     rows.sort(key=lambda item: item["start"])
     result = {"ok": True, "state": "connected",
               "calendar": {"id": calendar["id"], "name": calendar["name"]},
@@ -282,11 +447,13 @@ def create_event(owner_uid: str, payload: dict, paths: RuntimePaths = RuntimePat
     if response.status_code not in {200, 201, 204}:
         raise CalendarError("unavailable", f"Nextcloud could not create the event (HTTP {response.status_code}).")
     _CACHE.pop(owner_uid, None); _EVENT_CACHE.pop(owner_uid, None)
-    return {"ok": True, "id": _event_id(uid)}
+    return {"ok": True, "id": _event_id(uid, str(payload.get("start", "")))}
 
 
 def update_event(owner_uid: str, event_id: str, payload: dict, paths: RuntimePaths = RuntimePaths()) -> dict:
     secret, resource = _resource(owner_uid, event_id, paths)
+    if resource.get("editable") != "true":
+        raise CalendarError("recurring_event", "Recurring events must be edited in Nextcloud Calendar.")
     revision = str(payload.get("revision", ""))
     if revision and revision != resource["etag"]:
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before saving.")
@@ -302,6 +469,8 @@ def update_event(owner_uid: str, event_id: str, payload: dict, paths: RuntimePat
 
 def delete_event(owner_uid: str, event_id: str, revision: str = "", paths: RuntimePaths = RuntimePaths()) -> dict:
     secret, resource = _resource(owner_uid, event_id, paths)
+    if resource.get("editable") != "true":
+        raise CalendarError("recurring_event", "Recurring events must be deleted in Nextcloud Calendar.")
     if revision and revision != resource["etag"]:
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before deleting.")
     response = _dav("DELETE", resource["href"], secret, headers={"If-Match": resource["etag"] or "*"})

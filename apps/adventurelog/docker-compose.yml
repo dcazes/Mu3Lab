@@ -17,7 +17,11 @@ services:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/adventurelog/media:/code/media
     depends_on:
       db: {condition: service_healthy}
-    networks: [mu3lab_frontend, mu3lab_backend]
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [adventurelog-app]
+      adventurelog_internal: {}
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/health')\""]
@@ -35,7 +39,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/adventurelog/postgres:/var/lib/postgresql/data
-    networks: [mu3lab_backend]
+    networks: [adventurelog_internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U adventure -d adventurelog"]
@@ -46,3 +50,4 @@ services:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  adventurelog_internal: {internal: true}

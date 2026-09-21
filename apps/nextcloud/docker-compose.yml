@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${NEXTCLOUD_DB_PASSWORD:?NEXTCLOUD_DB_PASSWORD is required}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/postgres:/var/lib/postgresql/data
-    networks: [mu3lab_backend]
+    networks: [nextcloud_internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud"]
@@ -22,7 +22,7 @@ services:
     image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}"]
-    networks: [mu3lab_backend]
+    networks: [nextcloud_internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDISCLI_AUTH ping | grep PONG"]
@@ -53,7 +53,11 @@ services:
       OVERWRITECLIURL: ${NEXTCLOUD_OVERWRITECLIURL:?NEXTCLOUD_OVERWRITECLIURL is required}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
-    networks: [mu3lab_frontend, mu3lab_backend]
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [nextcloud-app]
+      nextcloud_internal: {}
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/status.php | grep -q '\"installed\":true'"]
@@ -71,9 +75,10 @@ services:
     environment: *nextcloud_environment
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
-    networks: [mu3lab_backend]
+    networks: [nextcloud_internal]
     security_opt: [no-new-privileges:true]
 
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  nextcloud_internal: {internal: true}

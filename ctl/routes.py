@@ -9,6 +9,7 @@ from ctl.control_state import ControlState
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.service_state import status as service_status, tailnet_dns_name
 
 START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
@@ -83,7 +84,10 @@ def apply(registry: Registry, current: Service, root: Path,
         if service.stage != "optional" or service.proxy_port is None:
             continue
         installed = state.installation(service.id) if state else None
-        if service.id == current.id or (installed and installed["state"] in {"running", "stopped", "degraded"}):
+        live = service_status(service, tailnet_dns_name(), root)
+        if (service.id == current.id or
+                live["state"] in {"ready", "running", "starting", "stopped", "needs_setup"} or
+                (installed and installed["state"] in {"running", "stopped", "degraded"})):
             enabled.append(service)
     candidate = render(base, enabled)
     temporary = target.with_suffix(".candidate")

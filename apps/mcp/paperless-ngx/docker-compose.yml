@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     command: ["npx", "-y", "paperless-ngx-mcp@3.1.1", "--http", "--port", "3000"]
     environment:
-      PAPERLESS_URL: http://webserver:8000
+      PAPERLESS_URL: http://paperless-webserver:8000
       PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL:-}
       PAPERLESS_API_KEY: ${PAPERLESS_API_KEY:?PAPERLESS_API_KEY is required}
       PAPERLESS_MAX_SESSIONS: "10"

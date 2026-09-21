@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from starlette.requests import Request
 
-from ctl.app import _mutation_allowed, identity
+from ctl.app import _calendar_owner, _mutation_allowed, identity
 
 
 def request(headers: dict[str, str]) -> Request:
@@ -52,3 +52,15 @@ class IdentityBoundaryTests(unittest.TestCase):
         })
         with patch("ctl.app._csrf_token", return_value="bound-token"):
             self.assertFalse(_mutation_allowed(cross_site))
+
+    def test_calendar_mutation_requires_operator_in_addition_to_subject(self):
+        value = request({"host": "host.ts.net", "origin": "https://host.ts.net"})
+        with patch("ctl.app.identity", return_value={"subject_id": "subject", "writes_enabled": False}):
+            result = _calendar_owner(value, write=True)
+        self.assertEqual(result.status_code, 403)
+
+    def test_calendar_read_remains_available_to_an_authenticated_subject(self):
+        value = request({})
+        with patch("ctl.app.identity", return_value={"subject_id": "subject", "writes_enabled": False}):
+            result = _calendar_owner(value)
+        self.assertEqual(result[1], "subject")

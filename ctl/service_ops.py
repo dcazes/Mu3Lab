@@ -23,7 +23,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl import workflow_secrets
 
-SUPPORTED_ACTIONS = frozenset({"install", "retry_setup", "start", "stop", "restart"})
+SUPPORTED_ACTIONS = frozenset({"install", "retry_setup", "start", "stop", "restart", "repair", "reset"})
 
 
 def project_path(service: Service, root: Path) -> Path:
@@ -87,7 +87,7 @@ def allowed_actions(service: Service, state: str) -> list[str]:
     if state == "stopped":
         return ["start", "restart"]
     if state in {"ready", "running", "starting", "configured", "installed"}:
-        result = ["restart"]
+        result = ["repair", "restart"] if service.stage == "optional" else ["restart"]
         if service.lifecycle != "always_on":
             result.insert(0, "stop")
         return result
@@ -370,6 +370,22 @@ def _install_nextcloud_if_needed(project: Path, log) -> tuple[bool, str]:
     """
     if _nextcloud_installed(project, log):
         return True, "Nextcloud base installation is already complete."
+    # The image needs a short period to finish Apache/PHP startup after the
+    # database and Redis dependencies become healthy.  Do not ask Compose to
+    # wait for the app health check here: that check intentionally requires
+    # an already-installed instance, which would deadlock a fresh install.
+    deadline = time.monotonic() + 120
+    last = "Nextcloud occ is not ready yet."
+    while time.monotonic() < deadline:
+        rc, output = actions.compose_exec(
+            project, "app", ["runuser", "-u", "www-data", "--", "php", "occ", "status",
+                             "--output=json"], log, timeout=30)
+        if rc == 0:
+            break
+        last = redact(output) or last
+        time.sleep(2)
+    else:
+        return False, "Nextcloud did not become ready for first-run installation: " + last
     script = (
         "set -eu; "
         "test -n \"${NEXTCLOUD_ADMIN_USER:-}\"; "
@@ -454,6 +470,34 @@ def _fail(store: JobStore, state: ControlState | None, job_id: str, service_id: 
             pass
     store.transition(job_id, "failed", actor=actor, detail=safe,
                      error_code=code, step_id=stage)
+
+
+def _append_runtime_diagnostics(store: JobStore, job_id: str, project: Path) -> None:
+    """Attach a small, redacted container-log tail to a failed job.
+
+    Compose's `--wait` output says only that a dependency became unhealthy;
+    the useful reason is normally in the application container.  Keep this
+    bounded so batch progress remains readable and secrets never enter audit
+    storage.
+    """
+    try:
+        rc, output = actions.compose_logs(project, lambda _line: None, tail=50)
+        if output:
+            store.append_event(job_id, "diagnostic", redact(output)[-4000:])
+    except OSError:
+        pass
+
+
+def _failure_code(default: str, detail: str) -> str:
+    """Turn common Docker failure text into stable, user-actionable codes."""
+    value = detail.lower()
+    if "password authentication failed" in value or "authentication failed for user" in value:
+        return "database_auth_failed"
+    if "unhealthy" in value or "dependency failed to start" in value:
+        return "dependency_unhealthy"
+    if "timed out" in value or "wait timeout" in value:
+        return "application_health_timeout"
+    return default
 
 
 def _install(store: JobStore, state: ControlState | None, job: dict,
@@ -551,13 +595,18 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_initialization(service.id, account_mode, "existing_account", job_id=job_id,
                                  owner_uid=str((account_identity or {}).get("owner_uid", "")))
     from ctl.compute import compose_overrides
+    # Nextcloud cron depends on a healthy app.  A brand-new app cannot be
+    # healthy until `occ maintenance:install` completes, so start only the
+    # dependencies and app first.  Cron is started after bootstrap cleanup.
+    requested_services = ["db", "redis", "app"] if service.id == "nextcloud" else None
     rc, output = actions.compose_up(
         project, log, timeout=wait_timeout + 300, wait_timeout=initial_wait_timeout,
         env=bootstrap_env, extra_files=[*compose_overrides(service.id, project), *bootstrap_files],
-        recreate=bool(prior_installation))
+        recreate=bool(prior_installation), services=requested_services)
     if rc:
+        _append_runtime_diagnostics(store, job_id, project)
         _fail(store, state, job_id, service.id, actor, "start_service",
-              "compose_start_failed", f"Application start failed: {output}")
+              _failure_code("compose_start_failed", output), f"Application start failed: {output}")
         return
     if service.id == "nextcloud":
         _event(store, job_id, "base_installation", "Confirming the Nextcloud base installation.")
@@ -591,8 +640,9 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
     _event(store, job_id, "verify_application", "Waiting for application health.")
     healthy, detail = _wait_healthy(service)
     if not healthy:
+        _append_runtime_diagnostics(store, job_id, project)
         _fail(store, state, job_id, service.id, actor, "verify_application",
-              "health_check_failed", f"Application did not become healthy: {detail}")
+              _failure_code("health_check_failed", detail), f"Application did not become healthy: {detail}")
         return
     if service.id == "nextcloud":
         _event(store, job_id, "configure_application", "Configuring Calendar and Authentik sign-in.")
@@ -632,6 +682,59 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
                      detail=f"{service.name} installed and verified.", step_id="finalize")
 
 
+def _repair(store: JobStore, state: ControlState | None, job: dict,
+            service: Service, registry, actor: str, root: Path) -> None:
+    """Recreate an optional runtime from its current curated manifest.
+
+    This is deliberately a repair, not an install: it never pulls images,
+    creates accounts, or removes volumes.  It is the safe migration path for
+    deployments that previously attached generic db/redis aliases to the
+    shared backend network.
+    """
+    job_id = str(job["id"])
+    if service.stage != "optional":
+        _fail(store, state, job_id, service.id, actor, "validate_service",
+              "repair_not_optional", "Only optional applications have a repairable runtime project.")
+        return
+    store.transition(job_id, "running", actor=actor,
+                     detail=f"Repairing {service.name} without changing persistent data.", step_id="materialize_runtime")
+    try:
+        project = _materialize(service, root)
+    except OSError as exc:
+        _fail(store, state, job_id, service.id, actor, "materialize_runtime", "materialize_failed", str(exc))
+        return
+    log = lambda line: store.append_event(job_id, "log", line)
+    _event(store, job_id, "validate_configuration", "Validating the repaired curated Compose configuration.")
+    rc, output = actions.compose_config(project, log)
+    if rc:
+        _fail(store, state, job_id, service.id, actor, "validate_configuration", "compose_invalid", output)
+        return
+    _event(store, job_id, "repair_runtime", "Recreating containers with the current private network layout.")
+    from ctl.compute import compose_overrides
+    wait_timeout = 900 if service.id in {"surfsense", "nextcloud"} else 180
+    rc, output = actions.compose_up(project, log, timeout=wait_timeout + 300, wait_timeout=wait_timeout,
+                                    extra_files=compose_overrides(service.id, project), recreate=True)
+    if rc:
+        _append_runtime_diagnostics(store, job_id, project)
+        _fail(store, state, job_id, service.id, actor, "repair_runtime",
+              _failure_code("compose_repair_failed", output), f"Application repair failed: {output}")
+        return
+    healthy, detail = _wait_healthy(service, timeout=wait_timeout)
+    if not healthy:
+        _append_runtime_diagnostics(store, job_id, project)
+        _fail(store, state, job_id, service.id, actor, "verify_application",
+              _failure_code("health_check_failed", detail), f"Application did not become healthy after repair: {detail}")
+        return
+    routed, detail = apply_route(registry, service, root, log)
+    if not routed:
+        _fail(store, state, job_id, service.id, actor, "configure_route", "route_configuration_failed", detail)
+        return
+    if state:
+        state.set_installation(service.id, "running", job_id=job_id, manifest_version="4", route_state="ready")
+    store.transition(job_id, "succeeded", actor=actor,
+                     detail=f"{service.name} repaired with the current curated runtime.", step_id="complete")
+
+
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
     job_id = str(job["id"])
     service_id = str(job.get("service_id") or "")
@@ -651,6 +754,26 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         return
     if action in {"install", "retry_setup"}:
         _install(store, state, job, service, registry, actor, root)
+        return
+    if action == "repair":
+        _repair(store, state, job, service, registry, actor, root)
+        return
+    if action == "reset":
+        if service.stage != "optional":
+            _fail(store, state, job_id, service.id, actor, "validate_service",
+                  "reset_not_optional", "Only optional applications can be reset from the catalog.")
+            return
+        store.transition(job_id, "running", actor=actor,
+                         detail=f"Cleaning failed {service.name} installation.", step_id="reset_cleanup")
+        log = lambda line: store.append_event(job_id, "log", line)
+        ok, detail = reset_failed_application(service, root, log)
+        if not ok:
+            _fail(store, state, job_id, service.id, actor, "reset_cleanup",
+                  "reset_cleanup_failed", detail)
+            return
+        if state:
+            state.reset_service(service.id)
+        store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
         return
     if action == "stop" and service.lifecycle == "always_on":
         _fail(store, state, job_id, service.id, worker_id, "validate_service",

@@ -10,7 +10,8 @@ import httpx
 
 from ctl import calendar_secrets
 from ctl.control_state import ControlState
-from ctl.nextcloud_calendar import CalendarError, create_event, delete_event, discover, events, update_event
+from ctl.nextcloud_calendar import (CalendarError, cancel_authorization, create_event, delete_event,
+                                    discover, events, poll_authorization, start_authorization, update_event)
 from ctl.runtime import RuntimePaths
 
 
@@ -132,6 +133,51 @@ class CalDavTests(unittest.TestCase):
             self.assertTrue(all(item["all_day"] for item in result["events"]))
             self.assertTrue(all("T" not in item["start"] for item in result["events"]))
             self.assertNotIn(excluded.isoformat(), {item["start"] for item in result["events"]})
+
+    def test_login_flow_connects_without_returning_or_logging_app_password(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            project = paths.projects / "nextcloud"; project.mkdir(parents=True)
+            (project / ".env").write_text(
+                "NEXTCLOUD_OVERWRITECLIURL=https://mu3lab.example.ts.net:8453\n", encoding="utf-8")
+            start_response = httpx.Response(200, json={
+                "login": "https://mu3lab.example.ts.net:8453/index.php/login/v2/flow",
+                "poll": {"endpoint": "https://mu3lab.example.ts.net:8453/index.php/login/v2/poll", "token": "private-token"},
+            })
+            with patch("ctl.nextcloud_calendar.httpx.post", return_value=start_response):
+                started = start_authorization("owner", paths)
+            self.assertEqual(started["state"], "awaiting_user")
+            self.assertNotIn("private-token", str(started))
+            completed = httpx.Response(200, json={"server": "https://mu3lab.example.ts.net:8453",
+                                                   "loginName": "display-name", "appPassword": "private-password"})
+            calendars = [{"id": "calendar", "name": "Personal", "href": "/remote.php/dav/calendars/alice/personal/"}]
+            with patch("ctl.nextcloud_calendar.httpx.post", return_value=completed), \
+                 patch("ctl.nextcloud_calendar._canonical_username", return_value="alice"), \
+                 patch("ctl.nextcloud_calendar.discover", return_value=calendars):
+                result = poll_authorization("owner", str(started["authorization_id"]), paths)
+            self.assertEqual(result["state"], "connected")
+            self.assertNotIn("private-password", str(result))
+            self.assertEqual(calendar_secrets.get("owner", paths)["username"], "alice")
+            with self.assertRaises(CalendarError):
+                cancel_authorization("owner", str(started["authorization_id"]))
+
+    def test_login_flow_pending_response_keeps_opaque_authorization_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            project = paths.projects / "nextcloud"; project.mkdir(parents=True)
+            (project / ".env").write_text(
+                "NEXTCLOUD_OVERWRITECLIURL=https://mu3lab.example.ts.net:8453\n", encoding="utf-8")
+            start_response = httpx.Response(200, json={
+                "login": "https://mu3lab.example.ts.net:8453/index.php/login/v2/flow",
+                "poll": {"endpoint": "https://mu3lab.example.ts.net:8453/index.php/login/v2/poll", "token": "private-token"},
+            })
+            with patch("ctl.nextcloud_calendar.httpx.post", return_value=start_response):
+                started = start_authorization("owner", paths)
+            with patch("ctl.nextcloud_calendar.httpx.post", return_value=httpx.Response(404)):
+                pending = poll_authorization("owner", str(started["authorization_id"]), paths)
+            self.assertEqual(pending["state"], "pending")
+            self.assertEqual(pending["authorization_id"], started["authorization_id"])
+            self.assertNotIn("private-token", str(pending))
 
 
 if __name__ == "__main__":

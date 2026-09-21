@@ -18,7 +18,10 @@ services:
       OIDC_USER_GROUP: ${MEALIE_OIDC_USER_GROUP:-mu3lab-users}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/mealie:/app/data
-    networks: [mu3lab_frontend, mu3lab_backend]
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [mealie-app]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/api/app/about', timeout=5)"]

@@ -268,6 +268,7 @@ def compose_up(projdir: Path, log: Callable[[str], None],
                extra_files: list[Path] | None = None,
                wait_timeout: int | None = None,
                recreate: bool = False,
+               services: list[str] | tuple[str, ...] | None = None,
                on_output: Callable[[str], None] | None = None) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
@@ -288,6 +289,15 @@ def compose_up(projdir: Path, log: Callable[[str], None],
         argv.append("--force-recreate")
     if wait_timeout is not None:
         argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
+    # Service names are always source-owned curated Compose names.  Keeping
+    # this allowlist-shaped helper avoids exposing arbitrary Compose argv to
+    # the dashboard while letting first-run stacks start prerequisites before
+    # their application health check is meaningful.
+    if services:
+        if any(not value or not isinstance(value, str) or value.startswith("-")
+               for value in services):
+            return 2, "invalid reviewed Compose service selection"
+        argv.extend(services)
     if on_output:
         return docker_cmd_stream(argv, log, timeout=timeout, env=env,
                                  on_output=on_output)

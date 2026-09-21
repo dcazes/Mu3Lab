@@ -11,7 +11,7 @@ services:
       POSTGRES_DB: ${DB_NAME:-surfsense}
     command: postgres -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10
     volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/postgres:/var/lib/postgresql/data"]
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-surfsense} -d ${DB_NAME:-surfsense}"]
       interval: 10s
@@ -27,7 +27,7 @@ services:
       PYTHONPATH: /app
       SERVICE_ROLE: migrate
       MIGRATION_TIMEOUT: 900
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     depends_on:
       db: {condition: service_healthy}
 
@@ -36,7 +36,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/redis:/data"]
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -52,7 +52,7 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
       - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
       interval: 10s
@@ -82,9 +82,7 @@ services:
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
-    networks:
-      mu3lab_backend:
-        aliases: [surfsense-backend]
+    networks: [surfsense_internal]
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -114,7 +112,7 @@ services:
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     depends_on:
       migrations: {condition: service_completed_successfully}
       backend: {condition: service_healthy}
@@ -130,7 +128,7 @@ services:
       CELERY_TASK_DEFAULT_QUEUE: surfsense
       PYTHONPATH: /app
       SERVICE_ROLE: beat
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     depends_on:
       migrations: {condition: service_completed_successfully}
       celery_worker: {condition: service_started}
@@ -154,7 +152,7 @@ services:
       ZERO_MUTATE_URL: http://frontend:3000/api/zero/mutate
       ZERO_QUERY_FORWARD_COOKIES: "true"
     volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/zero-cache:/data"]
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     depends_on:
       db: {condition: service_healthy}
       migrations: {condition: service_completed_successfully}
@@ -174,7 +172,7 @@ services:
       ETL_SERVICE: DOCLING
       DEPLOYMENT_MODE: self-hosted
       SURFSENSE_BACKEND_INTERNAL_URL: http://backend:8000
-    networks: [mu3lab_backend]
+    networks: [surfsense_internal]
     depends_on:
       backend: {condition: service_healthy}
       zero-cache: {condition: service_healthy}
@@ -187,6 +185,7 @@ services:
     networks:
       mu3lab_backend:
         aliases: [surfsense-proxy]
+      surfsense_internal: {}
       surfsense_edge: {}
     depends_on:
       frontend: {condition: service_started}
@@ -200,4 +199,5 @@ services:
 
 networks:
   mu3lab_backend: {external: true}
+  surfsense_internal: {internal: true}
   surfsense_edge: {}

@@ -64,6 +64,37 @@ def _available_models(key: str) -> list[str]:
     return result
 
 
+def _canonical_model_id(value: str) -> str:
+    """Compare FreeLLMAPI's normalized IDs with curated provider aliases.
+
+    The gateway intentionally reports every model as owned by `freellmapi`.
+    Provider ownership therefore cannot establish whether a stored key works;
+    the streamed route header is the authoritative check.  This helper only
+    finds sensible probe candidates, preserving the curated order.
+    """
+    normalized = value.strip().lower()
+    for prefix in ("openai/", "qwen/", "meta-llama/", "meta/", "nvidia/", "groq/", "google/"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    return normalized
+
+
+def _probe_candidates(provider_id: str, available: list[str]) -> list[str]:
+    """Return actual gateway IDs in curated probe order, without duplicates."""
+    exact = set(available)
+    normalized: dict[str, list[str]] = {}
+    for model in available:
+        normalized.setdefault(_canonical_model_id(model), []).append(model)
+    result: list[str] = []
+    for probe in get(provider_id).probe_models:
+        candidates = [probe] if probe in exact else normalized.get(_canonical_model_id(probe), [])
+        for candidate in candidates:
+            if candidate not in result:
+                result.append(candidate)
+    return result
+
+
 def _probe_stream(model: str, key: str) -> StreamProbe:
     payload = {"model": model, "messages": [{"role": "user", "content": "Reply with OK."}],
                "max_tokens": 4, "temperature": 0, "stream": True}
@@ -144,7 +175,7 @@ def _verify(provider_id: str, root: Path, log) -> StreamProbe:
         available = set(_available_models(key))
     except ModelCatalogUnavailable as exc:
         return StreamProbe(False, 0, "", "", "gateway_unavailable", str(exc))
-    candidates = [model for model in get(provider_id).probe_models if model in available]
+    candidates = _probe_candidates(provider_id, available)
     if not candidates:
         return StreamProbe(False, 200, "", "", "catalog_mismatch",
                            "None of Mu3Lab's curated probe models are present in this FreeLLMAPI catalog.")

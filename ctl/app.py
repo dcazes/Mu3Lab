@@ -44,8 +44,7 @@ from ctl.mcp_registry import snapshot as mcp_snapshot
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl import mcp_config
 from ctl.service_state import compose_snapshot, status as service_status, tailnet_dns_name, tailnet_serve_ports
-from ctl.service_ops import (SUPPORTED_ACTIONS, allowed_actions, project_path,
-                              reset_failed_application)
+from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl import actions
 from ctl import service_config
@@ -150,6 +149,7 @@ def _service_snapshot(request: Request | None = None) -> dict:
             registry.services))
     result = []
     for service, item in zip(registry.services, statuses, strict=True):
+        live_state = str(item["state"])
         # Traversing the protected dashboard through Authentik is stronger
         # evidence than a static manifest route flag.
         if service.id == "authentik" and operator and item["health_state"] == "healthy":
@@ -170,11 +170,17 @@ def _service_snapshot(request: Request | None = None) -> dict:
             item["missing_configuration"] = missing_config
         if installation and service.stage == "optional":
             persisted = str(installation["state"])
-            if persisted in {"queued", "installing", "starting", "verifying", "failed", "config_required"}:
+            # Queued/running workflow states describe an active operation.
+            # A historical failure must never hide Docker's current healthy
+            # state; this was why AdventureLog could be healthy yet shown as
+            # Failed and selectable for a second installation.
+            workflow_active = persisted in {"queued", "installing", "starting", "verifying", "config_required"}
+            if workflow_active or (persisted == "failed" and live_state not in {"ready", "running", "starting", "stopped", "needs_setup"}):
                 item["state"] = persisted
                 item["lifecycle_state"] = persisted
             item["installation"] = installation
-            item["route_state"] = installation["route_state"]
+            if item["state"] not in {"ready", "running", "starting", "stopped", "needs_setup"}:
+                item["route_state"] = installation["route_state"]
             item["last_error"] = installation.get("last_error", {})
         item["initialization"] = initialization or {
             "mode": service.account.get("mode", "none"),
@@ -186,6 +192,26 @@ def _service_snapshot(request: Request | None = None) -> dict:
         item["containers"] = container_snapshots.get(str(compose_dir.resolve()), [])
         item["last_job"] = latest
         item["last_job_id"] = str(latest["id"]) if latest else ""
+        if service.stage == "optional":
+            if item["state"] in {"ready", "running", "starting", "stopped", "needs_setup"}:
+                item["installation_state"] = "installed"
+            elif item["compose_present"]:
+                item["installation_state"] = "partial" if installation else "restore_available"
+            elif installation and str(installation["state"]) == "failed":
+                item["installation_state"] = "failed_setup"
+            else:
+                item["installation_state"] = "not_installed"
+        else:
+            item["installation_state"] = "installed" if item["state"] in {"ready", "running", "starting", "stopped"} else "not_installed"
+        item["operational_state"] = live_state
+        if item["installation_state"] == "restore_available":
+            item["recommended_action"] = "restore"
+        elif item["state"] in {"failed", "needs_attention", "degraded"}:
+            item["recommended_action"] = "view_logs"
+        elif item["state"] in {"planned", "not_installed"}:
+            item["recommended_action"] = "install"
+        else:
+            item["recommended_action"] = "none"
         item["allowed_actions"] = allowed_actions(service, str(item["state"])) if operator else []
         result.append(item)
     return {"ok": True, "version": __version__, "tailnet_dns_name": dns_name,
@@ -397,6 +423,12 @@ def _calendar_owner(request: Request, *, write: bool = False) -> tuple[dict, str
     owner_uid = str(identity_data.get("subject_id") or "")
     if not owner_uid:
         return JSONResponse({"ok": False, "error": "authenticated subject required"}, status_code=403)
+    # Calendar reads are personal and owner-scoped.  Any state-changing
+    # operation, including polling Login Flow v2 because it may store a
+    # credential, stays behind the same operator boundary as the rest of the
+    # control plane as well as the session-bound same-origin check.
+    if write and not identity_data.get("writes_enabled"):
+        return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
     if write and not _mutation_allowed(request):
         return JSONResponse({"ok": False, "error": "same-origin mutation verification failed"}, status_code=403)
     return identity_data, owner_uid
@@ -437,6 +469,48 @@ async def save_calendar_connection(request: Request) -> dict:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
+@app.post("/api/v1/calendar/authorization")
+def start_calendar_authorization(request: Request) -> dict:
+    """Begin Nextcloud Login Flow v2 without sending a password to the browser."""
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        from ctl.nextcloud_calendar import CalendarError, start_authorization
+        return JSONResponse(start_authorization(owner_uid), status_code=202)
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)}, status_code=400)
+
+
+@app.post("/api/v1/calendar/authorization/{authorization_id}/poll")
+def poll_calendar_authorization(authorization_id: str, request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        from ctl.nextcloud_calendar import CalendarError, poll_authorization
+        return poll_authorization(owner_uid, authorization_id)
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
+                            status_code=404 if exc.state == "not_found" else 400)
+
+
+@app.delete("/api/v1/calendar/authorization/{authorization_id}")
+def cancel_calendar_authorization(authorization_id: str, request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        from ctl.nextcloud_calendar import CalendarError, cancel_authorization
+        cancel_authorization(owner_uid, authorization_id)
+        return {"ok": True}
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)}, status_code=404)
+
+
 @app.put("/api/v1/calendar/connection")
 async def select_calendar_connection(request: Request) -> dict:
     auth = _calendar_owner(request, write=True)
@@ -461,8 +535,7 @@ def delete_calendar_connection(request: Request) -> dict:
         return auth
     _, owner_uid = auth
     from ctl.nextcloud_calendar import disconnect
-    disconnect(owner_uid)
-    return {"ok": True}
+    return disconnect(owner_uid)
 
 
 @app.get("/api/v1/calendar/events")
@@ -803,7 +876,11 @@ async def service_action(service_id: str, request: Request) -> dict:
     current = service_status(service, tailnet_dns_name(), ROOT)
     control_state = ControlState.runtime()
     installed = control_state.installation(service.id) if control_state else None
-    current_state = str(installed["state"]) if installed else str(current["state"])
+    current_state = str(current["state"])
+    if installed and str(installed["state"]) in {"queued", "installing", "starting", "verifying", "config_required"}:
+        current_state = str(installed["state"])
+    elif installed and str(installed["state"]) == "failed" and current_state not in {"ready", "running", "starting", "stopped", "needs_setup"}:
+        current_state = "failed"
     if service_config.missing_required(service):
         current_state = "config_required"
     if action not in allowed_actions(service, current_state):
@@ -976,12 +1053,13 @@ def reset_install_batch(batch_id: str, request: Request) -> dict:
     control = ControlState.runtime()
     if not jobs_store or not control or not batches:
         return JSONResponse({"ok": False, "error": "runtime state is unavailable"}, status_code=503)
-    if batch["state"] not in {"paused", "cancelled"}:
+    if batch["state"] not in {"paused", "cancelled", "completed_with_failures", "reset_failed"}:
         return JSONResponse({"ok": False, "error": "batch is not resettable"}, status_code=409)
 
-    # A reset must never race an active worker.  Cancelled/failed child jobs
-    # are terminal; queued/running operations require the operator to wait or
-    # cancel before cleanup can begin.
+    # A reset must never race an active worker.  Cleanup is deliberately
+    # queued for the durable worker rather than running Docker inside this
+    # request; browser connections can expire while Compose is stopping an
+    # unhealthy stack.
     active = {(str(job.get("service_id")), str(job.get("action")))
               for job in jobs_store.jobs(limit=100)
               if job.get("state") in {"queued", "running", "waiting_for_confirmation"}}
@@ -992,48 +1070,13 @@ def reset_install_batch(batch_id: str, request: Request) -> dict:
                                  "error": f"{item['service_id']} still has an active operation"},
                                 status_code=409)
 
-    registry = load_registry()
-    services: list[dict[str, object]] = []
-    for item in batch["items"]:
-        if item["state"] not in {"failed", "cancelled"}:
-            continue
-        try:
-            service = registry.get(str(item["service_id"]))
-            job = jobs_store.create(
-                kind="lifecycle", service_id=service.id, action="reset",
-                actor=str(identity_data["username"]),
-                detail=f"Operator reset failed installation for {service.name}.")
-            if job.get("state") != "queued" or jobs_store.get(str(job["id"])) is None:
-                return JSONResponse({"ok": False,
-                                     "error": f"{service.name} has another active operation"},
-                                    status_code=409)
-            jobs_store.transition(str(job["id"]), "running", actor=str(identity_data["username"]),
-                                  detail=f"Cleaning failed {service.name} installation.",
-                                  step_id="reset_cleanup")
-            jobs_store.append_event(str(job["id"]), "stage",
-                                    "Removing failed containers and temporary setup files.")
-            ok, detail = reset_failed_application(
-                service, ROOT, lambda line: jobs_store.append_event(str(job["id"]), "log", line))
-            if not ok:
-                jobs_store.transition(str(job["id"]), "failed", actor=str(identity_data["username"]),
-                                      detail=detail, error_code="reset_cleanup_failed",
-                                      step_id="reset_cleanup")
-                return JSONResponse({"ok": False, "error": detail,
-                                     "job_id": str(job["id"])}, status_code=409)
-            control.reset_service(service.id)
-            if item.get("job_id"):
-                workflow_secrets.delete_by_job(str(item["job_id"]))
-            jobs_store.transition(str(job["id"]), "succeeded", actor=str(identity_data["username"]),
-                                  detail=detail, step_id="complete")
-            services.append({"id": service.id, "ok": True, "detail": detail})
-        except (RegistryError, ValueError, OSError) as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
     try:
-        reset_batch = batches.reset(batch_id, jobs_store)
+        reset_batch = batches.begin_reset(batch_id, jobs_store)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
-    return {"ok": True, "reset": True, "batch": None,
-            "services": services, "reset_batch": reset_batch}
+    return JSONResponse({"ok": True, "reset": True, "batch": reset_batch,
+                         "message": "Cleanup has been queued. Persistent data will be preserved."},
+                        status_code=202)
 
 
 @app.get("/api/v1/credential-handoffs")

@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      MEALIE_BASE_URL: http://mealie:9000
+      MEALIE_BASE_URL: http://mealie-app:9000
       MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:?MEALIE_API_TOKEN is required}
       MEALIE_ALLOWED_UPLOAD_DIRS: ""
     ports: ["127.0.0.1:8814:8000"]

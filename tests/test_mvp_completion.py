@@ -131,6 +131,52 @@ class BatchPersistenceTests(unittest.TestCase):
             self.assertIsNone(latest)
             self.assertEqual(len([job for job in jobs.jobs() if job["state"] == "queued"]), 0)
 
+    def test_worker_owned_reset_is_durable_and_does_not_run_docker_in_the_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp)); paths.runtime.mkdir(parents=True)
+            control = ControlState(paths.runtime / "control-plane.sqlite3")
+            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
+            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            identity = {"owner_uid": "uid", "email": "operator@example.test",
+                        "username": "operator", "display_name": "Operator"}
+            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
+                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
+                batch = batches.create(load(), ["paperless-ngx"], actor="operator", owner_uid="uid",
+                                       identity=identity, idempotency_key="async-reset", jobs=jobs, control=control)
+                child = jobs.get(batch["items"][0]["job_id"])
+                jobs.transition(child["id"], "failed", actor="worker", detail="failed")
+                batches.advance_for_job(child["id"], jobs)
+                pending = batches.begin_reset(batch["id"], jobs)
+                self.assertEqual(pending["state"], "resetting")
+                self.assertEqual(pending["items"][0]["state"], "resetting")
+                reset_job = jobs.get(pending["items"][0]["job_id"])
+                self.assertEqual(reset_job["action"], "reset")
+                self.assertEqual(reset_job["state"], "queued")
+                jobs.transition(reset_job["id"], "running", actor="worker")
+                jobs.transition(reset_job["id"], "succeeded", actor="worker")
+                batches.advance_for_job(reset_job["id"], jobs)
+            self.assertEqual(batches.get(batch["id"])["state"], "reset")
+
+    def test_unrelated_batch_items_continue_after_a_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp)); paths.runtime.mkdir(parents=True)
+            control = ControlState(paths.runtime / "control-plane.sqlite3")
+            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
+            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            identity = {"owner_uid": "uid", "email": "operator@example.test",
+                        "username": "operator", "display_name": "Operator"}
+            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
+                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
+                batch = batches.create(load(), ["adventurelog", "paperless-ngx"], actor="operator", owner_uid="uid",
+                                       identity=identity, idempotency_key="continue-independent", jobs=jobs, control=control)
+                first = jobs.get(batch["items"][0]["job_id"])
+                jobs.transition(first["id"], "failed", actor="worker", detail="failed")
+                batches.advance_for_job(first["id"], jobs)
+            after = batches.get(batch["id"])
+            self.assertEqual(after["items"][0]["state"], "failed")
+            self.assertEqual(after["items"][1]["state"], "queued")
+            self.assertEqual(after["state"], "running")
+
 
 class FailedApplicationResetTests(unittest.TestCase):
     def test_cleanup_removes_transient_files_but_preserves_env_credentials(self):
