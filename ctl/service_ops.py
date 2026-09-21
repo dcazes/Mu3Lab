@@ -326,7 +326,13 @@ def _verify_bootstrap_account(service_id: str, project: Path,
 
 
 def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
-    """Install the pinned apps and configure the curated Authentik provider."""
+    """Install the latest Nextcloud-compatible apps and configure Authentik.
+
+    ``occ app:install`` resolves the current app-store release compatible
+    with the installed Nextcloud server.  Do not compare that result with a
+    stale hard-coded app version: a newer compatible Calendar release must
+    not make an otherwise healthy Nextcloud installation fail.
+    """
     env = read_runtime_env(project / ".env")
     client_id = env.get("NEXTCLOUD_OIDC_CLIENT_ID", "")
     client_secret = env.get("NEXTCLOUD_OIDC_CLIENT_SECRET", "")
@@ -347,8 +353,10 @@ def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
     except (ValueError, json.JSONDecodeError):
         app_state = {}
     enabled = app_state.get("enabled", {}) if isinstance(app_state, dict) else {}
-    if str(enabled.get("calendar", "")) != "6.5.4" or str(enabled.get("user_oidc", "")) != "8.11.0":
-        return False, "Nextcloud Calendar 6.5.4 and user_oidc 8.11.0 must both be enabled."
+    missing = [app_id for app_id in ("calendar", "user_oidc") if not str(enabled.get(app_id, ""))]
+    if missing:
+        return False, "Nextcloud required app(s) are not enabled: " + ", ".join(missing)
+    versions = ", ".join(f"{app_id} {enabled[app_id]}" for app_id in ("calendar", "user_oidc"))
     discovery = f"https://{host}/application/o/mu3lab-nextcloud/.well-known/openid-configuration"
     command = [*occ, "user_oidc:provider", "mu3lab", f"--clientid={client_id}",
                f"--clientsecret={client_secret}", f"--discoveryuri={discovery}"]
@@ -358,7 +366,7 @@ def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
     rc, output = actions.compose_exec(project, "app", [*occ, "user_oidc:provider", "mu3lab"], log, timeout=120)
     if rc or client_id not in output:
         return False, "Nextcloud did not confirm the Authentik provider configuration."
-    return True, "Calendar and Authentik sign-in are configured."
+    return True, f"Latest compatible Nextcloud apps enabled ({versions}); Calendar and Authentik sign-in are configured."
 
 
 def _install_nextcloud_if_needed(project: Path, log) -> tuple[bool, str]:

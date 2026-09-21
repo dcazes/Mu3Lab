@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl.registry import load
 from ctl.routes import render
 from ctl.runtime import RuntimePaths
-from ctl.service_ops import allowed_actions, execute_claimed
+from ctl.service_ops import _configure_nextcloud, allowed_actions, execute_claimed
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +83,26 @@ class RegistryV3Tests(unittest.TestCase):
 
 
 class InstallationWorkflowTests(unittest.TestCase):
+    def test_nextcloud_accepts_newer_compatible_app_store_versions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "nextcloud"
+            project.mkdir()
+            app_list = {"enabled": {"calendar": "6.6.1", "user_oidc": "8.11.0"}}
+            outputs = [
+                (0, "already installed"), (0, "enabled"),
+                (0, "already installed"), (0, "enabled"),
+                (0, json.dumps(app_list)), (0, "provider configured"),
+                (0, "mu3lab clientid=mu3lab-nextcloud"),
+            ]
+            with patch("ctl.service_ops.read_runtime_env", return_value={
+                "NEXTCLOUD_OIDC_CLIENT_ID": "mu3lab-nextcloud",
+                "NEXTCLOUD_OIDC_CLIENT_SECRET": "secret",
+                "NEXTCLOUD_OVERWRITEHOST": "mu3lab.example.ts.net:8453",
+            }), patch("ctl.service_ops.actions.compose_exec", side_effect=outputs):
+                ok, detail = _configure_nextcloud(project, lambda _line: None)
+            self.assertTrue(ok)
+            self.assertIn("calendar 6.6.1", detail)
+
     def test_nextcloud_bootstrap_does_not_wait_on_uninstalled_healthcheck(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime-root")
