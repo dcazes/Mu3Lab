@@ -11,7 +11,7 @@ import httpx
 from ctl import calendar_secrets
 from ctl.control_state import ControlState
 from ctl.nextcloud_calendar import (CalendarError, cancel_authorization, create_event, delete_event,
-                                    discover, events, poll_authorization, start_authorization, update_event)
+                                    auto_connect, discover, events, poll_authorization, start_authorization, update_event)
 from ctl.runtime import RuntimePaths
 
 
@@ -67,6 +67,30 @@ class CalDavTests(unittest.TestCase):
             self.assertNotEqual(result["events"][0]["revision"], '"event-one"')
             self.assertNotIn("description", result["events"][0])
             self.assertNotIn("attendees", result["events"][0])
+
+    def test_event_projection_uses_the_requested_calendar_view_range(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            href = "/remote.php/dav/calendars/alice/personal/"
+            state.set_calendar_connection("range-owner", "al•••e",
+                                          [{"id": "calendar-range", "name": "Personal", "href": href}],
+                                          "calendar-range")
+            calendar_secrets.save("range-owner", "alice", "secret", paths)
+            start = datetime(2026, 11, 1, tzinfo=UTC)
+            end = start + timedelta(days=31)
+            ics = "\r\n".join([
+                "BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:range-event",
+                "DTSTART:20261102T100000Z", "DTEND:20261102T110000Z", "SUMMARY:Visible", "END:VEVENT",
+                "END:VCALENDAR", "",
+            ])
+            xml = f'''<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>{href}range-event.ics</d:href><d:propstat><d:prop><d:getetag>"range-one"</d:getetag><c:calendar-data><![CDATA[{ics}]]></c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'''.encode()
+            with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(207, content=xml)) as request:
+                result = events("range-owner", paths, start=start, end=end, limit=100)
+            self.assertEqual([item["title"] for item in result["events"]], ["Visible"])
+            query = request.call_args.kwargs["content"]
+            self.assertIn("20261101T000000Z", query)
+            self.assertIn("20261202T000000Z", query)
 
     def test_event_mutations_use_the_selected_owner_calendar(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -180,6 +204,22 @@ class CalDavTests(unittest.TestCase):
             self.assertEqual(pending["state"], "pending")
             self.assertEqual(pending["authorization_id"], started["authorization_id"])
             self.assertNotIn("private-token", str(pending))
+
+    def test_auto_connect_stores_cli_token_without_returning_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            project = paths.projects / "nextcloud"
+            project.mkdir(parents=True)
+            (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            calendars = [{"id": "calendar", "name": "Personal",
+                          "href": "/remote.php/dav/calendars/akadmin/personal/"}]
+            with patch("ctl.actions.compose_exec",
+                       return_value=(0, "No password provided.\napp password:\ncli-generated-secret-1234567890")), \
+                 patch("ctl.nextcloud_calendar.discover", return_value=calendars):
+                result = auto_connect("owner", "akadmin", paths)
+            self.assertEqual(result["state"], "connected")
+            self.assertNotIn("cli-generated-secret", str(result))
+            self.assertEqual(calendar_secrets.get("owner", paths)["username"], "akadmin")
 
 
 if __name__ == "__main__":

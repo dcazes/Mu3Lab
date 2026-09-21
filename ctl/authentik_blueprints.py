@@ -104,7 +104,9 @@ entries:
       external_host: {_quote(authentik_origin)}
       access_token_validity: hours=24
       authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      # Nextcloud user_oidc uses the authorization-code grant. The implicit
+      # consent flow rejects that grant in current Authentik releases.
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       intercept_header_auth: true
   - model: authentik_core.application
@@ -197,7 +199,8 @@ entries:
       client_type: confidential
       client_id: {_quote(client_id)}
       client_secret: {_quote(client_secret)}
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      # All native OIDC clients use authorization code + PKCE.
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       issuer_mode: per_provider
       include_claims_in_id_token: true
@@ -291,6 +294,8 @@ entries:
         groups = [group.name for group in request.user.ak_groups.all()]
         return {{
           "email_verified": bool(request.user.email),
+          "preferred_username": request.user.username,
+          "name": request.user.name or request.user.username,
           "groups": groups,
           "mu3lab_role": "admin" if "mu3lab-operators" in groups or "authentik Admins" in groups else "user",
         }}
@@ -302,9 +307,13 @@ entries:
     attrs:
       name: Mu3Lab {name} provider
       client_type: confidential
+      grant_types:
+        - authorization_code
+      signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
       client_id: {_quote(client_id)}
       client_secret: {_quote(client_secret)}
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      # Native OIDC clients use authorization code + PKCE.
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       issuer_mode: per_provider
       include_claims_in_id_token: true

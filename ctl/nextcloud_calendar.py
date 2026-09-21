@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 import uuid
@@ -22,12 +23,17 @@ from ctl.secrets import read_runtime_env
 BASE = "http://127.0.0.1:8085"
 DAV = "DAV:"
 CALDAV = "urn:ietf:params:xml:ns:caldav"
+# Calendar payloads deliberately remain in-memory.  The range cache keeps
+# FullCalendar navigation efficient, while the per-owner snapshot is used only
+# to display the most recent safe projection when Nextcloud is briefly down.
 _CACHE: dict[str, tuple[datetime, dict]] = {}
+_LAST_CACHE: dict[str, tuple[datetime, dict]] = {}
 _EVENT_CACHE: dict[str, tuple[datetime, dict[str, dict[str, str]]]] = {}
 _AUTHORIZATIONS: dict[str, dict[str, str | float]] = {}
 _AUTH_LOCK = threading.RLock()
 _VERIFIED_GROUPS: dict[str, list[str]] = {}
 _AUTH_TTL_SECONDS = 20 * 60
+_USERNAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 class CalendarError(ValueError):
@@ -276,6 +282,36 @@ def public_connection(owner_uid: str, state: ControlState) -> dict:
             "last_success_at": metadata["last_success_at"], "error": metadata["last_error"]}
 
 
+def stale_events(owner_uid: str) -> dict | None:
+    """Return the last in-memory sync when the live DAV service is unavailable.
+
+    Event payloads remain non-persistent.  This is deliberately limited to the
+    current control-plane process; a restart clears it rather than writing
+    private calendar content to durable state.
+    """
+    cached = _LAST_CACHE.get(owner_uid)
+    if not cached:
+        return None
+    result = dict(cached[1])
+    result["state"] = "stale"
+    result["stale"] = True
+    result["error"] = "Nextcloud is temporarily unavailable. Showing the last successful sync."
+    return result
+
+
+def _clear_event_caches(owner_uid: str) -> None:
+    """Forget every range and resource projection for one calendar owner."""
+    prefix = f"{owner_uid}:"
+    for key in [key for key in _CACHE if key.startswith(prefix)]:
+        _CACHE.pop(key, None)
+    _LAST_CACHE.pop(owner_uid, None)
+    _EVENT_CACHE.pop(owner_uid, None)
+
+
+def _range_key(owner_uid: str, start: datetime, end: datetime, limit: int) -> str:
+    return f"{owner_uid}:{start.isoformat()}:{end.isoformat()}:{limit}"
+
+
 def connect(owner_uid: str, username: str, app_password: str,
             paths: RuntimePaths = RuntimePaths()) -> dict:
     calendars = discover(username, app_password)
@@ -287,8 +323,45 @@ def connect(owner_uid: str, username: str, app_password: str,
         raise CalendarError("unavailable", "Calendar state storage is unavailable.")
     hint = (username[:2] + "•••" + username[-1:]) if len(username) > 3 else "•••"
     state.set_calendar_connection(owner_uid, hint, calendars, selected["id"], success=True)
-    _CACHE.pop(owner_uid, None)
+    _clear_event_caches(owner_uid)
     return public_connection(owner_uid, state)
+
+
+def auto_connect(owner_uid: str, username: str,
+                 paths: RuntimePaths = RuntimePaths()) -> dict:
+    """Create Mu3Lab's server-side calendar credential for the SSO owner.
+
+    Nextcloud's OIDC browser session cannot be reused as a CalDAV credential.
+    The supported CLI token command lets the control plane create the device
+    credential without showing or copying an app password through JavaScript.
+    The token is immediately encrypted in the owner-scoped secret store.
+    """
+    if not owner_uid or not _USERNAME.fullmatch(username):
+        raise CalendarError("not_connected", "The authenticated Nextcloud owner is not available.")
+    project = paths.projects / "nextcloud"
+    if not (project / "docker-compose.yml").is_file():
+        raise CalendarError("not_installed", "Nextcloud is not installed yet.")
+    from ctl import actions
+    rc, output = actions.compose_exec(
+        project, "app", ["runuser", "-u", "www-data", "--", "php", "occ",
+                          "user:auth-tokens:add", username, "--name=Mu3Lab Calendar",
+                          "--no-interaction"], lambda _line: None, timeout=120)
+    if rc:
+        raise CalendarError("unavailable", "Nextcloud could not create its calendar connection.")
+    token = next((line.strip() for line in reversed(output.splitlines()) if line.strip()), "")
+    if len(token) < 20 or any(char.isspace() for char in token):
+        raise CalendarError("unavailable", "Nextcloud returned an invalid calendar connection.")
+    try:
+        return connect(owner_uid, username, token, paths)
+    except CalendarError:
+        # Best-effort revocation prevents a failed discovery from leaving an
+        # unused device credential behind. The token is never logged or returned.
+        try:
+            httpx.delete(f"{BASE}/ocs/v2.php/core/apppassword", params={"format": "json"},
+                         headers={"OCS-APIRequest": "true"}, auth=(username, token), timeout=20)
+        except httpx.HTTPError:
+            pass
+        raise
 
 
 def select(owner_uid: str, calendar_id: str, state: ControlState) -> dict:
@@ -296,8 +369,7 @@ def select(owner_uid: str, calendar_id: str, state: ControlState) -> dict:
     if not metadata or calendar_id not in {item.get("id") for item in metadata.get("calendars", [])}:
         raise CalendarError("not_connected", "Select a calendar returned by Nextcloud discovery.")
     state.set_calendar_connection(owner_uid, metadata["username_hint"], metadata["calendars"], calendar_id)
-    _CACHE.pop(owner_uid, None)
-    _EVENT_CACHE.pop(owner_uid, None)
+    _clear_event_caches(owner_uid)
     return public_connection(owner_uid, state)
 
 
@@ -319,8 +391,7 @@ def disconnect(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
     state = ControlState.runtime(paths)
     if state:
         state.delete_calendar_connection(owner_uid)
-    _CACHE.pop(owner_uid, None)
-    _EVENT_CACHE.pop(owner_uid, None)
+    _clear_event_caches(owner_uid)
     return {"ok": True, "warning": warning}
 
 
@@ -386,9 +457,29 @@ def _dav(method: str, href: str, secret: dict[str, str], *, content: bytes | Non
         raise CalendarError("unavailable", "Nextcloud calendar is temporarily unavailable.") from exc
 
 
-def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
-    cached = _CACHE.get(owner_uid)
+def events(owner_uid: str, paths: RuntimePaths = RuntimePaths(), *,
+           start: datetime | None = None, end: datetime | None = None,
+           limit: int = 5) -> dict:
+    """Return a privacy-filtered calendar projection for a bounded range.
+
+    The default remains the compact Home preview (five events in 30 days).
+    A month view may request a wider bounded range; this never changes what is
+    persisted because neither cache is durable.
+    """
     now = datetime.now(UTC)
+    start = start or now
+    end = end or (start + timedelta(days=30))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    start = start.astimezone(UTC)
+    end = end.astimezone(UTC)
+    if end <= start or end - start > timedelta(days=93):
+        raise CalendarError("invalid_range", "Calendar ranges must be between one minute and 93 days.")
+    limit = max(1, min(int(limit), 100))
+    cache_key = _range_key(owner_uid, start, end, limit)
+    cached = _CACHE.get(cache_key)
     if cached and now - cached[0] < timedelta(minutes=5):
         return cached[1]
     state = ControlState.runtime(paths)
@@ -401,8 +492,7 @@ def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
     if not calendar:
         raise CalendarError("not_connected", "Select a Nextcloud calendar first.")
     href = _safe_href(secret["username"], str(calendar.get("href", "")))
-    end = now + timedelta(days=30)
-    body = f"""<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="{now.strftime('%Y%m%dT%H%M%SZ')}" end="{end.strftime('%Y%m%dT%H%M%SZ')}"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>"""
+    body = f"""<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="{start.strftime('%Y%m%dT%H%M%SZ')}" end="{end.strftime('%Y%m%dT%H%M%SZ')}"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>"""
     try:
         response = httpx.request("REPORT", BASE + href, content=body,
                                  headers={"Depth": "1", "Content-Type": "application/xml"},
@@ -429,7 +519,7 @@ def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
             continue
         try:
             parsed = Calendar.from_ical(node.text)
-            occurrences = recurring_ical_events.of(parsed).between(now, end)
+            occurrences = recurring_ical_events.of(parsed).between(start, end)
             series_recurring = any(component.get("RRULE") is not None for component in parsed.walk("VEVENT"))
         except (ValueError, TypeError) as exc:
             raise CalendarError("unavailable", "Nextcloud returned an invalid calendar event.") from exc
@@ -457,18 +547,22 @@ def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
     rows.sort(key=lambda item: item["start"])
     result = {"ok": True, "state": "connected",
               "calendar": {"id": calendar["id"], "name": calendar["name"]},
-              "fetched_at": now.isoformat(), "events": rows[:5]}
+              "fetched_at": now.isoformat(), "events": rows[:limit]}
     state.set_calendar_connection(owner_uid, metadata["username_hint"], metadata["calendars"],
                                   metadata["selected_calendar_id"], success=True)
-    _CACHE[owner_uid] = (now, result)
+    _CACHE[cache_key] = (now, result)
+    _LAST_CACHE[owner_uid] = (now, result)
     _EVENT_CACHE[owner_uid] = (now, resources)
     return result
 
 
 def _resource(owner_uid: str, event_id: str, paths: RuntimePaths) -> tuple[dict[str, str], dict[str, str]]:
-    events(owner_uid, paths)
     cached = _EVENT_CACHE.get(owner_uid)
     resource = cached[1].get(event_id) if cached else None
+    if not resource:
+        events(owner_uid, paths)
+        cached = _EVENT_CACHE.get(owner_uid)
+        resource = cached[1].get(event_id) if cached else None
     secret = calendar_secrets.get(owner_uid, paths)
     if not resource or not secret:
         raise CalendarError("not_found", "The calendar event is no longer available. Refresh and try again.")
@@ -482,7 +576,7 @@ def create_event(owner_uid: str, payload: dict, paths: RuntimePaths = RuntimePat
                     headers={"Content-Type": "text/calendar", "If-None-Match": "*"})
     if response.status_code not in {200, 201, 204}:
         raise CalendarError("unavailable", f"Nextcloud could not create the event (HTTP {response.status_code}).")
-    _CACHE.pop(owner_uid, None); _EVENT_CACHE.pop(owner_uid, None)
+    _clear_event_caches(owner_uid)
     return {"ok": True, "id": _event_id(uid, str(payload.get("start", "")))}
 
 
@@ -499,7 +593,7 @@ def update_event(owner_uid: str, event_id: str, payload: dict, paths: RuntimePat
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before saving.")
     if response.status_code not in {200, 201, 204}:
         raise CalendarError("unavailable", f"Nextcloud could not update the event (HTTP {response.status_code}).")
-    _CACHE.pop(owner_uid, None); _EVENT_CACHE.pop(owner_uid, None)
+    _clear_event_caches(owner_uid)
     return {"ok": True, "id": event_id}
 
 
@@ -514,5 +608,5 @@ def delete_event(owner_uid: str, event_id: str, revision: str = "", paths: Runti
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before deleting.")
     if response.status_code not in {200, 204}:
         raise CalendarError("unavailable", f"Nextcloud could not delete the event (HTTP {response.status_code}).")
-    _CACHE.pop(owner_uid, None); _EVENT_CACHE.pop(owner_uid, None)
+    _clear_event_caches(owner_uid)
     return {"ok": True}

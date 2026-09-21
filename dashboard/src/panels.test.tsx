@@ -36,6 +36,14 @@ describe('dashboard organization', () => {
       .toEqual(['Productivity apps', 'AI Integration', 'Foundation', 'Blocked and planned']);
   });
 
+  it('searches the app catalog without losing its category context', () => {
+    render(<AppsPanel services={services} catalog={{ ok: true, profiles: [], services: {} }} />);
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search app catalog' }), { target: { value: 'Nextcloud' } });
+    expect(screen.getByRole('button', { name: /Nextcloud/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Ollama/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Productivity apps' })).toBeInTheDocument();
+  });
+
   it('does not present unverified native OIDC as a working launch', () => {
     const identityServices = services.map(item => ({ ...item }));
     const nextcloud = identityServices.find(item => item.id === 'nextcloud')!;
@@ -45,6 +53,46 @@ describe('dashboard organization', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
     expect(screen.getByRole('button', { name: 'Repair sign-in' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Open with Authentik/ })).not.toBeInTheDocument();
+  });
+
+  it('opens a verified legacy route while the identity projection is unavailable', () => {
+    const legacyServices = services.map(item => ({ ...item }));
+    const nextcloud = legacyServices.find(item => item.id === 'nextcloud')!;
+    nextcloud.state = 'ready';
+    nextcloud.route_state = 'verified';
+    nextcloud.ui = { state: 'ready', url: 'https://example:8453', label: 'Open securely', authentication: 'oidc', reason: '' };
+    render(<HomePanel services={legacyServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
+    expect(screen.getByRole('link', { name: 'Open securely ↗' })).toHaveAttribute('href', 'https://example:8453');
+  });
+
+  it('keeps a healthy native-OIDC route launchable while owner migration is pending', () => {
+    const pendingServices = services.map(item => ({ ...item }));
+    const nextcloud = pendingServices.find(item => item.id === 'nextcloud')!;
+    nextcloud.state = 'ready';
+    nextcloud.identity = { mode: 'native_oidc', state: 'unconfigured', launch_url: 'https://example:8453',
+      detail: 'Owner migration is pending.', last_verified_at: '', recovery_available: true, job_id: '' };
+    render(<HomePanel services={pendingServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
+    expect(screen.getByRole('link', { name: 'Open sign-in ↗' })).toHaveAttribute('href', 'https://example:8453');
+    expect(screen.getByRole('button', { name: 'Repair sign-in' })).toBeInTheDocument();
+  });
+
+  it('uses the FullCalendar month view for connected calendar events', async () => {
+    const calendarServices = services.map(item => ({ ...item }));
+    const nextcloud = calendarServices.find(item => item.id === 'nextcloud')!;
+    nextcloud.state = 'ready';
+    vi.stubGlobal('fetch', vi.fn((path: string) => Promise.resolve(path.startsWith('/api/v1/calendar/events')
+      ? { ok: true, json: async () => ({ ok: true, state: 'connected', calendar: { id: 'personal', name: 'Personal' }, events: [{ id: 'event-1', title: 'Planning', start: '2026-10-01T10:00:00Z', end: '2026-10-01T11:00:00Z', all_day: false, editable: true, revision: 'revision' }] }) }
+      : { ok: true, json: async () => ({ handoffs: [] }) })));
+    render(<HomePanel services={calendarServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    await waitFor(() => expect(document.querySelector('.calendar-widget .fc')).toBeInTheDocument());
+    expect(screen.getByText('Planning')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /today/i })).toBeInTheDocument();
+    expect(document.querySelector('.calendar-grid')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /New event/i }));
+    expect(screen.getByRole('dialog', { name: 'Add to your calendar' })).toBeInTheDocument();
+    expect(document.querySelector('.calendar-widget > .calendar-event-form')).not.toBeInTheDocument();
   });
 
   it('reconciles a completed reset when its response is lost', async () => {

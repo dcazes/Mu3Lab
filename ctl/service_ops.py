@@ -441,6 +441,14 @@ def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
                          "allow_multiple_user_backends", "--value=1"], log, timeout=120)
     if rc:
         return False, "Nextcloud could not stage its safe OIDC migration policy: " + redact(output)
+    # Authentik is reached through the node's private Tailnet hostname. The
+    # hostname resolves to a CGNAT address, which Nextcloud's DNS pinning
+    # otherwise rejects as a local server during discovery/token exchange.
+    rc, output = actions.compose_exec(
+        project, "app", [*occ, "config:system:set", "allow_local_remote_servers",
+                         "--type=boolean", "--value=true"], log, timeout=120)
+    if rc:
+        return False, "Nextcloud could not permit its private Authentik discovery route: " + redact(output)
     return True, f"Latest compatible Nextcloud apps enabled ({versions}); Calendar and Authentik sign-in are configured."
 
 
@@ -469,6 +477,23 @@ def _linked_owner_verified(service: Service, project: Path,
     if not email:
         return False
     expected = hashlib.sha256(email.encode()).hexdigest()
+    if service.id == "nextcloud":
+        username = str(owner.get("username", "")).strip()
+        if not username:
+            return False
+        rc, output = actions.compose_exec(
+            project, "app", ["runuser", "-u", "www-data", "--", "php", "occ",
+                             "user:info", username, "--output=json"], log, timeout=120)
+        if rc:
+            return False
+        try:
+            profile = json.loads(output[output.index("{"):])
+        except (ValueError, json.JSONDecodeError):
+            return False
+        groups = {str(group) for group in profile.get("groups", [])}
+        return (str(profile.get("user_id", "")) == username
+                and str(profile.get("email", "")).strip().lower() == email
+                and bool(profile.get("enabled")) and "admin" in groups)
     if service.id == "mealie":
         import sqlite3
         database = RuntimePaths().data / "mealie" / "mealie.db"

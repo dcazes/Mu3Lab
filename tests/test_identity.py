@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import sqlite3
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,6 +31,15 @@ class IdentityContractTests(unittest.TestCase):
         identity = projection(service, item, None)
         self.assertEqual(identity["state"], "unconfigured")
 
+    def test_nextcloud_launcher_enters_oidc_flow_directly(self):
+        service = load().get("nextcloud")
+        identity = projection(service, {
+            "route_ready": True, "health_state": "healthy",
+            "url": "https://host.example:8453",
+        }, None)
+        self.assertEqual(identity["launch_url"],
+                         "https://host.example:8453/index.php/apps/user_oidc/login/1")
+
     def test_identity_state_is_additive_and_owner_scoped(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = ControlState(Path(tmp) / "control.sqlite3")
@@ -54,6 +64,7 @@ class IdentityContractTests(unittest.TestCase):
             content = blueprint.read_text(encoding="utf-8")
             self.assertIn("preserved-secret", content)
             self.assertIn("email_verified", content)
+            self.assertIn("preferred_username", content)
             self.assertEqual((project / ".env").read_text(encoding="utf-8").count("preserved-secret"), 1)
 
     def test_mealie_owner_requires_oidc_link_and_admin_role(self):
@@ -70,6 +81,19 @@ class IdentityContractTests(unittest.TestCase):
                 verified = _linked_owner_verified(
                     load().get("mealie"), paths.projects / "mealie",
                     {"email": "OWNER@example.com"}, lambda _line: None)
+            self.assertTrue(verified)
+
+    def test_nextcloud_owner_requires_matching_email_and_admin_role(self):
+        profile = {"user_id": "akadmin", "email": "owner@example.com",
+                   "enabled": True, "groups": ["admin"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp) / "runtime")
+            with patch("ctl.service_ops.actions.compose_exec",
+                       return_value=(0, json.dumps(profile))):
+                verified = _linked_owner_verified(
+                    load().get("nextcloud"), paths.projects / "nextcloud",
+                    {"username": "akadmin", "email": "OWNER@example.com"},
+                    lambda _line: None)
             self.assertTrue(verified)
 
 

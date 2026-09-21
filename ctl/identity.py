@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from ctl.authentik_blueprints import write_oidc_application_blueprint
 from ctl.control_state import ControlState
+from ctl.jobs import JobStore
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -31,6 +32,7 @@ TRUSTED_HEADER = {"open-webui"}
 PROXY_GATE = {"litellm", "surfsense"}
 LOCAL = {"authentik", "vaultwarden", "freellmapi"}
 NO_UI = {"ingress", "ollama"}
+OIDC_LAUNCH_PATHS = {"nextcloud": "/index.php/apps/user_oidc/login/1"}
 
 
 def mode_for(service: Service) -> str:
@@ -53,11 +55,25 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     saved = state.service_identity(service.id) if state else None
     route_ready = bool(item.get("route_ready"))
     healthy = item.get("health_state") == "healthy"
-    launch_url = str((item.get("ui") or {}).get("url") or "")
+    # The additive identity projection must remain compatible with older
+    # service responses.  The route URL is the authoritative browser target;
+    # the legacy ui.url is only a fallback for mixed-version rollouts.
+    launch_url = str(item.get("url") or (item.get("ui") or {}).get("url") or "")
+    if service.id in OIDC_LAUNCH_PATHS and launch_url:
+        launch_url = launch_url.rstrip("/") + OIDC_LAUNCH_PATHS[service.id]
     recovery = service.id in {"actual-budget", "mealie", "nextcloud", "immich", "paperless-ngx", "adventurelog", "vaultwarden", "freellmapi"}
     if saved:
         current = str(saved["state"])
         detail = str(saved.get("detail") or "")
+        # A worker restart or an older worker binary can leave the durable
+        # identity row at configuring after its job has already failed. Do
+        # not strand the launcher in a permanently disabled state.
+        if current == "configuring":
+            job_store = JobStore.runtime()
+            job = job_store.get(str(saved.get("last_job_id") or "")) if job_store else None
+            if job and str(job.get("state")) in {"failed", "cancelled"}:
+                current = "degraded"
+                detail = str(job.get("detail") or "Sign-in reconciliation failed; retry repair.")
         if current == "ready" and (not route_ready or not healthy):
             current = "degraded"
             detail = "Sign-in is configured, but the application or its private route is unavailable."

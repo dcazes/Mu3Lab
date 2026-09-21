@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 import hmac
 import hashlib
@@ -448,9 +449,25 @@ def _calendar_readiness(state: ControlState) -> str:
     installation = state.installation("nextcloud")
     if not installation:
         return "not_installed"
-    if installation.get("state") == "stopped":
+    installation_state = str(installation.get("state", ""))
+    # A previously failed batch can leave durable workflow state behind even
+    # after the application has subsequently become healthy. Use the same
+    # local health contract as the service cards so Calendar does not falsely
+    # claim that a running Nextcloud is uninstalled.
+    if installation_state == "failed":
+        try:
+            from ctl.registry import load as load_registry
+            from ctl.service_state import _healthy
+            service = load_registry().get("nextcloud")
+            if _healthy(service)[0]:
+                installation_state = "running"
+            else:
+                installation_state = "stopped"
+        except Exception:
+            installation_state = "stopped"
+    if installation_state == "stopped":
         return "service_stopped"
-    if installation.get("state") not in {"running", "degraded"}:
+    if installation_state not in {"running", "degraded"}:
         return "not_installed"
     identity_state = state.service_identity("nextcloud")
     if not identity_state or identity_state.get("state") in {"unconfigured", "degraded"}:
@@ -501,6 +518,26 @@ async def save_calendar_connection(request: Request) -> dict:
         return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)}, status_code=400)
     except (ValueError, TypeError, AttributeError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
+@app.post("/api/v1/calendar/auto-connect")
+def auto_connect_calendar(request: Request) -> dict:
+    """Create the owner's encrypted device credential without password entry."""
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    identity_data, owner_uid = auth
+    state = ControlState.runtime()
+    if state is None:
+        return JSONResponse({"ok": False, "error": "calendar state is unavailable"}, status_code=503)
+    readiness = _calendar_readiness(state)
+    if readiness != "ready":
+        return JSONResponse(_calendar_state_response(readiness), status_code=409)
+    from ctl.nextcloud_calendar import CalendarError, auto_connect
+    try:
+        return auto_connect(owner_uid, str(identity_data.get("username") or ""))
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)}, status_code=400)
 
 
 @app.post("/api/v1/calendar/authorization")
@@ -592,12 +629,36 @@ def calendar_events(request: Request) -> dict:
         return JSONResponse({"ok": False, "state": "unavailable", "error": "calendar state is unavailable"}, status_code=503)
     readiness = _calendar_readiness(state)
     if readiness != "ready":
+        from ctl.nextcloud_calendar import stale_events
+        cached = stale_events(owner_uid)
+        if cached:
+            return cached
         return {"ok": True, "state": readiness, "events": [],
                 "error": _calendar_state_response(readiness)["error"]}
     try:
-        from ctl.nextcloud_calendar import CalendarError, events
-        return events(owner_uid)
+        from ctl.nextcloud_calendar import CalendarError, events, stale_events
+        start_value = request.query_params.get("start", "").strip()
+        end_value = request.query_params.get("end", "").strip()
+        if bool(start_value) != bool(end_value):
+            return JSONResponse({"ok": False, "state": "invalid_range",
+                                 "error": "Calendar start and end must be supplied together."}, status_code=400)
+        try:
+            start = datetime.fromisoformat(start_value.replace("Z", "+00:00")) if start_value else None
+            end = datetime.fromisoformat(end_value.replace("Z", "+00:00")) if end_value else None
+            if start and start.tzinfo is None:
+                start = start.replace(tzinfo=UTC)
+            if end and end.tzinfo is None:
+                end = end.replace(tzinfo=UTC)
+            limit = int(request.query_params.get("limit", "5"))
+        except ValueError:
+            return JSONResponse({"ok": False, "state": "invalid_range",
+                                 "error": "Calendar range values must be valid ISO 8601 datetimes."}, status_code=400)
+        return events(owner_uid, start=start, end=end, limit=limit)
     except CalendarError as exc:
+        if exc.state == "unavailable":
+            cached = stale_events(owner_uid)
+            if cached:
+                return cached
         return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
                             status_code=401 if exc.state == "authentication_expired" else 503)
 
