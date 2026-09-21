@@ -104,6 +104,6 @@ export interface InstallBatchItem { batch_id: string; service_id: string; ordina
 export interface InstallBatch { id: string; actor: string; state: 'queued' | 'running' | 'paused' | 'succeeded' | 'cancelled'; current_ordinal: number; created_at: string; updated_at: string; error?: { code?: string; message?: string }; items: InstallBatchItem[]; }
 export interface InstallBatchEvent { id: number; job_id: string; event: string; created_at: string; detail: string; }
 export interface InstallBatchJob { id: string; state: string; step_id: string; detail: string; events: InstallBatchEvent[]; }
-export interface InstallBatchResponse { ok: boolean; batch: InstallBatch | null; current_job?: InstallBatchJob | null; }
+export interface InstallBatchResponse { ok: boolean; batch: InstallBatch | null; current_job?: InstallBatchJob | null; reset?: boolean; }
 export interface CredentialHandoff { id: string; service_id: string; job_id: string; state: string; created_at: string; expires_at: string; login_url: string; }
 export interface CredentialReveal extends CredentialHandoff { username: string; email: string; password: string; }

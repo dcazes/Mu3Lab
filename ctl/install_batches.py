@@ -258,6 +258,7 @@ class InstallBatchStore:
     def latest(self, owner_uid: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("""SELECT id FROM install_batches WHERE owner_uid = ?
+                                  AND state != 'reset'
                                   ORDER BY created_at DESC LIMIT 1""", (owner_uid,)).fetchone()
         return self.get(str(row["id"])) if row else None
 
@@ -285,27 +286,25 @@ class InstallBatchStore:
         return self.get(batch_id) or {}
 
     def reset(self, batch_id: str, jobs: JobStore) -> dict[str, Any]:
-        """Reset a terminal/paused batch from its first unfinished app.
+        """Mark a terminal batch reset without queuing any installation.
 
-        This preserves the batch and its successful items, but creates a new
-        child job for the failed item so a prior idempotency key cannot strand
-        the retry on the old terminal job. No application data is removed.
+        Cleanup of failed containers is performed by the authenticated API
+        before this record transition.  This method only clears the batch's
+        visibility and encrypted batch identity so the operator can select a
+        fresh set of applications afterward.
         """
         batch = self.get(batch_id)
         if not batch or batch["state"] not in {"paused", "cancelled"}:
             raise ValueError("batch is not resettable")
-        first = next((item for item in batch["items"] if item["state"] != "succeeded"), None)
-        if not first:
-            raise ValueError("batch has no unfinished application")
-        ordinal = int(first["ordinal"])
         now = _now()
         with self._connect() as conn:
             conn.execute("""UPDATE install_batch_items
-                            SET state = 'pending', job_id = '', error_json = '{}',
-                                started_at = '', completed_at = ''
-                            WHERE batch_id = ? AND ordinal >= ?""", (batch_id, ordinal))
-            conn.execute("""UPDATE install_batches SET state = 'queued', error_json = '{}',
-                            current_ordinal = ?, updated_at = ? WHERE id = ?""",
-                         (ordinal, now, batch_id))
-        self._enqueue(batch_id, ordinal, str(batch["actor"]), jobs, force_new=True)
+                            SET state = CASE WHEN state = 'succeeded' THEN state ELSE 'reset' END,
+                                job_id = CASE WHEN state = 'succeeded' THEN job_id ELSE '' END,
+                                error_json = CASE WHEN state = 'succeeded' THEN error_json ELSE '{}' END,
+                                completed_at = CASE WHEN state = 'succeeded' THEN completed_at ELSE ? END
+                            WHERE batch_id = ?""", (now, batch_id))
+            conn.execute("""UPDATE install_batches SET state = 'reset', error_json = '{}',
+                            updated_at = ? WHERE id = ?""", (now, batch_id))
+        workflow_secrets.delete_by_job(f"batch:{batch_id}")
         return self.get(batch_id) or {}

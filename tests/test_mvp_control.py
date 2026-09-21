@@ -82,6 +82,42 @@ class RegistryV3Tests(unittest.TestCase):
 
 
 class InstallationWorkflowTests(unittest.TestCase):
+    def test_nextcloud_bootstrap_does_not_wait_on_uninstalled_healthcheck(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp) / "runtime-root")
+            paths.projects.mkdir(parents=True)
+            paths.data.mkdir(parents=True)
+            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            store = JobStore(paths.runtime / "control-plane.sqlite3")
+            created = store.create(kind="lifecycle", service_id="nextcloud",
+                                   action="install", actor="owner")
+            claimed = store.claim("worker")
+            identity = {"owner_uid": "owner", "email": "owner@example.test",
+                        "username": "owner", "display_name": "Owner"}
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_ops.ControlState.runtime", return_value=state), \
+                 patch("ctl.service_ops.workflow_secrets.job_identity", return_value=identity), \
+                 patch("ctl.service_ops.workflow_secrets.create_handoff", return_value={
+                     "id": "handoff", "created_at": "now", "expires_at": "later"}), \
+                 patch("ctl.service_ops.actions.compose_config", return_value=(0, "")), \
+                 patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")), \
+                 patch("ctl.service_ops.actions.docker_image_digest",
+                       return_value=(0, "example@sha256:abc")), \
+                 patch("ctl.service_ops.actions.compose_up",
+                       side_effect=[(0, "started"), (0, "recreated")]) as up, \
+                 patch("ctl.service_ops.actions.compose_exec", return_value=(0, "installed")), \
+                 patch("ctl.service_ops._nextcloud_installed",
+                       side_effect=[False, False, True]), \
+                 patch("ctl.service_ops._verify_bootstrap_account", return_value=(True, "ok")), \
+                 patch("ctl.service_ops._wait_healthy", return_value=(True, "HTTP 200")), \
+                 patch("ctl.service_ops._configure_nextcloud", return_value=(True, "configured")), \
+                 patch("ctl.service_ops.apply_route", return_value=(True, "ready")), \
+                 patch("ctl.service_ops.workflow_secrets.save_job_identity"):
+                execute_claimed(store, claimed, "worker", ROOT)
+            final = store.get(created["id"])
+            self.assertEqual(final["state"], "succeeded")
+            self.assertIsNone(up.call_args_list[0].kwargs["wait_timeout"])
+
     def test_optional_install_executes_the_bounded_stage_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime-root")

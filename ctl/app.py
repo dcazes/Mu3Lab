@@ -44,7 +44,8 @@ from ctl.mcp_registry import snapshot as mcp_snapshot
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl import mcp_config
 from ctl.service_state import compose_snapshot, status as service_status, tailnet_dns_name, tailnet_serve_ports
-from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
+from ctl.service_ops import (SUPPORTED_ACTIONS, allowed_actions, project_path,
+                              reset_failed_application)
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl import actions
 from ctl import service_config
@@ -972,12 +973,67 @@ def reset_install_batch(batch_id: str, request: Request) -> dict:
     batch = batches.get(batch_id) if batches else None
     if not batch or batch["owner_uid"] != identity_data.get("subject_id"):
         return JSONResponse({"ok": False, "error": "batch not found"}, status_code=404)
-    if not jobs_store:
-        return JSONResponse({"ok": False, "error": "job store unavailable"}, status_code=503)
+    control = ControlState.runtime()
+    if not jobs_store or not control or not batches:
+        return JSONResponse({"ok": False, "error": "runtime state is unavailable"}, status_code=503)
+    if batch["state"] not in {"paused", "cancelled"}:
+        return JSONResponse({"ok": False, "error": "batch is not resettable"}, status_code=409)
+
+    # A reset must never race an active worker.  Cancelled/failed child jobs
+    # are terminal; queued/running operations require the operator to wait or
+    # cancel before cleanup can begin.
+    active = {(str(job.get("service_id")), str(job.get("action")))
+              for job in jobs_store.jobs(limit=100)
+              if job.get("state") in {"queued", "running", "waiting_for_confirmation"}}
+    for item in batch["items"]:
+        if item["state"] in {"failed", "cancelled"} and any(
+                service_id == str(item["service_id"]) for service_id, _action in active):
+            return JSONResponse({"ok": False,
+                                 "error": f"{item['service_id']} still has an active operation"},
+                                status_code=409)
+
+    registry = load_registry()
+    services: list[dict[str, object]] = []
+    for item in batch["items"]:
+        if item["state"] not in {"failed", "cancelled"}:
+            continue
+        try:
+            service = registry.get(str(item["service_id"]))
+            job = jobs_store.create(
+                kind="lifecycle", service_id=service.id, action="reset",
+                actor=str(identity_data["username"]),
+                detail=f"Operator reset failed installation for {service.name}.")
+            if job.get("state") != "queued" or jobs_store.get(str(job["id"])) is None:
+                return JSONResponse({"ok": False,
+                                     "error": f"{service.name} has another active operation"},
+                                    status_code=409)
+            jobs_store.transition(str(job["id"]), "running", actor=str(identity_data["username"]),
+                                  detail=f"Cleaning failed {service.name} installation.",
+                                  step_id="reset_cleanup")
+            jobs_store.append_event(str(job["id"]), "stage",
+                                    "Removing failed containers and temporary setup files.")
+            ok, detail = reset_failed_application(
+                service, ROOT, lambda line: jobs_store.append_event(str(job["id"]), "log", line))
+            if not ok:
+                jobs_store.transition(str(job["id"]), "failed", actor=str(identity_data["username"]),
+                                      detail=detail, error_code="reset_cleanup_failed",
+                                      step_id="reset_cleanup")
+                return JSONResponse({"ok": False, "error": detail,
+                                     "job_id": str(job["id"])}, status_code=409)
+            control.reset_service(service.id)
+            if item.get("job_id"):
+                workflow_secrets.delete_by_job(str(item["job_id"]))
+            jobs_store.transition(str(job["id"]), "succeeded", actor=str(identity_data["username"]),
+                                  detail=detail, step_id="complete")
+            services.append({"id": service.id, "ok": True, "detail": detail})
+        except (RegistryError, ValueError, OSError) as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
     try:
-        return {"ok": True, "batch": batches.reset(batch_id, jobs_store)}
+        reset_batch = batches.reset(batch_id, jobs_store)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "reset": True, "batch": None,
+            "services": services, "reset_batch": reset_batch}
 
 
 @app.get("/api/v1/credential-handoffs")

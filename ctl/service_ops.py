@@ -34,6 +34,49 @@ def project_path(service: Service, root: Path) -> Path:
     return service.compose_path(root)
 
 
+def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, str]:
+    """Clean a failed optional application so it can be selected again.
+
+    This is deliberately not an install/retry operation.  It removes only
+    Compose containers/orphans and generated transient override files.  It
+    never passes ``--volumes`` and never deletes the persistent data root or
+    the generated .env credentials needed to reconnect to existing data.
+    """
+    if service.stage != "optional":
+        return False, "Only optional applications can be reset from the catalog."
+    project = project_path(service, root)
+    compose_file = project / "docker-compose.yml"
+    if not compose_file.is_file():
+        return True, "No materialized application containers were found."
+    rc, output = actions.compose_down(project, log)
+    if rc:
+        return False, output or "Failed application containers could not be removed."
+    for name in ("docker-compose.digest.yml", "docker-compose.bootstrap.yml"):
+        try:
+            (project / name).unlink(missing_ok=True)
+        except OSError as exc:
+            return False, f"Temporary setup file could not be removed: {exc}"
+    # These blueprints are generated for the first installation attempt.  A
+    # failed app must not leave a stale Authentik application to be reused by
+    # a later selection; successful installs regenerate the same idempotent
+    # blueprint during materialization.
+    blueprint = RuntimePaths().projects / "authentik" / "blueprints" / f"mu3lab-{service.id}.yaml"
+    try:
+        blueprint.unlink(missing_ok=True)
+    except OSError as exc:
+        return False, f"Temporary identity setup file could not be removed: {exc}"
+    env_path = project / ".env"
+    if env_path.is_file():
+        values = read_runtime_env(env_path)
+        for key in ("MU3LAB_BOOTSTRAP_USERNAME", "MU3LAB_BOOTSTRAP_EMAIL",
+                    "MU3LAB_BOOTSTRAP_PASSWORD", "NEXTCLOUD_ADMIN_USER",
+                    "NEXTCLOUD_ADMIN_PASSWORD"):
+            values.pop(key, None)
+        env_path.write_text(runtime_env_text(values), encoding="utf-8")
+        os.chmod(env_path, 0o600)
+    return True, "Failed containers and temporary setup files removed; persistent data preserved."
+
+
 def allowed_actions(service: Service, state: str) -> list[str]:
     if service.is_blocked:
         return []
@@ -484,6 +527,13 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
                                manifest_version="3", image_digests=image_snapshot)
     _event(store, job_id, "start_service", "Starting application containers.")
     wait_timeout = 900 if service.id in {"surfsense", "nextcloud"} else 120
+    # A fresh Nextcloud intentionally reports unhealthy until its database
+    # installation has completed.  Waiting on that healthcheck before the
+    # explicit `occ maintenance:install` below deadlocks the workflow: Docker
+    # waits for installed=true while the worker is waiting for Docker.  Start
+    # it without Compose's health wait, complete the base install, then the
+    # normal application health verification can require installed=true.
+    initial_wait_timeout = None if service.id == "nextcloud" else wait_timeout
     bootstrap_env: dict[str, str] | None = None
     bootstrap_files: list[Path] = []
     password = ""
@@ -502,7 +552,7 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
                                  owner_uid=str((account_identity or {}).get("owner_uid", "")))
     from ctl.compute import compose_overrides
     rc, output = actions.compose_up(
-        project, log, timeout=wait_timeout + 300, wait_timeout=wait_timeout,
+        project, log, timeout=wait_timeout + 300, wait_timeout=initial_wait_timeout,
         env=bootstrap_env, extra_files=[*compose_overrides(service.id, project), *bootstrap_files],
         recreate=bool(prior_installation))
     if rc:

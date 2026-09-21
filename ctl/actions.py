@@ -358,6 +358,26 @@ def compose_action(projdir: Path, action: str, log: Callable[[str], None],
     return docker_cmd_stream(command, log, timeout=timeout, env=env)
 
 
+def compose_down(projdir: Path, log: Callable[[str], None], *,
+                 timeout: int = 300,
+                 env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Remove this curated Compose project's containers and orphans.
+
+    Volumes are intentionally not passed to Docker.  Resetting a failed
+    installation must remove disposable containers while preserving the
+    persistent application data that makes a later retry safe.
+    """
+    files = [projdir / "docker-compose.yml"]
+    digest_override = projdir / "docker-compose.digest.yml"
+    if digest_override.is_file():
+        files.append(digest_override)
+    command = ["docker", "compose"]
+    for compose_file in files:
+        command.extend(["-f", str(compose_file)])
+    command.extend(["--project-directory", str(projdir), "down", "--remove-orphans"])
+    return docker_cmd(command, log, timeout=timeout, env=env)
+
+
 def compose_logs(projdir: Path, log: Callable[[str], None], *,
                  tail: int = 120, container: str = "") -> tuple[int, str]:
     """Return bounded logs without accepting paths or arbitrary arguments."""

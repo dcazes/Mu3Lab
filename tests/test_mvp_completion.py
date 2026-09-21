@@ -15,7 +15,7 @@ from ctl.jobs import JobStore
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
-from ctl.service_ops import _materialize
+from ctl.service_ops import _materialize, reset_failed_application
 
 
 class WorkflowSecretTests(unittest.TestCase):
@@ -105,7 +105,7 @@ class BatchPersistenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 batches.plan(load(), ["paperless-ngx", "paperless-ngx"], control)
 
-    def test_cancelled_batch_can_reset_failed_item_with_a_new_job(self):
+    def test_terminal_batch_reset_clears_batch_without_queuing_install(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             paths.runtime.mkdir(parents=True)
@@ -123,11 +123,40 @@ class BatchPersistenceTests(unittest.TestCase):
                 jobs.transition(failed_job["id"], "failed", actor="worker",
                                 detail="temporary start failure", error_code="compose_failed")
                 batches.advance_for_job(failed_job["id"], jobs)
-                batches.cancel(batch["id"], jobs)
                 reset = batches.reset(batch["id"], jobs)
-            self.assertEqual(reset["state"], "running")
-            self.assertEqual(reset["items"][0]["state"], "queued")
-            self.assertNotEqual(reset["items"][0]["job_id"], failed_job["id"])
+                latest = batches.latest("uid")
+            self.assertEqual(reset["state"], "reset")
+            self.assertEqual(reset["items"][0]["state"], "reset")
+            self.assertEqual(reset["items"][0]["job_id"], "")
+            self.assertIsNone(latest)
+            self.assertEqual(len([job for job in jobs.jobs() if job["state"] == "queued"]), 0)
+
+
+class FailedApplicationResetTests(unittest.TestCase):
+    def test_cleanup_removes_transient_files_but_preserves_env_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "nextcloud"
+            project.mkdir()
+            (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            (project / "docker-compose.digest.yml").write_text("temporary\n", encoding="utf-8")
+            (project / "docker-compose.bootstrap.yml").write_text("temporary\n", encoding="utf-8")
+            (project / ".env").write_text(
+                "NEXTCLOUD_DB_PASSWORD=keep-me\n"
+                "MU3LAB_BOOTSTRAP_USERNAME=remove-me\n"
+                "MU3LAB_BOOTSTRAP_PASSWORD=remove-me\n", encoding="utf-8")
+            service = load().get("nextcloud")
+            with patch("ctl.service_ops.project_path", return_value=project), \
+                 patch("ctl.service_ops.actions.compose_down", return_value=(0, "removed")) as down:
+                ok, detail = reset_failed_application(service, Path(tmp), lambda _line: None)
+            self.assertTrue(ok)
+            self.assertIn("persistent data preserved", detail)
+            down.assert_called_once()
+            self.assertFalse((project / "docker-compose.digest.yml").exists())
+            self.assertFalse((project / "docker-compose.bootstrap.yml").exists())
+            env = read_runtime_env(project / ".env")
+            self.assertEqual(env["NEXTCLOUD_DB_PASSWORD"], "keep-me")
+            self.assertNotIn("MU3LAB_BOOTSTRAP_USERNAME", env)
+            self.assertNotIn("MU3LAB_BOOTSTRAP_PASSWORD", env)
 
 
 if __name__ == "__main__":

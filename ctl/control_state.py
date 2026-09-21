@@ -220,6 +220,21 @@ class ControlState:
                 result[key] = {}
         return result
 
+    def reset_service(self, service_id: str) -> None:
+        """Forget a failed optional install without touching application data.
+
+        Runtime containers/projects are cleaned by the service operation.  The
+        control-plane projection is removed here so the next catalog refresh
+        derives a fresh planned/not-installed state instead of preserving a
+        stale failed or initialization record.
+        """
+        if not service_id:
+            return
+        with self._connect() as conn:
+            conn.execute("DELETE FROM service_installations WHERE service_id = ?", (service_id,))
+            conn.execute("DELETE FROM service_initializations WHERE service_id = ?", (service_id,))
+            conn.execute("DELETE FROM credential_handoffs WHERE service_id = ?", (service_id,))
+
     def provider(self, provider_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM provider_connections WHERE provider_id = ?", (provider_id,)).fetchone()

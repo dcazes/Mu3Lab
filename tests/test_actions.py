@@ -215,6 +215,18 @@ class DockerCmdTests(unittest.TestCase):
 
 
 class ComposeTests(unittest.TestCase):
+    def test_down_removes_containers_without_volumes(self):
+        seen: list[list[str]] = []
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "removed"
+        project = Path("/srv/mu3lab/projects/nextcloud")
+        with patch.object(actions, "docker_cmd", fake):
+            rc, _ = actions.compose_down(project, _silent)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen[0][-4:], ["--project-directory", str(project), "down", "--remove-orphans"])
+        self.assertNotIn("--volumes", seen[0])
+
     def test_extra_compose_file_is_appended_after_base(self):
         seen: list[list[str]] = []
         def fake(argv, log, timeout=300, env=None):
