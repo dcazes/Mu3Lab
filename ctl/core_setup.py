@@ -232,49 +232,13 @@ def _configure_open_webui_identity(runtime: RuntimePaths, root: Path,
     temporary.replace(env_path)
     env_path.chmod(0o600)
     # Reconcile the reviewed proxy base while preserving generated optional
-    # application routes owned by ctl.routes.
-    from ctl.control_state import ControlState
-    from ctl.routes import render
+    # application routes owned by ctl.routes. The helper also publishes the
+    # core UI endpoints, so later optional-app updates cannot remove them.
+    from ctl.routes import reconcile_core
     registry = load()
-    state = ControlState.runtime()
-    optional = []
-    if state:
-        for service in registry.services:
-            installed = state.installation(service.id)
-            if (service.stage == "optional" and installed and service.proxy_port
-                    and installed["state"] in {"running", "stopped", "degraded"}):
-                optional.append(service)
-    source = root / "core" / "ingress" / "Caddyfile.authenticated"
-    caddy_target = runtime.projects / "ingress" / "Caddyfile"
-    caddy_target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    content = render(source.read_text(encoding="utf-8"), optional)
-    candidate = caddy_target.with_suffix(".candidate")
-    candidate.write_text(content, encoding="utf-8")
-    ingress_token = read_runtime_env(root / ".env").get("MU3LAB_INGRESS_TOKEN", "")
-    if not ingress_token:
-        raise ValueError("The private ingress token is missing")
-    rc, output = actions.compose_up(
-        root / "core" / "ingress", log,
-        env={"MU3LAB_CADDYFILE": str(candidate), "MU3LAB_INGRESS_TOKEN": ingress_token},
-        recreate=True,
-    )
-    if rc:
-        candidate.unlink(missing_ok=True)
-        raise ValueError("Caddy rejected the trusted-header Open WebUI policy: " + redact(output))
-    candidate.replace(caddy_target)
-    rc, output = actions.compose_up(
-        root / "core" / "ingress", log,
-        env={"MU3LAB_CADDYFILE": str(caddy_target), "MU3LAB_INGRESS_TOKEN": ingress_token},
-        recreate=True,
-    )
-    if rc:
-        raise ValueError("Caddy could not activate the trusted-header policy: " + redact(output))
-    # Publish reviewed AI dashboards only after their Caddy listeners passed
-    # validation. They are not inferred from service health.
-    for private_port, proxy_port, label in ((8454, 19471, "LiteLLM"), (8455, 19472, "FreeLLMAPI")):
-        published = actions.tailscale_serve(private_port, proxy_port, log)
-        if not published.get("ok"):
-            raise ValueError(f"{label} private dashboard route could not be published")
+    routed, detail = reconcile_core(registry, root, log)
+    if not routed:
+        raise ValueError("Core private UI routes could not be reconciled: " + redact(detail))
     return origin
 
 

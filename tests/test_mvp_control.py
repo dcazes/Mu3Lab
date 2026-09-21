@@ -75,6 +75,17 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(second.count(":19467 {"), 1)
 
+    def test_optional_route_regeneration_preserves_core_ui_routes(self):
+        base = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        rendered = render(base, [load().get("mealie")])
+        self.assertIn(":19471 {", rendered)
+        self.assertIn(":19472 {", rendered)
+        self.assertIn(":19467 {", rendered)
+
+    def test_core_route_pending_offers_repair_not_retry_install(self):
+        self.assertEqual(allowed_actions(load().get("litellm"), "needs_setup"),
+                         ["repair", "restart"])
+
     def test_surfsense_route_is_authentik_gated_before_local_login(self):
         block = render("{\n  admin off\n}\n", [load().get("surfsense")])
         self.assertIn(":19464 {", block)

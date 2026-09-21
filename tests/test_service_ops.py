@@ -45,6 +45,22 @@ class ServiceOperationTests(unittest.TestCase):
             execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
             self.assertEqual(store.jobs()[0]["error_code"], "unsupported_action")
 
+    def test_core_restart_passes_runtime_environment_to_compose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "jobs.sqlite3")
+            created = store.create(kind="lifecycle", service_id="litellm",
+                                   action="restart", actor="owner")
+            claimed = store.claim("worker")
+            assert claimed is not None
+            with patch("ctl.service_ops.ControlState.runtime", return_value=None), \
+                 patch("ctl.service_ops.actions.compose_action", return_value=(0, "restarted")) as action, \
+                 patch("ctl.service_ops._wait_healthy", return_value=(True, "HTTP 200")):
+                execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
+            self.assertEqual(store.get(created["id"])["state"], "succeeded")
+            env = action.call_args.kwargs["env"]
+            self.assertEqual(env["MU3LAB_ENV_FILE"], "/srv/mu3lab/projects/litellm/.env")
+            self.assertEqual(env["MU3LAB_LITELLM_CONFIG"], "/srv/mu3lab/projects/litellm/config.yaml")
+
 
 if __name__ == "__main__":
     unittest.main()

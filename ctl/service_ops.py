@@ -83,7 +83,8 @@ def allowed_actions(service: Service, state: str) -> list[str]:
     if service.stage == "optional" and state in {"planned", "not_installed"}:
         return ["install"]
     if state in {"failed", "needs_attention", "needs_setup", "degraded"}:
-        return ["retry_setup", "restart"]
+        return (["repair", "restart"] if service.stage == "core"
+                else ["retry_setup", "restart"])
     if state == "stopped":
         return ["start", "restart"]
     if state in {"ready", "running", "starting", "configured", "installed"}:
@@ -700,6 +701,20 @@ def _repair(store: JobStore, state: ControlState | None, job: dict,
     shared backend network.
     """
     job_id = str(job["id"])
+    if service.stage == "core":
+        job_id = str(job["id"])
+        store.transition(job_id, "running", actor=actor,
+                         detail=f"Repairing private routes for {service.name}.", step_id="configure_route")
+        log = lambda line: store.append_event(job_id, "log", line)
+        from ctl.routes import reconcile_core
+        routed, detail = reconcile_core(registry, root, log)
+        if not routed:
+            _fail(store, state, job_id, service.id, actor, "configure_route",
+                  "route_configuration_failed", detail)
+            return
+        store.append_event(job_id, "step.completed", "core_routes:reconciled")
+        store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+        return
     if service.stage != "optional":
         _fail(store, state, job_id, service.id, actor, "validate_service",
               "repair_not_optional", "Only optional applications have a repairable runtime project.")
@@ -796,8 +811,18 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
                      detail=f"{action.title()} started for {service.name}.", step_id="compose")
     log = lambda line: store.append_event(job_id, "log", line)
     from ctl.compute import compose_overrides
+    runtime_env = None
+    if service.stage == "core":
+        runtime = RuntimePaths()
+        runtime_env = {"MU3LAB_ENV_FILE": str(runtime.projects / service.id / ".env"),
+                       "MU3LAB_DATA_ROOT": str(runtime.data)}
+        if service.id == "litellm":
+            runtime_env["MU3LAB_LITELLM_CONFIG"] = str(runtime.projects / "litellm" / "config.yaml")
+        elif service.id == "freellmapi":
+            runtime_env["MU3LAB_FREELLMAPI_CONFIG"] = str(runtime.projects / "freellmapi" / "freellmapi.config.json")
     rc, output = actions.compose_action(
-        project, action, log, extra_files=compose_overrides(service.id, project))
+        project, action, log, env=runtime_env,
+        extra_files=compose_overrides(service.id, project))
     if rc:
         _fail(store, state, job_id, service.id, actor, "compose",
               "compose_failed", f"{service.name} {action} failed: {output}")
