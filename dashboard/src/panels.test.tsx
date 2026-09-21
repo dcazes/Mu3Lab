@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppsPanel, HomePanel } from './panels';
+import { AiMcpPanel, AppsPanel, HomePanel } from './panels';
 import type { Service } from './api';
 
 function service(id: string, name: string, stage: Service['stage']): Service {
@@ -44,15 +44,15 @@ describe('dashboard organization', () => {
     expect(screen.getByRole('heading', { name: 'Productivity apps' })).toBeInTheDocument();
   });
 
-  it('does not present unverified native OIDC as a working launch', () => {
+  it('keeps identity repair out of the Home launcher', () => {
     const identityServices = services.map(item => ({ ...item }));
     const nextcloud = identityServices.find(item => item.id === 'nextcloud')!;
     nextcloud.identity = { mode: 'native_oidc', state: 'unconfigured', launch_url: 'https://example:8453',
       detail: 'Native sign-in is not verified.', last_verified_at: '', recovery_available: true, job_id: '' };
     render(<HomePanel services={identityServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
     fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
-    expect(screen.getByRole('button', { name: 'Repair sign-in' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Open with Authentik/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Nextcloud ↗' })).toHaveAttribute('href', 'https://example:8453');
+    expect(screen.queryByRole('button', { name: /Repair.*sign-in/ })).not.toBeInTheDocument();
   });
 
   it('opens a verified legacy route while the identity projection is unavailable', () => {
@@ -74,8 +74,20 @@ describe('dashboard organization', () => {
       detail: 'Owner migration is pending.', last_verified_at: '', recovery_available: true, job_id: '' };
     render(<HomePanel services={pendingServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
     fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
-    expect(screen.getByRole('link', { name: 'Open sign-in ↗' })).toHaveAttribute('href', 'https://example:8453');
-    expect(screen.getByRole('button', { name: 'Repair sign-in' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Nextcloud ↗' })).toHaveAttribute('href', 'https://example:8453');
+    expect(screen.queryByRole('button', { name: /Repair.*sign-in/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps application sign-in repair on Connections', () => {
+    const identityServices = services.map(item => ({ ...item }));
+    const nextcloud = identityServices.find(item => item.id === 'nextcloud')!;
+    nextcloud.state = 'ready';
+    nextcloud.identity = { mode: 'native_oidc', state: 'unconfigured', launch_url: 'https://example:8453',
+      detail: 'Native sign-in is not verified.', last_verified_at: '', recovery_available: true, job_id: '' };
+    render(<AiMcpPanel services={identityServices} integrations={{ ok: true, policy: '', integrations: [] }} />);
+    expect(screen.getByRole('heading', { name: 'Authentik connections' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Repair Nextcloud sign-in' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open app ↗' })).toHaveAttribute('href', 'https://example:8453');
   });
 
   it('uses the FullCalendar month view for connected calendar events', async () => {
