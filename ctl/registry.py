@@ -64,6 +64,7 @@ class Service:
     update: dict[str, Any] = field(default_factory=dict)
     configuration: tuple[dict[str, Any], ...] = ()
     account: dict[str, Any] = field(default_factory=dict)
+    ui: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_blocked(self) -> bool:
@@ -102,6 +103,12 @@ class Service:
                     "mode": str(self.account.get("mode", "none")),
                     "handoff": bool(self.account.get("handoff", False)),
                     "user_action": str(self.account.get("user_action", "")),
+                },
+                "ui": {
+                    "available": bool(self.ui.get("available", False)),
+                    "path": str(self.ui.get("path", "")),
+                    "authentication": str(self.ui.get("authentication", self.auth)),
+                    "unavailable_reason": str(self.ui.get("unavailable_reason", "")),
                 },
                 "configuration": [{key: value for key, value in field.items()
                                    if key not in {"env", "managed"}}
@@ -187,6 +194,11 @@ def _service(item: dict[str, Any]) -> Service:
     account = item.get("account", {"mode": "none"})
     if not isinstance(account, dict) or account.get("mode", "none") not in VALID_ACCOUNT_MODES:
         raise RegistryError(f"service {service_id}: invalid account contract")
+    ui = item.get("ui", {})
+    if not isinstance(ui, dict) or not isinstance(ui.get("available", False), bool):
+        raise RegistryError(f"service {service_id}: invalid UI contract")
+    if not isinstance(ui.get("path", ""), str) or not isinstance(ui.get("unavailable_reason", ""), str):
+        raise RegistryError(f"service {service_id}: invalid UI contract")
     return Service(id=service_id, maturity=maturity, name=_required(item, "name"),
                    category=_required(item, "category"), lifecycle=lifecycle,
                    compose_dir=compose_dir, https_port=port, private_https_port=private_port,
@@ -203,7 +215,7 @@ def _service(item: dict[str, Any]) -> Service:
                    setup_action=str(item.get("setup_action", "")),
                    update=dict(item.get("update", {})),
                    configuration=tuple(dict(field_item) for field_item in configuration),
-                   account=dict(account))
+                   account=dict(account), ui=dict(ui))
 
 
 class Registry:

@@ -42,7 +42,7 @@ export default function App() {
     load(); const timer = window.setInterval(load, 10000); return () => { active = false; controller?.abort(); window.clearInterval(timer); };
   }, []);
   const content = !data ? <div className="loading">Connecting to the Mu3Lab control plane…</div> : !knownRoute(locationPath, data.services.services) ? <section className="panel"><p className="eyebrow">NOT FOUND</p><h2>This dashboard page does not exist</h2><p>Use the sidebar to return to a supported Mu3Lab area.</p><a className="primary-action" href="/" onClick={event => { event.preventDefault(); navigate('/'); }}>Return home →</a></section> : (() => {
-    if (tab === 'home') return <HomePanel services={data.services.services} system={data.system} identity={data.identity} jobs={data.jobs} core={data.core} provisioning={data.provisioning} />;
+    if (tab === 'home') return <HomePanel services={data.services.services} system={data.system} jobs={data.jobs} />;
     if (tab === 'apps') return <AppsPanel key={locationPath} services={data.services.services} catalog={data.catalog} />;
     if (tab === 'chat') {
       const expected = expectedMcp();
@@ -51,7 +51,7 @@ export default function App() {
     }
     if (tab === 'connections') return <AiMcpPanel integrations={data.integrations} services={data.services.services} />;
     if (tab === 'security') return <ProtectionPanel identity={data.identity} backup={data.system.backup} audit={data.audit} />;
-    return <SystemPanel system={data.system} services={data.services.services} jobs={data.jobs} />;
+    return <SystemPanel system={data.system} services={data.services.services} jobs={data.jobs} core={data.core} provisioning={data.provisioning} identity={data.identity} />;
   })();
   return <div className="app-shell"><header className="app-header"><a className="brand" href="/" onClick={event => { event.preventDefault(); navigate('/'); }}><b>μ</b><span>Mu3Lab<small>Private app platform</small></span></a><div className="host-chip">{data?.system.tailnet_dns_name || 'Tailnet checking…'}</div><div className="header-spacer" /><div className={`connection ${data?.health.ok ? 'good' : ''}`}>{data?.health.ok ? 'Control plane online' : 'Connecting…'}</div></header><div className="app-body"><nav className="sidebar" aria-label="Mu3Lab navigation">{tabs.map((item, index) => <div key={item.id}>{item.group && <span className={index ? 'nav-group separated' : 'nav-group'}>{item.group}</span>}<button className={tab === item.id ? 'active' : ''} onClick={() => navigate(item.path)} aria-current={tab === item.id ? 'page' : undefined}>{item.label}</button></div>)}</nav><main className="page"><div className="page-heading"><div><p className="eyebrow">PRIVATE BY DEFAULT</p><h1>{tabs.find(item => item.id === tab)?.label}</h1></div>{data && <span className={data.identity.writes_enabled ? 'write-state enabled' : 'write-state'}>{data.identity.writes_enabled ? 'Changes protected' : 'Read-only until identity is configured'}</span>}</div>{error && <div className="error" role="alert">Dashboard data is unavailable: {error}</div>}{content}</main></div></div>;
 }

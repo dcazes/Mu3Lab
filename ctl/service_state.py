@@ -33,12 +33,15 @@ def tailnet_dns_name(run=subprocess.run) -> str:
 
 
 def public_url(service: Service, dns_name: str) -> str:
-    """Build a tailnet URL only after the manifest declares a verified route."""
-    if not dns_name or service.route != "ready":
+    """Build a browser URL only for a manifest-declared UI contract."""
+    if not dns_name or service.route != "ready" or not bool(service.ui.get("available", False)):
         return ""
     port = service.private_https_port or service.https_port
     suffix = "" if port == 443 else f":{port}"
-    return f"https://{dns_name}{suffix}"
+    path = str(service.ui.get("path", ""))
+    if path and not path.startswith("/"):
+        path = "/" + path
+    return f"https://{dns_name}{suffix}{path}"
 
 
 def _tcp_open(port: int) -> bool:
@@ -169,8 +172,14 @@ def compose_snapshot(run=subprocess.run) -> tuple[dict[str, str], dict[str, list
             "service": parts[1], "name": parts[2], "state": state,
             "status": parts[4], "health": health, "image": parts[5],
         })
-    project_states = {directory: ("running" if values and set(values) == {"running"} else "stopped")
-                      for directory, values in states.items()}
+    # Compose projects commonly include a migration container. A successful
+    # one-shot exit is evidence of completion, not a stopped application.
+    project_states = {}
+    for directory, values in states.items():
+        rows = containers.get(directory, [])
+        long_lived = [row["state"] for row in rows
+                      if not (row["state"] == "exited" and "Exited (0)" in row["status"])]
+        project_states[directory] = "running" if long_lived and set(long_lived) == {"running"} else "stopped"
     return project_states, containers
 
 
@@ -217,10 +226,18 @@ def status(service: Service, dns_name: str, root: Path,
     if healthy and route_required and not route_ready:
         lifecycle_state = "needs_setup"
     setup_state = "configured" if lifecycle_state == "ready" else ("blocked" if lifecycle_state == "blocked" else "needs_setup")
+    ui = dict(service.ui)
+    ui_available = bool(ui.get("available", False))
     url = public_url(service, dns_name)
-    if route_ready and not url and dns_name:
+    if route_ready and ui_available and not url and dns_name:
         port = service.private_https_port or service.https_port
-        url = f"https://{dns_name}" + ("" if port == 443 else f":{port}")
+        suffix = "" if port == 443 else f":{port}"
+        path = str(ui.get("path", ""))
+        url = f"https://{dns_name}{suffix}{path}"
+    ui_state = ("unavailable" if not ui_available else
+                "ready" if route_ready and bool(url) else "route_pending")
+    ui_reason = (str(ui.get("unavailable_reason", "")) if not ui_available else
+                 "Private UI route is not ready yet." if ui_state == "route_pending" else "")
     return {**service.public(), "state": lifecycle_state, "detail": detail,
             "lifecycle_state": lifecycle_state, "health_state": health_state,
             "setup_state": setup_state, "route_state": route_state,
@@ -234,5 +251,8 @@ def status(service: Service, dns_name: str, root: Path,
                             service.setup_action or detail),
             "url": url,
             "route_ready": route_ready,
+            "ui": {"state": ui_state, "url": url or None,
+                   "label": "Open securely", "authentication": str(ui.get("authentication", service.auth)),
+                   "reason": ui_reason},
             "compose_present": (runtime_file.is_file() if service.stage == "optional"
                                 else compose_file.is_file())}

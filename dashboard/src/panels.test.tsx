@@ -21,12 +21,12 @@ describe('dashboard organization', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('groups Home apps and removes the duplicate wiring panel', () => {
-    render(<HomePanel services={services} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} identity={{ ok: true, control_plane_auth: 'authentik', detail: '', writes_enabled: true }} jobs={{ ok: true, available: true, jobs: [] }} core={{ ok: true, ready_to_run: true, services: [], missing_manifests: [], next_action: '' }} provisioning={{ ok: true, available: true, complete: false, phases: [], progress: { completed: 6, total: 9 }, next_action: { kind: 'link', label: 'Add provider', href: '/connections/providers' } }} />);
+    render(<HomePanel services={services} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
     expect(screen.getByRole('heading', { name: 'Infrastructure' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'AI Integration' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Productivity apps' })).toBeInTheDocument();
     expect(screen.queryByText('CORE WIRING')).not.toBeInTheDocument();
-    expect(screen.getByText('6/9')).toBeInTheDocument();
+    expect(screen.queryByText('6/9')).not.toBeInTheDocument();
   });
 
   it('orders the app catalog with Productivity first', () => {

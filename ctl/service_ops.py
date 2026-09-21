@@ -225,12 +225,26 @@ def _account_username(identity: dict[str, str]) -> str:
     return value or "mu3lab-admin"
 
 
-def _fresh_account_storage(service_id: str) -> bool:
+def _nextcloud_installed(project: Path, log) -> bool:
+    """Ask Nextcloud itself; config.php exists before installation commits."""
+    rc, output = actions.compose_exec(
+        project, "app", ["runuser", "-u", "www-data", "--", "php", "occ", "status", "--output=json"],
+        log, timeout=90)
+    if rc:
+        return False
+    try:
+        start = output.index("{")
+        return bool(json.loads(output[start:]).get("installed", False))
+    except (ValueError, json.JSONDecodeError, TypeError):
+        return False
+
+
+def _fresh_account_storage(service_id: str, project: Path | None = None, log=None) -> bool:
     data = RuntimePaths().data
     if service_id == "nextcloud":
-        # This file is written only after Nextcloud commits its initial account
-        # and configuration. A partially populated database is not sufficient.
-        return not (data / "nextcloud" / "html" / "config" / "config.php").is_file()
+        # A config file is written before installation commits. The only safe
+        # source of truth is Nextcloud's own status command.
+        return not (project is not None and log is not None and _nextcloud_installed(project, log))
     directory = (data / "paperless" / "postgres" if service_id == "paperless-ngx"
                  else data / "adventurelog" / "postgres")
     try:
@@ -302,6 +316,32 @@ def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
     if rc or client_id not in output:
         return False, "Nextcloud did not confirm the Authentik provider configuration."
     return True, "Calendar and Authentik sign-in are configured."
+
+
+def _install_nextcloud_if_needed(project: Path, log) -> tuple[bool, str]:
+    """Complete a fresh bootstrap explicitly when Docker auto-install did not.
+
+    The reviewed bootstrap override injects NEXTCLOUD_ADMIN_* into the running
+    app. Variable names, rather than secret values, are intentionally used in
+    the command so job events cannot disclose credentials.
+    """
+    if _nextcloud_installed(project, log):
+        return True, "Nextcloud base installation is already complete."
+    script = (
+        "set -eu; "
+        "test -n \"${NEXTCLOUD_ADMIN_USER:-}\"; "
+        "test -n \"${NEXTCLOUD_ADMIN_PASSWORD:-}\"; "
+        "runuser -u www-data -- php occ maintenance:install "
+        "--database pgsql --database-host db --database-name nextcloud "
+        "--database-user nextcloud --database-pass=\"$POSTGRES_PASSWORD\" "
+        "--admin-user=\"$NEXTCLOUD_ADMIN_USER\" --admin-pass=\"$NEXTCLOUD_ADMIN_PASSWORD\""
+    )
+    rc, output = actions.compose_exec(project, "app", ["sh", "-ec", script], log, timeout=300)
+    if rc and "already installed" not in output.lower():
+        return False, "Nextcloud base installation failed: " + redact(output)
+    if not _nextcloud_installed(project, log):
+        return False, "Nextcloud did not confirm a completed base installation."
+    return True, "Nextcloud base installation completed."
 
 
 def _image_snapshot(output: str) -> dict[str, str]:
@@ -443,11 +483,11 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_installation(service.id, "starting", job_id=job_id,
                                manifest_version="3", image_digests=image_snapshot)
     _event(store, job_id, "start_service", "Starting application containers.")
-    wait_timeout = 900 if service.id == "surfsense" else 120
+    wait_timeout = 900 if service.id in {"surfsense", "nextcloud"} else 120
     bootstrap_env: dict[str, str] | None = None
     bootstrap_files: list[Path] = []
     password = ""
-    fresh_account = account_mode == "environment_bootstrap" and _fresh_account_storage(service.id)
+    fresh_account = account_mode == "environment_bootstrap" and _fresh_account_storage(service.id, project, log)
     if fresh_account and account_identity:
         password = workflow_secrets.generate_password()
         bootstrap_env = {
@@ -469,6 +509,13 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         _fail(store, state, job_id, service.id, actor, "start_service",
               "compose_start_failed", f"Application start failed: {output}")
         return
+    if service.id == "nextcloud":
+        _event(store, job_id, "base_installation", "Confirming the Nextcloud base installation.")
+        installed, install_detail = _install_nextcloud_if_needed(project, log)
+        if not installed:
+            _fail(store, state, job_id, service.id, actor, "base_installation",
+                  "nextcloud_install_incomplete", install_detail)
+            return
     if fresh_account:
         account_verified, account_detail = _verify_bootstrap_account(
             service.id, project, log, str(bootstrap_env.get("MU3LAB_BOOTSTRAP_USERNAME", "")))

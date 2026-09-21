@@ -63,3 +63,45 @@
   .app-dock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .routing-stages { grid-template-columns: 1fr; }
 }
+
+/* Branded glyphs and live installation feedback. */
+.app-glyph svg { width: 18px; height: 18px; fill: currentColor; }
+.app-glyph.logo-glyph { color: #eef0ff; }
+.app-glyph.initial-glyph { font-size: 11px; letter-spacing: -.04em; }
+.batch-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.batch-heading p { margin: 0; color: #aeb8d1; font-size: 12px; }
+.batch-heading > b { color: #c4c5ff; font-size: 12px; white-space: nowrap; }
+.batch-progressbar { position: relative; height: 8px; margin: 14px 0 10px; overflow: hidden; border-radius: 999px; background: #0f1528; }
+.batch-progressbar > span { display: block; height: 100%; border-radius: inherit; background: #6c70e5; transition: width .3s ease; }
+.batch-progress-live { position: absolute; inset: 0 auto 0 -35%; width: 35%; background: linear-gradient(90deg, transparent, #c1c2ff99, transparent); animation: batch-progress-sweep 1.5s ease-in-out infinite; }
+.batch-log { margin-top: 13px; border: 1px solid #2d3858; border-radius: 8px; background: #11172a; }
+.batch-log summary { padding: 9px 10px; color: #c6cbea; cursor: pointer; font-size: 12px; }
+.batch-log pre { max-height: 260px; overflow: auto; margin: 0; padding: 10px; border-top: 1px solid #2d3858; color: #cbd4e9; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+@keyframes batch-progress-sweep { from { transform: translateX(0); } to { transform: translateX(380%); } }
+@media (max-width: 560px) { .batch-heading { align-items: flex-start; flex-direction: column; } }
+
+/* Shared actions and uniform home launchers. Explicit classes avoid browser-default buttons. */
+.button { display: inline-flex; align-items: center; justify-content: center; min-height: 35px; border: 1px solid #414c73; border-radius: 8px; padding: 7px 11px; color: #e7e9ff; background: #242b42; font: inherit; font-size: 12px; line-height: 1; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.button:hover:not(:disabled) { border-color: #7178c9; background: #30385a; }
+.button-primary { border-color: #6e73e5; background: #6266d7; color: #fff; }
+.button-primary:hover:not(:disabled) { background: #7377e8; }
+.button-quiet { border-color: transparent; background: transparent; }
+.button-danger { border-color: #88425c; background: #482539; }
+.button:disabled { cursor: not-allowed; opacity: .62; }
+.mcp-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.mcp-card { border: 1px solid #313b5e; border-radius: 9px; background: #1b233a; }
+.mcp-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 60px; padding: 10px 12px; cursor: pointer; list-style: none; }
+.mcp-card > summary::-webkit-details-marker { display: none; }
+.mcp-card > summary span:first-child { display: grid; gap: 3px; }
+.mcp-card > summary small { color: #9eabc8; }
+.mcp-card-body { border-top: 1px solid #313b5e; padding: 12px; }
+.mcp-card-body > :first-child { margin-top: 0; }
+@media (max-width: 700px) { .mcp-list { grid-template-columns: 1fr; } }
+.actions .button { border: 1px solid #414c73; background: #242b42; }.actions .button-primary { border-color: #6e73e5; background: #6266d7; }.actions .button-quiet { border-color: transparent; background: transparent; }
+.app-dock { grid-template-columns: repeat(auto-fill, minmax(150px, 170px)); justify-content: start; }
+.job-row { display: flex; width: 100%; justify-content: space-between; gap: 10px; padding: 9px 0; border-radius: 0; border-bottom: 1px solid #2d3654; text-align: left; }
+.job-detail { display: grid; gap: 9px; margin-top: 14px; padding: 12px; border: 1px solid #3d476e; border-radius: 9px; background: #11172a; }
+.job-detail header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.job-detail header small { display: block; color: #9da8c2; margin-top: 2px; }
+.job-detail p { margin: 0; color: #c4cce1; font-size: 12px; }
+.job-detail pre { max-height: 260px; overflow: auto; margin: 0; padding: 10px; border-radius: 7px; background: #0c1120; color: #cbd4e9; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, monospace; }

@@ -15,7 +15,7 @@ settings:
 services:
   - id: ingress
     maturity: supported
-    name: Caddy ingress
+    name: Caddy
     category: infrastructure
     lifecycle: always_on
     compose_dir: core/ingress
@@ -28,6 +28,7 @@ services:
     images: ["caddy:2.10.2-alpine"]
     update: {repository: caddyserver/caddy, current_version: v2.10.2}
     route: ready
+    ui: {available: false, unavailable_reason: "Caddy is Mu3Lab's internal reverse proxy and has no end-user dashboard."}
     required: true
     setup_action: "Private ingress is installed and checked by the bootstrapper."
     backup: {volumes: [caddy-data, caddy-config]}
@@ -47,6 +48,7 @@ services:
     images: ["postgres:16-alpine", "ghcr.io/goauthentik/server:2026.5.0"]
     update: {repository: goauthentik/authentik, current_version: "2026.5.0"}
     route: pending
+    ui: {available: true, authentication: local}
     required: true
     setup_action: "Create the Authentik administrator and Mu3Lab application."
     backup: {database: authentik, volumes: [authentik-media, authentik-templates]}
@@ -66,6 +68,7 @@ services:
     images: ["vaultwarden/server:1.34.3-alpine"]
     update: {repository: dani-garcia/vaultwarden, current_version: "1.34.3"}
     route: pending
+    ui: {available: true, authentication: local}
     required: true
     setup_action: "Create the first Vaultwarden account locally, then use its private tailnet URL."
     identity_note: "Independent Vaultwarden login; never Authentik-gated."
@@ -85,6 +88,7 @@ services:
     stage: core
     required: true
     route: pending
+    ui: {available: false, unavailable_reason: "Ollama is an internal model and embedding API; it does not ship a browser UI."}
     images: ["ollama/ollama:0.34.1"]
     update: {repository: ollama/ollama, current_version: v0.34.1}
     setup_action: "Install and verify the model runner using the host-wide compute setting."
@@ -100,18 +104,21 @@ services:
     lifecycle: shared
     compose_dir: core/litellm
     https_port: 4000
+    private_https_port: 8454
+    proxy_port: 19471
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
-    auth: excluded
+    auth: oidc
     stage: core
     required: true
     route: pending
+    ui: {available: true, path: "/ui/", authentication: oidc}
     setup_action: "Connect Ollama and optional provider routes, then run a test request."
     resource_guidance: "Low host overhead; provider and model choice determines usage."
     images: ["ghcr.io/berriai/litellm:v1.92.0"]
     update: {repository: BerriAI/litellm, current_version: v1.92.0}
     dependencies: [ollama]
     backup: {binds: [config]}
-    identity_note: "Internal-only model gateway; user access is through Open WebUI or the future authenticated MCP gateway."
+    identity_note: "Authenticated model gateway. Its private dashboard uses Authentik sign-in."
     mcp: {exposed: false}
 
   - id: open-webui
@@ -128,6 +135,7 @@ services:
     stage: core
     required: true
     route: pending
+    ui: {available: true, authentication: trusted_header}
     setup_action: "Connect Open WebUI to the verified LiteLLM endpoint."
     resource_guidance: "Moderate memory use; model work happens upstream."
     images: ["ghcr.io/open-webui/open-webui:v0.11.1"]
@@ -146,12 +154,15 @@ services:
     lifecycle: optional
     compose_dir: apps/freellmapi
     https_port: 3001
+    private_https_port: 8455
+    proxy_port: 19472
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
     auth: excluded
     stage: core
     required: true
     route: pending
-    setup_action: "Mu3Lab manages provider configuration privately; it is never a user-facing app."
+    ui: {available: true, authentication: local}
+    setup_action: "Mu3Lab manages provider configuration privately; its native dashboard is available for operator recovery."
     resource_guidance: "Optional provider route inside the mandatory core suite."
     images: ["ghcr.io/tashfeenahmed/freellmapi:v0.11.0"]
     update: {repository: TashfeenAhmed/FreeLLMAPI, current_version: v0.11.0}
@@ -173,6 +184,7 @@ services:
     stage: optional
     required: false
     route: pending
+    ui: {available: true, authentication: proxy}
     identity_note: "Authentik protects the private route, then SurfSense uses a separate local account. This is intentionally not SSO. Create the first local account, then consider disabling registration."
     setup_action: "Install SurfSense, open its secure route, and create a separate local account after Authentik."
     resource_guidance: "Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is disabled."
@@ -227,6 +239,7 @@ services:
     stage: optional
     availability: available
     route: pending
+    ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private budgeting."
     resource_guidance: "Lightweight personal finance service."
     configuration:
@@ -265,6 +278,7 @@ services:
     stage: optional
     availability: available
     route: pending
+    ui: {available: true, authentication: proxy}
     setup_action: "Install only when you want private photo management."
     resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
     identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
@@ -290,6 +304,7 @@ services:
     stage: optional
     availability: available
     route: pending
+    ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private recipe and meal planning."
     resource_guidance: "Lightweight service."
     configuration:
@@ -328,6 +343,7 @@ services:
     stage: optional
     availability: available
     route: pending
+    ui: {available: true, authentication: proxy}
     setup_action: "Install only when you want private travel planning."
     resource_guidance: "Lightweight service with persistent trip data."
     identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
@@ -357,6 +373,7 @@ services:
     stage: optional
     availability: available
     route: pending
+    ui: {available: true, authentication: proxy}
     setup_action: "Install only when you want private document management."
     resource_guidance: "Storage and OCR usage grow with your document library."
     identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
@@ -386,6 +403,7 @@ services:
     stage: optional
     availability: available
     route: pending
+    ui: {available: true, authentication: oidc}
     setup_action: "Install private files and calendar with Authentik sign-in."
     resource_guidance: "Stores files and calendar data locally; storage use grows with uploaded content."
     identity_note: "Use Authentik for normal sign-in. A generated local administrator remains available through ?direct=1 for recovery."

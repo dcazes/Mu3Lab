@@ -152,9 +152,12 @@ def _service_snapshot(request: Request | None = None) -> dict:
         # Traversing the protected dashboard through Authentik is stronger
         # evidence than a static manifest route flag.
         if service.id == "authentik" and operator and item["health_state"] == "healthy":
+            auth_url = f"https://{dns_name}" if dns_name else ""
             item.update({"state": "ready", "lifecycle_state": "ready",
                          "setup_state": "configured", "route_state": "verified",
-                         "route_ready": True, "user_action": "Open securely"})
+                         "route_ready": True, "url": auth_url, "user_action": "Open securely",
+                         "ui": {"state": "ready", "url": auth_url or None,
+                                "label": "Open securely", "authentication": "local", "reason": ""}})
         latest = next((job for job in jobs if job["service_id"] == service.id), None)
         installation = control_state.installation(service.id) if control_state else None
         initialization = control_state.initialization(service.id) if control_state else None
@@ -393,8 +396,8 @@ def _calendar_owner(request: Request, *, write: bool = False) -> tuple[dict, str
     owner_uid = str(identity_data.get("subject_id") or "")
     if not owner_uid:
         return JSONResponse({"ok": False, "error": "authenticated subject required"}, status_code=403)
-    if write and (not identity_data["writes_enabled"] or not _mutation_allowed(request)):
-        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    if write and not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "same-origin mutation verification failed"}, status_code=403)
     return identity_data, owner_uid
 
 
@@ -473,6 +476,52 @@ def calendar_events(request: Request) -> dict:
     except CalendarError as exc:
         return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
                             status_code=401 if exc.state == "authentication_expired" else 503)
+
+
+@app.post("/api/v1/calendar/events")
+async def create_calendar_event(request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        from ctl.nextcloud_calendar import CalendarError, create_event
+        return create_event(owner_uid, await request.json())
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
+                            status_code=409 if exc.state == "event_changed" else 400)
+
+
+@app.put("/api/v1/calendar/events/{event_id}")
+async def update_calendar_event(event_id: str, request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        from ctl.nextcloud_calendar import CalendarError, update_event
+        return update_event(owner_uid, event_id, await request.json())
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
+                            status_code=409 if exc.state == "event_changed" else 400)
+
+
+@app.delete("/api/v1/calendar/events/{event_id}")
+async def delete_calendar_event(event_id: str, request: Request) -> dict:
+    auth = _calendar_owner(request, write=True)
+    if isinstance(auth, JSONResponse):
+        return auth
+    _, owner_uid = auth
+    try:
+        try:
+            payload = await request.json()
+        except ValueError:
+            payload = {}
+        from ctl.nextcloud_calendar import CalendarError, delete_event
+        return delete_event(owner_uid, event_id, str(payload.get("revision", "")))
+    except CalendarError as exc:
+        return JSONResponse({"ok": False, "state": exc.state, "error": str(exc)},
+                            status_code=409 if exc.state == "event_changed" else 400)
 
 
 @app.get("/api/setup/core")
@@ -825,6 +874,43 @@ async def create_install_batch(request: Request) -> dict:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
 
 
+def _install_batch_view(batch: dict | None) -> dict:
+    """Add the current child-job state and redacted tail to the browser view.
+
+    InstallBatchStore intentionally keeps its persistence shape small for the
+    worker.  The control-plane projection can safely enrich it with the live
+    child job without exposing job paths, identities, or unredacted output.
+    """
+    if not batch:
+        return {"batch": None, "current_job": None}
+    current_item = next(
+        (item for item in batch.get("items", [])
+         if int(item.get("ordinal", -1)) == int(batch.get("current_ordinal", -1))
+         and item.get("job_id")),
+        None,
+    )
+    if current_item is None:
+        current_item = next(
+            (item for item in batch.get("items", [])
+             if item.get("state") in {"queued", "running"} and item.get("job_id")),
+            None,
+        )
+    current_job = None
+    jobs_store = JobStore.runtime()
+    if current_item and jobs_store:
+        job_id = str(current_item["job_id"])
+        job = jobs_store.get(job_id)
+        if job:
+            current_job = {
+                "id": job_id,
+                "state": str(job.get("state") or "queued"),
+                "step_id": str(job.get("step_id") or ""),
+                "detail": str(job.get("detail") or ""),
+                "events": jobs_store.events(job_id, limit=20),
+            }
+    return {"batch": batch, "current_job": current_job}
+
+
 @app.get("/api/v1/service-install-batches/{batch_id}")
 def get_install_batch(batch_id: str, request: Request) -> dict:
     identity_data = identity(request)
@@ -834,7 +920,7 @@ def get_install_batch(batch_id: str, request: Request) -> dict:
     batch = batches.get(batch_id) if batches else None
     if not batch or batch["owner_uid"] != identity_data.get("subject_id"):
         return JSONResponse({"ok": False, "error": "batch not found"}, status_code=404)
-    return {"ok": True, "batch": batch}
+    return {"ok": True, **_install_batch_view(batch)}
 
 
 @app.get("/api/v1/service-install-batches")
@@ -844,7 +930,7 @@ def latest_install_batch(request: Request) -> dict:
     if not identity_data["writes_enabled"] or not owner_uid:
         return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
     batches = InstallBatchStore.runtime()
-    return {"ok": True, "batch": batches.latest(owner_uid) if batches else None}
+    return {"ok": True, **_install_batch_view(batches.latest(owner_uid) if batches else None)}
 
 
 @app.post("/api/v1/service-install-batches/{batch_id}/resume")

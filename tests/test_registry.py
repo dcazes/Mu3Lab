@@ -45,8 +45,16 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(public_url(service, ""), "")
         self.assertEqual(public_url(service, "mu3lab.example.ts.net"), "")
         ingress = load().get("ingress")
-        self.assertEqual(public_url(ingress, "mu3lab.example.ts.net"),
-                         "https://mu3lab.example.ts.net:8446")
+        self.assertEqual(public_url(ingress, "mu3lab.example.ts.net"), "")
+
+    def test_browser_ui_contract_distinguishes_services_from_internal_apis(self):
+        registry = load()
+        self.assertFalse(registry.get("ingress").ui["available"])
+        self.assertFalse(registry.get("ollama").ui["available"])
+        self.assertTrue(registry.get("authentik").ui["available"])
+        self.assertTrue(registry.get("litellm").ui["available"])
+        self.assertTrue(registry.get("freellmapi").ui["available"])
+        self.assertTrue(registry.get("nextcloud").ui["available"])
 
     def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
         registry = load()
@@ -133,11 +141,13 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
             blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-nextcloud.yaml"
             self.assertIn("/apps/user_oidc/code", blueprint.read_text(encoding="utf-8"))
+            # A config.php is not proof of installation: Nextcloud writes it
+            # before committing the database. The installer must retry safely.
             config = paths.data / "nextcloud" / "html" / "config" / "config.php"
             config.parent.mkdir(parents=True)
             config.write_text("<?php", encoding="utf-8")
             with patch("ctl.service_ops.RuntimePaths", return_value=paths):
-                self.assertFalse(_fresh_account_storage("nextcloud"))
+                self.assertTrue(_fresh_account_storage("nextcloud"))
 
     def test_healthy_service_without_private_route_needs_setup(self):
         service = load().get("open-webui")
@@ -151,12 +161,12 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(state["route_state"], "pending")
         self.assertEqual(state["user_action"], "Private HTTPS route pending")
 
-    def test_healthy_internal_service_does_not_require_a_browser_route(self):
+    def test_healthy_litellm_dashboard_requires_its_private_route(self):
         service = load().get("litellm")
         root = Path(__file__).resolve().parents[1]
         with patch("ctl.service_state._compose_state", return_value="running"), \
              patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")):
             state = service_status(service, "", root)
-        self.assertEqual(state["lifecycle_state"], "ready")
-        self.assertEqual(state["route_state"], "not_required")
+        self.assertEqual(state["lifecycle_state"], "needs_setup")
+        self.assertEqual(state["route_state"], "pending")
         self.assertFalse(state["route_ready"])

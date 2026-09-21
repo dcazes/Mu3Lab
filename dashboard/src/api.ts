@@ -11,6 +11,7 @@ export interface Service {
   state: LifecycleState; lifecycle_state: LifecycleState; health_state: string; setup_state: string; route_state: string;
   identity_mode: string; backup_state: string; last_job_id: string; last_error: string; user_action: string;
   detail: string; url: string; route_ready: boolean; compose_present: boolean;
+  ui?: { state: 'ready' | 'route_pending' | 'unavailable'; url: string | null; label: string; authentication: string; reason: string | null };
   // These fields were added with the v1 operator surface. Keep them optional
   // while an already-running control plane is being upgraded: the static
   // dashboard can be refreshed before the Python process is restarted.
@@ -101,5 +102,8 @@ export interface ChatStatus { ok: boolean; ready: boolean; url: string; authenti
 export interface SystemConfig { ok: boolean; compute_mode: 'auto' | 'cpu' | 'nvidia' | 'amd'; resolved_compute_mode: 'cpu' | 'nvidia' | 'amd'; available_modes: string[]; updated_at: string; updated_by: string; }
 export interface InstallBatchItem { batch_id: string; service_id: string; ordinal: number; explicitly_selected: number; state: string; job_id: string; error_json?: string; started_at: string; completed_at: string; }
 export interface InstallBatch { id: string; actor: string; state: 'queued' | 'running' | 'paused' | 'succeeded' | 'cancelled'; current_ordinal: number; created_at: string; updated_at: string; error?: { code?: string; message?: string }; items: InstallBatchItem[]; }
+export interface InstallBatchEvent { id: number; job_id: string; event: string; created_at: string; detail: string; }
+export interface InstallBatchJob { id: string; state: string; step_id: string; detail: string; events: InstallBatchEvent[]; }
+export interface InstallBatchResponse { ok: boolean; batch: InstallBatch | null; current_job?: InstallBatchJob | null; }
 export interface CredentialHandoff { id: string; service_id: string; job_id: string; state: string; created_at: string; expires_at: string; login_url: string; }
 export interface CredentialReveal extends CredentialHandoff { username: string; email: string; password: string; }

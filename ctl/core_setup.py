@@ -269,6 +269,12 @@ def _configure_open_webui_identity(runtime: RuntimePaths, root: Path,
     )
     if rc:
         raise ValueError("Caddy could not activate the trusted-header policy: " + redact(output))
+    # Publish reviewed AI dashboards only after their Caddy listeners passed
+    # validation. They are not inferred from service health.
+    for private_port, proxy_port, label in ((8454, 19471, "LiteLLM"), (8455, 19472, "FreeLLMAPI")):
+        published = actions.tailscale_serve(private_port, proxy_port, log)
+        if not published.get("ok"):
+            raise ValueError(f"{label} private dashboard route could not be published")
     return origin
 
 
