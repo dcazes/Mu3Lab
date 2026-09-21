@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 from unittest.mock import patch
@@ -15,10 +16,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ctl.registry import RegistryError, load
 from ctl.backups import Retention
 from ctl.runtime import RuntimePaths
-from ctl.service_state import public_url, status as service_status
+from ctl.service_state import _compose_state, public_url, status as service_status
 
 
 class RegistryTests(unittest.TestCase):
+    def test_successful_one_shot_migration_does_not_make_app_look_stopped(self):
+        def fake_run(*_args, **_kwargs):
+            return SimpleNamespace(returncode=0, stdout=(
+                '{"State":"running","Status":"Up 10 minutes (healthy)"}\n'
+                '{"State":"exited","Status":"Exited (0) 10 minutes ago"}\n'))
+
+        self.assertEqual(_compose_state(Path('/srv/mu3lab/projects/surfsense/docker-compose.yml'), fake_run), 'running')
+
     def test_checked_in_registry_marks_surfsense_installable_and_local_account(self):
         registry = load()
         self.assertEqual(registry.get("surfsense").availability, "available")

@@ -1989,10 +1989,14 @@ def run_job(job: dict, ctx: dict) -> None:
             existing = [item for item in store.jobs()
                         if item["service_id"] == "core-suite" and item["state"] in {
                             "queued", "running", "waiting_for_confirmation", "succeeded"}]
-            if not existing:
-                start_core_setup(store, "bootstrap", ctx["root"])
+            bootstrap_root = ctx.get("root")
+            if not existing and bootstrap_root:
+                start_core_setup(store, "bootstrap", bootstrap_root)
                 ctx["emit"]({"type": "log", "id": "_install_",
                              "line": "started durable core-platform reconciliation"})
+            elif not existing and not bootstrap_root:
+                ctx["emit"]({"type": "log", "id": "_install_",
+                             "line": "core-platform launch deferred: bootstrap root unavailable"})
     except Exception as exc:  # noqa: BLE001 - dashboard exposes the durable error path
         if provisioning:
             provisioning.update("core", "failed", error="Could not launch core reconciliation.")

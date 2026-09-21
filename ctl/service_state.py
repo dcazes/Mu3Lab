@@ -114,7 +114,13 @@ def _compose_state(compose_file: Path, run=subprocess.run) -> str:
                 continue
             if isinstance(row, dict):
                 rows.append(row)
-        states = {str(row.get("State", "")).lower() for row in rows}
+        # One-shot migration containers commonly remain as Exited (0) after
+        # a successful deployment. They must not make the whole multi-service
+        # application look stopped when the long-lived containers are running.
+        long_lived = [row for row in rows
+                      if not (str(row.get("State", "")).lower() == "exited"
+                              and "exited (0)" in str(row.get("Status", "")).lower())]
+        states = {str(row.get("State", "")).lower() for row in long_lived}
     except (ValueError, TypeError):
         return "unknown"
     if states and states == {"running"}:
