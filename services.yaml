@@ -107,18 +107,18 @@ services:
     private_https_port: 8454
     proxy_port: 19471
     health: {kind: http, url: "http://127.0.0.1:4000/health/liveliness"}
-    auth: oidc
+    auth: proxy
     stage: core
     required: true
     route: pending
-    ui: {available: true, path: "/ui/", authentication: oidc}
+    ui: {available: true, path: "/ui/", authentication: proxy}
     setup_action: "Connect Ollama and optional provider routes, then run a test request."
     resource_guidance: "Low host overhead; provider and model choice determines usage."
     images: ["ghcr.io/berriai/litellm:v1.92.0"]
     update: {repository: BerriAI/litellm, current_version: v1.92.0}
     dependencies: [ollama]
     backup: {binds: [config]}
-    identity_note: "Authenticated model gateway. Its private dashboard uses Authentik sign-in."
+    identity_note: "Authentik protects the private dashboard route. LiteLLM Community does not receive a native per-user OIDC session."
     mcp: {exposed: false}
 
   - id: open-webui
@@ -274,14 +274,14 @@ services:
     private_https_port: 8449
     proxy_port: 19466
     health: {kind: http, url: "http://127.0.0.1:2283/api/server/ping"}
-    auth: local
+    auth: oidc
     stage: optional
     availability: available
     route: pending
-    ui: {available: true, authentication: proxy}
+    ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private photo management."
     resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
-    identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    identity_note: "Supports native Authentik OAuth; password login is disabled only after the existing owner is linked and verified."
     images: ["ghcr.io/immich-app/immich-server:v3.2.2", "ghcr.io/immich-app/immich-machine-learning:v3.2.2", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
     update: {repository: immich-app/immich, current_version: "v3.2.2"}
     backup: {binds: [library, database]}
@@ -339,14 +339,14 @@ services:
     private_https_port: 8451
     proxy_port: 19468
     health: {kind: http, url: "http://127.0.0.1:8015/"}
-    auth: local
+    auth: oidc
     stage: optional
     availability: available
     route: pending
-    ui: {available: true, authentication: proxy}
+    ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private travel planning."
     resource_guidance: "Lightweight service with persistent trip data."
-    identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    identity_note: "Supports native Authentik OIDC; social-only login is enabled only after the bootstrap administrator is linked."
     account:
       mode: environment_bootstrap
       handoff: true
@@ -369,14 +369,14 @@ services:
     private_https_port: 8452
     proxy_port: 19469
     health: {kind: http, url: "http://127.0.0.1:8000/api/"}
-    auth: local
+    auth: oidc
     stage: optional
     availability: available
     route: pending
-    ui: {available: true, authentication: proxy}
+    ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private document management."
     resource_guidance: "Storage and OCR usage grow with your document library."
-    identity_note: "Uses its own administrator account in the MVP; its route remains private to the tailnet."
+    identity_note: "Supports native Authentik OIDC through django-allauth; the existing document owner is preserved during migration."
     account:
       mode: environment_bootstrap
       handoff: true

@@ -63,6 +63,8 @@ class CalDavTests(unittest.TestCase):
             with patch("ctl.nextcloud_calendar.httpx.request", return_value=response):
                 result = events("owner", paths)
             self.assertEqual(result["events"][0]["title"], "Planning")
+            self.assertTrue(result["events"][0]["revision"])
+            self.assertNotEqual(result["events"][0]["revision"], '"event-one"')
             self.assertNotIn("description", result["events"][0])
             self.assertNotIn("attendees", result["events"][0])
 

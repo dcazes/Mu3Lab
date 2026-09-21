@@ -104,6 +104,9 @@ class InstallationWorkflowTests(unittest.TestCase):
                 (0, "already installed"), (0, "enabled"),
                 (0, json.dumps(app_list)), (0, "provider configured"),
                 (0, "mu3lab clientid=mu3lab-nextcloud"),
+                (0, "auto_provision enabled"),
+                (0, "soft_auto_provision enabled"),
+                (0, "Config value allow_multiple_user_backends set to 1"),
             ]
             with patch("ctl.service_ops.read_runtime_env", return_value={
                 "NEXTCLOUD_OIDC_CLIENT_ID": "mu3lab-nextcloud",

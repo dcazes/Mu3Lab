@@ -21,8 +21,10 @@ export interface Service {
   configuration?: ServiceConfigField[];
   account?: { mode: string; handoff: boolean; user_action: string };
   initialization?: { mode: string; state: string; job_id?: string; verified_at?: string; last_error?: Record<string, unknown> };
+  identity?: ServiceIdentity;
   containers?: Array<{ service: string; name: string; state: string; status: string; health: string; image: string }>;
 }
+export interface ServiceIdentity { mode: 'native_oidc' | 'trusted_header' | 'proxy_gate' | 'local' | 'none'; state: 'unconfigured' | 'configuring' | 'migration_required' | 'ready' | 'degraded' | 'unsupported'; launch_url: string; detail: string; last_verified_at: string; recovery_available: boolean; job_id: string; error?: Record<string, unknown>; }
 export interface ServiceConfigField { key: string; type: 'string' | 'boolean' | 'integer' | 'enum' | 'secret'; label?: string; required?: boolean; default?: string | boolean | number; options?: string[]; value?: string | boolean | number | null; secret_present?: boolean; }
 export interface ServiceConfigResponse { ok: boolean; service_id: string; fields: ServiceConfigField[]; restart_required?: boolean; }
 export interface ServicesResponse { ok: boolean; tailnet_dns_name: string; services: Service[]; }
@@ -40,9 +42,9 @@ export interface ProvisioningAction { kind: 'none' | 'link' | 'job' | 'bootstrap
 export interface ProvisioningResponse { ok: boolean; available: boolean; complete: boolean; phases: ProvisioningPhase[]; waiting?: ProvisioningPhase | null; blocked?: ProvisioningPhase | null; progress?: { completed: number; total: number }; next_action?: ProvisioningAction; }
 export interface ProviderCatalogItem { id: string; name: string; key_hint: string; prefix: string; instructions: string; probe_models?: string[]; example_models: string[]; }
 export interface ProviderMetadata { id: string; name: string; label: string; enabled: boolean; state: 'saved' | 'verifying' | 'verified' | 'degraded' | 'disabled' | 'unsupported_legacy'; key_hint: string; credential_indicator: string; model_samples: string[]; models_are_examples: boolean; last_attempt_at: string; last_verified_at: string; updated_at: string; active_job_id: string; error: string; error_code?: string; recommended_action?: string; routed_via?: string; supported: boolean; }
-export interface CalendarConnection { ok: boolean; state: 'not_installed' | 'not_connected' | 'connected' | 'authentication_expired' | 'unavailable'; username_hint: string; selected_calendar_id: string; calendars: Array<{ id: string; name: string }>; last_success_at: string; error: string; }
+export interface CalendarConnection { ok: boolean; state: 'not_installed' | 'service_stopped' | 'sso_not_ready' | 'not_connected' | 'awaiting_approval' | 'connected' | 'authentication_expired' | 'unavailable'; username_hint: string; selected_calendar_id: string; calendars: Array<{ id: string; name: string }>; last_success_at: string; error: string; }
 export interface CalendarAuthorization { ok: boolean; state: 'awaiting_user' | 'pending' | 'connected' | 'expired' | 'failed'; authorization_id?: string; login_url?: string; expires_at?: string; poll_after_ms?: number; connection?: CalendarConnection; error?: string; }
-export interface CalendarEvent { id: string; title: string; start: string; end: string; all_day: boolean; editable?: boolean; }
+export interface CalendarEvent { id: string; title: string; start: string; end: string; all_day: boolean; editable?: boolean; revision?: string; }
 export interface CalendarEvents { ok: boolean; state: string; calendar?: { id: string; name: string }; fetched_at?: string; events: CalendarEvent[]; error?: string; }
 export interface ProviderMetadataResponse { ok: boolean; providers: ProviderMetadata[]; }
 export interface Job { id: string; kind: string; service_id: string; action: string; state: string; actor: string; created_at: string; updated_at: string; detail: string; step_id?: string; error_code?: string; }
@@ -88,9 +90,9 @@ export async function putJsonApi<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function deleteApi<T>(path: string): Promise<T> {
+export async function deleteApi<T>(path: string, body?: unknown): Promise<T> {
   const token = await csrf();
-  const res = await fetch(path, { method: 'DELETE', headers: { Accept: 'application/json', 'Idempotency-Key': crypto.randomUUID(), 'X-Mu3Lab-CSRF': token } });
+  const res = await fetch(path, { method: 'DELETE', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID(), 'X-Mu3Lab-CSRF': token }, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!res.ok) throw new Error(await errorMessage(res, 'DELETE', path));
   return res.json() as Promise<T>;
 }

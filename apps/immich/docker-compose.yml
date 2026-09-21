@@ -6,11 +6,13 @@ services:
     restart: unless-stopped
     ports: ["127.0.0.1:2283:2283"]
     environment:
+      IMMICH_CONFIG_FILE: /config/immich-config.json
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/immich/library:/data
+      - ./immich-config.json:/config/immich-config.json:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       redis: {condition: service_healthy}

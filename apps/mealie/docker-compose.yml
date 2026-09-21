@@ -16,6 +16,9 @@ services:
       OIDC_CLIENT_SECRET: ${MEALIE_OIDC_CLIENT_SECRET:-}
       OIDC_ADMIN_GROUP: ${MEALIE_OIDC_ADMIN_GROUP:-mu3lab-operators}
       OIDC_USER_GROUP: ${MEALIE_OIDC_USER_GROUP:-mu3lab-users}
+      OIDC_AUTO_REDIRECT: ${MEALIE_OIDC_AUTO_REDIRECT:-false}
+      OIDC_REMEMBER_ME: ${MEALIE_OIDC_REMEMBER_ME:-true}
+      ALLOW_PASSWORD_LOGIN: ${MEALIE_ALLOW_PASSWORD_LOGIN:-true}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/mealie:/app/data
     networks:

@@ -189,7 +189,8 @@ class RegistryTests(unittest.TestCase):
         service = load().get("litellm")
         root = Path(__file__).resolve().parents[1]
         with patch("ctl.service_state._compose_state", return_value="running"), \
-             patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")):
+             patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")), \
+             patch("ctl.service_state._tailnet_route_present", return_value=False):
             state = service_status(service, "", root)
         self.assertEqual(state["lifecycle_state"], "needs_setup")
         self.assertEqual(state["route_state"], "pending")

@@ -278,6 +278,22 @@ metadata:
   labels:
     blueprints.goauthentik.io/instantiate: "true"
 entries:
+  - id: mu3lab-{service_id}-claims
+    model: authentik_providers_oauth2.scopemapping
+    state: present
+    identifiers:
+      name: Mu3Lab {name} verified identity claims
+    attrs:
+      name: Mu3Lab {name} verified identity claims
+      scope_name: profile
+      description: Verified email, groups, and Mu3Lab operator role
+      expression: |
+        groups = [group.name for group in request.user.ak_groups.all()]
+        return {{
+          "email_verified": bool(request.user.email),
+          "groups": groups,
+          "mu3lab_role": "admin" if "mu3lab-operators" in groups or "authentik Admins" in groups else "user",
+        }}
   - id: mu3lab-{service_id}-provider
     model: authentik_providers_oauth2.oauth2provider
     state: present
@@ -296,6 +312,7 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        - !KeyOf mu3lab-{service_id}-claims
       redirect_uris:
 {redirects}
   - model: authentik_core.application

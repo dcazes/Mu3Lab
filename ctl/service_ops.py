@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import secrets as token_secrets
 import shutil
@@ -23,7 +24,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl import workflow_secrets
 
-SUPPORTED_ACTIONS = frozenset({"install", "retry_setup", "start", "stop", "restart", "repair", "reset"})
+SUPPORTED_ACTIONS = frozenset({"install", "retry_setup", "start", "stop", "restart", "repair", "reset", "configure_identity"})
 
 
 def project_path(service: Service, root: Path) -> Path:
@@ -119,12 +120,18 @@ def _materialize(service: Service, root: Path) -> Path:
         values.setdefault("DB_PASSWORD", token_secrets.token_urlsafe(36))
         values.setdefault("DB_USERNAME", "postgres")
         values.setdefault("DB_DATABASE_NAME", "immich")
+        values.setdefault("IMMICH_OIDC_CLIENT_ID", "mu3lab-immich")
+        values.setdefault("IMMICH_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
     elif service.id == "adventurelog":
         values.setdefault("POSTGRES_PASSWORD", token_secrets.token_urlsafe(36))
         values.setdefault("SECRET_KEY", token_secrets.token_urlsafe(48))
+        values.setdefault("ADVENTURELOG_OIDC_CLIENT_ID", "mu3lab-adventurelog")
+        values.setdefault("ADVENTURELOG_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
     elif service.id == "paperless-ngx":
         values.setdefault("PAPERLESS_DBPASS", token_secrets.token_urlsafe(36))
         values.setdefault("PAPERLESS_SECRET_KEY", token_secrets.token_urlsafe(48))
+        values.setdefault("PAPERLESS_OIDC_CLIENT_ID", "mu3lab-paperless-ngx")
+        values.setdefault("PAPERLESS_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
     elif service.id == "nextcloud":
         values.setdefault("NEXTCLOUD_DB_PASSWORD", token_secrets.token_urlsafe(36))
         values.setdefault("NEXTCLOUD_REDIS_PASSWORD", token_secrets.token_urlsafe(36))
@@ -159,6 +166,9 @@ def _materialize(service: Service, root: Path) -> Path:
             values.setdefault("MEALIE_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
             values.setdefault("MEALIE_OIDC_CONFIGURATION_URL",
                               f"https://{dns_name}/application/o/mu3lab-mealie/.well-known/openid-configuration")
+            values.setdefault("MEALIE_OIDC_AUTO_REDIRECT", "false")
+            values.setdefault("MEALIE_OIDC_REMEMBER_ME", "true")
+            values.setdefault("MEALIE_ALLOW_PASSWORD_LOGIN", "true")
             from ctl.authentik_blueprints import write_oidc_application_blueprint
             write_oidc_application_blueprint(
                 RuntimePaths().root, dns_name, service_id="mealie", name="Mealie",
@@ -185,8 +195,57 @@ def _materialize(service: Service, root: Path) -> Path:
             )
         elif service.id == "adventurelog":
             values.setdefault("SITE_URL", public_url)
+            values.setdefault("ADVENTURELOG_OIDC_DISCOVERY_URL",
+                              f"https://{dns_name}/application/o/mu3lab-adventurelog/.well-known/openid-configuration")
+            values.setdefault("ADVENTURELOG_FORCE_SOCIAL_LOGIN", "false")
+            from ctl.authentik_blueprints import write_oidc_application_blueprint
+            write_oidc_application_blueprint(
+                RuntimePaths().root, dns_name, service_id="adventurelog", name="AdventureLog",
+                private_port=service.private_https_port,
+                client_id=values["ADVENTURELOG_OIDC_CLIENT_ID"],
+                client_secret=values["ADVENTURELOG_OIDC_CLIENT_SECRET"],
+                redirect_paths=("/accounts/oidc/mu3lab-adventurelog/login/callback/",),
+            )
         elif service.id == "paperless-ngx":
             values.setdefault("PAPERLESS_URL", public_url)
+            discovery = f"https://{dns_name}/application/o/mu3lab-paperless-ngx/.well-known/openid-configuration"
+            values.setdefault("PAPERLESS_APPS", "allauth.socialaccount.providers.openid_connect")
+            values.setdefault("PAPERLESS_SOCIALACCOUNT_PROVIDERS", json.dumps({
+                "openid_connect": {"APPS": [{"provider_id": "authentik", "name": "Authentik",
+                    "client_id": values["PAPERLESS_OIDC_CLIENT_ID"],
+                    "secret": values["PAPERLESS_OIDC_CLIENT_SECRET"],
+                    "settings": {"server_url": discovery}}]},
+            }, separators=(",", ":")))
+            values.setdefault("PAPERLESS_DISABLE_REGULAR_LOGIN", "false")
+            values.setdefault("PAPERLESS_REDIRECT_LOGIN_TO_SSO", "false")
+            from ctl.authentik_blueprints import write_oidc_application_blueprint
+            write_oidc_application_blueprint(
+                RuntimePaths().root, dns_name, service_id="paperless-ngx", name="Paperless-ngx",
+                private_port=service.private_https_port,
+                client_id=values["PAPERLESS_OIDC_CLIENT_ID"],
+                client_secret=values["PAPERLESS_OIDC_CLIENT_SECRET"],
+                redirect_paths=("/accounts/oidc/authentik/login/callback/",),
+            )
+        elif service.id == "immich":
+            discovery = f"https://{dns_name}/application/o/mu3lab-immich/.well-known/openid-configuration"
+            config = {"oauth": {"enabled": True, "issuerUrl": discovery,
+                                 "clientId": values["IMMICH_OIDC_CLIENT_ID"],
+                                 "clientSecret": values["IMMICH_OIDC_CLIENT_SECRET"],
+                                 "scope": "openid email profile",
+                                 "signingAlgorithm": "RS256", "autoRegister": True,
+                                 "autoLaunch": False, "buttonText": "Login with Authentik",
+                                 "roleClaim": "mu3lab_role", "mobileOverrideEnabled": False,
+                                 "mobileRedirectUri": ""}}
+            (target / "immich-config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            os.chmod(target / "immich-config.json", 0o600)
+            from ctl.authentik_blueprints import write_oidc_application_blueprint
+            write_oidc_application_blueprint(
+                RuntimePaths().root, dns_name, service_id="immich", name="Immich",
+                private_port=service.private_https_port,
+                client_id=values["IMMICH_OIDC_CLIENT_ID"],
+                client_secret=values["IMMICH_OIDC_CLIENT_SECRET"],
+                redirect_paths=("/auth/login", "/user-settings", "/api/oauth/mobile-redirect"),
+            )
         elif service.id == "nextcloud":
             values.setdefault("NEXTCLOUD_TRUSTED_DOMAINS", f"{dns_name} localhost 127.0.0.1")
             values.setdefault("NEXTCLOUD_TRUSTED_PROXIES", "127.0.0.1")
@@ -360,14 +419,97 @@ def _configure_nextcloud(project: Path, log) -> tuple[bool, str]:
     versions = ", ".join(f"{app_id} {enabled[app_id]}" for app_id in ("calendar", "user_oidc"))
     discovery = f"https://{host}/application/o/mu3lab-nextcloud/.well-known/openid-configuration"
     command = [*occ, "user_oidc:provider", "mu3lab", f"--clientid={client_id}",
-               f"--clientsecret={client_secret}", f"--discoveryuri={discovery}"]
+               f"--clientsecret={client_secret}", f"--discoveryuri={discovery}",
+               "--mapping-uid=preferred_username", "--unique-uid=0"]
     rc, output = actions.compose_exec(project, "app", command, log, timeout=120)
     if rc:
         return False, "Nextcloud could not configure its Authentik provider: " + redact(output)
     rc, output = actions.compose_exec(project, "app", [*occ, "user_oidc:provider", "mu3lab"], log, timeout=120)
     if rc or client_id not in output:
         return False, "Nextcloud did not confirm the Authentik provider configuration."
+    for key in ("auto_provision", "soft_auto_provision"):
+        rc, output = actions.compose_exec(
+            project, "app", [*occ, "config:system:set", "user_oidc", key,
+                             "--type=boolean", "--value=true"], log, timeout=120)
+        if rc:
+            return False, f"Nextcloud could not enable {key}: " + redact(output)
+    # Keep local login available during owner migration.  The identity worker
+    # changes this to SSO-only only after a real callback proves that the
+    # Authentik subject resolves to the existing administrator.
+    rc, output = actions.compose_exec(
+        project, "app", [*occ, "config:app:set", "user_oidc",
+                         "allow_multiple_user_backends", "--value=1"], log, timeout=120)
+    if rc:
+        return False, "Nextcloud could not stage its safe OIDC migration policy: " + redact(output)
     return True, f"Latest compatible Nextcloud apps enabled ({versions}); Calendar and Authentik sign-in are configured."
+
+
+def _configure_adventurelog_oidc(project: Path, log) -> tuple[bool, str]:
+    """Upsert AdventureLog's supported django-allauth SocialApp idempotently."""
+    code = (
+        "import os; from allauth.socialaccount.models import SocialApp; "
+        "from django.contrib.sites.models import Site; "
+        "cid=os.environ['ADVENTURELOG_OIDC_CLIENT_ID']; "
+        "app,_=SocialApp.objects.update_or_create(provider='openid_connect', provider_id=cid, "
+        "defaults={'name':'Authentik','client_id':cid,'secret':os.environ['ADVENTURELOG_OIDC_CLIENT_SECRET'],"
+        "'settings':{'server_url':os.environ['ADVENTURELOG_OIDC_DISCOVERY_URL']}}); "
+        "app.sites.set(Site.objects.all()); print('MU3LAB_OIDC_APP_OK')"
+    )
+    rc, output = actions.compose_exec(
+        project, "app", ["python", "manage.py", "shell", "-c", code], log, timeout=120)
+    if rc or "MU3LAB_OIDC_APP_OK" not in output:
+        return False, "AdventureLog could not confirm its Authentik SocialApp: " + redact(output)
+    return True, "AdventureLog Authentik SocialApp is configured."
+
+
+def _linked_owner_verified(service: Service, project: Path,
+                           owner: dict[str, str], log) -> bool:
+    """Read app-owned identity evidence without reading password hashes."""
+    email = str(owner.get("email", "")).strip().lower()
+    if not email:
+        return False
+    expected = hashlib.sha256(email.encode()).hexdigest()
+    if service.id == "mealie":
+        import sqlite3
+        database = RuntimePaths().data / "mealie" / "mealie.db"
+        try:
+            conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5)
+            row = conn.execute(
+                "SELECT email, admin, auth_method FROM users WHERE lower(email) = ?", (email,)
+            ).fetchone()
+            conn.close()
+        except (OSError, sqlite3.Error):
+            return False
+        return bool(row and int(row[1]) == 1 and str(row[2]).upper() == "OIDC")
+    if service.id not in {"paperless-ngx", "adventurelog"}:
+        return False
+    container = "webserver" if service.id == "paperless-ngx" else "app"
+    code = (
+        "import hashlib; from allauth.socialaccount.models import SocialAccount; "
+        "print('\\n'.join(hashlib.sha256((x.user.email or '').strip().lower().encode()).hexdigest() "
+        "for x in SocialAccount.objects.select_related('user').all() "
+        "if x.user.is_superuser and x.user.email))"
+    )
+    rc, output = actions.compose_exec(
+        project, container, ["python", "manage.py", "shell", "-c", code], log, timeout=120)
+    return rc == 0 and expected in output.splitlines()
+
+
+def _enforce_identity_settings(service: Service, project: Path) -> None:
+    values = read_runtime_env(project / ".env")
+    if service.id == "mealie":
+        values["MEALIE_OIDC_AUTO_REDIRECT"] = "true"
+        values["MEALIE_ALLOW_PASSWORD_LOGIN"] = "false"
+        values["MEALIE_ALLOW_SIGNUP"] = "false"
+    elif service.id == "paperless-ngx":
+        values["PAPERLESS_DISABLE_REGULAR_LOGIN"] = "true"
+        values["PAPERLESS_REDIRECT_LOGIN_TO_SSO"] = "true"
+    elif service.id == "adventurelog":
+        values["ADVENTURELOG_FORCE_SOCIAL_LOGIN"] = "true"
+    else:
+        return
+    (project / ".env").write_text(runtime_env_text(values), encoding="utf-8")
+    os.chmod(project / ".env", 0o600)
 
 
 def _install_nextcloud_if_needed(project: Path, log) -> tuple[bool, str]:
@@ -670,6 +812,12 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_installation(service.id, "running", job_id=job_id,
                                manifest_version="3", image_digests=image_snapshot,
                                route_state="ready")
+        from ctl.identity import mode_for
+        if mode_for(service) == "native_oidc":
+            state.set_service_identity(
+                service.id, "native_oidc", "migration_required",
+                owner_uid=str((account_identity or {}).get("owner_uid", "")), job_id=job_id,
+                detail="Open the application once through Authentik to verify owner linking before local login is disabled.")
     if fresh_account and account_identity and state:
         host = ""
         try:
@@ -758,6 +906,81 @@ def _repair(store: JobStore, state: ControlState | None, job: dict,
                      detail=f"{service.name} repaired with the current curated runtime.", step_id="complete")
 
 
+def _configure_identity(store: JobStore, state: ControlState | None, job: dict,
+                        service: Service, registry, actor: str, root: Path) -> None:
+    """Materialize identity configuration without silently claiming migration success."""
+    from ctl.identity import mode_for, reconcile_blueprints
+
+    job_id = str(job["id"])
+    mode = mode_for(service)
+    owner = workflow_secrets.job_identity(job_id) or {}
+    owner_uid = str(owner.get("owner_uid", ""))
+    store.transition(job_id, "running", actor=actor,
+                     detail=f"Reconciling sign-in for {service.name}.", step_id="identity_configuration")
+    try:
+        if mode == "native_oidc":
+            project = project_path(service, root)
+            if service.stage == "optional":
+                project = _materialize(service, root)
+            from ctl.service_state import tailnet_dns_name
+            written = reconcile_blueprints(registry, tailnet_dns_name())
+            if service.id not in written:
+                raise ValueError("The persisted OIDC client configuration is incomplete.")
+            installation = state.installation(service.id) if state else None
+            previous_identity = state.service_identity(service.id) if state else None
+            linked = bool(
+                installation and installation.get("state") == "running"
+                and previous_identity and previous_identity.get("state") == "migration_required"
+                and _linked_owner_verified(
+                    service, project, owner,
+                    lambda line: store.append_event(job_id, "log", line)))
+            if linked:
+                _enforce_identity_settings(service, project)
+            if installation and installation.get("state") == "running":
+                from ctl.compute import compose_overrides
+                rc, output = actions.compose_up(
+                    project, lambda line: store.append_event(job_id, "log", line),
+                    timeout=600, wait_timeout=300,
+                    extra_files=compose_overrides(service.id, project), recreate=True)
+                if rc:
+                    raise ValueError("The application could not apply its staged OIDC configuration: " + redact(output))
+            if service.id == "adventurelog" and installation and installation.get("state") == "running":
+                ok, configured_detail = _configure_adventurelog_oidc(
+                    project_path(service, root),
+                    lambda line: store.append_event(job_id, "log", line))
+                if not ok:
+                    raise ValueError(configured_detail)
+            detail = ("OIDC configuration is installed. Complete a real Authentik callback so Mu3Lab "
+                      "can verify the existing owner and administrator role before disabling local login.")
+            target = "ready" if linked else "migration_required"
+            if linked:
+                detail = "Verified Authentik account linking and administrator role; browser password login is disabled."
+        elif mode == "trusted_header":
+            detail = "Authentik trusted-header access is configured; live route health remains authoritative."
+            target = "ready"
+        elif mode == "proxy_gate":
+            detail = "Authentik protects this route, but the application has no native per-user OIDC session."
+            target = "ready"
+        else:
+            detail = (service.identity_note or
+                      "This application does not support Mu3Lab-managed native Authentik sign-in.")
+            target = "unsupported"
+    except (OSError, ValueError, RegistryError) as exc:
+        detail = redact(str(exc))
+        if state:
+            state.set_service_identity(service.id, mode, "degraded", owner_uid=owner_uid,
+                                       job_id=job_id, detail=detail,
+                                       error={"code": "identity_configuration_failed", "message": detail})
+        _fail(store, state, job_id, service.id, actor, "identity_configuration",
+              "identity_configuration_failed", detail)
+        return
+    if state:
+        state.set_service_identity(service.id, mode, target, owner_uid=owner_uid,
+                                   job_id=job_id, detail=detail,
+                                   verified=target == "ready")
+    store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
     job_id = str(job["id"])
     service_id = str(job.get("service_id") or "")
@@ -780,6 +1003,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         return
     if action == "repair":
         _repair(store, state, job, service, registry, actor, root)
+        return
+    if action == "configure_identity":
+        _configure_identity(store, state, job, service, registry, actor, root)
         return
     if action == "reset":
         if service.stage != "optional":
@@ -834,6 +1060,14 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             _fail(store, state, job_id, service.id, actor, "verify_application",
                   "health_check_failed", f"Application did not become healthy: {detail}")
             return
+        if service.id == "adventurelog":
+            oidc_env = read_runtime_env(project / ".env")
+            if oidc_env.get("ADVENTURELOG_OIDC_CLIENT_ID"):
+                configured, detail = _configure_adventurelog_oidc(project, log)
+                if not configured:
+                    _fail(store, state, job_id, service.id, actor, "identity_configuration",
+                          "identity_configuration_failed", detail)
+                    return
     if state:
         state.set_installation(service.id, target_state, job_id=job_id,
                                route_state="ready")

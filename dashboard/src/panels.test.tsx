@@ -36,6 +36,17 @@ describe('dashboard organization', () => {
       .toEqual(['Productivity apps', 'AI Integration', 'Foundation', 'Blocked and planned']);
   });
 
+  it('does not present unverified native OIDC as a working launch', () => {
+    const identityServices = services.map(item => ({ ...item }));
+    const nextcloud = identityServices.find(item => item.id === 'nextcloud')!;
+    nextcloud.identity = { mode: 'native_oidc', state: 'unconfigured', launch_url: 'https://example:8453',
+      detail: 'Native sign-in is not verified.', last_verified_at: '', recovery_available: true, job_id: '' };
+    render(<HomePanel services={identityServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
+    expect(screen.getByRole('button', { name: 'Repair sign-in' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open with Authentik/ })).not.toBeInTheDocument();
+  });
+
   it('reconciles a completed reset when its response is lost', async () => {
     const batch = { id: 'batch', actor: 'operator', state: 'cancelled' as const, current_ordinal: 0,
       created_at: '', updated_at: '', items: [{ batch_id: 'batch', service_id: 'nextcloud', ordinal: 0,

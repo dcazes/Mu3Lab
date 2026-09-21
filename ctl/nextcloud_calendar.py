@@ -26,6 +26,7 @@ _CACHE: dict[str, tuple[datetime, dict]] = {}
 _EVENT_CACHE: dict[str, tuple[datetime, dict[str, dict[str, str]]]] = {}
 _AUTHORIZATIONS: dict[str, dict[str, str | float]] = {}
 _AUTH_LOCK = threading.RLock()
+_VERIFIED_GROUPS: dict[str, list[str]] = {}
 _AUTH_TTL_SECONDS = 20 * 60
 
 
@@ -80,12 +81,29 @@ def _canonical_username(username: str, app_password: str) -> str:
         raise CalendarError("authentication_expired", "Nextcloud rejected the generated app credential.")
     try:
         value = response.json()
-        canonical = str(value["ocs"]["data"]["id"])
+        profile = value["ocs"]["data"]
+        canonical = str(profile["id"])
+        groups = [str(item) for item in profile.get("groups", [])]
     except (TypeError, ValueError, KeyError) as exc:
         raise CalendarError("unavailable", "Nextcloud did not identify the signed-in calendar user.") from exc
     if not canonical or len(canonical) > 256:
         raise CalendarError("unavailable", "Nextcloud returned an invalid calendar user identifier.")
+    with _AUTH_LOCK:
+        _VERIFIED_GROUPS[canonical] = groups
     return canonical
+
+
+def _enforce_sso_only(paths: RuntimePaths) -> bool:
+    """Disable browser password login only after owner/admin evidence exists."""
+    from ctl import actions
+
+    project = paths.projects / "nextcloud"
+    if not (project / "docker-compose.yml").is_file():
+        return False
+    command = ["runuser", "-u", "www-data", "--", "php", "occ", "config:app:set",
+               "--type=string", "--value=0", "user_oidc", "allow_multiple_user_backends"]
+    rc, _output = actions.compose_exec(project, "app", command, lambda _line: None, timeout=120)
+    return rc == 0
 
 
 def start_authorization(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
@@ -173,9 +191,20 @@ def poll_authorization(owner_uid: str, authorization_id: str,
     canonical = _canonical_username(login_name, app_password)
     try:
         result = connect(owner_uid, canonical, app_password, paths)
+        state = ControlState.runtime(paths)
+        initialization = state.initialization("nextcloud") if state else None
+        with _AUTH_LOCK:
+            groups = _VERIFIED_GROUPS.pop(canonical, [])
+        if (state and initialization and initialization.get("owner_uid") == owner_uid
+                and "admin" in groups and _enforce_sso_only(paths)):
+            state.set_service_identity(
+                "nextcloud", "native_oidc", "ready", owner_uid=owner_uid,
+                detail="Authentik owner, Nextcloud administrator role, and CalDAV access verified.",
+                verified=True)
     finally:
         # The password must never remain in the temporary approval record.
         with _AUTH_LOCK:
+            _VERIFIED_GROUPS.pop(canonical, None)
             _AUTHORIZATIONS.pop(authorization_id, None)
     return {"ok": True, "state": "connected", "connection": result}
 
@@ -268,6 +297,7 @@ def select(owner_uid: str, calendar_id: str, state: ControlState) -> dict:
         raise CalendarError("not_connected", "Select a calendar returned by Nextcloud discovery.")
     state.set_calendar_connection(owner_uid, metadata["username_hint"], metadata["calendars"], calendar_id)
     _CACHE.pop(owner_uid, None)
+    _EVENT_CACHE.pop(owner_uid, None)
     return public_connection(owner_uid, state)
 
 
@@ -306,6 +336,11 @@ def _iso(value) -> tuple[str, bool]:
 def _event_id(uid: str, occurrence: str = "") -> str:
     """Opaque per-occurrence ID; recurring instances must not collide."""
     return hashlib.sha256(f"{uid}|{occurrence}".encode()).hexdigest()[:20]
+
+
+def _revision(etag: str) -> str:
+    """Do not expose a server ETag while retaining optimistic concurrency."""
+    return hashlib.sha256(etag.encode()).hexdigest()[:24] if etag else ""
 
 
 def _calendar_context(owner_uid: str, paths: RuntimePaths) -> tuple[ControlState, dict, dict, dict]:
@@ -417,7 +452,8 @@ def events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
             rows.append({"id": event_id,
                          "title": str(event.get("SUMMARY", "Untitled event"))[:256],
                          "start": start, "end": finish, "all_day": all_day,
-                         "editable": not recurring})
+                         "editable": not recurring,
+                         "revision": _revision(resources[event_id]["etag"]) if not recurring else ""})
     rows.sort(key=lambda item: item["start"])
     result = {"ok": True, "state": "connected",
               "calendar": {"id": calendar["id"], "name": calendar["name"]},
@@ -455,7 +491,7 @@ def update_event(owner_uid: str, event_id: str, payload: dict, paths: RuntimePat
     if resource.get("editable") != "true":
         raise CalendarError("recurring_event", "Recurring events must be edited in Nextcloud Calendar.")
     revision = str(payload.get("revision", ""))
-    if revision and revision != resource["etag"]:
+    if not revision or revision != _revision(resource["etag"]):
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before saving.")
     response = _dav("PUT", resource["href"], secret, content=_write_ical(payload, resource["uid"]),
                     headers={"Content-Type": "text/calendar", "If-Match": resource["etag"] or "*"})
@@ -471,7 +507,7 @@ def delete_event(owner_uid: str, event_id: str, revision: str = "", paths: Runti
     secret, resource = _resource(owner_uid, event_id, paths)
     if resource.get("editable") != "true":
         raise CalendarError("recurring_event", "Recurring events must be deleted in Nextcloud Calendar.")
-    if revision and revision != resource["etag"]:
+    if not revision or revision != _revision(resource["etag"]):
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before deleting.")
     response = _dav("DELETE", resource["href"], secret, headers={"If-Match": resource["etag"] or "*"})
     if response.status_code == 412:

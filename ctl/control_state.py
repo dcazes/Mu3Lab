@@ -29,6 +29,10 @@ INITIALIZATION_STATES = frozenset({
     "existing_account", "failed",
 })
 PROVIDER_STATES = frozenset({"saved", "verifying", "verified", "degraded", "disabled", "unsupported_legacy"})
+IDENTITY_MODES = frozenset({"native_oidc", "trusted_header", "proxy_gate", "local", "none"})
+IDENTITY_STATES = frozenset({
+    "unconfigured", "configuring", "migration_required", "ready", "degraded", "unsupported",
+})
 
 
 def _now() -> str:
@@ -128,6 +132,17 @@ class ControlState:
                 last_success_at TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS service_identity_state (
+                service_id TEXT PRIMARY KEY,
+                mode TEXT NOT NULL,
+                state TEXT NOT NULL,
+                owner_uid TEXT NOT NULL DEFAULT '',
+                last_job_id TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '',
+                last_error_json TEXT NOT NULL DEFAULT '{}',
+                last_verified_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
         """)
         return conn
 
@@ -204,6 +219,46 @@ class ControlState:
         with self._connect() as conn:
             conn.execute("DELETE FROM calendar_connections WHERE owner_uid = ?", (owner_uid,))
 
+    def service_identity(self, service_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM service_identity_state WHERE service_id = ?", (service_id,)
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["last_error"] = json.loads(result.pop("last_error_json"))
+        except (TypeError, ValueError):
+            result["last_error"] = {}
+        return result
+
+    def set_service_identity(self, service_id: str, mode: str, state: str, *,
+                             owner_uid: str = "", job_id: str = "", detail: str = "",
+                             error: dict[str, Any] | None = None,
+                             verified: bool = False) -> dict[str, Any]:
+        if not service_id or mode not in IDENTITY_MODES or state not in IDENTITY_STATES:
+            raise ValueError("invalid service identity state")
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("""
+                INSERT INTO service_identity_state
+                (service_id, mode, state, owner_uid, last_job_id, detail,
+                 last_error_json, last_verified_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(service_id) DO UPDATE SET
+                    mode = excluded.mode, state = excluded.state,
+                    owner_uid = CASE WHEN excluded.owner_uid != '' THEN excluded.owner_uid
+                        ELSE service_identity_state.owner_uid END,
+                    last_job_id = excluded.last_job_id, detail = excluded.detail,
+                    last_error_json = excluded.last_error_json,
+                    last_verified_at = CASE WHEN excluded.last_verified_at != ''
+                        THEN excluded.last_verified_at ELSE service_identity_state.last_verified_at END,
+                    updated_at = excluded.updated_at
+            """, (service_id, mode, state, owner_uid, job_id, detail,
+                  json.dumps(error or {}, sort_keys=True), now if verified else "", now))
+        return self.service_identity(service_id) or {}
+
     def installation(self, service_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -234,6 +289,7 @@ class ControlState:
             conn.execute("DELETE FROM service_installations WHERE service_id = ?", (service_id,))
             conn.execute("DELETE FROM service_initializations WHERE service_id = ?", (service_id,))
             conn.execute("DELETE FROM credential_handoffs WHERE service_id = ?", (service_id,))
+            conn.execute("DELETE FROM service_identity_state WHERE service_id = ?", (service_id,))
 
     def provider(self, provider_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:

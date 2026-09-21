@@ -66,6 +66,14 @@ def _reconcile_provisioning_on_startup() -> None:
     store = ProvisioningStore.runtime()
     if store:
         store.reconcile_runtime()
+    # Recover deleted/missed optional OIDC blueprints from persisted runtime
+    # secrets.  This is file-only reconciliation: no image pull, Compose
+    # recreation, account creation, or credential rotation occurs here.
+    try:
+        from ctl.identity import reconcile_blueprints
+        reconcile_blueprints(load_registry(), tailnet_dns_name())
+    except (OSError, RegistryError, ValueError):
+        pass
 
 
 def _ingress_token() -> str:
@@ -213,6 +221,8 @@ def _service_snapshot(request: Request | None = None) -> dict:
         else:
             item["recommended_action"] = "none"
         item["allowed_actions"] = allowed_actions(service, str(item["state"])) if operator else []
+        from ctl.identity import projection as identity_projection
+        item["identity"] = identity_projection(service, item, control_state)
         result.append(item)
     return {"ok": True, "version": __version__, "tailnet_dns_name": dns_name,
             "runtime": RuntimePaths().as_dict(), "services": result}
@@ -434,6 +444,31 @@ def _calendar_owner(request: Request, *, write: bool = False) -> tuple[dict, str
     return identity_data, owner_uid
 
 
+def _calendar_readiness(state: ControlState) -> str:
+    installation = state.installation("nextcloud")
+    if not installation:
+        return "not_installed"
+    if installation.get("state") == "stopped":
+        return "service_stopped"
+    if installation.get("state") not in {"running", "degraded"}:
+        return "not_installed"
+    identity_state = state.service_identity("nextcloud")
+    if not identity_state or identity_state.get("state") in {"unconfigured", "degraded"}:
+        return "sso_not_ready"
+    return "ready"
+
+
+def _calendar_state_response(value: str) -> dict:
+    detail = {
+        "service_stopped": "Nextcloud is installed but stopped.",
+        "sso_not_ready": "Repair Nextcloud sign-in before connecting a calendar.",
+        "not_installed": "Install Nextcloud before connecting a calendar.",
+    }.get(value, "Calendar is unavailable.")
+    return {"ok": True, "state": value, "username_hint": "",
+            "selected_calendar_id": "", "calendars": [],
+            "last_success_at": "", "error": detail}
+
+
 @app.get("/api/v1/calendar/connection")
 def calendar_connection(request: Request) -> dict:
     auth = _calendar_owner(request)
@@ -443,10 +478,9 @@ def calendar_connection(request: Request) -> dict:
     state = ControlState.runtime()
     if state is None:
         return JSONResponse({"ok": False, "error": "calendar state is unavailable"}, status_code=503)
-    installation = state.installation("nextcloud")
-    if not installation or installation.get("state") not in {"running", "stopped", "degraded"}:
-        return {"ok": True, "state": "not_installed", "username_hint": "",
-                "selected_calendar_id": "", "calendars": [], "last_success_at": "", "error": ""}
+    readiness = _calendar_readiness(state)
+    if readiness != "ready":
+        return _calendar_state_response(readiness)
     from ctl.nextcloud_calendar import public_connection
     return public_connection(owner_uid, state)
 
@@ -476,6 +510,15 @@ def start_calendar_authorization(request: Request) -> dict:
     if isinstance(auth, JSONResponse):
         return auth
     _, owner_uid = auth
+    state = ControlState.runtime()
+    if state is None:
+        return JSONResponse({"ok": False, "error": "calendar state is unavailable"}, status_code=503)
+    readiness = _calendar_readiness(state)
+    # Login Flow v2 is the live callback used to finish a safely staged owner
+    # migration, so migration_required is intentionally permitted here.
+    identity_state = state.service_identity("nextcloud") or {}
+    if readiness != "ready" and identity_state.get("state") != "migration_required":
+        return JSONResponse(_calendar_state_response(readiness), status_code=409)
     try:
         from ctl.nextcloud_calendar import CalendarError, start_authorization
         return JSONResponse(start_authorization(owner_uid), status_code=202)
@@ -544,6 +587,13 @@ def calendar_events(request: Request) -> dict:
     if isinstance(auth, JSONResponse):
         return auth
     _, owner_uid = auth
+    state = ControlState.runtime()
+    if state is None:
+        return JSONResponse({"ok": False, "state": "unavailable", "error": "calendar state is unavailable"}, status_code=503)
+    readiness = _calendar_readiness(state)
+    if readiness != "ready":
+        return {"ok": True, "state": readiness, "events": [],
+                "error": _calendar_state_response(readiness)["error"]}
     try:
         from ctl.nextcloud_calendar import CalendarError, events
         return events(owner_uid)
@@ -915,6 +965,50 @@ async def service_action(service_id: str, request: Request) -> dict:
                              error_code="bootstrap_contract_unavailable",
                              step_id="account_preflight")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/v1/services/{service_id}/identity/reconcile")
+def reconcile_service_identity(service_id: str, request: Request) -> dict:
+    """Queue bounded identity configuration without disguising it as repair."""
+    identity_data = identity(request)
+    if not identity_data["writes_enabled"] or not _mutation_allowed(request):
+        return JSONResponse({"ok": False, "error": "operator mutation verification failed"}, status_code=403)
+    if not identity_data.get("subject_id") or not identity_data.get("email"):
+        return JSONResponse({"ok": False, "error": "A verified Authentik subject and email are required."}, status_code=409)
+    try:
+        service = load_registry().get(service_id)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
+    if service.is_blocked:
+        return JSONResponse({"ok": False, "error": service.blocked_reason}, status_code=409)
+    store = JobStore.runtime()
+    control = ControlState.runtime()
+    if store is None or control is None:
+        return JSONResponse({"ok": False, "error": "runtime state is unavailable"}, status_code=503)
+    active = next((job for job in store.jobs() if job["service_id"] == service_id
+                   and job["action"] == "configure_identity"
+                   and job["state"] in {"queued", "running"}), None)
+    if active:
+        return {"ok": True, "duplicate": True, "job": active}
+    job = store.create(kind="lifecycle", service_id=service_id, action="configure_identity",
+                       actor=str(identity_data["username"]),
+                       detail=f"Operator requested sign-in reconciliation for {service.name}.",
+                       idempotency_key=request.headers.get("idempotency-key") or None)
+    try:
+        workflow_secrets.save_job_identity(
+            str(job["id"]), owner_uid=str(identity_data["subject_id"]),
+            email=str(identity_data["email"]), username=str(identity_data["username"]),
+            display_name=str(identity_data.get("display_name") or identity_data["username"]))
+    except workflow_secrets.WorkflowSecretError as exc:
+        store.transition(str(job["id"]), "failed", actor=str(identity_data["username"]),
+                         detail="Encrypted identity handoff storage is unavailable.",
+                         error_code="identity_contract_unavailable", step_id="identity_preflight")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    from ctl.identity import mode_for
+    control.set_service_identity(service_id, mode_for(service), "configuring",
+                                 owner_uid=str(identity_data["subject_id"]),
+                                 job_id=str(job["id"]), detail="Sign-in reconciliation is queued.")
     return {"ok": True, "job": job}
 
 
