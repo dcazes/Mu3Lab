@@ -84,10 +84,23 @@ class McpActivity:
                        (server_id, tool_name, actor, outcome, created_at, source_ref))
 
     def permission(self, server_id: str, tool_name: str, risk: str) -> str:
-        with self._db() as db:
-            row = db.execute("SELECT permission FROM tool_permissions WHERE server_id=? AND tool_name=?",
-                             (server_id, tool_name)).fetchone()
-        return str(row[0]) if row else ("auto" if risk == "read" else "needs_approval")
+        default = "auto" if risk == "read" else "needs_approval"
+        # Dashboard snapshots are read-only and can run before bootstrap has
+        # created /srv/mu3lab. Do not create a persistent runtime tree just to
+        # project a default permission into those responses.
+        if not self.path.is_file():
+            return default
+        try:
+            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
+            try:
+                row = db.execute(
+                    "SELECT permission FROM tool_permissions WHERE server_id=? AND tool_name=?",
+                    (server_id, tool_name)).fetchone()
+            finally:
+                db.close()
+        except (OSError, sqlite3.Error):
+            return default
+        return str(row[0]) if row else default
 
     def set_permission(self, server_id: str, tool_name: str, permission: str) -> None:
         if permission not in {"auto", "needs_approval", "disabled"}:

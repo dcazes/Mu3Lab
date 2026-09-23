@@ -30,7 +30,8 @@ class ServiceOperationTests(unittest.TestCase):
                                    action="start", actor="owner")
             claimed = store.claim("worker")
             assert claimed is not None
-            with patch("ctl.service_ops.actions.compose_action", return_value=(0, "started")) as action:
+            with patch("ctl.service_ops.actions.compose_action", return_value=(0, "started")) as action, \
+                 patch("ctl.service_ops._wait_healthy", return_value=(True, "HTTP 200")):
                 execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
             project, verb, _logger = action.call_args.args
             self.assertEqual(project.name, "ollama")
