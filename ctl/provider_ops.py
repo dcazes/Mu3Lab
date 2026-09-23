@@ -95,11 +95,12 @@ def _probe_candidates(provider_id: str, available: list[str]) -> list[str]:
     return result
 
 
-def _probe_stream(model: str, key: str) -> StreamProbe:
+def _probe_stream(model: str, key: str, *, gateway: str = "FreeLLMAPI",
+                  url: str = "http://127.0.0.1:3001/v1/chat/completions") -> StreamProbe:
     payload = {"model": model, "messages": [{"role": "user", "content": "Reply with OK."}],
                "max_tokens": 4, "temperature": 0, "stream": True}
     request = urllib.request.Request(
-        "http://127.0.0.1:3001/v1/chat/completions", method="POST",
+        url, method="POST",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Accept": "text/event-stream", "Content-Type": "application/json",
                  "Authorization": f"Bearer {key}"},
@@ -127,7 +128,7 @@ def _probe_stream(model: str, key: str) -> StreamProbe:
                         continue
             if not completed:
                 return StreamProbe(False, response.status, routed, model, "stream_failed",
-                                   "FreeLLMAPI opened a stream but did not complete it.")
+                                   f"{gateway} opened a stream but did not complete it.")
             return StreamProbe(True, response.status, routed, model, "", "Stream completed.")
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
@@ -138,11 +139,28 @@ def _probe_stream(model: str, key: str) -> StreamProbe:
             detail = "The provider is currently rate limited or out of quota."
         else:
             code = "stream_failed"
-            detail = f"FreeLLMAPI returned HTTP {exc.code} during the streamed probe."
+            detail = f"{gateway} returned HTTP {exc.code} during the streamed probe."
         return StreamProbe(False, exc.code, exc.headers.get("X-Routed-Via", ""), model, code, detail)
     except (OSError, urllib.error.URLError):
         return StreamProbe(False, 0, "", model, "gateway_unavailable",
-                           "FreeLLMAPI was unavailable during provider verification.")
+                           f"{gateway} was unavailable during provider verification.")
+
+
+def _groq_access_diagnostic() -> tuple[int, str]:
+    """Use Groq's read-only models endpoint to explain opaque gateway 502s."""
+    key = next((item["api_key"] for item in records() if item["id"] == "groq"), "")
+    if not key:
+        return 0, "No saved Groq credential was found."
+    request = urllib.request.Request(
+        "https://api.groq.com/openai/v1/models",
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status, "Groq accepted the key for model discovery."
+    except urllib.error.HTTPError as exc:
+        return exc.code, f"Groq's models endpoint returned HTTP {exc.code}."
+    except (OSError, urllib.error.URLError):
+        return 0, "Groq's models endpoint was unreachable."
 
 
 def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
@@ -175,13 +193,16 @@ def _verify(provider_id: str, root: Path, log) -> StreamProbe:
         available = set(_available_models(key))
     except ModelCatalogUnavailable as exc:
         return StreamProbe(False, 0, "", "", "gateway_unavailable", str(exc))
-    candidates = _probe_candidates(provider_id, available)
+    candidates = _probe_candidates(provider_id, list(available))
     if not candidates:
         return StreamProbe(False, 200, "", "", "catalog_mismatch",
                            "None of Mu3Lab's curated probe models are present in this FreeLLMAPI catalog.")
     last = StreamProbe(False, 0, "", "", "stream_failed", "No provider probe completed.")
     for model in candidates:
+        log(f"FreeLLMAPI probe: {model}")
         probe = _probe_stream(model, key)
+        log(f"FreeLLMAPI probe result: HTTP {probe.http_status or 'unavailable'}, "
+            f"route {probe.routed_via or 'unreported'}, {probe.error_code or 'complete'}")
         last = probe
         if not probe.success:
             if probe.error_code in {"credential_rejected", "rate_limited_or_quota", "gateway_unavailable"}:
@@ -189,11 +210,37 @@ def _verify(provider_id: str, root: Path, log) -> StreamProbe:
             continue
         routed_provider = probe.routed_via.split("/", 1)[0].strip().lower()
         if routed_provider == provider_id:
-            return StreamProbe(True, probe.http_status, probe.routed_via, model, "",
-                               f"Streamed routing passed through {probe.routed_via}.")
+            lite_key = read_runtime_env(RuntimePaths().projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
+            if not lite_key:
+                return StreamProbe(False, 0, probe.routed_via, model, "litellm_unavailable",
+                                   "LiteLLM master key is missing after reconciliation.")
+            log("LiteLLM probe: mu3lab-chat")
+            end_to_end = _probe_stream("mu3lab-chat", lite_key, gateway="LiteLLM",
+                                        url="http://127.0.0.1:4000/v1/chat/completions")
+            log(f"LiteLLM probe result: HTTP {end_to_end.http_status or 'unavailable'}, "
+                f"{end_to_end.error_code or 'complete'}")
+            if not end_to_end.success:
+                return StreamProbe(False, end_to_end.http_status, probe.routed_via, model,
+                                   "litellm_route_failed", end_to_end.detail)
+            if end_to_end.routed_via and end_to_end.routed_via.split("/", 1)[0].strip().lower() != provider_id:
+                return StreamProbe(False, end_to_end.http_status, end_to_end.routed_via, model,
+                                   "provider_route_mismatch",
+                                   f"LiteLLM completed through {end_to_end.routed_via}, not {provider_id}.")
+            return StreamProbe(True, end_to_end.http_status, probe.routed_via, model, "",
+                               f"{provider_id} routed via {probe.routed_via}; LiteLLM streamed mu3lab-chat successfully."
+                               + (" LiteLLM did not expose upstream provider attribution." if not end_to_end.routed_via else ""))
         last = StreamProbe(False, probe.http_status, probe.routed_via, model,
                            "provider_route_mismatch",
                            f"The test completed through {probe.routed_via or 'an unidentified provider'}, not {provider_id}.")
+    if provider_id == "groq" and not last.routed_via and last.error_code == "stream_failed":
+        status, diagnostic = _groq_access_diagnostic()
+        log(diagnostic)
+        if status in {401, 403}:
+            return StreamProbe(False, status, "", last.model, "upstream_access_denied",
+                               diagnostic + " Check the Groq key and account access.")
+        if status == 429:
+            return StreamProbe(False, status, "", last.model, "rate_limited_or_quota",
+                               diagnostic + " Check Groq quota or rate limits.")
     return last
 
 
@@ -257,8 +304,11 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
     else:
         recommendations = {
             "credential_rejected": "Replace the rejected key, then verify again.",
+            "upstream_access_denied": "Check the Groq credential and account access, then verify again.",
             "rate_limited_or_quota": "Check provider quota or wait for its rate limit to reset, then verify again.",
             "gateway_unavailable": "Confirm FreeLLMAPI is healthy, then verify again.",
+            "litellm_unavailable": "Confirm LiteLLM is healthy and its runtime credential is configured.",
+            "litellm_route_failed": "Check the LiteLLM job logs and its FreeLLMAPI route, then verify again.",
             "catalog_mismatch": "Review the provider's suggested models or update the curated catalog.",
             "provider_route_mismatch": "Disable competing routes for this model, then verify this provider again.",
             "stream_failed": "Open the verification job details, then retry the streamed check.",

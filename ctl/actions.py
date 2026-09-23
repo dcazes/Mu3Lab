@@ -86,6 +86,22 @@ def docker_cmd(argv: list[str], log: Callable[[str], None],
     return privilege._exec(command, timeout=timeout, env=command_env)
 
 
+def docker_cmd_stdin(argv: list[str], data: str, log: Callable[[str], None],
+                     timeout: int = 60) -> tuple[int, str]:
+    """Send private SQL/configuration over stdin without logging its contents."""
+    log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
+    command = _docker_invocation(argv)
+    if command is None:
+        return 1, "docker unavailable: no live group and no DB membership"
+    try:
+        proc = _subprocess.run(command, input=data, text=True, capture_output=True,
+                               timeout=timeout,
+                               env={**_os.environ, **_docker_config_env()})
+        return proc.returncode, (proc.stdout + proc.stderr).strip()
+    except (_subprocess.TimeoutExpired, OSError) as exc:
+        return 1, str(exc)
+
+
 def _docker_invocation(argv: list[str]) -> list[str] | None:
     """Return the direct/``sg`` Docker command without running it.
 

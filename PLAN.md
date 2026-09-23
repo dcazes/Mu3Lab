@@ -65,7 +65,8 @@ checked before being marked verified.
    to the React control plane.
 4. Deliver the mandatory AI slice: Ollama, FreeLLMAPI, LiteLLM, and Open WebUI.
    SurfSense is an optional Authentik-gated app with a separate local account;
-   Firecrawl remains blocked until its deployment contract is complete.
+   Firecrawl is an optional private AI integration with a complete API, worker,
+   Playwright, RabbitMQ, Redis, PostgreSQL, route, backup, and lifecycle contract.
 5. Add optional curated applications one at a time only after their manifest,
    auth classification, health checks, storage/backup plan, resource profile,
    integration verification, and MCP policy are complete.

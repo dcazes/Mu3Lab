@@ -206,24 +206,57 @@ services:
       user_action: "Open SurfSense after installation and create its separate local account."
 
   - id: firecrawl
-    maturity: planned
+    maturity: supported
     name: Firecrawl
     category: research
-    lifecycle: shared
+    lifecycle: optional
     compose_dir: apps/firecrawl
     https_port: 3002
+    private_https_port: 8456
+    proxy_port: 19473
     health: {kind: http, url: "http://127.0.0.1:3002/"}
     auth: excluded
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Planned: the full worker, Playwright, queue, database, backup, and real-scrape contract is not yet implemented."
+    stage: optional
+    availability: available
     required: false
     route: pending
     dependencies: []
-    setup_action: "Verify the local crawler service for SurfSense."
-    resource_guidance: "Browser and queue sidecars can use substantial memory during crawls."
-    images: ["ghcr.io/firecrawl/firecrawl:2.11.334-production", "postgres:16.4-alpine", "redis:7.4-alpine"]
-    backup: {binds: [data]}
+    ui: {available: true, authentication: excluded}
+    identity_note: "Firecrawl is an API service with no application login. Its route remains private to the tailnet."
+    setup_action: "Install the private Firecrawl API, queue workers, Playwright browser service, and durable data services."
+    resource_guidance: "Runs Firecrawl workers, Playwright, RabbitMQ, PostgreSQL, and Redis. Browser crawls can use substantial memory; concurrency defaults are intentionally conservative."
+    images: ["ghcr.io/firecrawl/firecrawl:2.11.334-production@sha256:70453d7102cce7000f4e8e80bd11e3e1353cdc9a0b87bb4cd1d4e8edf5a65744", "ghcr.io/firecrawl/playwright-service@sha256:df1a393ce8bfc3801570a826a9b0dcc400ae48789adb4a0ad9d6cbf0229b059b", "ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc", "rabbitmq:3.13-alpine@sha256:d7af1c87c5f1eda13fcfca06db452bf3aeab6619fc3358b68535c0c02c4e52bc", "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"]
+    update: {repository: firecrawl/firecrawl, current_version: "v2.11.0"}
+    backup: {database: firecrawl, binds: [postgres, redis, rabbitmq]}
+    account: {mode: none, handoff: false, user_action: "No login is required on the private Firecrawl API route."}
+
+  - id: lobehub
+    maturity: supported
+    name: LobeChat
+    category: ai
+    lifecycle: optional
+    compose_dir: apps/lobehub
+    https_port: 3211
+    private_https_port: 8457
+    proxy_port: 19474
+    health: {kind: http, url: "http://127.0.0.1:3211/__mu3lab_lobehub_health"}
+    auth: oidc
+    stage: optional
+    availability: available
+    required: false
+    route: pending
+    dependencies: [litellm, authentik]
+    ui: {available: true, authentication: oidc}
+    identity_note: "LobeChat uses its own Authentik OIDC session and persists conversations in its private database."
+    setup_action: "Install LobeChat alongside Open WebUI, connect it to LiteLLM, and sign in with Authentik."
+    resource_guidance: "Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk use."
+    images: ["lobehub/lobehub:2.2.18@sha256:b7c843911259c54c92f03864d9dd2e9099e18525de1d37498b64cc15751d087d", "paradedb/paradedb:0.25.9-pg17@sha256:8da5d202fe31875af32a49e802ce17cfbc146b0672306f4109809efee1e6f916", "redis:8-alpine@sha256:ba6e394f6acc2a695ef1b6944f161b9ca813711739be68319fa0db3470673f1d", "rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff", "rustfs/rc:v0.1.36@sha256:ab024bfebee49a750ce886b4c70963ccd9ddaa03f491704a90710641d7a26699", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
+    update: {repository: lobehub/lobehub, current_version: "v2.2.18"}
+    backup: {database: lobehub, binds: [postgres, redis, object-store]}
+    account:
+      mode: oidc_first_login
+      handoff: false
+      user_action: "Use the existing Authentik session; local email/password registration is disabled."
 
   - id: actual-budget
     maturity: supported
@@ -315,7 +348,7 @@ services:
     update: {repository: mealie-recipes/mealie, current_version: "v3.22.0"}
     mcp:
       kind: adapter
-      endpoint: http://127.0.0.1:8814/mcp
+      endpoint: http://mealie-mcp:8000/mcp
       auth: api-token
       scopes: [recipes-read, shopping-read, shopping-write]
       exposed: false
@@ -414,3 +447,30 @@ services:
       mode: environment_bootstrap
       handoff: true
       user_action: "Use Authentik normally and save the generated recovery administrator credential."
+
+  - id: homarr
+    maturity: supported
+    name: Homarr
+    category: dashboard
+    lifecycle: optional
+    compose_dir: apps/homarr
+    https_port: 7575
+    private_https_port: 8458
+    proxy_port: 19475
+    health: {kind: http, url: "http://127.0.0.1:7575/api/health/live"}
+    auth: oidc
+    stage: optional
+    availability: available
+    required: false
+    route: pending
+    ui: {available: true, authentication: oidc}
+    setup_action: "Install Homarr as an alternate dashboard, complete the Authentik sign-in, then arrange the generated app tiles and widgets."
+    resource_guidance: "Lightweight dashboard with persistent boards. Native Homarr status and action widgets list curated services and queue Mu3Lab's audited whole-stack start or stop jobs. The separate Docker inspector remains available for low-level container diagnostics."
+    identity_note: "Homarr signs in through Authentik OIDC and synchronizes group claims. App lifecycle mutations are sent to Mu3Lab's Authentik-verified API; direct Docker access stays isolated behind a socket proxy with general POST, restart, removal, and other Docker mutations disabled."
+    images: ["ghcr.io/homarr-labs/homarr-test:v2@sha256:b5fd9296016566205ad7a0d3ec8003fdb1b2e239956d7d4b148998bddb8d1c2b", "lscr.io/linuxserver/socket-proxy:3.4.4@sha256:a8c700baae19c2fff5b2940b21a748e78cf3b91cc311ad65f990efabdd1361eb"]
+    update: {repository: homarr-labs/homarr, current_version: "v2 preview"}
+    backup: {binds: [appdata]}
+    account:
+      mode: oidc_first_login
+      handoff: false
+      user_action: "Open Homarr and complete the Authentik sign-in. During first-run setup, assign the synchronized Mu3Lab operator group administrator access."

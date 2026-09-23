@@ -25,7 +25,8 @@ management:
 - Vaultwarden and infrastructure lifecycle are always excluded from MCP exposure.
 - SurfSense is installable through a reviewed v0.0.40 stack with its privileged
   sandbox disabled. Its tailnet route is Authentik-gated and SurfSense then uses
-  a separate local account. Firecrawl remains blocked pending its full contract.
+  a separate local account. Firecrawl is available as a private, login-free API
+  with durable queue, browser, cache, and database services.
 
 ## Current development state
 
@@ -37,13 +38,24 @@ Connections, Security & Backups, and System views. It truthfully distinguishes
 foundation, core, optional, and policy-blocked services, and never offers a
 browser route until that route is actually published through the tailnet.
 
+An optional Homarr v2 preview dashboard is available beside the custom Home
+view at `/homarr`. It is embedded after its private Tailnet route is verified
+and also offers a full-page link. Its AI & research and Work & life groups use
+single native tiles that combine each app icon, live running/stopped status,
+and the permitted audited start/stop action. The separate container inspector
+remains behind a socket proxy that keeps general POST access disabled and
+allowlists only container start/stop; restart, removal, configuration, and
+other Docker mutations remain disabled. The prior v1 app-data directory is
+retained separately for rollback.
+
 The control plane keeps leased, resumable, secret-redacted SQLite jobs and
 structured events under `/srv/mu3lab/runtime`; a persistent worker reclaims
 expired work after a restart. The supported AI slice is Ollama, FreeLLMAPI,
-LiteLLM, and Open WebUI. It verifies generated provider configuration, streamed
-chat, embedding dimensions, the private Open WebUI route, and Authentik
-trusted-header identity before reporting the slice verified. The dashboard also
-provides a full-screen Chat view backed by that protected Open WebUI instance.
+LiteLLM, Open WebUI, and optional LobeChat. It verifies generated provider
+configuration, streamed chat, embedding dimensions, private routes, and
+Authentik-protected identity before reporting the slice verified. The dashboard
+provides a full-screen Chat view with separate LobeChat and Open WebUI tabs;
+LobeChat is preferred when installed while Open WebUI remains available.
 
 Authenticated operators can install supported optional apps and manage them
 from their detail pages. Install, start, stop, restart, retry, and MCP runtime
@@ -54,13 +66,30 @@ acceleration ignore it. Basic application logs are bounded and redacted before
 reaching the browser. Update execution is deferred from the MVP.
 
 Provider Accounts accepts a curated eight-provider allowlist, stores one
-write-only encrypted credential per provider, and reports live verification and
-model samples from the FreeLLMAPI route. Advanced Integrations shows MCP cards
-only for installed applications. Operators provide write-only app credentials,
-then Mu3Lab installs the isolated integration, discovers its live tools, and
-registers the endpoint with Open WebUI. SurfSense is the first official MCP
-reference: the operator creates an `ss_pat_…` token in SurfSense and completes
-the remaining installation and Chat connection from the dashboard.
+write-only encrypted credential per provider, and reports the provider's
+FreeLLMAPI route plus a streamed LiteLLM `mu3lab-chat` check. The screen shows
+API authorization failures and verification job progress separately from an
+empty list. LobeChat offers only `mu3lab-chat`; Mu3Lab disables other persisted
+provider/model rows and blocks re-enabling them while preserving chat history.
+Eight saved LobeChat agents cover Actual Budget, Mealie, Immich, Paperless-ngx,
+SurfSense, Firecrawl, Nextcloud, and AdventureLog.
+
+Advanced Integrations shows MCP cards for installed applications. Operators
+provide app-scoped credentials and explicitly install each MCP. Enabled MCPs
+start after their application is healthy and stop before it stops; the worker
+reconciles those states after a host restart. Verified Streamable HTTP tools
+are bound and pinned only to their matching LobeChat agent, with approval
+required for write tools. Open WebUI receives the same reviewed connections
+when installed. Connections → Advanced integrations also offers prepared
+runtime status, per-tool permissions, an operator tool console, metadata-only
+action history from the dashboard and LobeChat, job diagnostics, and reviewed
+update status. Write calls in the console require a one-use confirmation.
+Mealie uses a pinned stdio-to-HTTP bridge; Firecrawl uses its official HTTP
+MCP server against the self-hosted API. Mu3Lab's small Nextcloud and
+AdventureLog adapters expose scoped files and travel data operations.
+All eight MCP runtimes can be prepared while their apps are stopped. A
+connection is not reported live until credentials, health, and tool discovery
+pass; Nextcloud and AdventureLog also perform an app-data read check.
 
 ## Developer checks
 

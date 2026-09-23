@@ -1,0 +1,85 @@
+name: mu3lab-homarr
+
+x-logging: &default-logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+services:
+  homarr:
+    image: ghcr.io/homarr-labs/homarr-test:v2@sha256:b5fd9296016566205ad7a0d3ec8003fdb1b2e239956d7d4b148998bddb8d1c2b
+    restart: unless-stopped
+    ports: ["127.0.0.1:7575:3000"]
+    environment:
+      SECRET_ENCRYPTION_KEY: ${HOMARR_SECRET_ENCRYPTION_KEY:?HOMARR_SECRET_ENCRYPTION_KEY is required}
+      BASE_URL: ${HOMARR_BASE_URL:?HOMARR_BASE_URL is required}
+      AUTH_PROVIDERS: oidc
+      AUTH_OIDC_CLIENT_ID: ${HOMARR_OIDC_CLIENT_ID:?HOMARR_OIDC_CLIENT_ID is required}
+      AUTH_OIDC_CLIENT_SECRET: ${HOMARR_OIDC_CLIENT_SECRET:?HOMARR_OIDC_CLIENT_SECRET is required}
+      AUTH_OIDC_ISSUER: ${HOMARR_OIDC_ISSUER:?HOMARR_OIDC_ISSUER is required}
+      AUTH_OIDC_CLIENT_NAME: Authentik
+      AUTH_OIDC_SCOPE_OVERWRITE: "openid email profile groups"
+      AUTH_OIDC_GROUPS_ATTRIBUTE: groups
+      AUTH_OIDC_AUTO_LOGIN: "true"
+      AUTH_LOGOUT_REDIRECT_URL: ${HOMARR_OIDC_LOGOUT_URL:?HOMARR_OIDC_LOGOUT_URL is required}
+      AUTH_COOKIE_PREFIX: mu3lab-homarr
+      # Used only by Homarr's server-side custom action widgets. It never
+      # reaches the browser and authorizes only curated Mu3Lab lifecycle calls.
+      HOMARR_CONTROL_TOKEN: ${HOMARR_CONTROL_TOKEN:?HOMARR_CONTROL_TOKEN is required}
+      DOCKER_HOSTNAMES: socket-proxy
+      DOCKER_PORTS: "2375"
+      TZ: ${TZ:-America/Toronto}
+    volumes:
+      # Keep the known-good v1 board and account database intact for rollback.
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/homarr-v2:/appdata
+    depends_on:
+      socket-proxy: {condition: service_healthy}
+    networks: [mu3lab_frontend, homarr_socket]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/api/health/live"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 45s
+    logging: *default-logging
+
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:3.4.4@sha256:a8c700baae19c2fff5b2940b21a748e78cf3b91cc311ad65f990efabdd1361eb
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      INFO: "1"
+      VERSION: "1"
+      PING: "1"
+      EVENTS: "1"
+      POST: "0"
+      ALLOW_START: "1"
+      ALLOW_STOP: "1"
+      ALLOW_RESTARTS: "0"
+      ALLOW_PAUSE: "0"
+      ALLOW_UNPAUSE: "0"
+      ALLOW_ARCHIVE: "0"
+      ALLOW_CHANGES: "0"
+      ALLOW_EXPORT: "0"
+      ALLOW_LOGS: "0"
+      ALLOW_TOP: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [homarr_socket]
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:2375/_ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging: *default-logging
+
+networks:
+  mu3lab_frontend: {external: true}
+  homarr_socket:
+    internal: true

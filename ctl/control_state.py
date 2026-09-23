@@ -21,7 +21,7 @@ INSTALL_STATES = frozenset({
     "verifying", "running", "stopped", "degraded", "failed",
 })
 MCP_STATES = frozenset({
-    "unavailable", "disabled", "starting", "live", "degraded",
+    "unavailable", "disabled", "prepared", "starting", "live", "degraded",
     "authentication_required", "incompatible", "failed", "stopped",
 })
 INITIALIZATION_STATES = frozenset({

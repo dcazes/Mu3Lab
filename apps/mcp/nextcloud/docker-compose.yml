@@ -1,0 +1,17 @@
+name: mu3lab-mcp-nextcloud
+services:
+  nextcloud-mcp:
+    build: .
+    restart: "no"
+    environment:
+      MCP_APP: nextcloud
+      APP_URL: http://nextcloud-app
+      NEXTCLOUD_USERNAME: ${NEXTCLOUD_USERNAME:?NEXTCLOUD_USERNAME is required}
+      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD:?NEXTCLOUD_APP_PASSWORD is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports: ["127.0.0.1:8819:8080"]
+    networks: [mu3lab_backend, mu3lab_mcp]
+    security_opt: [no-new-privileges:true]
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

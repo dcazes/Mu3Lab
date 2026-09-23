@@ -1,0 +1,16 @@
+{
+	admin off
+	auto_https off
+}
+
+:3211 {
+	handle /__mu3lab_lobehub_health {
+		respond 200
+	}
+	handle_path /lobe-assets/* {
+		reverse_proxy rustfs:9000
+	}
+	handle {
+		reverse_proxy app:3210
+	}
+}

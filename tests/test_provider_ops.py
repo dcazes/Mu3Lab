@@ -19,7 +19,8 @@ class ProviderProbeTests(unittest.TestCase):
     def test_stream_route_header_is_authoritative_after_normalization(self):
         successful = StreamProbe(True, 200, "groq/gpt-oss-120b", "gpt-oss-120b", "", "Stream completed.")
         with patch("ctl.provider_ops._reconcile", return_value=(True, "ok", [])), \
-             patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "service-key"}), \
+             patch("ctl.provider_ops.read_runtime_env", return_value={
+                 "FREELLMAPI_SERVICE_KEY": "service-key", "LITELLM_MASTER_KEY": "master-key"}), \
              patch("ctl.provider_ops._available_models", return_value=["gpt-oss-120b"]), \
              patch("ctl.provider_ops._probe_stream", return_value=successful):
             result = _verify("groq", Path("."), lambda _line: None)

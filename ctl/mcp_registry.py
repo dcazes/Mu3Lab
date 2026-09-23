@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ctl.control_state import ControlState
+from ctl.mcp_activity import McpActivity
 from ctl.mcp_catalog import load as load_catalog
 from ctl.registry import Registry
 from ctl.runtime import RuntimePaths
@@ -24,6 +25,7 @@ def missing_credentials(server) -> list[str]:
 def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, Any]:
     services = {service.id: service for service in registry.services}
     persisted = ControlState.runtime()
+    activity = McpActivity()
     servers: list[dict[str, Any]] = []
     for server in load_catalog(registry):
         service = services[server.service_id]
@@ -38,10 +40,10 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
         missing = missing_credentials(server)
         if server.status != "accepted" or not server.compose_dir:
             state = "unavailable"
-            error = ("No public MCP is currently available for this app." if server.status == "not_available"
-                     else "Candidate requires a completed security/runtime review.")
+            error = server.review_note or ("No public MCP is currently available for this app." if server.status == "not_available"
+                                           else "Candidate requires a completed security/runtime review.")
         elif app_state == "stopped":
-            state, error = "stopped", "Start the application before installing or verifying its MCP integration."
+            state, error = "stopped", "Start the application before connecting or verifying its MCP integration."
         elif service.is_blocked or app_state in {"blocked", "planned", "not_installed", "config_required"}:
             state, error = "unavailable", service.blocked_reason or "Install the application first."
         elif missing:
@@ -56,13 +58,17 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
              "risk": str(tool.get("risk", "read")), "enabled": enabled}
             for tool in manifest.get("tools", []) if isinstance(tool, dict)
         ]
+        tools = [tool | {"permission": activity.permission(server.id, str(tool.get("id", "")),
+                                                       str(tool.get("risk", "write")))} for tool in tools]
         servers.append({
             "id": server.id, "name": server.name, "service_id": server.service_id,
             "kind": server.provenance, "transport": server.transport,
             "endpoint": server.endpoint, "app_state": app_state,
             "enabled": enabled, "state": state, "error": error,
+            "prepared": bool(runtime and runtime["state"] in {"prepared", "stopped", "live"}),
             "review": {"status": server.status, "repository": server.repository,
-                       "revision": server.revision, "preferred": server.preferred},
+                       "revision": server.revision, "preferred": server.preferred,
+                       "note": server.review_note},
             "last_verified_at": str((runtime or {}).get("last_verified_at", "")),
             "auth": {"type": "service-credential" if server.credentials else "none",
                      "scopes": list(manifest.get("scopes", [])), "configured": not missing},

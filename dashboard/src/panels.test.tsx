@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AiMcpPanel, AppsPanel, HomePanel } from './panels';
+import { AiMcpPanel, AppsPanel, HomePanel, ProtectionPanel } from './panels';
 import type { Service } from './api';
 
 function service(id: string, name: string, stage: Service['stage']): Service {
@@ -14,7 +14,7 @@ function service(id: string, name: string, stage: Service['stage']): Service {
   };
 }
 
-const services = [service('ingress', 'Caddy', 'foundation'), service('ollama', 'Ollama', 'core'), service('nextcloud', 'Nextcloud', 'optional'), service('firecrawl', 'Firecrawl', 'blocked')];
+const services = [service('ingress', 'Caddy', 'foundation'), service('ollama', 'Ollama', 'core'), service('nextcloud', 'Nextcloud', 'optional'), service('firecrawl', 'Firecrawl', 'optional'), service('planned-tool', 'Planned Tool', 'blocked')];
 
 describe('dashboard organization', () => {
   beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ state: 'not_connected', events: [], error: '' }) })); });
@@ -25,6 +25,8 @@ describe('dashboard organization', () => {
     expect(screen.getByRole('heading', { name: 'Infrastructure' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'AI Integration' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Productivity apps' })).toBeInTheDocument();
+    const firecrawl = screen.getByRole('tab', { name: /Firecrawl/ });
+    expect(firecrawl.closest('.app-dock-group')?.querySelector('h3')).toHaveTextContent('AI Integration');
     expect(screen.queryByText('CORE WIRING')).not.toBeInTheDocument();
     expect(screen.queryByText('6/9')).not.toBeInTheDocument();
   });
@@ -51,7 +53,7 @@ describe('dashboard organization', () => {
       detail: 'Native sign-in is not verified.', last_verified_at: '', recovery_available: true, job_id: '' };
     render(<HomePanel services={identityServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
     fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
-    expect(screen.getByRole('link', { name: 'Open Nextcloud ↗' })).toHaveAttribute('href', 'https://example:8453');
+    expect(screen.getByRole('link', { name: 'Open app ↗' })).toHaveAttribute('href', 'https://example:8453');
     expect(screen.queryByRole('button', { name: /Repair.*sign-in/ })).not.toBeInTheDocument();
   });
 
@@ -63,7 +65,7 @@ describe('dashboard organization', () => {
     nextcloud.ui = { state: 'ready', url: 'https://example:8453', label: 'Open securely', authentication: 'oidc', reason: '' };
     render(<HomePanel services={legacyServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
     fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
-    expect(screen.getByRole('link', { name: 'Open securely ↗' })).toHaveAttribute('href', 'https://example:8453');
+    expect(screen.getByRole('link', { name: 'Open app ↗' })).toHaveAttribute('href', 'https://example:8453');
   });
 
   it('keeps a healthy native-OIDC route launchable while owner migration is pending', () => {
@@ -74,7 +76,7 @@ describe('dashboard organization', () => {
       detail: 'Owner migration is pending.', last_verified_at: '', recovery_available: true, job_id: '' };
     render(<HomePanel services={pendingServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
     fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
-    expect(screen.getByRole('link', { name: 'Open Nextcloud ↗' })).toHaveAttribute('href', 'https://example:8453');
+    expect(screen.getByRole('link', { name: 'Open app ↗' })).toHaveAttribute('href', 'https://example:8453');
     expect(screen.queryByRole('button', { name: /Repair.*sign-in/ })).not.toBeInTheDocument();
   });
 
@@ -88,6 +90,58 @@ describe('dashboard organization', () => {
     expect(screen.getByRole('heading', { name: 'Authentik connections' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Repair Nextcloud sign-in' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open app ↗' })).toHaveAttribute('href', 'https://example:8453');
+  });
+
+  it('makes Start the primary action for a stopped app without open or restart controls', () => {
+    const stoppedServices = services.map(item => ({ ...item }));
+    const nextcloud = stoppedServices.find(item => item.id === 'nextcloud')!;
+    nextcloud.state = 'stopped';
+    nextcloud.allowed_actions = ['start'];
+    nextcloud.identity = { mode: 'native_oidc', state: 'ready', launch_url: 'https://example:8453', detail: '', last_verified_at: '', recovery_available: true, job_id: '' };
+    render(<HomePanel services={stoppedServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
+    expect(screen.getByRole('button', { name: 'start' })).toHaveClass('button-primary');
+    expect(screen.queryByRole('link', { name: /Open Nextcloud/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'restart' })).not.toBeInTheDocument();
+  });
+
+  it('uses concise launch controls and omits launch for internal services', () => {
+    const launchServices = services.map(item => ({ ...item }));
+    const caddy = launchServices.find(item => item.id === 'ingress')!;
+    caddy.state = 'ready';
+    caddy.identity = { mode: 'none', state: 'unsupported', launch_url: '', detail: '', last_verified_at: '', recovery_available: false, job_id: '' };
+    caddy.ui = { state: 'unavailable', url: '', label: 'Open securely', authentication: 'none', reason: 'No dashboard' };
+    const vaultwarden = service('vaultwarden', 'Vaultwarden', 'foundation');
+    vaultwarden.state = 'ready';
+    vaultwarden.identity = { mode: 'local', state: 'ready', launch_url: 'https://example:8444', detail: '', last_verified_at: '', recovery_available: true, job_id: '' };
+    vaultwarden.ui = { state: 'ready', url: 'https://example:8444', label: '', authentication: 'local', reason: '' };
+    launchServices.push(vaultwarden);
+    render(<HomePanel services={launchServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Caddy/ }));
+    expect(screen.queryByRole('link', { name: /Open/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Vaultwarden/ }));
+    expect(screen.getByRole('link', { name: 'Login ↗' })).toHaveAttribute('href', 'https://example:8444');
+    expect(screen.queryByText(/separate login/i)).not.toBeInTheDocument();
+  });
+
+  it('offers both FreeLLMAPI login and provider management', () => {
+    const launchServices = services.map(item => ({ ...item }));
+    const free = service('freellmapi', 'FreeLLMAPI', 'core');
+    free.state = 'ready';
+    free.identity = { mode: 'local', state: 'ready', launch_url: 'https://example:8455', detail: '', last_verified_at: '', recovery_available: true, job_id: '' };
+    free.ui = { state: 'ready', url: 'https://example:8455', label: '', authentication: 'local', reason: '' };
+    launchServices.push(free);
+    render(<HomePanel services={launchServices} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /FreeLLMAPI/ }));
+    expect(screen.getByRole('link', { name: 'Login ↗' })).toHaveAttribute('href', 'https://example:8455');
+    expect(screen.getByRole('button', { name: 'Manage provider accounts' })).toBeInTheDocument();
+  });
+
+  it('places recovery credential export on Security and Backups', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => ({ ok: true, json: async () => path === '/api/v1/credential-handoffs' ? { handoffs: [{ id: 'handoff', service_id: 'nextcloud', job_id: 'job', state: 'available', created_at: '', expires_at: '2026-09-22T00:00:00Z', login_url: 'https://example:8453' }] } : {} })));
+    render(<ProtectionPanel identity={{ ok: true, control_plane_auth: 'authentik', detail: 'Protected', writes_enabled: true }} backup={{ state: 'verified' }} audit={{ ok: true, available: true, events: [] }} />);
+    expect(await screen.findByRole('button', { name: 'Export credentials' })).toBeInTheDocument();
+    expect(screen.getByText(/Authentik SSO has no password to export/)).toBeInTheDocument();
   });
 
   it('uses the FullCalendar month view for connected calendar events', async () => {

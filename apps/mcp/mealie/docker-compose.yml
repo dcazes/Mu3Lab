@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    restart: unless-stopped
+    restart: "no"
     environment:
       MEALIE_BASE_URL: http://mealie-app:9000
       MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:?MEALIE_API_TOKEN is required}

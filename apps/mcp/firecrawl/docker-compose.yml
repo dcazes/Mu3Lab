@@ -1,0 +1,20 @@
+name: mu3lab-mcp-firecrawl
+services:
+  firecrawl-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      HTTP_STREAMABLE_SERVER: "true"
+      HOST: 0.0.0.0
+      PORT: "3000"
+      FIRECRAWL_API_URL: http://firecrawl-api:3002
+      FIRECRAWL_NO_SEARCH_FEEDBACK: "1"
+      FIRECRAWL_NO_ENDPOINT_FEEDBACK: "1"
+    ports: ["127.0.0.1:8818:3000"]
+    networks: [mu3lab_backend, mu3lab_mcp]
+    security_opt: [no-new-privileges:true]
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

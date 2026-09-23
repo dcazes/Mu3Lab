@@ -10,9 +10,9 @@ servers:
     repository: https://github.com/2fst4u/mealie-mcp
     revision: 4728c5c68810105fa54f6ff2482a0414430f6f65
     package: mealie-mcp@0.2.105
-    transport: openapi-bridge
-    endpoint: http://mealie-mcp:8000
-    local_health: http://127.0.0.1:8814/openapi.json
+    transport: streamable-http
+    endpoint: http://mealie-mcp:8000/mcp
+    local_health: http://127.0.0.1:8814/healthz
     compose_dir: apps/mcp/mealie
     credentials:
       - {key: api_token, env: MEALIE_API_TOKEN, type: secret, label: "Mealie API token", required: true}
@@ -69,15 +69,18 @@ servers:
   - id: firecrawl-official
     service_id: firecrawl
     name: Firecrawl MCP
-    status: review_required
+    status: accepted
     preferred: true
     provenance: official
     repository: https://github.com/firecrawl/firecrawl-mcp-server
-    revision: 387352ef94f684df4623c467374c6948aa1a3604
-    transport: stdio
-    endpoint: ""
-    compose_dir: ""
+    revision: 3.25.3
+    package: firecrawl-mcp@3.25.3
+    transport: streamable-http
+    endpoint: http://firecrawl-mcp:3000/mcp
+    local_health: http://127.0.0.1:8818/mcp
+    compose_dir: apps/mcp/firecrawl
     credentials: []
+    review_note: "Uses the private self-hosted Firecrawl API; tools may fetch external web pages."
 
   - id: surfsense-official
     service_id: surfsense
@@ -98,14 +101,34 @@ servers:
   - id: adventurelog
     service_id: adventurelog
     name: AdventureLog MCP
-    status: not_available
-    preferred: false
-    provenance: none
-    repository: ""
-    revision: ""
-    transport: none
-    endpoint: ""
-    compose_dir: ""
-    credentials: []
+    status: accepted
+    preferred: true
+    provenance: mu3lab-adapter
+    repository: https://github.com/seanmorley15/AdventureLog
+    revision: v0.13.0-api
+    transport: streamable-http
+    endpoint: http://adventurelog-mcp:8080/mcp
+    local_health: http://127.0.0.1:8820/health
+    compose_dir: apps/mcp/adventurelog
+    credentials:
+      - {key: api_key, env: ADVENTURELOG_API_KEY, type: secret, label: "AdventureLog API key", required: true}
+    review_note: "Mu3Lab adapter exposes only collections and locations. Live API compatibility is checked when the app runs."
+
+  - id: nextcloud-context-agent
+    service_id: nextcloud
+    name: Nextcloud Files MCP
+    status: accepted
+    preferred: true
+    provenance: mu3lab-adapter
+    repository: https://docs.nextcloud.com/server/stable/user_manual/en/files/access_webdav.html
+    revision: nextcloud-33-webdav
+    transport: streamable-http
+    endpoint: http://nextcloud-mcp:8080/mcp
+    local_health: http://127.0.0.1:8819/health
+    compose_dir: apps/mcp/nextcloud
+    credentials:
+      - {key: username, env: NEXTCLOUD_USERNAME, type: string, label: "Nextcloud username", required: true}
+      - {key: app_password, env: NEXTCLOUD_APP_PASSWORD, type: secret, label: "Nextcloud app password", required: true}
+    review_note: "Mu3Lab adapter uses WebDAV for scoped file listing, text reading, and text writing."
 
 excluded_services: [vaultwarden, ingress, authentik, ollama, litellm, open-webui, freellmapi]

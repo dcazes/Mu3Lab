@@ -2,7 +2,7 @@ name: mu3lab-mcp-immich
 services:
   immich-mcp:
     image: ghcr.io/barryw/immichmcp:v3.3.3
-    restart: unless-stopped
+    restart: "no"
     environment:
       IMMICH_BASE_URL: http://immich-server:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY:?IMMICH_API_KEY is required}

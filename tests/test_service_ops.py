@@ -20,6 +20,9 @@ class ServiceOperationTests(unittest.TestCase):
     def test_blocked_service_has_no_actions(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "blocked"), [])
 
+    def test_stopped_service_offers_start_without_restart(self):
+        self.assertEqual(allowed_actions(load().get("actual-budget"), "stopped"), ["start"])
+
     def test_worker_resolves_curated_path_and_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "jobs.sqlite3")

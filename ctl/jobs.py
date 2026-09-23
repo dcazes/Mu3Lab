@@ -239,6 +239,12 @@ class JobStore:
             rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)).fetchall()
         return [dict(row) for row in rows]
 
+    def jobs_for_service(self, service_id: str, *, limit: int = 30) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM jobs WHERE service_id=? ORDER BY created_at DESC LIMIT ?",
+                                (service_id, max(1, min(limit, 100)))).fetchall()
+        return [dict(row) for row in rows]
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()

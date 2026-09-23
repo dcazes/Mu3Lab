@@ -28,6 +28,8 @@ def run() -> int:
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     stopping = False
     waiting_for_runtime_reported = False
+    next_mcp_reconcile = 0.0
+    next_mcp_activity = 0.0
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -48,6 +50,20 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         waiting_for_runtime_reported = False
+        if time.monotonic() >= next_mcp_reconcile:
+            next_mcp_reconcile = time.monotonic() + 60
+            try:
+                from ctl.mcp_ops import reconcile_lifecycle
+                reconcile_lifecycle(ROOT, lambda line: print(line, flush=True))
+            except Exception as exc:
+                print(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}", flush=True)
+        if time.monotonic() >= next_mcp_activity:
+            next_mcp_activity = time.monotonic() + 60
+            try:
+                from ctl.mcp_chat_activity import ingest
+                ingest(lambda line: print(line, flush=True))
+            except Exception as exc:
+                print(f"Mu3Lab MCP activity import deferred: {exc}", flush=True)
         try:
             from ctl.install_batches import InstallBatchStore
             batches = InstallBatchStore.runtime()

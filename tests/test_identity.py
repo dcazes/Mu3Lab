@@ -19,10 +19,19 @@ class IdentityContractTests(unittest.TestCase):
         registry = load()
         self.assertEqual(mode_for(registry.get("nextcloud")), "native_oidc")
         self.assertEqual(mode_for(registry.get("open-webui")), "trusted_header")
+        self.assertEqual(mode_for(registry.get("lobehub")), "native_oidc")
+        self.assertEqual(mode_for(registry.get("homarr")), "native_oidc")
         self.assertEqual(mode_for(registry.get("litellm")), "proxy_gate")
         self.assertEqual(mode_for(registry.get("surfsense")), "proxy_gate")
         self.assertEqual(mode_for(registry.get("vaultwarden")), "local")
         self.assertEqual(mode_for(registry.get("ollama")), "none")
+        self.assertEqual(mode_for(registry.get("firecrawl")), "none")
+
+    def test_login_free_api_uses_its_identity_note(self):
+        service = load().get("firecrawl")
+        identity = projection(service, {"route_ready": True, "health_state": "healthy"}, None)
+        self.assertEqual(identity["mode"], "none")
+        self.assertEqual(identity["detail"], service.identity_note)
 
     def test_native_oidc_never_becomes_ready_from_manifest_alone(self):
         service = load().get("nextcloud")
@@ -95,6 +104,20 @@ class IdentityContractTests(unittest.TestCase):
                     {"username": "akadmin", "email": "OWNER@example.com"},
                     lambda _line: None)
             self.assertTrue(verified)
+
+    def test_lobehub_owner_requires_verified_authentik_account(self):
+        evidence = "4cb1f144288e5d61695b0d3f9c63835c|t|authentik\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp) / "runtime")
+            with patch("ctl.service_ops.actions.compose_exec",
+                       return_value=(0, evidence)) as compose_exec:
+                verified = _linked_owner_verified(
+                    load().get("lobehub"), paths.projects / "lobehub",
+                    {"email": "OWNER@example.com"}, lambda _line: None)
+            self.assertTrue(verified)
+            command = compose_exec.call_args.args[2]
+            self.assertNotIn("owner@example.com", " ".join(command).lower())
+            self.assertNotIn("access_token", " ".join(command).lower())
 
 
 if __name__ == "__main__":

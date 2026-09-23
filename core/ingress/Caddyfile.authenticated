@@ -6,9 +6,21 @@
 }
 
 :19460 {
-	bind 127.0.0.1
+	# Also accept private requests from the Homarr Docker bridge for its
+	# server-side lifecycle widgets. This is the bridge gateway only; the
+	# public listener remains Tailscale Serve on the loopback binding.
+	bind 127.0.0.1 172.21.0.1
 	handle /__mu3lab_caddy_health {
 		respond 204
+	}
+	# Homarr custom widgets execute on the Homarr server, so they do not carry
+	# the operator's browser cookie. This narrow route has its own bearer token
+	# and still requires the trusted Caddy-to-control-plane hop token.
+	@homarr_control path /api/v1/homarr/*
+	handle @homarr_control {
+		reverse_proxy 127.0.0.1:8787 {
+			header_up X-Mu3Lab-Proxy-Token {env.MU3LAB_INGRESS_TOKEN}
+		}
 	}
 	handle {
 			route {

@@ -19,7 +19,61 @@ from ctl.runtime import RuntimePaths
 from ctl.service_state import _compose_state, public_url, status as service_status
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class RegistryTests(unittest.TestCase):
+    def test_homarr_socket_proxy_only_allows_container_start_and_stop(self):
+        service = load().get("homarr")
+        compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
+        self.assertEqual(set(compose["services"]), {"homarr", "socket-proxy"})
+        proxy = compose["services"]["socket-proxy"]
+        self.assertEqual(proxy["environment"]["POST"], "0")
+        self.assertEqual(proxy["environment"]["ALLOW_START"], "1")
+        self.assertEqual(proxy["environment"]["ALLOW_STOP"], "1")
+        self.assertEqual(proxy["environment"]["ALLOW_RESTARTS"], "0")
+        self.assertEqual(proxy["environment"]["CONTAINERS"], "1")
+        self.assertIn("linuxserver/socket-proxy:3.4.4@sha256:", proxy["image"])
+        self.assertTrue(proxy["read_only"])
+        self.assertNotIn("/var/run/docker.sock", str(compose["services"]["homarr"]))
+        self.assertIn("/var/run/docker.sock:/var/run/docker.sock:ro", proxy["volumes"])
+
+    def test_homarr_materialization_generates_and_preserves_its_encryption_key(self):
+        from ctl.secrets import read_runtime_env
+        from ctl.service_ops import _materialize
+
+        service = load().get("homarr")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
+                project = _materialize(service, ROOT)
+                first = read_runtime_env(project / ".env")["HOMARR_SECRET_ENCRYPTION_KEY"]
+                _materialize(service, ROOT)
+                second = read_runtime_env(project / ".env")["HOMARR_SECRET_ENCRYPTION_KEY"]
+            self.assertEqual(len(first), 64)
+            self.assertEqual(first, second)
+            self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
+
+    def test_homarr_materialization_generates_authentik_oidc_contract(self):
+        from ctl.secrets import read_runtime_env
+        from ctl.service_ops import _materialize
+
+        service = load().get("homarr")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
+                project = _materialize(service, ROOT)
+            values = read_runtime_env(project / ".env")
+            self.assertEqual(values["HOMARR_BASE_URL"], "https://mu3lab.example.ts.net:8458")
+            self.assertEqual(values["HOMARR_OIDC_ISSUER"], "https://mu3lab.example.ts.net/application/o/mu3lab-homarr/")
+            self.assertEqual(values["HOMARR_OIDC_LOGOUT_URL"], "https://mu3lab.example.ts.net/application/o/mu3lab-homarr/end-session/")
+            self.assertEqual(values["HOMARR_OIDC_CLIENT_ID"], "mu3lab-homarr")
+            self.assertTrue(values["HOMARR_OIDC_CLIENT_SECRET"])
+            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-homarr.yaml"
+            self.assertIn("/api/auth/callback/oidc", blueprint.read_text(encoding="utf-8"))
+
     def test_successful_one_shot_migration_does_not_make_app_look_stopped(self):
         def fake_run(*_args, **_kwargs):
             return SimpleNamespace(returncode=0, stdout=(
@@ -64,6 +118,68 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(registry.get("litellm").ui["available"])
         self.assertTrue(registry.get("freellmapi").ui["available"])
         self.assertTrue(registry.get("nextcloud").ui["available"])
+
+    def test_firecrawl_has_a_complete_private_login_free_runtime(self):
+        service = load().get("firecrawl")
+        self.assertEqual(service.availability, "available")
+        self.assertEqual(service.stage, "optional")
+        self.assertEqual(service.auth, "excluded")
+        self.assertEqual(service.private_https_port, 8456)
+        self.assertEqual(service.proxy_port, 19473)
+        compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
+        self.assertEqual(set(compose["services"]), {"api", "playwright-service", "redis", "rabbitmq", "nuq-postgres"})
+        self.assertTrue(all("@sha256:" in contract["image"] for contract in compose["services"].values()))
+        self.assertEqual(compose["services"]["playwright-service"]["command"], "node dist/api.js")
+        self.assertIn("mu3lab_frontend", compose["services"]["playwright-service"]["networks"])
+        self.assertNotIn("authentik", (ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8").lower())
+
+    def test_excluded_authentication_service_is_not_classified_as_local_login(self):
+        from ctl.identity import mode_for
+        self.assertEqual(mode_for(load().get("firecrawl")), "none")
+
+    def test_firecrawl_materialization_generates_all_runtime_secrets(self):
+        from ctl.secrets import read_runtime_env
+        from ctl.service_ops import _materialize
+        service = load().get("firecrawl")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
+                project = _materialize(service, ROOT)
+            values = read_runtime_env(project / ".env")
+            for key in ("POSTGRES_PASSWORD", "RABBITMQ_DEFAULT_PASS", "BULL_AUTH_KEY"):
+                self.assertTrue(values[key])
+            self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
+
+    def test_lobechat_is_optional_persistent_oidc_chat_alongside_open_webui(self):
+        from ctl.identity import mode_for
+        from ctl.secrets import read_runtime_env
+        from ctl.service_ops import _materialize
+
+        service = load().get("lobehub")
+        self.assertFalse(service.required)
+        self.assertEqual(service.stage, "optional")
+        self.assertEqual(service.dependencies, ("litellm", "authentik"))
+        self.assertEqual(mode_for(service), "native_oidc")
+        compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
+        self.assertEqual(set(compose["services"]), {"app", "edge", "postgres", "redis", "rustfs", "rustfs-init", "storage-init"})
+        self.assertTrue(all("@sha256:" in item["image"] for item in compose["services"].values()))
+        self.assertEqual(compose["services"]["app"]["environment"]["OPENAI_PROXY_URL"], "http://litellm:4000/v1")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            litellm = paths.projects / "litellm"
+            litellm.mkdir(parents=True)
+            (litellm / ".env").write_text("LITELLM_MASTER_KEY=test-master-key\n", encoding="utf-8")
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
+                project = _materialize(service, ROOT)
+            values = read_runtime_env(project / ".env")
+            self.assertEqual(values["AUTH_SSO_PROVIDERS"], "authentik")
+            self.assertEqual(values["AUTH_DISABLE_EMAIL_PASSWORD"], "1")
+            self.assertEqual(values["LITELLM_MASTER_KEY"], "test-master-key")
+            self.assertEqual(values["APP_URL"], "https://mu3lab.example.ts.net:8457")
+            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-lobehub.yaml"
+            self.assertIn("/api/auth/callback/authentik", blueprint.read_text(encoding="utf-8"))
 
     def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
         registry = load()

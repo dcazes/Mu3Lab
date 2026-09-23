@@ -69,6 +69,33 @@ jobs:
             MEALIE_API_TOKEN=ci-placeholder \
             IMMICH_API_KEY=ci-placeholder \
             PAPERLESS_API_KEY=ci-placeholder \
+            BULL_AUTH_KEY=ci-placeholder \
+            RABBITMQ_DEFAULT_PASS=ci-placeholder \
+            NEXTCLOUD_USERNAME=ci-operator \
+            NEXTCLOUD_APP_PASSWORD=ci-placeholder \
+            ADVENTURELOG_API_KEY=ci-placeholder \
+            HOMARR_SECRET_ENCRYPTION_KEY=ci-placeholder \
+            HOMARR_BASE_URL=https://example.ts.net:7575 \
+            HOMARR_OIDC_CLIENT_ID=ci-placeholder \
+            HOMARR_OIDC_CLIENT_SECRET=ci-placeholder \
+            HOMARR_OIDC_ISSUER=https://example.ts.net/application/o/homarr/ \
+            HOMARR_OIDC_LOGOUT_URL=https://example.ts.net/if/session-end/ \
+            HOMARR_CONTROL_TOKEN=ci-placeholder \
+            APP_URL=https://example.ts.net:8448 \
+            AUTH_AUTHENTIK_ID=ci-placeholder \
+            AUTH_AUTHENTIK_ISSUER=https://example.ts.net/application/o/lobehub/ \
+            AUTH_AUTHENTIK_SECRET=ci-placeholder \
+            AUTH_SECRET=ci-placeholder \
+            KEY_VAULTS_SECRET=Y2ktcGxhY2Vob2xkZXI= \
+            LITELLM_MASTER_KEY=ci-placeholder \
+            RUSTFS_ACCESS_KEY=ci-placeholder \
+            RUSTFS_SECRET_KEY=ci-placeholder \
+            S3_ENDPOINT=http://rustfs:9000 \
+            NEXTCLOUD_TRUSTED_DOMAINS=cloud.example.test \
+            NEXTCLOUD_OVERWRITECLIURL=https://cloud.example.test \
+            NEXTCLOUD_OVERWRITEHOST=cloud.example.test \
+            NEXTCLOUD_DB_PASSWORD=ci-placeholder \
+            NEXTCLOUD_REDIS_PASSWORD=ci-placeholder \
               docker compose -f "$compose_file" config --quiet
           done < <(find core apps -name docker-compose.yml -type f | sort)
       - name: Scan tracked files for accidental private environment files

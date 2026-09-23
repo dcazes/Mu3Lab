@@ -52,9 +52,9 @@ class RootEnvTests(unittest.TestCase):
             os.chmod(root / ".env", 0o600)
             values, added = secrets.ensure_root_env(
                 root, token_factory=lambda: "new")
-            # Live token untouched; only the missing key added; OTHER kept.
+            # Live token untouched; only missing keys added; OTHER kept.
             self.assertEqual(values["MU3LAB_CTL_TOKEN"], "live-token")
-            self.assertEqual(added, ["MU3LAB_INGRESS_TOKEN"])
+            self.assertEqual(added, ["MU3LAB_INGRESS_TOKEN", "MU3LAB_HOMARR_TOKEN"])
             text = (root / ".env").read_text(encoding="utf-8")
             self.assertIn("# mine", text)
             self.assertIn("OTHER=1", text)
@@ -63,7 +63,7 @@ class RootEnvTests(unittest.TestCase):
     def test_noop_when_complete(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            before = "MU3LAB_CTL_TOKEN=a\nMU3LAB_INGRESS_TOKEN=b\n"
+            before = "MU3LAB_CTL_TOKEN=a\nMU3LAB_INGRESS_TOKEN=b\nMU3LAB_HOMARR_TOKEN=c\n"
             (root / ".env").write_text(before, encoding="utf-8")
             _values, added = secrets.ensure_root_env(
                 root, token_factory=lambda: "new")
@@ -75,8 +75,8 @@ class RootEnvTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _values, added = secrets.ensure_root_env(
                 Path(tmp), token_factory=lambda: made.append("x") or "x")
-            self.assertEqual(len(made), 2)
-            self.assertEqual(len(added), 2)
+            self.assertEqual(len(made), 3)
+            self.assertEqual(len(added), 3)
 
     def test_authentik_env_returns_names_not_values(self):
         with tempfile.TemporaryDirectory() as tmp:

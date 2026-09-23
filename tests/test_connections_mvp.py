@@ -79,7 +79,8 @@ class ProviderCatalogTests(unittest.TestCase):
     def test_groq_verification_uses_routed_via_not_owned_by(self):
         from ctl.provider_ops import StreamProbe, _verify
         with patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])), \
-             patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}), \
+             patch("ctl.provider_ops.read_runtime_env", return_value={
+                 "FREELLMAPI_SERVICE_KEY": "internal", "LITELLM_MASTER_KEY": "master"}), \
              patch("ctl.provider_ops._available_models", return_value=["llama-3.3-70b-versatile"]), \
              patch("ctl.provider_ops._probe_stream", return_value=StreamProbe(
                  True, 200, "groq/llama-3.3-70b-versatile", "llama-3.3-70b-versatile", "", "done")):

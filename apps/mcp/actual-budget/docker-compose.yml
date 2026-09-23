@@ -2,7 +2,7 @@ name: mu3lab-mcp-actual-budget
 services:
   actual-budget-mcp:
     image: ghcr.io/agigante80/actual-mcp-server:0.22.4
-    restart: unless-stopped
+    restart: "no"
     environment:
       ACTUAL_SERVER_URL: http://actual-server:5006
       ACTUAL_PASSWORD: ${ACTUAL_PASSWORD:?ACTUAL_PASSWORD is required}

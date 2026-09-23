@@ -26,6 +26,8 @@ OIDC_CONTRACTS: dict[str, OidcContract] = {
     "immich": OidcContract("Immich", "IMMICH_OIDC_CLIENT_ID", "IMMICH_OIDC_CLIENT_SECRET", ("/auth/login", "/user-settings", "/api/oauth/mobile-redirect",)),
     "paperless-ngx": OidcContract("Paperless-ngx", "PAPERLESS_OIDC_CLIENT_ID", "PAPERLESS_OIDC_CLIENT_SECRET", ("/accounts/oidc/authentik/login/callback/",)),
     "adventurelog": OidcContract("AdventureLog", "ADVENTURELOG_OIDC_CLIENT_ID", "ADVENTURELOG_OIDC_CLIENT_SECRET", ("/accounts/oidc/mu3lab-adventurelog/login/callback/",)),
+    "lobehub": OidcContract("LobeChat", "AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", ("/api/auth/callback/authentik",)),
+    "homarr": OidcContract("Homarr", "HOMARR_OIDC_CLIENT_ID", "HOMARR_OIDC_CLIENT_SECRET", ("/api/auth/callback/oidc",)),
 }
 
 TRUSTED_HEADER = {"open-webui"}
@@ -44,6 +46,11 @@ def mode_for(service: Service) -> str:
         return "proxy_gate"
     if service.id in LOCAL:
         return "local"
+    # An excluded-auth service has a private route but no user identity or
+    # login flow (for example Firecrawl's API).  Keep it distinct from a
+    # local-login application so launch controls never incorrectly say Login.
+    if service.auth == "excluded":
+        return "none"
     if service.id in NO_UI or not service.ui.get("available", False):
         return "none"
     return "local"
@@ -78,7 +85,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
             current = "degraded"
             detail = "Sign-in is configured, but the application or its private route is unavailable."
     elif mode == "none":
-        current, detail = "unsupported", (service.ui.get("unavailable_reason") or "This service has no end-user interface.")
+        current, detail = "unsupported", (service.identity_note or service.ui.get("unavailable_reason") or "This service has no end-user interface.")
     elif service.id == "authentik":
         current = "ready" if route_ready and healthy else "degraded"
         detail = "This is the identity provider; the current Authentik session opens its administration UI directly."

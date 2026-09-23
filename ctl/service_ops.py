@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import base64
 import os
 import secrets as token_secrets
 import shutil
@@ -87,7 +88,7 @@ def allowed_actions(service: Service, state: str) -> list[str]:
         return (["repair", "restart"] if service.stage == "core"
                 else ["retry_setup", "restart"])
     if state == "stopped":
-        return ["start", "restart"]
+        return ["start"]
     if state in {"ready", "running", "starting", "configured", "installed"}:
         result = ["repair", "restart"] if service.stage == "optional" else ["restart"]
         if service.lifecycle != "always_on":
@@ -151,6 +152,35 @@ def _materialize(service: Service, root: Path) -> Path:
         values.setdefault("EMBEDDING_BASE_URL", "http://ollama:11434")
         # v0.0.40 also reads this legacy spelling in selected code paths.
         values.setdefault("EMBEDDING_API_BASE_URL", "http://ollama:11434")
+    elif service.id == "firecrawl":
+        values.setdefault("POSTGRES_PASSWORD", token_secrets.token_urlsafe(36))
+        values.setdefault("RABBITMQ_DEFAULT_PASS", token_secrets.token_urlsafe(36))
+        values.setdefault("BULL_AUTH_KEY", token_secrets.token_urlsafe(36))
+    elif service.id == "lobehub":
+        values.setdefault("POSTGRES_PASSWORD", token_secrets.token_urlsafe(36))
+        values.setdefault("AUTH_SECRET", token_secrets.token_urlsafe(48))
+        # LobeHub validates this as base64-decoded AES key material and only
+        # accepts 16, 24, or 32 bytes.  Generate the documented 256-bit form.
+        values.setdefault("KEY_VAULTS_SECRET",
+                          base64.b64encode(token_secrets.token_bytes(32)).decode("ascii"))
+        values.setdefault("RUSTFS_ACCESS_KEY", "mu3lab-lobehub")
+        values.setdefault("RUSTFS_SECRET_KEY", token_secrets.token_urlsafe(48))
+        values.setdefault("AUTH_AUTHENTIK_ID", "mu3lab-lobehub")
+        values.setdefault("AUTH_AUTHENTIK_SECRET", token_secrets.token_urlsafe(40))
+        litellm = read_runtime_env(RuntimePaths().projects / "litellm" / ".env")
+        if litellm.get("LITELLM_MASTER_KEY"):
+            values.setdefault("LITELLM_MASTER_KEY", litellm["LITELLM_MASTER_KEY"])
+        from ctl.lobehub_ops import apply_model_policy
+        apply_model_policy(values, root)
+    elif service.id == "homarr":
+        # Homarr requires exactly 32 bytes represented as a 64-character hex key.
+        # Keep it stable across repairs so encrypted integration data remains readable.
+        values.setdefault("HOMARR_SECRET_ENCRYPTION_KEY", token_secrets.token_hex(32))
+        values.setdefault("HOMARR_OIDC_CLIENT_ID", "mu3lab-homarr")
+        values.setdefault("HOMARR_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
+        root_values = read_runtime_env(root / ".env")
+        if root_values.get("MU3LAB_HOMARR_TOKEN"):
+            values.setdefault("HOMARR_CONTROL_TOKEN", root_values["MU3LAB_HOMARR_TOKEN"])
     try:
         from ctl.service_state import tailnet_dns_name
         dns_name = tailnet_dns_name()
@@ -261,6 +291,42 @@ def _materialize(service: Service, root: Path) -> Path:
             )
         elif service.id == "surfsense":
             values.setdefault("SURFSENSE_PUBLIC_URL", public_url)
+        elif service.id == "lobehub":
+            values.setdefault("APP_URL", public_url)
+            values.setdefault("S3_ENDPOINT", public_url + "/lobe-assets")
+            values.setdefault("AUTH_SSO_PROVIDERS", "authentik")
+            values.setdefault("AUTH_AUTHENTIK_ISSUER",
+                              f"https://{dns_name}/application/o/mu3lab-lobehub/")
+            values.setdefault("AUTH_DISABLE_EMAIL_PASSWORD", "1")
+            values.setdefault("OPENAI_PROXY_URL", "http://litellm:4000/v1")
+            values["OPENAI_MODEL_LIST"] = "-all,+mu3lab-chat"
+            from ctl.authentik_blueprints import write_oidc_application_blueprint
+            write_oidc_application_blueprint(
+                RuntimePaths().root, dns_name, service_id="lobehub", name="LobeChat",
+                private_port=service.private_https_port,
+                client_id=values["AUTH_AUTHENTIK_ID"],
+                client_secret=values["AUTH_AUTHENTIK_SECRET"],
+                redirect_paths=("/api/auth/callback/authentik",),
+            )
+        elif service.id == "homarr":
+            values.setdefault("HOMARR_BASE_URL", public_url)
+            values.setdefault("HOMARR_OIDC_ISSUER",
+                              f"https://{dns_name}/application/o/mu3lab-homarr/")
+            values.setdefault("HOMARR_OIDC_URI",
+                              f"https://{dns_name}/application/o/authorize/")
+            values.setdefault("HOMARR_OIDC_LOGOUT_URL",
+                              f"https://{dns_name}/application/o/mu3lab-homarr/end-session/")
+            # Homarr v2 uses its own web port (3000) and does not use the
+            # v1 AUTH_OIDC_URI / NEXTAUTH_URL compatibility variables.
+            values.setdefault("HOMARR_CONTROL_API_BASE", "http://172.21.0.1:19460")
+            from ctl.authentik_blueprints import write_oidc_application_blueprint
+            write_oidc_application_blueprint(
+                RuntimePaths().root, dns_name, service_id="homarr", name="Homarr",
+                private_port=service.private_https_port,
+                client_id=values["HOMARR_OIDC_CLIENT_ID"],
+                client_secret=values["HOMARR_OIDC_CLIENT_SECRET"],
+                redirect_paths=("/api/auth/callback/oidc",),
+            )
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
     return target
@@ -506,6 +572,28 @@ def _linked_owner_verified(service: Service, project: Path,
         except (OSError, sqlite3.Error):
             return False
         return bool(row and int(row[1]) == 1 and str(row[2]).upper() == "OIDC")
+    if service.id == "lobehub":
+        # Better Auth stores the linked provider separately from the user.  Ask
+        # PostgreSQL to return only an irreversible email digest plus the two
+        # booleans needed for verification; raw identity data and OIDC tokens
+        # must never enter job logs.
+        expected_md5 = hashlib.md5(email.encode(), usedforsecurity=False).hexdigest()
+        query = (
+            "SELECT md5(lower(u.email)), u.email_verified, a.provider_id "
+            "FROM users u JOIN accounts a ON a.user_id = u.id "
+            "WHERE a.provider_id = 'authentik';"
+        )
+        rc, output = actions.compose_exec(
+            project, "postgres",
+            ["psql", "-U", "postgres", "-d", "lobehub", "-Atc", query],
+            log, timeout=120)
+        if rc:
+            return False
+        return any(
+            parts[0] == expected_md5 and parts[1] == "t" and parts[2] == "authentik"
+            for line in output.splitlines()
+            if len(parts := line.strip().split("|")) == 3
+        )
     if service.id not in {"paperless-ngx", "adventurelog"}:
         return False
     container = "webserver" if service.id == "paperless-ngx" else "app"
@@ -746,7 +834,7 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_installation(service.id, "starting", job_id=job_id,
                                manifest_version="3", image_digests=image_snapshot)
     _event(store, job_id, "start_service", "Starting application containers.")
-    wait_timeout = 900 if service.id in {"surfsense", "nextcloud"} else 120
+    wait_timeout = 900 if service.id in {"surfsense", "nextcloud", "lobehub"} else 120
     # A fresh Nextcloud intentionally reports unhealthy until its database
     # installation has completed.  Waiting on that healthcheck before the
     # explicit `occ maintenance:install` below deadlocks the workflow: Docker
@@ -860,6 +948,16 @@ def _install(store: JobStore, state: ControlState | None, job: dict,
         state.set_initialization(service.id, account_mode, "ready", job_id=job_id,
                                  owner_uid=account_identity["owner_uid"], handoff_id=handoff["id"])
     _event(store, job_id, "finalize", "Application and private route verified.")
+    if service.id == "lobehub":
+        from ctl.lobehub_ops import reconcile
+        ready, detail = reconcile(log)
+        if not ready:
+            _fail(store, state, job_id, service.id, actor, "lobehub_policy",
+                  "lobehub_policy_failed", detail)
+            return
+    from ctl.mcp_ops import sync_application
+    if not sync_application(service.id, running=True, root=root, log=log):
+        log("One enabled MCP needs attention after application installation.")
     store.transition(job_id, "succeeded", actor=actor,
                      detail=f"{service.name} installed and verified.", step_id="finalize")
 
@@ -927,6 +1025,16 @@ def _repair(store: JobStore, state: ControlState | None, job: dict,
         return
     if state:
         state.set_installation(service.id, "running", job_id=job_id, manifest_version="4", route_state="ready")
+    if service.id == "lobehub":
+        from ctl.lobehub_ops import reconcile
+        ready, detail = reconcile(log)
+        if not ready:
+            _fail(store, state, job_id, service.id, actor, "lobehub_policy",
+                  "lobehub_policy_failed", detail)
+            return
+    from ctl.mcp_ops import sync_application
+    if not sync_application(service.id, running=True, root=root, log=log):
+        log("One enabled MCP needs attention after application repair.")
     store.transition(job_id, "succeeded", actor=actor,
                      detail=f"{service.name} repaired with the current curated runtime.", step_id="complete")
 
@@ -952,10 +1060,8 @@ def _configure_identity(store: JobStore, state: ControlState | None, job: dict,
             if service.id not in written:
                 raise ValueError("The persisted OIDC client configuration is incomplete.")
             installation = state.installation(service.id) if state else None
-            previous_identity = state.service_identity(service.id) if state else None
             linked = bool(
                 installation and installation.get("state") == "running"
-                and previous_identity and previous_identity.get("state") == "migration_required"
                 and _linked_owner_verified(
                     service, project, owner,
                     lambda line: store.append_event(job_id, "log", line)))
@@ -977,9 +1083,14 @@ def _configure_identity(store: JobStore, state: ControlState | None, job: dict,
                     raise ValueError(configured_detail)
             detail = ("OIDC configuration is installed. Complete a real Authentik callback so Mu3Lab "
                       "can verify the existing owner and administrator role before disabling local login.")
-            target = "ready" if linked else "migration_required"
-            if linked:
-                detail = "Verified Authentik account linking and administrator role; browser password login is disabled."
+            target = "ready" if linked or service.id == "homarr" else "migration_required"
+            if service.id == "homarr":
+                detail = ("Authentik OIDC is configured and Homarr no longer offers local credentials. "
+                          "Complete the Authentik redirect to finish Homarr's first-run group setup.")
+            elif linked:
+                detail = ("Verified Authentik account linking; password login is disabled."
+                          if service.id == "lobehub" else
+                          "Verified Authentik account linking and administrator role; browser password login is disabled.")
         elif mode == "trusted_header":
             detail = "Authentik trusted-header access is configured; live route health remains authoritative."
             target = "ready"
@@ -1071,6 +1182,12 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             runtime_env["MU3LAB_LITELLM_CONFIG"] = str(runtime.projects / "litellm" / "config.yaml")
         elif service.id == "freellmapi":
             runtime_env["MU3LAB_FREELLMAPI_CONFIG"] = str(runtime.projects / "freellmapi" / "freellmapi.config.json")
+    if action == "stop":
+        from ctl.mcp_ops import sync_application
+        if not sync_application(service.id, running=False, root=root, log=log):
+            _fail(store, state, job_id, service.id, actor, "stop_mcp",
+                  "mcp_stop_failed", "An enabled MCP could not stop safely.")
+            return
     rc, output = actions.compose_action(
         project, action, log, env=runtime_env,
         extra_files=compose_overrides(service.id, project))
@@ -1093,6 +1210,16 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
                     _fail(store, state, job_id, service.id, actor, "identity_configuration",
                           "identity_configuration_failed", detail)
                     return
+        from ctl.mcp_ops import sync_application
+        if not sync_application(service.id, running=True, root=root, log=log):
+            log("One enabled MCP needs attention after application start.")
+        if service.id == "lobehub":
+            from ctl.lobehub_ops import reconcile
+            ready, detail = reconcile(log)
+            if not ready:
+                _fail(store, state, job_id, service.id, actor, "lobehub_policy",
+                      "lobehub_policy_failed", detail)
+                return
     if state:
         state.set_installation(service.id, target_state, job_id=job_id,
                                route_state="ready")

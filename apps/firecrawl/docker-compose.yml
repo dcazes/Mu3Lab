@@ -1,51 +1,125 @@
 name: mu3lab-firecrawl
 
 services:
-  redis:
-    image: redis:7.4-alpine
-    restart: unless-stopped
-    networks: [mu3lab_backend]
-
-  postgres:
-    image: postgres:16.4-alpine
-    restart: unless-stopped
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
-    environment:
-      POSTGRES_DB: firecrawl
-      POSTGRES_USER: firecrawl
-    volumes:
-      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/firecrawl/postgres:/var/lib/postgresql/data
-    networks: [mu3lab_backend]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U firecrawl -d firecrawl"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   api:
-    image: ghcr.io/firecrawl/firecrawl:2.11.334-production
+    image: ghcr.io/firecrawl/firecrawl:2.11.334-production@sha256:70453d7102cce7000f4e8e80bd11e3e1353cdc9a0b87bb4cd1d4e8edf5a65744
     restart: unless-stopped
+    command: node dist/src/harness.js --start-docker
     ports: ["127.0.0.1:3002:3002"]
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]
     environment:
       HOST: 0.0.0.0
+      PORT: "3002"
       INTERNAL_PORT: "3002"
+      EXTRACT_WORKER_PORT: "3004"
+      WORKER_PORT: "3005"
+      ENV: local
       REDIS_URL: redis://redis:6379
-      POSTGRES_HOST: postgres
+      REDIS_RATE_LIMIT_URL: redis://redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+      POSTGRES_HOST: nuq-postgres
       POSTGRES_PORT: "5432"
-      POSTGRES_DB: firecrawl
-      POSTGRES_USER: firecrawl
-    networks: [mu3lab_frontend, mu3lab_backend]
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      USE_DB_AUTHENTICATION: "false"
+      NUQ_RABBITMQ_URL: amqp://firecrawl:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672
+      BULL_AUTH_KEY: ${BULL_AUTH_KEY:?BULL_AUTH_KEY is required}
+      CRAWL_CONCURRENT_REQUESTS: "2"
+      MAX_CONCURRENT_JOBS: "2"
+      BROWSER_POOL_SIZE: "2"
+      NUQ_WORKER_COUNT: "1"
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [firecrawl-api]
     depends_on:
-      redis: {condition: service_started}
-      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      nuq-postgres: {condition: service_healthy}
+      playwright-service: {condition: service_started}
     extra_hosts: ["host.docker.internal:host-gateway"]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 20s
       timeout: 10s
-      retries: 15
+      retries: 30
+      start_period: 90s
+    logging: &default-logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  playwright-service:
+    image: ghcr.io/firecrawl/playwright-service@sha256:df1a393ce8bfc3801570a826a9b0dcc400ae48789adb4a0ad9d6cbf0229b059b
+    restart: unless-stopped
+    # The published image includes the compiled server and dependencies, but
+    # its inherited pnpm command invokes Corepack and can try to download pnpm
+    # at runtime.  Start the bundled server directly so this private runtime
+    # remains self-contained once its images have been pulled.
+    command: node dist/api.js
+    environment:
+      PORT: "3000"
+      MAX_CONCURRENT_PAGES: "2"
+    # The backend network is intentionally internal.  Playwright needs the
+    # frontend network as well to reach public pages it is asked to crawl; it
+    # exposes no host port and the API still reaches it over the backend link.
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    logging: *default-logging
+
+  redis:
+    image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/firecrawl/redis:/data
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt: [no-new-privileges:true]
+    logging: *default-logging
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine@sha256:d7af1c87c5f1eda13fcfca06db452bf3aeab6619fc3358b68535c0c02c4e52bc
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: firecrawl
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/firecrawl/rabbitmq:/var/lib/rabbitmq
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    logging: *default-logging
+
+  nuq-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: postgres
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/firecrawl/postgres:/var/lib/postgresql/data
+    networks: [mu3lab_backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    logging: *default-logging
 
 networks:
   mu3lab_frontend: {external: true}

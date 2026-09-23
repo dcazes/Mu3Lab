@@ -27,8 +27,9 @@ from pathlib import Path
 # into sys.path itself (see tests/test_preflight.py); belt-and-braces here too.
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-DEFERRED_BOOTSTRAP_MODULES = ("tests.test_app_security", "tests.test_provisioning",
-                              "tests.test_registry")
+DEFERRED_BOOTSTRAP_MODULES = ("tests.test_app_security", "tests.test_calendar",
+                              "tests.test_connections_mvp", "tests.test_provisioning",
+                              "tests.test_provider_ops", "tests.test_registry")
 
 
 class JsonResult(unittest.TestResult):

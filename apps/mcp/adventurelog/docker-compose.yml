@@ -1,0 +1,16 @@
+name: mu3lab-mcp-adventurelog
+services:
+  adventurelog-mcp:
+    build: .
+    restart: "no"
+    environment:
+      MCP_APP: adventurelog
+      APP_URL: http://adventurelog-app
+      ADVENTURELOG_API_KEY: ${ADVENTURELOG_API_KEY:?ADVENTURELOG_API_KEY is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports: ["127.0.0.1:8820:8080"]
+    networks: [mu3lab_backend, mu3lab_mcp]
+    security_opt: [no-new-privileges:true]
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}
