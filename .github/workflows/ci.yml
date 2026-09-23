@@ -86,7 +86,7 @@ jobs:
             AUTH_AUTHENTIK_ISSUER=https://example.ts.net/application/o/lobehub/ \
             AUTH_AUTHENTIK_SECRET=ci-placeholder \
             AUTH_SECRET=ci-placeholder \
-            KEY_VAULTS_SECRET=Y2ktcGxhY2Vob2xkZXI= \
+            KEY_VAULTS_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
             LITELLM_MASTER_KEY=ci-placeholder \
             RUSTFS_ACCESS_KEY=ci-placeholder \
             RUSTFS_SECRET_KEY=ci-placeholder \
