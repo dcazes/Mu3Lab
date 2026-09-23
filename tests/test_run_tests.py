@@ -50,8 +50,11 @@ class ParseLineTests(unittest.TestCase):
     def test_bootstrap_defers_dependency_backed_registry_module(self):
         self.assertEqual(run_tests.DEFERRED_BOOTSTRAP_MODULES,
                          ("tests.test_app_security", "tests.test_calendar",
-                          "tests.test_connections_mvp", "tests.test_provisioning",
-                          "tests.test_provider_ops", "tests.test_registry"))
+                          "tests.test_connections_mvp", "tests.test_identity",
+                          "tests.test_mcp_registry", "tests.test_mvp_completion",
+                          "tests.test_mvp_control", "tests.test_mvp_runtime",
+                          "tests.test_provisioning", "tests.test_provider_ops",
+                          "tests.test_registry", "tests.test_service_ops"))
 
 
 class JsonResultTests(unittest.TestCase):
