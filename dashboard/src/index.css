@@ -167,6 +167,11 @@
 .app-inspector .actions { gap: 7px; flex-wrap: wrap; min-width: 0; }
 .app-inspector .actions .button, .app-inspector .actions a { flex: 1 1 calc(50% - 7px); min-width: 0; white-space: nowrap; }
 .app-inspector .actions .inspector-full-action { flex-basis: 100%; }
+.tailscale-inspector .status.stopped { color: #ff9caf; }
+.tailscale-inspector .inspector-facts > span { min-width: 0; }
+.tailscale-inspector .tailscale-magicdns { overflow-wrap: anywhere; }
+.tailscale-inspector .tailscale-route-summary { overflow-wrap: anywhere; }
+.app-inspector.tailscale-inspector .actions > a.button { flex: 1 1 100%; }
 .home-lower-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .home-lower-grid > :only-child { grid-column: 1 / -1; }
 

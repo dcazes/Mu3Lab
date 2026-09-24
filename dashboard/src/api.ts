@@ -33,7 +33,10 @@ export interface CatalogService { summary: string; category?: string; stage_labe
 export interface CatalogResponse { ok: boolean; profiles: CatalogProfile[]; services: Record<string, CatalogService>; }
 export interface Metric { total: number; used: number; percent: number; }
 export interface BackupReadiness { state?: string; detail?: string; repository_present?: boolean; integrity_verified?: boolean; snapshot_present?: boolean; off_device?: boolean; last_verified_at?: string; [key: string]: unknown; }
-export interface SystemResponse { ok: boolean; cpu_percent: number; uptime_seconds?: number; docker_ready: boolean; tailnet_dns_name: string; runtime_root: string; memory: Metric; disk: Metric; backup: BackupReadiness; }
+export type TailscaleConnectionState = 'connected' | 'disconnected' | 'unavailable';
+export interface TailscaleServeStatus { state: 'available' | 'unavailable'; ports: number[]; }
+export interface TailscaleStatus { state: TailscaleConnectionState; backend_state: string; online: boolean; dns_name: string; detail: string; serve: TailscaleServeStatus; }
+export interface SystemResponse { ok: boolean; cpu_percent: number; uptime_seconds?: number; docker_ready: boolean; tailnet_dns_name: string; tailscale?: TailscaleStatus; runtime_root: string; memory: Metric; disk: Metric; backup: BackupReadiness; }
 export interface IntegrationsResponse { ok: boolean; policy: string; integrations: { source: string; destination: string; kind: string }[]; }
 export interface IdentityResponse { ok: boolean; control_plane_auth: string; username?: string; subject_id?: string; email?: string; display_name?: string; groups?: string[]; detail: string; writes_enabled: boolean; }
 export interface CoreSetupResponse { ok: boolean; ready_to_run: boolean; services: string[]; missing_manifests: string[]; current_job?: Job | null; next_action: string; capacity?: { ok: boolean; reasons?: string[]; disk_free?: number; memory_total?: number; docker_ready?: boolean }; provisioning?: ProvisioningResponse | null; }

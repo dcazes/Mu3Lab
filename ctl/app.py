@@ -47,7 +47,9 @@ from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl import mcp_config
 from ctl.mcp_activity import McpActivity
 from ctl import mcp_console
-from ctl.service_state import compose_snapshot, status as service_status, tailnet_dns_name, tailnet_serve_ports
+from ctl.service_state import (compose_snapshot, status as service_status,
+                               tailnet_dns_name, tailnet_serve_ports,
+                               tailnet_serve_status, tailscale_status)
 from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl import actions
@@ -284,6 +286,8 @@ def system() -> dict:
                                 text=True, timeout=5).returncode == 0
     except (OSError, subprocess.SubprocessError):
         docker = False
+    tailscale = tailscale_status()
+    tailscale["serve"] = tailnet_serve_status()
     return {
         "ok": True,
         "cpu_percent": psutil.cpu_percent(interval=None),
@@ -292,7 +296,8 @@ def system() -> dict:
                    "percent": memory.percent},
         "disk": {"total": disk.total, "used": disk.used, "percent": disk.percent},
         "docker_ready": docker,
-        "tailnet_dns_name": tailnet_dns_name(),
+        "tailnet_dns_name": tailscale["dns_name"],
+        "tailscale": tailscale,
         "runtime_root": str(RuntimePaths().root),
         "backup": backup_readiness(),
     }

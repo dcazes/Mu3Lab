@@ -3,12 +3,12 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin, { type DateClickArg } from '@fullcalendar/interaction';
 import type { DatesSetArg, EventClickArg, EventInput } from '@fullcalendar/core';
-import { api, AuditResponse, BackupReadiness, CalendarAuthorization, CalendarConnection, CalendarEvent, CalendarEvents, CatalogResponse, CoreSetupResponse, CredentialHandoff, CredentialReveal, deleteApi, IdentityResponse, InstallBatch, InstallBatchJob, InstallBatchResponse, IntegrationsResponse, Job, JobDetailResponse, JobsResponse, McpRegistryResponse, postApi, postJsonApi, ProviderCatalogItem, ProviderMetadata, ProvisioningResponse, putJsonApi, Service, ServiceConfigResponse, ServiceLogsResponse, SystemConfig, SystemResponse } from './api';
+import { api, AuditResponse, BackupReadiness, CalendarAuthorization, CalendarConnection, CalendarEvent, CalendarEvents, CatalogResponse, CoreSetupResponse, CredentialHandoff, CredentialReveal, deleteApi, IdentityResponse, InstallBatch, InstallBatchJob, InstallBatchResponse, IntegrationsResponse, Job, JobDetailResponse, JobsResponse, McpRegistryResponse, postApi, postJsonApi, ProviderCatalogItem, ProviderMetadata, ProvisioningResponse, putJsonApi, Service, ServiceConfigResponse, ServiceLogsResponse, SystemConfig, SystemResponse, TailscaleStatus } from './api';
 import { siActualbudget, siAuthentik, siCaddy, siImmich, siMealie, siNextcloud, siOllama, siPaperlessngx, siVaultwarden, type SimpleIcon } from 'simple-icons';
 import { McpConsole } from './McpConsole';
 
 const logos: Record<string, SimpleIcon> = { ingress: siCaddy, authentik: siAuthentik, vaultwarden: siVaultwarden, ollama: siOllama, 'actual-budget': siActualbudget, immich: siImmich, mealie: siMealie, 'paperless-ngx': siPaperlessngx, nextcloud: siNextcloud };
-const initials: Record<string, string> = { litellm: 'LT', freellmapi: 'FL', lobehub: 'LC', 'baby-buddy': 'BB', surfsense: 'SS', firecrawl: 'FC', adventurelog: 'AL' };
+const initials: Record<string, string> = { litellm: 'LT', freellmapi: 'FL', lobehub: 'LC', 'baby-buddy': 'BB', surfsense: 'SS', firecrawl: 'FC', adventurelog: 'AL', tailscale: 'TS' };
 const stateLabel: Record<Service['state'], string> = { planned: 'Not installed', not_installed: 'Not installed', config_required: 'Configuration required', queued: 'Queued', installing: 'Installing', installed: 'Installed', needs_setup: 'Needs setup', configured: 'Configured', starting: 'Starting', verifying: 'Verifying', running: 'Running', ready: 'Ready', stopped: 'Stopped', updating: 'Updating', degraded: 'Degraded', failed: 'Failed', needs_attention: 'Needs attention', blocked: 'Blocked by policy' };
 const stageLabel: Record<Service['stage'], string> = { foundation: 'Foundation', core: 'AI Integration', optional: 'Productivity', blocked: 'Blocked' };
 const displayStage = (service: Service): Service['stage'] => ['firecrawl', 'lobehub'].includes(service.id) ? 'core' : service.stage === 'blocked' && service.category === 'productivity' ? 'optional' : service.stage;
@@ -117,9 +117,16 @@ function UpcomingEvents({ nextcloud }: { nextcloud?: Service }) {
   </section>;
 }
 
-function WorkspaceGroup({ title, services, selectedId, select }: { title: string; services: Service[]; selectedId?: string; select: (id: string) => void }) {
-  if (!services.length) return null;
-  return <div className="app-dock-group"><h3>{title}</h3><div className="app-dock" role="tablist" aria-label={title}>{services.map(service => { const tone = ['ready', 'running'].includes(service.state) ? 'green' : service.state === 'stopped' ? 'red' : ['failed', 'needs_attention', 'degraded', 'config_required', 'queued', 'installing', 'starting', 'verifying'].includes(service.state) ? 'amber' : 'gray'; return <button key={service.id} role="tab" aria-selected={selectedId === service.id} className={selectedId === service.id ? 'selected' : ''} onClick={() => select(service.id)}><AppGlyph id={service.id} /><span>{service.name}</span><i className={`state-dot ${tone}`} aria-label={stateLabel[service.state]} /></button>; })}</div></div>;
+interface WorkspaceTile {
+  id: string;
+  label: string;
+  tone: 'green' | 'red' | 'amber' | 'gray';
+  statusLabel: string;
+}
+
+function WorkspaceGroup({ title, services, supplementalTiles = [], selectedId, select }: { title: string; services: Service[]; supplementalTiles?: WorkspaceTile[]; selectedId: string; select: (id: string) => void }) {
+  if (!services.length && !supplementalTiles.length) return null;
+  return <div className="app-dock-group"><h3>{title}</h3><div className="app-dock" role="tablist" aria-label={title}>{services.map(service => { const tone = ['ready', 'running'].includes(service.state) ? 'green' : service.state === 'stopped' ? 'red' : ['failed', 'needs_attention', 'degraded', 'config_required', 'queued', 'installing', 'starting', 'verifying'].includes(service.state) ? 'amber' : 'gray'; return <button key={service.id} role="tab" aria-selected={selectedId === service.id} className={selectedId === service.id ? 'selected' : ''} onClick={() => select(service.id)}><AppGlyph id={service.id} /><span>{service.name}</span><i className={`state-dot ${tone}`} aria-label={stateLabel[service.state]} /></button>; })}{supplementalTiles.map(tile => <button key={tile.id} role="tab" aria-selected={selectedId === tile.id} className={selectedId === tile.id ? 'selected' : ''} onClick={() => select(tile.id)}><AppGlyph id={tile.id} /><span>{tile.label}</span><i className={`state-dot ${tile.tone}`} aria-label={tile.statusLabel} /></button>)}</div></div>;
 }
 
 function IdentityLaunch({ service }: { service: Service }) {
@@ -142,11 +149,35 @@ function IdentityLaunch({ service }: { service: Service }) {
 export function HomePanel({ services, system, jobs }: { services: Service[]; system: SystemResponse; jobs: JobsResponse }) {
   const workspace = services.filter(service => service.stage !== 'blocked');
   const defaultService = workspace.find(service => ['failed', 'needs_attention', 'degraded'].includes(service.state)) || workspace.find(service => ['ready', 'running'].includes(service.state)) || workspace[0];
-  const [selectedId, setSelectedId] = useState(defaultService?.id || ''); const [message, setMessage] = useState('');
-  const selected = workspace.find(service => service.id === selectedId) || defaultService;
-  useEffect(() => { if (selectedId && !workspace.some(service => service.id === selectedId)) setSelectedId(defaultService?.id || ''); }, [services, selectedId, defaultService?.id]);
+  const [selectedId, setSelectedId] = useState(defaultService?.id || 'tailscale'); const [message, setMessage] = useState('');
+  const userSelected = useRef(false);
+  const selectId = (id: string) => { userSelected.current = true; setSelectedId(id); };
+  const selectedService = workspace.find(service => service.id === selectedId);
+  const tailscaleSelected = selectedId === 'tailscale';
+  const tailscale = system.tailscale || (system.tailnet_dns_name ? {
+    state: 'connected', backend_state: 'Unknown', online: true, dns_name: system.tailnet_dns_name,
+    detail: 'Connected to the tailnet.', serve: { state: 'unavailable', ports: [] },
+  } : {
+    state: 'unavailable', backend_state: '', online: false, dns_name: '',
+    detail: 'Tailscale status is unavailable.', serve: { state: 'unavailable', ports: [] },
+  }) as TailscaleStatus;
+  const tailscaleTile: WorkspaceTile = {
+    id: 'tailscale', label: 'Tailscale',
+    tone: tailscale.state === 'connected' ? 'green' : tailscale.state === 'disconnected' ? 'red' : 'gray',
+    statusLabel: tailscale.state === 'connected' ? 'Connected' : tailscale.state === 'disconnected' ? 'Disconnected' : 'Status unavailable',
+  };
+  useEffect(() => {
+    if (selectedId === 'tailscale') {
+      if (!userSelected.current && defaultService) setSelectedId(defaultService.id);
+      return;
+    }
+    if (!workspace.some(service => service.id === selectedId)) {
+      userSelected.current = false;
+      setSelectedId(defaultService?.id || 'tailscale');
+    }
+  }, [services, selectedId, defaultService?.id]);
   const counts = { running: services.filter(service => ['ready', 'running'].includes(service.state)).length, installed: services.filter(service => !['planned', 'not_installed', 'blocked'].includes(service.state)).length, attention: services.filter(service => ['failed', 'needs_attention', 'degraded', 'config_required'].includes(service.state)).length };
-  const run = async (action: 'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair') => { if (!selected || !window.confirm(`${action === 'repair' ? 'Repair' : action.replaceAll('_', ' ')} ${selected.name}? ${action === 'repair' ? 'This recreates containers using the corrected private network layout but preserves data and does not download images.' : ''}`)) return; setMessage(''); try { await postJsonApi(`/api/v1/services/${selected.id}/actions`, { action }); setMessage(`${selected.name} ${action.replaceAll('_', ' ')} queued.`); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } };
+  const run = async (action: 'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair') => { if (!selectedService || !window.confirm(`${action === 'repair' ? 'Repair' : action.replaceAll('_', ' ')} ${selectedService.name}? ${action === 'repair' ? 'This recreates containers using the corrected private network layout but preserves data and does not download images.' : ''}`)) return; setMessage(''); try { await postJsonApi(`/api/v1/services/${selectedService.id}/actions`, { action }); setMessage(`${selectedService.name} ${action.replaceAll('_', ' ')} queued.`); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } };
   return <div className="home-workspace">
     <section className="metric-grid home-metrics"><Metric label="CPU" value={`${Math.round(system.cpu_percent)}%`} /><Metric label="Memory" value={`${Math.round(system.memory.percent)}%`} /><Metric label="Storage" value={`${Math.round(system.disk.percent)}%`} /><Metric label="Uptime" value={duration(system.uptime_seconds)} /><Metric label="Running" value={String(counts.running)} /><Metric label="Needs attention" value={String(counts.attention)} /></section>
     {jobs.jobs.some(job => ['queued', 'running'].includes(job.state)) && <section className="active-strip" role="status">{jobs.jobs.filter(job => ['queued', 'running'].includes(job.state)).slice(0, 1).map(job => <span key={job.id}><b>{job.service_id}</b> · {job.step_id?.replaceAll('_', ' ') || job.state}</span>)}</section>}
@@ -154,12 +185,51 @@ export function HomePanel({ services, system, jobs }: { services: Service[]; sys
     <section className="app-dock-section panel">
       <div className="section-heading"><div><p className="eyebrow">APPLICATION WORKSPACE</p><h2>{counts.installed} installed · {counts.running} running</h2><p className="section-caption">Select an app to see its health and common actions.</p></div><LinkButton path="/apps">View app catalog →</LinkButton></div>
       <div className="app-workspace-grid">
-        <div className="app-dock-groups"><WorkspaceGroup title="Infrastructure" services={workspace.filter(service => displayStage(service) === 'foundation')} selectedId={selected?.id} select={setSelectedId} /><WorkspaceGroup title="AI Integration" services={workspace.filter(service => displayStage(service) === 'core')} selectedId={selected?.id} select={setSelectedId} /><WorkspaceGroup title="Productivity apps" services={workspace.filter(service => displayStage(service) === 'optional')} selectedId={selected?.id} select={setSelectedId} /></div>
-        {selected && <article className="app-inspector"><header><AppGlyph id={selected.id} /><div><p className="eyebrow">{selected.category}</p><h2>{selected.name}</h2><Status state={selected.state} /></div></header><p>{selected.detail}</p><div className="inspector-facts"><span><b>Health</b>{selected.health_state.replaceAll('_', ' ')}</span><span><b>Route</b>{selected.route_state.replaceAll('_', ' ')}</span><span><b>Account</b>{selected.identity?.state.replaceAll('_', ' ') || selected.initialization?.state?.replaceAll('_', ' ') || 'not required'}</span><span><b>Containers</b>{selected.containers?.length || 0}</span></div><div className="actions">{selected.state !== 'stopped' && <IdentityLaunch service={selected} />}{(selected.allowed_actions || []).map(action => <Button variant={action === 'start' ? 'primary' : 'secondary'} key={action} onClick={() => run(action)}>{action.replaceAll('_', ' ')}</Button>)}<LinkButton path={`/apps/${selected.id}`}>Details & logs</LinkButton></div>{selected.identity?.detail && <p className="muted-copy">{selected.identity.detail}</p>}{message && <p className="notice" role="status">{message}</p>}</article>}
+        <div className="app-dock-groups"><WorkspaceGroup title="Infrastructure" services={workspace.filter(service => displayStage(service) === 'foundation')} supplementalTiles={[tailscaleTile]} selectedId={selectedId} select={selectId} /><WorkspaceGroup title="AI Integration" services={workspace.filter(service => displayStage(service) === 'core')} selectedId={selectedId} select={selectId} /><WorkspaceGroup title="Productivity apps" services={workspace.filter(service => displayStage(service) === 'optional')} selectedId={selectedId} select={selectId} /></div>
+        {tailscaleSelected ? <TailscaleInspector status={tailscale} /> : selectedService && <article className="app-inspector"><header><AppGlyph id={selectedService.id} /><div><p className="eyebrow">{selectedService.category}</p><h2>{selectedService.name}</h2><Status state={selectedService.state} /></div></header><p>{selectedService.detail}</p><div className="inspector-facts"><span><b>Health</b>{selectedService.health_state.replaceAll('_', ' ')}</span><span><b>Route</b>{selectedService.route_state.replaceAll('_', ' ')}</span><span><b>Account</b>{selectedService.identity?.state.replaceAll('_', ' ') || selectedService.initialization?.state?.replaceAll('_', ' ') || 'not required'}</span><span><b>Containers</b>{selectedService.containers?.length || 0}</span></div><div className="actions">{selectedService.state !== 'stopped' && <IdentityLaunch service={selectedService} />}{(selectedService.allowed_actions || []).map(action => <Button variant={action === 'start' ? 'primary' : 'secondary'} key={action} onClick={() => run(action)}>{action.replaceAll('_', ' ')}</Button>)}<LinkButton path={`/apps/${selectedService.id}`}>Details & logs</LinkButton></div>{selectedService.identity?.detail && <p className="muted-copy">{selectedService.identity.detail}</p>}{message && <p className="notice" role="status">{message}</p>}</article>}
       </div>
     </section>
     <JobActivity jobs={jobs.jobs.slice(0, 5)} />
   </div>;
+}
+
+function TailscaleInspector({ status }: { status: TailscaleStatus }) {
+  const [copyMessage, setCopyMessage] = useState('');
+  const connectionLabel = status.state === 'connected' ? 'Connected' : status.state === 'disconnected' ? 'Disconnected' : 'Unavailable';
+  const badgeLabel = status.state === 'unavailable' ? 'Status unavailable' : connectionLabel;
+  const badgeTone = status.state === 'connected' ? 'ready' : status.state === 'disconnected' ? 'stopped' : '';
+  const serveCount = status.serve.state === 'unavailable' ? 'Unavailable' : status.serve.ports.length === 0 ? 'None configured' : `${status.serve.ports.length} configured`;
+  const routeSummary = status.serve.state === 'unavailable'
+    ? 'Tailscale Serve route status is unavailable.'
+    : status.serve.ports.length
+      ? `HTTPS ports: ${status.serve.ports.join(', ')}`
+      : 'No Tailscale Serve HTTPS routes are configured.';
+  const copyAddress = async () => {
+    setCopyMessage('');
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(status.dns_name);
+      setCopyMessage('Tailnet address copied.');
+    } catch {
+      setCopyMessage('Could not copy the tailnet address.');
+    }
+  };
+  return <article className="app-inspector tailscale-inspector">
+    <header><AppGlyph id="tailscale" /><div><p className="eyebrow">INFRASTRUCTURE</p><h2>Tailscale</h2><span className={`status ${badgeTone}`}>{badgeLabel}</span></div></header>
+    <p>Private network access and HTTPS publishing for this Mu3Lab host.</p>
+    <div className="inspector-facts">
+      <span><b>Connection</b>{connectionLabel}</span>
+      <span><b>Backend</b>{status.backend_state || 'Unknown'}</span>
+      <span className="tailscale-magicdns"><b>MagicDNS</b>{status.dns_name || 'Not assigned'}</span>
+      <span><b>Serve routes</b>{serveCount}</span>
+    </div>
+    <p className="tailscale-route-summary">{routeSummary}</p>
+    <div className="actions">
+      <a className="button button-primary" href="https://login.tailscale.com/admin" target="_blank" rel="noreferrer">Open Tailscale Admin ↗</a>
+      {status.dns_name && <Button onClick={() => void copyAddress()}>Copy tailnet address</Button>}
+    </div>
+    {copyMessage && <p className="notice" role="status">{copyMessage}</p>}
+  </article>;
 }
 
 function SetupChecklist({ core, provisioning, identity }: { core: CoreSetupResponse; provisioning: ProvisioningResponse; identity: IdentityResponse }) {

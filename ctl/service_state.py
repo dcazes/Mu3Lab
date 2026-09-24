@@ -19,17 +19,60 @@ from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
 
-def tailnet_dns_name(run=subprocess.run) -> str:
-    """Return this node's MagicDNS name without exposing local fallback URLs."""
+def tailscale_status(run=subprocess.run) -> dict[str, object]:
+    """Return a minimal, sanitized projection of this node's Tailscale status."""
     try:
         proc = run(["tailscale", "status", "--json"], capture_output=True,
                    text=True, timeout=5)
-        if proc.returncode != 0:
-            return ""
+    except (OSError, subprocess.SubprocessError):
+        return {
+            "state": "unavailable", "backend_state": "", "online": False,
+            "dns_name": "", "detail": "Tailscale status is unavailable.",
+        }
+    if proc.returncode != 0:
+        return {
+            "state": "disconnected", "backend_state": "", "online": False,
+            "dns_name": "",
+            "detail": "Tailscale is installed but its status could not be read.",
+        }
+    try:
         data = json.loads(proc.stdout)
-        return str(data.get("Self", {}).get("DNSName", "")).rstrip(".")
-    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
-        return ""
+        if not isinstance(data, dict):
+            raise ValueError("Tailscale status JSON is not an object")
+        backend_value = data.get("BackendState", "")
+        backend_state = str(backend_value) if backend_value is not None else ""
+        self_data = data.get("Self")
+        if not isinstance(self_data, dict):
+            self_data = {}
+        online = self_data.get("Online") is True
+        dns_value = self_data.get("DNSName", "")
+        dns_name = str(dns_value).rstrip(".") if dns_value is not None else ""
+    except (TypeError, ValueError, AttributeError):
+        return {
+            "state": "unavailable", "backend_state": "", "online": False,
+            "dns_name": "", "detail": "Tailscale status is unavailable.",
+        }
+
+    if backend_state.casefold() == "running" and online:
+        state = "connected"
+        detail = "Connected to the tailnet."
+    else:
+        state = "disconnected"
+        if backend_state.casefold() == "needslogin":
+            detail = "Tailscale needs sign-in."
+        elif backend_state.casefold() == "running" and not online:
+            detail = "Tailscale is running, but this device is offline."
+        else:
+            detail = "Tailscale is not connected."
+    return {
+        "state": state, "backend_state": backend_state, "online": online,
+        "dns_name": dns_name, "detail": detail,
+    }
+
+
+def tailnet_dns_name(run=subprocess.run) -> str:
+    """Return this node's MagicDNS name without exposing local fallback URLs."""
+    return str(tailscale_status(run=run)["dns_name"])
 
 
 def public_url(service: Service, dns_name: str) -> str:
@@ -80,17 +123,23 @@ def _tailnet_route_present(port: int) -> bool:
     return f":{port}" in output or f"https={port}" in output
 
 
+def tailnet_serve_status(run=subprocess.run) -> dict[str, object]:
+    """Return whether local Serve status is readable and its HTTPS ports."""
+    try:
+        proc = run(["tailscale", "serve", "status"], capture_output=True,
+                   text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return {"state": "unavailable", "ports": []}
+    if proc.returncode != 0:
+        return {"state": "unavailable", "ports": []}
+    ports = sorted({int(value) for value in re.findall(
+        r"(?::|https=)(\d{2,5})", proc.stdout)})
+    return {"state": "available", "ports": ports}
+
+
 def tailnet_serve_ports() -> set[int]:
     """Read Tailscale Serve once and return configured HTTPS ports."""
-    try:
-        proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True,
-                              text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return set()
-    if proc.returncode != 0:
-        return set()
-    return {int(value) for value in re.findall(
-        r"(?::|https=)(\d{2,5})", proc.stdout)}
+    return set(tailnet_serve_status()["ports"])
 
 
 def _compose_state(compose_file: Path, run=subprocess.run) -> str:

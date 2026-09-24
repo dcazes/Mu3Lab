@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiMcpPanel, AppsPanel, HomePanel, ProtectionPanel } from './panels';
-import type { Service } from './api';
+import type { Service, SystemResponse, TailscaleStatus } from './api';
 
 function service(id: string, name: string, stage: Service['stage']): Service {
   return {
@@ -15,10 +15,29 @@ function service(id: string, name: string, stage: Service['stage']): Service {
 }
 
 const services = [service('ingress', 'Caddy', 'foundation'), service('ollama', 'Ollama', 'core'), service('nextcloud', 'Nextcloud', 'optional'), service('firecrawl', 'Firecrawl', 'optional'), service('planned-tool', 'Planned Tool', 'blocked')];
+const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+
+function systemResponse(overrides: Partial<SystemResponse> = {}): SystemResponse {
+  return {
+    ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '',
+    memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {}, ...overrides,
+  };
+}
+
+function tailscaleStatus(overrides: Partial<TailscaleStatus> = {}): TailscaleStatus {
+  return {
+    state: 'connected', backend_state: 'Running', online: true, dns_name: 'mu3lab-8.taile2cc7a.ts.net',
+    detail: 'Connected to the tailnet.', serve: { state: 'available', ports: [443, 8443, 8446] }, ...overrides,
+  };
+}
 
 describe('dashboard organization', () => {
   beforeEach(() => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({ state: 'not_connected', events: [], error: '' }) })); });
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  afterEach(() => {
+    cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+    if (originalClipboardDescriptor) Object.defineProperty(navigator, 'clipboard', originalClipboardDescriptor);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  });
 
   it('groups Home apps and removes the duplicate wiring panel', () => {
     render(<HomePanel services={services} system={{ ok: true, cpu_percent: 1, uptime_seconds: 1, docker_ready: true, tailnet_dns_name: '', runtime_root: '', memory: { total: 1, used: 1, percent: 1 }, disk: { total: 1, used: 1, percent: 1 }, backup: {} }} jobs={{ ok: true, available: true, jobs: [] }} />);
@@ -29,6 +48,110 @@ describe('dashboard organization', () => {
     expect(firecrawl.closest('.app-dock-group')?.querySelector('h3')).toHaveTextContent('AI Integration');
     expect(screen.queryByText('CORE WIRING')).not.toBeInTheDocument();
     expect(screen.queryByText('6/9')).not.toBeInTheDocument();
+  });
+
+  it('exposes Tailscale as an Infrastructure tab instead of a standalone link', () => {
+    render(<HomePanel services={services} system={systemResponse({ tailscale: tailscaleStatus() })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    const tailscale = screen.getByRole('tab', { name: /Tailscale/ });
+    expect(tailscale).toHaveAttribute('aria-selected', 'false');
+    expect(tailscale).not.toHaveClass('selected');
+    expect(tailscale.closest('.app-dock-group')?.querySelector('h3')).toHaveTextContent('Infrastructure');
+    expect(screen.queryByRole('link', { name: 'Tailscale' })).not.toBeInTheDocument();
+    fireEvent.click(tailscale);
+    expect(tailscale).toHaveAttribute('aria-selected', 'true');
+    expect(tailscale).toHaveClass('selected');
+    expect(screen.getByRole('heading', { name: 'Tailscale' })).toBeInTheDocument();
+  });
+
+  it('maps live Tailscale state to green, red, and gray status dots', () => {
+    const cases: Array<{ state: TailscaleStatus['state']; tone: string; label: string }> = [
+      { state: 'connected', tone: 'green', label: 'Connected' },
+      { state: 'disconnected', tone: 'red', label: 'Disconnected' },
+      { state: 'unavailable', tone: 'gray', label: 'Status unavailable' },
+    ];
+    for (const item of cases) {
+      const { unmount } = render(<HomePanel services={services} system={systemResponse({ tailscale: tailscaleStatus({ state: item.state }) })} jobs={{ ok: true, available: true, jobs: [] }} />);
+      const tile = screen.getByRole('tab', { name: /Tailscale/ });
+      const dot = tile.querySelector('.state-dot');
+      expect(dot).toHaveClass(item.tone);
+      expect(dot).toHaveAttribute('aria-label', item.label);
+      unmount();
+    }
+  });
+
+  it('shows Tailscale status facts, Serve routes, and the read-only Admin action', () => {
+    const state = tailscaleStatus();
+    render(<HomePanel services={services} system={systemResponse({ tailscale: state })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Tailscale/ }));
+    const inspector = document.querySelector('.tailscale-inspector');
+    expect(inspector).toBeInTheDocument();
+    expect(inspector).toHaveTextContent('INFRASTRUCTURE');
+    expect(inspector).toHaveTextContent('Connected');
+    expect(inspector).toHaveTextContent('BackendRunning');
+    expect(inspector).toHaveTextContent('MagicDNSmu3lab-8.taile2cc7a.ts.net');
+    expect(inspector).toHaveTextContent('Serve routes3 configured');
+    expect(screen.getByText('HTTPS ports: 443, 8443, 8446')).toBeInTheDocument();
+    const admin = screen.getByRole('link', { name: 'Open Tailscale Admin ↗' });
+    expect(admin).toHaveAttribute('href', 'https://login.tailscale.com/admin');
+    expect(admin).toHaveAttribute('target', '_blank');
+    expect(admin).toHaveAttribute('rel', 'noreferrer');
+  });
+
+  it('copies exactly the normalized tailnet address and announces success', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(<HomePanel services={services} system={systemResponse({ tailscale: tailscaleStatus() })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Tailscale/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy tailnet address' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('mu3lab-8.taile2cc7a.ts.net'));
+    expect(await screen.findByRole('status')).toHaveTextContent('Tailnet address copied.');
+  });
+
+  it('announces clipboard failure and hides copy when MagicDNS is absent', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { rerender } = render(<HomePanel services={services} system={systemResponse({ tailscale: tailscaleStatus() })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Tailscale/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy tailnet address' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Could not copy the tailnet address.');
+    rerender(<HomePanel services={services} system={systemResponse({ tailscale: tailscaleStatus({ dns_name: '' }) })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    expect(screen.queryByRole('button', { name: 'Copy tailnet address' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a manually selected Tailscale inspector through status refreshes and restores app actions', () => {
+    const nextcloud = service('nextcloud', 'Nextcloud', 'optional');
+    nextcloud.state = 'ready';
+    nextcloud.identity = { mode: 'local', state: 'ready', launch_url: 'https://example:8443', detail: '', last_verified_at: '', recovery_available: true, job_id: '' };
+    nextcloud.ui = { state: 'ready', url: 'https://example:8443', label: 'Login', authentication: 'local', reason: '' };
+    const { rerender } = render(<HomePanel services={[nextcloud]} system={systemResponse({ tailscale: tailscaleStatus() })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    const metricsBefore = document.querySelector('.home-metrics')?.textContent;
+    fireEvent.click(screen.getByRole('tab', { name: /Tailscale/ }));
+    rerender(<HomePanel services={[nextcloud]} system={systemResponse({ tailscale: tailscaleStatus({ state: 'disconnected', backend_state: 'NeedsLogin', online: false }) })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    expect(screen.getByRole('tab', { name: /Tailscale/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Disconnected', { selector: '.status' })).toBeInTheDocument();
+    expect(document.querySelector('.home-metrics')?.textContent).toBe(metricsBefore);
+    fireEvent.click(screen.getByRole('tab', { name: /Nextcloud/ }));
+    expect(screen.getByRole('heading', { name: 'Nextcloud' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Login ↗' })).toHaveAttribute('href', 'https://example:8443');
+    expect(screen.getByRole('button', { name: 'Details & logs' })).toBeInTheDocument();
+  });
+
+  it('supports the legacy system response with and without a tailnet DNS name', () => {
+    const { rerender } = render(<HomePanel services={services} system={systemResponse({ tailnet_dns_name: 'legacy.ts.net' })} jobs={{ ok: true, available: true, jobs: [] }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Tailscale/ }));
+    expect(screen.getByText('Connected', { selector: '.status' })).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getByText('legacy.ts.net')).toBeInTheDocument();
+    expect(screen.getByText('Tailscale Serve route status is unavailable.')).toBeInTheDocument();
+    rerender(<HomePanel services={services} system={systemResponse()} jobs={{ ok: true, available: true, jobs: [] }} />);
+    expect(screen.getByText('Status unavailable', { selector: '.status' })).toBeInTheDocument();
+  });
+
+  it('defaults to Tailscale only when there are no visible registry services', () => {
+    render(<HomePanel services={[service('planned-tool', 'Planned Tool', 'blocked')]} system={systemResponse()} jobs={{ ok: true, available: true, jobs: [] }} />);
+    expect(screen.getByRole('tab', { name: /Tailscale/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'Tailscale' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '0 installed · 0 running' })).toBeInTheDocument();
   });
 
   it('orders the app catalog with Productivity first', () => {
