@@ -23,11 +23,9 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import ensure_core_envs
 from ctl.service_state import status as service_status, tailnet_dns_name
 from ctl.core_wiring import EMBEDDING_MODEL, configure as configure_wiring
-from ctl import workflow_secrets
-from ctl.control_state import ControlState
-from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.secrets import read_runtime_env
 
-CORE_ORDER = ("ollama", "freellmapi", "litellm", "open-webui")
+CORE_ORDER = ("ollama", "freellmapi", "litellm", "lobehub")
 HEALTH_TIMEOUT_SECONDS = 120
 MODEL_TIMEOUT_SECONDS = 600
 
@@ -207,53 +205,29 @@ def _runtime_envs(env_files: dict[str, Path], wiring: dict) -> dict[str, dict[st
     return envs
 
 
-def _configure_open_webui_identity(runtime: RuntimePaths, root: Path,
-                                   log: Callable[[str], None]) -> str:
-    """Apply trusted-header identity and the frame-safe authenticated proxy."""
-    from ctl.secrets import read_runtime_env, runtime_env_text
-
-    host = tailnet_dns_name()
-    if not host:
-        raise ValueError("Tailscale MagicDNS name is unavailable for Open WebUI identity")
-    env_path = runtime.projects / "open-webui" / ".env"
-    values = read_runtime_env(env_path)
-    origin = f"https://{host}:8445"
-    values.update({
-        "WEBUI_URL": origin,
-        "WEBUI_AUTH_TRUSTED_EMAIL_HEADER": "X-Mu3Lab-Email",
-        "WEBUI_AUTH_TRUSTED_NAME_HEADER": "X-Mu3Lab-Name",
-        "ENABLE_LOGIN_FORM": "false",
-        "XFRAME_OPTIONS": "",
-        "DEFAULT_MODELS": "mu3lab-chat",
-    })
-    temporary = env_path.with_suffix(".env.tmp")
-    temporary.write_text(runtime_env_text(values), encoding="utf-8")
-    temporary.chmod(0o600)
-    temporary.replace(env_path)
-    env_path.chmod(0o600)
-    # Reconcile the reviewed proxy base while preserving generated optional
-    # application routes owned by ctl.routes. The helper also publishes the
-    # core UI endpoints, so later optional-app updates cannot remove them.
+def _configure_chat_routes(root: Path, log: Callable[[str], None]) -> None:
+    """Publish LobeChat and the other core UI routes through private HTTPS."""
     from ctl.routes import reconcile_core
     registry = load()
     routed, detail = reconcile_core(registry, root, log)
     if not routed:
         raise ValueError("Core private UI routes could not be reconciled: " + redact(detail))
-    return origin
 
 
 def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     """Check application-level contracts after container health has passed."""
-    litellm_env = __import__("ctl.secrets", fromlist=["read_runtime_env"]).read_runtime_env(
-        runtime.projects / "litellm" / ".env")
+    litellm_env = read_runtime_env(runtime.projects / "litellm" / ".env")
     key = litellm_env.get("LITELLM_MASTER_KEY", "")
     if not key or not _http_ok("http://127.0.0.1:4000/v1/models",
                                headers={"Authorization": f"Bearer {key}"}):
         return False, "LiteLLM did not expose its authenticated model registry"
     if not _http_ok("http://127.0.0.1:11434/api/tags"):
         return False, "Ollama model registry did not answer"
-    if not _http_ok("http://127.0.0.1:8084/health"):
-        return False, "Open WebUI did not answer its health endpoint"
+    if not _http_ok("http://127.0.0.1:3211/__mu3lab_lobehub_health"):
+        return False, "LobeChat did not answer its private health endpoint"
+    lobehub = read_runtime_env(runtime.projects / "lobehub" / ".env")
+    if not all(lobehub.get(key) for key in ("AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", "APP_URL")):
+        return False, "LobeChat's Authentik sign-in configuration is incomplete"
     if not wiring["chat_configured"]:
         return False, "Waiting for at least one external inference-provider key"
     if not _http_ok("http://127.0.0.1:3001/readyz"):
@@ -275,11 +249,11 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "The local embedding model did not return vectors through LiteLLM"
     host = tailnet_dns_name()
     if not host:
-        return False, "The private hostname disappeared before Open WebUI route verification"
+        return False, "The private hostname disappeared before LobeChat route verification"
     from ctl.service_state import tailnet_serve_ports
-    if 8445 not in tailnet_serve_ports():
-        return False, "Open WebUI's private Tailscale route is not published"
-    return True, "Private routes, trusted-header chat identity, streamed chat, and embeddings passed live checks."
+    if 8457 not in tailnet_serve_ports():
+        return False, "LobeChat's private Tailscale route is not published"
+    return True, "Private LobeChat route, Authentik sign-in configuration, streamed chat, and embeddings passed live checks."
 
 
 def _run(store: JobStore, job_id: str, actor: str, root: Path,
@@ -299,25 +273,10 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
             return
         runtime = RuntimePaths()
         env_files = ensure_core_envs(runtime.root)
-        account_identity = workflow_secrets.job_identity(job_id)
-        open_webui_data = runtime.data / "open-webui" / "webui.db"
-        open_webui_bootstrap: dict[str, str] | None = None
-        if not open_webui_data.exists() and account_identity:
-            password = workflow_secrets.generate_password()
-            open_webui_bootstrap = {"WEBUI_ADMIN_EMAIL": account_identity["email"],
-                                    "WEBUI_ADMIN_PASSWORD": password,
-                                    "WEBUI_ADMIN_NAME": account_identity.get("display_name") or account_identity["username"]}
-            env_path = runtime.projects / "open-webui" / ".env"
-            values = read_runtime_env(env_path)
-            values.update(open_webui_bootstrap)
-            env_path.write_text(runtime_env_text(values), encoding="utf-8")
-            env_path.chmod(0o600)
-        elif not open_webui_data.exists():
-            control = ControlState.runtime()
-            if control:
-                control.set_initialization("open-webui", "trusted_header", "awaiting_user",
-                                           job_id=job_id)
-        _configure_open_webui_identity(runtime, root, log)
+        from ctl.service_ops import _materialize
+        lobehub_project = _materialize(load().get("lobehub"), root)
+        env_files["lobehub"] = lobehub_project / ".env"
+        _configure_chat_routes(root, log)
         wiring = configure_wiring(runtime)
         envs = _runtime_envs(env_files, wiring)
         for service_id in CORE_ORDER:
@@ -325,7 +284,7 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
                 raise RuntimeError("job lease was lost")
             store.append_event(job_id, "step.started", service_id)
             service = load().get(service_id)
-            project = service.compose_path(root)
+            project = lobehub_project if service_id == "lobehub" else service.compose_path(root)
             from ctl.compute import compose_overrides
             rc, output = actions.compose_up(
                 project, log, env=envs[service_id],
@@ -337,7 +296,7 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
                 store.transition(job_id, "failed", actor=actor,
                                  detail=f"Stopped at {service_id}: {safe_output}")
                 return
-            deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+            deadline = time.monotonic() + (900 if service_id == "lobehub" else HEALTH_TIMEOUT_SECONDS)
             while time.monotonic() < deadline:
                 live = service_status(service, "", root)
                 if live["health_state"] == "healthy":
@@ -350,41 +309,14 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
                 return
             log(f"{service_id}: compose start completed")
             store.append_event(job_id, "step.verified", service_id)
-            if service_id == "open-webui" and open_webui_bootstrap and account_identity:
-                env_path = runtime.projects / "open-webui" / ".env"
-                values = read_runtime_env(env_path)
-                for key in ("WEBUI_ADMIN_EMAIL", "WEBUI_ADMIN_PASSWORD", "WEBUI_ADMIN_NAME"):
-                    values.pop(key, None)
-                env_path.write_text(runtime_env_text(values), encoding="utf-8")
-                env_path.chmod(0o600)
-                envs = _runtime_envs(env_files, wiring)
-                rc, _ = actions.compose_up(project, log, env=envs[service_id], recreate=True,
-                                           timeout=600)
-                if rc:
+            if service_id == "lobehub":
+                from ctl.lobehub_ops import reconcile
+                policy_ready, policy_detail = reconcile(log)
+                if not policy_ready:
                     store.transition(job_id, "failed", actor=actor,
-                                     detail="Open WebUI administrator was created, but bootstrap variables could not be removed.",
-                                     error_code="account_verification_failed", step_id="account_cleanup")
+                                     detail="LobeChat model and agent policy failed: " + redact(policy_detail),
+                                     error_code="lobehub_policy_failed", step_id="lobehub_policy")
                     return
-                host = tailnet_dns_name()
-                handoff = workflow_secrets.create_handoff(
-                    service_id="open-webui", job_id=job_id,
-                    owner_uid=account_identity["owner_uid"], username=account_identity["email"],
-                    email=account_identity["email"], password=open_webui_bootstrap["WEBUI_ADMIN_PASSWORD"],
-                    login_url=f"https://{host}:8445" if host else "")
-                control = ControlState.runtime()
-                if control:
-                    control.add_handoff(handoff["id"], "open-webui", job_id,
-                                        account_identity["owner_uid"], handoff["created_at"],
-                                        handoff["expires_at"])
-                    control.set_initialization("open-webui", "trusted_header", "ready",
-                                               job_id=job_id, owner_uid=account_identity["owner_uid"],
-                                               handoff_id=handoff["id"])
-                if provisioning:
-                    provisioning.update("open_webui_admin", "verified",
-                                        detail="The Authentik operator was initialized as Open WebUI administrator.")
-            elif service_id == "open-webui" and provisioning:
-                provisioning.update("open_webui_admin", "waiting_for_user",
-                                    detail="Open Chat once through Authentik to create the first administrator, then confirm setup.")
             if service_id == "ollama":
                 rc, output = actions.compose_exec(
                     project, "ollama", ["ollama", "pull", EMBEDDING_MODEL], log,
@@ -412,7 +344,7 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
             if provisioning:
                 if state == "waiting_for_confirmation":
                     provisioning.update("core", "verified",
-                                        detail="Core containers and private Open WebUI route are healthy.")
+                                        detail="Core containers and the private LobeChat route are healthy.")
                     provisioning.update("configuration", "waiting_for_user", detail=detail)
                 else:
                     provisioning.update("core", "failed", detail=detail, error=detail)
@@ -420,7 +352,7 @@ def _run(store: JobStore, job_id: str, actor: str, root: Path,
         if provisioning:
             provisioning.update("core", "verified", detail="Core services and private integration checks passed.")
             provisioning.update("verification", "verified",
-                                detail="Private routes, trusted-header chat identity, streamed chat, and embeddings passed.")
+                                detail="Private LobeChat route and OIDC configuration, streamed chat, and embeddings passed.")
         store.transition(job_id, "succeeded", actor=actor,
                          detail="Core suite started, wired, and passed application-level checks.")
     except Exception as exc:  # noqa: BLE001 - job state must become terminal

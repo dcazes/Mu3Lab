@@ -73,10 +73,10 @@ class JobStoreTests(unittest.TestCase):
             job = store.create(kind="lifecycle", service_id="core-suite", action="install",
                                actor="operator")
             store.claim("worker")
-            self.assertTrue(store.heartbeat(job["id"], "worker", step_id="open-webui"))
+            self.assertTrue(store.heartbeat(job["id"], "worker", step_id="lobehub"))
             self.assertTrue(store.heartbeat(job["id"], "worker"))
             current = next(item for item in store.jobs() if item["id"] == job["id"])
-            self.assertEqual(current["step_id"], "open-webui")
+            self.assertEqual(current["step_id"], "lobehub")
 
     def test_event_window_keeps_the_most_recent_diagnostics(self):
         with tempfile.TemporaryDirectory() as tmp:

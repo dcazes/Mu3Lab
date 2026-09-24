@@ -30,10 +30,26 @@
 
 :19461 {
 	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:9001 {
-		header_up Host {http.request.host}
-		header_up X-Forwarded-Host {http.request.host}
-		header_up X-Forwarded-Proto https
+	# LobeChat completes its native OIDC flow inside the dashboard iframe. Permit
+	# only Authentik's OAuth authorization and authentication-flow documents to
+	# be framed by the dashboard on this same private tailnet hostname. All other
+	# Authentik routes, including its administration UI, retain X-Frame-Options.
+	@embedded_oidc path /application/o/authorize/* /if/flow/*
+	handle @embedded_oidc {
+		reverse_proxy 127.0.0.1:9001 {
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_down -X-Frame-Options
+			header_down Content-Security-Policy "frame-ancestors 'self' https://{http.request.host}:8446"
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:9001 {
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+		}
 	}
 }
 
@@ -45,26 +61,11 @@
 }
 
 
-:19463 {
+:19474 {
 	bind 127.0.0.1
-	route {
-		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
-		forward_auth 127.0.0.1:9001 {
-			uri /outpost.goauthentik.io/auth/caddy
-			header_up Host {http.request.host}
-			header_up X-Forwarded-Host {http.request.host}
-			header_up X-Forwarded-Proto https
-			copy_headers X-Authentik-Email X-Authentik-Name X-Authentik-Groups
-			trusted_proxies private_ranges
-		}
-		reverse_proxy 127.0.0.1:8084 {
-			header_up X-Forwarded-Proto https
-			header_up X-Forwarded-Host {http.request.host}
-			header_up X-Mu3Lab-Email {http.request.header.X-Authentik-Email}
-			header_up X-Mu3Lab-Name {http.request.header.X-Authentik-Name}
-			header_down -X-Frame-Options
-			header_down Content-Security-Policy "frame-ancestors https://*.ts.net:8446"
-		}
+	reverse_proxy 127.0.0.1:3211 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {http.request.host}
 	}
 }
 

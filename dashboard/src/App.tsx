@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, AuditResponse, CatalogResponse, ChatProvider, ChatStatus, CoreSetupResponse, Health, IdentityResponse, IntegrationsResponse, JobsResponse, ProvisioningResponse, ServicesResponse, SystemResponse } from './api';
+import { api, AuditResponse, CatalogResponse, ChatStatus, CoreSetupResponse, Health, IdentityResponse, IntegrationsResponse, JobsResponse, ProvisioningResponse, ServicesResponse, SystemResponse } from './api';
 import { AiMcpPanel, AppsPanel, HomePanel, ProtectionPanel, SystemPanel } from './panels';
 
 type Tab = 'home' | 'apps' | 'chat' | 'connections' | 'security' | 'system';
@@ -17,7 +17,7 @@ const emptyData: DashboardData = {
   integrations: { ok: false, policy: '', integrations: [] }, identity: { ok: false, control_plane_auth: 'not_configured', detail: 'Identity status unavailable.', writes_enabled: false },
   jobs: { ok: false, available: false, jobs: [] }, audit: { ok: false, available: false, events: [] },
   core: { ok: false, ready_to_run: false, services: [], missing_manifests: [], next_action: 'Core status unavailable.' }, provisioning: { ok: false, available: false, complete: false, phases: [] },
-  chat: { ok: false, ready: false, url: '', authentication: 'trusted_header', mcp_enabled_count: 0, detail: 'Chat status unavailable.' },
+  chat: { ok: false, ready: false, url: '', authentication: 'native_oidc', mcp_enabled_count: 0, detail: 'Chat status unavailable.' },
 };
 function routeTab(path: string): Tab { if (path === '/' || path === '') return 'home'; if (path.startsWith('/apps')) return 'apps'; if (path.startsWith('/chat')) return 'chat'; if (path.startsWith('/connections')) return 'connections'; if (path.startsWith('/security')) return 'security'; if (path.startsWith('/system')) return 'system'; return 'home'; }
 function knownRoute(path: string, services: { id: string }[]): boolean {
@@ -34,21 +34,15 @@ function expectedMcp(): { name: string; serviceId: string } | null {
 }
 
 export function ChatPanel({ status, services }: { status: ChatStatus; services: ServicesResponse['services'] }) {
-  const fallback: ChatProvider[] = [{ id: 'open-webui', name: 'Open WebUI', ready: status.ready, url: status.url, authentication: status.authentication, detail: status.detail }];
-  const providers = status.providers?.length ? status.providers : fallback;
-  const preferred = providers.find(provider => provider.id === 'lobehub' && provider.ready) || providers.find(provider => provider.ready) || providers[0];
-  const [selectedId, setSelectedId] = useState(preferred?.id || 'open-webui');
-  useEffect(() => { if (!providers.some(provider => provider.id === selectedId)) setSelectedId(preferred?.id || 'open-webui'); }, [providers, preferred?.id, selectedId]);
-  const selected = providers.find(provider => provider.id === selectedId) || preferred;
   const expected = expectedMcp();
   const parent = expected ? services.find(service => service.id === expected.serviceId) : undefined;
   return <div className="chat-page">
     <header className="chat-provider-bar">
-      <div role="tablist" aria-label="Chat applications">{providers.map(provider => <button key={provider.id} type="button" role="tab" aria-selected={provider.id === selected?.id} className={provider.id === selected?.id ? 'selected' : ''} onClick={() => setSelectedId(provider.id)}>{provider.name}<span className={provider.ready ? 'ready' : ''}>{provider.ready ? 'Ready' : 'Unavailable'}</span></button>)}</div>
-      {selected?.ready && selected.url && <a href={selected.url} target="_blank" rel="noreferrer">Open {selected.name} ↗</a>}
+      <div>LobeChat</div>
+      {status.ready && status.url && <a href={status.url} target="_blank" rel="noreferrer">Open LobeChat ↗</a>}
     </header>
     {expected && <div className="chat-context"><span><b>{expected.name}</b> is expected to be available in this chat.</span>{parent?.route_ready && <a href={parent.url} target="_blank" rel="noreferrer">Open {parent.name} ↗</a>}</div>}
-    {selected?.ready && selected.url ? <section className="chat-shell"><iframe key={selected.id} title={`Mu3Lab ${selected.name} chat`} src={selected.url} allow="clipboard-read; clipboard-write" /></section> : <section className="panel chat-unavailable"><p className="eyebrow">{selected?.name || 'CHAT'}</p><h2>{selected?.name || 'Chat'} is not ready</h2><p>{selected?.detail || status.detail}</p><a className="button button-primary" href="/apps">Manage apps →</a></section>}
+    {status.ready && status.url ? <section className="chat-shell"><iframe title="Mu3Lab LobeChat chat" src={status.url} allow="clipboard-read; clipboard-write" /></section> : <section className="panel chat-unavailable"><p className="eyebrow">CHAT</p><h2>LobeChat is not ready</h2><p>{status.detail}</p><a className="button button-primary" href="/system">Check core status →</a></section>}
   </div>;
 }
 

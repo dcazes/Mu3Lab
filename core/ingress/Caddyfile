@@ -48,13 +48,3 @@
 		header_up X-Forwarded-Proto https
 	}
 }
-
-# Open WebUI performs native OIDC with Authentik; Caddy publishes only the
-# private tailnet origin and does not add a second forward-auth layer.
-:19463 {
-	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:8084 {
-		header_up X-Forwarded-Proto https
-		header_up X-Forwarded-Host {http.request.host}
-	}
-}

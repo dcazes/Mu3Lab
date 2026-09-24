@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import stat
-import sqlite3
 import sys
 import tempfile
 import unittest
@@ -60,48 +59,15 @@ class ProvisioningStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.update("core", "waiting_for_user")
 
-    def test_progress_and_next_action_cover_all_nine_phases(self):
+    def test_progress_and_next_action_cover_all_eight_phases(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
             for phase in ("foundation", "vaultwarden", "tailscale", "identity",
                           "dashboard_protection", "core"):
                 store.update(phase, "verified")
             summary = store.summary()
-        self.assertEqual(summary["progress"], {"completed": 6, "total": 9})
-        self.assertEqual(summary["next_action"]["href"], "/chat")
-
-    def test_existing_open_webui_admin_is_reconciled_read_only(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            database = paths.data / "open-webui" / "webui.db"
-            database.parent.mkdir(parents=True)
-            with sqlite3.connect(database) as conn:
-                conn.execute('CREATE TABLE "user" (id TEXT, role TEXT)')
-                conn.execute('CREATE TABLE "auth" (id TEXT)')
-                conn.execute('INSERT INTO "user" VALUES (?, ?)', ("1", "admin"))
-                conn.execute('INSERT INTO "auth" VALUES (?)', ("1",))
-            store = ProvisioningStore(paths.runtime / "control-plane.sqlite3")
-            store.reconcile_runtime(paths)
-            phase = next(item for item in store.summary()["phases"]
-                         if item["phase_id"] == "open_webui_admin")
-        self.assertEqual(phase["actual_state"], "verified")
-
-    def test_open_webui_admin_requires_a_matching_authentication_record(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            database = paths.data / "open-webui" / "webui.db"
-            database.parent.mkdir(parents=True)
-            with sqlite3.connect(database) as conn:
-                conn.execute('CREATE TABLE "user" (id TEXT, role TEXT)')
-                conn.execute('CREATE TABLE "auth" (id TEXT)')
-                conn.execute('INSERT INTO "user" VALUES (?, ?)', ("admin-id", "admin"))
-                conn.execute('INSERT INTO "auth" VALUES (?)', ("other-user",))
-            store = ProvisioningStore(paths.runtime / "control-plane.sqlite3")
-            store.reconcile_runtime(paths)
-            phase = next(item for item in store.summary()["phases"]
-                         if item["phase_id"] == "open_webui_admin")
-        self.assertEqual(phase["actual_state"], "pending")
-
+        self.assertEqual(summary["progress"], {"completed": 6, "total": 8})
+        self.assertEqual(summary["next_action"]["href"], "/connections/providers")
 
 @unittest.skipUnless(__import__("importlib.util").util.find_spec("cryptography"),
                      "cryptography is installed by control-plane requirements")
@@ -109,7 +75,7 @@ class CoreWiringTests(unittest.TestCase):
     def test_core_environment_contract_includes_ollama(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = ensure_core_envs(Path(tmp), token_factory=lambda: "generated")
-        self.assertEqual(set(paths), {"ollama", "freellmapi", "litellm", "open-webui"})
+        self.assertEqual(set(paths), {"ollama", "freellmapi", "litellm"})
 
     def test_provider_key_reaches_only_private_generated_adapter_config(self):
         with tempfile.TemporaryDirectory() as tmp:

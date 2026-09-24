@@ -121,32 +121,6 @@ services:
     identity_note: "Authentik protects the private dashboard route. LiteLLM Community does not receive a native per-user OIDC session."
     mcp: {exposed: false}
 
-  - id: open-webui
-    maturity: supported
-    name: Open WebUI
-    category: ai
-    lifecycle: optional
-    compose_dir: core/open-webui
-    https_port: 8084
-    private_https_port: 8445
-    proxy_port: 19463
-    health: {kind: http, url: "http://127.0.0.1:8084/health"}
-    auth: trusted_header
-    stage: core
-    required: true
-    route: pending
-    ui: {available: true, authentication: trusted_header}
-    setup_action: "Connect Open WebUI to the verified LiteLLM endpoint."
-    resource_guidance: "Moderate memory use; model work happens upstream."
-    images: ["ghcr.io/open-webui/open-webui:v0.11.1"]
-    update: {repository: open-webui/open-webui, current_version: v0.11.1}
-    dependencies: [litellm]
-    backup: {binds: [data]}
-    account:
-      mode: trusted_header
-      handoff: true
-      user_action: "Use Authentik for normal sign-in; save the generated recovery credential when offered."
-
   - id: freellmapi
     maturity: supported
     name: FreeLLMAPI
@@ -234,21 +208,21 @@ services:
     maturity: supported
     name: LobeChat
     category: ai
-    lifecycle: optional
+    lifecycle: always_on
     compose_dir: apps/lobehub
     https_port: 3211
     private_https_port: 8457
     proxy_port: 19474
     health: {kind: http, url: "http://127.0.0.1:3211/__mu3lab_lobehub_health"}
     auth: oidc
-    stage: optional
+    stage: core
     availability: available
-    required: false
+    required: true
     route: pending
     dependencies: [litellm, authentik]
     ui: {available: true, authentication: oidc}
     identity_note: "LobeChat uses its own Authentik OIDC session and persists conversations in its private database."
-    setup_action: "Install LobeChat alongside Open WebUI, connect it to LiteLLM, and sign in with Authentik."
+    setup_action: "Connect LobeChat to LiteLLM and sign in with Authentik."
     resource_guidance: "Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk use."
     images: ["lobehub/lobehub:2.2.18@sha256:b7c843911259c54c92f03864d9dd2e9099e18525de1d37498b64cc15751d087d", "paradedb/paradedb:0.25.9-pg17@sha256:8da5d202fe31875af32a49e802ce17cfbc146b0672306f4109809efee1e6f916", "redis:8-alpine@sha256:ba6e394f6acc2a695ef1b6944f161b9ca813711739be68319fa0db3470673f1d", "rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff", "rustfs/rc:v0.1.36@sha256:ab024bfebee49a750ce886b4c70963ccd9ddaa03f491704a90710641d7a26699", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
     update: {repository: lobehub/lobehub, current_version: "v2.2.18"}

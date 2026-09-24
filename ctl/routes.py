@@ -176,7 +176,7 @@ def reconcile_core(registry: Registry, root: Path, log) -> tuple[bool, str]:
     activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
     if not activated:
         return False, detail
-    for service_id in ("open-webui", "litellm", "freellmapi"):
+    for service_id in ("lobehub", "litellm", "freellmapi"):
         service = registry.get(service_id)
         if service.private_https_port is None or service.proxy_port is None:
             continue

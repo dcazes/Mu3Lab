@@ -6,9 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ctl import bootstrap_state, install
-from ctl.authentik_blueprints import (render_dashboard_blueprint,
-                                      render_open_webui_blueprint,
-                                      write_dashboard_blueprint)
+from ctl.authentik_blueprints import render_dashboard_blueprint, write_dashboard_blueprint
 from ctl.runtime import RuntimePaths
 
 
@@ -95,11 +93,3 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_dashboard_blueprint_rejects_non_tailnet_hosts(self):
         with self.assertRaises(ValueError):
             render_dashboard_blueprint("127.0.0.1")
-
-    def test_open_webui_blueprint_has_exact_private_callback(self):
-        content = render_open_webui_blueprint(
-            "mu3lab-4.taile2cc7a.ts.net", "client-id", "client-secret")
-        self.assertIn("authentik_providers_oauth2.oauth2provider", content)
-        self.assertIn('url: "https://mu3lab-4.taile2cc7a.ts.net:8445/oauth/oidc/callback"', content)
-        self.assertIn("matching_mode: strict", content)
-        self.assertIn("slug: mu3lab-open-webui", content)

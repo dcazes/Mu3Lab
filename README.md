@@ -46,11 +46,10 @@ data root, and uses Authentik trusted-header SSO on its private Tailnet route.
 The control plane keeps leased, resumable, secret-redacted SQLite jobs and
 structured events under `/srv/mu3lab/runtime`; a persistent worker reclaims
 expired work after a restart. The supported AI slice is Ollama, FreeLLMAPI,
-LiteLLM, Open WebUI, and optional LobeChat. It verifies generated provider
+LiteLLM, and LobeChat. It verifies generated provider
 configuration, streamed chat, embedding dimensions, private routes, and
 Authentik-protected identity before reporting the slice verified. The dashboard
-provides a full-screen Chat view with separate LobeChat and Open WebUI tabs;
-LobeChat is preferred when installed while Open WebUI remains available.
+provides a full-screen LobeChat Chat view.
 
 Authenticated operators can install supported optional apps and manage them
 from their detail pages. Install, start, stop, restart, retry, and MCP runtime
@@ -76,8 +75,7 @@ after the required application credential is available. Enabled MCPs start
 after their application is healthy and stop before it stops; the worker
 reconciles those states after a host restart. Verified Streamable HTTP tools
 are bound and pinned only to their matching LobeChat agent, with approval
-required for write tools. Open WebUI receives the same reviewed connections
-when installed. Connections → Advanced integrations also offers prepared
+required for write tools. Connections → Advanced integrations also offers prepared
 runtime status, per-tool permissions, an operator tool console, metadata-only
 action history from the dashboard and LobeChat, job diagnostics, and reviewed
 update status. Write calls in the console require a one-use confirmation.

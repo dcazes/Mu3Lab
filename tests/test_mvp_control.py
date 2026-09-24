@@ -46,7 +46,7 @@ class RegistryV3Tests(unittest.TestCase):
         optional = [service for service in registry.services if service.stage == "optional"]
         self.assertEqual({service.id for service in optional},
                          {"surfsense", "mealie", "actual-budget", "immich", "adventurelog",
-                          "paperless-ngx", "nextcloud", "firecrawl", "lobehub", "baby-buddy"})
+                          "paperless-ngx", "nextcloud", "firecrawl", "baby-buddy"})
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
@@ -60,7 +60,7 @@ class RegistryV3Tests(unittest.TestCase):
     def test_mcp_catalog_never_contains_vaultwarden_or_infrastructure(self):
         registry = load()
         servers = load_mcp_catalog(registry)
-        excluded = {"vaultwarden", "ingress", "authentik", "ollama", "litellm", "open-webui"}
+        excluded = {"vaultwarden", "ingress", "authentik", "ollama", "litellm", "lobehub"}
         self.assertFalse(excluded.intersection(server.service_id for server in servers))
         preferred: dict[str, int] = {}
         for server in servers:
@@ -106,6 +106,20 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn("header_up -Remote-User", block)
         self.assertIn("header_up Remote-User {http.request.header.X-Authentik-Username}", block)
         self.assertIn("reverse_proxy 127.0.0.1:8002", block)
+
+    def test_authentik_embedded_oidc_is_limited_to_the_dashboard_origin(self):
+        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        self.assertIn(
+            "@embedded_oidc path /application/o/authorize/* /if/flow/*", caddy)
+        self.assertIn("handle @embedded_oidc", caddy)
+        self.assertIn("header_down -X-Frame-Options", caddy)
+        self.assertIn(
+            "frame-ancestors 'self' https://{http.request.host}:8446", caddy)
+        embedded = caddy.split("handle @embedded_oidc", 1)[1].split("\n\thandle {", 1)[0]
+        fallback = caddy.split("handle @embedded_oidc", 1)[1].split("\n\thandle {", 1)[1]
+        self.assertIn("header_down -X-Frame-Options", embedded)
+        self.assertNotIn("header_down -X-Frame-Options", fallback.split("\n}", 1)[0])
+        self.assertNotIn("Access-Control-Allow-Origin", embedded)
 
 class InstallationWorkflowTests(unittest.TestCase):
     def test_nextcloud_accepts_newer_compatible_app_store_versions(self):

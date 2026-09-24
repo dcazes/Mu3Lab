@@ -5,4 +5,4 @@ profiles:
   - id: core-suite
     name: Core suite
     description: "The supported Mu3Lab AI slice: local embeddings, external-provider routing, and private chat."
-    services: [ollama, freellmapi, litellm, open-webui]
+    services: [ollama, freellmapi, litellm, lobehub]

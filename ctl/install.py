@@ -64,13 +64,13 @@ CADDY_PORT = 19460        # Caddy dashboard listener on loopback
 CADDY_HEALTH_PATH = "/__mu3lab_caddy_health"
 AUTHENTIK_PROXY_PORT = 19461
 VAULTWARDEN_PROXY_PORT = 19462
-OPEN_WEBUI_PROXY_PORT = 19463
+LOBEHUB_PROXY_PORT = 19474
 # Authentik must own standard HTTPS. Its browser UI creates API and WebSocket
 # URLs from the public origin and does not reliably preserve a high port.
 AUTHENTIK_SERVE_PORT = "443"
 DASHBOARD_SERVE_PORT = "8446"
 VAULTWARDEN_SERVE_PORT = "8443"
-OPEN_WEBUI_SERVE_PORT = "8445"
+LOBEHUB_SERVE_PORT = "8457"
 TS_HOSTNAME = "mu3lab"
 TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
 TAILSCALE_WORKER_TIMEOUT = 130    # bounds the worker beyond the CLI's own join window
@@ -140,8 +140,8 @@ DISPATCH = {
     ("authentik", "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
-    ("open_webui_serve", "unshared"): "share_open_webui",
-    ("open_webui_serve", "ready"): "skip",
+    ("lobehub_serve", "unshared"): "share_lobehub",
+    ("lobehub_serve", "ready"): "skip",
     ("authentik_setup", "needs_user"): "manual_authentik",
     ("authentik_setup", "ready"): "skip",
     ("dashboard_protection", "needs_user"): "manual_dashboard_protection",
@@ -1149,11 +1149,11 @@ def fix_authentik_serve(check: dict, ctx: dict) -> dict:
                                  ctx["log_fn"]("authentik_serve"))
 
 
-def fix_open_webui_serve(check: dict, ctx: dict) -> dict:
-    """Reserve Open WebUI's stable private origin before core reconciliation."""
-    return _tailscale_serve_port(OPEN_WEBUI_SERVE_PORT,
-                                 f"http://127.0.0.1:{OPEN_WEBUI_PROXY_PORT}",
-                                 ctx["log_fn"]("open_webui_serve"))
+def fix_lobehub_serve(check: dict, ctx: dict) -> dict:
+    """Reserve LobeChat's stable private origin before core reconciliation."""
+    return _tailscale_serve_port(LOBEHUB_SERVE_PORT,
+                                 f"http://127.0.0.1:{LOBEHUB_PROXY_PORT}",
+                                 ctx["log_fn"]("lobehub_serve"))
 
 
 def _authentik_check(ctx: dict) -> dict:
@@ -1806,9 +1806,9 @@ STEPS = [
     {"id": "authentik_serve", "label": "Authentik private access",
      "check": lambda ctx: _serve_port_check(AUTHENTIK_SERVE_PORT),
      "fix": fix_authentik_serve},
-    {"id": "open_webui_serve", "label": "Open WebUI private route",
-     "check": lambda ctx: _serve_port_check(OPEN_WEBUI_SERVE_PORT),
-     "fix": fix_open_webui_serve},
+    {"id": "lobehub_serve", "label": "LobeChat private route",
+     "check": lambda ctx: _serve_port_check(LOBEHUB_SERVE_PORT),
+     "fix": fix_lobehub_serve},
     {"id": "authentik_setup", "label": "Authentik administrator",
      "check": check_authentik_setup, "fix": fix_authentik_setup},
     # Publish the private dashboard route before the operator tests the
@@ -1969,9 +1969,6 @@ def run_job(job: dict, ctx: dict) -> None:
         if current.get("core") == "pending":
             provisioning.update("core", "pending",
                                 detail="Core platform reconciliation will start automatically.")
-        if current.get("open_webui_admin") == "pending":
-            provisioning.update("open_webui_admin", "pending",
-                                detail="The first Open WebUI administrator will be initialized during core setup.")
         if current.get("configuration") == "pending":
             provisioning.update("configuration", "pending",
                                 detail="Inference-provider enrollment will be requested only after core services start.")

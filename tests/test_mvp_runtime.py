@@ -72,16 +72,14 @@ class McpVerificationTests(unittest.TestCase):
         self.assertEqual(result["id"], 1)
 
 
-class OpenWebUiIdentityTests(unittest.TestCase):
-    def test_chat_uses_authentik_trusted_headers_and_can_be_embedded(self):
-        compose = (ROOT / "core/open-webui/docker-compose.yml").read_text(encoding="utf-8")
+class LobeChatIdentityTests(unittest.TestCase):
+    def test_chat_uses_authentik_oidc_and_can_be_embedded(self):
+        compose = (ROOT / "apps/lobehub/docker-compose.yml").read_text(encoding="utf-8")
         caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
-        self.assertIn("WEBUI_AUTH_TRUSTED_EMAIL_HEADER", compose)
-        self.assertIn('ENABLE_LOGIN_FORM: "false"', compose)
-        self.assertIn('env_file: ["${MU3LAB_ENV_FILE:-.env}"]', compose)
-        self.assertNotIn('WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY', compose)
-        self.assertIn("header_up X-Mu3Lab-Email", caddy)
-        self.assertIn("frame-ancestors https://*.ts.net:8446", caddy)
+        self.assertIn("AUTH_SSO_PROVIDERS", compose)
+        self.assertIn(":19474 {", caddy)
+        self.assertIn("frame-ancestors", caddy)
+        self.assertIn(":19474 {", caddy)
 
 
 class ComputeOverrideTests(unittest.TestCase):

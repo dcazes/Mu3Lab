@@ -39,7 +39,7 @@ describe('dashboard organization', () => {
   });
 
   it('keeps a planned Baby Buddy entry with productivity apps', () => {
-    const babyBuddy = service('babybuddy', 'Baby Buddy', 'blocked');
+    const babyBuddy = service('baby-buddy', 'Baby Buddy', 'blocked');
     babyBuddy.category = 'productivity';
     render(<AppsPanel services={[...services, babyBuddy]} catalog={{ ok: true, profiles: [], services: {} }} />);
     const card = screen.getByRole('button', { name: /Baby Buddy/ });

@@ -147,4 +147,4 @@ servers:
       - {key: api_token, env: BABYBUDDY_TOKEN, type: secret, label: "Baby Buddy user API token", required: true}
     review_note: "Baby Buddy requires a user-scoped API token from User Settings. Runtime review is still pending."
 
-excluded_services: [vaultwarden, ingress, authentik, ollama, litellm, open-webui, freellmapi]
+excluded_services: [vaultwarden, ingress, authentik, ollama, litellm, freellmapi, lobehub]

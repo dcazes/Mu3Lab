@@ -23,8 +23,6 @@ CORE_ENV_KEYS = {
     "ollama": (),
     "freellmapi": ("ENCRYPTION_KEY", "FREELLMAPI_SERVICE_KEY", "FREELLMAPI_ADMIN_PASSWORD"),
     "litellm": ("LITELLM_MASTER_KEY",),
-    "open-webui": ("WEBUI_SECRET_KEY", "LITELLM_MASTER_KEY", "OPENAI_API_KEY",
-                   "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET"),
 }
 
 
@@ -111,15 +109,6 @@ def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
         paths[service_id] = target
         if values.get("LITELLM_MASTER_KEY"):
             shared["LITELLM_MASTER_KEY"] = values["LITELLM_MASTER_KEY"]
-    # Reuse the same LiteLLM key in Open WebUI while keeping both files private.
-    litellm = read_runtime_env(paths["litellm"])
-    open_webui = read_runtime_env(paths["open-webui"])
-    if open_webui.get("LITELLM_MASTER_KEY") != litellm.get("LITELLM_MASTER_KEY"):
-        open_webui["LITELLM_MASTER_KEY"] = litellm["LITELLM_MASTER_KEY"]
-    if open_webui.get("OPENAI_API_KEY") != litellm.get("LITELLM_MASTER_KEY"):
-        open_webui["OPENAI_API_KEY"] = litellm["LITELLM_MASTER_KEY"]
-    paths["open-webui"].write_text("\n".join(f"{key}={value}" for key, value in open_webui.items()) + "\n", encoding="utf-8")
-    os.chmod(paths["open-webui"], 0o600)
     return paths
 
 

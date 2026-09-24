@@ -29,7 +29,7 @@ OIDC_CONTRACTS: dict[str, OidcContract] = {
     "lobehub": OidcContract("LobeChat", "AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", ("/api/auth/callback/authentik",)),
 }
 
-TRUSTED_HEADER = {"open-webui", "baby-buddy"}
+TRUSTED_HEADER = {"baby-buddy"}
 PROXY_GATE = {"litellm", "surfsense"}
 LOCAL = {"authentik", "vaultwarden", "freellmapi"}
 NO_UI = {"ingress", "ollama"}

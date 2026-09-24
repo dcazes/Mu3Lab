@@ -20,7 +20,7 @@ source of truth for current implementation status.
 1. Run the provider, SurfSense, and SurfSense MCP live acceptance path on a
    clean supported host and retain the resulting release/digest evidence.
 2. Promote each remaining application MCP only after its installed-app,
-   credential, tool-discovery, and OpenWebUI registration checks pass.
+   credential, tool-discovery, and LobeChat registration checks pass.
 3. Implement encrypted Restic snapshots and a typed-confirmation restore flow
    for Authentik, Vaultwarden, and LiteLLM configuration.
 4. Add update execution only after the backup/restore contract is operational.

@@ -249,7 +249,7 @@ def integrations() -> dict:
     return {"ok": True, "policy": "free-first", "integrations": [
         {"source": "ollama", "destination": "litellm", "kind": "model"},
         {"source": "freellmapi", "destination": "litellm", "kind": "optional_model"},
-        {"source": "litellm", "destination": "open-webui", "kind": "model"},
+        {"source": "litellm", "destination": "lobehub", "kind": "model"},
     ], "blocked": [service.public() for service in registry.services if service.is_blocked]}
 
 
@@ -1350,14 +1350,6 @@ def confirm_service_initialization(service_id: str, request: Request) -> dict:
         store.record_audit(actor=str(identity_data["username"]),
                            event="service.initialization.confirmed",
                            detail=f"Operator confirmed supported first-user setup for {service.id}.")
-    if service.id == "open-webui":
-        provisioning_store = ProvisioningStore.runtime()
-        if provisioning_store:
-            try:
-                provisioning_store.update("open_webui_admin", "verified",
-                                          detail="The operator confirmed the first Open WebUI administrator session.")
-            except ValueError:
-                pass
     return {"ok": True, "initialization": result}
 
 
@@ -1664,41 +1656,35 @@ def mcp_logs(server_id: str, request: Request, tail: int = 120) -> dict:
 
 @app.get("/api/v1/chat/status")
 def chat_status(request: Request) -> dict:
-    """Return every curated chat surface without replacing Open WebUI."""
+    """Return the primary LobeChat surface and its live route state."""
     if not identity(request)["writes_enabled"]:
         return JSONResponse({"ok": False, "error": "operator identity required"}, status_code=403)
     dns_name = tailnet_dns_name()
     registry = load_registry()
     ports = tailnet_serve_ports()
-    providers = []
-    for service_id in ("lobehub", "open-webui"):
-        try:
-            service = registry.get(service_id)
-            state = service_status(service, dns_name, ROOT, ports)
-        except RegistryError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
-        ready = (state["health_state"] == "healthy" and bool(dns_name)
-                 and bool(state.get("route_ready")))
-        providers.append({
-            "id": service.id,
-            "name": service.name,
-            "ready": ready,
-            "url": str(state.get("url") or ""),
-            "authentication": mode_for(service),
-            "detail": (f"{service.name} is ready." if ready else
-                       ("Install LobeChat from My Apps to test it alongside Open WebUI."
-                        if service.id == "lobehub" and state["state"] in {"planned", "not_installed"}
-                        else f"{service.name} is not ready; check its application status and private route.")),
-        })
-    preferred = next((item for item in providers if item["id"] == "lobehub" and item["ready"]),
-                     next((item for item in providers if item["id"] == "open-webui"), providers[0]))
+    try:
+        service = registry.get("lobehub")
+        state = service_status(service, dns_name, ROOT, ports)
+    except RegistryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    ready = (state["health_state"] == "healthy" and bool(dns_name)
+             and bool(state.get("route_ready")))
+    provider = {
+        "id": service.id,
+        "name": service.name,
+        "ready": ready,
+        "url": str(state.get("url") or ""),
+        "authentication": mode_for(service),
+        "detail": ("LobeChat is ready." if ready else
+                   "LobeChat is not ready; check core setup and its private route."),
+    }
     mcp = mcp_snapshot(load_registry(), {
         item["id"]: item["state"] for item in _service_snapshot(request)["services"]
     })
-    return {"ok": True, "ready": preferred["ready"], "url": preferred["url"],
-            "authentication": preferred["authentication"], "providers": providers,
+    return {"ok": True, "ready": provider["ready"], "url": provider["url"],
+            "authentication": provider["authentication"], "providers": [provider],
             "mcp_enabled_count": sum(1 for item in mcp["servers"] if item["enabled"]),
-            "detail": preferred["detail"]}
+            "detail": provider["detail"]}
 
 
 @app.get("/api/jobs")

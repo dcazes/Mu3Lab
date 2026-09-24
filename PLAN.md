@@ -63,7 +63,7 @@ checked before being marked verified.
    tailnet URL.
 3. Add authenticated, audited lifecycle jobs and the fixed core-suite executor
    to the React control plane.
-4. Deliver the mandatory AI slice: Ollama, FreeLLMAPI, LiteLLM, and Open WebUI.
+4. Deliver the mandatory AI slice: Ollama, FreeLLMAPI, LiteLLM, and LobeChat.
    SurfSense is an optional Authentik-gated app with a separate local account;
    Firecrawl is an optional private AI integration with a complete API, worker,
    Playwright, RabbitMQ, Redis, PostgreSQL, route, backup, and lifecycle contract.

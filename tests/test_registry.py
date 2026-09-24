@@ -130,14 +130,14 @@ class RegistryTests(unittest.TestCase):
                 self.assertTrue(values[key])
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
 
-    def test_lobechat_is_optional_persistent_oidc_chat_alongside_open_webui(self):
+    def test_lobechat_is_required_persistent_oidc_chat(self):
         from ctl.identity import mode_for
         from ctl.secrets import read_runtime_env
         from ctl.service_ops import _materialize
 
         service = load().get("lobehub")
-        self.assertFalse(service.required)
-        self.assertEqual(service.stage, "optional")
+        self.assertTrue(service.required)
+        self.assertEqual(service.stage, "core")
         self.assertEqual(service.dependencies, ("litellm", "authentik"))
         self.assertEqual(mode_for(service), "native_oidc")
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
@@ -163,7 +163,7 @@ class RegistryTests(unittest.TestCase):
     def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
         registry = load()
         self.assertTrue(registry.get("vaultwarden").images)
-        self.assertFalse(registry.get("open-webui").route == "ready")
+        self.assertEqual(registry.get("lobehub").route, "pending")
 
     def test_runtime_paths_are_outside_checkout(self):
         paths = RuntimePaths()
@@ -188,7 +188,7 @@ class RegistryTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.required and service.stage == "core"]
         self.assertEqual({service.id for service in core},
-                         {"ollama", "freellmapi", "litellm", "open-webui"})
+                         {"ollama", "freellmapi", "litellm", "lobehub"})
         for service in core:
             self.assertTrue((service.compose_path(root) / "docker-compose.yml").is_file(), service.id)
             self.assertTrue(service.images, service.id)
@@ -269,7 +269,7 @@ class RegistryTests(unittest.TestCase):
         self.assertFalse({"db", "redis", "broker", "app"}.intersection(generic_aliases))
 
     def test_healthy_service_without_private_route_needs_setup(self):
-        service = load().get("open-webui")
+        service = load().get("lobehub")
         root = Path(__file__).resolve().parents[1]
         with patch("ctl.service_state._compose_state", return_value="running"), \
              patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")), \

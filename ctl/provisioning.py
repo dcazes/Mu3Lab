@@ -16,7 +16,7 @@ from typing import Any
 from ctl.jobs import redact, redact_data
 from ctl.runtime import RuntimePaths
 
-WORKFLOW_VERSION = 2
+WORKFLOW_VERSION = 3
 PHASES = (
     ("foundation", "Host prerequisites and Docker", "Install the host runtime and private application networks."),
     ("vaultwarden", "Vaultwarden owner", "Verify the independent private password-vault owner account."),
@@ -24,7 +24,6 @@ PHASES = (
     ("identity", "Authentik owner", "Create the Mu3Lab identity owner and operator mapping."),
     ("dashboard_protection", "Protected dashboard", "Prove that Authentik protects the dashboard."),
     ("core", "Core platform", "Start and configure the curated core services."),
-    ("open_webui_admin", "Open WebUI administrator", "Initialize the first Open WebUI administrator."),
     ("configuration", "Provider configuration", "Validate external inference access."),
     ("verification", "Verified handoff", "Prove that the user-facing platform works."),
 )
@@ -85,16 +84,17 @@ class ProvisioningStore:
                     (workflow_version, phase_id, desired_state, actual_state, updated_at, detail)
                     VALUES (?, ?, 'verified', 'pending', ?, ?)
                 """, (WORKFLOW_VERSION, phase_id, now, detail))
-            legacy = {str(row["phase_id"]): str(row["actual_state"])
-                      for row in conn.execute("""SELECT phase_id, actual_state FROM provisioning_steps
-                                                 WHERE workflow_version = 1""").fetchall()}
-            if legacy:
-                mappings = {
-                    "foundation": ("foundation", "vaultwarden", "tailscale"),
-                    "identity": ("identity", "dashboard_protection"),
-                    "core": ("core",), "configuration": ("configuration",),
-                    "verification": ("verification",),
-                }
+            for version, mappings in (
+                (1, {"foundation": ("foundation", "vaultwarden", "tailscale"),
+                     "identity": ("identity", "dashboard_protection"),
+                     "configuration": ("configuration",)}),
+                (2, {phase: (phase,) for phase in (
+                    "foundation", "vaultwarden", "tailscale", "identity",
+                    "dashboard_protection", "configuration")}),
+            ):
+                legacy = {str(row["phase_id"]): str(row["actual_state"])
+                          for row in conn.execute("""SELECT phase_id, actual_state FROM provisioning_steps
+                                                     WHERE workflow_version = ?""", (version,)).fetchall()}
                 for old, targets in mappings.items():
                     if legacy.get(old) not in {"verified", "skipped"}:
                         continue
@@ -103,7 +103,7 @@ class ProvisioningStore:
                                         detail = ?, updated_at = ?
                                         WHERE workflow_version = ? AND phase_id = ?
                                           AND actual_state = 'pending'""",
-                                     ("Verified by the completed version 1 workflow.", now,
+                                     (f"Verified by the completed version {version} workflow.", now,
                                       WORKFLOW_VERSION, target))
 
     def update(self, phase_id: str, state: str, *, detail: str = "",
@@ -158,8 +158,6 @@ class ProvisioningStore:
         elif incomplete["phase_id"] == "core":
             next_action = {"kind": "job", "label": "Install missing core services",
                            "endpoint": "/api/setup/core"}
-        elif incomplete["phase_id"] == "open_webui_admin":
-            next_action = {"kind": "link", "label": "Open Open WebUI setup", "href": "/chat"}
         elif incomplete["phase_id"] == "configuration":
             next_action = {"kind": "link", "label": "Add or repair a provider",
                            "href": "/connections/providers"}
@@ -175,21 +173,6 @@ class ProvisioningStore:
         """Advance durable milestones from local authoritative evidence."""
         self.initialize()
         current = {item["phase_id"]: item["actual_state"] for item in self.summary()["phases"]}
-        database = paths.data / "open-webui" / "webui.db"
-        if current.get("open_webui_admin") not in {"verified", "skipped"} and database.is_file():
-            try:
-                conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
-                tables = {str(row[0]) for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-                admins = int(conn.execute(
-                    'SELECT COUNT(*) FROM "user" AS u JOIN "auth" AS a ON a.id = u.id '
-                    'WHERE u.role = ?', ("admin",)).fetchone()[0]) if {"user", "auth"}.issubset(tables) else 0
-                conn.close()
-                if admins > 0:
-                    self.update("open_webui_admin", "verified",
-                                detail="Existing Open WebUI administrator verified from local account state.")
-            except (OSError, sqlite3.Error, TypeError, ValueError):
-                pass
         try:
             from ctl.control_state import ControlState
             control = ControlState.runtime(paths)
