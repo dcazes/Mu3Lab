@@ -74,9 +74,11 @@ provider/model rows and blocks re-enabling them while preserving chat history.
 Eight saved LobeChat agents cover Actual Budget, Mealie, Immich, Paperless-ngx,
 SurfSense, Firecrawl, Nextcloud, and AdventureLog.
 
-Advanced Integrations shows MCP cards for installed applications. Operators
-provide app-scoped credentials and explicitly install each MCP. Enabled MCPs
-start after their application is healthy and stop before it stops; the worker
+Advanced Integrations separates automatically managed connections from apps
+that still require a user-scoped credential or approval. Mu3Lab handles MCP
+preparation, verification, chat registration, and lifecycle reconciliation
+after the required application credential is available. Enabled MCPs start
+after their application is healthy and stop before it stops; the worker
 reconciles those states after a host restart. Verified Streamable HTTP tools
 are bound and pinned only to their matching LobeChat agent, with approval
 required for write tools. Open WebUI receives the same reviewed connections
@@ -86,8 +88,10 @@ action history from the dashboard and LobeChat, job diagnostics, and reviewed
 update status. Write calls in the console require a one-use confirmation.
 Mealie uses a pinned stdio-to-HTTP bridge; Firecrawl uses its official HTTP
 MCP server against the self-hosted API. Mu3Lab's small Nextcloud and
-AdventureLog adapters expose scoped files and travel data operations.
-All eight MCP runtimes can be prepared while their apps are stopped. A
+AdventureLog adapters expose scoped files and travel data operations. Baby Buddy
+is listed as a planned productivity app; its official MCP remains manual because
+it acts as the user represented by an API token copied from BabyBuddy settings.
+All accepted MCP runtimes can be prepared while their apps are stopped. A
 connection is not reported live until credentials, health, and tool discovery
 pass; Nextcloud and AdventureLog also perform an app-data read check.
 

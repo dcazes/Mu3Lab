@@ -37,6 +37,20 @@ class McpRegistryTests(unittest.TestCase):
         with patch("ctl.mcp_registry.ControlState.runtime", return_value=None):
             self.assertEqual(snapshot(registry, {})["servers"], [])
 
+    def test_setup_mode_separates_managed_and_operator_action(self):
+        registry = load()
+        with tempfile.TemporaryDirectory() as tmp:
+            state = ControlState(Path(tmp) / "control.sqlite3")
+            state.set_installation("firecrawl", "running")
+            state.set_installation("mealie", "running")
+            with patch("ctl.mcp_registry.ControlState.runtime", return_value=state), \
+                 patch("ctl.mcp_registry.read_runtime_env", return_value={}):
+                result = snapshot(registry, {"firecrawl": "running", "mealie": "running"})
+        servers = {server["service_id"]: server for server in result["servers"]}
+        self.assertEqual(servers["firecrawl"]["setup_mode"], "automatic")
+        self.assertEqual(servers["mealie"]["setup_mode"], "manual")
+        self.assertIn("credential", servers["mealie"]["setup_detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

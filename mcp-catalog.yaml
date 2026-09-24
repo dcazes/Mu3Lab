@@ -131,4 +131,20 @@ servers:
       - {key: app_password, env: NEXTCLOUD_APP_PASSWORD, type: secret, label: "Nextcloud app password", required: true}
     review_note: "Mu3Lab adapter uses WebDAV for scoped file listing, text reading, and text writing."
 
+  - id: babybuddy-official
+    service_id: babybuddy
+    name: Baby Buddy MCP
+    status: review_required
+    preferred: true
+    provenance: official
+    repository: https://github.com/babybuddy/babybuddy-mcp
+    revision: pending-review
+    transport: streamable-http
+    endpoint: ""
+    local_health: ""
+    compose_dir: ""
+    credentials:
+      - {key: api_token, env: BABYBUDDY_TOKEN, type: secret, label: "Baby Buddy user API token", required: true}
+    review_note: "Baby Buddy requires a user-scoped API token from User Settings. Runtime review is still pending."
+
 excluded_services: [vaultwarden, ingress, authentik, ollama, litellm, open-webui, freellmapi]
