@@ -280,6 +280,21 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(state["route_state"], "pending")
         self.assertEqual(state["user_action"], "Private HTTPS route pending")
 
+    def test_core_lobechat_status_uses_its_materialized_compose_project(self):
+        service = load().get("lobehub")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            project = paths.projects / "lobehub"
+            project.mkdir(parents=True)
+            (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            with patch("ctl.service_state.RuntimePaths", return_value=paths), \
+                 patch("ctl.service_state._compose_state", return_value="running") as compose, \
+                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")):
+                state = service_status(service, "mu3lab.example.ts.net", ROOT, {8457})
+        self.assertEqual(compose.call_args.args[0], project / "docker-compose.yml")
+        self.assertEqual(state["state"], "ready")
+        self.assertEqual(state["url"], "https://mu3lab.example.ts.net:8457")
+
     def test_healthy_litellm_dashboard_requires_its_private_route(self):
         service = load().get("litellm")
         root = Path(__file__).resolve().parents[1]

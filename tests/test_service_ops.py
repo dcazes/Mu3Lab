@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from ctl.jobs import JobStore
 from ctl.registry import load
-from ctl.service_ops import allowed_actions, execute_claimed
+from ctl.runtime import RuntimePaths
+from ctl.service_ops import allowed_actions, execute_claimed, project_path
 
 
 class ServiceOperationTests(unittest.TestCase):
@@ -22,6 +23,18 @@ class ServiceOperationTests(unittest.TestCase):
 
     def test_stopped_service_offers_start_without_restart(self):
         self.assertEqual(allowed_actions(load().get("actual-budget"), "stopped"), ["start"])
+
+    def test_stopped_core_lobechat_starts_from_runtime_project(self):
+        service = load().get("lobehub")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            project = paths.projects / service.id
+            project.mkdir(parents=True)
+            (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            with patch("ctl.service_ops.RuntimePaths", return_value=paths):
+                selected = project_path(service, Path(__file__).resolve().parents[1])
+        self.assertEqual(selected, project)
+        self.assertEqual(allowed_actions(service, "stopped"), ["start"])
 
     def test_worker_resolves_curated_path_and_action(self):
         with tempfile.TemporaryDirectory() as tmp:

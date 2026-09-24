@@ -194,7 +194,8 @@ def status(service: Service, dns_name: str, root: Path,
            project_states: dict[str, str] | None = None) -> dict:
     """Return browser-safe service state without starting, stopping, or logging in."""
     runtime_file = RuntimePaths().projects / service.id / "docker-compose.yml"
-    compose_file = (runtime_file if service.stage == "optional" and runtime_file.is_file()
+    compose_file = (runtime_file if (service.stage == "optional" or service.id == "lobehub")
+                    and runtime_file.is_file()
                     else service.compose_path(root) / "docker-compose.yml")
     if service.is_blocked:
         lifecycle_state, detail = "blocked", service.blocked_reason

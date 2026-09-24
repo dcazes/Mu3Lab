@@ -29,9 +29,9 @@ SUPPORTED_ACTIONS = frozenset({"install", "retry_setup", "start", "stop", "resta
 
 
 def project_path(service: Service, root: Path) -> Path:
-    """Prefer a materialized optional project; core uses its checkout contract."""
+    """Use a materialized application project when it owns the running Compose stack."""
     runtime = RuntimePaths().projects / service.id
-    if service.stage == "optional" and (runtime / "docker-compose.yml").is_file():
+    if (service.stage == "optional" or service.id == "lobehub") and (runtime / "docker-compose.yml").is_file():
         return runtime
     return service.compose_path(root)
 

@@ -199,9 +199,7 @@ def _service_snapshot(request: Request | None = None) -> dict:
             "mode": service.account.get("mode", "none"),
             "state": "pending" if service.account.get("mode", "none") != "none" else "not_required",
         }
-        compose_dir = (RuntimePaths().projects / service.id if service.stage == "optional"
-                       and (RuntimePaths().projects / service.id / "docker-compose.yml").is_file()
-                       else service.compose_path(ROOT))
+        compose_dir = project_path(service, ROOT)
         item["containers"] = container_snapshots.get(str(compose_dir.resolve()), [])
         item["last_job"] = latest
         item["last_job_id"] = str(latest["id"]) if latest else ""
