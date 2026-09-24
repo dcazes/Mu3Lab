@@ -23,56 +23,35 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RegistryTests(unittest.TestCase):
-    def test_homarr_socket_proxy_only_allows_container_start_and_stop(self):
-        service = load().get("homarr")
+    def test_baby_buddy_uses_loopback_only_trusted_header_auth(self):
+        service = load().get("baby-buddy")
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
-        self.assertEqual(set(compose["services"]), {"homarr", "socket-proxy"})
-        proxy = compose["services"]["socket-proxy"]
-        self.assertEqual(proxy["environment"]["POST"], "0")
-        self.assertEqual(proxy["environment"]["ALLOW_START"], "1")
-        self.assertEqual(proxy["environment"]["ALLOW_STOP"], "1")
-        self.assertEqual(proxy["environment"]["ALLOW_RESTARTS"], "0")
-        self.assertEqual(proxy["environment"]["CONTAINERS"], "1")
-        self.assertIn("linuxserver/socket-proxy:3.4.4@sha256:", proxy["image"])
-        self.assertTrue(proxy["read_only"])
-        self.assertNotIn("/var/run/docker.sock", str(compose["services"]["homarr"]))
-        self.assertIn("/var/run/docker.sock:/var/run/docker.sock:ro", proxy["volumes"])
+        app = compose["services"]["baby-buddy"]
+        self.assertEqual(app["ports"], ["127.0.0.1:8002:8000"])
+        self.assertEqual(app["environment"]["REVERSE_PROXY_AUTH"], "True")
+        self.assertEqual(app["environment"]["PROXY_HEADER"], "HTTP_REMOTE_USER")
+        self.assertTrue(any("mu3lab_auth.py" in volume for volume in app["volumes"]))
+        self.assertTrue(any("90-mu3lab-auth" in volume for volume in app["volumes"]))
+        self.assertNotIn("docker.sock", str(app))
 
-    def test_homarr_materialization_generates_and_preserves_its_encryption_key(self):
+    def test_baby_buddy_materialization_preserves_secret_and_public_url(self):
         from ctl.secrets import read_runtime_env
         from ctl.service_ops import _materialize
 
-        service = load().get("homarr")
+        service = load().get("baby-buddy")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
                  patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
                 project = _materialize(service, ROOT)
-                first = read_runtime_env(project / ".env")["HOMARR_SECRET_ENCRYPTION_KEY"]
+                first = read_runtime_env(project / ".env")["BABY_BUDDY_SECRET_KEY"]
                 _materialize(service, ROOT)
-                second = read_runtime_env(project / ".env")["HOMARR_SECRET_ENCRYPTION_KEY"]
-            self.assertEqual(len(first), 64)
+                values = read_runtime_env(project / ".env")
+                second = values["BABY_BUDDY_SECRET_KEY"]
+            self.assertTrue(first)
             self.assertEqual(first, second)
+            self.assertEqual(values["BABY_BUDDY_PUBLIC_URL"], "https://mu3lab.example.ts.net:8458")
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
-
-    def test_homarr_materialization_generates_authentik_oidc_contract(self):
-        from ctl.secrets import read_runtime_env
-        from ctl.service_ops import _materialize
-
-        service = load().get("homarr")
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
-                project = _materialize(service, ROOT)
-            values = read_runtime_env(project / ".env")
-            self.assertEqual(values["HOMARR_BASE_URL"], "https://mu3lab.example.ts.net:8458")
-            self.assertEqual(values["HOMARR_OIDC_ISSUER"], "https://mu3lab.example.ts.net/application/o/mu3lab-homarr/")
-            self.assertEqual(values["HOMARR_OIDC_LOGOUT_URL"], "https://mu3lab.example.ts.net/application/o/mu3lab-homarr/end-session/")
-            self.assertEqual(values["HOMARR_OIDC_CLIENT_ID"], "mu3lab-homarr")
-            self.assertTrue(values["HOMARR_OIDC_CLIENT_SECRET"])
-            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-homarr.yaml"
-            self.assertIn("/api/auth/callback/oidc", blueprint.read_text(encoding="utf-8"))
 
     def test_successful_one_shot_migration_does_not_make_app_look_stopped(self):
         def fake_run(*_args, **_kwargs):
@@ -247,19 +226,6 @@ class RegistryTests(unittest.TestCase):
         proxies = [item.proxy_port for item in registry.services if item.proxy_port]
         self.assertEqual(len(ports), len(set(ports)))
         self.assertEqual(len(proxies), len(set(proxies)))
-
-    def test_babybuddy_is_a_planned_productivity_app_with_manual_mcp(self):
-        from ctl.mcp_catalog import load as load_mcp_catalog
-
-        registry = load()
-        service = registry.get("babybuddy")
-        self.assertEqual(service.category, "productivity")
-        self.assertEqual(service.stage, "blocked")
-        self.assertEqual(service.maturity, "planned")
-        candidate = next(server for server in load_mcp_catalog(registry)
-                         if server.service_id == "babybuddy")
-        self.assertEqual(candidate.status, "review_required")
-        self.assertEqual(candidate.credentials[0]["env"], "BABYBUDDY_TOKEN")
 
     def test_nextcloud_materialization_generates_private_runtime_secrets_and_oidc(self):
         from ctl.secrets import read_runtime_env

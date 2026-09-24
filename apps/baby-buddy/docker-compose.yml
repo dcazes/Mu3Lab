@@ -1,0 +1,32 @@
+name: mu3lab-baby-buddy
+
+services:
+  baby-buddy:
+    image: lscr.io/linuxserver/babybuddy:version-v2.7.1
+    restart: unless-stopped
+    ports: ["127.0.0.1:8002:8000"]
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-America/Toronto}
+      SECRET_KEY: ${BABY_BUDDY_SECRET_KEY:?BABY_BUDDY_SECRET_KEY is required}
+      ALLOWED_HOSTS: "*"
+      CSRF_TRUSTED_ORIGINS: ${BABY_BUDDY_PUBLIC_URL:?BABY_BUDDY_PUBLIC_URL is required}
+      SECURE_PROXY_SSL_HEADER: "True"
+      SESSION_COOKIE_SECURE: "True"
+      CSRF_COOKIE_SECURE: "True"
+      REVERSE_PROXY_AUTH: "True"
+      PROXY_HEADER: HTTP_REMOTE_USER
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/baby-buddy:/config
+      - ./mu3lab_auth.py:/app/www/public/babybuddy/mu3lab_auth.py:ro
+      - ./90-mu3lab-auth:/custom-cont-init.d/90-mu3lab-auth:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]

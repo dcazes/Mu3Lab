@@ -27,10 +27,9 @@ OIDC_CONTRACTS: dict[str, OidcContract] = {
     "paperless-ngx": OidcContract("Paperless-ngx", "PAPERLESS_OIDC_CLIENT_ID", "PAPERLESS_OIDC_CLIENT_SECRET", ("/accounts/oidc/authentik/login/callback/",)),
     "adventurelog": OidcContract("AdventureLog", "ADVENTURELOG_OIDC_CLIENT_ID", "ADVENTURELOG_OIDC_CLIENT_SECRET", ("/accounts/oidc/mu3lab-adventurelog/login/callback/",)),
     "lobehub": OidcContract("LobeChat", "AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", ("/api/auth/callback/authentik",)),
-    "homarr": OidcContract("Homarr", "HOMARR_OIDC_CLIENT_ID", "HOMARR_OIDC_CLIENT_SECRET", ("/api/auth/callback/oidc",)),
 }
 
-TRUSTED_HEADER = {"open-webui"}
+TRUSTED_HEADER = {"open-webui", "baby-buddy"}
 PROXY_GATE = {"litellm", "surfsense"}
 LOCAL = {"authentik", "vaultwarden", "freellmapi"}
 NO_UI = {"ingress", "ollama"}

@@ -132,7 +132,7 @@ servers:
     review_note: "Mu3Lab adapter uses WebDAV for scoped file listing, text reading, and text writing."
 
   - id: babybuddy-official
-    service_id: babybuddy
+    service_id: baby-buddy
     name: Baby Buddy MCP
     status: review_required
     preferred: true

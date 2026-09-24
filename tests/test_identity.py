@@ -20,7 +20,7 @@ class IdentityContractTests(unittest.TestCase):
         self.assertEqual(mode_for(registry.get("nextcloud")), "native_oidc")
         self.assertEqual(mode_for(registry.get("open-webui")), "trusted_header")
         self.assertEqual(mode_for(registry.get("lobehub")), "native_oidc")
-        self.assertEqual(mode_for(registry.get("homarr")), "native_oidc")
+        self.assertEqual(mode_for(registry.get("baby-buddy")), "trusted_header")
         self.assertEqual(mode_for(registry.get("litellm")), "proxy_gate")
         self.assertEqual(mode_for(registry.get("surfsense")), "proxy_gate")
         self.assertEqual(mode_for(registry.get("vaultwarden")), "local")

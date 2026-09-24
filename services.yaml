@@ -448,61 +448,29 @@ services:
       handoff: true
       user_action: "Use Authentik normally and save the generated recovery administrator credential."
 
-  - id: babybuddy
-    maturity: planned
-    name: Baby Buddy
-    category: productivity
-    lifecycle: optional
-    compose_dir: apps/babybuddy
-    https_port: 8001
-    private_https_port: 8459
-    proxy_port: 19476
-    health: {kind: http, url: "http://127.0.0.1:8001/"}
-    auth: local
-    stage: blocked
-    availability: blocked
-    blocked_reason: "Baby Buddy and its official MCP are being reviewed for safe account bootstrap, immutable images, backups, and private routing."
-    route: pending
-    ui: {available: true, authentication: local}
-    setup_action: "Install private baby-care tracking after the runtime and account-bootstrap review is complete."
-    resource_guidance: "Lightweight application with private family health and care records."
-    identity_note: "Baby Buddy uses its own local account. Its MCP acts as the user represented by a manually copied API token."
-    account:
-      mode: local_account_manual
-      handoff: false
-      user_action: "Create the family account and explicitly choose which user's API token the assistant may use."
-    mcp:
-      kind: official
-      auth: api-token
-      scopes: [care-read, care-write]
-      exposed: false
-      tools:
-        - {id: babybuddy.list_events, title: Read care events, risk: read}
-        - {id: babybuddy.create_event, title: Record care event, risk: write}
-
-  - id: homarr
+  - id: baby-buddy
     maturity: supported
-    name: Homarr
-    category: dashboard
+    name: Baby Buddy
+    category: family
     lifecycle: optional
-    compose_dir: apps/homarr
-    https_port: 7575
+    compose_dir: apps/baby-buddy
+    https_port: 8002
     private_https_port: 8458
     proxy_port: 19475
-    health: {kind: http, url: "http://127.0.0.1:7575/api/health/live"}
-    auth: oidc
+    health: {kind: http, url: "http://127.0.0.1:8002/"}
+    auth: trusted_header
     stage: optional
     availability: available
     required: false
     route: pending
-    ui: {available: true, authentication: oidc}
-    setup_action: "Install Homarr as an alternate dashboard, complete the Authentik sign-in, then arrange the generated app tiles and widgets."
-    resource_guidance: "Lightweight dashboard with persistent boards. Native Homarr status and action widgets list curated services and queue Mu3Lab's audited whole-stack start or stop jobs. The separate Docker inspector remains available for low-level container diagnostics."
-    identity_note: "Homarr signs in through Authentik OIDC and synchronizes group claims. App lifecycle mutations are sent to Mu3Lab's Authentik-verified API; direct Docker access stays isolated behind a socket proxy with general POST, restart, removal, and other Docker mutations disabled."
-    images: ["ghcr.io/homarr-labs/homarr-test:v2@sha256:b5fd9296016566205ad7a0d3ec8003fdb1b2e239956d7d4b148998bddb8d1c2b", "lscr.io/linuxserver/socket-proxy:3.4.4@sha256:a8c700baae19c2fff5b2940b21a748e78cf3b91cc311ad65f990efabdd1361eb"]
-    update: {repository: homarr-labs/homarr, current_version: "v2 preview"}
-    backup: {binds: [appdata]}
+    ui: {available: true, authentication: trusted_header}
+    setup_action: "Install Baby Buddy for shared feeding, sleep, diaper, pumping, and growth tracking."
+    resource_guidance: "Lightweight family tracker with durable local data and uploaded media. Authentik creates the Baby Buddy user automatically on first access."
+    identity_note: "Authentik protects the private route and supplies Baby Buddy's trusted Remote-User identity. Distinct admitted users receive full caregiver access on first login; direct access is loopback-only and client-supplied identity headers are replaced at the proxy."
+    images: ["lscr.io/linuxserver/babybuddy:version-v2.7.1"]
+    update: {repository: babybuddy/babybuddy, current_version: "v2.7.1"}
+    backup: {binds: [config]}
     account:
-      mode: oidc_first_login
+      mode: trusted_header
       handoff: false
-      user_action: "Open Homarr and complete the Authentik sign-in. During first-run setup, assign the synchronized Mu3Lab operator group administrator access."
+      user_action: "Open Baby Buddy through Mu3Lab; Authentik creates your application user on first access."

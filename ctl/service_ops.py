@@ -172,15 +172,8 @@ def _materialize(service: Service, root: Path) -> Path:
             values.setdefault("LITELLM_MASTER_KEY", litellm["LITELLM_MASTER_KEY"])
         from ctl.lobehub_ops import apply_model_policy
         apply_model_policy(values, root)
-    elif service.id == "homarr":
-        # Homarr requires exactly 32 bytes represented as a 64-character hex key.
-        # Keep it stable across repairs so encrypted integration data remains readable.
-        values.setdefault("HOMARR_SECRET_ENCRYPTION_KEY", token_secrets.token_hex(32))
-        values.setdefault("HOMARR_OIDC_CLIENT_ID", "mu3lab-homarr")
-        values.setdefault("HOMARR_OIDC_CLIENT_SECRET", token_secrets.token_urlsafe(40))
-        root_values = read_runtime_env(root / ".env")
-        if root_values.get("MU3LAB_HOMARR_TOKEN"):
-            values.setdefault("HOMARR_CONTROL_TOKEN", root_values["MU3LAB_HOMARR_TOKEN"])
+    elif service.id == "baby-buddy":
+        values.setdefault("BABY_BUDDY_SECRET_KEY", token_secrets.token_urlsafe(48))
     try:
         from ctl.service_state import tailnet_dns_name
         dns_name = tailnet_dns_name()
@@ -308,25 +301,8 @@ def _materialize(service: Service, root: Path) -> Path:
                 client_secret=values["AUTH_AUTHENTIK_SECRET"],
                 redirect_paths=("/api/auth/callback/authentik",),
             )
-        elif service.id == "homarr":
-            values.setdefault("HOMARR_BASE_URL", public_url)
-            values.setdefault("HOMARR_OIDC_ISSUER",
-                              f"https://{dns_name}/application/o/mu3lab-homarr/")
-            values.setdefault("HOMARR_OIDC_URI",
-                              f"https://{dns_name}/application/o/authorize/")
-            values.setdefault("HOMARR_OIDC_LOGOUT_URL",
-                              f"https://{dns_name}/application/o/mu3lab-homarr/end-session/")
-            # Homarr v2 uses its own web port (3000) and does not use the
-            # v1 AUTH_OIDC_URI / NEXTAUTH_URL compatibility variables.
-            values.setdefault("HOMARR_CONTROL_API_BASE", "http://172.21.0.1:19460")
-            from ctl.authentik_blueprints import write_oidc_application_blueprint
-            write_oidc_application_blueprint(
-                RuntimePaths().root, dns_name, service_id="homarr", name="Homarr",
-                private_port=service.private_https_port,
-                client_id=values["HOMARR_OIDC_CLIENT_ID"],
-                client_secret=values["HOMARR_OIDC_CLIENT_SECRET"],
-                redirect_paths=("/api/auth/callback/oidc",),
-            )
+        elif service.id == "baby-buddy":
+            values.setdefault("BABY_BUDDY_PUBLIC_URL", public_url)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
     return target
@@ -1083,11 +1059,8 @@ def _configure_identity(store: JobStore, state: ControlState | None, job: dict,
                     raise ValueError(configured_detail)
             detail = ("OIDC configuration is installed. Complete a real Authentik callback so Mu3Lab "
                       "can verify the existing owner and administrator role before disabling local login.")
-            target = "ready" if linked or service.id == "homarr" else "migration_required"
-            if service.id == "homarr":
-                detail = ("Authentik OIDC is configured and Homarr no longer offers local credentials. "
-                          "Complete the Authentik redirect to finish Homarr's first-run group setup.")
-            elif linked:
+            target = "ready" if linked else "migration_required"
+            if linked:
                 detail = ("Verified Authentik account linking; password login is disabled."
                           if service.id == "lobehub" else
                           "Verified Authentik account linking and administrator role; browser password login is disabled.")

@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { api, AuditResponse, CatalogResponse, ChatProvider, ChatStatus, CoreSetupResponse, Health, IdentityResponse, IntegrationsResponse, JobsResponse, ProvisioningResponse, ServicesResponse, SystemResponse } from './api';
 import { AiMcpPanel, AppsPanel, HomePanel, ProtectionPanel, SystemPanel } from './panels';
 
-type Tab = 'home' | 'homarr' | 'apps' | 'chat' | 'connections' | 'security' | 'system';
+type Tab = 'home' | 'apps' | 'chat' | 'connections' | 'security' | 'system';
 const tabs: { id: Tab; label: string; group?: string; path: string }[] = [
-  { id: 'home', label: 'Home', group: 'Platform', path: '/' }, { id: 'homarr', label: 'Homarr', path: '/homarr' }, { id: 'apps', label: 'My Apps', path: '/apps' },
+  { id: 'home', label: 'Home', group: 'Platform', path: '/' }, { id: 'apps', label: 'My Apps', path: '/apps' },
   { id: 'chat', label: 'Chat', path: '/chat' },
   { id: 'connections', label: 'Connections', path: '/connections' },
   { id: 'security', label: 'Security & Backups', group: 'Protection', path: '/security' },
@@ -19,9 +19,9 @@ const emptyData: DashboardData = {
   core: { ok: false, ready_to_run: false, services: [], missing_manifests: [], next_action: 'Core status unavailable.' }, provisioning: { ok: false, available: false, complete: false, phases: [] },
   chat: { ok: false, ready: false, url: '', authentication: 'trusted_header', mcp_enabled_count: 0, detail: 'Chat status unavailable.' },
 };
-function routeTab(path: string): Tab { if (path === '/' || path === '') return 'home'; if (path.startsWith('/homarr')) return 'homarr'; if (path.startsWith('/apps')) return 'apps'; if (path.startsWith('/chat')) return 'chat'; if (path.startsWith('/connections')) return 'connections'; if (path.startsWith('/security')) return 'security'; if (path.startsWith('/system')) return 'system'; return 'home'; }
+function routeTab(path: string): Tab { if (path === '/' || path === '') return 'home'; if (path.startsWith('/apps')) return 'apps'; if (path.startsWith('/chat')) return 'chat'; if (path.startsWith('/connections')) return 'connections'; if (path.startsWith('/security')) return 'security'; if (path.startsWith('/system')) return 'system'; return 'home'; }
 function knownRoute(path: string, services: { id: string }[]): boolean {
-  if (['/', '/homarr', '/apps', '/chat', '/connections', '/connections/providers', '/connections/mcp', '/security', '/security/identity', '/security/backups', '/system', '/system/diagnostics'].includes(path)) return true;
+  if (['/', '/apps', '/chat', '/connections', '/connections/providers', '/connections/mcp', '/security', '/security/identity', '/security/backups', '/system', '/system/diagnostics'].includes(path)) return true;
   const match = path.match(/^\/apps\/([^/]+)$/);
   return Boolean(match && services.some(service => service.id === match[1]));
 }
@@ -52,19 +52,6 @@ export function ChatPanel({ status, services }: { status: ChatStatus; services: 
   </div>;
 }
 
-export function HomarrPanel({ service }: { service?: ServicesResponse['services'][number] }) {
-  const ready = Boolean(service?.route_ready && service.url);
-  const requiresTopLevelOidc = service?.identity?.mode === 'native_oidc';
-  return <div className="homarr-page">
-    <header className="homarr-toolbar">
-      <div><b>Alternate home dashboard</b><span>Native application status, stack controls, shortcuts, and container inspection in Homarr.</span></div>
-      {ready && <a className="button button-secondary" href={service?.url} target="_blank" rel="noreferrer">Open full page ↗</a>}
-    </header>
-    {ready && requiresTopLevelOidc && <section className="homarr-oidc-note"><span>First visit?</span> Open Homarr full page to complete Authentik sign-in, then reload this page to use the embedded dashboard.</section>}
-    {ready ? <section className="homarr-shell"><iframe title="Mu3Lab Homarr dashboard" src={service?.url} allow="clipboard-read; clipboard-write" /></section> : <section className="panel homarr-unavailable"><p className="eyebrow">HOMARR</p><h2>{service?.state === 'not_installed' ? 'Install the alternate dashboard' : 'Homarr is not ready yet'}</h2><p>{service?.detail || 'Homarr is not present in this control-plane response yet.'}</p><a className="button button-primary" href="/apps/homarr" onClick={event => { event.preventDefault(); navigate('/apps/homarr'); }}>Manage Homarr →</a></section>}
-  </div>;
-}
-
 export default function App() {
   const [locationPath, setLocationPath] = useState(() => window.location.pathname); const [tab, setTab] = useState<Tab>(() => routeTab(window.location.pathname)); const [data, setData] = useState<DashboardData | null>(null); const [error, setError] = useState('');
   useEffect(() => { const sync = () => { setLocationPath(window.location.pathname); setTab(routeTab(window.location.pathname)); }; window.addEventListener('popstate', sync); return () => window.removeEventListener('popstate', sync); }, []);
@@ -75,7 +62,6 @@ export default function App() {
   }, []);
   const content = !data ? <div className="loading">Connecting to the Mu3Lab control plane…</div> : !knownRoute(locationPath, data.services.services) ? <section className="panel"><p className="eyebrow">NOT FOUND</p><h2>This dashboard page does not exist</h2><p>Use the sidebar to return to a supported Mu3Lab area.</p><a className="primary-action" href="/" onClick={event => { event.preventDefault(); navigate('/'); }}>Return home →</a></section> : (() => {
     if (tab === 'home') return <HomePanel services={data.services.services} system={data.system} jobs={data.jobs} />;
-    if (tab === 'homarr') return <HomarrPanel service={data.services.services.find(service => service.id === 'homarr')} />;
     if (tab === 'apps') return <AppsPanel key={locationPath} services={data.services.services} catalog={data.catalog} />;
     if (tab === 'chat') {
       return <ChatPanel status={data.chat} services={data.services.services} />;

@@ -1,0 +1,11 @@
+#!/usr/bin/with-contenv bash
+set -euo pipefail
+
+settings=/app/www/public/babybuddy/settings/base.py
+generic=django.contrib.auth.backends.RemoteUserBackend
+managed=babybuddy.mu3lab_auth.AuthentikRemoteUserBackend
+
+if grep -q "$generic" "$settings"; then
+    sed -i "s|$generic|$managed|" "$settings"
+fi
+grep -q "$managed" "$settings"

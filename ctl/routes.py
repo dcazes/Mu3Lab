@@ -94,20 +94,26 @@ def _block(service: Service) -> str:
 \t}}
 }}
 """.strip()
-    if service.id == "homarr":
-        assert service.private_https_port is not None
+    if service.id == "baby-buddy":
         return f"""
 :{service.proxy_port} {{
 \tbind 127.0.0.1
-\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\t# Tailscale Serve terminates the public :{service.private_https_port} listener
-\t\t# before this local hop. Preserve that port explicitly so Auth.js emits
-\t\t# the same OIDC callback URI that is registered with Authentik.
-\t\theader_up Host {{http.request.host}}:{service.private_https_port}
-\t\theader_up X-Forwarded-Proto https
-\t\theader_up X-Forwarded-Host {{http.request.host}}:{service.private_https_port}
-\t\theader_down -X-Frame-Options
-\t\theader_down Content-Security-Policy "frame-ancestors https://*.ts.net:8446"
+\troute {{
+\t\treverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+\t\tforward_auth 127.0.0.1:9001 {{
+\t\t\turi /outpost.goauthentik.io/auth/caddy
+\t\t\theader_up Host {{http.request.host}}
+\t\t\theader_up X-Forwarded-Host {{http.request.host}}
+\t\t\theader_up X-Forwarded-Proto https
+\t\t\tcopy_headers X-Authentik-Username
+\t\t\ttrusted_proxies private_ranges
+\t\t}}
+\t\treverse_proxy 127.0.0.1:{service.https_port} {{
+\t\t\theader_up -Remote-User
+\t\t\theader_up Remote-User {{http.request.header.X-Authentik-Username}}
+\t\t\theader_up X-Forwarded-Proto https
+\t\t\theader_up X-Forwarded-Host {{http.request.host}}
+\t\t}}
 \t}}
 }}
 """.strip()

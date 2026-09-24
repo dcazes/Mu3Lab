@@ -8,7 +8,7 @@ import { siActualbudget, siAuthentik, siCaddy, siImmich, siMealie, siNextcloud, 
 import { McpConsole } from './McpConsole';
 
 const logos: Record<string, SimpleIcon> = { ingress: siCaddy, authentik: siAuthentik, vaultwarden: siVaultwarden, ollama: siOllama, 'actual-budget': siActualbudget, immich: siImmich, mealie: siMealie, 'paperless-ngx': siPaperlessngx, nextcloud: siNextcloud };
-const initials: Record<string, string> = { litellm: 'LT', 'open-webui': 'OW', freellmapi: 'FL', lobehub: 'LC', homarr: 'HO', surfsense: 'SS', firecrawl: 'FC', adventurelog: 'AL', babybuddy: 'BB' };
+const initials: Record<string, string> = { litellm: 'LT', 'open-webui': 'OW', freellmapi: 'FL', lobehub: 'LC', 'baby-buddy': 'BB', surfsense: 'SS', firecrawl: 'FC', adventurelog: 'AL' };
 const stateLabel: Record<Service['state'], string> = { planned: 'Not installed', not_installed: 'Not installed', config_required: 'Configuration required', queued: 'Queued', installing: 'Installing', installed: 'Installed', needs_setup: 'Needs setup', configured: 'Configured', starting: 'Starting', verifying: 'Verifying', running: 'Running', ready: 'Ready', stopped: 'Stopped', updating: 'Updating', degraded: 'Degraded', failed: 'Failed', needs_attention: 'Needs attention', blocked: 'Blocked by policy' };
 const stageLabel: Record<Service['stage'], string> = { foundation: 'Foundation', core: 'AI Integration', optional: 'Productivity', blocked: 'Blocked' };
 const displayStage = (service: Service): Service['stage'] => ['firecrawl', 'lobehub'].includes(service.id) ? 'core' : service.stage === 'blocked' && service.category === 'productivity' ? 'optional' : service.stage;

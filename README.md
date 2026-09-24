@@ -38,15 +38,10 @@ Connections, Security & Backups, and System views. It truthfully distinguishes
 foundation, core, optional, and policy-blocked services, and never offers a
 browser route until that route is actually published through the tailnet.
 
-An optional Homarr v2 preview dashboard is available beside the custom Home
-view at `/homarr`. It is embedded after its private Tailnet route is verified
-and also offers a full-page link. Its AI & research and Work & life groups use
-single native tiles that combine each app icon, live running/stopped status,
-and the permitted audited start/stop action. The separate container inspector
-remains behind a socket proxy that keeps general POST access disabled and
-allowlists only container start/stop; restart, removal, configuration, and
-other Docker mutations remain disabled. The prior v1 app-data directory is
-retained separately for rollback.
+Baby Buddy is available as an optional family tracker for feeding, sleep,
+diapers, pumping, growth, and other care activity. It appears in the React
+Home workspace and My Apps catalog, stores its data under the normal Mu3Lab
+data root, and uses Authentik trusted-header SSO on its private Tailnet route.
 
 The control plane keeps leased, resumable, secret-redacted SQLite jobs and
 structured events under `/srv/mu3lab/runtime`; a persistent worker reclaims
@@ -88,9 +83,9 @@ action history from the dashboard and LobeChat, job diagnostics, and reviewed
 update status. Write calls in the console require a one-use confirmation.
 Mealie uses a pinned stdio-to-HTTP bridge; Firecrawl uses its official HTTP
 MCP server against the self-hosted API. Mu3Lab's small Nextcloud and
-AdventureLog adapters expose scoped files and travel data operations. Baby Buddy
-is listed as a planned productivity app; its official MCP remains manual because
-it acts as the user represented by an API token copied from BabyBuddy settings.
+AdventureLog adapters expose scoped files and travel data operations. Baby
+Buddy's official MCP remains manual because it acts as the user represented by
+an API token copied from Baby Buddy settings.
 All accepted MCP runtimes can be prepared while their apps are stopped. A
 connection is not reported live until credentials, health, and tool discovery
 pass; Nextcloud and AdventureLog also perform an app-data read check.

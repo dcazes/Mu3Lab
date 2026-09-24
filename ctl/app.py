@@ -47,7 +47,7 @@ from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl import mcp_config
 from ctl.mcp_activity import McpActivity
 from ctl import mcp_console
-from ctl.service_state import _healthy, compose_snapshot, status as service_status, tailnet_dns_name, tailnet_serve_ports
+from ctl.service_state import compose_snapshot, status as service_status, tailnet_dns_name, tailnet_serve_ports
 from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl import actions
@@ -94,23 +94,6 @@ def _trusted_proxy(request: Request) -> bool:
     expected = _ingress_token()
     supplied = request.headers.get("x-mu3lab-proxy-token", "")
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
-
-
-def _homarr_control_allowed(request: Request) -> bool:
-    """Authenticate server-side Homarr widgets across the trusted Caddy hop."""
-    if not _trusted_proxy(request):
-        return False
-    authorization = request.headers.get("authorization", "")
-    scheme, _, supplied = authorization.partition(" ")
-    try:
-        from ctl.secrets import read_runtime_env
-        expected = read_runtime_env(ROOT / ".env").get("MU3LAB_HOMARR_TOKEN", "")
-    except OSError:
-        expected = ""
-    return bool(
-        scheme.lower() == "bearer" and expected and supplied
-        and hmac.compare_digest(expected, supplied)
-    )
 
 
 def _csrf_token(request: Request) -> str:
@@ -254,173 +237,6 @@ def _service_snapshot(request: Request | None = None) -> dict:
 @app.get("/api/v1/services")
 def list_services(request: Request) -> dict:
     return _service_snapshot(request)
-
-
-_HOMARR_GROUPS = (
-    ("Infrastructure", ("ingress", "authentik", "vaultwarden", "homarr")),
-    ("AI & Research", ("ollama", "litellm", "open-webui", "freellmapi", "surfsense", "firecrawl", "lobehub")),
-    ("Work & Life", ("actual-budget", "immich", "mealie", "adventurelog", "paperless-ngx", "nextcloud")),
-)
-
-
-def _homarr_state(item: dict) -> dict:
-    state = str(item.get("state") or "unknown")
-    # The general service projection intentionally requires an interactive
-    # operator request before it marks Authentik's route as configured.  This
-    # endpoint is already reached through Authentik and independently
-    # authenticated by Homarr, so a healthy Authentik container is sufficient
-    # evidence for the dashboard status card.
-    if item.get("id") == "authentik" and item.get("health_state") == "healthy":
-        state = "ready"
-    if state in {"ready", "running"}:
-        tone, label = "teal", "Running"
-    elif state == "stopped":
-        tone, label = "gray", "Stopped"
-    elif state in {"queued", "installing", "starting", "verifying", "updating"}:
-        tone, label = "blue", state.replace("_", " ").title()
-    elif state in {"failed", "degraded", "needs_attention"}:
-        tone, label = "red", state.replace("_", " ").title()
-    elif state in {"not_installed", "planned", "config_required", "needs_setup"}:
-        tone, label = "yellow", state.replace("_", " ").title()
-    else:
-        tone, label = "gray", state.replace("_", " ").title()
-    return {
-        "id": str(item.get("id") or ""),
-        "name": str(item.get("name") or ""),
-        "state": state,
-        "stateLabel": label,
-        "tone": tone,
-        "detail": str(item.get("detail") or ""),
-        "url": str(item.get("url") or "") if item.get("route_ready") else "",
-    }
-
-
-@app.get("/api/v1/homarr/services")
-def homarr_services(request: Request) -> dict:
-    """Small, secret-free projection for Homarr's native status widget."""
-    if not _homarr_control_allowed(request):
-        return JSONResponse({"ok": False, "error": "Homarr integration authentication failed"}, status_code=403)
-    snapshot = _service_snapshot()
-    items = {str(item["id"]): _homarr_state(item) for item in snapshot.get("services", [])}
-    groups = [
-        {"name": name, "services": [
-            {**items[service_id], "category": name}
-            for service_id in service_ids if service_id in items
-        ]}
-        for name, service_ids in _HOMARR_GROUPS
-    ]
-    all_items = [item for group in groups for item in group["services"]]
-    return {
-        "ok": True,
-        "summary": {
-            "running": sum(item["state"] in {"ready", "running"} for item in all_items),
-            "stopped": sum(item["state"] == "stopped" for item in all_items),
-            "attention": sum(item["tone"] in {"red", "yellow"} for item in all_items),
-            "total": len(all_items),
-        },
-        "services": all_items,
-        "groups": groups,
-    }
-
-
-@app.get("/api/v1/homarr/services/{service_id}")
-def homarr_service(service_id: str, request: Request) -> dict:
-    """Live, per-app state used by Homarr's combined status/action tiles."""
-    if not _homarr_control_allowed(request):
-        return JSONResponse({"ok": False, "error": "Homarr integration authentication failed"}, status_code=403)
-    try:
-        service = load_registry().get(service_id)
-    except RegistryError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
-    if service.id not in {item for _, ids in _HOMARR_GROUPS for item in ids}:
-        return JSONResponse({"ok": False, "error": "Service is not part of the curated Homarr board"}, status_code=404)
-    # These cards poll independently (13 concurrent requests on a board
-    # refresh). Reuse one bounded Docker snapshot per card, then health-probe
-    # only running stacks; stopped stacks must not burn the probe timeout.
-    project_states, _ = compose_snapshot()
-    compose_dir = project_path(service, ROOT)
-    compose_file = compose_dir / "docker-compose.yml"
-    if service.is_blocked:
-        state, detail = "blocked", service.blocked_reason
-    elif not compose_file.is_file():
-        state, detail = "planned", "This curated stack is not installed yet."
-    else:
-        project_state = project_states.get(str(compose_dir.resolve()), "absent")
-        if project_state == "running":
-            state = "running"
-            is_healthy, detail = _healthy(service)
-            health_state = "healthy" if is_healthy else "unhealthy"
-        elif project_state == "stopped":
-            state, detail, health_state = "stopped", "", "unknown"
-        else:
-            state, detail, health_state = "planned", "", "unknown"
-    if service.is_blocked:
-        health_state = "blocked"
-    elif not compose_file.is_file():
-        health_state = "unknown"
-    item = {"id": service.id, "name": service.name, "state": state, "detail": detail}
-    # Keep actions conservative: only offer Start for an installed stopped
-    # stack, or Stop for a running stack whose lifecycle permits it.
-    actions_for_state = allowed_actions(service, "running" if state == "running" else state)
-    action = "start" if "start" in actions_for_state else "stop" if "stop" in actions_for_state else ""
-    projected = _homarr_state(item)
-    if health_state == "unhealthy":
-        projected.update({"stateLabel": "Unhealthy", "tone": "red"})
-    return {"ok": True, "service": {
-        **projected,
-        "healthState": health_state,
-        "availableAction": action,
-        "actionLabel": action.title() if action else "Unavailable",
-        "healthDetail": detail,
-        "iconUrl": f"https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/{service.id}.svg",
-    }}
-
-
-@app.post("/api/v1/homarr/services/{service_id}/toggle")
-def homarr_toggle_service(service_id: str, request: Request) -> dict:
-    """Toggle one curated app stack from a native Homarr action widget.
-
-    The widget never receives Docker or shell access. This endpoint resolves
-    the current state, selects only Start or Stop, and queues the same durable
-    audited lifecycle job used by the primary dashboard.
-    """
-    if not _homarr_control_allowed(request):
-        return JSONResponse({"ok": False, "error": "Homarr integration authentication failed"}, status_code=403)
-    try:
-        service = load_registry().get(service_id)
-    except RegistryError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
-    if service.lifecycle == "always_on" or service.id == "homarr":
-        return JSONResponse({"ok": False, "error": "This service is protected from dashboard power actions"}, status_code=409)
-    if service.is_blocked:
-        return JSONResponse({"ok": False, "error": service.blocked_reason}, status_code=409)
-    snapshot = _service_snapshot()
-    item = next((entry for entry in snapshot.get("services", []) if entry.get("id") == service.id), None)
-    if item is None:
-        return JSONResponse({"ok": False, "error": "Service state is unavailable"}, status_code=503)
-    available = allowed_actions(service, str(item.get("state") or "unknown"))
-    action = "start" if "start" in available else "stop" if "stop" in available else ""
-    if not action:
-        return JSONResponse({"ok": False, "error": "Start or stop is not valid for the current service state"}, status_code=409)
-    store = JobStore.runtime()
-    if store is None:
-        return JSONResponse({"ok": False, "error": "runtime job store is not initialized"}, status_code=503)
-    active = next((job for job in store.jobs(limit=100)
-                   if job["service_id"] == service.id and job["state"] in {"queued", "running"}), None)
-    if active:
-        return JSONResponse({"ok": False, "error": "A lifecycle action is already running", "job": active}, status_code=409)
-    actor = "homarr-dashboard"
-    try:
-        job = store.create(
-            kind="lifecycle", service_id=service.id, action=action, actor=actor,
-            detail=f"Homarr operator requested {action} for {service.name}.",
-        )
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
-    control_state = ControlState.runtime()
-    if control_state and job.get("state") == "queued":
-        control_state.set_installation(service.id, "queued", job_id=str(job["id"]))
-    return {"ok": True, "action": action, "job": job}
 
 
 @app.get("/api/integrations")

@@ -46,7 +46,7 @@ class RegistryV3Tests(unittest.TestCase):
         optional = [service for service in registry.services if service.stage == "optional"]
         self.assertEqual({service.id for service in optional},
                          {"surfsense", "mealie", "actual-budget", "immich", "adventurelog",
-                          "paperless-ngx", "nextcloud", "firecrawl", "lobehub", "homarr"})
+                          "paperless-ngx", "nextcloud", "firecrawl", "lobehub", "baby-buddy"})
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
@@ -98,37 +98,14 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn("reverse_proxy 127.0.0.1:3002", block)
         self.assertNotIn("forward_auth", block)
 
-    def test_homarr_route_can_be_embedded_only_by_the_dashboard_origin(self):
-        block = render("{\n  admin off\n}\n", [load().get("homarr")])
+    def test_baby_buddy_route_uses_authentik_verified_remote_user(self):
+        block = render("{\n  admin off\n}\n", [load().get("baby-buddy")])
         self.assertIn(":19475 {", block)
-        self.assertIn("reverse_proxy 127.0.0.1:7575", block)
-        self.assertIn("header_up Host {http.request.host}:8458", block)
-        self.assertIn("header_up X-Forwarded-Host {http.request.host}:8458", block)
-        self.assertIn("frame-ancestors https://*.ts.net:8446", block)
-        self.assertIn("header_down -X-Frame-Options", block)
-
-    def test_homarr_lifecycle_api_bypasses_oidc_only_at_its_bearer_route(self):
-        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
-        self.assertIn("@homarr_control path /api/v1/homarr/*", caddy)
-        self.assertIn("handle @homarr_control", caddy)
-        self.assertIn("header_up X-Mu3Lab-Proxy-Token", caddy)
-        self.assertNotIn("@homarr_lifecycle", caddy)
-
-    def test_homarr_board_uses_native_widgets_without_nested_iframe(self):
-        provisioner = (ROOT / "apps/homarr/provision-dashboard.js").read_text(encoding="utf-8")
-        self.assertIn('"mu3lab-application-status"', provisioner)
-        self.assertIn('"actionButton"', provisioner)
-        self.assertNotIn('addItem("app-lifecycle", "iframe"', provisioner)
-
-    def test_homarr_v2_tiles_gate_app_links_on_health_and_keep_labels_readable(self):
-        provisioner = (ROOT / "apps/homarr/provision-dashboard-v2.js").read_text(encoding="utf-8")
-        self.assertIn('data.status?.service?.healthState === "healthy"', provisioner)
-        self.assertIn('const statusUrl = escaped(`${dashboardBase}/apps/${app.id}`)', provisioner)
-        self.assertIn('href={${destination}}', provisioner)
-        self.assertIn('lineClamp={2}', provisioner)
-        self.assertIn('overflowWrap:"anywhere"', provisioner)
-        self.assertNotIn("Compose application is", provisioner)
-
+        self.assertIn("forward_auth 127.0.0.1:9001", block)
+        self.assertIn("copy_headers X-Authentik-Username", block)
+        self.assertIn("header_up -Remote-User", block)
+        self.assertIn("header_up Remote-User {http.request.header.X-Authentik-Username}", block)
+        self.assertIn("reverse_proxy 127.0.0.1:8002", block)
 
 class InstallationWorkflowTests(unittest.TestCase):
     def test_nextcloud_accepts_newer_compatible_app_store_versions(self):

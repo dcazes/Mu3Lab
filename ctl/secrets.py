@@ -16,7 +16,7 @@ import os
 import secrets
 from pathlib import Path
 
-ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN", "MU3LAB_HOMARR_TOKEN")
+ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
 CORE_ENV_KEYS = {
     # Ollama has no private values today, but it still participates in the
     # common runtime-environment contract used by the core executor.
