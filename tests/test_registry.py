@@ -248,6 +248,19 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(ports), len(set(ports)))
         self.assertEqual(len(proxies), len(set(proxies)))
 
+    def test_babybuddy_is_a_planned_productivity_app_with_manual_mcp(self):
+        from ctl.mcp_catalog import load as load_mcp_catalog
+
+        registry = load()
+        service = registry.get("babybuddy")
+        self.assertEqual(service.category, "productivity")
+        self.assertEqual(service.stage, "blocked")
+        self.assertEqual(service.maturity, "planned")
+        candidate = next(server for server in load_mcp_catalog(registry)
+                         if server.service_id == "babybuddy")
+        self.assertEqual(candidate.status, "review_required")
+        self.assertEqual(candidate.credentials[0]["env"], "BABYBUDDY_TOKEN")
+
     def test_nextcloud_materialization_generates_private_runtime_secrets_and_oidc(self):
         from ctl.secrets import read_runtime_env
         from ctl.service_ops import _fresh_account_storage, _materialize

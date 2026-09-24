@@ -8,10 +8,10 @@ import { siActualbudget, siAuthentik, siCaddy, siImmich, siMealie, siNextcloud, 
 import { McpConsole } from './McpConsole';
 
 const logos: Record<string, SimpleIcon> = { ingress: siCaddy, authentik: siAuthentik, vaultwarden: siVaultwarden, ollama: siOllama, 'actual-budget': siActualbudget, immich: siImmich, mealie: siMealie, 'paperless-ngx': siPaperlessngx, nextcloud: siNextcloud };
-const initials: Record<string, string> = { litellm: 'LT', 'open-webui': 'OW', freellmapi: 'FL', lobehub: 'LC', homarr: 'HO', surfsense: 'SS', firecrawl: 'FC', adventurelog: 'AL' };
+const initials: Record<string, string> = { litellm: 'LT', 'open-webui': 'OW', freellmapi: 'FL', lobehub: 'LC', homarr: 'HO', surfsense: 'SS', firecrawl: 'FC', adventurelog: 'AL', babybuddy: 'BB' };
 const stateLabel: Record<Service['state'], string> = { planned: 'Not installed', not_installed: 'Not installed', config_required: 'Configuration required', queued: 'Queued', installing: 'Installing', installed: 'Installed', needs_setup: 'Needs setup', configured: 'Configured', starting: 'Starting', verifying: 'Verifying', running: 'Running', ready: 'Ready', stopped: 'Stopped', updating: 'Updating', degraded: 'Degraded', failed: 'Failed', needs_attention: 'Needs attention', blocked: 'Blocked by policy' };
 const stageLabel: Record<Service['stage'], string> = { foundation: 'Foundation', core: 'AI Integration', optional: 'Productivity', blocked: 'Blocked' };
-const displayStage = (service: Service): Service['stage'] => ['firecrawl', 'lobehub'].includes(service.id) ? 'core' : service.stage;
+const displayStage = (service: Service): Service['stage'] => ['firecrawl', 'lobehub'].includes(service.id) ? 'core' : service.stage === 'blocked' && service.category === 'productivity' ? 'optional' : service.stage;
 function navigate(path: string) { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }
 function Button({ children, className = '', variant = 'secondary', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'quiet' | 'danger' }) { return <button className={`button button-${variant} ${className}`} {...props}>{children}</button>; }
 function LinkButton({ path, children, className = '', variant = 'secondary' }: { path: string; children: ReactNode; className?: string; variant?: 'primary' | 'secondary' | 'quiet' | 'danger' }) { return <Button className={className} variant={variant} onClick={() => navigate(path)}>{children}</Button>; }
@@ -187,7 +187,44 @@ function McpCard({ server, refresh }: { server: McpRegistryResponse['servers'][n
     navigate('/chat');
   };
   const surfSenseHelp = server.service_id === 'surfsense' ? 'Open SurfSense, sign in locally, create a personal token in API Playground → API Keys, enable its workspace, then paste the ss_pat_… token here.' : '';
-  return <details className="mcp-card"><summary><span><b>{server.name}</b><small>{server.kind} · {server.transport}</small></span><span className={`status ${server.state === 'live' ? 'ready' : ['degraded', 'failed', 'incompatible'].includes(server.state) ? 'needs_attention' : 'needs_setup'}`}>{server.state.replaceAll('_', ' ')}</span></summary><div className="mcp-card-body"><p>{server.error || `${server.tools.length} discovered or reviewed tools · ${server.auth.type}`}</p>{server.review?.note && <p className="notice">{server.review.note}</p>}{surfSenseHelp && <p className="notice">{surfSenseHelp}</p>}{server.review?.repository && <a href={server.review.repository} target="_blank" rel="noreferrer">Review source ↗</a>}{server.configuration && server.configuration.length > 0 && <form className="provider-form" onSubmit={save}>{server.configuration.map(field => <label key={field.key}>{field.label || field.key}<input type={field.type === 'secret' ? 'password' : 'text'} required={field.required && !field.secret_present} value={values[field.key] || ''} placeholder={field.type === 'secret' && field.secret_present ? 'Saved; leave blank to keep' : ''} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))} /></label>)}<Button variant="primary" type="submit" disabled={Boolean(pending)}>{pending === 'save' ? 'Saving…' : 'Save credentials'}</Button></form>}<div className="actions">{server.state === 'stopped' ? <><Button disabled={Boolean(pending) || server.prepared || server.review?.status !== 'accepted'} onClick={() => act('prepare')}>{server.prepared ? 'Prepared' : 'Prepare MCP'}</Button><LinkButton path={`/apps/${server.service_id}`}>Start app</LinkButton></> : server.state === 'live' ? <><Button disabled={Boolean(pending)} onClick={() => act('verify')}>Verify</Button><Button disabled={Boolean(pending)} onClick={() => act('restart')}>Restart</Button><Button variant="danger" disabled={Boolean(pending)} onClick={() => act('disable')}>Disable</Button><Button onClick={openChat}>Open Chat</Button></> : server.review?.status === 'accepted' && <Button variant="primary" disabled={Boolean(pending) || !server.auth.configured || ['unavailable', 'starting'].includes(server.state)} onClick={() => act('install')}>Install and connect MCP</Button>}{server.enabled && <Button disabled={Boolean(pending)} onClick={loadLogs}>{pending === 'logs' ? 'Loading…' : 'View logs'}</Button>}</div>{message && <p className="notice" role="status">{message}</p>}{logs && <pre className="inline-logs">{logs.join('\n') || 'No recent log lines.'}</pre>}<McpConsole server={server} /></div></details>;
+  const setupMode = server.setup_mode || (server.auth.configured ? 'automatic' : 'manual');
+  const setupDetail = server.setup_detail || (setupMode === 'automatic' ? 'Mu3Lab manages this connection.' : 'Add the application credential below; Mu3Lab will handle the rest.');
+  const stateTone = server.state === 'live' ? 'ready' : ['degraded', 'failed', 'incompatible'].includes(server.state) ? 'needs_attention' : 'needs_setup';
+  return <details className={`mcp-card mcp-card-${setupMode}`}>
+    <summary className="mcp-card-summary">
+      <AppGlyph id={server.service_id} />
+      <span className="mcp-card-heading"><b>{server.name}</b><small>{setupDetail}</small></span>
+      <span className="mcp-card-facts"><small>{server.tools.length} tools</small><span className={`status ${stateTone}`}>{server.state.replaceAll('_', ' ')}</span></span>
+    </summary>
+    <div className="mcp-card-body">
+      <p className="mcp-connection-detail">{server.error || `${server.tools.length} discovered or reviewed tools · ${server.auth.type}`}</p>
+      {server.review?.note && <p className="notice">{server.review.note}</p>}
+      {surfSenseHelp && <p className="notice">{surfSenseHelp}</p>}
+      {setupMode === 'manual' && server.configuration && server.configuration.length > 0 && <form className="provider-form mcp-setup-form" onSubmit={save}>
+        {server.configuration.map(field => <label key={field.key}>{field.label || field.key}<input type={field.type === 'secret' ? 'password' : 'text'} required={field.required && !field.secret_present} value={values[field.key] || ''} placeholder={field.type === 'secret' && field.secret_present ? 'Saved; leave blank to keep' : ''} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))} /></label>)}
+        <Button variant="primary" type="submit" disabled={Boolean(pending)}>{pending === 'save' ? 'Saving…' : 'Save credential'}</Button>
+      </form>}
+      <div className="actions mcp-primary-actions">
+        {server.state === 'stopped' ? <><Button disabled={Boolean(pending) || server.prepared || server.review?.status !== 'accepted'} onClick={() => act('prepare')}>{server.prepared ? 'Prepared' : 'Prepare connection'}</Button><LinkButton path={`/apps/${server.service_id}`}>Start app</LinkButton></>
+          : server.state === 'live' ? <Button variant="primary" onClick={openChat}>Open Chat</Button>
+            : server.review?.status === 'accepted' && <Button variant="primary" disabled={Boolean(pending) || !server.auth.configured || ['unavailable', 'starting'].includes(server.state)} onClick={() => act('install')}>Connect</Button>}
+      </div>
+      {message && <p className="notice" role="status">{message}</p>}
+      <details className="mcp-advanced">
+        <summary>Advanced controls and diagnostics</summary>
+        <div className="mcp-advanced-body">
+          <p><span>{server.kind}</span><span>{server.transport}</span>{server.last_verified_at && <span>Verified {new Date(server.last_verified_at).toLocaleString()}</span>}</p>
+          {server.review?.repository && <a href={server.review.repository} target="_blank" rel="noreferrer">Review source ↗</a>}
+          <div className="actions">
+            {server.state === 'live' && <><Button disabled={Boolean(pending)} onClick={() => act('verify')}>Verify</Button><Button disabled={Boolean(pending)} onClick={() => act('restart')}>Restart</Button><Button variant="danger" disabled={Boolean(pending)} onClick={() => act('disable')}>Disable</Button></>}
+            {server.enabled && <Button disabled={Boolean(pending)} onClick={loadLogs}>{pending === 'logs' ? 'Loading…' : 'View logs'}</Button>}
+          </div>
+          {logs && <pre className="inline-logs">{logs.join('\n') || 'No recent log lines.'}</pre>}
+          <McpConsole server={server} />
+        </div>
+      </details>
+    </div>
+  </details>;
 }
 
 function ProviderVerificationJob({ id }: { id: string }) {
@@ -404,7 +441,29 @@ export function AiMcpPanel({ integrations, services }: { integrations: Integrati
   const refreshMcp = () => api<McpRegistryResponse>('/api/v1/mcp/servers').then(setMcpRegistry).catch(() => setMcpRegistry(null));
   const nav = <div className="subnav"><LinkButton path="/connections" className={!mcp && !providers ? 'selected' : ''}>AI services & routing</LinkButton><LinkButton path="/connections/providers" className={providers ? 'selected' : ''}>Provider accounts</LinkButton><LinkButton path="/connections/mcp" className={mcp ? 'selected' : ''}>Advanced integrations</LinkButton></div>;
   if (providers) return <div>{nav}<ProviderAccounts catalog={providerCatalog} providers={savedProviders} providerId={providerId} label={label} apiKey={apiKey} message={providerMessage} loadError={providerLoadError} setProviderId={setProviderId} setLabel={setLabel} setApiKey={setApiKey} save={saveProvider} act={providerAction} /></div>;
-  if (mcp) return <div>{nav}<section className="panel"><p className="eyebrow">APPLICATION-DATA MCP</p><h2>Curated integrations</h2><p>{mcpRegistry?.policy || 'Loading the reviewed MCP registry…'}</p>{mcpRegistry && (mcpRegistry.servers.length ? <div className="mcp-list">{mcpRegistry.servers.map(server => <McpCard key={server.id} server={server} refresh={refreshMcp} />)}</div> : <div className="empty-state">Install an application with a reviewed MCP integration first. <LinkButton path="/apps">Open My Apps →</LinkButton></div>)}<ul className="policy"><li>Credentials are scoped to one application and remain write-only.</li><li>MVP tools become available after an operator installs and verifies the server.</li><li>Vaultwarden and infrastructure lifecycle remain excluded.</li></ul></section></div>;
+  if (mcp) {
+    const automatic = mcpRegistry?.servers.filter(server => (server.setup_mode || (server.auth.configured ? 'automatic' : 'manual')) === 'automatic') || [];
+    const manual = mcpRegistry?.servers.filter(server => (server.setup_mode || (server.auth.configured ? 'automatic' : 'manual')) === 'manual') || [];
+    return <div>{nav}<div className="mcp-page">
+      <section className="panel mcp-intro">
+        <p className="eyebrow">APP INTEGRATIONS</p>
+        <h2>Connect your apps to Chat</h2>
+        <p>Mu3Lab manages supported connections after their app credential is available. Only integrations that need something from you appear in manual setup.</p>
+        {mcpRegistry && <div className="mcp-summary" aria-label="MCP connection summary"><span><b>{automatic.length}</b> managed automatically</span><span><b>{manual.length}</b> need manual setup</span><span><b>{mcpRegistry.summary.live || 0}</b> live</span></div>}
+      </section>
+      {!mcpRegistry ? <section className="panel loading">Loading reviewed app integrations…</section> : !mcpRegistry.servers.length ? <section className="panel empty-state">Install an application with a reviewed integration first. <LinkButton path="/apps">Open My Apps →</LinkButton></section> : <>
+        <section className="panel mcp-section" aria-labelledby="automatic-mcp-heading">
+          <div className="mcp-section-heading"><div><p className="eyebrow">MANAGED BY MU3LAB</p><h2 id="automatic-mcp-heading">Set up automatically</h2><p>Credentials are ready. Mu3Lab handles connection health, tool discovery, and chat registration.</p></div><span className="mcp-section-count">{automatic.length}</span></div>
+          {automatic.length ? <div className="mcp-list">{automatic.map(server => <McpCard key={server.id} server={server} refresh={refreshMcp} />)}</div> : <p className="mcp-section-empty">Automatic integrations will appear here after their app credentials are ready.</p>}
+        </section>
+        <section className="panel mcp-section mcp-manual-section" aria-labelledby="manual-mcp-heading">
+          <div className="mcp-section-heading"><div><p className="eyebrow">ACTION REQUIRED</p><h2 id="manual-mcp-heading">Manual integration</h2><p>These apps require a user-scoped key, password, or approval that Mu3Lab cannot create for you.</p></div><span className="mcp-section-count">{manual.length}</span></div>
+          {manual.length ? <div className="mcp-list">{manual.map(server => <McpCard key={server.id} server={server} refresh={refreshMcp} />)}</div> : <p className="mcp-section-empty">Nothing needs manual setup.</p>}
+        </section>
+      </>}
+      <details className="panel mcp-policy"><summary>Security and connection policy</summary><div><p>{mcpRegistry?.policy}</p><ul className="policy"><li>Credentials are scoped to one application and remain write-only.</li><li>Tools are available only after connection and runtime verification succeed.</li><li>Vaultwarden and infrastructure lifecycle remain excluded.</li></ul></div></details>
+    </div></div>;
+  }
   const stages = [{ id: 'ollama', label: 'Ollama embeddings' }, { id: 'freellmapi', label: 'FreeLLMAPI providers' }, { id: 'litellm', label: 'LiteLLM gateway' }, { id: 'lobehub', label: 'LobeChat' }, { id: 'open-webui', label: 'Open WebUI + app MCPs' }];
   return <div>{nav}<div className="connections-grid"><section className="panel routing-panel"><p className="eyebrow">MODEL ROUTING</p><h2>How requests move through Mu3Lab</h2><p>Ollama keeps embeddings local, FreeLLMAPI verifies external provider routes, LiteLLM exposes one internal gateway, and LobeChat plus Open WebUI consume only that gateway.</p><div className="routing-stages">{stages.map((stage, index) => { const service = services.find(item => item.id === stage.id); const ready = service && ['ready', 'running'].includes(service.state); return <div className={ready ? 'routing-stage ready' : 'routing-stage muted'} key={stage.id}><span>{index + 1}</span><b>{stage.label}</b><small>{ready ? 'ready' : service?.state.replaceAll('_', ' ') || 'unavailable'}</small></div>; })}</div><div className="graph">{integrations.integrations.map(edge => <div className={!available.has(edge.source) || !available.has(edge.destination) ? 'edge muted' : 'edge'} key={`${edge.source}-${edge.destination}`}><b>{edge.source}</b><span>→</span><b>{edge.destination}</b><small>{edge.kind.replace('_', ' ')}</small></div>)}</div><p className="muted-copy">A route is reported ready only after streamed chat and local embedding checks pass.</p></section><section className="panel"><p className="eyebrow">APP CONTRACT</p><h2>Verified private chat access</h2><p>LobeChat uses native Authentik OIDC and Open WebUI uses trusted identity headers. Both receive only LiteLLM’s internal endpoint and curated model access.</p></section><CalendarConnectionCard nextcloud={services.find(service => service.id === 'nextcloud')} /><IdentityConnections services={services} /></div></div>;
 }

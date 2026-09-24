@@ -448,6 +448,38 @@ services:
       handoff: true
       user_action: "Use Authentik normally and save the generated recovery administrator credential."
 
+  - id: babybuddy
+    maturity: planned
+    name: Baby Buddy
+    category: productivity
+    lifecycle: optional
+    compose_dir: apps/babybuddy
+    https_port: 8001
+    private_https_port: 8459
+    proxy_port: 19476
+    health: {kind: http, url: "http://127.0.0.1:8001/"}
+    auth: local
+    stage: blocked
+    availability: blocked
+    blocked_reason: "Baby Buddy and its official MCP are being reviewed for safe account bootstrap, immutable images, backups, and private routing."
+    route: pending
+    ui: {available: true, authentication: local}
+    setup_action: "Install private baby-care tracking after the runtime and account-bootstrap review is complete."
+    resource_guidance: "Lightweight application with private family health and care records."
+    identity_note: "Baby Buddy uses its own local account. Its MCP acts as the user represented by a manually copied API token."
+    account:
+      mode: local_account_manual
+      handoff: false
+      user_action: "Create the family account and explicitly choose which user's API token the assistant may use."
+    mcp:
+      kind: official
+      auth: api-token
+      scopes: [care-read, care-write]
+      exposed: false
+      tools:
+        - {id: babybuddy.list_events, title: Read care events, risk: read}
+        - {id: babybuddy.create_event, title: Record care event, risk: write}
+
   - id: homarr
     maturity: supported
     name: Homarr

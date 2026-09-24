@@ -38,6 +38,15 @@ describe('dashboard organization', () => {
       .toEqual(['Productivity apps', 'AI Integration', 'Foundation', 'Blocked and planned']);
   });
 
+  it('keeps a planned Baby Buddy entry with productivity apps', () => {
+    const babyBuddy = service('babybuddy', 'Baby Buddy', 'blocked');
+    babyBuddy.category = 'productivity';
+    render(<AppsPanel services={[...services, babyBuddy]} catalog={{ ok: true, profiles: [], services: {} }} />);
+    const card = screen.getByRole('button', { name: /Baby Buddy/ });
+    expect(card.closest('.catalog-group')?.querySelector('h2')).toHaveTextContent('Productivity apps');
+    expect(card).toHaveTextContent('BB');
+  });
+
   it('searches the app catalog without losing its category context', () => {
     render(<AppsPanel services={services} catalog={{ ok: true, profiles: [], services: {} }} />);
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search app catalog' }), { target: { value: 'Nextcloud' } });
@@ -90,6 +99,33 @@ describe('dashboard organization', () => {
     expect(screen.getByRole('heading', { name: 'Authentik connections' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Repair Nextcloud sign-in' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open app ↗' })).toHaveAttribute('href', 'https://example:8453');
+  });
+
+  it('separates automatically managed MCPs from manual setup', async () => {
+    window.history.pushState({}, '', '/connections/mcp');
+    const mcpServer = (overrides: Record<string, unknown>) => ({
+      id: 'firecrawl-official', name: 'Firecrawl MCP', service_id: 'firecrawl', kind: 'official',
+      transport: 'streamable-http', app_state: 'running', enabled: true, prepared: true,
+      setup_mode: 'automatic', setup_detail: 'Mu3Lab manages this connection.', state: 'live',
+      auth: { type: 'none', scopes: [], configured: true }, configuration: [], tools: [],
+      review: { status: 'accepted', repository: 'https://example.test', revision: '1', preferred: true },
+      ...overrides,
+    });
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => path === '/api/v1/mcp/servers' ? {
+        ok: true, policy: 'Application data only.', summary: { live: 1 },
+        servers: [mcpServer({}), mcpServer({ id: 'mealie-community', name: 'Mealie MCP', service_id: 'mealie', enabled: false, prepared: false, setup_mode: 'manual', setup_detail: 'Add the application credential below.', state: 'authentication_required', auth: { type: 'service-credential', scopes: [], configured: false }, configuration: [{ key: 'api_token', type: 'secret', label: 'Mealie API token', required: true, secret_present: false }], review: { status: 'accepted', repository: 'https://example.test', revision: '1', preferred: true } })],
+      } : {},
+    })));
+    render(<AiMcpPanel services={services} integrations={{ ok: true, policy: '', integrations: [] }} />);
+    const automatic = await screen.findByRole('region', { name: 'Set up automatically' });
+    const manual = screen.getByRole('region', { name: 'Manual integration' });
+    expect(automatic).toHaveTextContent('Firecrawl MCP');
+    expect(automatic).not.toHaveTextContent('Mealie MCP');
+    expect(manual).toHaveTextContent('Mealie MCP');
+    expect(screen.getByLabelText('MCP connection summary')).toHaveTextContent('1 managed automatically');
+    window.history.pushState({}, '', '/connections');
   });
 
   it('makes Start the primary action for a stopped app without open or restart controls', () => {

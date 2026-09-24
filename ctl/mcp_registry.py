@@ -65,6 +65,15 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             "kind": server.provenance, "transport": server.transport,
             "endpoint": server.endpoint, "app_state": app_state,
             "enabled": enabled, "state": state, "error": error,
+            # A server that still lacks an app credential needs an operator.
+            # Once configured, Mu3Lab owns preparation, registration, health
+            # checks, and lifecycle reconciliation without further setup.
+            "setup_mode": "manual" if missing else "automatic",
+            "setup_detail": (
+                "Add the application credential below; Mu3Lab will handle the rest."
+                if missing else
+                "Mu3Lab manages this connection and keeps it aligned with the application."
+            ),
             "prepared": bool(runtime and runtime["state"] in {"prepared", "stopped", "live"}),
             "review": {"status": server.status, "repository": server.repository,
                        "revision": server.revision, "preferred": server.preferred,
