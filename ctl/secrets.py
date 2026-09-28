@@ -117,8 +117,7 @@ def generate_hex(nbytes: int = 32) -> str:
     return secrets.token_hex(nbytes)
 
 
-def ensure_root_env(root: Path,
-                    token_factory=generate_hex) -> tuple[dict[str, str], list[str]]:
+def ensure_root_env(root: Path, token_factory=generate_hex) -> tuple[dict[str, str], list[str]]:
     """Ensure root .env exists (0600) with both MU3LAB_* tokens present.
 
     Creates the file if missing, ADDS absent keys, preserves everything else

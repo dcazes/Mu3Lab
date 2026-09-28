@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
 
 from ctl.runtime import RuntimePaths
 
@@ -25,8 +24,7 @@ class Retention:
 
     def restic_args(self) -> list[str]:
         """Return explicit retention flags for a future authenticated backup job."""
-        return ["--keep-daily", str(self.daily), "--keep-weekly", str(self.weekly),
-                "--keep-monthly", str(self.monthly)]
+        return ["--keep-daily", str(self.daily), "--keep-weekly", str(self.weekly), "--keep-monthly", str(self.monthly)]
 
 
 def readiness(paths: RuntimePaths = RuntimePaths(), retention: Retention = Retention()) -> dict:
@@ -56,10 +54,15 @@ def readiness(paths: RuntimePaths = RuntimePaths(), retention: Retention = Reten
         state = "verified"
     else:
         state = "local_only"
-    return {"engine": "restic", "available": engine_available,
-            "repository_path": str(repository), "repository_present": repository_present,
-            "retention": {"daily": retention.daily, "weekly": retention.weekly,
-                          "monthly": retention.monthly},
-            "snapshot_present": snapshot_ok, "integrity_verified": integrity_ok,
-            "last_verified_at": str(verification.get("integrity_checked_at", "")),
-            "off_device": False, "state": state}
+    return {
+        "engine": "restic",
+        "available": engine_available,
+        "repository_path": str(repository),
+        "repository_present": repository_present,
+        "retention": {"daily": retention.daily, "weekly": retention.weekly, "monthly": retention.monthly},
+        "snapshot_present": snapshot_ok,
+        "integrity_verified": integrity_ok,
+        "last_verified_at": str(verification.get("integrity_checked_at", "")),
+        "off_device": False,
+        "state": state,
+    }

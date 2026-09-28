@@ -7,17 +7,18 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import yaml
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl.registry import RegistryError, load
 from ctl.backups import Retention
+from ctl.registry import RegistryError, load
 from ctl.runtime import RuntimePaths
-from ctl.service_state import _compose_state, public_url, status as service_status
-
+from ctl.service_state import _compose_state, public_url
+from ctl.service_state import status as service_status
+from tests.support import runtime_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,17 +36,19 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn("docker.sock", str(app))
 
     def test_baby_buddy_materialization_preserves_secret_and_public_url(self):
+        from ctl.lifecycle.materialize import materialize
         from ctl.secrets import read_runtime_env
-        from ctl.service_ops import _materialize
 
         service = load().get("baby-buddy")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
-                project = _materialize(service, ROOT)
+            with (
+                runtime_paths(paths),
+                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+            ):
+                project = materialize(service, ROOT)
                 first = read_runtime_env(project / ".env")["BABY_BUDDY_SECRET_KEY"]
-                _materialize(service, ROOT)
+                materialize(service, ROOT)
                 values = read_runtime_env(project / ".env")
                 second = values["BABY_BUDDY_SECRET_KEY"]
             self.assertTrue(first)
@@ -55,11 +58,15 @@ class RegistryTests(unittest.TestCase):
 
     def test_successful_one_shot_migration_does_not_make_app_look_stopped(self):
         def fake_run(*_args, **_kwargs):
-            return SimpleNamespace(returncode=0, stdout=(
-                '{"State":"running","Status":"Up 10 minutes (healthy)"}\n'
-                '{"State":"exited","Status":"Exited (0) 10 minutes ago"}\n'))
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    '{"State":"running","Status":"Up 10 minutes (healthy)"}\n'
+                    '{"State":"exited","Status":"Exited (0) 10 minutes ago"}\n'
+                ),
+            )
 
-        self.assertEqual(_compose_state(Path('/srv/mu3lab/projects/surfsense/docker-compose.yml'), fake_run), 'running')
+        self.assertEqual(_compose_state(Path("/srv/mu3lab/projects/surfsense/docker-compose.yml"), fake_run), "running")
 
     def test_checked_in_registry_marks_surfsense_installable_and_local_account(self):
         registry = load()
@@ -78,7 +85,10 @@ class RegistryTests(unittest.TestCase):
     def test_rejects_compose_path_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "services.yaml"
-            path.write_text("""schema_version: 2\nservices:\n  - id: bad\n    maturity: supported\n    name: Bad\n    category: test\n    lifecycle: optional\n    compose_dir: ../outside\n    https_port: 1\n    health: {kind: tcp, port: 1}\n    auth: proxy\n    profiles: [cpu]\n""", encoding="utf-8")
+            path.write_text(
+                """schema_version: 2\nservices:\n  - id: bad\n    maturity: supported\n    name: Bad\n    category: test\n    lifecycle: optional\n    compose_dir: ../outside\n    https_port: 1\n    health: {kind: tcp, port: 1}\n    auth: proxy\n    profiles: [cpu]\n""",
+                encoding="utf-8",
+            )
             with self.assertRaisesRegex(RegistryError, "unsafe compose_dir"):
                 load(path)
 
@@ -110,21 +120,27 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(all("@sha256:" in contract["image"] for contract in compose["services"].values()))
         self.assertEqual(compose["services"]["playwright-service"]["command"], "node dist/api.js")
         self.assertIn("mu3lab_frontend", compose["services"]["playwright-service"]["networks"])
-        self.assertNotIn("authentik", (ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8").lower())
+        self.assertNotIn(
+            "authentik", (ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8").lower()
+        )
 
     def test_excluded_authentication_service_is_not_classified_as_local_login(self):
         from ctl.identity import mode_for
+
         self.assertEqual(mode_for(load().get("firecrawl")), "none")
 
     def test_firecrawl_materialization_generates_all_runtime_secrets(self):
+        from ctl.lifecycle.materialize import materialize
         from ctl.secrets import read_runtime_env
-        from ctl.service_ops import _materialize
+
         service = load().get("firecrawl")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
-                project = _materialize(service, ROOT)
+            with (
+                runtime_paths(paths),
+                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+            ):
+                project = materialize(service, ROOT)
             values = read_runtime_env(project / ".env")
             for key in ("POSTGRES_PASSWORD", "RABBITMQ_DEFAULT_PASS", "BULL_AUTH_KEY"):
                 self.assertTrue(values[key])
@@ -132,8 +148,8 @@ class RegistryTests(unittest.TestCase):
 
     def test_lobechat_is_required_persistent_oidc_chat(self):
         from ctl.identity import mode_for
+        from ctl.lifecycle.materialize import materialize
         from ctl.secrets import read_runtime_env
-        from ctl.service_ops import _materialize
 
         service = load().get("lobehub")
         self.assertTrue(service.required)
@@ -141,7 +157,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(service.dependencies, ("litellm", "authentik"))
         self.assertEqual(mode_for(service), "native_oidc")
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
-        self.assertEqual(set(compose["services"]), {"app", "edge", "postgres", "redis", "rustfs", "rustfs-init", "storage-init"})
+        self.assertEqual(
+            set(compose["services"]), {"app", "edge", "postgres", "redis", "rustfs", "rustfs-init", "storage-init"}
+        )
         self.assertTrue(all("@sha256:" in item["image"] for item in compose["services"].values()))
         self.assertEqual(compose["services"]["app"]["environment"]["OPENAI_PROXY_URL"], "http://litellm:4000/v1")
         with tempfile.TemporaryDirectory() as tmp:
@@ -149,9 +167,11 @@ class RegistryTests(unittest.TestCase):
             litellm = paths.projects / "litellm"
             litellm.mkdir(parents=True)
             (litellm / ".env").write_text("LITELLM_MASTER_KEY=test-master-key\n", encoding="utf-8")
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
-                project = _materialize(service, ROOT)
+            with (
+                runtime_paths(paths),
+                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+            ):
+                project = materialize(service, ROOT)
             values = read_runtime_env(project / ".env")
             self.assertEqual(values["AUTH_SSO_PROVIDERS"], "authentik")
             self.assertEqual(values["AUTH_DISABLE_EMAIL_PASSWORD"], "1")
@@ -166,13 +186,16 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(registry.get("lobehub").route, "pending")
 
     def test_runtime_paths_are_outside_checkout(self):
-        paths = RuntimePaths()
+        from ctl.runtime import PRODUCTION_RUNTIME_ROOT
+
+        paths = RuntimePaths(PRODUCTION_RUNTIME_ROOT)
         self.assertEqual(paths.root, Path("/srv/mu3lab"))
         self.assertEqual(paths.backups, Path("/srv/mu3lab/backups"))
+        checkout = Path(__file__).resolve().parent.parent
+        self.assertNotIn(checkout, paths.root.parents)
 
     def test_backup_policy_matches_the_product_default(self):
-        self.assertEqual(Retention().restic_args(),
-                         ["--keep-daily", "7", "--keep-weekly", "4", "--keep-monthly", "12"])
+        self.assertEqual(Retention().restic_args(), ["--keep-daily", "7", "--keep-weekly", "4", "--keep-monthly", "12"])
 
     def test_core_compose_files_are_valid_and_pin_identity_images(self):
         root = Path(__file__).resolve().parents[1]
@@ -187,17 +210,14 @@ class RegistryTests(unittest.TestCase):
         registry = load()
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.required and service.stage == "core"]
-        self.assertEqual({service.id for service in core},
-                         {"ollama", "freellmapi", "litellm", "lobehub"})
+        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub"})
         for service in core:
             self.assertTrue((service.compose_path(root) / "docker-compose.yml").is_file(), service.id)
             self.assertTrue(service.images, service.id)
             self.assertTrue(all(":latest" not in image and ":main" not in image for image in service.images))
 
     def test_ingress_matches_tailnet_host_headers_on_loopback(self):
-        caddyfile = (Path(__file__).resolve().parents[1] / "core/ingress/Caddyfile").read_text(
-            encoding="utf-8"
-        )
+        caddyfile = (Path(__file__).resolve().parents[1] / "core/ingress/Caddyfile").read_text(encoding="utf-8")
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
@@ -210,8 +230,7 @@ class RegistryTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         catalog = yaml.safe_load((root / "catalog.yaml").read_text(encoding="utf-8"))
         registry = load()
-        profile_ids = {service_id for profile in catalog["profiles"]
-                       for service_id in profile["services"]}
+        profile_ids = {service_id for profile in catalog["profiles"] for service_id in profile["services"]}
         self.assertTrue(profile_ids.issubset({service.id for service in registry.services}))
 
     def test_nextcloud_is_curated_productivity_with_unique_private_ports(self):
@@ -228,16 +247,20 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(proxies), len(set(proxies)))
 
     def test_nextcloud_materialization_generates_private_runtime_secrets_and_oidc(self):
+        from ctl.lifecycle.accounts import fresh_account_storage
+        from ctl.lifecycle.materialize import materialize
         from ctl.secrets import read_runtime_env
-        from ctl.service_ops import _fresh_account_storage, _materialize
+
         root = Path(__file__).resolve().parents[1]
         service = load().get("nextcloud")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
-                project = _materialize(service, root)
-                self.assertTrue(_fresh_account_storage("nextcloud"))
+            with (
+                runtime_paths(paths),
+                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+            ):
+                project = materialize(service, root)
+                self.assertTrue(fresh_account_storage("nextcloud"))
             values = read_runtime_env(project / ".env")
             self.assertEqual(values["NEXTCLOUD_OIDC_CLIENT_ID"], "mu3lab-nextcloud")
             self.assertTrue(values["NEXTCLOUD_DB_PASSWORD"])
@@ -250,17 +273,23 @@ class RegistryTests(unittest.TestCase):
             config = paths.data / "nextcloud" / "html" / "config" / "config.php"
             config.parent.mkdir(parents=True)
             config.write_text("<?php", encoding="utf-8")
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths):
-                self.assertTrue(_fresh_account_storage("nextcloud"))
+            with runtime_paths(paths):
+                self.assertTrue(fresh_account_storage("nextcloud"))
 
     def test_multi_container_apps_keep_generic_backing_hostnames_private(self):
         root = Path(__file__).resolve().parents[1]
         generic_aliases: set[str] = set()
-        private_networks = {"adventurelog": "adventurelog_internal", "paperless-ngx": "paperless_internal",
-                            "nextcloud": "nextcloud_internal", "surfsense": "surfsense_internal",
-                            "immich": "immich_internal"}
+        private_networks = {
+            "adventurelog": "adventurelog_internal",
+            "paperless-ngx": "paperless_internal",
+            "nextcloud": "nextcloud_internal",
+            "surfsense": "surfsense_internal",
+            "immich": "immich_internal",
+        }
         for service_id, private_network in private_networks.items():
-            compose = yaml.safe_load((root / load().get(service_id).compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
+            compose = yaml.safe_load(
+                (root / load().get(service_id).compose_dir / "docker-compose.yml").read_text(encoding="utf-8")
+            )
             self.assertIn(private_network, compose["networks"], service_id)
             for _name, contract in compose["services"].items():
                 networks = contract.get("networks", [])
@@ -271,9 +300,11 @@ class RegistryTests(unittest.TestCase):
     def test_healthy_service_without_private_route_needs_setup(self):
         service = load().get("lobehub")
         root = Path(__file__).resolve().parents[1]
-        with patch("ctl.service_state._compose_state", return_value="running"), \
-             patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")), \
-             patch("ctl.service_state._tailnet_route_present", return_value=False):
+        with (
+            patch("ctl.service_state._compose_state", return_value="running"),
+            patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+            patch("ctl.service_state._tailnet_route_present", return_value=False),
+        ):
             state = service_status(service, "", root)
         self.assertEqual(state["lifecycle_state"], "needs_setup")
         self.assertEqual(state["health_state"], "healthy")
@@ -287,9 +318,11 @@ class RegistryTests(unittest.TestCase):
             project = paths.projects / "lobehub"
             project.mkdir(parents=True)
             (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-            with patch("ctl.service_state.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state._compose_state", return_value="running") as compose, \
-                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")):
+            with (
+                patch("ctl.service_state.RuntimePaths", return_value=paths),
+                patch("ctl.service_state._compose_state", return_value="running") as compose,
+                patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+            ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8457})
         self.assertEqual(compose.call_args.args[0], project / "docker-compose.yml")
         self.assertEqual(state["state"], "ready")
@@ -298,9 +331,11 @@ class RegistryTests(unittest.TestCase):
     def test_healthy_litellm_dashboard_requires_its_private_route(self):
         service = load().get("litellm")
         root = Path(__file__).resolve().parents[1]
-        with patch("ctl.service_state._compose_state", return_value="running"), \
-             patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")), \
-             patch("ctl.service_state._tailnet_route_present", return_value=False):
+        with (
+            patch("ctl.service_state._compose_state", return_value="running"),
+            patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+            patch("ctl.service_state._tailnet_route_present", return_value=False),
+        ):
             state = service_status(service, "", root)
         self.assertEqual(state["lifecycle_state"], "needs_setup")
         self.assertEqual(state["route_state"], "pending")

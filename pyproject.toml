@@ -1,0 +1,38 @@
+[project]
+name = "mu3lab"
+description = "Private homelab control plane"
+requires-python = ">=3.11"
+dynamic = ["version"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["dashboard", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",  # ruff format owns line length; long string literals are allowed
+    "SIM105",  # try/except/pass is clearer than contextlib.suppress for OSError guards
+    "RUF001",  # UI copy intentionally uses typographic characters
+    "RUF002",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["ctl.runtime.RuntimePaths", "ctl.backups.Retention", "fastapi.Depends"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ctl", "tests", "tools"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["ctl"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+# The first-run bootstrap installer is due for a rework; type it then.
+[[tool.mypy.overrides]]
+module = ["ctl.install", "ctl.preflight", "ctl.elevate", "ctl.privilege"]
+ignore_errors = true

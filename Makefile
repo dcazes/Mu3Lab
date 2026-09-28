@@ -4,7 +4,7 @@
 # WHY:   One canonical spelling per task so docs and muscle memory agree.
 # DEBUG: `make -n <target>` prints the commands without running them.
 
-.PHONY: install start test check dry-run clean nuke
+.PHONY: install start dev-setup test lint format typecheck verify check dry-run clean nuke
 
 install:
 	./install.sh
@@ -12,8 +12,31 @@ install:
 start:
 	./start.sh
 
+dev-setup:
+	.venv/bin/pip install -r requirements-dev.txt
+	cd dashboard && npm ci
+
 test:
-	.venv/bin/python -m unittest discover -s tests -v
+	.venv/bin/python -m unittest discover -s tests -t . -v
+	cd dashboard && npm test
+
+lint:
+	.venv/bin/ruff check .
+	.venv/bin/ruff format --check .
+	cd dashboard && npm run lint && npm run format:check
+
+format:
+	.venv/bin/ruff check --fix .
+	.venv/bin/ruff format .
+	cd dashboard && npm run format
+
+typecheck:
+	.venv/bin/mypy
+	cd dashboard && npm run typecheck
+
+# verify: everything CI checks, in one command.
+verify: lint typecheck test
+	cd dashboard && npm run build
 
 # check: zero-install fresh-user flow. check.sh prechecks python, proves the
 # venv (or warns on), then serves the gated check dashboard on :8799.

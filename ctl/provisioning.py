@@ -49,7 +49,7 @@ class ProvisioningStore:
         self.database = database
 
     @classmethod
-    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> "ProvisioningStore | None":
+    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> ProvisioningStore | None:
         if not paths.runtime.is_dir():
             return None
         return cls(paths.runtime / "control-plane.sqlite3")
@@ -79,35 +79,61 @@ class ProvisioningStore:
         now = _now()
         with self._connect() as conn:
             for phase_id, _label, detail in PHASES:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT OR IGNORE INTO provisioning_steps
                     (workflow_version, phase_id, desired_state, actual_state, updated_at, detail)
                     VALUES (?, ?, 'verified', 'pending', ?, ?)
-                """, (WORKFLOW_VERSION, phase_id, now, detail))
+                """,
+                    (WORKFLOW_VERSION, phase_id, now, detail),
+                )
             for version, mappings in (
-                (1, {"foundation": ("foundation", "vaultwarden", "tailscale"),
-                     "identity": ("identity", "dashboard_protection"),
-                     "configuration": ("configuration",)}),
-                (2, {phase: (phase,) for phase in (
-                    "foundation", "vaultwarden", "tailscale", "identity",
-                    "dashboard_protection", "configuration")}),
+                (
+                    1,
+                    {
+                        "foundation": ("foundation", "vaultwarden", "tailscale"),
+                        "identity": ("identity", "dashboard_protection"),
+                        "configuration": ("configuration",),
+                    },
+                ),
+                (
+                    2,
+                    {
+                        phase: (phase,)
+                        for phase in (
+                            "foundation",
+                            "vaultwarden",
+                            "tailscale",
+                            "identity",
+                            "dashboard_protection",
+                            "configuration",
+                        )
+                    },
+                ),
             ):
-                legacy = {str(row["phase_id"]): str(row["actual_state"])
-                          for row in conn.execute("""SELECT phase_id, actual_state FROM provisioning_steps
-                                                     WHERE workflow_version = ?""", (version,)).fetchall()}
+                legacy = {
+                    str(row["phase_id"]): str(row["actual_state"])
+                    for row in conn.execute(
+                        """SELECT phase_id, actual_state FROM provisioning_steps
+                                                     WHERE workflow_version = ?""",
+                        (version,),
+                    ).fetchall()
+                }
                 for old, targets in mappings.items():
                     if legacy.get(old) not in {"verified", "skipped"}:
                         continue
                     for target in targets:
-                        conn.execute("""UPDATE provisioning_steps SET actual_state = 'verified',
+                        conn.execute(
+                            """UPDATE provisioning_steps SET actual_state = 'verified',
                                         detail = ?, updated_at = ?
                                         WHERE workflow_version = ? AND phase_id = ?
                                           AND actual_state = 'pending'""",
-                                     (f"Verified by the completed version {version} workflow.", now,
-                                      WORKFLOW_VERSION, target))
+                            (f"Verified by the completed version {version} workflow.", now, WORKFLOW_VERSION, target),
+                        )
 
-    def update(self, phase_id: str, state: str, *, detail: str = "",
-               error: str = "", inputs: dict[str, Any] | None = None) -> None:
+    def update(
+        self, phase_id: str, state: str, *, detail: str = "", error: str = "", inputs: dict[str, Any] | None = None
+    ) -> None:
         if phase_id not in {item[0] for item in PHASES}:
             raise ValueError("unknown provisioning phase")
         if state not in VALID_STATES:
@@ -116,36 +142,52 @@ class ProvisioningStore:
         now = _now()
         payload = json.dumps(redact_data(inputs or {}), sort_keys=True)
         with self._connect() as conn:
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT actual_state FROM provisioning_steps
                 WHERE workflow_version = ? AND phase_id = ?
-            """, (WORKFLOW_VERSION, phase_id)).fetchone()
+            """,
+                (WORKFLOW_VERSION, phase_id),
+            ).fetchone()
             current = str(row["actual_state"]) if row else "pending"
             if state != current and state not in TRANSITIONS[current]:
                 raise ValueError(f"invalid provisioning transition: {current} -> {state}")
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE provisioning_steps
                 SET actual_state = ?, attempts = attempts + ?, detail = ?, error = ?,
                     inputs_json = ?, updated_at = ?
                 WHERE workflow_version = ? AND phase_id = ?
-            """, (state, 1 if state == "running" else 0, redact(detail), redact(error),
-                  payload, now, WORKFLOW_VERSION, phase_id))
+            """,
+                (
+                    state,
+                    1 if state == "running" else 0,
+                    redact(detail),
+                    redact(error),
+                    payload,
+                    now,
+                    WORKFLOW_VERSION,
+                    phase_id,
+                ),
+            )
 
     def summary(self) -> dict[str, Any]:
         self.initialize()
         labels = {phase_id: (label, default_detail) for phase_id, label, default_detail in PHASES}
         with self._connect() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT phase_id, desired_state, actual_state, attempts, detail, error,
                        updated_at FROM provisioning_steps
                 WHERE workflow_version = ? ORDER BY rowid
-            """, (WORKFLOW_VERSION,)).fetchall()
+            """,
+                (WORKFLOW_VERSION,),
+            ).fetchall()
         phases = []
         for row in rows:
             value = dict(row)
             label, default_detail = labels[value["phase_id"]]
-            phases.append({**value, "label": label,
-                           "detail": value["detail"] or default_detail})
+            phases.append({**value, "label": label, "detail": value["detail"] or default_detail})
         completed = sum(item["actual_state"] in {"verified", "skipped"} for item in phases)
         verified = completed == len(phases)
         blocked = next((item for item in phases if item["actual_state"] == "failed"), None)
@@ -156,18 +198,25 @@ class ProvisioningStore:
         elif incomplete["phase_id"] in {"foundation", "vaultwarden", "tailscale", "identity", "dashboard_protection"}:
             next_action = {"kind": "bootstrap", "label": "Resume ./install"}
         elif incomplete["phase_id"] == "core":
-            next_action = {"kind": "job", "label": "Install missing core services",
-                           "endpoint": "/api/setup/core"}
+            next_action = {
+                "kind": "job",
+                "label": "Install missing core services",
+                "endpoint": "/api/v1/jobs/core-install",
+            }
         elif incomplete["phase_id"] == "configuration":
-            next_action = {"kind": "link", "label": "Add or repair a provider",
-                           "href": "/connections/providers"}
+            next_action = {"kind": "link", "label": "Add or repair a provider", "href": "/settings/ai"}
         else:
-            next_action = {"kind": "job", "label": "Verify platform",
-                           "endpoint": "/api/v1/jobs/core-verify"}
-        return {"ok": True, "workflow_version": WORKFLOW_VERSION, "complete": verified,
-                "blocked": blocked, "waiting": waiting, "phases": phases,
-                "progress": {"completed": completed, "total": len(phases)},
-                "next_action": next_action}
+            next_action = {"kind": "job", "label": "Verify platform", "endpoint": "/api/v1/jobs/core-verify"}
+        return {
+            "ok": True,
+            "workflow_version": WORKFLOW_VERSION,
+            "complete": verified,
+            "blocked": blocked,
+            "waiting": waiting,
+            "phases": phases,
+            "progress": {"completed": completed, "total": len(phases)},
+            "next_action": next_action,
+        }
 
     def reconcile_runtime(self, paths: RuntimePaths = RuntimePaths()) -> None:
         """Advance durable milestones from local authoritative evidence."""
@@ -175,16 +224,23 @@ class ProvisioningStore:
         current = {item["phase_id"]: item["actual_state"] for item in self.summary()["phases"]}
         try:
             from ctl.control_state import ControlState
+
             control = ControlState.runtime(paths)
             providers = control.providers() if control else []
             if any(item.get("enabled") and item.get("state") == "verified" for item in providers):
                 if current.get("configuration") not in {"verified", "skipped"}:
-                    self.update("configuration", "verified",
-                                detail="An enabled inference provider passed streamed routing verification.")
+                    self.update(
+                        "configuration",
+                        "verified",
+                        detail="An enabled inference provider passed streamed routing verification.",
+                    )
             elif current.get("configuration") in {"pending", "running", "waiting_for_user"}:
                 degraded = next((item for item in providers if item.get("state") == "degraded"), None)
-                detail = ("A saved provider needs attention before chat can be verified." if degraded
-                          else "Add and verify an inference provider to finish chat setup.")
+                detail = (
+                    "A saved provider needs attention before chat can be verified."
+                    if degraded
+                    else "Add and verify an inference provider to finish chat setup."
+                )
                 self.update("configuration", "waiting_for_user", detail=detail)
         except (OSError, sqlite3.Error, ValueError):
             pass

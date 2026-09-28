@@ -25,9 +25,14 @@ from ctl import install
 
 def _ctx(log=None, inputs=None):
     lines: list[str] = []
-    return {"root": Path("/nonexistent"), "log_fn": lambda step: lines.append,
-            "inputs": inputs or {}, "wait_input": lambda step: {},
-            "stopped": lambda: False, "lines": lines}
+    return {
+        "root": Path("/nonexistent"),
+        "log_fn": lambda step: lines.append,
+        "inputs": inputs or {},
+        "wait_input": lambda step: {},
+        "stopped": lambda: False,
+        "lines": lines,
+    }
 
 
 def _ok(*args, **kwargs):
@@ -59,8 +64,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(install.fix_for_state("docker", "nope"), "unknown")
 
     def test_ready_always_skips(self):
-        for step in ("host_base", "node", "venv", "docker", "tailscale_pkg",
-                     "caddy"):
+        for step in ("host_base", "node", "venv", "docker", "tailscale_pkg", "caddy"):
             self.assertEqual(install.fix_for_state(step, "ready"), "skip")
 
     def test_steps_have_check_and_fix(self):
@@ -73,8 +77,7 @@ class DispatchTests(unittest.TestCase):
 
     def test_job_matches_steps(self):
         job = install.new_job()
-        self.assertEqual([s["id"] for s in job["steps"]],
-                         [m["id"] for m in install.STEPS])
+        self.assertEqual([s["id"] for s in job["steps"]], [m["id"] for m in install.STEPS])
         for step in job["steps"]:
             self.assertEqual(step["status"], "pending")
 
@@ -92,18 +95,21 @@ class DispatchTests(unittest.TestCase):
 
     def test_tailscale_operator_check_skips_when_persisted(self):
         output = '{"OperatorUser":"dak"}'
-        with patch("ctl.install.getpass.getuser", return_value="dak"), \
-             patch("ctl.install.actions.privilege._exec", return_value=(0, output)):
+        with (
+            patch("ctl.install.getpass.getuser", return_value="dak"),
+            patch("ctl.install.actions.privilege._exec", return_value=(0, output)),
+        ):
             result = install._tailscale_operator_check(_ctx())
         self.assertEqual(result["state"], "ready")
 
     def test_tailscale_operator_fix_sets_user_once(self):
-        with patch("ctl.install.getpass.getuser", return_value="dak"), \
-             patch("ctl.install.privilege.run_privileged", return_value={"ok": True}) as run:
+        with (
+            patch("ctl.install.getpass.getuser", return_value="dak"),
+            patch("ctl.install.privilege.run_privileged", return_value={"ok": True}) as run,
+        ):
             result = install.fix_tailscale_operator({}, _ctx())
         self.assertTrue(result["ok"])
-        self.assertEqual(run.call_args.args[0],
-                         ["tailscale", "set", "--operator=dak"])
+        self.assertEqual(run.call_args.args[0], ["tailscale", "set", "--operator=dak"])
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
     def test_service_check_names_a_failed_worker_without_blaming_dashboard(self):
@@ -113,8 +119,10 @@ class DispatchTests(unittest.TestCase):
             unit_dir.mkdir(parents=True)
             for unit in ("mu3lab-ctl.service", "mu3lab-worker.service"):
                 (unit_dir / unit).touch()
-            with patch("ctl.install.Path.home", return_value=home), \
-                 patch("ctl.install._user_service_active", side_effect=(True, False)):
+            with (
+                patch("ctl.install.Path.home", return_value=home),
+                patch("ctl.install._user_service_active", side_effect=(True, False)),
+            ):
                 check = install._service_check(Path("/unused"))
         self.assertEqual(check["state"], "inactive")
         self.assertIn("Dashboard is running", check["detail"])
@@ -123,43 +131,43 @@ class DispatchTests(unittest.TestCase):
 
 class VaultwardenDomainTests(unittest.TestCase):
     def test_local_compose_omits_domain(self):
-        compose = (Path(__file__).resolve().parents[1] / "core" /
-                   "vaultwarden" / "docker-compose.yml").read_text(encoding="utf-8")
+        compose = (Path(__file__).resolve().parents[1] / "core" / "vaultwarden" / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("DOMAIN:", compose)
 
     def test_tailnet_domain_requires_magicdns_and_https(self):
         self.assertEqual(
-            install.vaultwarden_tailnet_domain("mu3lab-1.example.ts.net."),
-            "https://mu3lab-1.example.ts.net:8443")
+            install.vaultwarden_tailnet_domain("mu3lab-1.example.ts.net."), "https://mu3lab-1.example.ts.net:8443"
+        )
         self.assertEqual(install.vaultwarden_tailnet_domain("mu3lab.local"), "")
         self.assertEqual(install.vaultwarden_tailnet_domain("https://bad.ts.net"), "")
 
     def test_private_route_applies_tailnet_override(self):
         ctx = _ctx()
-        with patch("ctl.install._tailscale_dns_name_for_install",
-                   return_value="mu3lab-1.example.ts.net"), \
-             patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up, \
-             patch("ctl.install.privilege.run_privileged",
-                   return_value={"ok": True}):
+        with (
+            patch("ctl.install._tailscale_dns_name_for_install", return_value="mu3lab-1.example.ts.net"),
+            patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up,
+            patch("ctl.install.privilege.run_privileged", return_value={"ok": True}),
+        ):
             result = install.fix_vaultwarden_serve({}, ctx)
         self.assertTrue(result["ok"])
-        self.assertEqual(up.call_args.kwargs["env"]["VAULTWARDEN_DOMAIN"],
-                         "https://mu3lab-1.example.ts.net:8443")
-        self.assertEqual(up.call_args.kwargs["extra_files"], [
-            Path("/nonexistent/core/vaultwarden/docker-compose.tailnet.yml")])
+        self.assertEqual(up.call_args.kwargs["env"]["VAULTWARDEN_DOMAIN"], "https://mu3lab-1.example.ts.net:8443")
+        self.assertEqual(
+            up.call_args.kwargs["extra_files"], [Path("/nonexistent/core/vaultwarden/docker-compose.tailnet.yml")]
+        )
 
 
 class DockerFixTests(unittest.TestCase):
     def _check(self, state):
-        return {"name": "docker", "status": "missing", "detail": state,
-                "action": "", "state": state, "blocking": False}
+        return {"name": "docker", "status": "missing", "detail": state, "action": "", "state": state, "blocking": False}
 
     def test_down_starts_never_reinstalls(self):
-        with patch("ctl.install.actions.systemctl_enable_now",
-                   return_value=_ok()) as start, \
-             patch("ctl.install.actions.apt_install") as apt, \
-             patch("ctl.install.actions.usermod_add_group",
-                   return_value=_ok()):
+        with (
+            patch("ctl.install.actions.systemctl_enable_now", return_value=_ok()) as start,
+            patch("ctl.install.actions.apt_install") as apt,
+            patch("ctl.install.actions.usermod_add_group", return_value=_ok()),
+        ):
             result = install.fix_docker(self._check("daemon_down"), _ctx())
         self.assertTrue(result.get("ok"))
         start.assert_called_once()
@@ -170,50 +178,56 @@ class DockerFixTests(unittest.TestCase):
         # missing ones get created, and liveness is someone else's job.
         # Live group is stubbed (never the test box's real groups).
         created: list[str] = []
+
         def fake_net(name, log, internal=False):
             created.append(name)
             return _ok()
+
         import types as _types
+
         fake_grp = _types.SimpleNamespace(gr_name="docker")
-        with patch("ctl.install.actions.docker_network_create",
-                   side_effect=fake_net), \
-             patch("ctl.install.actions.privilege") as priv, \
-             patch("ctl.install.preflight") as _pre, \
-             patch("os.getgroups", return_value=[999]), \
-             patch("grp.getgrgid", return_value=fake_grp):
+        with (
+            patch("ctl.install.actions.docker_network_create", side_effect=fake_net),
+            patch("ctl.install.actions.privilege") as priv,
+            patch("ctl.install.preflight") as _pre,
+            patch("os.getgroups", return_value=[999]),
+            patch("grp.getgrgid", return_value=fake_grp),
+        ):
             _pre.MU3LAB_NETWORKS = ["mu3lab_frontend", "mu3lab_backend"]
             # frontend present, backend missing: only backend gets created.
-            priv._exec.side_effect = lambda argv, **kw: (
-                (0, "") if argv[-1] == "mu3lab_frontend" else (1, ""))
-            result = install.fix_networks_router(
-                self._check("missing"), _ctx())
+            priv._exec.side_effect = lambda argv, **kw: (0, "") if argv[-1] == "mu3lab_frontend" else (1, "")
+            result = install.fix_networks_router(self._check("missing"), _ctx())
         self.assertTrue(result.get("ok"))
         self.assertEqual(created, ["mu3lab_backend"])
 
     def test_group_ensures_membership_defers_liveness(self):
         # fix_docker ensures membership but NEVER judges liveness (that's the
         # checkpoint's job): no waiting here, just ok.
-        with patch("ctl.install.actions.usermod_add_group",
-                   return_value=_ok()) as mod:
+        with patch("ctl.install.actions.usermod_add_group", return_value=_ok()) as mod:
             result = install.fix_docker(self._check("no_group"), _ctx())
         self.assertTrue(result.get("ok"))
         self.assertIsNone(result.get("waiting"))
         mod.assert_called_once()
 
-    def test_probe_distinguishes_denied_from_down(self):        # REGRESSION: the install-side probe once discarded docker-info
+    def test_probe_distinguishes_denied_from_down(
+        self,
+    ):  # REGRESSION: the install-side probe once discarded docker-info
         # stderr, misreading "permission denied" as a dead daemon (which then
         # failed verify after a pointless start). It must mirror run_all().
         def fake_exec(argv, timeout=300):
-            cmd = " ".join(argv)
             if argv[:2] == ["docker", "info"]:
                 return 1, "permission denied while trying to connect"
             if argv[:2] == ["systemctl", "is-active"]:
                 return 0, "active"
             return 1, ""
+
         import shutil as _sh
-        with patch("ctl.install.actions.privilege") as priv, \
-             patch.object(_sh, "which", return_value="/usr/bin/docker"), \
-             patch("ctl.preflight._db_has_group", return_value=False):
+
+        with (
+            patch("ctl.install.actions.privilege") as priv,
+            patch.object(_sh, "which", return_value="/usr/bin/docker"),
+            patch("ctl.preflight._db_has_group", return_value=False),
+        ):
             priv._exec.side_effect = fake_exec
             check = install._docker_check(_ctx())
         self.assertEqual(check["state"], "no_access")
@@ -230,9 +244,13 @@ class CaddyFixTests(unittest.TestCase):
     the fix must poll the port (the live failure), not declare victory."""
 
     def _ctx(self, root):
-        return {"root": root, "log_fn": lambda step: lambda line: None,
-                "inputs": {}, "wait_input": lambda step: {},
-                "stopped": lambda: False}
+        return {
+            "root": root,
+            "log_fn": lambda step: lambda line: None,
+            "inputs": {},
+            "wait_input": lambda step: {},
+            "stopped": lambda: False,
+        }
 
     def _projdir(self, root):
         projdir = root / "core" / "ingress"
@@ -244,6 +262,7 @@ class CaddyFixTests(unittest.TestCase):
     def test_waits_for_port(self):
         import tempfile
         import urllib.request as _url
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._projdir(root)
@@ -264,13 +283,14 @@ class CaddyFixTests(unittest.TestCase):
                     requests.append(request)
                     return FakeResp()
 
-            with patch("ctl.install.actions.compose_up",
-                       return_value=(0, "up")), \
-                 patch("ctl.install._tcp_open",
-                       side_effect=lambda port: calls.__setitem__(
-                           "n", calls["n"] + 1) or calls["n"] >= 2), \
-                 patch.object(_url, "build_opener",
-                              return_value=FakeOpener()):
+            with (
+                patch("ctl.install.actions.compose_up", return_value=(0, "up")),
+                patch(
+                    "ctl.install._tcp_open",
+                    side_effect=lambda port: calls.__setitem__("n", calls["n"] + 1) or calls["n"] >= 2,
+                ),
+                patch.object(_url, "build_opener", return_value=FakeOpener()),
+            ):
                 result = install.fix_caddy({"state": "down"}, self._ctx(root))
             self.assertTrue(result.get("ok"))
             self.assertGreaterEqual(calls["n"], 2)
@@ -278,13 +298,15 @@ class CaddyFixTests(unittest.TestCase):
 
     def test_times_out_honestly(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._projdir(root)
-            with patch("ctl.install.actions.compose_up",
-                       return_value=(0, "up")), \
-                 patch("ctl.install._tcp_open", return_value=False), \
-                 patch("time.sleep", return_value=None):
+            with (
+                patch("ctl.install.actions.compose_up", return_value=(0, "up")),
+                patch("ctl.install._tcp_open", return_value=False),
+                patch("time.sleep", return_value=None),
+            ):
                 result = install.fix_caddy({"state": "down"}, self._ctx(root))
             self.assertFalse(result.get("ok"))
             self.assertIn("19460", result.get("error", ""))
@@ -297,26 +319,33 @@ class AuthentikReadinessTests(unittest.TestCase):
         events: list[dict] = []
         ctx = _ctx()
         ctx["progress"] = lambda step, update: events.append(update)
-        checks = iter([
-            {"status": "missing", "state": "down", "detail": "Connection reset by peer"},
-            {"status": "missing", "state": "down", "detail": "Connection refused"},
-            {"status": "ok", "state": "ready", "detail": "healthy"},
-        ])
-        containers = [[
-            {"name": "authentik-server-1", "status": "Up 1 minute (health: starting)"},
-            {"name": "authentik-worker-1", "status": "Up 1 minute (healthy)"},
-        ]]
-        with patch("ctl.install._authentik_check", side_effect=lambda ctx: next(checks)), \
-             patch("ctl.install._authentik_containers", side_effect=containers * 3), \
-             patch("time.sleep", return_value=None):
+        checks = iter(
+            [
+                {"status": "missing", "state": "down", "detail": "Connection reset by peer"},
+                {"status": "missing", "state": "down", "detail": "Connection refused"},
+                {"status": "ok", "state": "ready", "detail": "healthy"},
+            ]
+        )
+        containers = [
+            [
+                {"name": "authentik-server-1", "status": "Up 1 minute (health: starting)"},
+                {"name": "authentik-worker-1", "status": "Up 1 minute (healthy)"},
+            ]
+        ]
+        with (
+            patch("ctl.install._authentik_check", side_effect=lambda ctx: next(checks)),
+            patch("ctl.install._authentik_containers", side_effect=containers * 3),
+            patch("time.sleep", return_value=None),
+        ):
             result = install._authentik_readiness(ctx, {"id": "authentik"})
         self.assertTrue(result["ok"])
         self.assertTrue(any(e["phase"] == "ready" for e in events))
         self.assertTrue(any("Connection reset" in e["activity"] for e in events))
 
     def test_exited_container_fails_with_actionable_reason(self):
-        with patch("ctl.install._authentik_containers", return_value=[
-                {"name": "authentik-server-1", "status": "Exited (1)"}]):
+        with patch(
+            "ctl.install._authentik_containers", return_value=[{"name": "authentik-server-1", "status": "Exited (1)"}]
+        ):
             result = install._authentik_readiness(_ctx(), {"id": "authentik"})
         self.assertFalse(result["ok"])
         self.assertIn("exited", result["error"].lower())
@@ -325,32 +354,28 @@ class AuthentikReadinessTests(unittest.TestCase):
         ctx = _ctx()
         ctx["progress"] = lambda step, update: None
         env_file = Path("/tmp/authentik.env")
-        with patch("ctl.install._tailscale_dns_name_for_install",
-                   return_value="mu3lab.example.ts.net"), \
-             patch("ctl.authentik_blueprints.write_dashboard_blueprint",
-                   return_value=Path("/tmp/authentik-dashboard.yaml")), \
-             patch("ctl.install._authentik_containers", return_value=[]), \
-             patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up, \
-             patch("ctl.install.time.sleep", return_value=None):
-            # Patch imported dependencies directly: fix_authentik imports
-            # secrets and the blueprint writer locally to avoid bootstrap-time
-            # dependency cycles, and it requires a valid MagicDNS name before
-            # Compose can be started.
-            with patch("ctl.secrets.ensure_authentik_env", return_value=(env_file, [])), \
-                 patch("ctl.secrets.read_runtime_env", return_value={}):
-                result = install.fix_authentik({"state": "down"}, ctx)
+        with (
+            patch("ctl.install._tailscale_dns_name_for_install", return_value="mu3lab.example.ts.net"),
+            patch(
+                "ctl.authentik_blueprints.write_dashboard_blueprint", return_value=Path("/tmp/authentik-dashboard.yaml")
+            ),
+            patch("ctl.install._authentik_containers", return_value=[]),
+            patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up,
+            patch("ctl.install.time.sleep", return_value=None),
+            # fix_authentik imports secrets and the blueprint writer locally
+            # to avoid bootstrap-time dependency cycles.
+            patch("ctl.secrets.ensure_authentik_env", return_value=(env_file, [])),
+            patch("ctl.secrets.read_runtime_env", return_value={}),
+        ):
+            result = install.fix_authentik({"state": "down"}, ctx)
         self.assertTrue(result["ok"])
-        self.assertEqual(up.call_args.kwargs["wait_timeout"],
-                         install.AUTHENTIK_READINESS_TIMEOUT)
+        self.assertEqual(up.call_args.kwargs["wait_timeout"], install.AUTHENTIK_READINESS_TIMEOUT)
 
     def test_dashboard_probe_rejects_localhost_auth_redirect(self):
         host = "mu3lab.example.ts.net"
-        self.assertTrue(install._authentik_redirect_is_expected(
-            f"https://{host}/application/o/authorize/", host))
-        self.assertFalse(install._authentik_redirect_is_expected(
-            "http://localhost/application/o/authorize/", host))
-        self.assertFalse(install._authentik_redirect_is_expected(
-            f"https://{host}:8444/application/o/authorize/", host))
+        self.assertTrue(install._authentik_redirect_is_expected(f"https://{host}/application/o/authorize/", host))
+        self.assertFalse(install._authentik_redirect_is_expected("http://localhost/application/o/authorize/", host))
+        self.assertFalse(install._authentik_redirect_is_expected(f"https://{host}:8444/application/o/authorize/", host))
 
 
 class VaultwardenReadinessTests(unittest.TestCase):
@@ -364,16 +389,19 @@ class VaultwardenReadinessTests(unittest.TestCase):
         events: list[dict] = []
         ctx = _ctx()
         ctx["progress"] = lambda step, update: events.append(update)
-        checks = iter([
-            {"status": "missing", "state": "down", "detail": "Connection reset by peer"},
-            {"status": "ok", "state": "ready", "detail": "healthy"},
-        ])
-        with patch("ctl.install._vaultwarden_check",
-                   side_effect=lambda ctx: next(checks)), \
-             patch("ctl.install.time.sleep", return_value=None):
+        checks = iter(
+            [
+                {"status": "missing", "state": "down", "detail": "Connection reset by peer"},
+                {"status": "ok", "state": "ready", "detail": "healthy"},
+            ]
+        )
+        with (
+            patch("ctl.install._vaultwarden_check", side_effect=lambda ctx: next(checks)),
+            patch("ctl.install.time.sleep", return_value=None),
+        ):
             result = install._compose_readiness(
-                ctx, {"id": "vaultwarden"},
-                lambda: install._vaultwarden_check(ctx), "Vaultwarden", 60)
+                ctx, {"id": "vaultwarden"}, lambda: install._vaultwarden_check(ctx), "Vaultwarden", 60
+            )
         self.assertTrue(result["ok"])
         self.assertTrue(any("Connection reset" in e["activity"] for e in events))
         self.assertTrue(any(e["phase"] == "ready" for e in events))
@@ -381,6 +409,7 @@ class VaultwardenReadinessTests(unittest.TestCase):
     def test_account_check_requires_a_real_local_user(self):
         import sqlite3
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp) / "data" / "vaultwarden"
             data.mkdir(parents=True)
@@ -401,12 +430,17 @@ class VaultwardenReadinessTests(unittest.TestCase):
 
 class WorkspaceStepTests(unittest.TestCase):
     def _ctx(self, root):
-        return {"root": root, "log_fn": lambda step: lambda line: None,
-                "inputs": {}, "wait_input": lambda step: {},
-                "stopped": lambda: False}
+        return {
+            "root": root,
+            "log_fn": lambda step: lambda line: None,
+            "inputs": {},
+            "wait_input": lambda step: {},
+            "stopped": lambda: False,
+        }
 
     def test_venv_ready_skips(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".venv" / "bin").mkdir(parents=True)
@@ -418,10 +452,12 @@ class WorkspaceStepTests(unittest.TestCase):
     def test_venv_missing_creates(self):
         import tempfile
         from unittest.mock import patch as _patch
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             check = install._venv_check(root)
             self.assertEqual(check["state"], "no_venv")
+
             def fake_run(argv, **kwargs):
                 # Simulate a real venv creation (mock must produce the
                 # artifact the fix verifies, like the real command would).
@@ -432,6 +468,7 @@ class WorkspaceStepTests(unittest.TestCase):
                 result.stdout = ""
                 result.stderr = ""
                 return result
+
             with _patch("subprocess.run", side_effect=fake_run) as run:
                 result = install.fix_venv(check, self._ctx(root))
             self.assertTrue(result.get("ok"))
@@ -440,6 +477,7 @@ class WorkspaceStepTests(unittest.TestCase):
     def test_pip_missing_installs(self):
         import tempfile
         from unittest.mock import patch as _patch
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".venv" / "bin").mkdir(parents=True)
@@ -460,6 +498,7 @@ class WorkspaceStepTests(unittest.TestCase):
         import tempfile
         import time
         from unittest.mock import patch as _patch
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dash = root / "dashboard"
@@ -470,6 +509,7 @@ class WorkspaceStepTests(unittest.TestCase):
             # Make src NEWER than dist → stale.
             now = time.time()
             import os as _os
+
             _os.utime(dash / "dist" / "index.html", (now - 100, now - 100))
             check = install._build_check(root)
             self.assertEqual(check["state"], "stale")
@@ -484,11 +524,13 @@ class WorkspaceStepTests(unittest.TestCase):
 
     def test_src_missing_fails_plainly(self):
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmp:
             check = install._src_check(Path(tmp))
             self.assertEqual(check["status"], "fail")
             result = install.fix_dashboard_src(check, self._ctx(Path(tmp)))
             self.assertFalse(result.get("ok"))
+
     def test_step_order(self):
         # Identity-first bootstrap: Vaultwarden is initialized locally before
         # the tailnet and Authentik are introduced.
@@ -517,49 +559,51 @@ class WorkspaceStepTests(unittest.TestCase):
     def test_join_prompt_guides(self):
         prompt = install._join_prompt("https://login.example/abc")
         self.assertEqual(prompt["kind"], "tailscale_login")
-        for needle in ("Tailscale web login", "https://login.example/abc",
-                       "open_tailscale_login.sh"):
-            self.assertIn(needle, prompt["body"] + prompt.get("login_url", "")
-                          + prompt.get("terminal_command", ""))
+        for needle in ("Tailscale web login", "https://login.example/abc", "open_tailscale_login.sh"):
+            self.assertIn(needle, prompt["body"] + prompt.get("login_url", "") + prompt.get("terminal_command", ""))
         self.assertNotIn("keys_url", prompt)
         self.assertEqual(prompt["login_url"], "https://login.example/abc")
 
     def test_join_prompt_keeps_copyable_fallback_command(self):
         prompt = install._join_prompt("")
         self.assertFalse(prompt["login_url"])
-        self.assertEqual(prompt["terminal_command"],
-                         "./tools/open_tailscale_login.sh")
+        self.assertEqual(prompt["terminal_command"], "./tools/open_tailscale_login.sh")
 
     def test_tailscale_join_uses_elevation_worker_and_opens_url(self):
-        with patch("ctl.install.privilege.run_privileged", return_value={
-                "ok": True,
-                "output": "To authenticate, visit: https://login.tailscale.com/a/abc123"}) as run, \
-             patch("ctl.install.webbrowser.open", return_value=True) as opened:
-            result = install.fix_tailscale_join(
-                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        with (
+            patch(
+                "ctl.install.privilege.run_privileged",
+                return_value={"ok": True, "output": "To authenticate, visit: https://login.tailscale.com/a/abc123"},
+            ) as run,
+            patch("ctl.install.webbrowser.open", return_value=True) as opened,
+        ):
+            result = install.fix_tailscale_join({"state": "unjoined"}, self._ctx(Path("/nonexistent")))
         run.assert_called_once_with(
-            ["tailscale", "up", "--hostname=mu3lab", "--timeout=120s"],
-            unittest.mock.ANY, timeout=130)
+            ["tailscale", "up", "--hostname=mu3lab", "--timeout=120s"], unittest.mock.ANY, timeout=130
+        )
         opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
         self.assertTrue(result["waiting"])
-        self.assertEqual(result["prompt"]["login_url"],
-                         "https://login.tailscale.com/a/abc123")
+        self.assertEqual(result["prompt"]["login_url"], "https://login.tailscale.com/a/abc123")
 
     def test_tailscale_join_reads_pending_url_from_local_status(self):
-        status = type("Proc", (), {
-            "returncode": 0,
-            "stdout": '{"AuthURL":"https://login.tailscale.com/a/from-status"}',
-        })()
-        with patch("ctl.install.privilege.run_privileged", return_value={
-                "ok": False, "output": "timeout waiting"}), \
-             patch("ctl.install.subprocess.run", return_value=status) as status_run, \
-             patch("ctl.install.webbrowser.open", return_value=True):
-            result = install.fix_tailscale_join(
-                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
-        status_run.assert_called_once_with(["tailscale", "status", "--json"],
-                                           capture_output=True, text=True, timeout=10)
-        self.assertEqual(result["prompt"]["login_url"],
-                         "https://login.tailscale.com/a/from-status")
+        status = type(
+            "Proc",
+            (),
+            {
+                "returncode": 0,
+                "stdout": '{"AuthURL":"https://login.tailscale.com/a/from-status"}',
+            },
+        )()
+        with (
+            patch("ctl.install.privilege.run_privileged", return_value={"ok": False, "output": "timeout waiting"}),
+            patch("ctl.install.subprocess.run", return_value=status) as status_run,
+            patch("ctl.install.webbrowser.open", return_value=True),
+        ):
+            result = install.fix_tailscale_join({"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        status_run.assert_called_once_with(
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=10
+        )
+        self.assertEqual(result["prompt"]["login_url"], "https://login.tailscale.com/a/from-status")
 
     def test_tailscale_join_polls_status_before_cli_timeout(self):
         # A real tailscale up can stay alive while the browser approval is
@@ -569,67 +613,79 @@ class WorkspaceStepTests(unittest.TestCase):
             def __init__(self, target, **_kwargs):
                 self._target = target
                 self._alive = True
+
             def start(self):
                 self._alive = True
+
             def join(self, timeout=None):
                 return None
+
             def is_alive(self):
                 return self._alive
 
-        with patch("ctl.install.threading.Thread", PendingThread), \
-             patch("ctl.install._tailscale_auth_url",
-                   return_value="https://login.tailscale.com/a/live"), \
-             patch("ctl.install.webbrowser.open", return_value=True) as opened:
-            result = install.fix_tailscale_join(
-                {"state": "unjoined"}, self._ctx(Path("/nonexistent")))
+        with (
+            patch("ctl.install.threading.Thread", PendingThread),
+            patch("ctl.install._tailscale_auth_url", return_value="https://login.tailscale.com/a/live"),
+            patch("ctl.install.webbrowser.open", return_value=True) as opened,
+        ):
+            result = install.fix_tailscale_join({"state": "unjoined"}, self._ctx(Path("/nonexistent")))
         self.assertTrue(result["waiting"])
-        self.assertEqual(result["prompt"]["login_url"],
-                         "https://login.tailscale.com/a/live")
+        self.assertEqual(result["prompt"]["login_url"], "https://login.tailscale.com/a/live")
         opened.assert_called_once_with("https://login.tailscale.com/a/live", new=2)
 
     def test_tailscale_key_url_shape(self):
         # Slash-separated or it 404s (verified live against pkgs.tailscale.com
         # after the dotted form failed a real install). Never trust memory.
         self.assertEqual(
-            install.tailscale_key_url("ubuntu", "noble"),
-            "https://pkgs.tailscale.com/stable/ubuntu/noble.gpg")
+            install.tailscale_key_url("ubuntu", "noble"), "https://pkgs.tailscale.com/stable/ubuntu/noble.gpg"
+        )
         self.assertEqual(
-            install.tailscale_key_url("linuxmint", "noble"),
-            "https://pkgs.tailscale.com/stable/ubuntu/noble.gpg")
+            install.tailscale_key_url("linuxmint", "noble"), "https://pkgs.tailscale.com/stable/ubuntu/noble.gpg"
+        )
         self.assertEqual(
-            install.tailscale_key_url("debian", "bookworm"),
-            "https://pkgs.tailscale.com/stable/debian/bookworm.gpg")
+            install.tailscale_key_url("debian", "bookworm"), "https://pkgs.tailscale.com/stable/debian/bookworm.gpg"
+        )
 
 
 class DockerSessionTests(unittest.TestCase):
     """A stale bootstrap process continues via the Docker group safely."""
 
     def _ctx(self):
-        return {"root": Path("/nonexistent"),
-                "log_fn": lambda step: lambda line: None,
-                "inputs": {}, "wait_input": lambda step: {},
-                "stopped": lambda: False}
+        return {
+            "root": Path("/nonexistent"),
+            "log_fn": lambda step: lambda line: None,
+            "inputs": {},
+            "wait_input": lambda step: {},
+            "stopped": lambda: False,
+        }
 
     def test_stale_bootstrap_has_no_wait_step(self):
         ids = [m["id"] for m in install.STEPS]
         self.assertNotIn("docker_session", ids)
-        self.assertEqual(install.fix_for_state("docker", "stale_login"),
-                         "docker_group")
+        self.assertEqual(install.fix_for_state("docker", "stale_login"), "docker_group")
 
     def test_networks_denied_proceeds(self):
         # denied probes no longer fail: fix_networks runs through docker_cmd
         # (sg when needed). Only a genuinely dead daemon fails.
         # (sg when needed). Only a genuinely dead daemon fails.
-        check = {"name": "docker_networks", "status": "missing",
-                 "detail": "x", "action": "y", "state": "denied",
-                 "blocking": False}
+        check = {
+            "name": "docker_networks",
+            "status": "missing",
+            "detail": "x",
+            "action": "y",
+            "state": "denied",
+            "blocking": False,
+        }
         created: list[str] = []
+
         def fake_cmd(argv, log, timeout=300):
             created.append(" ".join(argv))
             return 0, "created"
-        with unittest.mock.patch("ctl.install.actions.docker_cmd",
-                                 side_effect=fake_cmd), \
-             unittest.mock.patch("ctl.install.preflight") as _pre:
+
+        with (
+            unittest.mock.patch("ctl.install.actions.docker_cmd", side_effect=fake_cmd),
+            unittest.mock.patch("ctl.install.preflight") as _pre,
+        ):
             _pre.MU3LAB_NETWORKS = ["mu3lab_backend"]
             result = install.fix_networks_router(check, self._ctx())
         self.assertTrue(result.get("ok"))
@@ -646,12 +702,12 @@ class DockerSessionTests(unittest.TestCase):
             if argv[:2] == ["docker", "info"]:
                 return 0, "ok"
             return 0, ""
-        with unittest.mock.patch("ctl.install.actions.docker_cmd",
-                                 side_effect=fake_cmd):
+
+        with unittest.mock.patch("ctl.install.actions.docker_cmd", side_effect=fake_cmd):
             check = install._networks_check(self._ctx())
         self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
 
-    def test_full_dispatch_coverage(self):        # Every state any step check can emit must map to a real fix.
+    def test_full_dispatch_coverage(self):  # Every state any step check can emit must map to a real fix.
         states = {
             "host_base": ["missing", "ready"],
             "node": ["absent", "old", "ready"],
@@ -662,9 +718,18 @@ class DockerSessionTests(unittest.TestCase):
             "root_env": ["missing", "ready"],
             "runtime_layout": ["missing", "ready"],
             "service": ["no_unit", "inactive", "unhealthy", "ready"],
-            "docker": ["absent", "daemon_down", "unverified", "old_engine",
-                       "no_compose", "no_access", "stale_login", "no_group",
-                       "no_networks", "ready"],
+            "docker": [
+                "absent",
+                "daemon_down",
+                "unverified",
+                "old_engine",
+                "no_compose",
+                "no_access",
+                "stale_login",
+                "no_group",
+                "no_networks",
+                "ready",
+            ],
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],
@@ -684,19 +749,25 @@ class DockerSessionTests(unittest.TestCase):
         self.assertEqual(set(states), step_ids)
         for step, lst in states.items():
             for state in lst:
-                self.assertNotEqual(
-                    install.fix_for_state(step, state), "unknown",
-                    f"{step}/{state}")
+                self.assertNotEqual(install.fix_for_state(step, state), "unknown", f"{step}/{state}")
 
 
 class PropagateTests(unittest.TestCase):
     def test_collect_script(self):
-        job = {"steps": [
-            {"id": "a", "log": ["$ sudo apt-get update", "plain noise",
-                                "$ sudo apt-get install -y docker-ce",
-                                "$ sudo apt-get update"]},
-            {"id": "b", "log": ["$ docker network create foo"]},
-        ]}
+        job = {
+            "steps": [
+                {
+                    "id": "a",
+                    "log": [
+                        "$ sudo apt-get update",
+                        "plain noise",
+                        "$ sudo apt-get install -y docker-ce",
+                        "$ sudo apt-get update",
+                    ],
+                },
+                {"id": "b", "log": ["$ docker network create foo"]},
+            ]
+        }
         script = install.collect_privileged_script(job)
         # Deduped, sudo-prefixed lines only, runnable header present.
         self.assertIn("set -e", script.splitlines()[3])
@@ -708,16 +779,15 @@ class PropagateTests(unittest.TestCase):
         self.assertEqual(install.collect_privileged_script({"steps": []}), "")
 
     def test_terminal_becomes_waiting(self):
-        result = install._propagate({"ok": False, "changed": False, "log": [],
-                                     "need_terminal": True,
-                                     "terminal_command": "sudo apt-get update"})
+        result = install._propagate(
+            {"ok": False, "changed": False, "log": [], "need_terminal": True, "terminal_command": "sudo apt-get update"}
+        )
         self.assertTrue(result.get("waiting"))
         self.assertEqual(result["prompt"]["kind"], "terminal")
         self.assertIn("apt-get", result["prompt"]["terminal_command"])
 
     def test_failure_passes_error(self):
-        result = install._propagate({"ok": False, "changed": False,
-                                     "log": ["boom"]})
+        result = install._propagate({"ok": False, "changed": False, "log": ["boom"]})
         self.assertFalse(result.get("ok"))
         self.assertIn("boom", result.get("error", ""))
 
@@ -727,12 +797,17 @@ class PropagateTests(unittest.TestCase):
         # write ALL of status/error/prompt/detail; only logs accumulate.
         events: list[dict] = []
         ctx = {"emit": events.append}
-        step = {"id": "caddy", "label": "Caddy", "status": "pending",
-                "log": ["old line"], "prompt": None, "error": "",
-                "detail": ""}
+        step = {
+            "id": "caddy",
+            "label": "Caddy",
+            "status": "pending",
+            "log": ["old line"],
+            "prompt": None,
+            "error": "",
+            "detail": "",
+        }
         job = {"status": "running", "steps": [step], "events": []}
-        install._finish_step(job, ctx, step,
-                             {"ok": False, "error": "port never answered"})
+        install._finish_step(job, ctx, step, {"ok": False, "error": "port never answered"})
         self.assertEqual(step["status"], "failed")
         self.assertTrue(step["error"])
         install._finish_step(job, ctx, step, {"ok": True, "skipped": True})
@@ -745,17 +820,27 @@ class PropagateTests(unittest.TestCase):
     def test_success_keeps_verification_detail(self):
         events: list[dict] = []
         ctx = {"emit": events.append}
-        step = {"id": "vaultwarden_setup", "label": "Vaultwarden",
-                "status": "waiting", "log": [], "prompt": {"kind": "manual_setup"},
-                "error": "", "detail": ""}
+        step = {
+            "id": "vaultwarden_setup",
+            "label": "Vaultwarden",
+            "status": "waiting",
+            "log": [],
+            "prompt": {"kind": "manual_setup"},
+            "error": "",
+            "detail": "",
+        }
         job = {"status": "running", "steps": [step], "events": []}
-        install._finish_step(job, ctx, step, {
-            "ok": True,
-            "detail": "Vaultwarden account detected in its local database.",
-        })
+        install._finish_step(
+            job,
+            ctx,
+            step,
+            {
+                "ok": True,
+                "detail": "Vaultwarden account detected in its local database.",
+            },
+        )
         self.assertEqual(step["status"], "ready")
-        self.assertEqual(step["detail"],
-                         "Vaultwarden account detected in its local database.")
+        self.assertEqual(step["detail"], "Vaultwarden account detected in its local database.")
         self.assertIsNone(step["prompt"])
 
 
@@ -766,11 +851,13 @@ class RunnerTests(unittest.TestCase):
         # kept the step waiting even though a fresh status probe was ready.
         entered_wait = threading.Event()
         release_wait = threading.Event()
-        checks = iter([
-            {"status": "missing", "state": "unjoined", "detail": "login needed"},
-            {"status": "ok", "state": "ready", "detail": "tailnet connected"},
-            {"status": "ok", "state": "ready", "detail": "tailnet connected"},
-        ])
+        checks = iter(
+            [
+                {"status": "missing", "state": "unjoined", "detail": "login needed"},
+                {"status": "ok", "state": "ready", "detail": "tailnet connected"},
+                {"status": "ok", "state": "ready", "detail": "tailnet connected"},
+            ]
+        )
         fixes = []
 
         def check(_ctx):
@@ -778,16 +865,19 @@ class RunnerTests(unittest.TestCase):
 
         def fix(value, _ctx):
             fixes.append(value)
-            return {"waiting": True,
-                    "prompt": {"kind": "tailscale_login", "title": "login"}}
+            return {"waiting": True, "prompt": {"kind": "tailscale_login", "title": "login"}}
 
-        meta = {"id": "tailscale_join", "label": "Tailscale connection",
-                "check": check, "fix": fix}
-        step = {"id": "tailscale_join", "label": "Tailscale connection",
-                "status": "pending", "log": [], "prompt": None,
-                "error": "", "detail": ""}
-        job = {"id": "job", "status": "queued", "steps": [step],
-               "events": []}
+        meta = {"id": "tailscale_join", "label": "Tailscale connection", "check": check, "fix": fix}
+        step = {
+            "id": "tailscale_join",
+            "label": "Tailscale connection",
+            "status": "pending",
+            "log": [],
+            "prompt": None,
+            "error": "",
+            "detail": "",
+        }
+        job = {"id": "job", "status": "queued", "steps": [step], "events": []}
 
         def wait_input(_step):
             entered_wait.set()
@@ -795,10 +885,11 @@ class RunnerTests(unittest.TestCase):
             return {}
 
         events = []
-        ctx = {"emit": events.append, "stopped": lambda: False,
-               "wait_input": wait_input}
-        with patch.object(install, "STEPS", [meta]), \
-             patch("ctl.install.privilege.ensure_elevation", return_value="worker"):
+        ctx = {"emit": events.append, "stopped": lambda: False, "wait_input": wait_input}
+        with (
+            patch.object(install, "STEPS", [meta]),
+            patch("ctl.install.privilege.ensure_elevation", return_value="worker"),
+        ):
             worker = threading.Thread(target=install.run_job, args=(job, ctx))
             worker.start()
             self.assertTrue(entered_wait.wait(timeout=2))

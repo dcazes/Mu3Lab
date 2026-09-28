@@ -66,7 +66,8 @@ API authorization failures and verification job progress separately from an
 empty list. LobeChat offers only `mu3lab-chat`; Mu3Lab disables other persisted
 provider/model rows and blocks re-enabling them while preserving chat history.
 Eight saved LobeChat agents cover Actual Budget, Mealie, Immich, Paperless-ngx,
-SurfSense, Firecrawl, Nextcloud, and AdventureLog.
+SurfSense, Firecrawl, Nextcloud, and AdventureLog. Mu3Lab seeds them for existing
+LobeChat accounts and automatically for accounts created later.
 
 Advanced Integrations separates automatically managed connections from apps
 that still require a user-scoped credential or approval. Mu3Lab handles MCP
@@ -88,15 +89,32 @@ All accepted MCP runtimes can be prepared while their apps are stopped. A
 connection is not reported live until credentials, health, and tool discovery
 pass; Nextcloud and AdventureLog also perform an app-data read check.
 
-## Developer checks
+## Development
 
 ```bash
-./install.sh --no-open
-make test
-cd dashboard && npm ci && npm run build
+./install.sh --no-open   # first run: creates .venv and installs the control plane
+make dev-setup           # linters, type checkers, and dashboard dependencies
+make verify              # everything CI runs: lint, type check, tests, build
+make format              # apply ruff and prettier formatting
 ```
 
-The CI workflow runs the Python suite, dashboard build, and YAML validation.
+Code layout:
+
+- `ctl/api/` — the FastAPI control plane. `security.py` resolves the caller's
+  Authentik identity and provides the `Operator`/`OperatorMutation`
+  dependencies every route uses; `routes/` has one router per dashboard area,
+  all under `/api/v1` (plus the unversioned `/api/health` probe).
+- `ctl/service_ops.py` runs lifecycle jobs in the worker; `ctl/lifecycle/`
+  holds the steps it sequences (runtime project generation, health checks,
+  account linking, per-app setup).
+- `dashboard/src/` — `api/` (typed client), `components/` (shared UI),
+  `features/<area>/` (one folder per dashboard page), `lib/` (helpers).
+
+Tests never touch the host's `/srv/mu3lab`: `tests/__init__.py` points
+`MU3LAB_RUNTIME_ROOT` at an empty temporary directory.
+
+CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier,
+the dashboard build, YAML and Compose validation, and a secret scan.
 
 ## Storage and backups
 

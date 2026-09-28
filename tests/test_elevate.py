@@ -23,26 +23,29 @@ from ctl import elevate
 def _local_worker() -> elevate.Worker:
     """Worker whose runner is plain python3 (protocol-identical, unprivileged)."""
     w = elevate.Worker()
+
     # Build the same spawn the production path uses, minus pkexec.
-    orig_start = w.start
     def start(log=None):
-        import subprocess as _sp, tempfile as _tf
+        import subprocess as _sp
+        import tempfile as _tf
+
         w._dir = _tf.mkdtemp(prefix="mu3lab-elev-")
         os.chmod(w._dir, 0o700)
         cmd_fifo = os.path.join(w._dir, "cmd")
         res_fifo = os.path.join(w._dir, "res")
         os.mkfifo(cmd_fifo, 0o600)
         os.mkfifo(res_fifo, 0o600)
-        w._proc = _sp.Popen([sys.executable, "-c", elevate.RUNNER,
-                             cmd_fifo, res_fifo],
-                            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        w._proc = _sp.Popen(
+            [sys.executable, "-c", elevate.RUNNER, cmd_fifo, res_fifo], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL
+        )
         w._cmd_fd = os.open(cmd_fifo, os.O_WRONLY)
-        w._res_file = open(res_fifo, "r")
+        w._res_file = open(res_fifo)  # noqa: SIM115 - owned by the worker until stop()
         answer = w._request(["true"], timeout=10)
         if answer is None or answer.get("rc") != 0:
             w.stop()
             return False
         return True
+
     w.start = start  # type: ignore[method-assign]
     return w
 
@@ -52,9 +55,8 @@ class WorkerTests(unittest.TestCase):
         # Simulate a pkexec process waiting for an auth dialog.  The parent
         # must not block forever opening the response FIFO in that case.
         import time
-        worker = elevate.Worker(
-            spawn=[sys.executable, "-c", "import time; time.sleep(5)"],
-            start_timeout=0.2)
+
+        worker = elevate.Worker(spawn=[sys.executable, "-c", "import time; time.sleep(5)"], start_timeout=0.2)
         started = time.monotonic()
         self.assertFalse(worker.start())
         self.assertLess(time.monotonic() - started, 2.0)
@@ -75,7 +77,7 @@ class WorkerTests(unittest.TestCase):
         worker = _local_worker()
         self.assertTrue(worker.start())
         try:
-            rc, out = worker.run(["ls", "/nonexistent-dir-xyz"])
+            rc, _out = worker.run(["ls", "/nonexistent-dir-xyz"])
             self.assertNotEqual(rc, 0)
         finally:
             worker.stop()
@@ -102,14 +104,14 @@ class WorkerTests(unittest.TestCase):
 
 class ScriptTests(unittest.TestCase):
     def test_combined_script(self):
-        script = elevate.build_combined_script(
-            ["apt-get update", "apt-get install -y docker-ce"])
+        script = elevate.build_combined_script(["apt-get update", "apt-get install -y docker-ce"])
         self.assertIn("set -e", script.splitlines()[3])
         self.assertIn("apt-get install -y docker-ce", script)
         self.assertTrue(script.endswith("\n"))
 
     def test_no_secret_params(self):
         import inspect
+
         for name in ("Worker", "build_combined_script"):
             obj = getattr(elevate, name)
             target = obj.run if name == "Worker" else obj

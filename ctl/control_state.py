@@ -16,23 +16,57 @@ from typing import Any
 from ctl.runtime import RuntimePaths
 
 COMPUTE_MODES = frozenset({"auto", "cpu", "nvidia", "amd"})
-INSTALL_STATES = frozenset({
-    "not_installed", "config_required", "queued", "installing", "starting",
-    "verifying", "running", "stopped", "degraded", "failed",
-})
-MCP_STATES = frozenset({
-    "unavailable", "disabled", "prepared", "starting", "live", "degraded",
-    "authentication_required", "incompatible", "failed", "stopped",
-})
-INITIALIZATION_STATES = frozenset({
-    "not_required", "pending", "initializing", "awaiting_user", "ready",
-    "existing_account", "failed",
-})
+INSTALL_STATES = frozenset(
+    {
+        "not_installed",
+        "config_required",
+        "queued",
+        "installing",
+        "starting",
+        "verifying",
+        "running",
+        "stopped",
+        "degraded",
+        "failed",
+    }
+)
+MCP_STATES = frozenset(
+    {
+        "unavailable",
+        "disabled",
+        "prepared",
+        "starting",
+        "live",
+        "degraded",
+        "authentication_required",
+        "incompatible",
+        "failed",
+        "stopped",
+    }
+)
+INITIALIZATION_STATES = frozenset(
+    {
+        "not_required",
+        "pending",
+        "initializing",
+        "awaiting_user",
+        "ready",
+        "existing_account",
+        "failed",
+    }
+)
 PROVIDER_STATES = frozenset({"saved", "verifying", "verified", "degraded", "disabled", "unsupported_legacy"})
 IDENTITY_MODES = frozenset({"native_oidc", "trusted_header", "proxy_gate", "local", "none"})
-IDENTITY_STATES = frozenset({
-    "unconfigured", "configuring", "migration_required", "ready", "degraded", "unsupported",
-})
+IDENTITY_STATES = frozenset(
+    {
+        "unconfigured",
+        "configuring",
+        "migration_required",
+        "ready",
+        "degraded",
+        "unsupported",
+    }
+)
 
 
 def _now() -> str:
@@ -46,7 +80,7 @@ class ControlState:
         self.database = database
 
     @classmethod
-    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> "ControlState | None":
+    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> ControlState | None:
         if not paths.runtime.is_dir():
             return None
         return cls(paths.runtime / "control-plane.sqlite3")
@@ -158,8 +192,11 @@ class ControlState:
             value = json.loads(row["value_json"])
         except (TypeError, ValueError):
             value = "auto"
-        return {"compute_mode": value if value in COMPUTE_MODES else "auto",
-                "updated_at": row["updated_at"], "updated_by": row["updated_by"]}
+        return {
+            "compute_mode": value if value in COMPUTE_MODES else "auto",
+            "updated_at": row["updated_at"],
+            "updated_by": row["updated_by"],
+        }
 
     def set_compute_mode(self, mode: str, actor: str) -> dict[str, Any]:
         if mode not in COMPUTE_MODES:
@@ -168,18 +205,20 @@ class ControlState:
             raise ValueError("actor is required")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO system_config (key, value_json, updated_at, updated_by)
                 VALUES ('compute_mode', ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
                     updated_at = excluded.updated_at, updated_by = excluded.updated_by
-            """, (json.dumps(mode), now, actor))
+            """,
+                (json.dumps(mode), now, actor),
+            )
         return {"compute_mode": mode, "updated_at": now, "updated_by": actor}
 
     def calendar_connection(self, owner_uid: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM calendar_connections WHERE owner_uid = ?",
-                               (owner_uid,)).fetchone()
+            row = conn.execute("SELECT * FROM calendar_connections WHERE owner_uid = ?", (owner_uid,)).fetchone()
         if not row:
             return None
         result = dict(row)
@@ -189,15 +228,23 @@ class ControlState:
             result["calendars"] = []
         return result
 
-    def set_calendar_connection(self, owner_uid: str, username_hint: str,
-                                calendars: list[dict[str, str]], selected_id: str,
-                                *, state: str = "connected", error: str = "",
-                                success: bool = False) -> dict[str, Any]:
+    def set_calendar_connection(
+        self,
+        owner_uid: str,
+        username_hint: str,
+        calendars: list[dict[str, str]],
+        selected_id: str,
+        *,
+        state: str = "connected",
+        error: str = "",
+        success: bool = False,
+    ) -> dict[str, Any]:
         if not owner_uid or len(owner_uid) > 256 or not selected_id:
             raise ValueError("invalid calendar connection metadata")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO calendar_connections
                 (owner_uid, username_hint, selected_calendar_id, calendars_json,
                  state, last_error, last_success_at, updated_at)
@@ -211,8 +258,18 @@ class ControlState:
                     last_success_at = CASE WHEN excluded.last_success_at != ''
                         THEN excluded.last_success_at ELSE calendar_connections.last_success_at END,
                     updated_at = excluded.updated_at
-            """, (owner_uid, username_hint, selected_id, json.dumps(calendars, sort_keys=True),
-                  state, error, now if success else "", now))
+            """,
+                (
+                    owner_uid,
+                    username_hint,
+                    selected_id,
+                    json.dumps(calendars, sort_keys=True),
+                    state,
+                    error,
+                    now if success else "",
+                    now,
+                ),
+            )
         return self.calendar_connection(owner_uid) or {}
 
     def delete_calendar_connection(self, owner_uid: str) -> None:
@@ -221,9 +278,7 @@ class ControlState:
 
     def service_identity(self, service_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM service_identity_state WHERE service_id = ?", (service_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM service_identity_state WHERE service_id = ?", (service_id,)).fetchone()
         if not row:
             return None
         result = dict(row)
@@ -233,15 +288,24 @@ class ControlState:
             result["last_error"] = {}
         return result
 
-    def set_service_identity(self, service_id: str, mode: str, state: str, *,
-                             owner_uid: str = "", job_id: str = "", detail: str = "",
-                             error: dict[str, Any] | None = None,
-                             verified: bool = False) -> dict[str, Any]:
+    def set_service_identity(
+        self,
+        service_id: str,
+        mode: str,
+        state: str,
+        *,
+        owner_uid: str = "",
+        job_id: str = "",
+        detail: str = "",
+        error: dict[str, Any] | None = None,
+        verified: bool = False,
+    ) -> dict[str, Any]:
         if not service_id or mode not in IDENTITY_MODES or state not in IDENTITY_STATES:
             raise ValueError("invalid service identity state")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO service_identity_state
                 (service_id, mode, state, owner_uid, last_job_id, detail,
                  last_error_json, last_verified_at, updated_at)
@@ -255,15 +319,24 @@ class ControlState:
                     last_verified_at = CASE WHEN excluded.last_verified_at != ''
                         THEN excluded.last_verified_at ELSE service_identity_state.last_verified_at END,
                     updated_at = excluded.updated_at
-            """, (service_id, mode, state, owner_uid, job_id, detail,
-                  json.dumps(error or {}, sort_keys=True), now if verified else "", now))
+            """,
+                (
+                    service_id,
+                    mode,
+                    state,
+                    owner_uid,
+                    job_id,
+                    detail,
+                    json.dumps(error or {}, sort_keys=True),
+                    now if verified else "",
+                    now,
+                ),
+            )
         return self.service_identity(service_id) or {}
 
     def installation(self, service_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM service_installations WHERE service_id = ?", (service_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM service_installations WHERE service_id = ?", (service_id,)).fetchone()
         if not row:
             return None
         result = dict(row)
@@ -311,16 +384,26 @@ class ControlState:
             rows = conn.execute("SELECT provider_id FROM provider_connections ORDER BY updated_at DESC").fetchall()
         return [item for row in rows if (item := self.provider(str(row["provider_id"]))) is not None]
 
-    def set_provider(self, provider_id: str, label: str, *, enabled: bool = True,
-                     state: str = "saved", models: list[str] | None = None,
-                     error: dict[str, Any] | None = None, attempted: bool = False,
-                     verified: bool = False, job_id: str = "",
-                     replace_models: bool = False) -> dict[str, Any]:
+    def set_provider(
+        self,
+        provider_id: str,
+        label: str,
+        *,
+        enabled: bool = True,
+        state: str = "saved",
+        models: list[str] | None = None,
+        error: dict[str, Any] | None = None,
+        attempted: bool = False,
+        verified: bool = False,
+        job_id: str = "",
+        replace_models: bool = False,
+    ) -> dict[str, Any]:
         if not provider_id or state not in PROVIDER_STATES or not label:
             raise ValueError("invalid provider connection state")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO provider_connections
                 (provider_id, label, enabled, state, model_samples_json, last_attempt_at,
                  last_verified_at, last_error_json, active_job_id, config_revision, updated_at)
@@ -339,19 +422,38 @@ class ControlState:
                     active_job_id = excluded.active_job_id,
                     config_revision = provider_connections.config_revision + 1,
                     updated_at = excluded.updated_at
-            """, (provider_id, label, int(enabled), state,
-                  json.dumps(models or [], sort_keys=True), now if attempted else "",
-                  now if verified else "", json.dumps(error or {}, sort_keys=True), job_id, now,
-                  int(replace_models)))
+            """,
+                (
+                    provider_id,
+                    label,
+                    int(enabled),
+                    state,
+                    json.dumps(models or [], sort_keys=True),
+                    now if attempted else "",
+                    now if verified else "",
+                    json.dumps(error or {}, sort_keys=True),
+                    job_id,
+                    now,
+                    int(replace_models),
+                ),
+            )
         return self.provider(provider_id) or {}
 
     def delete_provider(self, provider_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM provider_connections WHERE provider_id = ?", (provider_id,))
 
-    def set_installation(self, service_id: str, state: str, *, job_id: str = "",
-                         manifest_version: str = "", image_digests: dict[str, str] | None = None,
-                         route_state: str = "unknown", error: dict[str, Any] | None = None) -> dict[str, Any]:
+    def set_installation(
+        self,
+        service_id: str,
+        state: str,
+        *,
+        job_id: str = "",
+        manifest_version: str = "",
+        image_digests: dict[str, str] | None = None,
+        route_state: str = "unknown",
+        error: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not service_id or state not in INSTALL_STATES:
             raise ValueError("invalid service installation state")
         now = _now()
@@ -363,7 +465,8 @@ class ControlState:
             ).fetchone()
             if existing and existing["installed_at"]:
                 installed_at = existing["installed_at"]
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO service_installations
                 (service_id, state, manifest_version, image_digests_json, config_revision,
                  route_state, last_job_id, last_error_json, installed_at, updated_at)
@@ -378,17 +481,25 @@ class ControlState:
                     installed_at = CASE WHEN service_installations.installed_at != ''
                         THEN service_installations.installed_at ELSE excluded.installed_at END,
                     updated_at = excluded.updated_at
-            """, (service_id, state, manifest_version,
-                  json.dumps(image_digests or {}, sort_keys=True),
-                  int(existing["config_revision"]) if existing else 0,
-                  route_state, job_id, json.dumps(error or {}, sort_keys=True),
-                  installed_at, now))
+            """,
+                (
+                    service_id,
+                    state,
+                    manifest_version,
+                    json.dumps(image_digests or {}, sort_keys=True),
+                    int(existing["config_revision"]) if existing else 0,
+                    route_state,
+                    job_id,
+                    json.dumps(error or {}, sort_keys=True),
+                    installed_at,
+                    now,
+                ),
+            )
         return self.installation(service_id) or {}
 
     def initialization(self, service_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM service_initializations WHERE service_id = ?",
-                               (service_id,)).fetchone()
+            row = conn.execute("SELECT * FROM service_initializations WHERE service_id = ?", (service_id,)).fetchone()
         if not row:
             return None
         result = dict(row)
@@ -398,14 +509,23 @@ class ControlState:
             result["last_error"] = {}
         return result
 
-    def set_initialization(self, service_id: str, mode: str, state: str, *,
-                           job_id: str = "", owner_uid: str = "", handoff_id: str = "",
-                           error: dict[str, Any] | None = None) -> dict[str, Any]:
+    def set_initialization(
+        self,
+        service_id: str,
+        mode: str,
+        state: str,
+        *,
+        job_id: str = "",
+        owner_uid: str = "",
+        handoff_id: str = "",
+        error: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not service_id or state not in INITIALIZATION_STATES:
             raise ValueError("invalid service initialization state")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO service_initializations
                 (service_id, mode, state, job_id, owner_uid, credential_handoff_id,
                  last_error_json, verified_at, updated_at)
@@ -421,53 +541,78 @@ class ControlState:
                     verified_at = CASE WHEN excluded.verified_at != '' THEN excluded.verified_at
                         ELSE service_initializations.verified_at END,
                     updated_at = excluded.updated_at
-            """, (service_id, mode, state, job_id, owner_uid, handoff_id,
-                  json.dumps(error or {}, sort_keys=True), now if state == "ready" else "", now))
+            """,
+                (
+                    service_id,
+                    mode,
+                    state,
+                    job_id,
+                    owner_uid,
+                    handoff_id,
+                    json.dumps(error or {}, sort_keys=True),
+                    now if state == "ready" else "",
+                    now,
+                ),
+            )
         return self.initialization(service_id) or {}
 
-    def add_handoff(self, handoff_id: str, service_id: str, job_id: str,
-                    owner_uid: str, created_at: str, expires_at: str) -> None:
+    def add_handoff(
+        self, handoff_id: str, service_id: str, job_id: str, owner_uid: str, created_at: str, expires_at: str
+    ) -> None:
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO credential_handoffs
                 (id, service_id, job_id, owner_uid, state, created_at, expires_at)
                 VALUES (?, ?, ?, ?, 'available', ?, ?)
-            """, (handoff_id, service_id, job_id, owner_uid, created_at, expires_at))
+            """,
+                (handoff_id, service_id, job_id, owner_uid, created_at, expires_at),
+            )
 
     def handoffs(self, owner_uid: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT * FROM credential_handoffs WHERE owner_uid = ?
                 ORDER BY created_at DESC
-            """, (owner_uid,)).fetchall()
+            """,
+                (owner_uid,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def confirm_handoff(self, handoff_id: str, owner_uid: str) -> bool:
         now = _now()
         with self._connect() as conn:
-            result = conn.execute("""
+            result = conn.execute(
+                """
                 UPDATE credential_handoffs SET state = 'confirmed', confirmed_at = ?
                 WHERE id = ? AND owner_uid = ? AND state = 'available'
-            """, (now, handoff_id, owner_uid))
+            """,
+                (now, handoff_id, owner_uid),
+            )
         return result.rowcount == 1
 
     def expire_handoffs(self, ids: list[str]) -> None:
         if not ids:
             return
         with self._connect() as conn:
-            conn.executemany("UPDATE credential_handoffs SET state = 'expired' WHERE id = ?",
-                             ((value,) for value in ids if value))
+            conn.executemany(
+                "UPDATE credential_handoffs SET state = 'expired' WHERE id = ?", ((value,) for value in ids if value)
+            )
 
     def bump_config_revision(self, service_id: str) -> int:
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO service_installations (service_id, state, config_revision, updated_at)
                 VALUES (?, 'config_required', 1, ?)
                 ON CONFLICT(service_id) DO UPDATE SET
                     config_revision = service_installations.config_revision + 1,
                     updated_at = excluded.updated_at
-            """, (service_id, now))
+            """,
+                (service_id, now),
+            )
             row = conn.execute(
                 "SELECT config_revision FROM service_installations WHERE service_id = ?",
                 (service_id,),
@@ -489,14 +634,23 @@ class ControlState:
                 result[key] = [] if key == "tool_snapshot" else {}
         return result
 
-    def set_mcp_server(self, server_id: str, service_id: str, *, enabled: bool,
-                       state: str, tools: list[dict[str, Any]] | None = None,
-                       error: dict[str, Any] | None = None, verified: bool = False) -> dict[str, Any]:
+    def set_mcp_server(
+        self,
+        server_id: str,
+        service_id: str,
+        *,
+        enabled: bool,
+        state: str,
+        tools: list[dict[str, Any]] | None = None,
+        error: dict[str, Any] | None = None,
+        verified: bool = False,
+    ) -> dict[str, Any]:
         if state not in MCP_STATES:
             raise ValueError("invalid MCP state")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO mcp_servers
                 (server_id, service_id, enabled, state, tool_snapshot_json,
                  last_verified_at, last_error_json, updated_at)
@@ -506,7 +660,16 @@ class ControlState:
                     last_verified_at = CASE WHEN excluded.last_verified_at != ''
                         THEN excluded.last_verified_at ELSE mcp_servers.last_verified_at END,
                     last_error_json = excluded.last_error_json, updated_at = excluded.updated_at
-            """, (server_id, service_id, int(enabled), state,
-                  json.dumps(tools or [], sort_keys=True), now if verified else "",
-                  json.dumps(error or {}, sort_keys=True), now))
+            """,
+                (
+                    server_id,
+                    service_id,
+                    int(enabled),
+                    state,
+                    json.dumps(tools or [], sort_keys=True),
+                    now if verified else "",
+                    json.dumps(error or {}, sort_keys=True),
+                    now,
+                ),
+            )
         return self.mcp_server(server_id) or {}

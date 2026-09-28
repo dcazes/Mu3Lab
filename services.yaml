@@ -131,16 +131,17 @@ services:
     private_https_port: 8455
     proxy_port: 19472
     health: {kind: http, url: "http://127.0.0.1:3001/api/ping"}
-    auth: excluded
+    auth: proxy
     stage: core
     required: true
     route: pending
-    ui: {available: true, authentication: local}
+    ui: {available: true, authentication: proxy}
     setup_action: "Mu3Lab manages provider configuration privately; its native dashboard is available for operator recovery."
     resource_guidance: "Optional provider route inside the mandatory core suite."
     images: ["ghcr.io/tashfeenahmed/freellmapi:v0.11.0"]
     update: {repository: TashfeenAhmed/FreeLLMAPI, current_version: v0.11.0}
     backup: {binds: [data]}
+    identity_note: "Authentik protects the private dashboard route. FreeLLMAPI has no header-based login, so its generated local account is saved to your Vaultwarden."
 
   - id: surfsense
     maturity: supported

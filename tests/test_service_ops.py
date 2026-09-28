@@ -11,6 +11,7 @@ from ctl.jobs import JobStore
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import allowed_actions, execute_claimed, project_path
+from tests.support import runtime_paths
 
 
 class ServiceOperationTests(unittest.TestCase):
@@ -31,7 +32,7 @@ class ServiceOperationTests(unittest.TestCase):
             project = paths.projects / service.id
             project.mkdir(parents=True)
             (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths):
+            with runtime_paths(paths):
                 selected = project_path(service, Path(__file__).resolve().parents[1])
         self.assertEqual(selected, project)
         self.assertEqual(allowed_actions(service, "stopped"), ["start"])
@@ -39,12 +40,13 @@ class ServiceOperationTests(unittest.TestCase):
     def test_worker_resolves_curated_path_and_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "jobs.sqlite3")
-            created = store.create(kind="lifecycle", service_id="ollama",
-                                   action="start", actor="owner")
+            created = store.create(kind="lifecycle", service_id="ollama", action="start", actor="owner")
             claimed = store.claim("worker")
             assert claimed is not None
-            with patch("ctl.service_ops.actions.compose_action", return_value=(0, "started")) as action, \
-                 patch("ctl.service_ops._wait_healthy", return_value=(True, "HTTP 200")):
+            with (
+                patch("ctl.service_ops.actions.compose_action", return_value=(0, "started")) as action,
+                patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
+            ):
                 execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
             project, verb, _logger = action.call_args.args
             self.assertEqual(project.name, "ollama")
@@ -55,8 +57,7 @@ class ServiceOperationTests(unittest.TestCase):
     def test_worker_rejects_unregistered_action(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "jobs.sqlite3")
-            store.create(kind="lifecycle", service_id="ollama",
-                         action="shell", actor="owner")
+            store.create(kind="lifecycle", service_id="ollama", action="shell", actor="owner")
             claimed = store.claim("worker")
             assert claimed is not None
             execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
@@ -65,18 +66,20 @@ class ServiceOperationTests(unittest.TestCase):
     def test_core_restart_passes_runtime_environment_to_compose(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "jobs.sqlite3")
-            created = store.create(kind="lifecycle", service_id="litellm",
-                                   action="restart", actor="owner")
+            created = store.create(kind="lifecycle", service_id="litellm", action="restart", actor="owner")
             claimed = store.claim("worker")
             assert claimed is not None
-            with patch("ctl.service_ops.ControlState.runtime", return_value=None), \
-                 patch("ctl.service_ops.actions.compose_action", return_value=(0, "restarted")) as action, \
-                 patch("ctl.service_ops._wait_healthy", return_value=(True, "HTTP 200")):
+            with (
+                patch("ctl.service_ops.ControlState.runtime", return_value=None),
+                patch("ctl.service_ops.actions.compose_action", return_value=(0, "restarted")) as action,
+                patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
+            ):
                 execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
             self.assertEqual(store.get(created["id"])["state"], "succeeded")
             env = action.call_args.kwargs["env"]
-            self.assertEqual(env["MU3LAB_ENV_FILE"], "/srv/mu3lab/projects/litellm/.env")
-            self.assertEqual(env["MU3LAB_LITELLM_CONFIG"], "/srv/mu3lab/projects/litellm/config.yaml")
+            project = RuntimePaths().projects / "litellm"
+            self.assertEqual(env["MU3LAB_ENV_FILE"], str(project / ".env"))
+            self.assertEqual(env["MU3LAB_LITELLM_CONFIG"], str(project / "config.yaml"))
 
 
 if __name__ == "__main__":

@@ -35,20 +35,19 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Constants.
 # ---------------------------------------------------------------------------
-DEFAULT_PORT = 8799   # 8787 belongs to the real dashboard; never collide
-TEST_TIMEOUT = 120    # kill a hung suite run after N seconds
-MAX_EVENTS = 2000     # cap in-memory test event log (oldest dropped)
+DEFAULT_PORT = 8799  # 8787 belongs to the real dashboard; never collide
+TEST_TIMEOUT = 120  # kill a hung suite run after N seconds
+MAX_EVENTS = 2000  # cap in-memory test event log (oldest dropped)
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "tools" / "check_page.html"
 STATE_FILE = ROOT / ".state" / "check-progress.json"
-CODE_VERSION = 8      # bump on ANY api/report-shape change (invalidates disk)
+CODE_VERSION = 8  # bump on ANY api/report-shape change (invalidates disk)
 
 
 def tailnet_dashboard_url() -> str:
     """Return the node's canonical private HTTPS URL, if Tailscale is ready."""
     try:
-        proc = subprocess.run(["tailscale", "status", "--json"],
-                              capture_output=True, text=True, timeout=5)
+        proc = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5)
         payload = json.loads(proc.stdout) if proc.returncode == 0 else {}
         name = str(payload.get("Self", {}).get("DNSName", "")).rstrip(".")
     except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -70,11 +69,11 @@ class State:
         self.lock = threading.Lock()
         self.code_version = CODE_VERSION
         self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.test_run: dict | None = None      # active run or None
-        self.test_events: list[dict] = []      # JSON lines from the runner
-        self.tests_green = False               # card ① exit-0 seen?
+        self.test_run: dict | None = None  # active run or None
+        self.test_events: list[dict] = []  # JSON lines from the runner
+        self.tests_green = False  # card ① exit-0 seen?
         self.tests_summary: dict | None = None
-        self.preflight_passed = False          # card ② passed (no blocking FAILs)?
+        self.preflight_passed = False  # card ② passed (no blocking FAILs)?
         self.preflight_report: dict | None = None
         # Install job (card ③): at most one active; threads + events live here.
         self.install_job: dict | None = None
@@ -98,11 +97,12 @@ def can_open_install(state: State) -> tuple[bool, str]:
 
 def can_reset_authentik_admin(job: dict | None) -> bool:
     """Limit administrator recovery to its explicit paused setup checkpoint."""
-    waiting = next((step for step in (job or {}).get("steps", [])
-                    if step.get("status") == "waiting"), None)
-    return bool(waiting and waiting.get("id") == "authentik_setup"
-                and (waiting.get("prompt") or {}).get("recovery_action")
-                == "reset_authentik_admin")
+    waiting = next((step for step in (job or {}).get("steps", []) if step.get("status") == "waiting"), None)
+    return bool(
+        waiting
+        and waiting.get("id") == "authentik_setup"
+        and (waiting.get("prompt") or {}).get("recovery_action") == "reset_authentik_admin"
+    )
 
 
 def _test_worker(state: State, python: str) -> None:
@@ -113,20 +113,20 @@ def _test_worker(state: State, python: str) -> None:
     honors MU3LAB_TEST_RUNNER (tests only): the regression test points it at
     a 3-line fake so the suite never runs itself recursively.
     """
-    runner = os.environ.get("MU3LAB_TEST_RUNNER",
-                            str(ROOT / "tools" / "run_tests.py"))
+    runner = os.environ.get("MU3LAB_TEST_RUNNER", str(ROOT / "tools" / "run_tests.py"))
     try:
         proc = subprocess.Popen(
             [python, runner],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=str(ROOT),
             env={**os.environ, "MU3LAB_BOOTSTRAP_TESTS": "1"},
         )
     except OSError as exc:
         with state.lock:
             state.test_run = None
-            state.test_events.append({"type": "error",
-                                      "detail": f"could not start runner: {exc}"})
+            state.test_events.append({"type": "error", "detail": f"could not start runner: {exc}"})
         return
     with state.lock:
         if state.test_run is not None:  # killed while spawning; clean up
@@ -147,7 +147,7 @@ def _test_worker(state: State, python: str) -> None:
             with state.lock:
                 state.test_events.append(event)
                 if len(state.test_events) > MAX_EVENTS:
-                    del state.test_events[:len(state.test_events) - MAX_EVENTS]
+                    del state.test_events[: len(state.test_events) - MAX_EVENTS]
         rc = proc.wait(timeout=TEST_TIMEOUT)
         if proc.stdout is not None:
             proc.stdout.close()
@@ -155,16 +155,14 @@ def _test_worker(state: State, python: str) -> None:
         proc.kill()
         rc = 124
         with state.lock:
-            state.test_events.append({"type": "error",
-                                      "detail": f"suite timed out after {TEST_TIMEOUT}s"})
+            state.test_events.append({"type": "error", "detail": f"suite timed out after {TEST_TIMEOUT}s"})
     with state.lock:
-        summary = next((e for e in reversed(state.test_events)
-                        if e.get("type") == "summary" and e.get("phase") == "done"),
-                       None)
+        summary = next(
+            (e for e in reversed(state.test_events) if e.get("type") == "summary" and e.get("phase") == "done"), None
+        )
         state.tests_summary = summary
         # Green = runner exit 0 AND a done-summary with zero failures/errors.
-        state.tests_green = (rc == 0 and summary is not None
-                             and not summary.get("failed") and not summary.get("errored"))
+        state.tests_green = rc == 0 and summary is not None and not summary.get("failed") and not summary.get("errored")
         state.test_run = None
     # OUTSIDE the lock on purpose: save_progress() takes state.lock itself,
     # and threading.Lock is not reentrant — nesting here self-deadlocks the
@@ -179,6 +177,7 @@ def _install_worker(state: State) -> None:
     by this server or stored in the job.
     """
     from ctl import install
+
     job = state.install_job
     assert job is not None
     MAX_INSTALL_EVENTS = 2000
@@ -187,7 +186,7 @@ def _install_worker(state: State) -> None:
         with state.lock:
             job["events"].append(event)
             if len(job["events"]) > MAX_INSTALL_EVENTS:
-                del job["events"][:len(job["events"]) - MAX_INSTALL_EVENTS]
+                del job["events"][: len(job["events"]) - MAX_INSTALL_EVENTS]
 
     def log_fn(step_id: str):
         def _log(line: str) -> None:
@@ -196,8 +195,8 @@ def _install_worker(state: State) -> None:
                     if step["id"] == step_id:
                         step["log"].append(line)
                         break
-                job["events"].append({"type": "log", "id": step_id,
-                                      "line": line[:2000]})
+                job["events"].append({"type": "log", "id": step_id, "line": line[:2000]})
+
         return _log
 
     def progress(step_id: str, update: dict) -> None:
@@ -213,9 +212,7 @@ def _install_worker(state: State) -> None:
                 if step["id"] == step_id:
                     existing = step.get("progress") or {}
                     started_at = existing.get("started_at", time.time())
-                    step["progress"] = {**existing, **update,
-                                        "started_at": started_at,
-                                        "updated_at": time.time()}
+                    step["progress"] = {**existing, **update, "started_at": started_at, "updated_at": time.time()}
                     break
 
     def wait_input(step_id: str) -> dict:
@@ -226,20 +223,25 @@ def _install_worker(state: State) -> None:
         with state.lock:
             return dict(job["inputs"])
 
-    ctx = {"root": ROOT, "log_fn": log_fn, "inputs": job["inputs"],
-           "wait_input": wait_input,
-           "stopped": state.install_stop.is_set, "emit": emit,
-           "progress": progress}
+    ctx = {
+        "root": ROOT,
+        "log_fn": log_fn,
+        "inputs": job["inputs"],
+        "wait_input": wait_input,
+        "stopped": state.install_stop.is_set,
+        "emit": emit,
+        "progress": progress,
+    }
     try:
         install.run_job(job, ctx)
-    except Exception as exc:  # noqa: BLE001 (job must end, never hang)
+    except Exception as exc:
         with state.lock:
             job["status"] = "failed"
-            job["events"].append({"type": "error",
-                                  "detail": f"installer crashed: {exc}"})
+            job["events"].append({"type": "error", "detail": f"installer crashed: {exc}"})
     finally:
         # Stop the elevated worker when the job ends (no lingering root process).
         from ctl import privilege as _priv
+
         _priv.release_elevation()
         emit({"type": "summary", "phase": "done", "status": job["status"]})
 
@@ -248,12 +250,23 @@ def _serialize_job(job: dict | None) -> dict | None:
     """Job shape the page renders (per-step logs capped at 50 lines)."""
     if job is None:
         return None
-    return {"id": job["id"], "status": job["status"],
-            "steps": [{"id": s["id"], "label": s["label"], "status": s["status"],
-                       "log": s["log"][-50:], "prompt": s.get("prompt"),
-                       "error": s.get("error", ""), "detail": s.get("detail", ""),
-                       "progress": s.get("progress")}
-                      for s in job["steps"]]}
+    return {
+        "id": job["id"],
+        "status": job["status"],
+        "steps": [
+            {
+                "id": s["id"],
+                "label": s["label"],
+                "status": s["status"],
+                "log": s["log"][-50:],
+                "prompt": s.get("prompt"),
+                "error": s.get("error", ""),
+                "detail": s.get("detail", ""),
+                "progress": s.get("progress"),
+            }
+            for s in job["steps"]
+        ],
+    }
 
 
 def _repo_head() -> str:
@@ -261,8 +274,7 @@ def _repo_head() -> str:
     progress after code changes — a green suite from older code proves
     nothing about the current tree."""
     try:
-        proc = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
-                              text=True, timeout=10, cwd=str(ROOT))
+        proc = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, cwd=str(ROOT))
     except OSError:
         return ""
     return proc.stdout.strip() if proc.returncode == 0 else ""
@@ -274,9 +286,11 @@ def _source_fingerprint() -> str:
     suffixes = {".py", ".sh", ".html", ".yaml", ".yml", ".toml", ".json", ".ts", ".tsx"}
     ignored = {".git", ".venv", "node_modules", "dist", "__pycache__", ".state"}
     try:
-        files = sorted(path for path in ROOT.rglob("*")
-                       if path.is_file() and path.suffix in suffixes
-                       and not ignored.intersection(path.relative_to(ROOT).parts))
+        files = sorted(
+            path
+            for path in ROOT.rglob("*")
+            if path.is_file() and path.suffix in suffixes and not ignored.intersection(path.relative_to(ROOT).parts)
+        )
         for path in files:
             digest.update(str(path.relative_to(ROOT)).encode("utf-8"))
             digest.update(b"\0")
@@ -296,14 +310,17 @@ def build_identity() -> dict:
     if head:
         try:
             proc = subprocess.run(
-                ["git", "status", "--porcelain"], capture_output=True,
-                text=True, timeout=10, cwd=str(ROOT))
+                ["git", "status", "--porcelain"], capture_output=True, text=True, timeout=10, cwd=str(ROOT)
+            )
             dirty = proc.returncode == 0 and bool(proc.stdout.strip())
         except OSError:
             dirty = False
-    return {"head": head[:12], "dirty": dirty,
-            "source_fingerprint": _source_fingerprint()[:12],
-            "code_version": CODE_VERSION}
+    return {
+        "head": head[:12],
+        "dirty": dirty,
+        "source_fingerprint": _source_fingerprint()[:12],
+        "code_version": CODE_VERSION,
+    }
 
 
 def save_progress(state: State, path: Path = STATE_FILE) -> None:
@@ -314,14 +331,16 @@ def save_progress(state: State, path: Path = STATE_FILE) -> None:
     from a fresh run (the page says so when restoring).
     """
     with state.lock:
-        payload = {"code_version": state.code_version,
-                   "repo_head": _repo_head(),
-                   "source_fingerprint": _source_fingerprint(),
-                   "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                   "tests_green": state.tests_green,
-                   "tests_summary": state.tests_summary,
-                   "preflight_passed": state.preflight_passed,
-                   "preflight_report": state.preflight_report}
+        payload = {
+            "code_version": state.code_version,
+            "repo_head": _repo_head(),
+            "source_fingerprint": _source_fingerprint(),
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "tests_green": state.tests_green,
+            "tests_summary": state.tests_summary,
+            "preflight_passed": state.preflight_passed,
+            "preflight_report": state.preflight_report,
+        }
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
@@ -356,9 +375,7 @@ def load_progress(state: State, path: Path = STATE_FILE) -> str:
 
 def response_headers(content_type: str, length: int) -> dict[str, str]:
     """Headers for every response. no-store is load-bearing (see _json)."""
-    return {"Content-Type": content_type,
-            "Cache-Control": "no-store",
-            "Content-Length": str(length)}
+    return {"Content-Type": content_type, "Cache-Control": "no-store", "Content-Length": str(length)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -370,8 +387,7 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj: dict, status: int = 200) -> None:
         body = json.dumps(obj).encode()
         self.send_response(status)
-        for key, value in response_headers("application/json",
-                                           len(body)).items():
+        for key, value in response_headers("application/json", len(body)).items():
             self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
@@ -383,41 +399,42 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # -- GET ---------------------------------------------------------------
-    def do_GET(self):  # noqa: N802 (BaseHTTPRequestHandler hook, keep it)
+    def do_GET(self):
         state = self._state()
         if self.path == "/":
             try:
                 page = PAGE.read_bytes()
             except OSError:
-                self._json({"error": "page missing",
-                            "hint": "tools/check_page.html not found"}, 500)
+                self._json({"error": "page missing", "hint": "tools/check_page.html not found"}, 500)
                 return
             self.send_response(200)
-            for key, value in response_headers("text/html; charset=utf-8",
-                                               len(page)).items():
+            for key, value in response_headers("text/html; charset=utf-8", len(page)).items():
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(page)
         elif self.path == "/api/state":
             with state.lock:
-                self._json({
-                    "server_started_at": state.started_at,
-                    "code_version": state.code_version,
-                    "build": build_identity(),
-                    "tests_running": state.test_run is not None,
-                    "tests_green": state.tests_green,
-                    "tests_summary": state.tests_summary,
-                    "preflight_passed": state.preflight_passed,
-                    "preflight_report": state.preflight_report,
-                    "install_job": _serialize_job(state.install_job),
-                    "tailnet_dashboard_url": tailnet_dashboard_url(),
-                })
+                self._json(
+                    {
+                        "server_started_at": state.started_at,
+                        "code_version": state.code_version,
+                        "build": build_identity(),
+                        "tests_running": state.test_run is not None,
+                        "tests_green": state.tests_green,
+                        "tests_summary": state.tests_summary,
+                        "preflight_passed": state.preflight_passed,
+                        "preflight_report": state.preflight_report,
+                        "install_job": _serialize_job(state.install_job),
+                        "tailnet_dashboard_url": tailnet_dashboard_url(),
+                    }
+                )
         elif self.path == "/api/tests/events":
             with state.lock:
                 self._json({"events": list(state.test_events)})
-        elif self.path == "/api/install/script":            # Combined admin script (headless fallback): every privileged
+        elif self.path == "/api/install/script":  # Combined admin script (headless fallback): every privileged
             # command recorded so far, as one `sudo bash` script.
             from ctl import install as _install
+
             with state.lock:
                 job = state.install_job
                 script = _install.collect_privileged_script(job) if job else ""
@@ -431,26 +448,22 @@ class Handler(BaseHTTPRequestHandler):
                 job = state.install_job
                 self._json({"events": list(job["events"]) if job else []})
         else:
-            self._json({"error": "not found",
-                        "hint": "see / for the dashboard"}, 404)
+            self._json({"error": "not found", "hint": "see / for the dashboard"}, 404)
 
     # -- POST --------------------------------------------------------------
-    def do_POST(self):  # noqa: N802 (BaseHTTPRequestHandler hook, keep it)
+    def do_POST(self):
         state = self._state()
         length = int(self.headers.get("Content-Length", 0))
         self._body = self.rfile.read(length)
         if self.path == "/api/tests/run":
             with state.lock:
                 if state.test_run is not None:
-                    self._json({"error": "already running",
-                                "hint": "kill the active run first"}, 409)
+                    self._json({"error": "already running", "hint": "kill the active run first"}, 409)
                     return
                 state.test_events = []
                 state.tests_green = False
                 state.test_run = {"status": "running"}
-            thread = threading.Thread(target=_test_worker,
-                                      args=(state, sys.executable),
-                                      daemon=True)
+            thread = threading.Thread(target=_test_worker, args=(state, sys.executable), daemon=True)
             thread.start()
             self._json({"started": True})
         elif self.path == "/api/tests/kill":
@@ -478,17 +491,16 @@ class Handler(BaseHTTPRequestHandler):
             # hacks: reload() leaves stale closures and double state).
             try:
                 from ctl import preflight
+
                 report = preflight.run_all()
-            except Exception as exc:  # noqa: BLE001 (must survive, report it)
-                self._json({"error": "preflight crashed",
-                            "hint": f"{type(exc).__name__}: {exc}"}, 500)
+            except Exception as exc:
+                self._json({"error": "preflight crashed", "hint": f"{type(exc).__name__}: {exc}"}, 500)
                 return
             with state.lock:
                 state.preflight_report = report
                 # Gate: install_ready (zero FAILs among BLOCKING checks).
                 # Fall back to legacy "ok" for reports predating the field.
-                state.preflight_passed = bool(report.get("install_ready",
-                                                         report.get("ok")))
+                state.preflight_passed = bool(report.get("install_ready", report.get("ok")))
             save_progress(state)
             self._json(report)
         elif self.path == "/api/install/start":
@@ -497,22 +509,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "locked", "hint": reason}, 409)
                 return
             from ctl import install as _install
+
             with state.lock:
                 thread = state.install_thread
                 alive = thread is not None and thread.is_alive()
                 if alive:
-                    self._json({"error": "already running",
-                                "hint": "kill the active install first"}, 409)
+                    self._json({"error": "already running", "hint": "kill the active install first"}, 409)
                     return
                 job = _install.new_job()
                 import uuid as _uuid
+
                 job["id"] = _uuid.uuid4().hex[:12]
                 job["status"] = "queued"
                 state.install_job = job
                 state.install_stop.clear()
                 state.install_input.clear()
-                state.install_thread = threading.Thread(
-                    target=_install_worker, args=(state,), daemon=True)
+                state.install_thread = threading.Thread(target=_install_worker, args=(state,), daemon=True)
                 state.install_thread.start()
             self._json({"started": True, "job_id": job["id"]})
         elif self.path == "/api/install/state":
@@ -530,8 +542,7 @@ class Handler(BaseHTTPRequestHandler):
                 if state.install_job is None:
                     self._json({"error": "no job"}, 409)
                     return
-                waiting = next((step for step in state.install_job["steps"]
-                                if step.get("status") == "waiting"), None)
+                waiting = next((step for step in state.install_job["steps"] if step.get("status") == "waiting"), None)
                 if waiting and (waiting.get("prompt") or {}).get("kind") == "manual_setup":
                     state.install_job["inputs"][f"{waiting['id']}_confirmed"] = True
                     restart_manual = True
@@ -550,16 +561,13 @@ class Handler(BaseHTTPRequestHandler):
                     if thread is None or not thread.is_alive():
                         state.install_stop.clear()
                         state.install_input.clear()
-                        state.install_thread = threading.Thread(
-                            target=_install_worker, args=(state,), daemon=True)
+                        state.install_thread = threading.Thread(target=_install_worker, args=(state,), daemon=True)
                         state.install_thread.start()
             with state.lock:
                 job = state.install_job
-                active_waiting = next((step["id"] for step in job["steps"]
-                                       if step.get("status") == "waiting"), None)
+                active_waiting = next((step["id"] for step in job["steps"] if step.get("status") == "waiting"), None)
                 status = job["status"]
-            self._json({"continued": True, "status": status,
-                        "waiting_step": active_waiting})
+            self._json({"continued": True, "status": status, "waiting_step": active_waiting})
         elif self.path == "/api/install/authentik-admin/reset":
             # This is intentionally available only at the manual Authentik
             # administrator checkpoint.  It resets exactly akadmin and
@@ -569,24 +577,35 @@ class Handler(BaseHTTPRequestHandler):
                 job = state.install_job
                 allowed = can_reset_authentik_admin(job)
             if not allowed:
-                self._json({"error": "unavailable",
-                            "hint": "Authentik administrator recovery is available only at its setup step."}, 409)
+                self._json(
+                    {
+                        "error": "unavailable",
+                        "hint": "Authentik administrator recovery is available only at its setup step.",
+                    },
+                    409,
+                )
                 return
             from ctl import install as _install
+
             def log(line: str) -> None:
                 with state.lock:
                     for step in job["steps"]:
                         if step["id"] == "authentik_setup":
                             step["log"].append(line)
                             break
-            result = _install.reset_authentik_admin_password(
-                {"log_fn": lambda _step: log})
+
+            result = _install.reset_authentik_admin_password({"log_fn": lambda _step: log})
             if not result.get("ok"):
                 self._json({"error": "reset failed", "hint": result.get("error", "try again")}, 502)
                 return
-            self._json({"ok": True, "username": result["username"],
-                        "temporary_password": result["temporary_password"],
-                        "next": "Sign in to Authentik and change this temporary password before continuing."})
+            self._json(
+                {
+                    "ok": True,
+                    "username": result["username"],
+                    "temporary_password": result["temporary_password"],
+                    "next": "Sign in to Authentik and change this temporary password before continuing.",
+                }
+            )
         elif self.path == "/api/install/kill":
             with state.lock:
                 thread = state.install_thread
@@ -603,8 +622,7 @@ class Handler(BaseHTTPRequestHandler):
                 job = state.install_job
                 thread = state.install_thread
                 if job is None:
-                    self._json({"error": "no job",
-                                "hint": "start an install first"}, 409)
+                    self._json({"error": "no job", "hint": "start an install first"}, 409)
                     return
                 if thread is not None and thread.is_alive():
                     self._json({"error": "already running"}, 409)
@@ -612,8 +630,7 @@ class Handler(BaseHTTPRequestHandler):
                 job["status"] = "queued"
                 state.install_stop.clear()
                 state.install_input.clear()
-                state.install_thread = threading.Thread(
-                    target=_install_worker, args=(state,), daemon=True)
+                state.install_thread = threading.Thread(target=_install_worker, args=(state,), daemon=True)
                 state.install_thread.start()
             self._json({"retried": True})
         elif self.path == "/api/service/stop":
@@ -624,25 +641,23 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 payload = json.loads(self._body.decode() or "{}")
             except (ValueError, AttributeError):
-                self._json({"error": "bad request",
-                            "hint": 'send JSON {"mode": "once"|"disable"}'}, 400)
+                self._json({"error": "bad request", "hint": 'send JSON {"mode": "once"|"disable"}'}, 400)
                 return
             mode = payload.get("mode", "once")
             if mode not in ("once", "disable"):
-                self._json({"error": "bad request",
-                            "hint": 'mode must be "once" or "disable"'}, 400)
+                self._json({"error": "bad request", "hint": 'mode must be "once" or "disable"'}, 400)
                 return
             import subprocess as _sp
-            stop = _sp.run(["systemctl", "--user", "stop", "mu3lab-ctl"],
-                           capture_output=True, text=True, timeout=30)
+
+            stop = _sp.run(["systemctl", "--user", "stop", "mu3lab-ctl"], capture_output=True, text=True, timeout=30)
             if stop.returncode != 0:
-                self._json({"error": "stop failed",
-                            "hint": (stop.stdout + stop.stderr).strip()
-                            or "is mu3lab-ctl running?"}, 500)
+                self._json(
+                    {"error": "stop failed", "hint": (stop.stdout + stop.stderr).strip() or "is mu3lab-ctl running?"},
+                    500,
+                )
                 return
             if mode == "disable":
-                _sp.run(["systemctl", "--user", "disable", "mu3lab-ctl"],
-                        capture_output=True, timeout=30)
+                _sp.run(["systemctl", "--user", "disable", "mu3lab-ctl"], capture_output=True, timeout=30)
             self._json({"stopped": True, "autostart_off": mode == "disable"})
         else:
             self._json({"error": "not found"}, 404)
@@ -652,8 +667,7 @@ def main(argv: list[str] | None = None) -> int:
     """Parse flags, serve forever on 127.0.0.1. Ctrl-C stops (no cleanup needed)."""
     parser = argparse.ArgumentParser(description="Mu3Lab zero-install check dashboard")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--no-open", action="store_true",
-                        help="print the URL instead of opening a browser")
+    parser.add_argument("--no-open", action="store_true", help="print the URL instead of opening a browser")
     args = parser.parse_args(argv)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.state = State()  # type: ignore[attr-defined]

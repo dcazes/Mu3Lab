@@ -30,9 +30,8 @@ class OrderTests(unittest.TestCase):
     def test_fresh_sudo_runs_direct(self):
         calls: list[list[str]] = []
         result = privilege.run_privileged(
-            ["apt-get", "update"], _silent,
-            _exec=lambda argv: (calls.append(argv) or (0, "ok")),
-            _sudo_fresh=True)
+            ["apt-get", "update"], _silent, _exec=lambda argv: calls.append(argv) or (0, "ok"), _sudo_fresh=True
+        )
         self.assertTrue(result["ok"])
         self.assertEqual(calls[0][:2], ["sudo", "apt-get"])
         self.assertNotIn("pkexec", calls[0])
@@ -40,20 +39,22 @@ class OrderTests(unittest.TestCase):
     def test_pkexec_when_stale_but_graphical(self):
         calls: list[list[str]] = []
         result = privilege.run_privileged(
-            ["usermod", "-aG", "docker", "dak"], _silent,
-            _exec=lambda argv: (calls.append(argv) or (0, "ok")),
-            _sudo_fresh=False, _agent=True)
+            ["usermod", "-aG", "docker", "dak"],
+            _silent,
+            _exec=lambda argv: calls.append(argv) or (0, "ok"),
+            _sudo_fresh=False,
+            _agent=True,
+        )
         self.assertTrue(result["ok"])
         self.assertEqual(calls[0][0], "pkexec")
 
     def test_terminal_fallback(self):
         result = privilege.run_privileged(
-            ["systemctl", "enable", "--now", "docker"], _silent,
-            _sudo_fresh=False, _agent=False)
+            ["systemctl", "enable", "--now", "docker"], _silent, _sudo_fresh=False, _agent=False
+        )
         self.assertFalse(result["ok"])
         self.assertTrue(result["need_terminal"])
-        self.assertEqual(result["terminal_command"],
-                         "sudo systemctl enable --now docker")
+        self.assertEqual(result["terminal_command"], "sudo systemctl enable --now docker")
 
 
 class QuotingTests(unittest.TestCase):
@@ -71,8 +72,9 @@ class NoSecretsTests(unittest.TestCase):
         # The backend must never accept secrets: fail if any parameter in
         # this module is named like a credential.
         import ctl.privilege as module
+
         for name, func in vars(module).items():
-            if not callable(func) or not getattr(func, "__module__", "") == module.__name__:
+            if not callable(func) or getattr(func, "__module__", "") != module.__name__:
                 continue
             for param in inspect.signature(func).parameters:
                 self.assertNotIn("password", param.lower(), name)
@@ -85,25 +87,27 @@ class SessionTests(unittest.TestCase):
         privilege.release_elevation()
 
     def test_fresh_sudo_needs_no_worker(self):
-        with unittest.mock.patch.object(
-                privilege, "has_fresh_sudo", return_value=True):
+        with unittest.mock.patch.object(privilege, "has_fresh_sudo", return_value=True):
             mode = privilege.ensure_elevation(_silent)
         self.assertEqual(mode, "sudo")
         self.assertIsNone(privilege._worker)
 
     def test_worker_spawned_once(self):
         made: list[str] = []
+
         class FakeWorker:
             def start(self, log=None):
                 made.append("spawn")
                 return True
+
             def alive(self):
                 return True
-        with unittest.mock.patch.object(
-                privilege, "has_fresh_sudo", return_value=False), \
-             unittest.mock.patch.object(
-                privilege, "has_polkit_agent", return_value=True), \
-             unittest.mock.patch("ctl.elevate.Worker", FakeWorker):
+
+        with (
+            unittest.mock.patch.object(privilege, "has_fresh_sudo", return_value=False),
+            unittest.mock.patch.object(privilege, "has_polkit_agent", return_value=True),
+            unittest.mock.patch("ctl.elevate.Worker", FakeWorker),
+        ):
             self.assertEqual(privilege.ensure_elevation(_silent), "worker")
             # Second call reuses; no second spawn.
             self.assertEqual(privilege.ensure_elevation(_silent), "worker")
@@ -113,11 +117,12 @@ class SessionTests(unittest.TestCase):
         class DeadWorker:
             def start(self, log=None):
                 return False
-        with unittest.mock.patch.object(
-                privilege, "has_fresh_sudo", return_value=False), \
-             unittest.mock.patch.object(
-                privilege, "has_polkit_agent", return_value=True), \
-             unittest.mock.patch("ctl.elevate.Worker", DeadWorker):
+
+        with (
+            unittest.mock.patch.object(privilege, "has_fresh_sudo", return_value=False),
+            unittest.mock.patch.object(privilege, "has_polkit_agent", return_value=True),
+            unittest.mock.patch("ctl.elevate.Worker", DeadWorker),
+        ):
             logged: list[str] = []
             mode = privilege.ensure_elevation(logged.append)
         self.assertEqual(mode, "terminal")
@@ -126,8 +131,10 @@ class SessionTests(unittest.TestCase):
         class LiveWorker:
             def alive(self):
                 return True
+
             def run(self, argv, timeout=300):
                 return 0, "via-worker"
+
         privilege._worker = LiveWorker()
         logged: list[str] = []
         result = privilege.run_privileged(["apt-get", "update"], logged.append)
@@ -136,11 +143,14 @@ class SessionTests(unittest.TestCase):
 
     def test_release_stops_worker(self):
         stopped: list[str] = []
+
         class LiveWorker:
             def alive(self):
                 return True
+
             def stop(self):
                 stopped.append("stop")
+
         privilege._worker = LiveWorker()
         privilege.release_elevation()
         self.assertEqual(stopped, ["stop"])

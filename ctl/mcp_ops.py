@@ -12,11 +12,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from ctl import actions
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
+from ctl.mcp_credentials import ensure as ensure_credentials
 from ctl.mcp_registry import credential_path, missing_credentials
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -91,12 +93,19 @@ def _decode_rpc_response(payload: bytes, content_type: str) -> dict:
     return decoded
 
 
-def _rpc_request(url: str, method: str, request_id: int, *, token: str = "",
-                 session_id: str = "", params: dict | None = None) -> tuple[dict, str]:
+def _rpc_request(
+    url: str, method: str, request_id: int, *, token: str = "", session_id: str = "", params: dict | None = None
+) -> tuple[dict, str]:
     if params is None:
-        params = ({"protocolVersion": "2025-03-26", "capabilities": {},
-                   "clientInfo": {"name": "mu3lab-verifier", "version": "1"}}
-                  if method == "initialize" else {})
+        params = (
+            {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "mu3lab-verifier", "version": "1"},
+            }
+            if method == "initialize"
+            else {}
+        )
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
@@ -106,8 +115,7 @@ def _rpc_request(url: str, method: str, request_id: int, *, token: str = "",
         headers["Authorization"] = f"Bearer {token}"
     if session_id:
         headers["Mcp-Session-Id"] = session_id
-    payload = json.dumps({"jsonrpc": "2.0", "id": request_id,
-                          "method": method, "params": params}).encode("utf-8")
+    payload = json.dumps({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=15) as response:
         payload = response.read(2_000_001)
@@ -134,24 +142,40 @@ def _rpc_notification(url: str, method: str, *, token: str = "", session_id: str
 
 
 def _tool_risk(name: str) -> str:
-    write_words = ("create", "add", "update", "delete", "remove", "set", "upload", "move", "write",
-                   "mark", "send", "share", "publish", "run", "start", "stop", "execute")
-    read_words = ("get", "list", "search", "find", "query", "read", "describe", "fetch", "view",
-                  "lookup", "inspect")
+    write_words = (
+        "create",
+        "add",
+        "update",
+        "delete",
+        "remove",
+        "set",
+        "upload",
+        "move",
+        "write",
+        "mark",
+        "send",
+        "share",
+        "publish",
+        "run",
+        "start",
+        "stop",
+        "execute",
+    )
+    read_words = ("get", "list", "search", "find", "query", "read", "describe", "fetch", "view", "lookup", "inspect")
     words = set(re.split(r"[^a-z0-9]+", name.lower()))
     if words.intersection(write_words):
         return "write"
     return "read" if words.intersection(read_words) else "write"
 
 
-def _discover_tools(server, values: dict[str, str]) -> list[dict[str, str | bool]]:
+def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
     """Verify the actual tool surface instead of treating an open port as success."""
     if server.transport == "openapi-bridge":
         request = urllib.request.Request(server.local_health, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=15) as response:
             schema = json.load(response)
         paths = schema.get("paths", {}) if isinstance(schema, dict) else {}
-        tools = []
+        tools: list[dict[str, Any]] = []
         for path, operations in paths.items():
             if not isinstance(operations, dict):
                 continue
@@ -159,8 +183,14 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, str | bool
                 if verb.lower() not in {"get", "post", "put", "patch", "delete"} or not isinstance(operation, dict):
                     continue
                 name = str(operation.get("operationId") or f"{verb}_{path}").strip()
-                tools.append({"id": name, "title": str(operation.get("summary") or name),
-                              "risk": "read" if verb.lower() == "get" else "write", "enabled": True})
+                tools.append(
+                    {
+                        "id": name,
+                        "title": str(operation.get("summary") or name),
+                        "risk": "read" if verb.lower() == "get" else "write",
+                        "enabled": True,
+                    }
+                )
         if not tools:
             raise ValueError("MCP OpenAPI bridge exposed no tools")
         return tools
@@ -175,25 +205,35 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, str | bool
     result = response.get("result", {})
     raw_tools = result.get("tools", []) if isinstance(result, dict) else []
     tools = [
-        {"id": str(tool.get("name", "")),
-         "title": str(tool.get("title") or tool.get("description") or tool.get("name", ""))[:240],
-         "risk": _tool_risk(str(tool.get("name", ""))), "enabled": True,
-         "parameters": tool.get("inputSchema") or {"type": "object", "properties": {}}}
-        for tool in raw_tools if isinstance(tool, dict) and tool.get("name")
+        {
+            "id": str(tool.get("name", "")),
+            "title": str(tool.get("title") or tool.get("description") or tool.get("name", ""))[:240],
+            "risk": _tool_risk(str(tool.get("name", ""))),
+            "enabled": True,
+            "parameters": tool.get("inputSchema") or {"type": "object", "properties": {}},
+        }
+        for tool in raw_tools
+        if isinstance(tool, dict) and tool.get("name")
     ]
     if not tools:
         raise ValueError("MCP server returned no tools")
     if getattr(server, "id", "") == "surfsense-official":
-        check, _ = _rpc_request(url, "tools/call", 3, token=token, session_id=session_id,
-                                params={"name": "surfsense_list_workspaces",
-                                        "arguments": {"response_format": "json"}})
+        check, _ = _rpc_request(
+            url,
+            "tools/call",
+            3,
+            token=token,
+            session_id=session_id,
+            params={"name": "surfsense_list_workspaces", "arguments": {"response_format": "json"}},
+        )
         result = check.get("result", {})
         if not isinstance(result, dict) or result.get("isError"):
             raise ValueError("SurfSense rejected the token or workspace API check")
     if getattr(server, "id", "") in {"nextcloud-context-agent", "adventurelog"}:
         name = "list_files" if server.id == "nextcloud-context-agent" else "list_collections"
-        check, _ = _rpc_request(url, "tools/call", 3, token=token, session_id=session_id,
-                                params={"name": name, "arguments": {}})
+        check, _ = _rpc_request(
+            url, "tools/call", 3, token=token, session_id=session_id, params={"name": name, "arguments": {}}
+        )
         result = check.get("result", {})
         if not isinstance(result, dict) or result.get("isError"):
             raise ValueError(f"{server.name} could not read app data with the saved credential")
@@ -215,56 +255,81 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
             continue
         project = credential_path(server.id).parent
         if not (project / "docker-compose.yml").is_file():
-            state.set_mcp_server(server.id, service_id, enabled=True, state="failed",
-                                 error={"message": "MCP runtime is missing; reinstall the MCP."})
+            state.set_mcp_server(
+                server.id,
+                service_id,
+                enabled=True,
+                state="failed",
+                error={"message": "MCP runtime is missing; reinstall the MCP."},
+            )
             success = success and not running
             continue
         if not running:
             if runtime["state"] in {"prepared", "authentication_required"}:
                 continue
             rc, output = actions.compose_action(project, "stop", log)
-            state.set_mcp_server(server.id, service_id, enabled=True,
-                                 state="stopped" if rc == 0 else "failed",
-                                 error={} if rc == 0 else {"message": redact(output)})
+            state.set_mcp_server(
+                server.id,
+                service_id,
+                enabled=True,
+                state="stopped" if rc == 0 else "failed",
+                error={} if rc == 0 else {"message": redact(output)},
+            )
             success = success and rc == 0
             from ctl.lobehub_ops import sync_mcp
+
             linked, detail = sync_mcp(server, [], "", enabled=False, log=log)
             if not linked:
                 log(detail)
             continue
         missing = missing_credentials(server)
         if missing:
-            state.set_mcp_server(server.id, service_id, enabled=True,
-                                 state="authentication_required",
-                                 error={"message": "Configure: " + ", ".join(missing)})
+            provisioned, provision_detail = ensure_credentials(server, log)
+            if provisioned:
+                log(provision_detail)
+            missing = missing_credentials(server)
+        if missing:
+            state.set_mcp_server(
+                server.id,
+                service_id,
+                enabled=True,
+                state="authentication_required",
+                error={"message": provision_detail},
+            )
             continue
         rc, output = actions.compose_up(project, log, wait_timeout=120)
         if rc:
-            state.set_mcp_server(server.id, service_id, enabled=True, state="failed",
-                                 error={"message": redact(output)})
+            state.set_mcp_server(server.id, service_id, enabled=True, state="failed", error={"message": redact(output)})
             success = False
             continue
         healthy, detail = _probe(server.local_health)
         if not healthy:
-            state.set_mcp_server(server.id, service_id, enabled=True, state="degraded",
-                                 error={"message": redact(detail)})
+            state.set_mcp_server(
+                server.id, service_id, enabled=True, state="degraded", error={"message": redact(detail)}
+            )
             success = False
             continue
         try:
             tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
-            state.set_mcp_server(server.id, service_id, enabled=True, state="live",
-                                 tools=tools, verified=True)
+            state.set_mcp_server(server.id, service_id, enabled=True, state="live", tools=tools, verified=True)
             from ctl.lobehub_ops import sync_mcp
+
             linked, link_detail = sync_mcp(
-                server, tools, read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
-                enabled=True, log=log)
+                server,
+                tools,
+                read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
+                enabled=True,
+                log=log,
+            )
             if not linked:
-                state.set_mcp_server(server.id, service_id, enabled=True, state="incompatible",
-                                     error={"message": link_detail})
+                state.set_mcp_server(
+                    server.id, service_id, enabled=True, state="incompatible", error={"message": link_detail}
+                )
                 success = False
         except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-            state.set_mcp_server(server.id, service_id, enabled=True, state="degraded",
-                                 error={"message": redact(str(exc))})
+            state.set_mcp_server(
+                server.id, service_id, enabled=True, state="degraded", error={"message": redact(str(exc))}
+            )
             success = False
     return success
 
@@ -276,13 +341,15 @@ def reconcile_lifecycle(root: Path, log) -> None:
         return
     registry = load_registry()
     from ctl.service_state import _healthy
+
     for server in load_catalog(registry):
         runtime = state.mcp_server(server.id)
         if not runtime or not runtime["enabled"] or server.status != "accepted":
             continue
         installation = state.installation(server.service_id)
-        app_healthy = bool(installation and installation.get("state") == "running"
-                           and _healthy(registry.get(server.service_id))[0])
+        app_healthy = bool(
+            installation and installation.get("state") == "running" and _healthy(registry.get(server.service_id))[0]
+        )
         mcp_healthy = _probe(server.local_health)[0] if runtime["state"] == "live" else False
         if app_healthy and (runtime["state"] != "live" or not mcp_healthy):
             sync_application(server.service_id, running=True, root=root, log=log)
@@ -294,20 +361,48 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
     """Apply one checked-in reviewed runtime, restoring the previous files on failure."""
     candidate = server.reviewed_update
     if not candidate:
-        store.transition(job_id, "failed", actor=actor, detail="No reviewed MCP update is available.",
-                         error_code="mcp_update_unavailable", step_id="validate")
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail="No reviewed MCP update is available.",
+            error_code="mcp_update_unavailable",
+            step_id="validate",
+        )
         return
     source = (root / candidate["compose_dir"]).resolve()
     if root.resolve() not in source.parents or not (source / "docker-compose.yml").is_file():
-        store.transition(job_id, "failed", actor=actor, detail="Reviewed update bundle is missing.",
-                         error_code="mcp_update_missing", step_id="validate")
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail="Reviewed update bundle is missing.",
+            error_code="mcp_update_missing",
+            step_id="validate",
+        )
         return
     target = credential_path(server.id).parent
     if not (target / "docker-compose.yml").is_file():
-        store.transition(job_id, "failed", actor=actor, detail="Install the current MCP before updating.",
-                         error_code="mcp_not_installed", step_id="validate")
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail="Install the current MCP before updating.",
+            error_code="mcp_not_installed",
+            step_id="validate",
+        )
         return
     state = ControlState.runtime()
+    if state is None:
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail="Runtime state is not initialized.",
+            error_code="runtime_unavailable",
+            step_id="validate",
+        )
+        return
     previous = state.mcp_server(server.id) if state else None
     with tempfile.TemporaryDirectory(prefix="mu3lab-mcp-rollback-") as directory:
         backup = Path(directory) / "previous"
@@ -329,16 +424,25 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
                 raise ValueError("Updated MCP health check failed: " + redact(detail))
             tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
             from ctl.lobehub_ops import sync_mcp
-            linked, detail = sync_mcp(server, tools, read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
-                                      enabled=True, log=log)
+
+            linked, detail = sync_mcp(
+                server,
+                tools,
+                read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
+                enabled=True,
+                log=log,
+            )
             if not linked:
                 raise ValueError(detail)
-            state.set_mcp_server(server.id, server.service_id, enabled=True,
-                                 state="live", tools=tools, verified=True)
-            store.transition(job_id, "succeeded", actor=actor,
-                             detail=f"{server.name} updated to {candidate['version']} and verified.",
-                             step_id="complete")
-        except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            state.set_mcp_server(server.id, server.service_id, enabled=True, state="live", tools=tools, verified=True)
+            store.transition(
+                job_id,
+                "succeeded",
+                actor=actor,
+                detail=f"{server.name} updated to {candidate['version']} and verified.",
+                step_id="complete",
+            )
+        except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError):
             for item in target.iterdir():
                 if item.name != ".env":
                     if item.is_dir():
@@ -347,14 +451,22 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
                         item.unlink()
             shutil.copytree(backup, target, dirs_exist_ok=True)
             rc, output = actions.compose_up(target, log, recreate=True, wait_timeout=120)
-            state.set_mcp_server(server.id, server.service_id, enabled=True,
-                                 state="live" if rc == 0 else "failed",
-                                 tools=(previous or {}).get("tool_snapshot") if rc == 0 else None,
-                                 error={} if rc == 0 else {"message": redact(output)})
-            store.transition(job_id, "failed", actor=actor,
-                             detail="Update failed; prior MCP runtime " + ("restored." if rc == 0 else "could not be restored."),
-                             error_code="mcp_update_rolled_back" if rc == 0 else "mcp_rollback_failed",
-                             step_id="rollback")
+            state.set_mcp_server(
+                server.id,
+                server.service_id,
+                enabled=True,
+                state="live" if rc == 0 else "failed",
+                tools=(previous or {}).get("tool_snapshot") if rc == 0 else None,
+                error={} if rc == 0 else {"message": redact(output)},
+            )
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail="Update failed; prior MCP runtime " + ("restored." if rc == 0 else "could not be restored."),
+                error_code="mcp_update_rolled_back" if rc == 0 else "mcp_rollback_failed",
+                step_id="rollback",
+            )
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
@@ -366,9 +478,14 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
     server = next((candidate for candidate in catalog if candidate.id == server_id), None)
     state = ControlState.runtime()
     if not server or server.status != "accepted" or action not in SUPPORTED_ACTIONS or state is None:
-        store.transition(job_id, "failed", actor=worker_id,
-                         detail="The worker rejected an unavailable MCP operation.",
-                         error_code="unsupported_mcp_action", step_id="validate")
+        store.transition(
+            job_id,
+            "failed",
+            actor=worker_id,
+            detail="The worker rejected an unavailable MCP operation.",
+            error_code="unsupported_mcp_action",
+            step_id="validate",
+        )
         return
     installation = state.installation(server.service_id)
     if action != "disable" and (not installation or installation.get("state") != "running"):
@@ -376,18 +493,36 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             try:
                 _materialize(server, root)
                 state.set_mcp_server(server.id, server.service_id, enabled=True, state="prepared")
-                store.transition(job_id, "succeeded", actor=actor,
-                                 detail=f"{server.name} prepared; it will connect when the app and credentials are ready.",
-                                 step_id="complete")
+                store.transition(
+                    job_id,
+                    "succeeded",
+                    actor=actor,
+                    detail=f"{server.name} prepared; it will connect when the app and credentials are ready.",
+                    step_id="complete",
+                )
             except (OSError, ValueError) as exc:
-                store.transition(job_id, "failed", actor=actor, detail=redact(str(exc)),
-                                 error_code="mcp_materialize_failed", step_id="materialize")
+                store.transition(
+                    job_id,
+                    "failed",
+                    actor=actor,
+                    detail=redact(str(exc)),
+                    error_code="mcp_materialize_failed",
+                    step_id="materialize",
+                )
             return
-        store.transition(job_id, "failed", actor=actor,
-                         detail=f"Start {server.service_id} before enabling its MCP.",
-                         error_code="mcp_application_stopped", step_id="validate")
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail=f"Start {server.service_id} before enabling its MCP.",
+            error_code="mcp_application_stopped",
+            step_id="validate",
+        )
         return
-    log = lambda line: store.append_event(job_id, "log", line)
+
+    def log(line: str) -> None:
+        store.append_event(job_id, "log", line)
+
     if action == "update":
         _update_claimed(store, job_id, actor, server, root, log)
         return
@@ -395,83 +530,141 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         try:
             _materialize(server, root)
             state.set_mcp_server(server.id, server.service_id, enabled=True, state="prepared")
-            store.transition(job_id, "succeeded", actor=actor,
-                             detail=f"{server.name} prepared. Add credentials and connect to verify its tools.",
-                             step_id="complete")
+            store.transition(
+                job_id,
+                "succeeded",
+                actor=actor,
+                detail=f"{server.name} prepared. Add credentials and connect to verify its tools.",
+                step_id="complete",
+            )
         except (OSError, ValueError) as exc:
-            store.transition(job_id, "failed", actor=actor, detail=redact(str(exc)),
-                             error_code="mcp_materialize_failed", step_id="materialize")
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=redact(str(exc)),
+                error_code="mcp_materialize_failed",
+                step_id="materialize",
+            )
         return
     if action == "disable":
         project = credential_path(server.id).parent
         if (project / "docker-compose.yml").is_file():
             rc, output = actions.compose_action(project, "stop", log)
             if rc:
-                store.transition(job_id, "failed", actor=actor, detail=redact(output),
-                                 error_code="mcp_stop_failed", step_id="stop")
+                store.transition(
+                    job_id, "failed", actor=actor, detail=redact(output), error_code="mcp_stop_failed", step_id="stop"
+                )
                 return
         state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
         from ctl.lobehub_ops import sync_mcp
+
         linked, link_detail = sync_mcp(server, [], "", enabled=False, log=log)
         if not linked:
-            store.transition(job_id, "failed", actor=actor, detail=link_detail,
-                             error_code="lobehub_registration_failed", step_id="register")
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=link_detail,
+                error_code="lobehub_registration_failed",
+                step_id="register",
+            )
             return
-        store.transition(job_id, "succeeded", actor=actor,
-                         detail=f"{server.name} disabled.", step_id="complete")
+        store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
         return
     missing = missing_credentials(server)
     if missing:
-        state.set_mcp_server(server.id, server.service_id, enabled=False,
-                             state="authentication_required",
-                             error={"message": "Configure: " + ", ".join(missing)})
-        store.transition(job_id, "failed", actor=actor,
-                         detail="Required MCP application credentials are missing.",
-                         error_code="mcp_authentication_required", step_id="validate")
+        provisioned, provision_detail = ensure_credentials(server, log)
+        if provisioned:
+            log(provision_detail)
+        missing = missing_credentials(server)
+    if missing:
+        state.set_mcp_server(
+            server.id,
+            server.service_id,
+            enabled=False,
+            state="authentication_required",
+            error={"message": provision_detail},
+        )
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail=provision_detail,
+            error_code="mcp_authentication_required",
+            step_id="validate",
+        )
         return
     try:
         project = _materialize(server, root)
     except (OSError, ValueError) as exc:
-        store.transition(job_id, "failed", actor=actor, detail=redact(str(exc)),
-                         error_code="mcp_materialize_failed", step_id="materialize")
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail=redact(str(exc)),
+            error_code="mcp_materialize_failed",
+            step_id="materialize",
+        )
         return
     state.set_mcp_server(server.id, server.service_id, enabled=True, state="starting")
     rc, output = actions.compose_up(project, log, wait_timeout=120)
     if rc:
-        state.set_mcp_server(server.id, server.service_id, enabled=True, state="failed",
-                             error={"message": redact(output)})
-        store.transition(job_id, "failed", actor=actor, detail=redact(output),
-                         error_code="mcp_start_failed", step_id="start")
+        state.set_mcp_server(
+            server.id, server.service_id, enabled=True, state="failed", error={"message": redact(output)}
+        )
+        store.transition(
+            job_id, "failed", actor=actor, detail=redact(output), error_code="mcp_start_failed", step_id="start"
+        )
         return
     healthy, detail = _probe(server.local_health)
     if not healthy:
-        state.set_mcp_server(server.id, server.service_id, enabled=True, state="degraded",
-                             error={"message": redact(detail)})
-        store.transition(job_id, "failed", actor=actor, detail=redact(detail),
-                         error_code="mcp_verify_failed", step_id="verify")
+        state.set_mcp_server(
+            server.id, server.service_id, enabled=True, state="degraded", error={"message": redact(detail)}
+        )
+        store.transition(
+            job_id, "failed", actor=actor, detail=redact(detail), error_code="mcp_verify_failed", step_id="verify"
+        )
         return
     try:
         tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
-    except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError,
-            json.JSONDecodeError) as exc:
+    except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
         detail = f"Tool discovery failed: {exc}"
-        state.set_mcp_server(server.id, server.service_id, enabled=True, state="degraded",
-                             error={"message": redact(detail)})
-        store.transition(job_id, "failed", actor=actor, detail=redact(detail),
-                         error_code="mcp_tool_discovery_failed", step_id="verify_tools")
+        state.set_mcp_server(
+            server.id, server.service_id, enabled=True, state="degraded", error={"message": redact(detail)}
+        )
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail=redact(detail),
+            error_code="mcp_tool_discovery_failed",
+            step_id="verify_tools",
+        )
         return
-    state.set_mcp_server(server.id, server.service_id, enabled=True, state="live",
-                         tools=tools, verified=True)
+    state.set_mcp_server(server.id, server.service_id, enabled=True, state="live", tools=tools, verified=True)
     from ctl.lobehub_ops import sync_mcp
+
     linked, link_detail = sync_mcp(
-        server, tools, read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
-        enabled=True, log=log)
+        server, tools, read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""), enabled=True, log=log
+    )
     if not linked:
-        state.set_mcp_server(server.id, server.service_id, enabled=True, state="incompatible",
-                             error={"message": link_detail})
-        store.transition(job_id, "failed", actor=actor, detail=link_detail,
-                         error_code="lobehub_registration_failed", step_id="register_lobehub")
+        state.set_mcp_server(
+            server.id, server.service_id, enabled=True, state="incompatible", error={"message": link_detail}
+        )
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail=link_detail,
+            error_code="lobehub_registration_failed",
+            step_id="register_lobehub",
+        )
         return
-    store.transition(job_id, "succeeded", actor=actor,
-                     detail=f"{server.name} is live and registered with LobeChat.",
-                     step_id="complete")
+    store.transition(
+        job_id,
+        "succeeded",
+        actor=actor,
+        detail=f"{server.name} is live and registered with LobeChat.",
+        step_id="complete",
+    )

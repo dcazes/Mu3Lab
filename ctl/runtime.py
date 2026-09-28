@@ -8,10 +8,12 @@ WHY: App data, backup state, and secrets must never be mixed with Git-managed
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_RUNTIME_ROOT = Path("/srv/mu3lab")
+PRODUCTION_RUNTIME_ROOT = Path("/srv/mu3lab")
+DEFAULT_RUNTIME_ROOT = Path(os.environ.get("MU3LAB_RUNTIME_ROOT") or PRODUCTION_RUNTIME_ROOT)
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,10 @@ class RuntimePaths:
 
     def as_dict(self) -> dict[str, str]:
         """Return UI-safe path labels, never filesystem metadata or secrets."""
-        return {"root": str(self.root), "data": str(self.data),
-                "backups": str(self.backups), "runtime": str(self.runtime),
-                "projects": str(self.projects)}
+        return {
+            "root": str(self.root),
+            "data": str(self.data),
+            "backups": str(self.backups),
+            "runtime": str(self.runtime),
+            "projects": str(self.projects),
+        }

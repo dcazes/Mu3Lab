@@ -24,18 +24,16 @@ import subprocess
 from collections.abc import Callable
 
 
-def _exec(argv: list[str], timeout: int = 300,
-          env: dict | None = None) -> tuple[int, str]:
+def _exec(argv: list[str], timeout: int = 300, env: dict | None = None) -> tuple[int, str]:
     """Run argv, return (rc, merged output). Never raises, never uses shell.
 
     `env` merges over os.environ (used for DOCKER_CONFIG isolation); None
     inherits the environment unchanged.
     """
     import os as _os
+
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=timeout,
-                              env={**_os.environ, **(env or {})})
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env={**_os.environ, **(env or {})})
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except FileNotFoundError:
         return 127, f"{argv[0]}: command not found"
@@ -56,8 +54,7 @@ def has_polkit_agent(env: dict | None = None) -> bool:
     `env` injected for tests; live callers pass nothing (reads os.environ).
     """
     env = os.environ if env is None else env
-    return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")
-                or env.get("DBUS_SESSION_BUS_ADDRESS"))
+    return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY") or env.get("DBUS_SESSION_BUS_ADDRESS"))
 
 
 def quote_terminal(argv: list[str]) -> str:
@@ -84,6 +81,7 @@ def ensure_elevation(log: Callable[[str], None]) -> str:
         return "worker"
     if has_polkit_agent():
         from ctl import elevate
+
         worker = elevate.Worker()
         if worker.start(log):
             _worker = worker
@@ -110,9 +108,14 @@ def release_elevation() -> None:
         _worker = None
 
 
-def run_privileged(argv: list[str], log: Callable[[str], None],
-                   _exec=_exec, _sudo_fresh: bool | None = None,
-                   _agent: bool | None = None, timeout: int = 300) -> dict:
+def run_privileged(
+    argv: list[str],
+    log: Callable[[str], None],
+    _exec=_exec,
+    _sudo_fresh: bool | None = None,
+    _agent: bool | None = None,
+    timeout: int = 300,
+) -> dict:
     """Run a root-needing command, or return how to run it by hand.
 
     Returns {"ok": True, "rc", "output"} on success, {"ok": False, ...} on
@@ -130,25 +133,20 @@ def run_privileged(argv: list[str], log: Callable[[str], None],
         return {"ok": rc == 0, "rc": rc, "output": out}
     fresh = has_fresh_sudo(_exec) if _sudo_fresh is None else _sudo_fresh
     if fresh:
-        rc, out = (_exec(["sudo"] + argv) if timeout == 300
-                   else _exec(["sudo"] + argv, timeout=timeout))
+        rc, out = _exec(["sudo", *argv]) if timeout == 300 else _exec(["sudo", *argv], timeout=timeout)
         log(out or f"(exit {rc}, no output)")
         return {"ok": rc == 0, "rc": rc, "output": out}
     agent = has_polkit_agent() if _agent is None else _agent
     if agent:
         # Standalone single command (no session): one dialog for this call.
         # Install jobs avoid this path via ensure_elevation().
-        rc, out = (_exec(["pkexec"] + argv) if timeout == 300
-                   else _exec(["pkexec"] + argv, timeout=timeout))
+        rc, out = _exec(["pkexec", *argv]) if timeout == 300 else _exec(["pkexec", *argv], timeout=timeout)
         log(out or f"(exit {rc}, no output)")
         # A background worker has no reliable way to surface a polkit dialog.
         # Convert a timed-out dialog into the same explicit terminal fallback
         # used when no polkit agent exists, instead of returning a generic
         # command failure with no recovery path.
         if rc == 124:
-            return {"ok": False, "need_terminal": True,
-                    "terminal_command": quote_terminal(argv),
-                    "output": out}
+            return {"ok": False, "need_terminal": True, "terminal_command": quote_terminal(argv), "output": out}
         return {"ok": rc == 0, "rc": rc, "output": out}
-    return {"ok": False, "need_terminal": True,
-            "terminal_command": quote_terminal(argv)}
+    return {"ok": False, "need_terminal": True, "terminal_command": quote_terminal(argv)}

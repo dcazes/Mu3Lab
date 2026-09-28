@@ -7,7 +7,6 @@ import json
 from ctl import actions
 from ctl.mcp_activity import McpActivity
 
-
 SQL = """
 SELECT json_build_object(
   'ref', p.id, 'server', substring(p.identifier from 8),
@@ -25,8 +24,23 @@ ORDER BY m.created_at DESC LIMIT 500;
 
 def ingest(log) -> None:
     rc, output = actions.docker_cmd_stdin(
-        ["docker", "exec", "-i", "mu3lab-lobehub-postgres-1", "psql", "-At", "-v", "ON_ERROR_STOP=1",
-         "-U", "postgres", "-d", "lobehub"], SQL, lambda _line: None)
+        [
+            "docker",
+            "exec",
+            "-i",
+            "mu3lab-lobehub-postgres-1",
+            "psql",
+            "-At",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "postgres",
+            "-d",
+            "lobehub",
+        ],
+        SQL,
+        lambda _line: None,
+    )
     if rc:
         return
     store = McpActivity()
@@ -35,8 +49,13 @@ def ingest(log) -> None:
             row = json.loads(line)
             if not all(row.get(key) for key in ("ref", "server", "tool", "actor", "created_at")):
                 continue
-            store.ingest_chat_call(str(row["ref"]), str(row["server"]), str(row["tool"]),
-                                   str(row["actor"]), str(row["outcome"]),
-                                   str(row["created_at"]))
+            store.ingest_chat_call(
+                str(row["ref"]),
+                str(row["server"]),
+                str(row["tool"]),
+                str(row["actor"]),
+                str(row["outcome"]),
+                str(row["created_at"]),
+            )
         except (ValueError, TypeError):
             log("Skipped malformed LobeChat MCP activity metadata.")

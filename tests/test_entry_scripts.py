@@ -24,38 +24,29 @@ class EntryScriptTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         helper = root / "tools" / "open_tailscale_login.sh"
         self.assertTrue(helper.is_file())
-        result = subprocess.run(["bash", "-n", str(helper)], capture_output=True,
-                                text=True)
+        result = subprocess.run(["bash", "-n", str(helper)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("xdg-open", helper.read_text(encoding="utf-8"))
 
     def test_ready_preflight_keeps_install_action_available(self):
-        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
-            encoding="utf-8"
-        )
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(encoding="utf-8")
         self.assertIn("Host prerequisites are ready.", page)
         self.assertIn("btn-inst').disabled = false", page)
         self.assertNotIn("Everything above is already installed — nothing to do.", page)
 
     def test_install_completion_points_to_real_dashboard(self):
-        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
-            encoding="utf-8"
-        )
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(encoding="utf-8")
         self.assertIn("All done", page)
         self.assertIn("real-dashboard-link", page)
         self.assertIn("ts\\.net", page)
 
     def test_manual_install_resume_keeps_polling_and_shows_checking(self):
-        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
-            encoding="utf-8"
-        )
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(encoding="utf-8")
         self.assertIn("checking the completed setup", page)
         self.assertIn("startInstallPolling()", page)
         self.assertIn("['ready', 'failed', 'cancelled']", page)
         self.assertIn("continueInFlight", page)
 
     def test_protected_dashboard_prompt_names_its_destination(self):
-        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(
-            encoding="utf-8"
-        )
+        page = (Path(__file__).resolve().parents[1] / "tools" / "check_page.html").read_text(encoding="utf-8")
         self.assertIn("Open protected dashboard", page)

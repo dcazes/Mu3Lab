@@ -29,8 +29,9 @@ def write(server, submitted: dict[str, Any]) -> None:
         if prefix and not value.startswith(prefix):
             raise ValueError(f"{key} must use the expected {prefix}… format")
         values[str(field["env"])] = value
-    missing = [str(field["key"]) for field in server.credentials
-               if field.get("required") and not values.get(str(field["env"]))]
+    missing = [
+        str(field["key"]) for field in server.credentials if field.get("required") and not values.get(str(field["env"]))
+    ]
     if missing:
         raise ValueError("required MCP configuration is missing: " + ", ".join(missing))
     temporary = target.with_suffix(".tmp")

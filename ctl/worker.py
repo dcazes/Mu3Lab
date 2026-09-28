@@ -16,12 +16,18 @@ from pathlib import Path
 
 from ctl.core_setup import execute_claimed
 from ctl.jobs import JobStore
-from ctl.service_ops import execute_claimed as execute_service_claimed
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
+from ctl.service_ops import execute_claimed as execute_service_claimed
 
 ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
+
+
+def _maintain_lease(store: JobStore, job: dict, worker_id: str, stop: threading.Event) -> None:
+    while not stop.wait(10):
+        if not store.heartbeat(str(job["id"]), worker_id, step_id=str(job.get("step_id") or "")):
+            return
 
 
 def run() -> int:
@@ -54,6 +60,7 @@ def run() -> int:
             next_mcp_reconcile = time.monotonic() + 60
             try:
                 from ctl.mcp_ops import reconcile_lifecycle
+
                 reconcile_lifecycle(ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}", flush=True)
@@ -61,11 +68,13 @@ def run() -> int:
             next_mcp_activity = time.monotonic() + 60
             try:
                 from ctl.mcp_chat_activity import ingest
+
                 ingest(lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab MCP activity import deferred: {exc}", flush=True)
         try:
             from ctl.install_batches import InstallBatchStore
+
             batches = InstallBatchStore.runtime()
             if batches:
                 batches.reconcile(store)
@@ -76,14 +85,9 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         heartbeat_stop = threading.Event()
-
-        def maintain_lease() -> None:
-            while not heartbeat_stop.wait(10):
-                if not store.heartbeat(str(job["id"]), worker_id,
-                                       step_id=str(job.get("step_id") or "")):
-                    return
-
-        heartbeat_thread = threading.Thread(target=maintain_lease, daemon=True)
+        heartbeat_thread = threading.Thread(
+            target=_maintain_lease, args=(store, job, worker_id, heartbeat_stop), daemon=True
+        )
         heartbeat_thread.start()
         try:
             if job.get("service_id") == "core-suite":
@@ -96,9 +100,13 @@ def run() -> int:
                 execute_service_claimed(store, job, worker_id, ROOT)
         except Exception as exc:  # final containment for all future dispatchers
             try:
-                store.transition(str(job["id"]), "failed", actor=worker_id,
-                                 detail=f"Worker stopped safely: {exc}",
-                                 error_code="worker_failure")
+                store.transition(
+                    str(job["id"]),
+                    "failed",
+                    actor=worker_id,
+                    detail=f"Worker stopped safely: {exc}",
+                    error_code="worker_failure",
+                )
             except (KeyError, ValueError):
                 pass
         finally:
@@ -106,11 +114,13 @@ def run() -> int:
             heartbeat_thread.join(timeout=2)
             try:
                 from ctl.install_batches import InstallBatchStore
+
                 batches = InstallBatchStore.runtime()
                 if batches:
                     batches.advance_for_job(str(job["id"]), store)
                 from ctl import workflow_secrets
                 from ctl.control_state import ControlState
+
                 expired = workflow_secrets.cleanup()
                 control = ControlState.runtime()
                 if control:

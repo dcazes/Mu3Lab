@@ -30,8 +30,7 @@ class OsTests(unittest.TestCase):
             ('ID=debian\nVERSION_ID="12"', ""),
             # Generic derivative: ID_LIKE + codename, no name special-cased.
             ('ID=pop\nID_LIKE=ubuntu\nVERSION_ID="22.04"\nUBUNTU_CODENAME=jammy', ""),
-            ('ID=linuxmint\nID_LIKE="ubuntu debian"\nVERSION_ID="22.3"\n'
-             'UBUNTU_CODENAME=noble', ""),
+            ('ID=linuxmint\nID_LIKE="ubuntu debian"\nVERSION_ID="22.3"\nUBUNTU_CODENAME=noble', ""),
         ]
         for text, kernel in good:
             with self.subTest(text=text.splitlines()[0]):
@@ -39,8 +38,7 @@ class OsTests(unittest.TestCase):
                 self.assertEqual(result["status"], "ok")
 
     def test_old(self):
-        for text in ('ID=debian\nVERSION_ID="11"',
-                     'ID=ubuntu\nVERSION_ID="20.04"'):
+        for text in ('ID=debian\nVERSION_ID="11"', 'ID=ubuntu\nVERSION_ID="20.04"'):
             with self.subTest(text=text.splitlines()[1]):
                 result = preflight.check_os(text)
                 self.assertEqual(result["status"], "fail")
@@ -100,8 +98,7 @@ class PythonNodeTests(unittest.TestCase):
 
 class PrivilegeTests(unittest.TestCase):
     def test_ok(self):
-        self.assertEqual(
-            preflight.check_privilege(True, False)["status"], "ok")
+        self.assertEqual(preflight.check_privilege(True, False)["status"], "ok")
         result = preflight.check_privilege(False, True)
         self.assertEqual(result["status"], "ok")
         self.assertIn("pkexec", result["detail"])
@@ -114,10 +111,15 @@ class PrivilegeTests(unittest.TestCase):
 
 class DockerTests(unittest.TestCase):
     def _base(self, **over):
-        args = {"docker_info_rc": 0, "group_names": ["docker"],
-                "networks_present": list(preflight.MU3LAB_NETWORKS),
-                "engine_version": "25.0.3", "compose_present": True,
-                "binary_present": True, "db_has_group": True}
+        args = {
+            "docker_info_rc": 0,
+            "group_names": ["docker"],
+            "networks_present": list(preflight.MU3LAB_NETWORKS),
+            "engine_version": "25.0.3",
+            "compose_present": True,
+            "binary_present": True,
+            "db_has_group": True,
+        }
         args.update(over)
         return preflight.check_docker(**args)
 
@@ -143,16 +145,15 @@ class DockerTests(unittest.TestCase):
         # plus a live daemon must route to the group path, never install.
         # (db_has_group=False here: with a real membership this box would
         # correctly report stale_login instead.)
-        result = self._base(docker_info_rc=1, permission_denied=True,
-                            daemon_active=True, group_names=["dak"],
-                            db_has_group=False)
+        result = self._base(
+            docker_info_rc=1, permission_denied=True, daemon_active=True, group_names=["dak"], db_has_group=False
+        )
         self.assertEqual(result["state"], "no_access")
         self.assertIn("authorized", result["detail"])
 
     def test_denied_dead_daemon_starts(self):
         # Denied text but daemon actually down: starting is still correct.
-        result = self._base(docker_info_rc=1, permission_denied=True,
-                            daemon_active=False)
+        result = self._base(docker_info_rc=1, permission_denied=True, daemon_active=False)
         self.assertEqual(result["state"], "daemon_down")
 
     def test_unverified(self):
@@ -183,9 +184,9 @@ class DockerTests(unittest.TestCase):
         self.assertIn("continue safely", result["action"])
 
     def test_denied_with_db_routes_to_restart(self):
-        result = self._base(docker_info_rc=1, permission_denied=True,
-                            daemon_active=True, group_names=["dak"],
-                            db_has_group=True)
+        result = self._base(
+            docker_info_rc=1, permission_denied=True, daemon_active=True, group_names=["dak"], db_has_group=True
+        )
         self.assertEqual(result["state"], "stale_login")
 
     def test_networks(self):
@@ -195,13 +196,15 @@ class DockerTests(unittest.TestCase):
 
     def test_never_blocks(self):
         # No docker shortfall may ever report "fail": all of it is step ③.
-        cases = [self._base(binary_present=False),
-                 self._base(docker_info_rc=1),
-                 self._base(engine_version=""),
-                 self._base(engine_version="20.10.0"),
-                 self._base(compose_present=False),
-                 self._base(group_names=[]),
-                 self._base(networks_present=[])]
+        cases = [
+            self._base(binary_present=False),
+            self._base(docker_info_rc=1),
+            self._base(engine_version=""),
+            self._base(engine_version="20.10.0"),
+            self._base(compose_present=False),
+            self._base(group_names=[]),
+            self._base(networks_present=[]),
+        ]
         for result in cases:
             self.assertNotEqual(result["status"], "fail")
 
@@ -236,6 +239,7 @@ class PortTests(unittest.TestCase):
     def test_busy(self):
         # Deterministic: stub ss so the box's real listeners can't flip it.
         from unittest.mock import patch as _patch
+
         with _patch("ctl.preflight._run", return_value=(1, "")):
             result = preflight.check_ports(connect_fn=lambda port: port == 8787)
         self.assertEqual(result["status"], "fail")
@@ -244,18 +248,20 @@ class PortTests(unittest.TestCase):
     def test_ours_is_info_not_block(self):
         # Our autostarted dashboard holding :8787 is EXPECTED post-install:
         # info row, never a blocker (this kills the stop-and-rerun loop).
-        from unittest.mock import MagicMock, patch as _patch
-        ss_out = ('State Recv-Q Local Address:Port Process\n'
-                  'LISTEN 0 128 127.0.0.1:8787 '
-                  'users:(("uvicorn",pid=4242,fd=13))')
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
+        ss_out = (
+            'State Recv-Q Local Address:Port Process\nLISTEN 0 128 127.0.0.1:8787 users:(("uvicorn",pid=4242,fd=13))'
+        )
         fake_path = MagicMock()
-        fake_path.return_value.read_bytes.return_value = (
-            b"/home/dak/Desktop/Mu3Lab/.venv/bin/python ctl.app:app")
-        with _patch("ctl.preflight._run", return_value=(0, ss_out)), \
-             _patch("ctl.preflight.Path", fake_path), \
-             _patch("ctl.preflight.ROOT", Path("/home/dak/Desktop/Mu3Lab")):
-            result = preflight.check_ports(
-                connect_fn=lambda port: port == 8787)
+        fake_path.return_value.read_bytes.return_value = b"/home/dak/Desktop/Mu3Lab/.venv/bin/python ctl.app:app"
+        with (
+            _patch("ctl.preflight._run", return_value=(0, ss_out)),
+            _patch("ctl.preflight.Path", fake_path),
+            _patch("ctl.preflight.ROOT", Path("/home/dak/Desktop/Mu3Lab")),
+        ):
+            result = preflight.check_ports(connect_fn=lambda port: port == 8787)
         self.assertEqual(result["status"], "ok")
         self.assertIn("Mu3Lab services", result["detail"])
 
@@ -263,34 +269,36 @@ class PortTests(unittest.TestCase):
         # Busy ports carry an owners map so the UI can offer Stop for OURS.
         # /proc reads are stubbed: fixture PIDs must never depend on which
         # real processes happen to exist on the test box.
-        from unittest.mock import MagicMock, patch as _patch
-        ss_out = ('State Recv-Q Local Address:Port Process\n'
-                  'LISTEN 0 128 127.0.0.1:8787 '
-                  'users:(("uvicorn",pid=4242,fd=13))')
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
+        ss_out = (
+            'State Recv-Q Local Address:Port Process\nLISTEN 0 128 127.0.0.1:8787 users:(("uvicorn",pid=4242,fd=13))'
+        )
         fake_path = MagicMock()
-        fake_path.return_value.read_bytes.return_value = (
-            b"/home/dak/Desktop/Mu3Lab/.venv/bin/python ctl.app:app")
-        with _patch("ctl.preflight._run", return_value=(0, ss_out)), \
-             _patch("ctl.preflight.Path", fake_path):
-            with _patch("ctl.preflight.ROOT", Path("/home/dak/Desktop/Mu3Lab")):
-                result = preflight.check_ports(
-                    connect_fn=lambda port: port == 8787)
+        fake_path.return_value.read_bytes.return_value = b"/home/dak/Desktop/Mu3Lab/.venv/bin/python ctl.app:app"
+        with (
+            _patch("ctl.preflight._run", return_value=(0, ss_out)),
+            _patch("ctl.preflight.Path", fake_path),
+            _patch("ctl.preflight.ROOT", Path("/home/dak/Desktop/Mu3Lab")),
+        ):
+            result = preflight.check_ports(connect_fn=lambda port: port == 8787)
         owner = result["owners"]["8787"]
         self.assertEqual(owner["pid"], 4242)
         self.assertTrue(owner["ours"])
         self.assertEqual(owner["port_info"]["service"], "Mu3Lab control plane")
 
     def test_foreign_owner_not_ours(self):
-        from unittest.mock import MagicMock, patch as _patch
-        ss_out = ('State Recv-Q Local Address:Port Process\n'
-                  'LISTEN 0 128 127.0.0.1:8787 '
-                  'users:(("something",pid=4243,fd=3))')
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
+        ss_out = (
+            'State Recv-Q Local Address:Port Process\nLISTEN 0 128 127.0.0.1:8787 users:(("something",pid=4243,fd=3))'
+        )
         fake_path = MagicMock()
         fake_path.return_value.read_bytes.side_effect = OSError("denied")
-        with _patch("ctl.preflight._run", return_value=(0, ss_out)), \
-             _patch("ctl.preflight.Path", fake_path):
-            result = preflight.check_ports(
-                connect_fn=lambda port: port == 8787)
+        with _patch("ctl.preflight._run", return_value=(0, ss_out)), _patch("ctl.preflight.Path", fake_path):
+            result = preflight.check_ports(connect_fn=lambda port: port == 8787)
         owner = result["owners"]["8787"]
         self.assertEqual(owner["pid"], 4243)
         self.assertFalse(owner["ours"])
@@ -301,6 +309,7 @@ class PortTests(unittest.TestCase):
         # still identify this checkout's labeled container via sg docker.
         ss_out = "LISTEN 0 4096 127.0.0.1:8081 0.0.0.0:*"
         root = Path("/home/dak/Desktop/Mu3Lab")
+
         def fake_run(argv, timeout=10):
             if argv[:2] == ["ss", "-tlnp"]:
                 return 0, ss_out
@@ -313,43 +322,47 @@ class PortTests(unittest.TestCase):
             if argv[:3] == ["sg", "docker", "-c"] and "docker inspect" in argv[3]:
                 return 0, str(root / "core" / "vaultwarden")
             return 1, "unexpected command"
+
         from unittest.mock import patch as _patch
-        with _patch("ctl.preflight._run", side_effect=fake_run), \
-             _patch("ctl.preflight._db_has_group", return_value=True), \
-             _patch("ctl.preflight.getpass.getuser", return_value="dak"), \
-             _patch("ctl.preflight.shutil.which", return_value="/usr/bin/sg"), \
-             _patch("ctl.preflight.ROOT", root):
+
+        with (
+            _patch("ctl.preflight._run", side_effect=fake_run),
+            _patch("ctl.preflight._db_has_group", return_value=True),
+            _patch("ctl.preflight.getpass.getuser", return_value="dak"),
+            _patch("ctl.preflight.shutil.which", return_value="/usr/bin/sg"),
+            _patch("ctl.preflight.ROOT", root),
+        ):
             result = preflight.check_ports(connect_fn=lambda port: port == 8081)
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["owners"]["8081"]["ours"])
-        self.assertEqual(result["owners"]["8081"]["process"],
-                         "vaultwarden-vaultwarden-1")
-        self.assertIn("private HTTPS URL on port 8443",
-                      result["owners"]["8081"]["port_info"]["access"])
+        self.assertEqual(result["owners"]["8081"]["process"], "vaultwarden-vaultwarden-1")
+        self.assertIn("private HTTPS URL on port 8443", result["owners"]["8081"]["port_info"]["access"])
 
     def test_compose_owner_matches_the_container_publishing_that_port(self):
         ss_out = "LISTEN 0 4096 127.0.0.1:9001 0.0.0.0:*"
         root = Path("/home/dak/Desktop/Mu3Lab")
         inspected: list[str] = []
+
         def fake_run(argv, timeout=10):
             if argv[:2] == ["ss", "-tlnp"]:
                 return 0, ss_out
             if argv[:2] == ["docker", "ps"]:
-                return 0, ("authentik-worker-1\t\n"
-                           "authentik-server-1\t127.0.0.1:9001->9000/tcp")
+                return 0, ("authentik-worker-1\t\nauthentik-server-1\t127.0.0.1:9001->9000/tcp")
             if argv[:2] == ["docker", "inspect"]:
                 inspected.append(argv[-1])
                 return 0, str(root / "core" / "authentik")
             return 1, "unexpected command"
+
         from unittest.mock import patch as _patch
-        with _patch("ctl.preflight._run", side_effect=fake_run), \
-             _patch("ctl.preflight.ROOT", root):
+
+        with _patch("ctl.preflight._run", side_effect=fake_run), _patch("ctl.preflight.ROOT", root):
             result = preflight.check_ports(connect_fn=lambda port: port == 9001)
         self.assertEqual(result["owners"]["9001"]["process"], "authentik-server-1")
         self.assertEqual(inspected, ["authentik-server-1"])
 
     def test_ss_missing_still_reports(self):
         from unittest.mock import patch as _patch
+
         with _patch("ctl.preflight._run", return_value=(127, "no ss")):
             result = preflight.check_ports(connect_fn=lambda port: True)
         self.assertEqual(result["status"], "fail")
@@ -380,7 +393,8 @@ class BundleTests(unittest.TestCase):
             dist.mkdir(parents=True)
             (dist / "app.js").touch()
             (root / "dashboard" / "dist" / "index.html").write_text(
-                '<script src="/assets/app.js"></script>', encoding="utf-8")
+                '<script src="/assets/app.js"></script>', encoding="utf-8"
+            )
             self.assertEqual(preflight.check_bundle(root=root)["status"], "ok")
 
     def test_dangling_asset(self):
@@ -390,7 +404,8 @@ class BundleTests(unittest.TestCase):
             (root / ".venv" / "bin" / "python").touch()
             (root / "dashboard" / "dist").mkdir(parents=True)
             (root / "dashboard" / "dist" / "index.html").write_text(
-                '<script src="/assets/gone.js"></script>', encoding="utf-8")
+                '<script src="/assets/gone.js"></script>', encoding="utf-8"
+            )
             result = preflight.check_bundle(root=root)
             self.assertEqual(result["status"], "missing")
             self.assertEqual(result["state"], "no_build")
@@ -413,23 +428,25 @@ class AggregateTests(unittest.TestCase):
 
     def test_ready_with_todos(self):
         # Fresh-box shape: only install-provided items missing → ready.
-        report = {"checks": [
-            {"name": "os", "status": "ok", "blocking": True},
-            {"name": "docker", "status": "missing", "blocking": False},
-            {"name": "tailscale", "status": "missing", "blocking": False},
-        ]}
-        ready = not any(c["status"] == "fail" and c["blocking"]
-                        for c in report["checks"])
+        report = {
+            "checks": [
+                {"name": "os", "status": "ok", "blocking": True},
+                {"name": "docker", "status": "missing", "blocking": False},
+                {"name": "tailscale", "status": "missing", "blocking": False},
+            ]
+        }
+        ready = not any(c["status"] == "fail" and c["blocking"] for c in report["checks"])
         self.assertTrue(ready)
 
     def test_blocked_on_fail(self):
-        report = {"checks": [
-            {"name": "os", "status": "ok", "blocking": True},
-            {"name": "ports", "status": "fail", "blocking": True},
-            {"name": "docker", "status": "missing", "blocking": False},
-        ]}
-        ready = not any(c["status"] == "fail" and c["blocking"]
-                        for c in report["checks"])
+        report = {
+            "checks": [
+                {"name": "os", "status": "ok", "blocking": True},
+                {"name": "ports", "status": "fail", "blocking": True},
+                {"name": "docker", "status": "missing", "blocking": False},
+            ]
+        }
+        ready = not any(c["status"] == "fail" and c["blocking"] for c in report["checks"])
         self.assertFalse(ready)
 
 

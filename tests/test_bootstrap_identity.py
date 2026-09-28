@@ -31,9 +31,11 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_authentik_setup_uses_version_stable_private_root(self):
         host = "mu3lab-3.example.ts.net"
         ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
-        with patch("ctl.install._tailscale_dns_name_for_install", return_value=host), \
-             patch("ctl.install._runtime_marker", return_value=False), \
-             patch("ctl.install._authentik_initial_setup_pending", return_value=True):
+        with (
+            patch("ctl.install._tailscale_dns_name_for_install", return_value=host),
+            patch("ctl.install._runtime_marker", return_value=False),
+            patch("ctl.install._authentik_initial_setup_pending", return_value=True),
+        ):
             prompt = install.fix_authentik_setup({}, ctx)["prompt"]
             check = install.check_authentik_setup(ctx)
         expected = f"https://{host}/"
@@ -44,10 +46,8 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertEqual(prompt["recovery_username"], "akadmin")
 
     def test_authentik_recovery_is_one_time_and_not_a_marker(self):
-        ctx = {"inputs": {}, "root": Path("/tmp"),
-               "log_fn": lambda _: lambda _: None}
-        with patch("ctl.install.actions.reset_authentik_admin_password",
-                   return_value={"ok": True}) as reset:
+        ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
+        with patch("ctl.install.actions.reset_authentik_admin_password", return_value={"ok": True}) as reset:
             result = install.reset_authentik_admin_password(ctx)
         self.assertEqual(result["username"], "akadmin")
         self.assertTrue(result["temporary_password"].startswith("Mu3Lab-"))
@@ -69,6 +69,10 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertIn("mode: forward_single", content)
         self.assertIn("authentik Embedded Outpost", content)
         self.assertIn("slug: mu3lab", content)
+        self.assertIn("name: Mu3Lab LiteLLM provider", content)
+        self.assertIn('external_host: "https://mu3lab-4.taile2cc7a.ts.net:8454"', content)
+        self.assertIn('meta_launch_url: "https://mu3lab-4.taile2cc7a.ts.net:8454/ui/"', content)
+        self.assertIn("name, Mu3Lab LiteLLM provider", content)
         self.assertIn("name: mu3lab-operators", content)
         self.assertIn("authentik_policies.policybinding", content)
         self.assertIn('authentik_host: "https://mu3lab-4.taile2cc7a.ts.net"', content)
@@ -78,8 +82,11 @@ class BootstrapIdentityTests(unittest.TestCase):
 
     def test_authentik_host_must_be_the_private_https_origin(self):
         with self.assertRaises(ValueError):
-            render_dashboard_blueprint(
-                "mu3lab-4.taile2cc7a.ts.net", "http://localhost:9001")
+            render_dashboard_blueprint("mu3lab-4.taile2cc7a.ts.net", "http://localhost:9001")
+
+    def test_litellm_authentik_external_host_must_include_its_private_port(self):
+        with self.assertRaises(ValueError):
+            render_dashboard_blueprint("mu3lab-4.taile2cc7a.ts.net", litellm_host="https://mu3lab-4.taile2cc7a.ts.net")
 
     def test_caddy_preserves_public_authentik_origin_headers(self):
         root = Path(__file__).resolve().parents[1]

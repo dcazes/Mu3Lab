@@ -75,7 +75,7 @@ def _canonical_model_id(value: str) -> str:
     normalized = value.strip().lower()
     for prefix in ("openai/", "qwen/", "meta-llama/", "meta/", "nvidia/", "groq/", "google/"):
         if normalized.startswith(prefix):
-            normalized = normalized[len(prefix):]
+            normalized = normalized[len(prefix) :]
             break
     return normalized
 
@@ -95,15 +95,21 @@ def _probe_candidates(provider_id: str, available: list[str]) -> list[str]:
     return result
 
 
-def _probe_stream(model: str, key: str, *, gateway: str = "FreeLLMAPI",
-                  url: str = "http://127.0.0.1:3001/v1/chat/completions") -> StreamProbe:
-    payload = {"model": model, "messages": [{"role": "user", "content": "Reply with OK."}],
-               "max_tokens": 4, "temperature": 0, "stream": True}
+def _probe_stream(
+    model: str, key: str, *, gateway: str = "FreeLLMAPI", url: str = "http://127.0.0.1:3001/v1/chat/completions"
+) -> StreamProbe:
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 4,
+        "temperature": 0,
+        "stream": True,
+    }
     request = urllib.request.Request(
-        url, method="POST",
+        url,
+        method="POST",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Accept": "text/event-stream", "Content-Type": "application/json",
-                 "Authorization": f"Bearer {key}"},
+        headers={"Accept": "text/event-stream", "Content-Type": "application/json", "Authorization": f"Bearer {key}"},
     )
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
@@ -127,8 +133,14 @@ def _probe_stream(model: str, key: str, *, gateway: str = "FreeLLMAPI",
                     except (ValueError, AttributeError):
                         continue
             if not completed:
-                return StreamProbe(False, response.status, routed, model, "stream_failed",
-                                   f"{gateway} opened a stream but did not complete it.")
+                return StreamProbe(
+                    False,
+                    response.status,
+                    routed,
+                    model,
+                    "stream_failed",
+                    f"{gateway} opened a stream but did not complete it.",
+                )
             return StreamProbe(True, response.status, routed, model, "", "Stream completed.")
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
@@ -142,8 +154,9 @@ def _probe_stream(model: str, key: str, *, gateway: str = "FreeLLMAPI",
             detail = f"{gateway} returned HTTP {exc.code} during the streamed probe."
         return StreamProbe(False, exc.code, exc.headers.get("X-Routed-Via", ""), model, code, detail)
     except (OSError, urllib.error.URLError):
-        return StreamProbe(False, 0, "", model, "gateway_unavailable",
-                           f"{gateway} was unavailable during provider verification.")
+        return StreamProbe(
+            False, 0, "", model, "gateway_unavailable", f"{gateway} was unavailable during provider verification."
+        )
 
 
 def _groq_access_diagnostic() -> tuple[int, str]:
@@ -153,7 +166,8 @@ def _groq_access_diagnostic() -> tuple[int, str]:
         return 0, "No saved Groq credential was found."
     request = urllib.request.Request(
         "https://api.groq.com/openai/v1/models",
-        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             return response.status, "Groq accepted the key for model discovery."
@@ -181,7 +195,11 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
         if rc:
             return False, f"{service.name} reconciliation failed: {redact(output)}", []
     service_key = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")
-    return bool(service_key), ("Provider gateway reconciled." if service_key else "FreeLLMAPI service key is unavailable."), []
+    return (
+        bool(service_key),
+        ("Provider gateway reconciled." if service_key else "FreeLLMAPI service key is unavailable."),
+        [],
+    )
 
 
 def _verify(provider_id: str, root: Path, log) -> StreamProbe:
@@ -195,14 +213,22 @@ def _verify(provider_id: str, root: Path, log) -> StreamProbe:
         return StreamProbe(False, 0, "", "", "gateway_unavailable", str(exc))
     candidates = _probe_candidates(provider_id, list(available))
     if not candidates:
-        return StreamProbe(False, 200, "", "", "catalog_mismatch",
-                           "None of Mu3Lab's curated probe models are present in this FreeLLMAPI catalog.")
+        return StreamProbe(
+            False,
+            200,
+            "",
+            "",
+            "catalog_mismatch",
+            "None of Mu3Lab's curated probe models are present in this FreeLLMAPI catalog.",
+        )
     last = StreamProbe(False, 0, "", "", "stream_failed", "No provider probe completed.")
     for model in candidates:
         log(f"FreeLLMAPI probe: {model}")
         probe = _probe_stream(model, key)
-        log(f"FreeLLMAPI probe result: HTTP {probe.http_status or 'unavailable'}, "
-            f"route {probe.routed_via or 'unreported'}, {probe.error_code or 'complete'}")
+        log(
+            f"FreeLLMAPI probe result: HTTP {probe.http_status or 'unavailable'}, "
+            f"route {probe.routed_via or 'unreported'}, {probe.error_code or 'complete'}"
+        )
         last = probe
         if not probe.success:
             if probe.error_code in {"credential_rejected", "rate_limited_or_quota", "gateway_unavailable"}:
@@ -212,35 +238,68 @@ def _verify(provider_id: str, root: Path, log) -> StreamProbe:
         if routed_provider == provider_id:
             lite_key = read_runtime_env(RuntimePaths().projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
             if not lite_key:
-                return StreamProbe(False, 0, probe.routed_via, model, "litellm_unavailable",
-                                   "LiteLLM master key is missing after reconciliation.")
+                return StreamProbe(
+                    False,
+                    0,
+                    probe.routed_via,
+                    model,
+                    "litellm_unavailable",
+                    "LiteLLM master key is missing after reconciliation.",
+                )
             log("LiteLLM probe: mu3lab-chat")
-            end_to_end = _probe_stream("mu3lab-chat", lite_key, gateway="LiteLLM",
-                                        url="http://127.0.0.1:4000/v1/chat/completions")
-            log(f"LiteLLM probe result: HTTP {end_to_end.http_status or 'unavailable'}, "
-                f"{end_to_end.error_code or 'complete'}")
+            end_to_end = _probe_stream(
+                "mu3lab-chat", lite_key, gateway="LiteLLM", url="http://127.0.0.1:4000/v1/chat/completions"
+            )
+            log(
+                f"LiteLLM probe result: HTTP {end_to_end.http_status or 'unavailable'}, "
+                f"{end_to_end.error_code or 'complete'}"
+            )
             if not end_to_end.success:
-                return StreamProbe(False, end_to_end.http_status, probe.routed_via, model,
-                                   "litellm_route_failed", end_to_end.detail)
+                return StreamProbe(
+                    False, end_to_end.http_status, probe.routed_via, model, "litellm_route_failed", end_to_end.detail
+                )
             if end_to_end.routed_via and end_to_end.routed_via.split("/", 1)[0].strip().lower() != provider_id:
-                return StreamProbe(False, end_to_end.http_status, end_to_end.routed_via, model,
-                                   "provider_route_mismatch",
-                                   f"LiteLLM completed through {end_to_end.routed_via}, not {provider_id}.")
-            return StreamProbe(True, end_to_end.http_status, probe.routed_via, model, "",
-                               f"{provider_id} routed via {probe.routed_via}; LiteLLM streamed mu3lab-chat successfully."
-                               + (" LiteLLM did not expose upstream provider attribution." if not end_to_end.routed_via else ""))
-        last = StreamProbe(False, probe.http_status, probe.routed_via, model,
-                           "provider_route_mismatch",
-                           f"The test completed through {probe.routed_via or 'an unidentified provider'}, not {provider_id}.")
+                return StreamProbe(
+                    False,
+                    end_to_end.http_status,
+                    end_to_end.routed_via,
+                    model,
+                    "provider_route_mismatch",
+                    f"LiteLLM completed through {end_to_end.routed_via}, not {provider_id}.",
+                )
+            return StreamProbe(
+                True,
+                end_to_end.http_status,
+                probe.routed_via,
+                model,
+                "",
+                f"{provider_id} routed via {probe.routed_via}; LiteLLM streamed mu3lab-chat successfully."
+                + (" LiteLLM did not expose upstream provider attribution." if not end_to_end.routed_via else ""),
+            )
+        last = StreamProbe(
+            False,
+            probe.http_status,
+            probe.routed_via,
+            model,
+            "provider_route_mismatch",
+            f"The test completed through {probe.routed_via or 'an unidentified provider'}, not {provider_id}.",
+        )
     if provider_id == "groq" and not last.routed_via and last.error_code == "stream_failed":
         status, diagnostic = _groq_access_diagnostic()
         log(diagnostic)
         if status in {401, 403}:
-            return StreamProbe(False, status, "", last.model, "upstream_access_denied",
-                               diagnostic + " Check the Groq key and account access.")
+            return StreamProbe(
+                False,
+                status,
+                "",
+                last.model,
+                "upstream_access_denied",
+                diagnostic + " Check the Groq key and account access.",
+            )
         if status == 429:
-            return StreamProbe(False, status, "", last.model, "rate_limited_or_quota",
-                               diagnostic + " Check Groq quota or rate limits.")
+            return StreamProbe(
+                False, status, "", last.model, "rate_limited_or_quota", diagnostic + " Check Groq quota or rate limits."
+            )
     return last
 
 
@@ -255,14 +314,23 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
     except ValueError:
         provider = None
     if state is None or (provider is None and action != "remove") or action not in SUPPORTED_ACTIONS:
-        store.transition(job_id, "failed", actor=worker_id, detail="The worker rejected an unsupported provider operation.",
-                         error_code="unsupported_provider_action", step_id="validate")
+        store.transition(
+            job_id,
+            "failed",
+            actor=worker_id,
+            detail="The worker rejected an unsupported provider operation.",
+            error_code="unsupported_provider_action",
+            step_id="validate",
+        )
         return
     resolved_id = provider.id if provider else provider_id
     resolved_name = provider.name if provider else str((state.provider(provider_id) or {}).get("label") or provider_id)
     current = state.provider(resolved_id)
     label = str((current or {}).get("label") or resolved_name)
-    log = lambda line: store.append_event(job_id, "log", line)
+
+    def log(line: str) -> None:
+        store.append_event(job_id, "log", line)
+
     if action == "remove":
         delete_secret(resolved_id)
         state.delete_provider(resolved_id)
@@ -270,37 +338,61 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             _reconcile(root, log)
         except (OSError, ValueError):
             pass
-        store.transition(job_id, "succeeded", actor=actor, detail=f"{resolved_name} connection removed.", step_id="complete")
+        store.transition(
+            job_id, "succeeded", actor=actor, detail=f"{resolved_name} connection removed.", step_id="complete"
+        )
         return
+    assert provider is not None  # only removal accepts unknown legacy providers
     if action == "disable":
         state.set_provider(provider.id, label, enabled=False, state="disabled", job_id=job_id)
         ok, detail, _ = _reconcile(root, log)
-        store.transition(job_id, "succeeded" if ok else "failed", actor=actor, detail=detail,
-                         error_code="" if ok else "provider_reconcile_failed", step_id="complete" if ok else "reconcile")
+        store.transition(
+            job_id,
+            "succeeded" if ok else "failed",
+            actor=actor,
+            detail=detail,
+            error_code="" if ok else "provider_reconcile_failed",
+            step_id="complete" if ok else "reconcile",
+        )
         return
     if action == "enable":
         action = "verify"
     state.set_provider(provider.id, label, enabled=True, state="verifying", attempted=True, job_id=job_id)
     probe = _verify(provider.id, root, log)
     if probe.success:
-        state.set_provider(provider.id, label, enabled=True, state="verified", models=[probe.model],
-                           attempted=True, verified=True, job_id="")
+        state.set_provider(
+            provider.id,
+            label,
+            enabled=True,
+            state="verified",
+            models=[probe.model],
+            attempted=True,
+            verified=True,
+            job_id="",
+        )
         _reconcile(root, log)
         provisioning = __import__("ctl.provisioning", fromlist=["ProvisioningStore"]).ProvisioningStore.runtime()
         if provisioning:
             provisioning.update("configuration", "verified", detail=f"{provider.name} streamed routing passed.")
         store.transition(job_id, "succeeded", actor=actor, detail=probe.detail, step_id="complete")
-        core_jobs = [item for item in store.jobs(limit=100)
-                     if item.get("service_id") == "core-suite"]
-        waiting_core = next((item for item in core_jobs
-                             if item.get("state") == "waiting_for_confirmation"), None)
+        core_jobs = [item for item in store.jobs(limit=100) if item.get("service_id") == "core-suite"]
+        waiting_core = next((item for item in core_jobs if item.get("state") == "waiting_for_confirmation"), None)
         if waiting_core:
-            store.transition(str(waiting_core["id"]), "cancelled", actor=actor,
-                             detail="Superseded by verification-only checks after provider setup.")
+            store.transition(
+                str(waiting_core["id"]),
+                "cancelled",
+                actor=actor,
+                detail="Superseded by verification-only checks after provider setup.",
+            )
         if not any(item.get("state") in {"queued", "running"} for item in core_jobs):
-            store.create(kind="verification", service_id="core-suite", action="verify", actor=actor,
-                         detail="Verify live platform contracts after provider setup.",
-                         idempotency_key=f"provider-verified:{provider.id}:{job_id}")
+            store.create(
+                kind="verification",
+                service_id="core-suite",
+                action="verify",
+                actor=actor,
+                detail="Verify live platform contracts after provider setup.",
+                idempotency_key=f"provider-verified:{provider.id}:{job_id}",
+            )
     else:
         recommendations = {
             "credential_rejected": "Replace the rejected key, then verify again.",
@@ -314,23 +406,39 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "stream_failed": "Open the verification job details, then retry the streamed check.",
         }
         recommendation = recommendations.get(probe.error_code, "Review the verification details and try again.")
-        error = {"code": probe.error_code, "message": redact(probe.detail),
-                 "recommended_action": recommendation, "routed_via": probe.routed_via,
-                 "model": probe.model, "http_status": probe.http_status}
-        state.set_provider(provider.id, label, enabled=True, state="degraded", models=[],
-                           error=error, attempted=True, job_id=job_id, replace_models=True)
+        error = {
+            "code": probe.error_code,
+            "message": redact(probe.detail),
+            "recommended_action": recommendation,
+            "routed_via": probe.routed_via,
+            "model": probe.model,
+            "http_status": probe.http_status,
+        }
+        state.set_provider(
+            provider.id,
+            label,
+            enabled=True,
+            state="degraded",
+            models=[],
+            error=error,
+            attempted=True,
+            job_id=job_id,
+            replace_models=True,
+        )
         # Re-render without the degraded credential so it cannot remain routable.
         try:
             _reconcile(root, log)
         except (OSError, ValueError):
             pass
-        store.transition(job_id, "failed", actor=actor, detail=probe.detail,
-                         error_code=probe.error_code, step_id="verify")
+        store.transition(
+            job_id, "failed", actor=actor, detail=probe.detail, error_code=probe.error_code, step_id="verify"
+        )
 
 
 def migrate_legacy(state: ControlState) -> None:
     """Project old encrypted records without deleting or exposing their keys."""
     from ctl.provider_catalog import BY_ID, canonical_id
+
     for item in metadata():
         raw_id = str(item["id"])
         provider_id = canonical_id(raw_id)

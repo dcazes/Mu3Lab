@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from ctl.authentik_blueprints import write_oidc_application_blueprint
+
+from ctl.authentik_blueprints import write_dashboard_blueprint, write_oidc_application_blueprint
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
 from ctl.registry import Registry, Service
@@ -20,19 +21,49 @@ class OidcContract:
 
 
 OIDC_CONTRACTS: dict[str, OidcContract] = {
-    "actual-budget": OidcContract("Actual Budget", "ACTUAL_OPENID_CLIENT_ID", "ACTUAL_OPENID_CLIENT_SECRET", ("/openid/callback",)),
-    "mealie": OidcContract("Mealie", "MEALIE_OIDC_CLIENT_ID", "MEALIE_OIDC_CLIENT_SECRET", ("/login", "/login?direct=1")),
-    "nextcloud": OidcContract("Nextcloud", "NEXTCLOUD_OIDC_CLIENT_ID", "NEXTCLOUD_OIDC_CLIENT_SECRET", ("/apps/user_oidc/code",)),
-    "immich": OidcContract("Immich", "IMMICH_OIDC_CLIENT_ID", "IMMICH_OIDC_CLIENT_SECRET", ("/auth/login", "/user-settings", "/api/oauth/mobile-redirect",)),
-    "paperless-ngx": OidcContract("Paperless-ngx", "PAPERLESS_OIDC_CLIENT_ID", "PAPERLESS_OIDC_CLIENT_SECRET", ("/accounts/oidc/authentik/login/callback/",)),
-    "adventurelog": OidcContract("AdventureLog", "ADVENTURELOG_OIDC_CLIENT_ID", "ADVENTURELOG_OIDC_CLIENT_SECRET", ("/accounts/oidc/mu3lab-adventurelog/login/callback/",)),
-    "lobehub": OidcContract("LobeChat", "AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", ("/api/auth/callback/authentik",)),
+    "actual-budget": OidcContract(
+        "Actual Budget", "ACTUAL_OPENID_CLIENT_ID", "ACTUAL_OPENID_CLIENT_SECRET", ("/openid/callback",)
+    ),
+    "mealie": OidcContract(
+        "Mealie", "MEALIE_OIDC_CLIENT_ID", "MEALIE_OIDC_CLIENT_SECRET", ("/login", "/login?direct=1")
+    ),
+    "nextcloud": OidcContract(
+        "Nextcloud", "NEXTCLOUD_OIDC_CLIENT_ID", "NEXTCLOUD_OIDC_CLIENT_SECRET", ("/apps/user_oidc/code",)
+    ),
+    "immich": OidcContract(
+        "Immich",
+        "IMMICH_OIDC_CLIENT_ID",
+        "IMMICH_OIDC_CLIENT_SECRET",
+        (
+            "/auth/login",
+            "/user-settings",
+            "/api/oauth/mobile-redirect",
+        ),
+    ),
+    "paperless-ngx": OidcContract(
+        "Paperless-ngx",
+        "PAPERLESS_OIDC_CLIENT_ID",
+        "PAPERLESS_OIDC_CLIENT_SECRET",
+        ("/accounts/oidc/authentik/login/callback/",),
+    ),
+    "adventurelog": OidcContract(
+        "AdventureLog",
+        "ADVENTURELOG_OIDC_CLIENT_ID",
+        "ADVENTURELOG_OIDC_CLIENT_SECRET",
+        ("/accounts/oidc/mu3lab-adventurelog/login/callback/",),
+    ),
+    "lobehub": OidcContract(
+        "LobeChat", "AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", ("/api/auth/callback/authentik",)
+    ),
 }
 
 TRUSTED_HEADER = {"baby-buddy"}
-PROXY_GATE = {"litellm", "surfsense"}
-LOCAL = {"authentik", "vaultwarden", "freellmapi"}
+PROXY_GATE = {"litellm", "freellmapi", "surfsense"}
+LOCAL = {"authentik", "vaultwarden"}
 NO_UI = {"ingress", "ollama"}
+# Start the native OIDC flow from Home so an existing Authentik session can
+# sign into the app without stopping at its local login chooser. Applications
+# without a safe GET-based OIDC entry point keep their normal UI URL.
 OIDC_LAUNCH_PATHS = {"nextcloud": "/index.php/apps/user_oidc/login/1"}
 
 
@@ -67,7 +98,16 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     launch_url = str(item.get("url") or (item.get("ui") or {}).get("url") or "")
     if service.id in OIDC_LAUNCH_PATHS and launch_url:
         launch_url = launch_url.rstrip("/") + OIDC_LAUNCH_PATHS[service.id]
-    recovery = service.id in {"actual-budget", "mealie", "nextcloud", "immich", "paperless-ngx", "adventurelog", "vaultwarden", "freellmapi"}
+    recovery = service.id in {
+        "actual-budget",
+        "mealie",
+        "nextcloud",
+        "immich",
+        "paperless-ngx",
+        "adventurelog",
+        "vaultwarden",
+        "freellmapi",
+    }
     if saved:
         current = str(saved["state"])
         detail = str(saved.get("detail") or "")
@@ -84,7 +124,14 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
             current = "degraded"
             detail = "Sign-in is configured, but the application or its private route is unavailable."
     elif mode == "none":
-        current, detail = "unsupported", (service.identity_note or service.ui.get("unavailable_reason") or "This service has no end-user interface.")
+        current, detail = (
+            "unsupported",
+            (
+                service.identity_note
+                or service.ui.get("unavailable_reason")
+                or "This service has no end-user interface."
+            ),
+        )
     elif service.id == "authentik":
         current = "ready" if route_ready and healthy else "degraded"
         detail = "This is the identity provider; the current Authentik session opens its administration UI directly."
@@ -92,27 +139,47 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
         current, detail = "unsupported", service.identity_note or "This application requires its own local sign-in."
     elif mode == "proxy_gate":
         current = "ready" if route_ready and healthy else "degraded"
-        detail = "Authentik protects access to this route; the application does not receive a native per-user OIDC session."
+        detail = (
+            "Authentik protects access to this route; the application does not receive a native per-user OIDC session."
+        )
     elif mode == "trusted_header":
         current = "ready" if route_ready and healthy else "degraded"
         detail = "Authentik supplies the verified user identity to the application."
     else:
-        current, detail = "unconfigured", "Native Authentik sign-in has not completed owner migration and live callback verification."
+        current, detail = (
+            "unconfigured",
+            "Native Authentik sign-in has not completed owner migration and live callback verification.",
+        )
     return {
-        "mode": mode, "state": current,
+        "mode": mode,
+        "state": current,
         "launch_url": launch_url if service.id not in NO_UI else "",
-        "detail": detail, "last_verified_at": str((saved or {}).get("last_verified_at", "")),
+        "detail": detail,
+        "last_verified_at": str((saved or {}).get("last_verified_at", "")),
         "recovery_available": recovery,
         "job_id": str((saved or {}).get("last_job_id", "")),
         "error": (saved or {}).get("last_error", {}),
     }
 
 
-def reconcile_blueprints(registry: Registry, host: str,
-                         paths: RuntimePaths = RuntimePaths()) -> list[str]:
-    """Restore missing OIDC blueprints strictly from already-persisted secrets."""
+def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = RuntimePaths()) -> list[str]:
+    """Reconcile managed Authentik routes and OIDC apps from saved configuration."""
     if not host:
         return []
+    authentik = registry.get("authentik")
+    dashboard = registry.get("ingress")
+    litellm = registry.get("litellm")
+    freellmapi = registry.get("freellmapi")
+    write_dashboard_blueprint(
+        paths.root,
+        host,
+        authentik_host=f"https://{host}"
+        if authentik.private_https_port in (None, 443)
+        else f"https://{host}:{authentik.private_https_port}",
+        dashboard_host=f"https://{host}:{dashboard.private_https_port or 8446}",
+        litellm_port=litellm.private_https_port or 8454,
+        freellmapi_port=freellmapi.private_https_port or 8455,
+    )
     written: list[str] = []
     for service_id, contract in OIDC_CONTRACTS.items():
         service = registry.get(service_id)
@@ -126,9 +193,14 @@ def reconcile_blueprints(registry: Registry, host: str,
         if not client_id or not secret:
             continue
         write_oidc_application_blueprint(
-            paths.root, host, service_id=service_id, name=contract.name,
-            private_port=service.private_https_port, client_id=client_id,
-            client_secret=secret, redirect_paths=contract.redirects,
+            paths.root,
+            host,
+            service_id=service_id,
+            name=contract.name,
+            private_port=service.private_https_port,
+            client_id=client_id,
+            client_secret=secret,
+            redirect_paths=contract.redirects,
         )
         written.append(service_id)
     return written

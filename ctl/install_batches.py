@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ctl import workflow_secrets
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
-from ctl.registry import Registry, RegistryError, load as load_registry
+from ctl.registry import Registry, RegistryError
+from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl import workflow_secrets
 
 
 def _now() -> str:
@@ -25,7 +26,7 @@ class InstallBatchStore:
         self.database = database
 
     @classmethod
-    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> "InstallBatchStore | None":
+    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> InstallBatchStore | None:
         return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
 
     def _connect(self) -> sqlite3.Connection:
@@ -91,6 +92,7 @@ class InstallBatchStore:
                     if dep.stage == "core" and (not installed or installed["state"] not in {"running", "stopped"}):
                         from ctl.registry import ROOT
                         from ctl.service_state import status, tailnet_dns_name
+
                         live = status(dep, tailnet_dns_name(), ROOT)
                         if live["state"] not in {"ready", "running"}:
                             raise ValueError(f"Install and verify {dep.name} before {service.name}")
@@ -110,6 +112,7 @@ class InstallBatchStore:
                 try:
                     from ctl.registry import ROOT
                     from ctl.service_state import status, tailnet_dns_name
+
                     live = status(service, tailnet_dns_name(), ROOT)
                     live_installed = live["state"] in {"ready", "running", "starting", "stopped", "needs_setup"}
                 except (OSError, ValueError):
@@ -122,44 +125,69 @@ class InstallBatchStore:
             visit(service_id)
         return [(service_id, service_id in requested_set) for service_id in order]
 
-    def _enqueue(self, batch_id: str, ordinal: int, actor: str, jobs: JobStore,
-                 *, force_new: bool = False) -> dict[str, Any]:
+    def _enqueue(
+        self, batch_id: str, ordinal: int, actor: str, jobs: JobStore, *, force_new: bool = False
+    ) -> dict[str, Any]:
         with self._connect() as conn:
-            item = conn.execute("""
+            item = conn.execute(
+                """
                 SELECT service_id FROM install_batch_items
                 WHERE batch_id = ? AND ordinal = ?
-            """, (batch_id, ordinal)).fetchone()
+            """,
+                (batch_id, ordinal),
+            ).fetchone()
         if not item:
             raise ValueError("batch item not found")
-        idempotency_key = (f"batch:{batch_id}:{ordinal}:retry:{uuid4().hex}"
-                           if force_new else f"batch:{batch_id}:{ordinal}")
-        job = jobs.create(kind="lifecycle", service_id=str(item["service_id"]), action="install",
-                          actor=actor, detail="Queued by a reviewed application install batch.",
-                          idempotency_key=idempotency_key)
+        idempotency_key = (
+            f"batch:{batch_id}:{ordinal}:retry:{uuid4().hex}" if force_new else f"batch:{batch_id}:{ordinal}"
+        )
+        job = jobs.create(
+            kind="lifecycle",
+            service_id=str(item["service_id"]),
+            action="install",
+            actor=actor,
+            detail="Queued by a reviewed application install batch.",
+            idempotency_key=idempotency_key,
+        )
         identity = workflow_secrets.job_identity(f"batch:{batch_id}")
         if identity:
             workflow_secrets.save_job_identity(str(job["id"]), **identity)
         now = _now()
         with self._connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE install_batch_items SET state = 'queued', job_id = ?, started_at = ?
                 WHERE batch_id = ? AND ordinal = ?
-            """, (job["id"], now, batch_id, ordinal))
-            conn.execute("""
+            """,
+                (job["id"], now, batch_id, ordinal),
+            )
+            conn.execute(
+                """
                 UPDATE install_batches SET state = 'running', current_ordinal = ?, updated_at = ?
                 WHERE id = ?
-            """, (ordinal, now, batch_id))
-        ControlState(self.database).set_installation(
-            str(item["service_id"]), "queued", job_id=str(job["id"]))
+            """,
+                (ordinal, now, batch_id),
+            )
+        ControlState(self.database).set_installation(str(item["service_id"]), "queued", job_id=str(job["id"]))
         return job
 
-    def create(self, registry: Registry, service_ids: list[str], *, actor: str,
-               owner_uid: str, identity: dict[str, str], idempotency_key: str,
-               jobs: JobStore, control: ControlState) -> dict[str, Any]:
+    def create(
+        self,
+        registry: Registry,
+        service_ids: list[str],
+        *,
+        actor: str,
+        owner_uid: str,
+        identity: workflow_secrets.JobIdentity,
+        idempotency_key: str,
+        jobs: JobStore,
+        control: ControlState,
+    ) -> dict[str, Any]:
         with self._connect() as conn:
             if idempotency_key:
-                existing = conn.execute("SELECT id FROM install_batches WHERE idempotency_key = ?",
-                                        (idempotency_key,)).fetchone()
+                existing = conn.execute(
+                    "SELECT id FROM install_batches WHERE idempotency_key = ?", (idempotency_key,)
+                ).fetchone()
                 if existing:
                     return self.get(str(existing["id"])) or {}
         plan = self.plan(registry, service_ids, control)
@@ -168,17 +196,31 @@ class InstallBatchStore:
         batch_id, now = uuid4().hex, _now()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO install_batches
                 (id, actor, owner_uid, state, idempotency_key, created_at, updated_at)
                 VALUES (?, ?, ?, 'queued', ?, ?, ?)
-            """, (batch_id, actor, owner_uid, idempotency_key or None, now, now))
-            conn.executemany("""
+            """,
+                (batch_id, actor, owner_uid, idempotency_key or None, now, now),
+            )
+            conn.executemany(
+                """
                 INSERT INTO install_batch_items
                 (batch_id, service_id, ordinal, explicitly_selected, state, depends_on_json)
                 VALUES (?, ?, ?, ?, 'pending', ?)
-            """, ((batch_id, service_id, ordinal, int(explicit), json.dumps(list(registry.get(service_id).dependencies)))
-                  for ordinal, (service_id, explicit) in enumerate(plan)))
+            """,
+                (
+                    (
+                        batch_id,
+                        service_id,
+                        ordinal,
+                        int(explicit),
+                        json.dumps(list(registry.get(service_id).dependencies)),
+                    )
+                    for ordinal, (service_id, explicit) in enumerate(plan)
+                ),
+            )
         workflow_secrets.save_job_identity(f"batch:{batch_id}", **identity)
         self._enqueue(batch_id, 0, actor, jobs)
         return self.get(batch_id) or {}
@@ -186,9 +228,12 @@ class InstallBatchStore:
     def get(self, batch_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             batch = conn.execute("SELECT * FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
-            items = conn.execute("""
+            items = conn.execute(
+                """
                 SELECT * FROM install_batch_items WHERE batch_id = ? ORDER BY ordinal
-            """, (batch_id,)).fetchall()
+            """,
+                (batch_id,),
+            ).fetchall()
         if not batch:
             return None
         result = dict(batch)
@@ -230,20 +275,30 @@ class InstallBatchStore:
 
     def _enqueue_reset(self, batch_id: str, ordinal: int, actor: str, jobs: JobStore) -> dict[str, Any]:
         with self._connect() as conn:
-            item = conn.execute("SELECT service_id FROM install_batch_items WHERE batch_id = ? AND ordinal = ?",
-                                (batch_id, ordinal)).fetchone()
+            item = conn.execute(
+                "SELECT service_id FROM install_batch_items WHERE batch_id = ? AND ordinal = ?", (batch_id, ordinal)
+            ).fetchone()
         if not item:
             raise ValueError("batch reset item not found")
-        job = jobs.create(kind="lifecycle", service_id=str(item["service_id"]), action="reset",
-                          actor=actor, detail="Queued cleanup for a failed application installation.",
-                          idempotency_key=f"batch-reset:{batch_id}:{ordinal}")
+        job = jobs.create(
+            kind="lifecycle",
+            service_id=str(item["service_id"]),
+            action="reset",
+            actor=actor,
+            detail="Queued cleanup for a failed application installation.",
+            idempotency_key=f"batch-reset:{batch_id}:{ordinal}",
+        )
         now = _now()
         with self._connect() as conn:
-            conn.execute("""UPDATE install_batch_items SET state = 'resetting', job_id = ?,
+            conn.execute(
+                """UPDATE install_batch_items SET state = 'resetting', job_id = ?,
                             started_at = ?, completed_at = '' WHERE batch_id = ? AND ordinal = ?""",
-                         (job["id"], now, batch_id, ordinal))
-            conn.execute("UPDATE install_batches SET state = 'resetting', current_ordinal = ?, updated_at = ? WHERE id = ?",
-                         (ordinal, now, batch_id))
+                (job["id"], now, batch_id, ordinal),
+            )
+            conn.execute(
+                "UPDATE install_batches SET state = 'resetting', current_ordinal = ?, updated_at = ? WHERE id = ?",
+                (ordinal, now, batch_id),
+            )
         return job
 
     def advance_for_job(self, job_id: str, jobs: JobStore) -> None:
@@ -260,77 +315,126 @@ class InstallBatchStore:
         batch = self.get(batch_id)
         if not batch or batch["state"] == "cancelled":
             with self._connect() as conn:
-                conn.execute("""UPDATE install_batch_items SET state = ?, completed_at = ?
+                conn.execute(
+                    """UPDATE install_batch_items SET state = ?, completed_at = ?
                                 WHERE batch_id = ? AND ordinal = ?""",
-                             (job["state"], now, batch_id, ordinal))
+                    (job["state"], now, batch_id, ordinal),
+                )
             return
         if batch["state"] == "resetting":
             if job["state"] != "succeeded":
-                error = {"code": job.get("error_code") or "reset_cleanup_failed",
-                         "message": job.get("detail") or "Application cleanup failed."}
+                error = {
+                    "code": job.get("error_code") or "reset_cleanup_failed",
+                    "message": job.get("detail") or "Application cleanup failed.",
+                }
                 with self._connect() as conn:
-                    conn.execute("""UPDATE install_batch_items SET state = 'reset_failed', error_json = ?, completed_at = ?
+                    conn.execute(
+                        """UPDATE install_batch_items SET state = 'reset_failed', error_json = ?, completed_at = ?
                                     WHERE batch_id = ? AND ordinal = ?""",
-                                 (json.dumps(error), now, batch_id, ordinal))
-                    conn.execute("UPDATE install_batches SET state = 'reset_failed', error_json = ?, updated_at = ? WHERE id = ?",
-                                 (json.dumps(error), now, batch_id))
+                        (json.dumps(error), now, batch_id, ordinal),
+                    )
+                    conn.execute(
+                        "UPDATE install_batches SET state = 'reset_failed', error_json = ?, updated_at = ? WHERE id = ?",
+                        (json.dumps(error), now, batch_id),
+                    )
                 return
             with self._connect() as conn:
-                conn.execute("""UPDATE install_batch_items SET state = 'reset', completed_at = ?, error_json = '{}'
-                                WHERE batch_id = ? AND ordinal = ?""", (now, batch_id, ordinal))
-                next_item = conn.execute("""SELECT ordinal FROM install_batch_items
+                conn.execute(
+                    """UPDATE install_batch_items SET state = 'reset', completed_at = ?, error_json = '{}'
+                                WHERE batch_id = ? AND ordinal = ?""",
+                    (now, batch_id, ordinal),
+                )
+                next_item = conn.execute(
+                    """SELECT ordinal FROM install_batch_items
                                             WHERE batch_id = ? AND state = 'reset_pending'
-                                            ORDER BY ordinal LIMIT 1""", (batch_id,)).fetchone()
+                                            ORDER BY ordinal LIMIT 1""",
+                    (batch_id,),
+                ).fetchone()
                 actor = conn.execute("SELECT actor FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
                 if not next_item:
-                    conn.execute("UPDATE install_batches SET state = 'reset', error_json = '{}', updated_at = ? WHERE id = ?",
-                                 (now, batch_id))
+                    conn.execute(
+                        "UPDATE install_batches SET state = 'reset', error_json = '{}', updated_at = ? WHERE id = ?",
+                        (now, batch_id),
+                    )
                     workflow_secrets.delete_by_job(f"batch:{batch_id}")
                     return
             self._enqueue_reset(batch_id, int(next_item["ordinal"]), str(actor["actor"]), jobs)
             return
         if job["state"] != "succeeded":
-            error = {"code": job.get("error_code") or "child_failed",
-                     "message": job.get("detail") or "Application installation failed."}
+            error = {
+                "code": job.get("error_code") or "child_failed",
+                "message": job.get("detail") or "Application installation failed.",
+            }
             with self._connect() as conn:
-                conn.execute("""UPDATE install_batch_items SET state = ?, error_json = ?, completed_at = ?
+                conn.execute(
+                    """UPDATE install_batch_items SET state = ?, error_json = ?, completed_at = ?
                                 WHERE batch_id = ? AND ordinal = ?""",
-                             (job["state"], json.dumps(error), now, batch_id, ordinal))
-                pending = conn.execute("""SELECT ordinal, service_id FROM install_batch_items
+                    (job["state"], json.dumps(error), now, batch_id, ordinal),
+                )
+                pending = conn.execute(
+                    """SELECT ordinal, service_id FROM install_batch_items
                                           WHERE batch_id = ? AND state = 'pending' ORDER BY ordinal""",
-                                       (batch_id,)).fetchall()
+                    (batch_id,),
+                ).fetchall()
                 for candidate in pending:
                     if self._depends_on(str(candidate["service_id"]), str(item["service_id"])):
-                        conn.execute("""UPDATE install_batch_items SET state = 'blocked_by_dependency',
+                        conn.execute(
+                            """UPDATE install_batch_items SET state = 'blocked_by_dependency',
                                         error_json = ?, completed_at = ? WHERE batch_id = ? AND ordinal = ?""",
-                                     (json.dumps({"code": "blocked_by_dependency",
-                                                  "message": f"Blocked because {item['service_id']} failed."}),
-                                      now, batch_id, candidate["ordinal"]))
-                next_item = conn.execute("""SELECT ordinal FROM install_batch_items
+                            (
+                                json.dumps(
+                                    {
+                                        "code": "blocked_by_dependency",
+                                        "message": f"Blocked because {item['service_id']} failed.",
+                                    }
+                                ),
+                                now,
+                                batch_id,
+                                candidate["ordinal"],
+                            ),
+                        )
+                next_item = conn.execute(
+                    """SELECT ordinal FROM install_batch_items
                                             WHERE batch_id = ? AND state = 'pending' ORDER BY ordinal LIMIT 1""",
-                                         (batch_id,)).fetchone()
+                    (batch_id,),
+                ).fetchone()
                 actor = conn.execute("SELECT actor FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
                 if not next_item:
-                    conn.execute("""UPDATE install_batches SET state = 'completed_with_failures', error_json = ?,
-                                    updated_at = ? WHERE id = ?""", (json.dumps(error), now, batch_id))
+                    conn.execute(
+                        """UPDATE install_batches SET state = 'completed_with_failures', error_json = ?,
+                                    updated_at = ? WHERE id = ?""",
+                        (json.dumps(error), now, batch_id),
+                    )
                     workflow_secrets.delete_by_job(f"batch:{batch_id}")
                     return
-                conn.execute("UPDATE install_batches SET state = 'running', error_json = ?, updated_at = ? WHERE id = ?",
-                             (json.dumps(error), now, batch_id))
+                conn.execute(
+                    "UPDATE install_batches SET state = 'running', error_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(error), now, batch_id),
+                )
             self._enqueue(batch_id, int(next_item["ordinal"]), str(actor["actor"]), jobs)
             return
         with self._connect() as conn:
-            conn.execute("""UPDATE install_batch_items SET state = 'succeeded', completed_at = ?
-                            WHERE batch_id = ? AND ordinal = ?""", (now, batch_id, ordinal))
-            next_item = conn.execute("""SELECT ordinal FROM install_batch_items
+            conn.execute(
+                """UPDATE install_batch_items SET state = 'succeeded', completed_at = ?
+                            WHERE batch_id = ? AND ordinal = ?""",
+                (now, batch_id, ordinal),
+            )
+            next_item = conn.execute(
+                """SELECT ordinal FROM install_batch_items
                                         WHERE batch_id = ? AND ordinal > ? AND state = 'pending'
-                                        ORDER BY ordinal LIMIT 1""", (batch_id, ordinal)).fetchone()
+                                        ORDER BY ordinal LIMIT 1""",
+                (batch_id, ordinal),
+            ).fetchone()
             if not next_item:
-                any_failure = conn.execute("""SELECT 1 FROM install_batch_items WHERE batch_id = ?
+                any_failure = conn.execute(
+                    """SELECT 1 FROM install_batch_items WHERE batch_id = ?
                                               AND state IN ('failed', 'cancelled', 'blocked_by_dependency') LIMIT 1""",
-                                           (batch_id,)).fetchone()
-                conn.execute("UPDATE install_batches SET state = ?, updated_at = ? WHERE id = ?",
-                             ("completed_with_failures" if any_failure else "succeeded", now, batch_id))
+                    (batch_id,),
+                ).fetchone()
+                conn.execute(
+                    "UPDATE install_batches SET state = ?, updated_at = ? WHERE id = ?",
+                    ("completed_with_failures" if any_failure else "succeeded", now, batch_id),
+                )
                 workflow_secrets.delete_by_job(f"batch:{batch_id}")
                 return
             actor = conn.execute("SELECT actor FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
@@ -363,19 +467,28 @@ class InstallBatchStore:
                     except (KeyError, ValueError):
                         pass
         with self._connect() as conn:
-            result = conn.execute("""
+            result = conn.execute(
+                """
                 UPDATE install_batches SET state = 'cancelled', updated_at = ?
                 WHERE id = ? AND state IN ('queued', 'running', 'paused', 'completed_with_failures')
-            """, (now, batch_id))
-            conn.execute("""UPDATE install_batch_items SET state = 'cancelled'
-                            WHERE batch_id = ? AND state = 'pending'""", (batch_id,))
+            """,
+                (now, batch_id),
+            )
+            conn.execute(
+                """UPDATE install_batch_items SET state = 'cancelled'
+                            WHERE batch_id = ? AND state = 'pending'""",
+                (batch_id,),
+            )
         return result.rowcount == 1
 
     def latest(self, owner_uid: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = conn.execute("""SELECT id FROM install_batches WHERE owner_uid = ?
+            row = conn.execute(
+                """SELECT id FROM install_batches WHERE owner_uid = ?
                                   AND state != 'reset'
-                                  ORDER BY created_at DESC LIMIT 1""", (owner_uid,)).fetchone()
+                                  ORDER BY created_at DESC LIMIT 1""",
+                (owner_uid,),
+            ).fetchone()
         return self.get(str(row["id"])) if row else None
 
     def resume(self, batch_id: str, jobs: JobStore) -> dict[str, Any]:
@@ -385,20 +498,27 @@ class InstallBatchStore:
         failed = next((item for item in batch["items"] if item["state"] in {"failed", "cancelled"}), None)
         if not failed or not failed["job_id"]:
             raise ValueError("batch has no retryable failed item")
-        retry = jobs.retry(str(failed["job_id"]), actor=str(batch["actor"]),
-                           idempotency_key=f"batch:{batch_id}:{failed['ordinal']}:retry:{uuid4().hex}")
+        retry = jobs.retry(
+            str(failed["job_id"]),
+            actor=str(batch["actor"]),
+            idempotency_key=f"batch:{batch_id}:{failed['ordinal']}:retry:{uuid4().hex}",
+        )
         identity = workflow_secrets.job_identity(f"batch:{batch_id}")
         if identity:
             workflow_secrets.save_job_identity(str(retry["id"]), **identity)
         now = _now()
         with self._connect() as conn:
-            conn.execute("""UPDATE install_batch_items SET state = 'queued', job_id = ?,
+            conn.execute(
+                """UPDATE install_batch_items SET state = 'queued', job_id = ?,
                             error_json = '{}', started_at = ?, completed_at = ''
                             WHERE batch_id = ? AND ordinal = ?""",
-                         (retry["id"], now, batch_id, failed["ordinal"]))
-            conn.execute("""UPDATE install_batches SET state = 'running', error_json = '{}',
+                (retry["id"], now, batch_id, failed["ordinal"]),
+            )
+            conn.execute(
+                """UPDATE install_batches SET state = 'running', error_json = '{}',
                             current_ordinal = ?, updated_at = ? WHERE id = ?""",
-                         (failed["ordinal"], now, batch_id))
+                (failed["ordinal"], now, batch_id),
+            )
         return self.get(batch_id) or {}
 
     def begin_reset(self, batch_id: str, jobs: JobStore) -> dict[str, Any]:
@@ -408,7 +528,8 @@ class InstallBatchStore:
             raise ValueError("batch is not resettable")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""UPDATE install_batch_items
+            conn.execute(
+                """UPDATE install_batch_items
                             SET state = CASE
                                 WHEN state IN ('failed', 'cancelled', 'reset_failed') THEN 'reset_pending'
                                 WHEN state = 'succeeded' THEN state
@@ -416,17 +537,25 @@ class InstallBatchStore:
                                 job_id = CASE WHEN state IN ('failed', 'cancelled', 'reset_failed') THEN '' ELSE job_id END,
                                 error_json = CASE WHEN state = 'succeeded' THEN error_json ELSE '{}' END,
                                 completed_at = CASE WHEN state = 'succeeded' THEN completed_at ELSE ? END
-                            WHERE batch_id = ?""", (now, batch_id))
-            conn.execute("UPDATE install_batches SET state = 'resetting', error_json = '{}', updated_at = ? WHERE id = ?",
-                         (now, batch_id))
-            next_item = conn.execute("""SELECT ordinal FROM install_batch_items WHERE batch_id = ?
+                            WHERE batch_id = ?""",
+                (now, batch_id),
+            )
+            conn.execute(
+                "UPDATE install_batches SET state = 'resetting', error_json = '{}', updated_at = ? WHERE id = ?",
+                (now, batch_id),
+            )
+            next_item = conn.execute(
+                """SELECT ordinal FROM install_batch_items WHERE batch_id = ?
                                         AND state = 'reset_pending' ORDER BY ordinal LIMIT 1""",
-                                     (batch_id,)).fetchone()
+                (batch_id,),
+            ).fetchone()
         if next_item:
             self._enqueue_reset(batch_id, int(next_item["ordinal"]), str(batch["actor"]), jobs)
         else:
             with self._connect() as conn:
-                conn.execute("UPDATE install_batches SET state = 'reset', updated_at = ? WHERE id = ?", (_now(), batch_id))
+                conn.execute(
+                    "UPDATE install_batches SET state = 'reset', updated_at = ? WHERE id = ?", (_now(), batch_id)
+                )
             workflow_secrets.delete_by_job(f"batch:{batch_id}")
         return self.get(batch_id) or {}
 
@@ -443,13 +572,18 @@ class InstallBatchStore:
             raise ValueError("batch is not resettable")
         now = _now()
         with self._connect() as conn:
-            conn.execute("""UPDATE install_batch_items
+            conn.execute(
+                """UPDATE install_batch_items
                             SET state = CASE WHEN state = 'succeeded' THEN state ELSE 'reset' END,
                                 job_id = CASE WHEN state = 'succeeded' THEN job_id ELSE '' END,
                                 error_json = CASE WHEN state = 'succeeded' THEN error_json ELSE '{}' END,
                                 completed_at = CASE WHEN state = 'succeeded' THEN completed_at ELSE ? END
-                            WHERE batch_id = ?""", (now, batch_id))
-            conn.execute("UPDATE install_batches SET state = 'reset', error_json = '{}', updated_at = ? WHERE id = ?",
-                         (now, batch_id))
+                            WHERE batch_id = ?""",
+                (now, batch_id),
+            )
+            conn.execute(
+                "UPDATE install_batches SET state = 'reset', error_json = '{}', updated_at = ? WHERE id = ?",
+                (now, batch_id),
+            )
         workflow_secrets.delete_by_job(f"batch:{batch_id}")
         return self.get(batch_id) or {}

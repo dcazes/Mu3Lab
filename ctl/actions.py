@@ -16,16 +16,16 @@ DEBUG: Return shape is ALWAYS {"ok", "changed", "log"[, "terminal_command"]}.
 
 from __future__ import annotations
 
-import os as _os
 import json as _json
+import os as _os
 import queue as _queue
 import shlex as _shlex
 import subprocess as _subprocess
 import threading as _threading
 import time as _time
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-import urllib.request
 
 from ctl import privilege
 
@@ -40,8 +40,7 @@ def _fail(log_lines: list[str], **extra) -> dict:
     return {"ok": False, "changed": False, "log": log_lines, **extra}
 
 
-def _run_user(argv: list[str], log: Callable[[str], None],
-              _exec=privilege._exec) -> tuple[int, str]:
+def _run_user(argv: list[str], log: Callable[[str], None], _exec=privilege._exec) -> tuple[int, str]:
     """Run an UNPRIVILEGED command (docker, compose, curl-equivalents).
 
     Logged the same way as privileged calls ($-prefixed, no sudo).
@@ -60,13 +59,15 @@ def _docker_config_env() -> dict[str, str]:
     about this). A per-uid temp dir keeps both worlds separate. 0700.
     """
     import tempfile
+
     path = Path(tempfile.gettempdir()) / f"mu3lab-docker-cfg-{_os.getuid()}"
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return {"DOCKER_CONFIG": str(path)}
 
 
-def docker_cmd(argv: list[str], log: Callable[[str], None],
-               timeout: int = 300, env: dict[str, str] | None = None) -> tuple[int, str]:
+def docker_cmd(
+    argv: list[str], log: Callable[[str], None], timeout: int = 300, env: dict[str, str] | None = None
+) -> tuple[int, str]:
     """Run a docker CLI command with whatever access exists. THE choke point:
     every installer docker invocation flows through here (never raw).
 
@@ -81,22 +82,27 @@ def docker_cmd(argv: list[str], log: Callable[[str], None],
         command_env.update(env)
     command = _docker_invocation(argv)
     if command is None:
-        return 1, ("docker unavailable: no live group and no DB membership "
-                   "(installer should have added you — report this)")
+        return 1, (
+            "docker unavailable: no live group and no DB membership (installer should have added you — report this)"
+        )
     return privilege._exec(command, timeout=timeout, env=command_env)
 
 
-def docker_cmd_stdin(argv: list[str], data: str, log: Callable[[str], None],
-                     timeout: int = 60) -> tuple[int, str]:
+def docker_cmd_stdin(argv: list[str], data: str, log: Callable[[str], None], timeout: int = 60) -> tuple[int, str]:
     """Send private SQL/configuration over stdin without logging its contents."""
     log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
     command = _docker_invocation(argv)
     if command is None:
         return 1, "docker unavailable: no live group and no DB membership"
     try:
-        proc = _subprocess.run(command, input=data, text=True, capture_output=True,
-                               timeout=timeout,
-                               env={**_os.environ, **_docker_config_env()})
+        proc = _subprocess.run(
+            command,
+            input=data,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            env={**_os.environ, **_docker_config_env()},
+        )
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except (_subprocess.TimeoutExpired, OSError) as exc:
         return 1, str(exc)
@@ -111,9 +117,12 @@ def _docker_invocation(argv: list[str]) -> list[str] | None:
     """
     import getpass as _gp
     import shutil as _sh
+
     from ctl import preflight as _pre
+
     try:
         import grp as _grp
+
         live_groups = [_grp.getgrgid(gid).gr_name for gid in _os.getgroups()]
     except OSError:
         live_groups = []
@@ -124,9 +133,14 @@ def _docker_invocation(argv: list[str]) -> list[str] | None:
     return None
 
 
-def docker_cmd_stream(argv: list[str], log: Callable[[str], None], *,
-                      timeout: int = 300, env: dict[str, str] | None = None,
-                      on_output: Callable[[str], None] | None = None) -> tuple[int, str]:
+def docker_cmd_stream(
+    argv: list[str],
+    log: Callable[[str], None],
+    *,
+    timeout: int = 300,
+    env: dict[str, str] | None = None,
+    on_output: Callable[[str], None] | None = None,
+) -> tuple[int, str]:
     """Run a Docker command while forwarding bounded, line-oriented output.
 
     ``subprocess.run(capture_output=True)`` is appropriate for short probes,
@@ -137,15 +151,21 @@ def docker_cmd_stream(argv: list[str], log: Callable[[str], None], *,
     log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
     command = _docker_invocation(argv)
     if command is None:
-        return 1, ("docker unavailable: no live group and no DB membership "
-                   "(installer should have added you — report this)")
+        return 1, (
+            "docker unavailable: no live group and no DB membership (installer should have added you — report this)"
+        )
     command_env = _docker_config_env()
     if env:
         command_env.update(env)
     try:
-        proc = _subprocess.Popen(command, stdout=_subprocess.PIPE,
-                                 stderr=_subprocess.STDOUT, text=True,
-                                 bufsize=1, env={**_os.environ, **command_env})
+        proc = _subprocess.Popen(
+            command,
+            stdout=_subprocess.PIPE,
+            stderr=_subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={**_os.environ, **command_env},
+        )
     except OSError as exc:
         return 126, f"{command[0]}: {exc}"
     assert proc.stdout is not None
@@ -154,7 +174,7 @@ def docker_cmd_stream(argv: list[str], log: Callable[[str], None], *,
 
     def read_output() -> None:
         try:
-            for line in proc.stdout:
+            for line in proc.stdout or ():
                 inbox.put(line.rstrip())
         finally:
             inbox.put(None)
@@ -190,9 +210,9 @@ def docker_cmd_stream(argv: list[str], log: Callable[[str], None], *,
     return rc, "\n".join(lines).strip()
 
 
-def docker_cmd_with_stdin(argv: list[str], stdin_data: str,
-                          log: Callable[[str], None], *,
-                          timeout: int = 60) -> tuple[int, str]:
+def docker_cmd_with_stdin(
+    argv: list[str], stdin_data: str, log: Callable[[str], None], *, timeout: int = 60
+) -> tuple[int, str]:
     """Run one installer-owned Docker command with private standard input.
 
     This is deliberately separate from :func:`docker_cmd`: its input must
@@ -200,16 +220,19 @@ def docker_cmd_with_stdin(argv: list[str], stdin_data: str,
     It exists for tools such as Authentik's interactive password-reset command
     whose supported interface reads the new value from standard input.
     """
-    log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv)
-        + "  (private input supplied securely)")
+    log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv) + "  (private input supplied securely)")
     command = _docker_invocation(argv)
     if command is None:
-        return 1, ("docker unavailable: no live group and no DB membership "
-                   "(installer should have added you — report this)")
+        return 1, (
+            "docker unavailable: no live group and no DB membership (installer should have added you — report this)"
+        )
     try:
         proc = _subprocess.Popen(
-            command, stdin=_subprocess.PIPE, stdout=_subprocess.PIPE,
-            stderr=_subprocess.STDOUT, text=True,
+            command,
+            stdin=_subprocess.PIPE,
+            stdout=_subprocess.PIPE,
+            stderr=_subprocess.STDOUT,
+            text=True,
             env={**_os.environ, **_docker_config_env()},
         )
         output, _ = proc.communicate(stdin_data, timeout=timeout)
@@ -224,8 +247,7 @@ def docker_cmd_with_stdin(argv: list[str], stdin_data: str,
     return proc.returncode, output.replace(stdin_data, "[redacted]").strip()
 
 
-def reset_authentik_admin_password(password: str,
-                                   log: Callable[[str], None]) -> dict:
+def reset_authentik_admin_password(password: str, log: Callable[[str], None]) -> dict:
     """Set a one-time password for the built-in ``akadmin`` account.
 
     Authentik documents ``ak changepassword akadmin`` as its recovery path.
@@ -234,22 +256,25 @@ def reset_authentik_admin_password(password: str,
     """
     if not password or "\n" in password or "\r" in password:
         return {"ok": False, "error": "invalid temporary password"}
-    rc, output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "authentik-server-1", "ak",
-         "changepassword", "akadmin"],
-        password + "\n" + password + "\n", log, timeout=90)
+    rc, _output = docker_cmd_with_stdin(
+        ["docker", "exec", "-i", "authentik-server-1", "ak", "changepassword", "akadmin"],
+        password + "\n" + password + "\n",
+        log,
+        timeout=90,
+    )
     if rc != 0:
         # Django's output can include installation details.  The bootstrap
         # needs only an actionable, non-sensitive result.
-        return {"ok": False,
-                "error": "Authentik could not reset the akadmin password. "
-                         "Confirm its server container is healthy, then retry."}
+        return {
+            "ok": False,
+            "error": "Authentik could not reset the akadmin password. "
+            "Confirm its server container is healthy, then retry.",
+        }
     log("Authentik akadmin password reset; temporary password was not logged.")
     return {"ok": True}
 
 
-def freellmapi_local_setup(email: str, password: str,
-                           log: Callable[[str], None]) -> tuple[int, dict]:
+def freellmapi_local_setup(email: str, password: str, log: Callable[[str], None]) -> tuple[int, dict]:
     """Claim a fresh FreeLLMAPI from inside its container's loopback boundary.
 
     Upstream intentionally requires a setup code when the socket peer is not
@@ -268,8 +293,8 @@ def freellmapi_local_setup(email: str, password: str,
     )
     payload = _json.dumps({"email": email, "password": password}, separators=(",", ":")) + "\n"
     rc, output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "mu3lab-freellmapi-freellmapi-1",
-         "node", "-e", script], payload, log, timeout=30)
+        ["docker", "exec", "-i", "mu3lab-freellmapi-freellmapi-1", "node", "-e", script], payload, log, timeout=30
+    )
     if rc:
         return rc, {}
     try:
@@ -279,13 +304,17 @@ def freellmapi_local_setup(email: str, password: str,
     return 0, decoded if isinstance(decoded, dict) else {}
 
 
-def compose_up(projdir: Path, log: Callable[[str], None],
-               timeout: int = 300, env: dict[str, str] | None = None,
-               extra_files: list[Path] | None = None,
-               wait_timeout: int | None = None,
-               recreate: bool = False,
-               services: list[str] | tuple[str, ...] | None = None,
-               on_output: Callable[[str], None] | None = None) -> tuple[int, str]:
+def compose_up(
+    projdir: Path,
+    log: Callable[[str], None],
+    timeout: int = 300,
+    env: dict[str, str] | None = None,
+    extra_files: list[Path] | None = None,
+    wait_timeout: int | None = None,
+    recreate: bool = False,
+    services: list[str] | tuple[str, ...] | None = None,
+    on_output: Callable[[str], None] | None = None,
+) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
     Uses -f/--project-directory flags instead of cwd= so `sg -c` (single
@@ -310,43 +339,70 @@ def compose_up(projdir: Path, log: Callable[[str], None],
     # the dashboard while letting first-run stacks start prerequisites before
     # their application health check is meaningful.
     if services:
-        if any(not value or not isinstance(value, str) or value.startswith("-")
-               for value in services):
+        if any(not value or not isinstance(value, str) or value.startswith("-") for value in services):
             return 2, "invalid reviewed Compose service selection"
         argv.extend(services)
     if on_output:
-        return docker_cmd_stream(argv, log, timeout=timeout, env=env,
-                                 on_output=on_output)
+        return docker_cmd_stream(argv, log, timeout=timeout, env=env, on_output=on_output)
     return docker_cmd(argv, log, timeout=timeout, env=env)
 
 
-def compose_config(projdir: Path, log: Callable[[str], None], *,
-                   env: dict[str, str] | None = None) -> tuple[int, str]:
+def compose_config(projdir: Path, log: Callable[[str], None], *, env: dict[str, str] | None = None) -> tuple[int, str]:
     """Validate one materialized curated project before any image pull."""
-    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
-               "--project-directory", str(projdir), "config", "--quiet"]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(projdir / "docker-compose.yml"),
+        "--project-directory",
+        str(projdir),
+        "config",
+        "--quiet",
+    ]
     return docker_cmd(command, log, timeout=60, env=env)
 
 
-def compose_pull(projdir: Path, log: Callable[[str], None], *,
-                 timeout: int = 1800,
-                 env: dict[str, str] | None = None) -> tuple[int, str]:
+def compose_pull(
+    projdir: Path, log: Callable[[str], None], *, timeout: int = 1800, env: dict[str, str] | None = None
+) -> tuple[int, str]:
     """Pull images declared by one curated, already-validated Compose file."""
-    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
-               "--project-directory", str(projdir), "pull"]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(projdir / "docker-compose.yml"),
+        "--project-directory",
+        str(projdir),
+        "pull",
+    ]
     return docker_cmd_stream(command, log, timeout=timeout, env=env)
 
 
 def compose_images(projdir: Path, log: Callable[[str], None]) -> tuple[int, str]:
     """Return resolved image IDs for audit after a successful curated pull."""
-    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
-               "--project-directory", str(projdir), "images", "--format", "json"]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(projdir / "docker-compose.yml"),
+        "--project-directory",
+        str(projdir),
+        "images",
+        "--format",
+        "json",
+    ]
     return docker_cmd(command, log, timeout=60)
 
 
-def compose_exec(projdir: Path, service: str, argv: list[str],
-                 log: Callable[[str], None], *, timeout: int = 300,
-                 env: dict[str, str] | None = None) -> tuple[int, str]:
+def compose_exec(
+    projdir: Path,
+    service: str,
+    argv: list[str],
+    log: Callable[[str], None],
+    *,
+    timeout: int = 300,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str]:
     """Run a fixed, reviewed command inside one curated Compose service.
 
     Callers must supply a service name and argument list from source code; no
@@ -355,15 +411,30 @@ def compose_exec(projdir: Path, service: str, argv: list[str],
     """
     if not service or not argv or any(not isinstance(value, str) for value in argv):
         return 2, "invalid reviewed compose exec request"
-    command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"),
-               "--project-directory", str(projdir), "exec", "-T", service, *argv]
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(projdir / "docker-compose.yml"),
+        "--project-directory",
+        str(projdir),
+        "exec",
+        "-T",
+        service,
+        *argv,
+    ]
     return docker_cmd(command, log, timeout=timeout, env=env)
 
 
-def compose_action(projdir: Path, action: str, log: Callable[[str], None],
-                   *, timeout: int = 600,
-                   env: dict[str, str] | None = None,
-                   extra_files: list[Path] | None = None) -> tuple[int, str]:
+def compose_action(
+    projdir: Path,
+    action: str,
+    log: Callable[[str], None],
+    *,
+    timeout: int = 600,
+    env: dict[str, str] | None = None,
+    extra_files: list[Path] | None = None,
+) -> tuple[int, str]:
     """Run one allowlisted lifecycle verb for a reviewed Compose project."""
     verbs = {
         "start": ["up", "-d"],
@@ -384,9 +455,9 @@ def compose_action(projdir: Path, action: str, log: Callable[[str], None],
     return docker_cmd_stream(command, log, timeout=timeout, env=env)
 
 
-def compose_down(projdir: Path, log: Callable[[str], None], *,
-                 timeout: int = 300,
-                 env: dict[str, str] | None = None) -> tuple[int, str]:
+def compose_down(
+    projdir: Path, log: Callable[[str], None], *, timeout: int = 300, env: dict[str, str] | None = None
+) -> tuple[int, str]:
     """Remove this curated Compose project's containers and orphans.
 
     Volumes are intentionally not passed to Docker.  Resetting a failed
@@ -404,16 +475,14 @@ def compose_down(projdir: Path, log: Callable[[str], None], *,
     return docker_cmd(command, log, timeout=timeout, env=env)
 
 
-def compose_logs(projdir: Path, log: Callable[[str], None], *,
-                 tail: int = 120, container: str = "") -> tuple[int, str]:
+def compose_logs(projdir: Path, log: Callable[[str], None], *, tail: int = 120, container: str = "") -> tuple[int, str]:
     """Return bounded logs without accepting paths or arbitrary arguments."""
     bounded = max(20, min(int(tail), 500))
     command = ["docker", "compose", "-f", str(projdir / "docker-compose.yml")]
     digest_override = projdir / "docker-compose.digest.yml"
     if digest_override.is_file():
         command.extend(["-f", str(digest_override)])
-    command.extend(["--project-directory", str(projdir), "logs", "--no-color",
-                    "--tail", str(bounded)])
+    command.extend(["--project-directory", str(projdir), "logs", "--no-color", "--tail", str(bounded)])
     if container:
         command.append(container)
     return docker_cmd(command, log, timeout=30)
@@ -426,19 +495,37 @@ def docker_container_statuses(project: str) -> tuple[int, str]:
     rather than re-evaluating a Compose file, so it works while the project is
     still starting and does not need to receive service environment values.
     """
-    return docker_cmd([
-        "docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
-        "--format", "{{.Names}}\t{{.Status}}",
-    ], lambda _line: None, timeout=15)
+    return docker_cmd(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--format",
+            "{{.Names}}\t{{.Status}}",
+        ],
+        lambda _line: None,
+        timeout=15,
+    )
 
 
 def docker_image_digest(image: str) -> tuple[int, str]:
     """Resolve one manifest-owned image reference to its immutable repo digest."""
     if not image or any(char.isspace() for char in image):
         return 2, "invalid curated image reference"
-    return docker_cmd([
-        "docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image,
-    ], lambda _line: None, timeout=30)
+    return docker_cmd(
+        [
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{index .RepoDigests 0}}",
+            image,
+        ],
+        lambda _line: None,
+        timeout=30,
+    )
 
 
 def apt_update(log: Callable[[str], None]) -> dict:
@@ -457,9 +544,8 @@ def apt_install(packages: list[str], log: Callable[[str], None]) -> dict:
     """`apt-get install -y <packages>`. Non-empty list required."""
     lines: list[str] = []
     if not packages:
-        return _fail(lines + ["apt_install called with empty package list"])
-    res = privilege.run_privileged(["apt-get", "install", "-y"] + packages,
-                                   lines.append)
+        return _fail([*lines, "apt_install called with empty package list"])
+    res = privilege.run_privileged(["apt-get", "install", "-y", *packages], lines.append)
     if res.get("need_terminal"):
         return _fail(lines, terminal_command=res["terminal_command"])
     if not res["ok"]:
@@ -468,8 +554,7 @@ def apt_install(packages: list[str], log: Callable[[str], None]) -> dict:
     return _ok(lines)
 
 
-def fetch_url(url: str, dest: Path, log: Callable[[str], None],
-              mode: int = 0o644) -> dict:
+def fetch_url(url: str, dest: Path, log: Callable[[str], None], mode: int = 0o644) -> dict:
     """Download a repo GPG key with urllib (no curl dependency) as the USER.
 
     Writes only under `dest`'s existing parent; keyring dirs (/etc/apt/...)
@@ -481,18 +566,17 @@ def fetch_url(url: str, dest: Path, log: Callable[[str], None],
         with urllib.request.urlopen(url, timeout=30) as resp:
             data = resp.read()
     except OSError as exc:
-        return _fail(lines + [f"download failed: {url}: {exc}"])
+        return _fail([*lines, f"download failed: {url}: {exc}"])
     try:
         dest.write_bytes(data)
         dest.chmod(mode)
     except OSError as exc:
-        return _fail(lines + [f"cannot write {dest}: {exc}"])
+        return _fail([*lines, f"cannot write {dest}: {exc}"])
     lines.append(f"downloaded {len(data)} bytes: {url} -> {dest}")
     return _ok(lines)
 
 
-def write_root_file(path: str, content: str, log: Callable[[str], None],
-                    mode: str = "644") -> dict:
+def write_root_file(path: str, content: str, log: Callable[[str], None], mode: str = "644") -> dict:
     """Write a root-owned TEXT file (apt .list) as root. See write_root_bytes
     for binary payloads (GPG keys). Content travels via staged files, never
     on a command line.
@@ -500,8 +584,7 @@ def write_root_file(path: str, content: str, log: Callable[[str], None],
     return write_root_bytes(path, content.encode("utf-8"), log, mode=mode)
 
 
-def write_root_bytes(path: str, data: bytes, log: Callable[[str], None],
-                    mode: str = "644") -> dict:
+def write_root_bytes(path: str, data: bytes, log: Callable[[str], None], mode: str = "644") -> dict:
     """Write a root-owned BINARY file (repo GPG keys) as root.
 
     APT's ``.gpg`` keyring format is binary, while the official repository
@@ -512,11 +595,11 @@ def write_root_bytes(path: str, data: bytes, log: Callable[[str], None],
     """
     lines: list[str] = []
     import tempfile
+
     tmpdir = Path(tempfile.mkdtemp(prefix="mu3lab-"))
     tmpdir.chmod(0o700)
     staged = tmpdir / "payload"
-    if Path(path).suffix == ".gpg" and data.lstrip().startswith(
-            b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
+    if Path(path).suffix == ".gpg" and data.lstrip().startswith(b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
         armored = tmpdir / "payload.asc"
         binary = tmpdir / "payload.gpg"
         armored.write_bytes(data)
@@ -524,10 +607,12 @@ def write_root_bytes(path: str, data: bytes, log: Callable[[str], None],
         gnupg_home.mkdir(mode=0o700)
         try:
             proc = _subprocess.run(
-                ["gpg", "--batch", "--yes", "--dearmor",
-                 "--output", str(binary), str(armored)],
-                capture_output=True, text=True, timeout=30,
-                env={**_os.environ, "GNUPGHOME": str(gnupg_home)})
+                ["gpg", "--batch", "--yes", "--dearmor", "--output", str(binary), str(armored)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**_os.environ, "GNUPGHOME": str(gnupg_home)},
+            )
         except (OSError, _subprocess.TimeoutExpired) as exc:
             return _fail([f"could not dearmor GPG key for {path}: {exc}"])
         if proc.returncode != 0 or not binary.is_file():
@@ -541,8 +626,7 @@ def write_root_bytes(path: str, data: bytes, log: Callable[[str], None],
     cp = privilege.run_privileged(["cp", str(staged), path], lines.append)
     if cp.get("need_terminal") or not cp["ok"]:
         lines.append(f"could not place {path}")
-        return _fail(lines, **({"terminal_command": cp["terminal_command"]}
-                               if cp.get("need_terminal") else {}))
+        return _fail(lines, **({"terminal_command": cp["terminal_command"]} if cp.get("need_terminal") else {}))
     ch = privilege.run_privileged(["chmod", mode, path], lines.append)
     if not ch["ok"] and not ch.get("need_terminal"):
         return _fail(lines)
@@ -565,8 +649,7 @@ def remove_root_file(path: str, log: Callable[[str], None]) -> dict:
     return _ok(lines) if res["ok"] else _fail(lines)
 
 
-def systemctl_enable_now(unit: str, log: Callable[[str], None],
-                         user_scope: bool = False) -> dict:
+def systemctl_enable_now(unit: str, log: Callable[[str], None], user_scope: bool = False) -> dict:
     """`systemctl enable --now <unit>` (system scope) or --user variant."""
     lines: list[str] = []
     if user_scope:
@@ -576,8 +659,7 @@ def systemctl_enable_now(unit: str, log: Callable[[str], None],
         if rc != 0:
             return _fail(lines)
         return _ok(lines)
-    res = privilege.run_privileged(["systemctl", "enable", "--now", unit],
-                                   lines.append)
+    res = privilege.run_privileged(["systemctl", "enable", "--now", unit], lines.append)
     if res.get("need_terminal"):
         return _fail(lines, terminal_command=res["terminal_command"])
     if not res["ok"]:
@@ -588,8 +670,7 @@ def systemctl_enable_now(unit: str, log: Callable[[str], None],
 def usermod_add_group(user: str, group: str, log: Callable[[str], None]) -> dict:
     """`usermod -aG <group> <user>` (append-only, never replaces groups)."""
     lines: list[str] = []
-    res = privilege.run_privileged(["usermod", "-aG", group, user],
-                                   lines.append)
+    res = privilege.run_privileged(["usermod", "-aG", group, user], lines.append)
     if res.get("need_terminal"):
         return _fail(lines, terminal_command=res["terminal_command"])
     if not res["ok"]:
@@ -597,15 +678,13 @@ def usermod_add_group(user: str, group: str, log: Callable[[str], None]) -> dict
     return _ok(lines, changed=True)
 
 
-def docker_network_create(name: str, log: Callable[[str], None],
-                          internal: bool = False) -> dict:
+def docker_network_create(name: str, log: Callable[[str], None], internal: bool = False) -> dict:
     """`docker network create [--internal] <name>`, sg-aware via docker_cmd.
 
     Unprivileged by design (relies on group membership OR the sg fallback,
     both handled inside docker_cmd) — never needs the pkexec worker.
     """
-    argv = (["docker", "network", "create"]
-            + (["--internal"] if internal else []) + [name])
+    argv = ["docker", "network", "create"] + (["--internal"] if internal else []) + [name]
     rc, out = docker_cmd(argv, log)
     lines = [out or f"(exit {rc})"]
     if rc != 0:
@@ -613,13 +692,11 @@ def docker_network_create(name: str, log: Callable[[str], None],
     return _ok(lines)
 
 
-def tailscale_serve(port: int, loopback_port: int,
-                    log: Callable[[str], None]) -> dict:
+def tailscale_serve(port: int, loopback_port: int, log: Callable[[str], None]) -> dict:
     """Publish one registry-owned loopback listener through Tailscale Serve."""
     if not (1 <= int(port) <= 65535 and 1 <= int(loopback_port) <= 65535):
         return _fail(["invalid curated Tailscale route"])
-    argv = ["tailscale", "serve", "--bg", f"--https={int(port)}",
-            f"http://127.0.0.1:{int(loopback_port)}"]
+    argv = ["tailscale", "serve", "--bg", f"--https={int(port)}", f"http://127.0.0.1:{int(loopback_port)}"]
     # Tailscale can delegate Serve configuration to the dashboard operator
     # (`tailscale set --operator=<user>`). Try that supported unprivileged path
     # first so a background worker does not invoke a polkit dialog needlessly.
@@ -634,10 +711,14 @@ def tailscale_serve(port: int, loopback_port: int,
         log(str(exc))
     result = privilege.run_privileged(argv, log, timeout=60)
     if result.get("need_terminal"):
-        return _fail(["Tailscale Serve requires an administrator command."],
-                     terminal_command=result["terminal_command"])
-    return _ok(["Private HTTPS route published."], changed=True) if result.get("ok") else _fail(
-        ["Tailscale Serve could not publish the curated route."])
+        return _fail(
+            ["Tailscale Serve requires an administrator command."], terminal_command=result["terminal_command"]
+        )
+    return (
+        _ok(["Private HTTPS route published."], changed=True)
+        if result.get("ok")
+        else _fail(["Tailscale Serve could not publish the curated route."])
+    )
 
 
 def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> dict:
@@ -654,8 +735,7 @@ def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> 
             return _fail(lines, terminal_command=res["terminal_command"])
         if not res["ok"]:
             return _fail(lines)
-    root_owner = privilege.run_privileged(
-        ["chown", f"root:{user}", str(root)], lines.append)
+    root_owner = privilege.run_privileged(["chown", f"root:{user}", str(root)], lines.append)
     if root_owner.get("need_terminal"):
         return _fail(lines, terminal_command=root_owner["terminal_command"])
     if not root_owner["ok"]:
@@ -666,7 +746,7 @@ def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> 
     if not secret["ok"]:
         return _fail(lines)
     owned = [str(path) for path in paths[1:]]
-    res = privilege.run_privileged(["chown", "-R", f"{user}:{user}"] + owned, lines.append)
+    res = privilege.run_privileged(["chown", "-R", f"{user}:{user}", *owned], lines.append)
     if res.get("need_terminal"):
         return _fail(lines, terminal_command=res["terminal_command"])
     return _ok(lines) if res["ok"] else _fail(lines)

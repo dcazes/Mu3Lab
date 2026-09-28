@@ -35,8 +35,14 @@ class BackupReadinessTests(unittest.TestCase):
             paths.backups.mkdir()
             paths.runtime.mkdir()
             (paths.backups / "config").write_text("restic", encoding="utf-8")
-            (paths.runtime / "backup-verification.json").write_text(json.dumps({
-                "snapshot_id": "abc", "integrity_checked_at": "2026-01-01T00:00:00Z",
-            }), encoding="utf-8")
+            (paths.runtime / "backup-verification.json").write_text(
+                json.dumps(
+                    {
+                        "snapshot_id": "abc",
+                        "integrity_checked_at": "2026-01-01T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
             result = readiness(paths)
         self.assertEqual(result["state"], "verified")

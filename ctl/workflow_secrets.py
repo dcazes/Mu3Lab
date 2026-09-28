@@ -12,7 +12,7 @@ import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
@@ -58,7 +58,7 @@ def _read(paths: RuntimePaths) -> list[dict[str, Any]]:
     try:
         raw = _cipher(paths).decrypt(store_path.read_bytes())
         value = json.loads(raw.decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise WorkflowSecretError("encrypted workflow store could not be read") from exc
     return value if isinstance(value, list) else []
 
@@ -88,69 +88,126 @@ def generate_password() -> str:
             return value
 
 
-def save_job_identity(job_id: str, *, owner_uid: str, email: str, username: str,
-                      display_name: str, paths: RuntimePaths = RuntimePaths()) -> None:
+class JobIdentity(TypedDict):
+    """The verified Authentik user a provisioning job creates an account for."""
+
+    owner_uid: str
+    email: str
+    username: str
+    display_name: str
+
+
+def save_job_identity(
+    job_id: str, *, owner_uid: str, email: str, username: str, display_name: str, paths: RuntimePaths = RuntimePaths()
+) -> None:
     if not job_id or not owner_uid or not email:
         raise WorkflowSecretError("verified job identity is incomplete")
-    records = [item for item in _read(paths)
-               if not (item.get("kind") == "job_identity" and item.get("job_id") == job_id)]
+    records = [
+        item for item in _read(paths) if not (item.get("kind") == "job_identity" and item.get("job_id") == job_id)
+    ]
     created = _now()
-    records.append({"id": uuid4().hex, "kind": "job_identity", "job_id": job_id,
-                    "owner_uid": owner_uid, "email": email, "username": username,
-                    "display_name": display_name,
-                    "created_at": created.isoformat(timespec="seconds"),
-                    "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds")})
+    records.append(
+        {
+            "id": uuid4().hex,
+            "kind": "job_identity",
+            "job_id": job_id,
+            "owner_uid": owner_uid,
+            "email": email,
+            "username": username,
+            "display_name": display_name,
+            "created_at": created.isoformat(timespec="seconds"),
+            "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds"),
+        }
+    )
     _write(records, paths)
 
 
-def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str] | None:
+def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> JobIdentity | None:
     cleanup(paths)
     for item in _read(paths):
         if item.get("kind") == "job_identity" and item.get("job_id") == job_id:
-            return {key: str(item.get(key, "")) for key in
-                    ("owner_uid", "email", "username", "display_name")}
+            return JobIdentity(
+                owner_uid=str(item.get("owner_uid", "")),
+                email=str(item.get("email", "")),
+                username=str(item.get("username", "")),
+                display_name=str(item.get("display_name", "")),
+            )
     return None
 
 
-def create_handoff(*, service_id: str, job_id: str, owner_uid: str, username: str,
-                   email: str, password: str, login_url: str,
-                   paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
+def create_handoff(
+    *,
+    service_id: str,
+    job_id: str,
+    owner_uid: str,
+    username: str,
+    email: str,
+    password: str,
+    login_url: str,
+    paths: RuntimePaths = RuntimePaths(),
+) -> dict[str, str]:
     created, handoff_id = _now(), uuid4().hex
     records = _read(paths)
-    records.append({"id": handoff_id, "kind": "credential", "service_id": service_id,
-                    "job_id": job_id, "owner_uid": owner_uid, "username": username,
-                    "email": email, "password": password, "login_url": login_url,
-                    "created_at": created.isoformat(timespec="seconds"),
-                    "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds")})
+    records.append(
+        {
+            "id": handoff_id,
+            "kind": "credential",
+            "service_id": service_id,
+            "job_id": job_id,
+            "owner_uid": owner_uid,
+            "username": username,
+            "email": email,
+            "password": password,
+            "login_url": login_url,
+            "created_at": created.isoformat(timespec="seconds"),
+            "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds"),
+        }
+    )
     _write(records, paths)
-    return {"id": handoff_id, "created_at": created.isoformat(timespec="seconds"),
-            "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds")}
+    return {
+        "id": handoff_id,
+        "created_at": created.isoformat(timespec="seconds"),
+        "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds"),
+    }
 
 
 def metadata(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     cleanup(paths)
     keys = ("id", "service_id", "job_id", "created_at", "expires_at", "login_url")
-    return [{key: str(item.get(key, "")) for key in keys}
-            for item in _read(paths)
-            if item.get("kind") == "credential" and item.get("owner_uid") == owner_uid]
+    return [
+        {key: str(item.get(key, "")) for key in keys}
+        for item in _read(paths)
+        if item.get("kind") == "credential" and item.get("owner_uid") == owner_uid
+    ]
 
 
-def reveal(handoff_id: str, owner_uid: str,
-           paths: RuntimePaths = RuntimePaths()) -> dict[str, str] | None:
+def reveal(handoff_id: str, owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str] | None:
     cleanup(paths)
     for item in _read(paths):
-        if (item.get("kind") == "credential" and item.get("id") == handoff_id
-                and item.get("owner_uid") == owner_uid):
-            return {key: str(item.get(key, "")) for key in
-                    ("id", "service_id", "username", "email", "password",
-                     "login_url", "created_at", "expires_at")}
+        if item.get("kind") == "credential" and item.get("id") == handoff_id and item.get("owner_uid") == owner_uid:
+            return {
+                key: str(item.get(key, ""))
+                for key in (
+                    "id",
+                    "service_id",
+                    "username",
+                    "email",
+                    "password",
+                    "login_url",
+                    "created_at",
+                    "expires_at",
+                )
+            }
     return None
 
 
 def delete(record_id: str, owner_uid: str = "", paths: RuntimePaths = RuntimePaths()) -> bool:
     records = _read(paths)
-    retained = [item for item in records if not (
-        item.get("id") == record_id and (not owner_uid or item.get("owner_uid") == owner_uid))]
+    retained = [
+        item
+        for item in records
+        if not (item.get("id") == record_id and (not owner_uid or item.get("owner_uid") == owner_uid))
+    ]
     if len(retained) == len(records):
         return False
     _write(retained, paths)

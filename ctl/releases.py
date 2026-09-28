@@ -25,8 +25,7 @@ def latest(repository: str, current_version: str = "") -> dict[str, Any]:
     else:
         request = urllib.request.Request(
             f"https://api.github.com/repos/{repository}/releases/latest",
-            headers={"Accept": "application/vnd.github+json",
-                     "User-Agent": "Mu3Lab-control-plane"},
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "Mu3Lab-control-plane"},
         )
         try:
             with urllib.request.urlopen(request, timeout=10) as response:
@@ -37,14 +36,20 @@ def latest(repository: str, current_version: str = "") -> dict[str, Any]:
         url = str(payload.get("html_url", ""))[:500]
         if not tag or not url.startswith(f"https://github.com/{repository}/releases/"):
             raise RuntimeError("upstream returned invalid release metadata")
-        result = {"repository": repository, "latest_version": tag,
-                  "release_url": url,
-                  "published_at": str(payload.get("published_at", ""))[:40],
-                  "release_name": str(payload.get("name") or tag)[:160],
-                  "notes": str(payload.get("body") or "")[:2000]}
+        result = {
+            "repository": repository,
+            "latest_version": tag,
+            "release_url": url,
+            "published_at": str(payload.get("published_at", ""))[:40],
+            "release_name": str(payload.get("name") or tag)[:160],
+            "notes": str(payload.get("body") or "")[:2000],
+        }
         _CACHE[repository] = (now + _TTL_SECONDS, result)
     normalized_current = current_version.removeprefix("v")
     normalized_latest = str(result["latest_version"]).removeprefix("v")
-    return {**result, "current_version": current_version,
-            "update_available": bool(normalized_current and normalized_current != normalized_latest),
-            "checked_at": int(time.time())}
+    return {
+        **result,
+        "current_version": current_version,
+        "update_available": bool(normalized_current and normalized_current != normalized_latest),
+        "checked_at": int(time.time()),
+    }

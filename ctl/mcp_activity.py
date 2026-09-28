@@ -52,7 +52,9 @@ class McpActivity:
         """)
         if "source_ref" not in {row[1] for row in db.execute("PRAGMA table_info(calls)")}:
             db.execute("ALTER TABLE calls ADD COLUMN source_ref TEXT")
-        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS calls_source_ref ON calls(source_ref) WHERE source_ref IS NOT NULL")
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS calls_source_ref ON calls(source_ref) WHERE source_ref IS NOT NULL"
+        )
         try:
             with db:
                 yield db
@@ -63,25 +65,31 @@ class McpActivity:
         with self._db() as db:
             rows = db.execute(
                 "SELECT * FROM calls WHERE server_id=? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?",
-                (server_id, before, before, max(1, min(limit, 100)))).fetchall()
+                (server_id, before, before, max(1, min(limit, 100))),
+            ).fetchall()
         return [dict(row) for row in rows]
 
-    def record(self, server_id: str, tool_name: str, source: str, actor: str,
-               outcome: str, duration_ms: int, detail: str = "") -> None:
+    def record(
+        self, server_id: str, tool_name: str, source: str, actor: str, outcome: str, duration_ms: int, detail: str = ""
+    ) -> None:
         # detail is an enum-like diagnostic, never upstream exception text or content.
         with self._db() as db:
-            db.execute("INSERT INTO calls (server_id,tool_name,source,actor,outcome,duration_ms,created_at,detail) "
-                       "VALUES (?,?,?,?,?,?,?,?)",
-                       (server_id, tool_name, source, actor, outcome, max(0, duration_ms),
-                        _now(), detail[:100]))
+            db.execute(
+                "INSERT INTO calls (server_id,tool_name,source,actor,outcome,duration_ms,created_at,detail) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (server_id, tool_name, source, actor, outcome, max(0, duration_ms), _now(), detail[:100]),
+            )
 
-    def ingest_chat_call(self, source_ref: str, server_id: str, tool_name: str,
-                         actor: str, outcome: str, created_at: str) -> None:
+    def ingest_chat_call(
+        self, source_ref: str, server_id: str, tool_name: str, actor: str, outcome: str, created_at: str
+    ) -> None:
         with self._db() as db:
-            db.execute("INSERT OR IGNORE INTO calls "
-                       "(server_id,tool_name,source,actor,outcome,duration_ms,created_at,detail,source_ref) "
-                       "VALUES (?,?, 'lobechat', ?, ?, 0, ?, '', ?)",
-                       (server_id, tool_name, actor, outcome, created_at, source_ref))
+            db.execute(
+                "INSERT OR IGNORE INTO calls "
+                "(server_id,tool_name,source,actor,outcome,duration_ms,created_at,detail,source_ref) "
+                "VALUES (?,?, 'lobechat', ?, ?, 0, ?, '', ?)",
+                (server_id, tool_name, actor, outcome, created_at, source_ref),
+            )
 
     def permission(self, server_id: str, tool_name: str, risk: str) -> str:
         default = "auto" if risk == "read" else "needs_approval"
@@ -94,8 +102,8 @@ class McpActivity:
             db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
             try:
                 row = db.execute(
-                    "SELECT permission FROM tool_permissions WHERE server_id=? AND tool_name=?",
-                    (server_id, tool_name)).fetchone()
+                    "SELECT permission FROM tool_permissions WHERE server_id=? AND tool_name=?", (server_id, tool_name)
+                ).fetchone()
             finally:
                 db.close()
         except (OSError, sqlite3.Error):
@@ -106,9 +114,11 @@ class McpActivity:
         if permission not in {"auto", "needs_approval", "disabled"}:
             raise ValueError("invalid tool permission")
         with self._db() as db:
-            db.execute("INSERT INTO tool_permissions VALUES (?,?,?,?) ON CONFLICT(server_id,tool_name) "
-                       "DO UPDATE SET permission=excluded.permission, updated_at=excluded.updated_at",
-                       (server_id, tool_name, permission, _now()))
+            db.execute(
+                "INSERT INTO tool_permissions VALUES (?,?,?,?) ON CONFLICT(server_id,tool_name) "
+                "DO UPDATE SET permission=excluded.permission, updated_at=excluded.updated_at",
+                (server_id, tool_name, permission, _now()),
+            )
 
     @staticmethod
     def input_hash(payload: dict) -> str:
@@ -119,20 +129,28 @@ class McpActivity:
         expiry = (datetime.now(UTC) + timedelta(minutes=5)).isoformat(timespec="seconds")
         with self._db() as db:
             db.execute("DELETE FROM write_confirmations WHERE expires_at < ?", (_now(),))
-            db.execute("INSERT INTO write_confirmations VALUES (?,?,?,?,?,?)",
-                       (nonce, server_id, tool_name, actor, self.input_hash(payload), expiry))
+            db.execute(
+                "INSERT INTO write_confirmations VALUES (?,?,?,?,?,?)",
+                (nonce, server_id, tool_name, actor, self.input_hash(payload), expiry),
+            )
         return nonce
 
-    def consume(self, nonce: str, server_id: str, tool_name: str, actor: str,
-                payload: dict, idempotency_key: str) -> bool:
+    def consume(
+        self, nonce: str, server_id: str, tool_name: str, actor: str, payload: dict, idempotency_key: str
+    ) -> bool:
         if not nonce or not idempotency_key:
             return False
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM write_confirmations WHERE nonce=?", (nonce,)).fetchone()
-            if not row or row["server_id"] != server_id or row["tool_name"] != tool_name or \
-                    row["actor"] != actor or row["input_hash"] != self.input_hash(payload) or \
-                    row["expires_at"] < _now():
+            if (
+                not row
+                or row["server_id"] != server_id
+                or row["tool_name"] != tool_name
+                or row["actor"] != actor
+                or row["input_hash"] != self.input_hash(payload)
+                or row["expires_at"] < _now()
+            ):
                 return False
             db.execute("DELETE FROM write_confirmations WHERE nonce=?", (nonce,))
             try:

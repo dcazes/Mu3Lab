@@ -7,10 +7,10 @@ never served by the dashboard or committed to Git.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
-import json
 import yaml
 
 from ctl.provider_secrets import records
@@ -52,17 +52,24 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
 
     providers = records(paths)
     from ctl.control_state import ControlState
+
     state = ControlState.runtime(paths)
     if state:
-        providers = [item for item in providers
-                     if (connection := state.provider(item["id"]))
-                     and connection["enabled"] and connection["state"] in {"verifying", "verified"}]
+        providers = [
+            item
+            for item in providers
+            if (connection := state.provider(item["id"]))
+            and connection["enabled"]
+            and connection["state"] in {"verifying", "verified"}
+        ]
     # This is the Mu3Lab-owned, supported declarative hand-off.  The adapter
     # records provider names/keys privately; the runtime verifier refuses to
     # claim chat readiness until the pinned FreeLLMAPI image accepts it.
     free_config = {
-        "keys": [{"platform": item["id"], "key": item["api_key"],
-                  "label": item["label"], "enabled": True} for item in providers],
+        "keys": [
+            {"platform": item["id"], "key": item["api_key"], "label": item["label"], "enabled": True}
+            for item in providers
+        ],
         "routing": {"strategy": "smartest"},
     }
     free_config_path = _write_private(
@@ -77,21 +84,38 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
     litellm_env["FREELLMAPI_SERVICE_KEY"] = service_key
     litellm_config = {
         "model_list": [
-            {"model_name": "mu3lab-chat", "litellm_params": {
-                "model": "openai/auto:smartest", "api_base": "os.environ/FREELLMAPI_API_BASE",
-                "api_key": "os.environ/FREELLMAPI_SERVICE_KEY"}},
-            {"model_name": "mu3lab-fast", "litellm_params": {
-                "model": "openai/auto:fastest", "api_base": "os.environ/FREELLMAPI_API_BASE",
-                "api_key": "os.environ/FREELLMAPI_SERVICE_KEY"}},
-            {"model_name": "mu3lab-embed", "litellm_params": {
-                "model": f"ollama/{EMBEDDING_MODEL}", "api_base": "os.environ/OLLAMA_API_BASE"}},
+            {
+                "model_name": "mu3lab-chat",
+                "litellm_params": {
+                    "model": "openai/auto:smartest",
+                    "api_base": "os.environ/FREELLMAPI_API_BASE",
+                    "api_key": "os.environ/FREELLMAPI_SERVICE_KEY",
+                },
+            },
+            {
+                "model_name": "mu3lab-fast",
+                "litellm_params": {
+                    "model": "openai/auto:fastest",
+                    "api_base": "os.environ/FREELLMAPI_API_BASE",
+                    "api_key": "os.environ/FREELLMAPI_SERVICE_KEY",
+                },
+            },
+            {
+                "model_name": "mu3lab-embed",
+                "litellm_params": {"model": f"ollama/{EMBEDDING_MODEL}", "api_base": "os.environ/OLLAMA_API_BASE"},
+            },
         ],
         "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
         "litellm_settings": {"drop_params": True},
     }
     litellm_config_path = _write_private(
-        project_root / "litellm" / "config.yaml", yaml.safe_dump(litellm_config, sort_keys=False),
+        project_root / "litellm" / "config.yaml",
+        yaml.safe_dump(litellm_config, sort_keys=False),
     )
     _write_private(litellm_env_path, _env_text(litellm_env))
-    return {"litellm_config": litellm_config_path, "freellmapi_config": free_config_path,
-            "provider_count": len(providers), "chat_configured": bool(providers)}
+    return {
+        "litellm_config": litellm_config_path,
+        "freellmapi_config": free_config_path,
+        "provider_count": len(providers),
+        "chat_configured": bool(providers),
+    }

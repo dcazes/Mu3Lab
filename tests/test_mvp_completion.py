@@ -12,10 +12,12 @@ from ctl import workflow_secrets
 from ctl.control_state import ControlState
 from ctl.install_batches import InstallBatchStore
 from ctl.jobs import JobStore
+from ctl.lifecycle.materialize import materialize
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
-from ctl.service_ops import _materialize, reset_failed_application
+from ctl.service_ops import reset_failed_application
+from tests.support import runtime_paths
 
 
 class WorkflowSecretTests(unittest.TestCase):
@@ -32,14 +34,19 @@ class WorkflowSecretTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             result = workflow_secrets.create_handoff(
-                service_id="paperless-ngx", job_id="job", owner_uid="owner-a",
-                username="operator", email="operator@example.test",
-                password="NeverPlaintext123!", login_url="https://private.example", paths=paths)
+                service_id="paperless-ngx",
+                job_id="job",
+                owner_uid="owner-a",
+                username="operator",
+                email="operator@example.test",
+                password="NeverPlaintext123!",
+                login_url="https://private.example",
+                paths=paths,
+            )
             encrypted = (paths.runtime / "workflow-secrets.enc").read_bytes()
             self.assertNotIn(b"NeverPlaintext123!", encrypted)
             self.assertIsNone(workflow_secrets.reveal(result["id"], "owner-b", paths))
-            self.assertEqual(workflow_secrets.reveal(result["id"], "owner-a", paths)["password"],
-                             "NeverPlaintext123!")
+            self.assertEqual(workflow_secrets.reveal(result["id"], "owner-a", paths)["password"], "NeverPlaintext123!")
             self.assertTrue(workflow_secrets.delete(result["id"], "owner-a", paths))
             self.assertIsNone(workflow_secrets.reveal(result["id"], "owner-a", paths))
             self.assertEqual(stat.S_IMODE((paths.runtime / "workflow-secrets.key").stat().st_mode), 0o600)
@@ -58,12 +65,13 @@ class RegistryAccountTests(unittest.TestCase):
             source = Path(source_tmp)
             project = source / "apps" / "surfsense"
             project.mkdir(parents=True)
-            (project / "docker-compose.yml").write_text("services: {app: {image: example:test}}\n",
-                                                         encoding="utf-8")
+            (project / "docker-compose.yml").write_text("services: {app: {image: example:test}}\n", encoding="utf-8")
             paths = RuntimePaths(Path(runtime_tmp))
-            with patch("ctl.service_ops.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
-                target = _materialize(load().get("surfsense"), source)
+            with (
+                runtime_paths(paths),
+                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+            ):
+                target = materialize(load().get("surfsense"), source)
             values = read_runtime_env(target / ".env")
             self.assertEqual(values["EMBEDDING_MODEL"], "litellm://ollama/nomic-embed-text")
             self.assertEqual(values["EMBEDDING_BASE_URL"], "http://ollama:11434")
@@ -78,13 +86,26 @@ class BatchPersistenceTests(unittest.TestCase):
             control = ControlState(paths.runtime / "control-plane.sqlite3")
             jobs = JobStore(paths.runtime / "control-plane.sqlite3")
             batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
-            identity = {"owner_uid": "uid", "email": "operator@example.test",
-                        "username": "operator", "display_name": "Operator"}
-            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
-                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
-                batch = batches.create(load(), ["paperless-ngx", "adventurelog"],
-                                       actor="operator", owner_uid="uid", identity=identity,
-                                       idempotency_key="request-1", jobs=jobs, control=control)
+            identity = {
+                "owner_uid": "uid",
+                "email": "operator@example.test",
+                "username": "operator",
+                "display_name": "Operator",
+            }
+            with (
+                patch("ctl.install_batches.workflow_secrets.save_job_identity"),
+                patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity),
+            ):
+                batch = batches.create(
+                    load(),
+                    ["paperless-ngx", "adventurelog"],
+                    actor="operator",
+                    owner_uid="uid",
+                    identity=identity,
+                    idempotency_key="request-1",
+                    jobs=jobs,
+                    control=control,
+                )
                 self.assertEqual([item["state"] for item in batch["items"]], ["queued", "pending"])
                 first = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(first["id"], "running", actor="worker")
@@ -112,16 +133,34 @@ class BatchPersistenceTests(unittest.TestCase):
             control = ControlState(paths.runtime / "control-plane.sqlite3")
             jobs = JobStore(paths.runtime / "control-plane.sqlite3")
             batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
-            identity = {"owner_uid": "uid", "email": "operator@example.test",
-                        "username": "operator", "display_name": "Operator"}
-            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
-                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
-                batch = batches.create(load(), ["paperless-ngx"],
-                                       actor="operator", owner_uid="uid", identity=identity,
-                                       idempotency_key="request-reset", jobs=jobs, control=control)
+            identity = {
+                "owner_uid": "uid",
+                "email": "operator@example.test",
+                "username": "operator",
+                "display_name": "Operator",
+            }
+            with (
+                patch("ctl.install_batches.workflow_secrets.save_job_identity"),
+                patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity),
+            ):
+                batch = batches.create(
+                    load(),
+                    ["paperless-ngx"],
+                    actor="operator",
+                    owner_uid="uid",
+                    identity=identity,
+                    idempotency_key="request-reset",
+                    jobs=jobs,
+                    control=control,
+                )
                 failed_job = jobs.get(batch["items"][0]["job_id"])
-                jobs.transition(failed_job["id"], "failed", actor="worker",
-                                detail="temporary start failure", error_code="compose_failed")
+                jobs.transition(
+                    failed_job["id"],
+                    "failed",
+                    actor="worker",
+                    detail="temporary start failure",
+                    error_code="compose_failed",
+                )
                 batches.advance_for_job(failed_job["id"], jobs)
                 reset = batches.reset(batch["id"], jobs)
                 latest = batches.latest("uid")
@@ -133,16 +172,31 @@ class BatchPersistenceTests(unittest.TestCase):
 
     def test_worker_owned_reset_is_durable_and_does_not_run_docker_in_the_request(self):
         with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp)); paths.runtime.mkdir(parents=True)
+            paths = RuntimePaths(Path(tmp))
+            paths.runtime.mkdir(parents=True)
             control = ControlState(paths.runtime / "control-plane.sqlite3")
             jobs = JobStore(paths.runtime / "control-plane.sqlite3")
             batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
-            identity = {"owner_uid": "uid", "email": "operator@example.test",
-                        "username": "operator", "display_name": "Operator"}
-            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
-                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
-                batch = batches.create(load(), ["paperless-ngx"], actor="operator", owner_uid="uid",
-                                       identity=identity, idempotency_key="async-reset", jobs=jobs, control=control)
+            identity = {
+                "owner_uid": "uid",
+                "email": "operator@example.test",
+                "username": "operator",
+                "display_name": "Operator",
+            }
+            with (
+                patch("ctl.install_batches.workflow_secrets.save_job_identity"),
+                patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity),
+            ):
+                batch = batches.create(
+                    load(),
+                    ["paperless-ngx"],
+                    actor="operator",
+                    owner_uid="uid",
+                    identity=identity,
+                    idempotency_key="async-reset",
+                    jobs=jobs,
+                    control=control,
+                )
                 child = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(child["id"], "failed", actor="worker", detail="failed")
                 batches.advance_for_job(child["id"], jobs)
@@ -159,16 +213,31 @@ class BatchPersistenceTests(unittest.TestCase):
 
     def test_unrelated_batch_items_continue_after_a_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp)); paths.runtime.mkdir(parents=True)
+            paths = RuntimePaths(Path(tmp))
+            paths.runtime.mkdir(parents=True)
             control = ControlState(paths.runtime / "control-plane.sqlite3")
             jobs = JobStore(paths.runtime / "control-plane.sqlite3")
             batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
-            identity = {"owner_uid": "uid", "email": "operator@example.test",
-                        "username": "operator", "display_name": "Operator"}
-            with patch("ctl.install_batches.workflow_secrets.save_job_identity"), \
-                 patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity):
-                batch = batches.create(load(), ["adventurelog", "paperless-ngx"], actor="operator", owner_uid="uid",
-                                       identity=identity, idempotency_key="continue-independent", jobs=jobs, control=control)
+            identity = {
+                "owner_uid": "uid",
+                "email": "operator@example.test",
+                "username": "operator",
+                "display_name": "Operator",
+            }
+            with (
+                patch("ctl.install_batches.workflow_secrets.save_job_identity"),
+                patch("ctl.install_batches.workflow_secrets.job_identity", return_value=identity),
+            ):
+                batch = batches.create(
+                    load(),
+                    ["adventurelog", "paperless-ngx"],
+                    actor="operator",
+                    owner_uid="uid",
+                    identity=identity,
+                    idempotency_key="continue-independent",
+                    jobs=jobs,
+                    control=control,
+                )
                 first = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(first["id"], "failed", actor="worker", detail="failed")
                 batches.advance_for_job(first["id"], jobs)
@@ -189,10 +258,14 @@ class FailedApplicationResetTests(unittest.TestCase):
             (project / ".env").write_text(
                 "NEXTCLOUD_DB_PASSWORD=keep-me\n"
                 "MU3LAB_BOOTSTRAP_USERNAME=remove-me\n"
-                "MU3LAB_BOOTSTRAP_PASSWORD=remove-me\n", encoding="utf-8")
+                "MU3LAB_BOOTSTRAP_PASSWORD=remove-me\n",
+                encoding="utf-8",
+            )
             service = load().get("nextcloud")
-            with patch("ctl.service_ops.project_path", return_value=project), \
-                 patch("ctl.service_ops.actions.compose_down", return_value=(0, "removed")) as down:
+            with (
+                patch("ctl.service_ops.project_path", return_value=project),
+                patch("ctl.service_ops.actions.compose_down", return_value=(0, "removed")) as down,
+            ):
                 ok, detail = reset_failed_application(service, Path(tmp), lambda _line: None)
             self.assertTrue(ok)
             self.assertIn("persistent data preserved", detail)

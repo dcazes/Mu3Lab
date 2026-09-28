@@ -25,8 +25,13 @@ def _resolve(server_id: str, tool_name: str):
     state = ControlState.runtime()
     runtime = state.mcp_server(server_id) if state else None
     installation = state.installation(server.service_id) if state else None
-    if not runtime or not runtime["enabled"] or runtime["state"] != "live" or \
-            not installation or installation["state"] != "running":
+    if (
+        not runtime
+        or not runtime["enabled"]
+        or runtime["state"] != "live"
+        or not installation
+        or installation["state"] != "running"
+    ):
         raise ValueError("MCP connection and its application must be live")
     tool = next((item for item in runtime.get("tool_snapshot", []) if item.get("id") == tool_name), None)
     if not tool:
@@ -57,20 +62,26 @@ def prepare(server_id: str, tool_name: str, arguments: Any, actor: str) -> dict:
     payload = _validate(tool, arguments)
     needs_confirmation = tool.get("risk") != "read" or permission == "needs_approval"
     nonce = McpActivity().prepare(server_id, tool_name, actor, payload) if needs_confirmation else ""
-    return {"ok": True, "server_id": server_id, "tool_name": tool_name,
-            "risk": tool.get("risk", "write"), "permission": permission,
-            "confirmation_required": needs_confirmation, "confirmation_token": nonce,
-            "expires_in_seconds": 300 if nonce else 0}
+    return {
+        "ok": True,
+        "server_id": server_id,
+        "tool_name": tool_name,
+        "risk": tool.get("risk", "write"),
+        "permission": permission,
+        "confirmation_required": needs_confirmation,
+        "confirmation_token": nonce,
+        "expires_in_seconds": 300 if nonce else 0,
+    }
 
 
-def execute(server_id: str, tool_name: str, arguments: Any, actor: str,
-            *, nonce: str = "", idempotency_key: str = "") -> dict:
+def execute(
+    server_id: str, tool_name: str, arguments: Any, actor: str, *, nonce: str = "", idempotency_key: str = ""
+) -> dict:
     server, tool, permission = _resolve(server_id, tool_name)
     payload = _validate(tool, arguments)
     needs_confirmation = tool.get("risk") != "read" or permission == "needs_approval"
     activity = McpActivity()
-    if needs_confirmation and not activity.consume(nonce, server_id, tool_name, actor,
-                                                    payload, idempotency_key):
+    if needs_confirmation and not activity.consume(nonce, server_id, tool_name, actor, payload, idempotency_key):
         raise ValueError("confirmation expired, changed, or already used")
     if server.transport != "streamable-http":
         raise ValueError("tool console requires a Streamable HTTP MCP connection")
@@ -83,13 +94,22 @@ def execute(server_id: str, tool_name: str, arguments: Any, actor: str,
     try:
         _, session = _rpc_request(endpoint, "initialize", 1, token=token)
         _rpc_notification(endpoint, "notifications/initialized", token=token, session_id=session)
-        result, _ = _rpc_request(endpoint, "tools/call", 2, token=token, session_id=session,
-                                 params={"name": tool_name, "arguments": payload})
-        outcome = "tool_error" if isinstance(result.get("result"), dict) and result["result"].get("isError") else "succeeded"
-        activity.record(server_id, tool_name, "dashboard", actor, outcome,
-                        int((time.monotonic() - started) * 1000))
+        result, _ = _rpc_request(
+            endpoint, "tools/call", 2, token=token, session_id=session, params={"name": tool_name, "arguments": payload}
+        )
+        outcome = (
+            "tool_error" if isinstance(result.get("result"), dict) and result["result"].get("isError") else "succeeded"
+        )
+        activity.record(server_id, tool_name, "dashboard", actor, outcome, int((time.monotonic() - started) * 1000))
         return {"ok": outcome == "succeeded", "result": result.get("result", {}), "outcome": outcome}
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
-        activity.record(server_id, tool_name, "dashboard", actor, "failed",
-                        int((time.monotonic() - started) * 1000), "mcp_call_failed")
+        activity.record(
+            server_id,
+            tool_name,
+            "dashboard",
+            actor,
+            "failed",
+            int((time.monotonic() - started) * 1000),
+            "mcp_call_failed",
+        )
         raise ValueError("MCP tool call failed; inspect connection health and server logs") from None

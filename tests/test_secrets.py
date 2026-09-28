@@ -36,8 +36,7 @@ class RootEnvTests(unittest.TestCase):
 
     def test_creates_with_both_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
-            values, added = secrets.ensure_root_env(
-                Path(tmp), token_factory=lambda: "tok")
+            values, added = secrets.ensure_root_env(Path(tmp), token_factory=lambda: "tok")
             self.assertEqual(set(added), set(secrets.ROOT_ENV_KEYS))
             self.assertEqual(values["MU3LAB_CTL_TOKEN"], "tok")
             mode = stat.S_IMODE(os.stat(Path(tmp) / ".env").st_mode)
@@ -46,12 +45,9 @@ class RootEnvTests(unittest.TestCase):
     def test_preserves_existing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / ".env").write_text(
-                "# mine\nMU3LAB_CTL_TOKEN=live-token\nOTHER=1\n",
-                encoding="utf-8")
+            (root / ".env").write_text("# mine\nMU3LAB_CTL_TOKEN=live-token\nOTHER=1\n", encoding="utf-8")
             os.chmod(root / ".env", 0o600)
-            values, added = secrets.ensure_root_env(
-                root, token_factory=lambda: "new")
+            values, added = secrets.ensure_root_env(root, token_factory=lambda: "new")
             # Live token untouched; only missing keys added; OTHER kept.
             self.assertEqual(values["MU3LAB_CTL_TOKEN"], "live-token")
             self.assertEqual(added, ["MU3LAB_INGRESS_TOKEN"])
@@ -65,33 +61,33 @@ class RootEnvTests(unittest.TestCase):
             root = Path(tmp)
             before = "MU3LAB_CTL_TOKEN=a\nMU3LAB_INGRESS_TOKEN=b\n"
             (root / ".env").write_text(before, encoding="utf-8")
-            _values, added = secrets.ensure_root_env(
-                root, token_factory=lambda: "new")
+            _values, added = secrets.ensure_root_env(root, token_factory=lambda: "new")
             self.assertEqual(added, [])
             self.assertEqual((root / ".env").read_text(encoding="utf-8"), before)
 
     def test_token_factory_used_per_missing_key(self):
         made: list[str] = []
         with tempfile.TemporaryDirectory() as tmp:
-            _values, added = secrets.ensure_root_env(
-                Path(tmp), token_factory=lambda: made.append("x") or "x")
+            _values, added = secrets.ensure_root_env(Path(tmp), token_factory=lambda: made.append("x") or "x")
             self.assertEqual(len(made), 2)
             self.assertEqual(len(added), 2)
 
     def test_authentik_env_returns_names_not_values(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path, added = secrets.ensure_authentik_env(
-                Path(tmp), token_factory=lambda: "secret-value")
+            path, added = secrets.ensure_authentik_env(Path(tmp), token_factory=lambda: "secret-value")
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             self.assertIn("AUTHENTIK_SECRET_KEY", added)
             self.assertNotIn("secret-value", repr(added))
             self.assertEqual(secrets.read_runtime_env(path)["AUTHENTIK_SECRET_KEY"], "secret-value")
 
-    @unittest.skipUnless(__import__("importlib.util").util.find_spec("cryptography"),
-                         "cryptography is installed by the control-plane requirements")
+    @unittest.skipUnless(
+        __import__("importlib.util").util.find_spec("cryptography"),
+        "cryptography is installed by the control-plane requirements",
+    )
     def test_provider_credentials_are_encrypted_and_write_only(self):
         from ctl.provider_secrets import metadata, save
         from ctl.runtime import RuntimePaths
+
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             self.assertEqual(save("groq", "Main provider", "gsk_super-secret", paths)["id"], "groq")

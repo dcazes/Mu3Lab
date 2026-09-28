@@ -13,6 +13,13 @@ class Provider:
     prefix: str = ""
     instructions: str = ""
     probe_models: tuple[str, ...] = ()
+    signup_url: str = ""
+    keys_url: str = ""
+    # "email" providers get a pre-generated Vaultwarden sign-up entry;
+    # "google" providers use the owner's existing Google account instead.
+    account: str = "email"
+    recommended: bool = False
+    free_tier: str = ""
 
     def public(self) -> dict:
         value = asdict(self)
@@ -28,27 +35,110 @@ class Provider:
 
 
 PROVIDERS = (
-    Provider("cerebras", "Cerebras", "csk-…", "csk-", "Create a key in Cerebras Cloud.",
-             ("llama-3.3-70b", "qwen-3-32b", "gpt-oss-120b")),
-    Provider("google", "Google AI Studio", "AIza…", "AIza", "Create a Gemini API key in Google AI Studio.",
-             ("gemini-2.5-flash", "gemini-2.5-pro", "gemma-3-27b-it")),
-    Provider("groq", "Groq", "gsk_…", "gsk_", "Create a key in the Groq console.",
-             ("compound-mini", "compound", "llama-3.3-70b-versatile",
-              "openai/gpt-oss-120b", "qwen/qwen3-32b")),
-    Provider("huggingface", "Hugging Face", "hf_…", "hf_", "Create a fine-grained access token in Hugging Face settings.",
-             ("meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen3-32B", "openai/gpt-oss-120b")),
-    Provider("nvidia", "NVIDIA", "nvapi-…", "nvapi-", "Create a key in the NVIDIA API Catalog.",
-             ("nemotron-3-super-120b", "nemotron-3-ultra-550b", "nemotron-3.5-lightning-30b-a3b",
-              "meta/llama-3.3-70b-instruct", "nvidia/llama-3.1-nemotron-ultra-253b-v1")),
-    Provider("openrouter", "OpenRouter", "sk-or-v1-…", "sk-or-v1-", "Create a key in OpenRouter settings.",
-             ("openrouter/free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-coder:free")),
-    Provider("mistral", "Mistral", "Paste the key from Mistral Console", "", "Create a key in Mistral La Plateforme.",
-             ("mistral-small-latest", "open-mistral-nemo", "codestral-latest")),
-    Provider("zhipu", "Z.ai", "Paste the key from Z.ai", "", "Create an API key in the Z.ai developer console.",
-             ("glm-4.5-flash", "glm-4.5", "glm-4.5-air")),
+    Provider(
+        "cerebras",
+        "Cerebras",
+        "csk-…",
+        "csk-",
+        "Create a key in Cerebras Cloud.",
+        ("llama-3.3-70b", "qwen-3-32b", "gpt-oss-120b"),
+        signup_url="https://cloud.cerebras.ai/",
+        keys_url="https://cloud.cerebras.ai/platform/",
+        recommended=True,
+        free_tier="Very high daily token allowance on fast open models.",
+    ),
+    Provider(
+        "google",
+        "Google AI Studio",
+        "AIza…",
+        "AIza",
+        "Create a Gemini API key in Google AI Studio.",
+        ("gemini-2.5-flash", "gemini-2.5-pro", "gemma-3-27b-it"),
+        signup_url="https://aistudio.google.com/",
+        keys_url="https://aistudio.google.com/app/apikey",
+        account="google",
+        recommended=True,
+        free_tier="Gemini free tier; uses your existing Google account.",
+    ),
+    Provider(
+        "groq",
+        "Groq",
+        "gsk_…",
+        "gsk_",
+        "Create a key in the Groq console.",
+        ("compound-mini", "compound", "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen/qwen3-32b"),
+        signup_url="https://console.groq.com/",
+        keys_url="https://console.groq.com/keys",
+        recommended=True,
+        free_tier="Generous per-day request limits across many open models.",
+    ),
+    Provider(
+        "huggingface",
+        "Hugging Face",
+        "hf_…",
+        "hf_",
+        "Create a fine-grained access token in Hugging Face settings.",
+        ("meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen3-32B", "openai/gpt-oss-120b"),
+        signup_url="https://huggingface.co/join",
+        keys_url="https://huggingface.co/settings/tokens",
+        free_tier="Small monthly inference credit.",
+    ),
+    Provider(
+        "nvidia",
+        "NVIDIA",
+        "nvapi-…",
+        "nvapi-",
+        "Create a key in the NVIDIA API Catalog.",
+        (
+            "nemotron-3-super-120b",
+            "nemotron-3-ultra-550b",
+            "nemotron-3.5-lightning-30b-a3b",
+            "meta/llama-3.3-70b-instruct",
+            "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+        ),
+        signup_url="https://build.nvidia.com/",
+        keys_url="https://build.nvidia.com/settings/api-keys",
+        free_tier="Rate-limited trial access to NVIDIA-hosted models.",
+    ),
+    Provider(
+        "openrouter",
+        "OpenRouter",
+        "sk-or-v1-…",
+        "sk-or-v1-",
+        "Create a key in OpenRouter settings.",
+        ("openrouter/free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-coder:free"),
+        signup_url="https://openrouter.ai/",
+        keys_url="https://openrouter.ai/settings/keys",
+        free_tier="Free model variants with a low daily request cap.",
+    ),
+    Provider(
+        "mistral",
+        "Mistral",
+        "Paste the key from Mistral Console",
+        "",
+        "Create a key in Mistral La Plateforme.",
+        ("mistral-small-latest", "open-mistral-nemo", "codestral-latest"),
+        signup_url="https://console.mistral.ai/",
+        keys_url="https://console.mistral.ai/api-keys",
+        free_tier="Free experiment plan; requires phone verification.",
+    ),
+    Provider(
+        "zhipu",
+        "Z.ai",
+        "Paste the key from Z.ai",
+        "",
+        "Create an API key in the Z.ai developer console.",
+        ("glm-4.5-flash", "glm-4.5", "glm-4.5-air"),
+        signup_url="https://z.ai/",
+        keys_url="https://z.ai/manage-apikey/apikey-list",
+        free_tier="Free GLM Flash models.",
+    ),
 )
 
 BY_ID = {provider.id: provider for provider in PROVIDERS}
+# One verified provider completes setup; this many recommended providers give
+# chat enough free capacity to fail over when one tier is rate-limited.
+RECOMMENDED_MINIMUM = 2
 ALIASES = {"zai": "zhipu", "z-ai": "zhipu", "z.ai": "zhipu", "google-studio": "google"}
 
 
@@ -74,3 +164,24 @@ def prefix_warning(provider_id: str, api_key: str) -> str:
     if provider.prefix and not api_key.startswith(provider.prefix):
         return f"This key does not use the usual {provider.key_hint} format. Mu3Lab will still verify it live."
     return ""
+
+
+def setup_progress(connections: list[dict]) -> dict:
+    """Summarize provider setup: one verified provider is enough to finish,
+    but Mu3Lab keeps recommending the most generous free tiers until
+    RECOMMENDED_MINIMUM of them are verified."""
+    verified = {
+        canonical_id(str(item.get("provider_id", "")))
+        for item in connections
+        if item.get("enabled") and item.get("state") == "verified"
+    }
+    recommended = [provider.id for provider in PROVIDERS if provider.recommended]
+    recommended_verified = [provider_id for provider_id in recommended if provider_id in verified]
+    return {
+        "verified": len(verified),
+        "complete": bool(verified),
+        "recommended": recommended,
+        "recommended_verified": recommended_verified,
+        "recommended_minimum": RECOMMENDED_MINIMUM,
+        "recommendation_met": len(recommended_verified) >= RECOMMENDED_MINIMUM,
+    }

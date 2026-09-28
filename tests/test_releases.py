@@ -27,7 +27,13 @@ class ReleaseTests(unittest.TestCase):
             releases.latest("https://evil.example/repo")
 
     def test_reports_latest_stable_release(self):
-        payload = {"tag_name": "v3.27.0", "html_url": "https://github.com/mealie-recipes/mealie/releases/tag/v3.27.0", "published_at": "2026-09-17T13:40:44Z", "name": "3.27", "body": "notes"}
+        payload = {
+            "tag_name": "v3.27.0",
+            "html_url": "https://github.com/mealie-recipes/mealie/releases/tag/v3.27.0",
+            "published_at": "2026-09-17T13:40:44Z",
+            "name": "3.27",
+            "body": "notes",
+        }
         with patch("urllib.request.urlopen", return_value=_Response(json.dumps(payload).encode())):
             result = releases.latest("mealie-recipes/mealie", "v3.26.0")
         self.assertTrue(result["update_available"])
@@ -35,9 +41,11 @@ class ReleaseTests(unittest.TestCase):
 
     def test_invalid_release_link_is_rejected(self):
         payload = {"tag_name": "v1", "html_url": "https://evil.example/v1"}
-        with patch("urllib.request.urlopen", return_value=_Response(json.dumps(payload).encode())):
-            with self.assertRaisesRegex(RuntimeError, "invalid release"):
-                releases.latest("owner/repo", "v0")
+        with (
+            patch("urllib.request.urlopen", return_value=_Response(json.dumps(payload).encode())),
+            self.assertRaisesRegex(RuntimeError, "invalid release"),
+        ):
+            releases.latest("owner/repo", "v0")
 
 
 if __name__ == "__main__":

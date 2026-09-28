@@ -21,11 +21,19 @@ VALID_ACTIONS = frozenset({"start", "stop", "restart", "update"})
 VALID_STAGES = frozenset({"foundation", "core", "optional", "blocked"})
 VALID_ROUTES = frozenset({"ready", "pending", "unavailable"})
 VALID_MATURITY = frozenset({"supported", "experimental", "planned"})
-VALID_ACCOUNT_MODES = frozenset({
-    "none", "existing_bootstrap", "manual_owner", "trusted_header",
-    "oidc_first_login", "environment_bootstrap", "browser_registration",
-    "local_account_manual", "internal",
-})
+VALID_ACCOUNT_MODES = frozenset(
+    {
+        "none",
+        "existing_bootstrap",
+        "manual_owner",
+        "trusted_header",
+        "oidc_first_login",
+        "environment_bootstrap",
+        "browser_registration",
+        "local_account_manual",
+        "internal",
+    }
+)
 
 
 class RegistryError(ValueError):
@@ -80,39 +88,50 @@ class Service:
 
     def public(self) -> dict[str, Any]:
         """Return browser-safe metadata with no paths outside the checkout/secrets."""
-        return {"id": self.id, "name": self.name, "category": self.category,
-                "maturity": self.maturity,
-                "lifecycle": self.lifecycle, "https_port": self.https_port,
-                "private_https_port": self.private_https_port,
-                "proxy_port": self.proxy_port,
-                "auth": self.auth, "profiles": list(self.profiles),
-                "compute": self.compute,
-                "dependencies": list(self.dependencies),
-                "availability": self.availability,
-                "blocked_reason": self.blocked_reason,
-                "stage": self.stage, "route": self.route,
-                "routable": self.route == "ready",
-                "required": self.required, "identity_note": self.identity_note,
-                "resource_guidance": self.resource_guidance,
-                "setup_action": self.setup_action,
-                "update": {"repository": str(self.update.get("repository", "")),
-                           "current_version": str(self.update.get("current_version", ""))},
-                "mcp": {"exposed": bool(self.mcp.get("exposed", False)),
-                        "risk": self.mcp.get("risk", "")},
-                "account": {
-                    "mode": str(self.account.get("mode", "none")),
-                    "handoff": bool(self.account.get("handoff", False)),
-                    "user_action": str(self.account.get("user_action", "")),
-                },
-                "ui": {
-                    "available": bool(self.ui.get("available", False)),
-                    "path": str(self.ui.get("path", "")),
-                    "authentication": str(self.ui.get("authentication", self.auth)),
-                    "unavailable_reason": str(self.ui.get("unavailable_reason", "")),
-                },
-                "configuration": [{key: value for key, value in field.items()
-                                   if key not in {"env", "managed"}}
-                                  for field in self.configuration if not field.get("managed")]}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+            "maturity": self.maturity,
+            "lifecycle": self.lifecycle,
+            "https_port": self.https_port,
+            "private_https_port": self.private_https_port,
+            "proxy_port": self.proxy_port,
+            "auth": self.auth,
+            "profiles": list(self.profiles),
+            "compute": self.compute,
+            "dependencies": list(self.dependencies),
+            "availability": self.availability,
+            "blocked_reason": self.blocked_reason,
+            "stage": self.stage,
+            "route": self.route,
+            "routable": self.route == "ready",
+            "required": self.required,
+            "identity_note": self.identity_note,
+            "resource_guidance": self.resource_guidance,
+            "setup_action": self.setup_action,
+            "update": {
+                "repository": str(self.update.get("repository", "")),
+                "current_version": str(self.update.get("current_version", "")),
+            },
+            "mcp": {"exposed": bool(self.mcp.get("exposed", False)), "risk": self.mcp.get("risk", "")},
+            "account": {
+                "mode": str(self.account.get("mode", "none")),
+                "handoff": bool(self.account.get("handoff", False)),
+                "user_action": str(self.account.get("user_action", "")),
+            },
+            "ui": {
+                "available": bool(self.ui.get("available", False)),
+                "path": str(self.ui.get("path", "")),
+                "authentication": str(self.ui.get("authentication", self.auth)),
+                "unavailable_reason": str(self.ui.get("unavailable_reason", "")),
+            },
+            "configuration": [
+                {key: value for key, value in field.items() if key not in {"env", "managed"}}
+                for field in self.configuration
+                if not field.get("managed")
+            ],
+        }
 
 
 def _required(item: dict[str, Any], key: str) -> Any:
@@ -169,8 +188,7 @@ def _service(item: dict[str, Any]) -> Service:
     images = tuple(item.get("images", []))
     if stage == "foundation" and not images:
         raise RegistryError(f"service {service_id}: foundation services require reviewed images")
-    if not all(isinstance(image, str) and image and ":" in image and ":latest" not in image
-               for image in images):
+    if not all(isinstance(image, str) and image and ":" in image and ":latest" not in image for image in images):
         raise RegistryError(f"service {service_id}: images must be pinned and never use latest")
     if stage == "blocked" and item.get("availability") != "blocked":
         raise RegistryError(f"service {service_id}: blocked stage requires blocked availability")
@@ -184,9 +202,13 @@ def _service(item: dict[str, Any]) -> Service:
         key = field_item.get("key")
         env_name = field_item.get("env")
         field_type = field_item.get("type")
-        if (not isinstance(key, str) or not key.replace("_", "").isalnum()
-                or not isinstance(env_name, str) or not env_name.replace("_", "").isalnum()
-                or field_type not in {"string", "boolean", "integer", "enum", "secret"}):
+        if (
+            not isinstance(key, str)
+            or not key.replace("_", "").isalnum()
+            or not isinstance(env_name, str)
+            or not env_name.replace("_", "").isalnum()
+            or field_type not in {"string", "boolean", "integer", "enum", "secret"}
+        ):
             raise RegistryError(f"service {service_id}: invalid configuration contract")
         if key in seen_config:
             raise RegistryError(f"service {service_id}: duplicate configuration key {key}")
@@ -199,23 +221,37 @@ def _service(item: dict[str, Any]) -> Service:
         raise RegistryError(f"service {service_id}: invalid UI contract")
     if not isinstance(ui.get("path", ""), str) or not isinstance(ui.get("unavailable_reason", ""), str):
         raise RegistryError(f"service {service_id}: invalid UI contract")
-    return Service(id=service_id, maturity=maturity, name=_required(item, "name"),
-                   category=_required(item, "category"), lifecycle=lifecycle,
-                   compose_dir=compose_dir, https_port=port, private_https_port=private_port,
-                   proxy_port=proxy_port, health=health,
-                   auth=auth, profiles=profiles, compute=dict(item.get("compute", {})),
-                   dependencies=tuple(item.get("dependencies", [])),
-                   availability=item.get("availability", "available"),
-                   blocked_reason=item.get("blocked_reason", ""),
-                   backup=dict(item.get("backup", {})), mcp=dict(item.get("mcp", {})),
-                   stage=stage, images=images, route=route,
-                   required=bool(item.get("required", False)),
-                   identity_note=str(item.get("identity_note", "")),
-                   resource_guidance=str(item.get("resource_guidance", "")),
-                   setup_action=str(item.get("setup_action", "")),
-                   update=dict(item.get("update", {})),
-                   configuration=tuple(dict(field_item) for field_item in configuration),
-                   account=dict(account), ui=dict(ui))
+    return Service(
+        id=service_id,
+        maturity=maturity,
+        name=_required(item, "name"),
+        category=_required(item, "category"),
+        lifecycle=lifecycle,
+        compose_dir=compose_dir,
+        https_port=port,
+        private_https_port=private_port,
+        proxy_port=proxy_port,
+        health=health,
+        auth=auth,
+        profiles=profiles,
+        compute=dict(item.get("compute", {})),
+        dependencies=tuple(item.get("dependencies", [])),
+        availability=item.get("availability", "available"),
+        blocked_reason=item.get("blocked_reason", ""),
+        backup=dict(item.get("backup", {})),
+        mcp=dict(item.get("mcp", {})),
+        stage=stage,
+        images=images,
+        route=route,
+        required=bool(item.get("required", False)),
+        identity_note=str(item.get("identity_note", "")),
+        resource_guidance=str(item.get("resource_guidance", "")),
+        setup_action=str(item.get("setup_action", "")),
+        update=dict(item.get("update", {})),
+        configuration=tuple(dict(field_item) for field_item in configuration),
+        account=dict(account),
+        ui=dict(ui),
+    )
 
 
 class Registry:
@@ -231,8 +267,7 @@ class Registry:
             unknown = set(service.dependencies) - self._by_id.keys()
             if unknown:
                 raise RegistryError(f"service {service.id}: unknown dependencies {sorted(unknown)}")
-        ports = [service.private_https_port for service in services
-                 if service.private_https_port is not None]
+        ports = [service.private_https_port for service in services if service.private_https_port is not None]
         if len(ports) != len(set(ports)):
             raise RegistryError("private HTTPS ports must be unique")
         proxy_ports = [service.proxy_port for service in services if service.proxy_port is not None]
@@ -266,5 +301,4 @@ def load(path: Path = REGISTRY_PATH) -> Registry:
         raise RegistryError("registry services must be a non-empty list")
     if not all(isinstance(item, dict) for item in raw_services):
         raise RegistryError("registry services entries must be mappings")
-    return Registry(tuple(_service(item) for item in raw_services),
-                    dict(raw.get("settings", {})))
+    return Registry(tuple(_service(item) for item in raw_services), dict(raw.get("settings", {})))

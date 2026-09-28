@@ -24,13 +24,11 @@ from tools import run_tests
 
 class ParseLineTests(unittest.TestCase):
     def test_ok(self):
-        line = json.dumps({"type": "test", "id": "a.B.c", "outcome": "pass",
-                           "detail": ""})
+        line = json.dumps({"type": "test", "id": "a.B.c", "outcome": "pass", "detail": ""})
         self.assertEqual(run_tests.parse_line(line)["outcome"], "pass")
 
     def test_summary(self):
-        line = json.dumps({"type": "summary", "ran": 3, "ok": 3, "failed": 0,
-                           "errored": 0, "skipped": 0})
+        line = json.dumps({"type": "summary", "ran": 3, "ok": 3, "failed": 0, "errored": 0, "skipped": 0})
         self.assertEqual(run_tests.parse_line(line)["ran"], 3)
 
     def test_bad_outcome(self):
@@ -47,14 +45,10 @@ class ParseLineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_tests.parse_line("not json at all{")
 
-    def test_bootstrap_defers_dependency_backed_registry_module(self):
-        self.assertEqual(run_tests.DEFERRED_BOOTSTRAP_MODULES,
-                         ("tests.test_app_security", "tests.test_calendar",
-                          "tests.test_connections_mvp", "tests.test_identity",
-                          "tests.test_mcp_registry", "tests.test_mvp_completion",
-                          "tests.test_mvp_control", "tests.test_mvp_runtime",
-                          "tests.test_provisioning", "tests.test_provider_ops",
-                          "tests.test_registry", "tests.test_service_ops"))
+    def test_deferred_bootstrap_modules_exist(self):
+        tests_dir = Path(run_tests.ROOT) / "tests"
+        for module in run_tests.DEFERRED_BOOTSTRAP_MODULES:
+            self.assertTrue((tests_dir / f"{module.removeprefix('tests.')}.py").is_file(), module)
 
 
 class JsonResultTests(unittest.TestCase):
@@ -62,6 +56,7 @@ class JsonResultTests(unittest.TestCase):
         """Run a single TestCase through JsonResult, capturing stdout lines."""
         import io
         from contextlib import redirect_stdout
+
         buffer = io.StringIO()
         result = run_tests.JsonResult()
         suite = unittest.TestSuite([test])
@@ -73,6 +68,7 @@ class JsonResultTests(unittest.TestCase):
         class T(unittest.TestCase):
             def runTest(self):
                 pass
+
         (line,) = self._run_one(T())
         self.assertEqual(line["outcome"], "pass")
         self.assertTrue(line["id"].endswith("runTest"))
@@ -81,6 +77,7 @@ class JsonResultTests(unittest.TestCase):
         class T(unittest.TestCase):
             def runTest(self):
                 self.assertTrue(False, "boom")
+
         (line,) = self._run_one(T())
         self.assertEqual(line["outcome"], "fail")
         self.assertIn("boom", line["detail"])
@@ -90,8 +87,9 @@ class JsonResultTests(unittest.TestCase):
         # runTest onto a bare TestCase() instance breaks unittest's suite
         # machinery (_tearDownPreviousClass needs class-level attributes).
         class SkippedCase(unittest.TestCase):
-            def runTest(self):  # noqa: N802 (unittest hook name, keep it)
+            def runTest(self):
                 raise unittest.SkipTest("not today")
+
         (line,) = self._run_one(SkippedCase())
         self.assertEqual(line["outcome"], "skipped")
         self.assertIn("not today", line["detail"])

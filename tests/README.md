@@ -13,5 +13,8 @@
 #     code looks up at call time) so production paths stay identical.
 #  4. No test spawns the full suite (fork-bomb), binds ports, writes outside
 #     tmp dirs, or needs root/sudo/network.
-# DEBUG: `python3 -m unittest discover -s tests -v` must pass on a bare
+#  5. The runtime root is isolated automatically: tests/__init__.py sets
+#     MU3LAB_RUNTIME_ROOT to an empty temp path, so never patch around it by
+#     reading /srv/mu3lab. Use tests.support.runtime_paths() for a populated one.
+# DEBUG: `python3 -m unittest discover -s tests -t . -v` must pass on a bare
 #  checkout with stock system python3, no installs, first try.

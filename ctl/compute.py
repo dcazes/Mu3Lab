@@ -10,8 +10,7 @@ from ctl.control_state import ControlState
 
 def detect() -> str:
     try:
-        if subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True,
-                          timeout=4).returncode == 0:
+        if subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=4).returncode == 0:
             return "nvidia"
     except (OSError, subprocess.SubprocessError):
         pass

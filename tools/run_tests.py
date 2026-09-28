@@ -28,10 +28,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 DEFERRED_BOOTSTRAP_MODULES = (
-    "tests.test_app_security", "tests.test_calendar", "tests.test_connections_mvp",
-    "tests.test_identity", "tests.test_mcp_registry", "tests.test_mvp_completion",
-    "tests.test_mvp_control", "tests.test_mvp_runtime", "tests.test_provisioning",
-    "tests.test_provider_ops", "tests.test_registry", "tests.test_service_ops",
+    "tests.test_app_security",
+    "tests.test_calendar",
+    "tests.test_connections_mvp",
+    "tests.test_identity",
+    "tests.test_mcp_registry",
+    "tests.test_mvp_completion",
+    "tests.test_mvp_control",
+    "tests.test_mvp_runtime",
+    "tests.test_provisioning",
+    "tests.test_provider_ops",
+    "tests.test_registry",
+    "tests.test_service_ops",
+    "tests.test_tailscale_status",
+    "tests.test_api_app",
+    "tests.test_vault_setup",
 )
 
 
@@ -49,11 +60,11 @@ class JsonResult(unittest.TestResult):
         super().__init__(*args, **kwargs)
         self._current: unittest.TestCase | None = None
 
-    def startTest(self, test):  # noqa: N802 (unittest hook name, keep it)
+    def startTest(self, test):
         self._current = test
         super().startTest(test)
 
-    def stopTest(self, test):  # noqa: N802 (unittest hook name, keep it)
+    def stopTest(self, test):
         super().stopTest(test)
         test_id = test.id()
         outcome, detail = "pass", ""
@@ -70,9 +81,7 @@ class JsonResult(unittest.TestResult):
             if errored_test is test:
                 outcome, detail = "error", formatted
                 break
-        print(json.dumps({"type": "test", "id": test_id,
-                          "outcome": outcome, "detail": detail}),
-              flush=True)
+        print(json.dumps({"type": "test", "id": test_id, "outcome": outcome, "detail": detail}), flush=True)
 
 
 def parse_line(line: str) -> dict:
@@ -103,33 +112,44 @@ def main() -> int:
     if bootstrap_mode:
         # A fresh checkout cannot import PyYAML yet. Load modules separately
         # so the registry module is deferred instead of becoming a FailedTest.
-        modules = sorted(path.stem for path in (ROOT / "tests").glob("test_*.py")
-                         if f"tests.{path.stem}" not in DEFERRED_BOOTSTRAP_MODULES)
-        suite = unittest.TestSuite(
-            loader.loadTestsFromName(f"tests.{module}") for module in modules
+        modules = sorted(
+            path.stem
+            for path in (ROOT / "tests").glob("test_*.py")
+            if f"tests.{path.stem}" not in DEFERRED_BOOTSTRAP_MODULES
         )
+        suite = unittest.TestSuite(loader.loadTestsFromName(f"tests.{module}") for module in modules)
     else:
         # start_dir tests/, top_level_dir root: test ids look like
         # "test_preflight.OsTests.test_ubuntu_2204_accepted".
-        suite = loader.discover(start_dir=str(ROOT / "tests"),
-                                top_level_dir=str(ROOT))
+        suite = loader.discover(start_dir=str(ROOT / "tests"), top_level_dir=str(ROOT))
     total = suite.countTestCases()
-    print(json.dumps({"type": "summary", "phase": "start",
-                      "total": total,
-                      "deferred": list(DEFERRED_BOOTSTRAP_MODULES) if bootstrap_mode else []}),
-          flush=True)
+    print(
+        json.dumps(
+            {
+                "type": "summary",
+                "phase": "start",
+                "total": total,
+                "deferred": list(DEFERRED_BOOTSTRAP_MODULES) if bootstrap_mode else [],
+            }
+        ),
+        flush=True,
+    )
     # Silence per-test stderr noise (dots/tracebacks unittest prints by
     # default); our JSON lines are the only output. Tracebacks survive inside
     # the `detail` field of fail/error lines.
     stream = io.StringIO()
-    runner = unittest.TextTestRunner(stream=stream, verbosity=0,
-                                     resultclass=JsonResult)
+    runner = unittest.TextTestRunner(stream=stream, verbosity=0, resultclass=JsonResult)
     result = runner.run(suite)
-    summary = {"type": "summary", "phase": "done", "ran": result.testsRun,
-               "ok": result.testsRun - len(result.failures) - len(result.errors),
-               "failed": len(result.failures), "errored": len(result.errors),
-               "skipped": len(result.skipped),
-               "deferred": list(DEFERRED_BOOTSTRAP_MODULES) if bootstrap_mode else []}
+    summary = {
+        "type": "summary",
+        "phase": "done",
+        "ran": result.testsRun,
+        "ok": result.testsRun - len(result.failures) - len(result.errors),
+        "failed": len(result.failures),
+        "errored": len(result.errors),
+        "skipped": len(result.skipped),
+        "deferred": list(DEFERRED_BOOTSTRAP_MODULES) if bootstrap_mode else [],
+    }
     print(json.dumps(summary), flush=True)
     # Exit 0 only when everything ran and nothing failed/errored. Skips are
     # tolerated (they are explicit, not breakage).
@@ -140,6 +160,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception:  # last-resort: a crashed runner must still emit JSON
-        print(json.dumps({"type": "summary", "phase": "crashed",
-                          "detail": traceback.format_exc()}), flush=True)
-        raise SystemExit(2)
+        print(json.dumps({"type": "summary", "phase": "crashed", "detail": traceback.format_exc()}), flush=True)
+        raise SystemExit(2) from None

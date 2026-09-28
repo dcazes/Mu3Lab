@@ -15,7 +15,6 @@ from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,13 +23,18 @@ class ServiceConfigurationTests(unittest.TestCase):
         service = load().get("paperless-ngx")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime-root")
-            with patch("ctl.service_config.RuntimePaths", return_value=paths), \
-                 patch("ctl.service_config.ControlState.runtime", return_value=None):
-                result = service_config.write(service, {
-                    "admin_username": "operator",
-                    "admin_email": "operator@example.test",
-                    "admin_password": "private-value",
-                })
+            with (
+                patch("ctl.service_config.RuntimePaths", return_value=paths),
+                patch("ctl.service_config.ControlState.runtime", return_value=None),
+            ):
+                result = service_config.write(
+                    service,
+                    {
+                        "admin_username": "operator",
+                        "admin_email": "operator@example.test",
+                        "admin_password": "private-value",
+                    },
+                )
                 service_config.write(service, {"admin_password": ""})
                 reread = service_config.read(service)
             password = next(field for field in result if field["key"] == "admin_password")
@@ -51,13 +55,24 @@ class McpVerificationTests(unittest.TestCase):
         )
         responses = [
             ({"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-03-26"}}, "session"),
-            ({"jsonrpc": "2.0", "id": 2, "result": {"tools": [
-                {"name": "search_assets", "description": "Search the photo library"},
-                {"name": "create_album", "description": "Create an album"},
-            ]}}, "session"),
+            (
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [
+                            {"name": "search_assets", "description": "Search the photo library"},
+                            {"name": "create_album", "description": "Create an album"},
+                        ]
+                    },
+                },
+                "session",
+            ),
         ]
-        with patch("ctl.mcp_ops._rpc_request", side_effect=responses) as request, \
-             patch("ctl.mcp_ops._rpc_notification") as notification:
+        with (
+            patch("ctl.mcp_ops._rpc_request", side_effect=responses) as request,
+            patch("ctl.mcp_ops._rpc_notification") as notification,
+        ):
             tools = mcp_ops._discover_tools(server, {})
         self.assertEqual(request.call_args_list[1].args[1], "tools/list")
         notification.assert_called_once()
@@ -86,8 +101,7 @@ class ComputeOverrideTests(unittest.TestCase):
     def test_one_system_mode_selects_only_a_curated_override(self):
         project = ROOT / "core/ollama"
         with patch("ctl.compute.resolved_mode", return_value="nvidia"):
-            self.assertEqual(compose_overrides("ollama", project),
-                             [project / "docker-compose.nvidia.yml"])
+            self.assertEqual(compose_overrides("ollama", project), [project / "docker-compose.nvidia.yml"])
         with patch("ctl.compute.resolved_mode", return_value="cpu"):
             self.assertEqual(compose_overrides("ollama", project), [])
 

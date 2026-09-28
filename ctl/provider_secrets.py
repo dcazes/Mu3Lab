@@ -47,7 +47,7 @@ def _read(paths: RuntimePaths) -> list[dict[str, str]]:
     try:
         raw = _cipher(paths).decrypt(store_path.read_bytes())
         value = json.loads(raw.decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001 - never expose crypto details
+    except Exception as exc:
         raise ProviderSecretError("encrypted provider store could not be read") from exc
     return value if isinstance(value, list) else []
 
@@ -55,6 +55,7 @@ def _read(paths: RuntimePaths) -> list[dict[str, str]]:
 def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
     """Upsert one credential and return metadata only."""
     from ctl.provider_catalog import get
+
     provider = get(provider_id)
     provider_id = provider.id
     label = label.strip() or provider.name
@@ -65,8 +66,12 @@ def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = Runti
     if not api_key or len(api_key) > 4096:
         raise ProviderSecretError("provider credential is required and too long")
     records = _read(paths)
-    record = {"id": provider_id, "label": label, "api_key": api_key,
-              "updated_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    record = {
+        "id": provider_id,
+        "label": label,
+        "api_key": api_key,
+        "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
     records = [item for item in records if item.get("id") != provider_id]
     records.append(record)
     cipher = _cipher(paths)
@@ -99,8 +104,11 @@ def delete(provider_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
 
 def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     """Return provider ids and labels only; never return encrypted values."""
-    return [{key: item[key] for key in ("id", "label", "updated_at")}
-            for item in _read(paths) if all(key in item for key in ("id", "label", "updated_at"))]
+    return [
+        {key: item[key] for key in ("id", "label", "updated_at")}
+        for item in _read(paths)
+        if all(key in item for key in ("id", "label", "updated_at"))
+    ]
 
 
 def records(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
@@ -110,6 +118,8 @@ def records(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     narrow bridge between encrypted user credentials and generated root-only
     service configuration.
     """
-    return [{key: str(item[key]) for key in ("id", "label", "api_key", "updated_at")}
-            for item in _read(paths)
-            if all(key in item for key in ("id", "label", "api_key", "updated_at"))]
+    return [
+        {key: str(item[key]) for key in ("id", "label", "api_key", "updated_at")}
+        for item in _read(paths)
+        if all(key in item for key in ("id", "label", "api_key", "updated_at"))
+    ]

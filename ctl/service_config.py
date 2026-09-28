@@ -84,5 +84,8 @@ def write(service: Service, submitted: dict[str, Any]) -> list[dict[str, Any]]:
 
 def missing_required(service: Service) -> list[str]:
     values = read_runtime_env(_path(service))
-    return [str(field["key"]) for field in service.configuration
-            if field.get("required") and not values.get(str(field["env"]))]
+    return [
+        str(field["key"])
+        for field in service.configuration
+        if field.get("required") and not values.get(str(field["env"]))
+    ]

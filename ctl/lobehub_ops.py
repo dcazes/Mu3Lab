@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import base64
+import json
 import os
 from pathlib import Path
 
@@ -12,32 +12,66 @@ from ctl.jobs import redact
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
-
 AGENTS = (
-    ("actual-budget", "Actual Budget", "Plan budgets and inspect transactions.",
-     "Help with Actual Budget. Explain calculations and ask before changing transactions, categories, or budgets. Use only Actual Budget tools assigned to this agent."),
-    ("mealie", "Mealie", "Plan meals, recipes, and shopping lists.",
-     "Help with Mealie recipes, meal plans, and shopping lists. Ask before changing recipes or lists. Use only Mealie tools assigned to this agent."),
-    ("immich", "Immich", "Find and organize photos and videos.",
-     "Help find and organize Immich photos and albums. Ask before uploads, edits, or deletions. Use only Immich tools assigned to this agent."),
-    ("paperless-ngx", "Paperless-ngx", "Find and organize documents.",
-     "Help find and organize Paperless documents. Ask before changing metadata, uploading, or deleting documents. Use only Paperless tools assigned to this agent."),
-    ("surfsense", "SurfSense", "Search and organize research sources.",
-     "Help search and organize SurfSense research. Use only SurfSense tools assigned to this agent. Ask before changing sources or workspaces."),
-    ("firecrawl", "Firecrawl", "Collect and analyze web content.",
-     "Help collect web content with Firecrawl tools assigned to this agent. Explain when a request will fetch external pages or start a crawl. Ask before starting large crawls."),
-    ("nextcloud", "Nextcloud", "Work with files and calendars.",
-     "Help with Nextcloud files and calendars. Do not claim to have accessed live data unless a reviewed Nextcloud tool is assigned. Ask before changing data."),
-    ("adventurelog", "AdventureLog", "Plan and review travel records.",
-     "Help plan and review AdventureLog trips. Do not claim to have accessed live data unless a reviewed AdventureLog tool is assigned. Ask before changing data."),
+    (
+        "actual-budget",
+        "Actual Budget",
+        "Plan budgets and inspect transactions.",
+        "Help with Actual Budget. Explain calculations and ask before changing transactions, categories, or budgets. Use only Actual Budget tools assigned to this agent.",
+    ),
+    (
+        "mealie",
+        "Mealie",
+        "Plan meals, recipes, and shopping lists.",
+        "Help with Mealie recipes, meal plans, and shopping lists. Ask before changing recipes or lists. Use only Mealie tools assigned to this agent.",
+    ),
+    (
+        "immich",
+        "Immich",
+        "Find and organize photos and videos.",
+        "Help find and organize Immich photos and albums. Ask before uploads, edits, or deletions. Use only Immich tools assigned to this agent.",
+    ),
+    (
+        "paperless-ngx",
+        "Paperless-ngx",
+        "Find and organize documents.",
+        "Help find and organize Paperless documents. Ask before changing metadata, uploading, or deleting documents. Use only Paperless tools assigned to this agent.",
+    ),
+    (
+        "surfsense",
+        "SurfSense",
+        "Search and organize research sources.",
+        "Help search and organize SurfSense research. Use only SurfSense tools assigned to this agent. Ask before changing sources or workspaces.",
+    ),
+    (
+        "firecrawl",
+        "Firecrawl",
+        "Collect and analyze web content.",
+        "Help collect web content with Firecrawl tools assigned to this agent. Explain when a request will fetch external pages or start a crawl. Ask before starting large crawls.",
+    ),
+    (
+        "nextcloud",
+        "Nextcloud",
+        "Work with files and calendars.",
+        "Help with Nextcloud files and calendars. Do not claim to have accessed live data unless a reviewed Nextcloud tool is assigned. Ask before changing data.",
+    ),
+    (
+        "adventurelog",
+        "AdventureLog",
+        "Plan and review travel records.",
+        "Help plan and review AdventureLog trips. Do not claim to have accessed live data unless a reviewed AdventureLog tool is assigned. Ask before changing data.",
+    ),
 )
 
 
 def apply_model_policy(values: dict[str, str], root: Path) -> None:
     """Hide every pinned builtin model except the one LiteLLM chat route."""
     path = root / "apps" / "lobehub" / "blocked-model-providers.txt"
-    providers = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()
-                 if line.strip() and not line.startswith("#")]
+    providers = [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
     for provider in providers:
         values[f"{provider.upper()}_MODEL_LIST"] = "-all"
         values[f"ENABLED_{provider.upper()}"] = "0"
@@ -52,8 +86,10 @@ def _quoted(value: str) -> str:
 
 
 def _sql() -> str:
-    rows = [{"slug": f"mu3lab-{slug}", "title": title, "description": description,
-             "system_role": prompt} for slug, title, description, prompt in AGENTS]
+    rows = [
+        {"slug": f"mu3lab-{slug}", "title": title, "description": description, "system_role": prompt}
+        for slug, title, description, prompt in AGENTS
+    ]
     agent_json = _quoted(json.dumps(rows, ensure_ascii=False))
     return f"""
 BEGIN;
@@ -61,6 +97,22 @@ UPDATE ai_providers SET enabled = false WHERE id <> 'openai' AND enabled IS DIST
 UPDATE ai_providers SET enabled = true WHERE id = 'openai' AND enabled IS DISTINCT FROM true;
 UPDATE ai_models SET enabled = false
  WHERE enabled IS TRUE AND (provider_id <> 'openai' OR id <> 'mu3lab-chat');
+CREATE OR REPLACE FUNCTION mu3lab_seed_default_agents() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO agents (id, slug, title, name, description, user_id, model, provider,
+                      system_role, plugins, virtual, pinned, created_at, updated_at)
+  SELECT 'agt_mu3lab_' || replace(data.slug, '-', '_') || '_' || substr(md5(NEW.id), 1, 8),
+         data.slug, data.title, data.title, data.description, NEW.id,
+         'mu3lab-chat', 'openai', data.system_role, '[]'::jsonb, false, true, now(), now()
+  FROM jsonb_to_recordset({agent_json}::jsonb)
+    AS data(slug text, title text, description text, system_role text)
+  ON CONFLICT (slug, user_id) WHERE workspace_id IS NULL DO NOTHING;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS mu3lab_seed_default_agents_trigger ON users;
+CREATE TRIGGER mu3lab_seed_default_agents_trigger AFTER INSERT ON users
+FOR EACH ROW EXECUTE FUNCTION mu3lab_seed_default_agents();
 INSERT INTO agents (id, slug, title, name, description, user_id, model, provider,
                     system_role, plugins, virtual, pinned, created_at, updated_at)
 SELECT 'agt_mu3lab_' || replace(data.slug, '-', '_') || '_' || substr(md5(users.id), 1, 8),
@@ -114,23 +166,44 @@ COMMIT;
 def reconcile(log) -> tuple[bool, str]:
     """Keep existing conversations while adding app agents and enforcing model rows."""
     rc, output = actions.docker_cmd_stdin(
-        ["docker", "exec", "-i", "mu3lab-lobehub-postgres-1", "psql", "-v", "ON_ERROR_STOP=1",
-         "-U", "postgres", "-d", "lobehub"], _sql(), log)
+        [
+            "docker",
+            "exec",
+            "-i",
+            "mu3lab-lobehub-postgres-1",
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "postgres",
+            "-d",
+            "lobehub",
+        ],
+        _sql(),
+        log,
+    )
     if rc:
         return False, redact(output)
     from ctl.control_state import ControlState
     from ctl.mcp_catalog import load as load_mcp_catalog
     from ctl.mcp_registry import credential_path
     from ctl.registry import load as load_registry
+
     state = ControlState.runtime()
     if state:
         for server in load_mcp_catalog(load_registry()):
             runtime = state.mcp_server(server.id)
-            if server.transport != "streamable-http" or not runtime or not runtime["enabled"] or runtime["state"] != "live":
+            if (
+                server.transport != "streamable-http"
+                or not runtime
+                or not runtime["enabled"]
+                or runtime["state"] != "live"
+            ):
                 continue
             values = read_runtime_env(credential_path(server.id))
-            ok, detail = sync_mcp(server, runtime.get("tool_snapshot") or [],
-                                  values.get("MCP_AUTH_TOKEN", ""), enabled=True, log=log)
+            ok, detail = sync_mcp(
+                server, runtime.get("tool_snapshot") or [], values.get("MCP_AUTH_TOKEN", ""), enabled=True, log=log
+            )
             if not ok:
                 return False, detail
     return True, "LobeChat agents and single-provider policy reconciled."
@@ -138,6 +211,7 @@ def reconcile(log) -> tuple[bool, str]:
 
 def _encrypt_credential(token: str) -> str:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
     secret = read_runtime_env(RuntimePaths().projects / "lobehub" / ".env").get("KEY_VAULTS_SECRET", "")
     key = base64.b64decode(secret, validate=True)
     if len(key) not in {16, 24, 32}:
@@ -162,31 +236,41 @@ def sync_mcp(server, tools: list[dict], token: str, *, enabled: bool, log) -> tu
     name = _quoted(server.name)
     endpoint = _quoted(server.endpoint)
     from ctl.mcp_activity import McpActivity
+
     activity = McpActivity()
-    tool_rows = [{"name": str(tool.get("id", "")), "title": str(tool.get("title", ""))[:255],
-                  "risk": "write" if tool.get("risk") == "write" else "read",
-                  "permission": activity.permission(server.id, str(tool.get("id", "")),
-                                                     str(tool.get("risk", "write"))),
-                  "parameters": tool.get("parameters") or {"type": "object", "properties": {}}}
-                 for tool in tools if tool.get("id")]
+    tool_rows = [
+        {
+            "name": str(tool.get("id", "")),
+            "title": str(tool.get("title", ""))[:255],
+            "risk": "write" if tool.get("risk") == "write" else "read",
+            "permission": activity.permission(server.id, str(tool.get("id", "")), str(tool.get("risk", "write"))),
+            "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+        }
+        for tool in tools
+        if tool.get("id")
+    ]
     tool_json = _quoted(json.dumps(tool_rows, ensure_ascii=False))
     status = "connected" if enabled else "disconnected"
-    insert_sql = f"""
+    insert_sql = (
+        f"""
 INSERT INTO user_connectors (user_id, agent_id, identifier, name, source_type,
   mcp_server_url, mcp_connection_type, status, is_enabled, credentials, created_at, updated_at)
 SELECT a.user_id, a.id, {identifier}, {name}, 'custom', {endpoint}, 'http',
        'connected', true, {credential}, now(), now()
 FROM agents a WHERE a.slug = {slug} AND a.workspace_id IS NULL
   AND NOT EXISTS (SELECT 1 FROM user_connectors c WHERE c.agent_id = a.id AND c.identifier = {identifier});
-""" if enabled else ""
+"""
+        if enabled
+        else ""
+    )
     sql = f"""
 BEGIN;
 {insert_sql}
-UPDATE user_connectors c SET status = '{status}', is_enabled = {'true' if enabled else 'false'},
+UPDATE user_connectors c SET status = '{status}', is_enabled = {"true" if enabled else "false"},
   mcp_server_url = {endpoint}, mcp_connection_type = 'http',
   credentials = COALESCE({credential}, c.credentials), updated_at = now()
 FROM agents a WHERE c.agent_id = a.id AND a.slug = {slug} AND c.identifier = {identifier};
-UPDATE agents a SET plugins = CASE WHEN {'true' if enabled else 'false'} THEN
+UPDATE agents a SET plugins = CASE WHEN {"true" if enabled else "false"} THEN
     CASE WHEN EXISTS (
       SELECT 1 FROM jsonb_array_elements(COALESCE(a.plugins, '[]'::jsonb)) AS item(value)
       WHERE CASE WHEN jsonb_typeof(item.value) = 'string' THEN item.value #>> '{{}}'
@@ -216,10 +300,27 @@ ON CONFLICT (user_connector_id, tool_name) DO UPDATE SET
 COMMIT;
 """
     rc, _output = actions.docker_cmd_stdin(
-        ["docker", "exec", "-i", "mu3lab-lobehub-postgres-1", "psql", "-v", "ON_ERROR_STOP=1",
-         "-U", "postgres", "-d", "lobehub"], sql, log)
-    return rc == 0, (f"{server.name} synced to its LobeChat agent." if rc == 0
-                     else f"LobeChat rejected the {server.name} connector sync; check its database logs.")
+        [
+            "docker",
+            "exec",
+            "-i",
+            "mu3lab-lobehub-postgres-1",
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "postgres",
+            "-d",
+            "lobehub",
+        ],
+        sql,
+        log,
+    )
+    return rc == 0, (
+        f"{server.name} synced to its LobeChat agent."
+        if rc == 0
+        else f"LobeChat rejected the {server.name} connector sync; check its database logs."
+    )
 
 
 def set_tool_permission(server_id: str, tool_name: str, permission: str) -> tuple[bool, str]:
@@ -229,10 +330,24 @@ def set_tool_permission(server_id: str, tool_name: str, permission: str) -> tupl
     sql = f"""
 UPDATE user_connector_tools t SET permission = {_quoted(permission)}, updated_at = now()
 FROM user_connectors c
-WHERE t.user_connector_id = c.id AND c.identifier = {_quoted('mu3lab-' + server_id)}
+WHERE t.user_connector_id = c.id AND c.identifier = {_quoted("mu3lab-" + server_id)}
   AND t.tool_name = {_quoted(tool_name)} AND c.agent_id IS NOT NULL;
 """
     rc, _ = actions.docker_cmd_stdin(
-        ["docker", "exec", "-i", "mu3lab-lobehub-postgres-1", "psql", "-v", "ON_ERROR_STOP=1",
-         "-U", "postgres", "-d", "lobehub"], sql, lambda line: None)
+        [
+            "docker",
+            "exec",
+            "-i",
+            "mu3lab-lobehub-postgres-1",
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "postgres",
+            "-d",
+            "lobehub",
+        ],
+        sql,
+        lambda line: None,
+    )
     return rc == 0, ("Permission updated in LobeChat." if rc == 0 else "LobeChat permission sync failed.")

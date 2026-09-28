@@ -14,6 +14,8 @@ servers:
     endpoint: http://mealie-mcp:8000/mcp
     local_health: http://127.0.0.1:8814/healthz
     compose_dir: apps/mcp/mealie
+    auto_provision: true
+    auto_provision_note: "Creates a five-year Mu3Lab MCP token for the single Mealie administrator."
     credentials:
       - {key: api_token, env: MEALIE_API_TOKEN, type: secret, label: "Mealie API token", required: true}
 
@@ -30,6 +32,7 @@ servers:
     endpoint: http://actual-budget-mcp:3600/http
     local_health: http://127.0.0.1:8813/health
     compose_dir: apps/mcp/actual-budget
+    auto_provision_note: "Actual's server password and selected Budget Sync ID cannot be recovered or inferred safely."
     credentials:
       - {key: password, env: ACTUAL_PASSWORD, type: secret, label: "Actual server password", required: true}
       - {key: sync_id, env: ACTUAL_BUDGET_SYNC_ID, type: string, label: "Budget Sync ID", required: true}
@@ -47,6 +50,8 @@ servers:
     endpoint: http://immich-mcp:5000/mcp
     local_health: http://127.0.0.1:8815/health/ready
     compose_dir: apps/mcp/immich
+    auto_provision: true
+    auto_provision_note: "Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator."
     credentials:
       - {key: api_key, env: IMMICH_API_KEY, type: secret, label: "Immich API key", required: true}
 
@@ -63,6 +68,8 @@ servers:
     endpoint: http://paperless-mcp:3000/mcp
     local_health: http://127.0.0.1:8816/mcp
     compose_dir: apps/mcp/paperless-ngx
+    auto_provision: true
+    auto_provision_note: "Creates or reuses a Paperless API token for the single active superuser."
     credentials:
       - {key: api_key, env: PAPERLESS_API_KEY, type: secret, label: "Paperless API token", required: true}
 
@@ -95,6 +102,8 @@ servers:
     endpoint: http://surfsense-mcp:8080/mcp
     local_health: http://127.0.0.1:8817/health
     compose_dir: apps/mcp/surfsense
+    auto_provision: true
+    auto_provision_note: "Creates a Mu3Lab MCP personal token for the single active SurfSense user and enables API access on that user's workspaces."
     credentials:
       - {key: api_token, env: MCP_AUTH_TOKEN, type: secret, label: "SurfSense personal API token (ss_pat_…)", required: true, prefix: "ss_pat_"}
 
@@ -110,6 +119,8 @@ servers:
     endpoint: http://adventurelog-mcp:8080/mcp
     local_health: http://127.0.0.1:8820/health
     compose_dir: apps/mcp/adventurelog
+    auto_provision: true
+    auto_provision_note: "Creates a dedicated Mu3Lab MCP API key for the single active AdventureLog superuser."
     credentials:
       - {key: api_key, env: ADVENTURELOG_API_KEY, type: secret, label: "AdventureLog API key", required: true}
     review_note: "Mu3Lab adapter exposes only collections and locations. Live API compatibility is checked when the app runs."
@@ -126,25 +137,11 @@ servers:
     endpoint: http://nextcloud-mcp:8080/mcp
     local_health: http://127.0.0.1:8819/health
     compose_dir: apps/mcp/nextcloud
+    auto_provision: true
+    auto_provision_note: "Creates a named Nextcloud app password for the single administrator account."
     credentials:
       - {key: username, env: NEXTCLOUD_USERNAME, type: string, label: "Nextcloud username", required: true}
       - {key: app_password, env: NEXTCLOUD_APP_PASSWORD, type: secret, label: "Nextcloud app password", required: true}
     review_note: "Mu3Lab adapter uses WebDAV for scoped file listing, text reading, and text writing."
-
-  - id: babybuddy-official
-    service_id: baby-buddy
-    name: Baby Buddy MCP
-    status: review_required
-    preferred: true
-    provenance: official
-    repository: https://github.com/babybuddy/babybuddy-mcp
-    revision: pending-review
-    transport: streamable-http
-    endpoint: ""
-    local_health: ""
-    compose_dir: ""
-    credentials:
-      - {key: api_token, env: BABYBUDDY_TOKEN, type: secret, label: "Baby Buddy user API token", required: true}
-    review_note: "Baby Buddy requires a user-scoped API token from User Settings. Runtime review is still pending."
 
 excluded_services: [vaultwarden, ingress, authentik, ollama, litellm, freellmapi, lobehub]

@@ -18,6 +18,7 @@ def _paths(paths: RuntimePaths):
 
 def _cipher(paths: RuntimePaths):
     from cryptography.fernet import Fernet
+
     key_path, _ = _paths(paths)
     paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
     if key_path.is_file():
@@ -35,7 +36,7 @@ def _read(paths: RuntimePaths) -> dict[str, dict[str, str]]:
         return {}
     try:
         value = json.loads(_cipher(paths).decrypt(target.read_bytes()).decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001 - crypto details are intentionally hidden
+    except Exception as exc:
         raise CalendarSecretError("encrypted calendar storage could not be read") from exc
     return value if isinstance(value, dict) else {}
 
@@ -49,8 +50,7 @@ def _write(records: dict[str, dict[str, str]], paths: RuntimePaths) -> None:
     os.chmod(target, 0o600)
 
 
-def save(owner_uid: str, username: str, app_password: str,
-         paths: RuntimePaths = RuntimePaths()) -> None:
+def save(owner_uid: str, username: str, app_password: str, paths: RuntimePaths = RuntimePaths()) -> None:
     if not owner_uid or len(owner_uid) > 256 or not username or len(username) > 256:
         raise CalendarSecretError("valid calendar owner and username are required")
     if not app_password or len(app_password) > 4096:

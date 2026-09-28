@@ -19,8 +19,7 @@ MAX_OUTPUT = 250_000
 
 
 def schema(properties: dict, required: list[str] | None = None) -> dict:
-    return {"type": "object", "properties": properties, "required": required or [],
-            "additionalProperties": False}
+    return {"type": "object", "properties": properties, "required": required or [], "additionalProperties": False}
 
 
 def tool(name: str, description: str, parameters: dict) -> dict:
@@ -32,13 +31,21 @@ if MODE == "nextcloud":
     TOOLS = [
         tool("list_files", "List one Nextcloud folder", schema({"path": {"type": "string", "default": ""}})),
         tool("read_text_file", "Read one UTF-8 text file from Nextcloud", schema({"path": TEXT}, ["path"])),
-        tool("write_text_file", "Create or replace one UTF-8 text file in Nextcloud", schema({"path": TEXT, "content": {"type": "string", "maxLength": 65536}}, ["path", "content"])),
+        tool(
+            "write_text_file",
+            "Create or replace one UTF-8 text file in Nextcloud",
+            schema({"path": TEXT, "content": {"type": "string", "maxLength": 65536}}, ["path", "content"]),
+        ),
     ]
 elif MODE == "adventurelog":
     TOOLS = [
         tool("list_collections", "List AdventureLog collections", schema({})),
         tool("list_locations", "List AdventureLog locations", schema({})),
-        tool("create_collection", "Create one AdventureLog collection", schema({"name": TEXT, "description": {"type": "string"}}, ["name"])),
+        tool(
+            "create_collection",
+            "Create one AdventureLog collection",
+            schema({"name": TEXT, "description": {"type": "string"}}, ["name"]),
+        ),
     ]
 else:
     raise SystemExit("unsupported adapter mode")
@@ -58,14 +65,19 @@ def _auth() -> str:
 
 
 def _path(value: str) -> str:
-    if not isinstance(value, str) or value.startswith("/") or "\\" in value or \
-            any(part in {".", ".."} for part in value.split("/")):
+    if (
+        not isinstance(value, str)
+        or value.startswith("/")
+        or "\\" in value
+        or any(part in {".", ".."} for part in value.split("/"))
+    ):
         raise ValueError("path must stay within the account's files")
     return "/".join(quote(part, safe="") for part in value.split("/") if part)
 
 
-def _request(path: str, method: str = "GET", payload: bytes | None = None,
-             content_type: str = "application/json") -> tuple[bytes, int]:
+def _request(
+    path: str, method: str = "GET", payload: bytes | None = None, content_type: str = "application/json"
+) -> tuple[bytes, int]:
     headers = {"Authorization": _auth(), "Accept": "application/xml" if method == "PROPFIND" else "application/json"}
     if MODE == "nextcloud":
         headers["OCS-APIRequest"] = "true"
@@ -147,8 +159,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             if method == "initialize":
-                result = {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}},
-                          "serverInfo": {"name": f"mu3lab-{MODE}", "version": "1.0"}}
+                result = {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": f"mu3lab-{MODE}", "version": "1.0"},
+                }
             elif method == "tools/list":
                 result = {"tools": TOOLS}
             elif method == "tools/call":
@@ -165,8 +180,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("unsupported MCP method")
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "result": result})
         except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-            self._send(200, {"jsonrpc": "2.0", "id": locals().get("request_id"),
-                             "error": {"code": -32000, "message": str(exc)[:200]}})
+            self._send(
+                200,
+                {
+                    "jsonrpc": "2.0",
+                    "id": locals().get("request_id"),
+                    "error": {"code": -32000, "message": str(exc)[:200]},
+                },
+            )
 
     def _send(self, status: int, value: dict):
         body = json.dumps(value).encode()

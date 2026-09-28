@@ -77,8 +77,8 @@
 		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
 		forward_auth 127.0.0.1:9001 {
 			uri /outpost.goauthentik.io/auth/caddy
-			header_up Host {http.request.host}
-			header_up X-Forwarded-Host {http.request.host}
+			header_up Host {http.request.hostport}
+			header_up X-Forwarded-Host {http.request.hostport}
 			header_up X-Forwarded-Proto https
 			trusted_proxies private_ranges
 		}
@@ -89,12 +89,22 @@
 	}
 }
 
-# FreeLLMAPI keeps its own native dashboard session. Tailnet publication is
-# private, while the upstream login remains the final authentication layer.
+# FreeLLMAPI's dashboard is operator-facing. Authentik protects the private
+# route; FreeLLMAPI still enforces its own generated login behind it.
 :19472 {
 	bind 127.0.0.1
-	reverse_proxy 127.0.0.1:3001 {
-		header_up X-Forwarded-Proto https
-		header_up X-Forwarded-Host {http.request.host}
+	route {
+		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+		forward_auth 127.0.0.1:9001 {
+			uri /outpost.goauthentik.io/auth/caddy
+			header_up Host {http.request.hostport}
+			header_up X-Forwarded-Host {http.request.hostport}
+			header_up X-Forwarded-Proto https
+			trusted_proxies private_ranges
+		}
+		reverse_proxy 127.0.0.1:3001 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {http.request.host}
+		}
 	}
 }

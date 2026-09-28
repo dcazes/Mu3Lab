@@ -18,12 +18,12 @@ from uuid import uuid4
 from ctl.runtime import RuntimePaths
 
 _SECRET = re.compile(
-    r'''(?ix)(
+    r"""(?ix)(
     ["']?(?:password|token|secret|api[_-]?key|cookie|set-cookie|authorization)["']?
         \s*[:=]\s*["']?(?:bearer\s+)?[^\s,;}"']+
     |authorization\s*:\s*bearer\s+\S+
     |https?://[^\s:/]+:[^\s@/]+@[^\s]+
-    )'''
+    )"""
 )
 _PRIVATE_DIAGNOSTIC = re.compile(
     r"(?ix)("
@@ -57,9 +57,11 @@ def redact_data(value: Any) -> Any:
         clean: dict[str, Any] = {}
         for key, item in value.items():
             name = str(key)
-            clean[name] = ("[redacted]" if re.search(
-                r"(?i)(password|token|secret|api[_-]?key|cookie|authorization)", name)
-                else redact_data(item))
+            clean[name] = (
+                "[redacted]"
+                if re.search(r"(?i)(password|token|secret|api[_-]?key|cookie|authorization)", name)
+                else redact_data(item)
+            )
         return clean
     if isinstance(value, list):
         return [redact_data(item) for item in value]
@@ -83,7 +85,7 @@ class JobStore:
         self.database = database
 
     @classmethod
-    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> "JobStore | None":
+    def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> JobStore | None:
         """Return a store only when bootstrap created the approved runtime dir."""
         return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
 
@@ -122,12 +124,22 @@ class JobStore:
         for name, declaration in additions.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_key "
-                     "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_key "
+            "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
         return conn
 
-    def create(self, *, kind: str, service_id: str, action: str, actor: str,
-               detail: str = "", idempotency_key: str | None = None) -> dict[str, str]:
+    def create(
+        self,
+        *,
+        kind: str,
+        service_id: str,
+        action: str,
+        actor: str,
+        detail: str = "",
+        idempotency_key: str | None = None,
+    ) -> dict[str, str]:
         """Create a queued job. Callers must authenticate and authorize first."""
         if kind not in _SAFE_KINDS or not service_id or not action or not actor:
             raise ValueError("invalid safe job request")
@@ -137,29 +149,37 @@ class JobStore:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if idempotency_key:
-                row = conn.execute("SELECT id, state, created_at FROM jobs WHERE idempotency_key = ?",
-                                   (idempotency_key,)).fetchone()
+                row = conn.execute(
+                    "SELECT id, state, created_at FROM jobs WHERE idempotency_key = ?", (idempotency_key,)
+                ).fetchone()
                 if row:
                     return dict(row)
             active = conn.execute(
                 "SELECT id, state, created_at FROM jobs WHERE service_id = ? "
                 "AND state IN ('queued', 'running', 'waiting_for_confirmation') "
-                "ORDER BY created_at DESC LIMIT 1", (service_id,)).fetchone()
+                "ORDER BY created_at DESC LIMIT 1",
+                (service_id,),
+            ).fetchone()
             if active:
                 return dict(active)
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO jobs
                 (id, kind, service_id, action, state, actor, created_at, updated_at,
                  detail, idempotency_key)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (job_id, kind, service_id, action, "queued", actor, now, now,
-                  redact(detail), idempotency_key))
-            conn.execute("INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
-                         (job_id, actor, "job.created", now, redact(f"{kind}:{action}")))
+            """,
+                (job_id, kind, service_id, action, "queued", actor, now, now, redact(detail), idempotency_key),
+            )
+            conn.execute(
+                "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                (job_id, actor, "job.created", now, redact(f"{kind}:{action}")),
+            )
         return {"id": job_id, "state": "queued", "created_at": now}
 
-    def transition(self, job_id: str, state: str, *, actor: str, detail: str = "",
-                   error_code: str = "", step_id: str = "") -> None:
+    def transition(
+        self, job_id: str, state: str, *, actor: str, detail: str = "", error_code: str = "", step_id: str = ""
+    ) -> None:
         """Move an existing job to a reviewed state and append its audit event."""
         if state not in _SAFE_STATES or not actor:
             raise ValueError("invalid job state transition")
@@ -171,14 +191,19 @@ class JobStore:
             current = str(row["state"])
             if state != current and state not in _TRANSITIONS.get(current, frozenset()):
                 raise ValueError(f"invalid job transition: {current} -> {state}")
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE jobs SET state = ?, updated_at = ?, detail = ?, error_code = ?,
                     step_id = ?, lease_owner = CASE WHEN ? = 'running' THEN lease_owner ELSE '' END,
                     lease_expires_at = CASE WHEN ? = 'running' THEN lease_expires_at ELSE '' END
                 WHERE id = ?
-            """, (state, now, redact(detail), error_code[:64], step_id[:64], state, state, job_id))
-            conn.execute("INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
-                         (job_id, actor, f"job.{state}", now, redact(detail)))
+            """,
+                (state, now, redact(detail), error_code[:64], step_id[:64], state, state, job_id),
+            )
+            conn.execute(
+                "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                (job_id, actor, f"job.{state}", now, redact(detail)),
+            )
 
     def claim(self, worker_id: str, *, lease_seconds: int = 45) -> dict[str, Any] | None:
         """Atomically claim the oldest queued job or reclaim an expired runner."""
@@ -188,33 +213,43 @@ class JobStore:
         expires = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT * FROM jobs
                 WHERE state = 'queued'
                    OR (state = 'running' AND lease_expires_at != '' AND lease_expires_at < ?)
                 ORDER BY created_at ASC LIMIT 1
-            """, (now,)).fetchone()
+            """,
+                (now,),
+            ).fetchone()
             if not row:
                 return None
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE jobs SET state = 'running', lease_owner = ?, lease_expires_at = ?,
                     heartbeat_at = ?, updated_at = ? WHERE id = ?
-            """, (worker_id, expires, now, now, row["id"]))
-            conn.execute("INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
-                         (row["id"], worker_id, "job.claimed", now, "Durable worker claimed the job."))
+            """,
+                (worker_id, expires, now, now, row["id"]),
+            )
+            conn.execute(
+                "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                (row["id"], worker_id, "job.claimed", now, "Durable worker claimed the job."),
+            )
             claimed = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
         return dict(claimed) if claimed else None
 
-    def heartbeat(self, job_id: str, worker_id: str, *, lease_seconds: int = 45,
-                  step_id: str = "") -> bool:
+    def heartbeat(self, job_id: str, worker_id: str, *, lease_seconds: int = 45, step_id: str = "") -> bool:
         now = _now()
         expires = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
         with self._connect() as conn:
-            result = conn.execute("""
+            result = conn.execute(
+                """
                 UPDATE jobs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?,
                     step_id = CASE WHEN ? != '' THEN ? ELSE step_id END
                 WHERE id = ? AND state = 'running' AND lease_owner = ?
-            """, (now, expires, now, step_id[:64], step_id[:64], job_id, worker_id))
+            """,
+                (now, expires, now, step_id[:64], step_id[:64], job_id, worker_id),
+            )
         return result.rowcount == 1
 
     def append_event(self, job_id: str, event: str, detail: str) -> None:
@@ -223,26 +258,35 @@ class JobStore:
         with self._connect() as conn:
             if not conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone():
                 raise KeyError(job_id)
-            conn.execute("INSERT INTO job_events (job_id, event, created_at, detail) VALUES (?, ?, ?, ?)",
-                         (job_id, event, _now(), redact(detail)))
+            conn.execute(
+                "INSERT INTO job_events (job_id, event, created_at, detail) VALUES (?, ?, ?, ?)",
+                (job_id, event, _now(), redact(detail)),
+            )
 
     def events(self, job_id: str, limit: int = 200) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT id, job_id, event, created_at, detail FROM job_events
                 WHERE job_id = ? ORDER BY id DESC LIMIT ?
-            """, (job_id, max(1, min(limit, 1000)))).fetchall()
+            """,
+                (job_id, max(1, min(limit, 1000))),
+            ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
     def jobs(self, limit: int = 30) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def jobs_for_service(self, service_id: str, *, limit: int = 30) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM jobs WHERE service_id=? ORDER BY created_at DESC LIMIT ?",
-                                (service_id, max(1, min(limit, 100)))).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE service_id=? ORDER BY created_at DESC LIMIT ?",
+                (service_id, max(1, min(limit, 100))),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def get(self, job_id: str) -> dict[str, Any] | None:
@@ -267,30 +311,34 @@ class JobStore:
         if row["state"] not in {"failed", "waiting_for_confirmation"}:
             raise ValueError("job is not retryable")
         if row["state"] == "waiting_for_confirmation":
-            self.transition(job_id, "cancelled", actor=actor,
-                            detail="Superseded by an explicit retry.")
-        return self.create(kind=str(row["kind"]), service_id=str(row["service_id"]),
-                           action=str(row["action"]), actor=actor,
-                           detail=f"Retry of job {job_id}", idempotency_key=idempotency_key)
+            self.transition(job_id, "cancelled", actor=actor, detail="Superseded by an explicit retry.")
+        return self.create(
+            kind=str(row["kind"]),
+            service_id=str(row["service_id"]),
+            action=str(row["action"]),
+            actor=actor,
+            detail=f"Retry of job {job_id}",
+            idempotency_key=idempotency_key,
+        )
 
     def cancel(self, job_id: str, *, actor: str) -> None:
         """Request cancellation at the next executor boundary."""
-        self.transition(job_id, "cancelled", actor=actor,
-                        detail="Cancellation requested by the operator.")
+        self.transition(job_id, "cancelled", actor=actor, detail="Cancellation requested by the operator.")
 
     def audit(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT id, job_id, actor, event, created_at, detail FROM audit ORDER BY id DESC LIMIT ?", (max(1, min(limit, 100)),)).fetchall()
+            rows = conn.execute(
+                "SELECT id, job_id, actor, event, created_at, detail FROM audit ORDER BY id DESC LIMIT ?",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
         return [dict(row) for row in rows]
 
-    def record_audit(self, *, actor: str, event: str, detail: str = "",
-                     job_id: str | None = None) -> None:
+    def record_audit(self, *, actor: str, event: str, detail: str = "", job_id: str | None = None) -> None:
         """Append a non-job configuration audit record after authorization."""
         if not actor or not event or len(event) > 96:
             raise ValueError("invalid audit record")
         with self._connect() as conn:
-            if job_id and not conn.execute(
-                    "SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone():
+            if job_id and not conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone():
                 raise KeyError(job_id)
             conn.execute(
                 "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",

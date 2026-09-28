@@ -31,6 +31,8 @@ class McpServer:
     local_health: str
     compose_dir: str
     credentials: tuple[dict[str, Any], ...]
+    auto_provision: bool = False
+    auto_provision_note: str = ""
     review_note: str = ""
     reviewed_update: dict[str, str] | None = None
 
@@ -68,28 +70,41 @@ def load(registry: Registry, path: Path = CATALOG) -> tuple[McpServer, ...]:
             preferred.add(service_id)
         credentials = item.get("credentials", [])
         if not isinstance(credentials, list) or any(
-                not isinstance(field, dict) or field.get("type") not in {"string", "secret"}
-                for field in credentials):
+            not isinstance(field, dict) or field.get("type") not in {"string", "secret"} for field in credentials
+        ):
             raise ValueError(f"MCP server {server_id} has invalid credential fields")
         compose_dir = str(item.get("compose_dir", ""))
         if compose_dir.startswith("/") or ".." in Path(compose_dir).parts:
             raise ValueError(f"MCP server {server_id} has unsafe compose_dir")
         update = item.get("reviewed_update")
         if update is not None:
-            if not isinstance(update, dict) or not all(update.get(key) for key in ("version", "compose_dir", "release_url")):
+            if not isinstance(update, dict) or not all(
+                update.get(key) for key in ("version", "compose_dir", "release_url")
+            ):
                 raise ValueError(f"MCP server {server_id} has invalid reviewed update")
             candidate_dir = str(update["compose_dir"])
             if Path(candidate_dir).is_absolute() or ".." in Path(candidate_dir).parts:
                 raise ValueError(f"MCP server {server_id} has unsafe update path")
-        result.append(McpServer(
-            id=server_id, service_id=service_id, name=str(item.get("name", server_id)),
-            status=str(item["status"]), preferred=bool(item.get("preferred")),
-            provenance=str(item.get("provenance", "")), repository=str(item.get("repository", "")),
-            revision=str(item.get("revision", "")), transport=str(item["transport"]),
-            endpoint=str(item.get("endpoint", "")), local_health=str(item.get("local_health", "")),
-            compose_dir=compose_dir, credentials=tuple(dict(field) for field in credentials),
-            review_note=str(item.get("review_note", "")),
-            reviewed_update={str(key): str(value) for key, value in update.items()} if update else None,
-        ))
+        result.append(
+            McpServer(
+                id=server_id,
+                service_id=service_id,
+                name=str(item.get("name", server_id)),
+                status=str(item["status"]),
+                preferred=bool(item.get("preferred")),
+                provenance=str(item.get("provenance", "")),
+                repository=str(item.get("repository", "")),
+                revision=str(item.get("revision", "")),
+                transport=str(item["transport"]),
+                endpoint=str(item.get("endpoint", "")),
+                local_health=str(item.get("local_health", "")),
+                compose_dir=compose_dir,
+                credentials=tuple(dict(field) for field in credentials),
+                auto_provision=bool(item.get("auto_provision", False)),
+                auto_provision_note=str(item.get("auto_provision_note", "")),
+                review_note=str(item.get("review_note", "")),
+                reviewed_update={str(key): str(value) for key, value in update.items()} if update else None,
+            )
+        )
         ids.add(server_id)
     return tuple(result)
