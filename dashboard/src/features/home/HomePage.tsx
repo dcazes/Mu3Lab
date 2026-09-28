@@ -1,5 +1,5 @@
-import { AlertTriangle, ArrowRight, KeyRound, Loader2, Plus, Rocket, Sparkles } from 'lucide-react';
-import type { CredentialHandoff, ProviderMetadataResponse, Service } from '../../api';
+import { AlertTriangle, ArrowRight, KeyRound, Loader2, Plus, Rocket } from 'lucide-react';
+import type { CredentialHandoff, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
 import { duration } from '../../lib/format';
@@ -17,6 +17,7 @@ import {
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { Agenda } from './Agenda';
+import { GetStarted } from './GetStarted';
 
 function greeting() {
   const hour = new Date().getHours();
@@ -61,9 +62,6 @@ function Attention() {
   const handoffs = useApi<{ handoffs: CredentialHandoff[] }>(operator ? '/api/v1/credential-handoffs' : null, {
     interval: 60000,
   });
-  const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
-  const providerSetup = providers.data?.setup;
-  const vault = useApi<{ seeded: boolean }>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
   const failing = data.services.services.filter(needsAttention);
   const saved = handoffs.data?.handoffs.length || 0;
   const working = data.services.services.filter(isWorking);
@@ -89,28 +87,6 @@ function Attention() {
       : []),
     ...(setupIncomplete
       ? [{ key: 'setup', icon: Rocket, tone: 'info', text: 'Finish setting up Mu3Lab', to: '/settings/system' }]
-      : []),
-    ...(vault.data && !vault.data.seeded
-      ? [
-          {
-            key: 'vault',
-            icon: KeyRound,
-            tone: 'info',
-            text: 'Save your app logins to Vaultwarden so your browser can fill them in',
-            to: '/settings/sign-in',
-          },
-        ]
-      : []),
-    ...(providerSetup?.complete && !providerSetup.recommendation_met
-      ? [
-          {
-            key: 'providers',
-            icon: Sparkles,
-            tone: 'info',
-            text: 'Add a second free AI provider so chat keeps working at its daily limit',
-            to: '/settings/ai',
-          },
-        ]
       : []),
     ...working.map((service) => ({
       key: `working-${service.id}`,
@@ -167,6 +143,7 @@ export function HomePage() {
         <p>{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
       </header>
       <Attention />
+      <GetStarted />
       <section aria-labelledby="apps-heading">
         <div className="section-title">
           <h2 id="apps-heading">Your apps</h2>

@@ -11,16 +11,22 @@ cd Mu3Lab
 ./install.sh
 ```
 
-`./install.sh` asks for your password once, prepares its own Python
-environment, and opens a setup page in your browser. The page checks this
-computer, installs only what is missing or out of date, and tells you when it
-needs you: creating your Vaultwarden and Authentik accounts and approving the
-computer in Tailscale. Keep the terminal open until the page says Mu3Lab is
-installed, then continue in your private dashboard.
+`./install.sh` runs entirely in the terminal. It asks for your computer
+password once, then for the email and password you want for Mu3Lab (the same
+password signs you in to the dashboard and unlocks your Vaultwarden password
+vault). Everything else installs by itself. The only other thing you do is
+approve this computer in Tailscale: your browser opens the page, and the
+installer continues on its own once you approve. At the end it saves your app
+logins to your vault and opens the dashboard, whose Home page lists what to do
+next.
 
 Run `./install.sh` again at any time, for example after `git pull`: finished
 steps are skipped, changed code is rebuilt, and the dashboard restarts on the
 new version. `make check` prints a read-only readiness report.
+
+To remove Mu3Lab and all of its data, run `./uninstall.sh`. Add
+`--everything` to also remove Docker, Tailscale, Node.js and NVIDIA container
+support; `--dry-run` shows what would be removed first.
 
 The permanent dashboard is reached through private Tailscale HTTPS, manages
 only Mu3Lab's curated services, and never treats arbitrary Docker projects as

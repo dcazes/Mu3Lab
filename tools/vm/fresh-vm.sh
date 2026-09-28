@@ -74,8 +74,7 @@ EOF
       vm_ssh 'cloud-init status --wait >/dev/null 2>&1 || true'
       printf '\n'
       sync_repo
-      echo "VM ready. Shell: $0 ssh"
-      echo "To see the setup page: ssh -L 8799:127.0.0.1:8799 (see '$0 ssh'), then open the printed link."
+      echo "VM ready. Open a shell with: $0 ssh   then run: cd Mu3Lab && ./install.sh"
       return 0
     fi
     printf '.'

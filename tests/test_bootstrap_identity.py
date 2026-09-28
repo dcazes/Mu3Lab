@@ -19,40 +19,36 @@ class BootstrapIdentityTests(unittest.TestCase):
             self.assertIn("vaultwarden_account", value)
             self.assertNotIn("password", str(value).lower())
 
-    def test_manual_prompts_are_copyable_and_explicit(self):
-        ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
-        with patch("ctl.install._runtime_marker", return_value=False):
-            prompt = install.fix_vaultwarden_setup({}, ctx)["prompt"]
-        self.assertEqual(prompt["kind"], "manual_setup")
-        self.assertEqual(prompt["copy_url"], prompt["url"])
-        self.assertIn("password", prompt["body"].lower())
-        self.assertIn("check", prompt["check_label"].lower())
+    def test_vaultwarden_account_is_created_from_the_terminal_answers(self):
+        account = {"name": "Alex", "email": "alex@example.com", "password": "correct horse battery"}
+        ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None, "account": lambda: account}
+        with patch("ctl.vaultwarden_api.register") as register:
+            result = install.fix_vaultwarden_setup({}, ctx)
+        self.assertTrue(result["ok"])
+        register.assert_called_once_with("http://127.0.0.1:19462", "alex@example.com", "correct horse battery", "Alex")
 
-    def test_authentik_setup_uses_version_stable_private_root(self):
-        host = "mu3lab-3.example.ts.net"
+    def test_account_steps_fail_clearly_without_answers(self):
         ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
+        for fix in (install.fix_vaultwarden_setup, install.fix_authentik_setup):
+            with self.subTest(fix=fix.__name__):
+                result = fix({}, ctx)
+                self.assertFalse(result["ok"])
+                self.assertIn("./install.sh", result["error"])
+
+    def test_authentik_owner_gets_the_same_login(self):
+        account = {"name": "Alex", "email": "alex@example.com", "password": "correct horse battery"}
+        ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None, "account": lambda: account}
+        with patch("ctl.install.actions.authentik_set_owner", return_value={"ok": True}) as set_owner:
+            result = install.fix_authentik_setup({}, ctx)
+        self.assertTrue(result["ok"])
+        self.assertEqual(set_owner.call_args.args[:3], ("alex@example.com", "Alex", "correct horse battery"))
+
+    def test_authentik_account_is_done_once_first_run_setup_is_over(self):
         with (
-            patch("ctl.install._tailscale_dns_name_for_install", return_value=host),
-            patch("ctl.install._runtime_marker", return_value=False),
-            patch("ctl.install._authentik_initial_setup_pending", return_value=True),
+            patch("ctl.install._authentik_check", return_value={"status": "ok"}),
+            patch("ctl.install._authentik_initial_setup_pending", return_value=False),
         ):
-            prompt = install.fix_authentik_setup({}, ctx)["prompt"]
-            check = install.check_authentik_setup(ctx)
-        expected = f"https://{host}/"
-        self.assertEqual(prompt["url"], expected)
-        self.assertEqual(check["setup_url"], expected)
-        self.assertNotIn("initial-setup", prompt["url"])
-        self.assertEqual(prompt["recovery_action"], "reset_authentik_admin")
-        self.assertEqual(prompt["recovery_username"], "akadmin")
-
-    def test_authentik_recovery_is_one_time_and_not_a_marker(self):
-        ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None}
-        with patch("ctl.install.actions.reset_authentik_admin_password", return_value={"ok": True}) as reset:
-            result = install.reset_authentik_admin_password(ctx)
-        self.assertEqual(result["username"], "akadmin")
-        self.assertTrue(result["temporary_password"].startswith("Mu3Lab-"))
-        self.assertNotIn("confirmed", result)
-        reset.assert_called_once()
+            self.assertEqual(install.check_authentik_setup({})["state"], "ready")
 
     def test_identity_steps_are_before_final_dashboard_route(self):
         ids = [step["id"] for step in install.STEPS]

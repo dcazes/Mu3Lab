@@ -143,21 +143,7 @@ class CoreImageTests(unittest.TestCase):
         self.assertIn("ollama/ollama:1", result["error"])
 
 
-class ScanTests(unittest.TestCase):
-    def test_scan_reports_every_step_and_survives_a_crashing_check(self):
-        def boom(_ctx):
-            raise OSError("no docker")
-
-        steps = [
-            {"id": "host_supported", "check": lambda _ctx: {"status": "ok", "state": "ready", "detail": "fine"}},
-            {"id": "docker", "check": boom},
-        ]
-        with patch.object(install, "STEPS", steps):
-            result = install.scan({})
-        self.assertTrue(result["host_supported"]["done"])
-        self.assertFalse(result["docker"]["done"])
-        self.assertIn("Not checked yet", result["docker"]["detail"])
-
+class PhaseTests(unittest.TestCase):
     def test_every_step_belongs_to_exactly_one_phase_in_run_order(self):
         flat = [step_id for _title, ids in install.PHASES for step_id in ids]
         self.assertEqual(flat, [step["id"] for step in install.STEPS])

@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # Mu3Lab :: install.sh
 # WHAT:  The one command to install, resume, or update Mu3Lab on this computer.
-#        It checks the basics, asks for your password once, prepares the
-#        installer's Python environment, then opens the setup page in your
-#        browser, which installs only what is missing or out of date.
-# RUN:   ./install.sh [--no-open] [--port N]
+#        It checks the basics, asks for your computer password once, prepares
+#        the installer's Python environment, then installs only what is
+#        missing or out of date, asking you only for what it can't decide.
+# RUN:   ./install.sh
 # DEBUG: Safe to run again at any time: finished steps are skipped. The
 #        password is only used by sudo; Mu3Lab never sees or stores it.
 set -Eeuo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
-PORT=8799
-OPEN_BROWSER=true
 MIN_PYTHON="3.10"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -24,28 +22,19 @@ fail() {
 
 usage() {
   cat <<'EOF'
-Usage: ./install.sh [--no-open] [--port N]
+Usage: ./install.sh
 
 Installs Mu3Lab, or finishes/updates an existing installation. Finished steps
 are skipped, so it is always safe to run again (for example after `git pull`).
-
-  --no-open   print the setup link instead of opening the browser
-  --port N    serve the setup page on port N (default 8799)
-  -h, --help  show this help
+To remove Mu3Lab, run ./uninstall.sh.
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --no-open) OPEN_BROWSER=false ;;
-    --port) [[ $# -gt 1 ]] || fail "--port needs a number." "./install.sh --port 8800"; PORT="$2"; shift ;;
-    --port=*) PORT="${1#--port=}" ;;
-    -h|--help) usage; exit 0 ;;
-    *) fail "Unknown option '$1'." "Run ./install.sh --help" ;;
-  esac
-  shift
-done
-[[ "$PORT" =~ ^[0-9]+$ ]] || fail "--port must be a number, got '$PORT'."
+case "${1:-}" in
+  "") ;;
+  -h|--help) usage; exit 0 ;;
+  *) fail "Unknown option '$1'." "Run ./install.sh --help" ;;
+esac
 
 bold "Mu3Lab setup"
 
@@ -97,16 +86,10 @@ else
   echo "Python environment is up to date."
 fi
 
-# --- 4. Hand over to the setup page ----------------------------------------------
-step "Opening the setup page"
-ARGS=(--port "$PORT")
-[[ "$OPEN_BROWSER" == true ]] || ARGS+=(--no-open)
-if [[ "$OPEN_BROWSER" == true && -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-  ARGS+=(--no-open)
-fi
+# --- 4. Install ---------------------------------------------------------------------
 cd "$ROOT"
 set +e
-"$ROOT/.venv/bin/python" -m ctl.bootstrap.server "${ARGS[@]}"
+"$ROOT/.venv/bin/python" -m ctl.bootstrap.terminal
 status=$?
 set -e
 exit "$status"

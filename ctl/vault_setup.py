@@ -74,6 +74,7 @@ def desired_items(
     owner_uid: str,
     username: str,
     email: str,
+    authentik_password: str = "",
     paths: RuntimePaths = RuntimePaths(),
 ) -> list[DesiredItem]:
     items: list[DesiredItem] = []
@@ -85,8 +86,11 @@ def desired_items(
                 name="Authentik (Mu3Lab sign-in)",
                 folder=FOLDER,
                 username=username or email,
+                password=authentik_password,
                 uris=((_origin(host, authentik.private_https_port), MATCH_HOST),),
-                notes="Your single sign-on for Mu3Lab apps. Your password was never sent to Mu3Lab; "
+                notes="Your Mu3Lab sign-in. Sign in with your email address."
+                if authentik_password
+                else "Your single sign-on for Mu3Lab apps. Your password was never sent to Mu3Lab; "
                 "let the browser extension save it the next time you sign in.",
             )
         )

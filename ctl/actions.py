@@ -274,6 +274,39 @@ def reset_authentik_admin_password(password: str, log: Callable[[str], None]) ->
     return {"ok": True}
 
 
+def authentik_set_owner(email: str, name: str, password: str, log: Callable[[str], None]) -> dict:
+    """Give Authentik's built-in administrator the owner's email, name and password.
+
+    Setting a usable password also ends Authentik's first-run setup. The
+    values travel as JSON on stdin to Authentik's own shell; they are never
+    placed on a command line or logged.
+    """
+    if not email or not password:
+        return {"ok": False, "error": "An email and password are required."}
+    script = (
+        "import json, sys\n"
+        "from authentik.core.models import User\n"
+        "data = json.loads(sys.stdin.readline())\n"
+        "user = User.objects.get(username='akadmin')\n"
+        "user.email = data['email']\n"
+        "user.name = data['name']\n"
+        "user.set_password(data['password'])\n"
+        "user.save()\n"
+        "print('MU3LAB_OWNER_OK')\n"
+    )
+    payload = _json.dumps({"email": email, "name": name or email, "password": password}) + "\n"
+    rc, output = docker_cmd_with_stdin(
+        ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", script], payload, log, timeout=120
+    )
+    if rc != 0 or "MU3LAB_OWNER_OK" not in output:
+        return {
+            "ok": False,
+            "error": "Authentik could not save your account. Check that Authentik is running, then retry.",
+        }
+    log("Authentik owner account saved (password not logged).")
+    return {"ok": True}
+
+
 def freellmapi_local_setup(email: str, password: str, log: Callable[[str], None]) -> tuple[int, dict]:
     """Claim a fresh FreeLLMAPI from inside its container's loopback boundary.
 

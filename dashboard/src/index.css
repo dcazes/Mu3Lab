@@ -1761,6 +1761,80 @@ a.row-main:hover b,
   color: var(--blue);
 }
 
+.get-started-count {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.get-started-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.get-started-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.get-started-item > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-3);
+}
+
+.get-started-item span {
+  flex: 1;
+}
+
+.get-started-item:hover {
+  border-color: var(--border-strong);
+}
+
+.get-started-item.is-next {
+  border-color: var(--accent);
+}
+
+.get-started-item.is-done {
+  cursor: default;
+  color: var(--text-3);
+}
+
+.get-started-item .get-started-done {
+  color: var(--green);
+}
+
+.get-started-hide {
+  margin-top: 8px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.guide-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .launcher {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));

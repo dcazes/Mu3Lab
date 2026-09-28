@@ -130,6 +130,60 @@ def master_password_hash(master_key: bytes, password: str) -> str:
     return _b64(hashlib.pbkdf2_hmac("sha256", master_key, password.encode("utf-8"), 1, 32))
 
 
+PBKDF2_ITERATIONS = 600_000
+
+
+def register(base_url: str, email: str, password: str, name: str, *, client: httpx.Client | None = None) -> None:
+    """Create a Vaultwarden account the way the official web vault does.
+
+    Keys are generated here and only the encrypted user key, the RSA key pair
+    (private key encrypted) and the master-password hash are sent. The
+    password itself never leaves this process.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    email = email.strip().lower()
+    if not email or not password:
+        raise VaultError("An email and password are required.", "invalid_input")
+    kdf = {"kdf": KDF_PBKDF2, "kdfIterations": PBKDF2_ITERATIONS}
+    master_key = derive_master_key(password, email, kdf)
+    user_key = os.urandom(64)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_der = private_key.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    private_der = private_key.private_bytes(
+        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    body = {
+        "email": email,
+        "name": name or email,
+        "masterPasswordHash": master_password_hash(master_key, password),
+        "masterPasswordHint": None,
+        "key": encrypt(user_key, stretch(master_key)),
+        "kdf": KDF_PBKDF2,
+        "kdfIterations": PBKDF2_ITERATIONS,
+        "keys": {
+            "publicKey": _b64(public_der),
+            "encryptedPrivateKey": encrypt(private_der, SymmetricKey.from_bytes(user_key)),
+        },
+    }
+    owned = client is None
+    http = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=30.0)
+    try:
+        response = http.post("/api/accounts/register", json=body)
+        if response.status_code == 400 and "already" in response.text.lower():
+            raise VaultError("A Vaultwarden account with this email already exists.", "exists")
+        if response.status_code >= 400:
+            raise VaultError(f"Vaultwarden refused the new account (HTTP {response.status_code}).", "rejected")
+    except httpx.HTTPError as exc:
+        raise VaultError("Vaultwarden is not answering.", "unreachable") from exc
+    finally:
+        if owned:
+            http.close()
+
+
 @dataclass
 class Folder:
     id: str

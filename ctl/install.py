@@ -25,7 +25,6 @@ import json
 import os
 import platform
 import re
-import secrets
 import socket
 import subprocess
 import threading
@@ -147,7 +146,7 @@ DISPATCH = {
     ("caddy", "ready"): "skip",
     ("vaultwarden", "down"): "vaultwarden_up",
     ("vaultwarden", "ready"): "skip",
-    ("vaultwarden_setup", "needs_user"): "manual_vaultwarden",
+    ("vaultwarden_setup", "needs_user"): "create_account",
     ("vaultwarden_setup", "ready"): "skip",
     ("tailscale_pkg", "absent"): "tailscale_install",
     ("tailscale_pkg", "daemon_down"): "tailscale_start",
@@ -165,11 +164,10 @@ DISPATCH = {
     ("authentik_serve", "ready"): "skip",
     ("lobehub_serve", "unshared"): "share_lobehub",
     ("lobehub_serve", "ready"): "skip",
-    ("authentik_setup", "needs_user"): "manual_authentik",
+    ("authentik_setup", "needs_user"): "create_account",
     ("authentik_setup", "ready"): "skip",
-    ("dashboard_protection", "needs_user"): "manual_dashboard_protection",
     ("dashboard_protection", "needs_apply"): "apply_dashboard_protection",
-    ("dashboard_protection", "needs_attention"): "manual_dashboard_protection",
+    ("dashboard_protection", "needs_attention"): "apply_dashboard_protection",
     ("dashboard_protection", "ready"): "skip",
     ("serve", "unshared"): "share_tailnet",
     ("serve", "ready"): "skip",
@@ -1053,25 +1051,6 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     }
 
 
-def _manual_prompt(title: str, body: str, url: str, done: str) -> dict:
-    """Return a safe human step; URLs are destinations only, never secrets."""
-    return {
-        "kind": "manual_setup",
-        "title": title,
-        "body": body,
-        "url": url,
-        "done_label": done,
-        "copy_url": url,
-        "check_label": "I completed this — check again",
-    }
-
-
-def _runtime_marker(step: str, ctx: dict) -> bool:
-    from ctl import bootstrap_state
-
-    return bootstrap_state.is_complete(step, inputs=ctx.get("inputs", {}))
-
-
 def _compose_health(port: int, url: str) -> dict:
     if not _tcp_open(port):
         return {"status": "missing", "state": "down", "detail": f"Service is not answering on loopback :{port}."}
@@ -1255,26 +1234,32 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     return {"ok": True}
 
 
+def _account(ctx: dict) -> dict | None:
+    """The owner's email/name/password, asked for once by the terminal installer."""
+    provider = ctx.get("account")
+    return provider() if callable(provider) else None
+
+
 def check_vaultwarden_setup(ctx: dict) -> dict:
     if _vaultwarden_account_exists():
-        return {"status": "ok", "state": "ready", "detail": "Vaultwarden account detected in its local database."}
-    return {
-        "status": "waiting",
-        "state": "needs_user",
-        "detail": "Create the first Vaultwarden account in the local setup page.",
-    }
+        return {"status": "ok", "state": "ready", "detail": "Your Vaultwarden account exists."}
+    return {"status": "missing", "state": "needs_user", "detail": "Your Vaultwarden account will be created."}
 
 
 def fix_vaultwarden_setup(check: dict, ctx: dict) -> dict:
-    return {
-        "waiting": True,
-        "prompt": _manual_prompt(
-            "Create your first Vaultwarden account",
-            "Vaultwarden is running locally. Create the first account in its official UI. Mu3Lab never stores the master password; after setup you can choose to let it save your app logins to the vault once. After creating the account, return here and check again.",
-            f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}/#/signup",
-            "I created the account",
-        ),
-    }
+    from ctl import vaultwarden_api
+
+    account = _account(ctx)
+    if not account:
+        return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
+    try:
+        vaultwarden_api.register(
+            f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}", account["email"], account["password"], account["name"]
+        )
+    except vaultwarden_api.VaultError as exc:
+        return {"ok": False, "error": str(exc)}
+    ctx["log_fn"]("vaultwarden_setup")("Vaultwarden account created (password not logged).")
+    return {"ok": True}
 
 
 def _tailscale_serve_port(port: str, target: str, log: Callable[[str], None]) -> dict:
@@ -1474,28 +1459,10 @@ def tailnet_https_origin(host: str, port: str) -> str:
 
 def check_authentik_setup(ctx: dict) -> dict:
     if _authentik_check(ctx).get("status") != "ok":
-        return {
-            "status": "waiting",
-            "state": "needs_user",
-            "detail": "Authentik is not running yet; its admin account is created after it starts.",
-        }
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    setup_pending = _authentik_initial_setup_pending()
-    if not setup_pending:
-        return {
-            "status": "ok",
-            "state": "ready",
-            "detail": "Authentik owner account exists; authenticated access is verified at dashboard handoff.",
-        }
-    return {
-        "status": "waiting",
-        "state": "needs_user",
-        "detail": "Create the first Authentik administrator in the official setup flow.",
-        # Authentik 2026.5 routes its root itself to first-run setup. Do
-        # not hard-code its version-sensitive internal flow path: a
-        # direct legacy flow URL is explicitly denied by this release.
-        "setup_url": tailnet_https_origin(host, AUTHENTIK_SERVE_PORT),
-    }
+        return {"status": "missing", "state": "needs_user", "detail": "Authentik is not running yet."}
+    if not _authentik_initial_setup_pending():
+        return {"status": "ok", "state": "ready", "detail": "Your Authentik sign-in account exists."}
+    return {"status": "missing", "state": "needs_user", "detail": "Your Authentik sign-in account will be created."}
 
 
 def _authentik_initial_setup_pending() -> bool:
@@ -1538,72 +1505,24 @@ def vaultwarden_tailnet_domain(dns_name: str) -> str:
 
 
 def fix_authentik_setup(check: dict, ctx: dict) -> dict:
-    host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    return {
-        "waiting": True,
-        "prompt": _manual_prompt(
-            "Create the Authentik administrator",
-            "Open Authentik’s official first-run page and create the administrator. "
-            "Mu3Lab never receives or stores that password. If Authentik instead "
-            "shows a sign-in page and you do not know the administrator password, "
-            "you can deliberately reset only the built-in akadmin account below. "
-            "After a recovery reset, sign in and change the temporary password "
-            "before continuing. Mu3Lab will detect when the owner account exists.",
-            tailnet_https_origin(host, AUTHENTIK_SERVE_PORT),
-            "Check owner account again",
-        )
-        | {
-            "recovery_action": "reset_authentik_admin",
-            "recovery_username": "akadmin",
-        },
-    }
-
-
-def reset_authentik_admin_password(ctx: dict) -> dict:
-    """Generate and apply a one-time recovery password without persisting it."""
-    # Token output contains no whitespace and is sufficiently long for a
-    # temporary administrator credential.  It lives only in this call and its
-    # HTTPS-local API response; never in job state, logs, or disk.
-    temporary_password = "Mu3Lab-" + secrets.token_urlsafe(24)
-    result = actions.reset_authentik_admin_password(temporary_password, ctx["log_fn"]("authentik_setup"))
-    if not result.get("ok"):
-        return result
-    return {"ok": True, "username": "akadmin", "temporary_password": temporary_password}
+    account = _account(ctx)
+    if not account:
+        return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
+    result = actions.authentik_set_owner(
+        account["email"], account["name"], account["password"], ctx["log_fn"]("authentik_setup")
+    )
+    return result if not result.get("ok") else {"ok": True}
 
 
 def check_dashboard_protection(ctx: dict) -> dict:
-    host = _tailscale_dns_name_for_install()
-    if _runtime_marker("dashboard_protection", ctx):
-        target = RuntimePaths().projects / "ingress" / "Caddyfile"
-        if not target.is_file():
-            return {
-                "status": "missing",
-                "state": "needs_apply",
-                "detail": "Dashboard protection was confirmed; applying the verified Caddy policy.",
-            }
-        return {
-            "status": "ok",
-            "state": "ready",
-            "detail": "An Authentik operator successfully reached the protected dashboard.",
-        }
-    host = host or "127.0.0.1"
+    host = _tailscale_dns_name_for_install() or "127.0.0.1"
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     if target.is_file():
         verdict = _dashboard_access_probe_with_retry(host)
         if verdict["state"] == "ready":
-            return {
-                "status": "waiting",
-                "state": "needs_user",
-                "detail": "Authentik protection is active; verify one signed-in dashboard request, then confirm.",
-                "setup_url": tailnet_https_origin(host, DASHBOARD_SERVE_PORT),
-            }
+            return {"status": "ok", "state": "ready", "detail": "The dashboard requires signing in."}
         return {"status": "missing", "state": "needs_attention", "detail": verdict["detail"]}
-    return {
-        "status": "waiting",
-        "state": "needs_apply",
-        "detail": "Mu3Lab will create the Authentik provider, application, and embedded-outpost assignment automatically.",
-        "setup_url": tailnet_https_origin(host, DASHBOARD_SERVE_PORT),
-    }
+    return {"status": "missing", "state": "needs_apply", "detail": "Sign-in will be required for the dashboard."}
 
 
 def _dashboard_access_probe_with_retry(host: str | None = None) -> dict:
@@ -1623,30 +1542,6 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
     if not ingress_token:
         return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
-    if _runtime_marker("dashboard_protection", ctx):
-        source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
-        target = RuntimePaths().projects / "ingress" / "Caddyfile"
-        if target.is_file():
-            host = _tailscale_dns_name_for_install() or "127.0.0.1"
-            return {
-                "waiting": True,
-                "prompt": _manual_prompt(
-                    "Verify the protected dashboard",
-                    "Open the protected dashboard in an anonymous browser window. It must redirect to the private Authentik HTTPS page, not localhost or an HTTP URL. Sign in as a Mu3Lab operator and confirm the dashboard loads, then return here and check again.",
-                    tailnet_https_origin(host, DASHBOARD_SERVE_PORT),
-                    "I verified the protected dashboard",
-                ),
-            }
-        target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-        log = ctx["log_fn"]("dashboard_protection")
-        rc, out = actions.compose_up(
-            ctx["root"] / "core" / "ingress",
-            log,
-            env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
-        )
-        log(out or f"(exit {rc})")
-        return {"ok": rc == 0, "error": "Caddy could not apply dashboard protection." if rc else ""}
     host = _tailscale_dns_name_for_install()
     if not host:
         return {
@@ -1712,15 +1607,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     while time.monotonic() - started < 180:
         verdict = _dashboard_access_probe(host)
         if verdict["state"] == "ready":
-            return {
-                "waiting": True,
-                "prompt": _manual_prompt(
-                    "Verify the protected Mu3Lab dashboard",
-                    "Mu3Lab created the Authentik provider, application, and embedded outpost automatically. Open the protected dashboard in an anonymous window; it must redirect to the private Authentik HTTPS page, not localhost or an HTTP URL. Sign in as a Mu3Lab operator and confirm the dashboard loads. Mu3Lab never receives the Authentik password.",
-                    tailnet_https_origin(host, DASHBOARD_SERVE_PORT),
-                    "I verified the protected dashboard",
-                ),
-            }
+            return {"ok": True}
         _update_progress(
             ctx,
             "dashboard_protection",
@@ -2484,27 +2371,6 @@ PHASES = (
     ("Download the core apps", ("core_images",)),
 )
 PHASE_OF = {step_id: title for title, ids in PHASES for step_id in ids}
-
-
-def scan(ctx: dict) -> dict[str, dict]:
-    """Run every step's read-only check; nothing is installed or changed.
-
-    Powers the page's first view: which steps are already done, which will be
-    installed, and whether anything blocks installation on this computer.
-    """
-    results: dict[str, dict] = {}
-    for meta in STEPS:
-        try:
-            check = meta["check"](ctx)
-        except Exception as exc:  # a check that cannot run yet is simply "to do"
-            check = {"status": "missing", "state": "unknown", "detail": f"Not checked yet ({type(exc).__name__})."}
-        done = check.get("status") == "ok" or fix_for_state(meta["id"], check.get("state", "")) == "skip"
-        results[meta["id"]] = {
-            "done": done,
-            "blocked": check.get("status") == "fail",
-            "detail": str(check.get("detail", "")),
-        }
-    return results
 
 
 def run_job(job: dict, ctx: dict) -> None:

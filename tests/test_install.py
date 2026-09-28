@@ -401,10 +401,6 @@ class AuthentikReadinessTests(unittest.TestCase):
 class VaultwardenReadinessTests(unittest.TestCase):
     """Container start must not be mistaken for Rocket application readiness."""
 
-    def test_first_account_prompt_opens_the_signup_screen(self):
-        result = install.fix_vaultwarden_setup({}, _ctx())
-        self.assertEqual(result["prompt"]["url"], "http://127.0.0.1:19462/#/signup")
-
     def test_connection_reset_is_retried_until_ready(self):
         events: list[dict] = []
         ctx = _ctx()
@@ -769,7 +765,7 @@ class DockerSessionTests(unittest.TestCase):
             "authentik_serve": ["unshared", "ready"],
             "lobehub_serve": ["unshared", "ready"],
             "authentik_setup": ["needs_user", "ready"],
-            "dashboard_protection": ["needs_user", "needs_apply", "needs_attention", "ready"],
+            "dashboard_protection": ["needs_apply", "needs_attention", "ready"],
         }
         step_ids = {m["id"] for m in install.STEPS}
         self.assertEqual(set(states), step_ids)

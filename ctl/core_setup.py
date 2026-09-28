@@ -98,7 +98,11 @@ def _http_ok(url: str, *, headers: dict[str, str] | None = None) -> bool:
 
 
 def _http_json(
-    url: str, method: str = "GET", payload: dict | None = None, headers: dict[str, str] | None = None
+    url: str,
+    method: str = "GET",
+    payload: dict | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 15,
 ) -> tuple[int, dict]:
     """Call a fixed local integration endpoint without logging its payload."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -113,7 +117,7 @@ def _http_json(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
             return response.status, json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
@@ -234,6 +238,39 @@ def _configure_chat_routes(root: Path, log: Callable[[str], None]) -> None:
         raise ValueError("Core private UI routes could not be reconciled: " + redact(detail))
 
 
+EMBEDDING_ATTEMPTS = 4
+EMBEDDING_TIMEOUT = 120
+
+
+def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep) -> bool:
+    """Ask for one embedding, allowing for the model's first load into memory.
+
+    The first request after Ollama starts loads the model, which can take well
+    over a minute on a CPU; a short timeout reported a healthy install as failed.
+    """
+    for attempt in range(EMBEDDING_ATTEMPTS):
+        status, embedding = _http_json(
+            "http://127.0.0.1:4000/v1/embeddings",
+            "POST",
+            {"model": "mu3lab-embed", "input": "Mu3Lab readiness check"},
+            headers=headers,
+            timeout=EMBEDDING_TIMEOUT,
+        )
+        vectors = embedding.get("data") if isinstance(embedding, dict) else None
+        first = vectors[0] if isinstance(vectors, list) and vectors and isinstance(vectors[0], dict) else {}
+        vector = first.get("embedding")
+        if (
+            status == 200
+            and isinstance(vector, list)
+            and len(vector) == 768
+            and all(isinstance(value, (int, float)) for value in vector)
+        ):
+            return True
+        if attempt + 1 < EMBEDDING_ATTEMPTS:
+            sleep(10)
+    return False
+
+
 def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     """Check application-level contracts after container health has passed."""
     litellm_env = read_runtime_env(runtime.projects / "litellm" / ".env")
@@ -260,25 +297,7 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     }
     if not _stream_chat_ok("http://127.0.0.1:4000/v1/chat/completions", chat_payload, headers):
         return False, "A streamed FreeLLMAPI chat request did not complete through LiteLLM"
-    embedding_status, embedding = _http_json(
-        "http://127.0.0.1:4000/v1/embeddings",
-        "POST",
-        {
-            "model": "mu3lab-embed",
-            "input": "Mu3Lab readiness check",
-        },
-        headers=headers,
-    )
-    vectors = embedding.get("data") if isinstance(embedding, dict) else None
-    vector = (
-        vectors[0].get("embedding") if isinstance(vectors, list) and vectors and isinstance(vectors[0], dict) else None
-    )
-    if (
-        embedding_status != 200
-        or not isinstance(vector, list)
-        or len(vector) != 768
-        or not all(isinstance(value, (int, float)) for value in vector)
-    ):
+    if not _embedding_ok(headers):
         return False, "The local embedding model did not return vectors through LiteLLM"
     host = tailnet_dns_name()
     if not host:

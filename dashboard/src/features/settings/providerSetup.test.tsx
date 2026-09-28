@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderCatalogItem, ProviderMetadata } from '../../api';
 import { dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
 import { AiSettings } from './AiSettings';
@@ -99,15 +99,41 @@ describe('AI provider checklist', () => {
   });
 });
 
-describe('Home setup reminders', () => {
-  it('asks for the vault step until it has been done once', async () => {
+describe('Get started', () => {
+  const api = (seeded: boolean, connected: ProviderMetadata[]) => (path: string) =>
+    path === '/api/v1/vault/status'
+      ? { ok: true, seeded, seeded_at: '' }
+      : (providersApi(connected, [])(path) ?? { handoffs: [] });
+
+  beforeEach(() => localStorage.clear());
+
+  it('points to the first unfinished step in order', async () => {
     const { HomePage } = await import('../home/HomePage');
-    stubFetch((path) =>
-      path === '/api/v1/vault/status' ? { ok: true, seeded: false, seeded_at: '' } : { handoffs: [] },
-    );
+    stubFetch(api(true, []));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    const link = await screen.findByRole('link', { name: /Save your app logins to Vaultwarden/ });
-    expect(link).toHaveAttribute('href', '/settings/sign-in');
+    const first = await screen.findByRole('link', { name: /1\. Connect a free AI provider/ });
+    expect(first).toHaveAttribute('href', '/settings/ai');
+    expect(first).toHaveClass('is-next');
+    expect(screen.getByText('0 of 5 done')).toBeInTheDocument();
+    expect(screen.queryByText(/Save your app logins/)).not.toBeInTheDocument();
+  });
+
+  it('ticks off detected steps and adds the vault step when it was never done', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch(api(false, [connection('groq', 'Groq')]));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    expect(await screen.findByText('1 of 6 done')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Save your app logins to your password vault/ })).toHaveClass('is-next');
+  });
+
+  it('opens a numbered guide for steps it cannot detect and remembers them', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch(api(true, []));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    fireEvent.click(await screen.findByRole('button', { name: /Let your browser fill in your passwords/ }));
+    expect(screen.getByText(/choose/)).toHaveTextContent('Self-hosted');
+    fireEvent.click(screen.getByRole('button', { name: "I've done this" }));
+    expect(await screen.findByText('1 of 5 done')).toBeInTheDocument();
   });
 });
 
