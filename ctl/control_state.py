@@ -216,6 +216,23 @@ class ControlState:
             )
         return {"compute_mode": mode, "updated_at": now, "updated_by": actor}
 
+    def vault_seeded(self) -> dict[str, Any]:
+        """When the owner last saved Mu3Lab logins to Vaultwarden, if ever."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT updated_at, updated_by FROM system_config WHERE key = 'vault_seeded'").fetchone()
+        return {"seeded": bool(row), "seeded_at": row["updated_at"] if row else ""}
+
+    def mark_vault_seeded(self, actor: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO system_config (key, value_json, updated_at, updated_by)
+                VALUES ('vault_seeded', 'true', ?, ?)
+                ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at, updated_by = excluded.updated_by
+            """,
+                (_now(), actor),
+            )
+
     def calendar_connection(self, owner_uid: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM calendar_connections WHERE owner_uid = ?", (owner_uid,)).fetchone()

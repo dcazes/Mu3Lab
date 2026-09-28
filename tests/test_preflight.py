@@ -13,7 +13,6 @@ DEBUG: A failing test prints the check dict; compare `status`/`blocking`/
 """
 
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -94,19 +93,6 @@ class PythonNodeTests(unittest.TestCase):
         result = preflight.check_node("")
         self.assertEqual(result["status"], "missing")
         self.assertIn("step 3", result["action"])
-
-
-class PrivilegeTests(unittest.TestCase):
-    def test_ok(self):
-        self.assertEqual(preflight.check_privilege(True, False)["status"], "ok")
-        result = preflight.check_privilege(False, True)
-        self.assertEqual(result["status"], "ok")
-        self.assertIn("pkexec", result["detail"])
-
-    def test_headless(self):
-        result = preflight.check_privilege(False, False)
-        self.assertEqual(result["status"], "missing")
-        self.assertIn("terminal", result["action"])
 
 
 class DockerTests(unittest.TestCase):
@@ -377,54 +363,27 @@ class PortTests(unittest.TestCase):
         self.assertEqual(set(seen), set(preflight.CHECK_PORTS))
 
 
-class BundleTests(unittest.TestCase):
-    def test_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            result = preflight.check_bundle(root=Path(tmp))
-            self.assertEqual(result["status"], "missing")
-            self.assertEqual(result["state"], "no_venv")
-
-    def test_ok(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "python").touch()
-            dist = root / "dashboard" / "dist" / "assets"
-            dist.mkdir(parents=True)
-            (dist / "app.js").touch()
-            (root / "dashboard" / "dist" / "index.html").write_text(
-                '<script src="/assets/app.js"></script>', encoding="utf-8"
-            )
-            self.assertEqual(preflight.check_bundle(root=root)["status"], "ok")
-
-    def test_dangling_asset(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "python").touch()
-            (root / "dashboard" / "dist").mkdir(parents=True)
-            (root / "dashboard" / "dist" / "index.html").write_text(
-                '<script src="/assets/gone.js"></script>', encoding="utf-8"
-            )
-            result = preflight.check_bundle(root=root)
-            self.assertEqual(result["status"], "missing")
-            self.assertEqual(result["state"], "no_build")
-            self.assertIn("gone.js", result["detail"])
-
-
 class AggregateTests(unittest.TestCase):
     def test_shape(self):
         # Live run on THIS box: shape asserted, verdict not (mid-build boxes
         # are TODO-heavy by definition).
         report = preflight.run_all()
         self.assertIn("install_ready", report)
-        self.assertEqual(len(report["checks"]), 11)
+        self.assertEqual(
+            [check["name"] for check in report["checks"]],
+            ["os", "arch", "python", "ports", "gpu", "node", "docker", "tailscale"],
+        )
         for check in report["checks"]:
             self.assertIn(check["status"], ("ok", "missing", "fail"))
             self.assertIn("blocking", check)
             self.assertIn("state", check)
             self.assertTrue(check["detail"])
         self.assertNotIn("4000", str(report))  # no future-port leakage
+
+    def test_host_checks_are_all_blocking(self):
+        checks = preflight.run_host_checks()
+        self.assertEqual([check["name"] for check in checks], ["os", "arch", "python", "ports"])
+        self.assertTrue(all(check["blocking"] for check in checks))
 
     def test_ready_with_todos(self):
         # Fresh-box shape: only install-provided items missing → ready.

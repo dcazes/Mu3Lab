@@ -63,6 +63,7 @@ function Attention() {
   });
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
   const providerSetup = providers.data?.setup;
+  const vault = useApi<{ seeded: boolean }>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
   const failing = data.services.services.filter(needsAttention);
   const saved = handoffs.data?.handoffs.length || 0;
   const working = data.services.services.filter(isWorking);
@@ -88,6 +89,17 @@ function Attention() {
       : []),
     ...(setupIncomplete
       ? [{ key: 'setup', icon: Rocket, tone: 'info', text: 'Finish setting up Mu3Lab', to: '/settings/system' }]
+      : []),
+    ...(vault.data && !vault.data.seeded
+      ? [
+          {
+            key: 'vault',
+            icon: KeyRound,
+            tone: 'info',
+            text: 'Save your app logins to Vaultwarden so your browser can fill them in',
+            to: '/settings/sign-in',
+          },
+        ]
       : []),
     ...(providerSetup?.complete && !providerSetup.recommendation_met
       ? [

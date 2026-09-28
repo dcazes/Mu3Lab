@@ -1,17 +1,30 @@
 # Mu3Lab
 
-Mu3Lab is a curated, private homelab control plane for Debian 12+ and Ubuntu
-22.04+ x86-64 hosts. It separates first-run host preparation from normal app
-management:
+Mu3Lab is a curated, private homelab control plane for Linux desktops running
+Ubuntu 22.04+, Debian 12+, or a derivative such as Linux Mint (x86-64 or arm64).
 
-1. `./install.sh` (or `./check.sh`) opens a temporary local bootstrap dashboard at
-   `127.0.0.1:8799`. It checks host compatibility, installs only missing
-   dependencies, and pauses for unavoidable human actions such as the normal
-   Tailscale web login. Developer unit tests are available separately and never
-   block an end-user install.
-2. The React control plane is the permanent dashboard. It is intended to be
-   reached through private Tailscale HTTPS, manages only Mu3Lab's curated
-   services, and never treats arbitrary Docker projects as trusted apps.
+## Install
+
+```bash
+git clone https://github.com/dcazes/Mu3Lab.git
+cd Mu3Lab
+./install.sh
+```
+
+`./install.sh` asks for your password once, prepares its own Python
+environment, and opens a setup page in your browser. The page checks this
+computer, installs only what is missing or out of date, and tells you when it
+needs you: creating your Vaultwarden and Authentik accounts and approving the
+computer in Tailscale. Keep the terminal open until the page says Mu3Lab is
+installed, then continue in your private dashboard.
+
+Run `./install.sh` again at any time, for example after `git pull`: finished
+steps are skipped, changed code is rebuilt, and the dashboard restarts on the
+new version. `make check` prints a read-only readiness report.
+
+The permanent dashboard is reached through private Tailscale HTTPS, manages
+only Mu3Lab's curated services, and never treats arbitrary Docker projects as
+trusted apps.
 
 ## Product safety rules
 

@@ -224,10 +224,15 @@ def check_arch(machine: str) -> dict:
 def check_gpu(nvidia_present: bool, amd_present: bool) -> dict:
     """Report a selectable CPU/NVIDIA/AMD profile; detection never installs drivers."""
     if nvidia_present:
-        return _result("gpu", "ok", "NVIDIA GPU detected; confirm the NVIDIA profile before install.", state="nvidia")
+        return _result("gpu", "ok", "NVIDIA GPU detected; apps that support it will use it.", state="nvidia")
     if amd_present:
-        return _result("gpu", "ok", "AMD GPU detected; confirm the AMD profile before install.", state="amd")
-    return _result("gpu", "ok", "No supported GPU detected; CPU profile will be offered.", state="cpu")
+        return _result(
+            "gpu",
+            "ok",
+            "AMD GPU detected; apps will use the CPU (AMD acceleration is not set up automatically).",
+            state="amd",
+        )
+    return _result("gpu", "ok", "No supported GPU detected; apps will use the CPU.", state="cpu")
 
 
 def check_python(version: tuple[int, ...]) -> dict:
@@ -268,34 +273,6 @@ def check_node(node_version_output: str) -> dict:
         f"Node {match.group(0)} below the required Node.js LTS v{MIN_NODE_MAJOR}.",
         "step 3 upgrades it via the NodeSource repo.",
         state="old",
-    )
-
-
-def check_privilege(sudo_fresh: bool, graphical_session: bool) -> dict:
-    """Report HOW a future privileged step would prompt (never prompts here).
-
-    - sudo timestamp fresh  -> steps run silently, no dialog.
-    - graphical session     -> pkexec pops the native system dialog.
-    - neither               -> dashboard shows copy-paste terminal commands.
-    Both booleans are injected so tests (and --dry-run) don't probe the TTY.
-    """
-    if sudo_fresh:
-        return _result(
-            "privilege", "ok", "sudo timestamp fresh: privileged steps run without prompting.", state="fresh_sudo"
-        )
-    if graphical_session:
-        return _result(
-            "privilege",
-            "ok",
-            "No fresh sudo, but a graphical session exists: pkexec will show the native system password dialog.",
-            state="polkit",
-        )
-    return _result(
-        "privilege",
-        "missing",
-        "No fresh sudo and no graphical session detected.",
-        "Privileged steps will show terminal commands to run by hand.",
-        state="terminal",
     )
 
 
@@ -649,7 +626,7 @@ def check_ports(connect_fn=None) -> dict:
         # Our own autostarted dashboard is EXPECTED here post-install (it
         # starts at boot by design): report it as info, not a conflict.
         # Only foreign holders block.
-        ours = [port for port in busy if owners.get(str(port)) and owners[str(port)]["ours"]]
+        ours = [port for port in busy if (owners.get(str(port)) or {}).get("ours")]
         foreign = [port for port in busy if port not in ours]
         if not foreign:
             return {
@@ -683,101 +660,45 @@ def check_ports(connect_fn=None) -> dict:
     }
 
 
-def check_bundle(root: Path = ROOT) -> dict:
-    """Verify the repo-root venv and the built dashboard bundle exist."""
-    problems: list[str] = []
-    venv_ok = (root / ".venv" / "bin" / "python").exists()
-    if not venv_ok:
-        problems.append("project workspace folder (.venv) missing")
-    index = root / "dashboard" / "dist" / "index.html"
-    if not index.is_file():
-        problems.append("built dashboard missing")
-    else:
-        # Every /assets/* file referenced by index.html must exist on disk.
-        html = index.read_text(encoding="utf-8")
-        for marker in ('src="/assets/', 'href="/assets/'):
-            start = 0
-            while True:
-                found = html.find(marker, start)
-                if found == -1:
-                    break
-                asset = html[found + len(marker) :].split('"', 1)[0]
-                if not (index.parent / "assets" / asset).is_file():
-                    problems.append(f"bundle references missing asset: {asset}")
-                start = found + len(marker)
-    if problems:
-        state = "no_venv" if not venv_ok else "no_build"
-        return _result("bundle", "missing", "; ".join(problems), "step 3 sets up the workspace.", state=state)
-    return _result("bundle", "ok", "Workspace ready (.venv + built dashboard).", state="ready")
-
-
-def check_compose_projects(root: Path = ROOT) -> dict:
-    """Report per-project .env presence and container state (Step 1c–1e).
-
-    Read-only: parses compose files and queries `docker compose ps` via _run.
-    On a clean box every project reports "not installed" (status missing),
-    which is the CORRECT pre-Step-1 answer — not an error.
-    """
-    lines: list[str] = []
-    for project in ("ingress", "authentik", "vaultwarden"):
-        projdir = root / "core" / project
-        if not (projdir / "docker-compose.yml").is_file():
-            lines.append(f"{project}: no compose file yet")
-            continue
-        env_note = ".env present" if (projdir / ".env").is_file() else ".env missing"
-        rc, out = _run(["docker", "compose", "ps", "--format", "{{.State}}"], timeout=15)
-        if rc != 0 and "command not found" in out:
-            lines.append(f"{project}: docker unavailable ({env_note})")
-        else:
-            states = out.split() if out else []
-            running = sum(1 for state in states if state == "running")
-            lines.append(f"{project}: {running} running ({env_note})")
-    return _result("compose", "ok" if lines else "missing", "; ".join(lines) or "no compose projects defined yet")
-
-
 # ---------------------------------------------------------------------------
 # Aggregation + live wiring (the only part that touches the real host).
 # ---------------------------------------------------------------------------
 
 
-def run_all() -> dict:
-    """Run every check against the live host. Powers GET /api/preflight."""
-    # OS release text (best effort; missing file = explicit fail, not crash).
+def _os_release_text() -> str:
     try:
-        release_text = Path("/etc/os-release").read_text(encoding="utf-8")
+        return Path("/etc/os-release").read_text(encoding="utf-8")
     except OSError as exc:
-        release_text = f"ID=unknown\nVERSION_ID=0\nPRETTY_NAME=unreadable ({exc})"
-    # Node version (absent binary is a normal "missing").
-    _, node_out = _run(["node", "--version"])
-    # Privilege signals: fresh sudo? graphical session?
-    sudo_fresh = _run(["sudo", "-n", "true"])[0] == 0
-    graphical = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    # Docker + tailscale signals: shared gatherers (install/verify use the
-    # same code path, so the two can never disagree again).
-    docker_check = gather_docker()
-    tailscale_check = gather_tailscale()
+        return f"ID=unknown\nVERSION_ID=0\nPRETTY_NAME=unreadable ({exc})"
 
+
+def run_host_checks() -> list[dict]:
+    """The facts the installer cannot change for the user (all BLOCKING)."""
+    checks = [
+        check_os(_os_release_text(), kernel_release=platform.release()),
+        check_arch(platform.machine()),
+        check_python((sys.version_info.major, sys.version_info.minor, sys.version_info.micro)),
+        check_ports(),
+    ]
+    for check in checks:
+        check["blocking"] = True
+    return checks
+
+
+def run_all() -> dict:
+    """Every host fact, for `python -m ctl.preflight` diagnostics."""
+    _, node_out = _run(["node", "--version"])
     _, lspci_out = _run(["lspci", "-nn"])
     checks = [
-        check_os(release_text, kernel_release=platform.release()),
-        check_arch(platform.machine()),
+        *run_host_checks(),
         check_gpu(
             _run(["nvidia-smi", "-L"])[0] == 0,
             "amd" in lspci_out.lower() or "advanced micro devices" in lspci_out.lower(),
         ),
-        check_python(tuple(sys.version_info)),
         check_node(node_out),
-        check_privilege(sudo_fresh, graphical),
-        docker_check,
-        tailscale_check,
-        check_ports(),
-        check_bundle(),
-        check_compose_projects(),
+        gather_docker(),
+        gather_tailscale(),
     ]
-    # Each check is stamped blocking True/False from BLOCKING so the dashboard
-    # can split "fix this yourself" from "step ③ provides it" with no extra
-    # logic. "ok" (all green) remains for exactness but gates nothing; the
-    # gate itself is gate_passed() below (single rule, shared with server).
     for check in checks:
         check["blocking"] = check["name"] in BLOCKING
     return {

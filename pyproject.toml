@@ -31,8 +31,3 @@ ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 check_untyped_defs = true
-
-# The first-run bootstrap installer is due for a rework; type it then.
-[[tool.mypy.overrides]]
-module = ["ctl.install", "ctl.preflight", "ctl.elevate", "ctl.privilege"]
-ignore_errors = true

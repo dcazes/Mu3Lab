@@ -18,8 +18,8 @@ jobs:
         with: {python-version: '3.12'}
       - uses: actions/setup-node@v4
         with: {node-version: '24', cache: 'npm', cache-dependency-path: dashboard/package-lock.json}
-      - name: Prove fresh-checkout bootstrap needs no installed Python packages
-        run: MU3LAB_BOOTSTRAP_TESTS=1 python tools/run_tests.py
+      - name: Installer scripts parse
+        run: bash -n install.sh start.sh tools/vm/fresh-vm.sh tools/open_tailscale_login.sh
       - name: Install control-plane and developer dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Python lint and format

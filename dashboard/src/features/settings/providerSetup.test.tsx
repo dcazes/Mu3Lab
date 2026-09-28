@@ -99,6 +99,18 @@ describe('AI provider checklist', () => {
   });
 });
 
+describe('Home setup reminders', () => {
+  it('asks for the vault step until it has been done once', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch((path) =>
+      path === '/api/v1/vault/status' ? { ok: true, seeded: false, seeded_at: '' } : { handoffs: [] },
+    );
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    const link = await screen.findByRole('link', { name: /Save your app logins to Vaultwarden/ });
+    expect(link).toHaveAttribute('href', '/settings/sign-in');
+  });
+});
+
 describe('Vault setup', () => {
   it('sends the master password once and shows what was saved', async () => {
     const fetchMock = stubFetch((path) =>

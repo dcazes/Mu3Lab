@@ -9,7 +9,7 @@
 set -Eeuo pipefail
 
 opened=false
-sudo tailscale up --hostname=mu3lab 2>&1 | while IFS= read -r line; do
+sudo tailscale up --hostname=mu3lab --operator="$USER" 2>&1 | while IFS= read -r line; do
   printf '%s\n' "$line"
   if [[ "$opened" == false && "$line" =~ (https://login\.tailscale\.com/[A-Za-z0-9/_-]+) ]]; then
     url="${BASH_REMATCH[1]}"

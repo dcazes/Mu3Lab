@@ -121,12 +121,32 @@ class DispatchTests(unittest.TestCase):
                 (unit_dir / unit).touch()
             with (
                 patch("ctl.install.Path.home", return_value=home),
+                patch("ctl.install._rendered_unit", return_value=""),
+                patch("ctl.install.stamps.read", return_value="current"),
+                patch("ctl.install.stamps.control_plane_digest", return_value="current"),
                 patch("ctl.install._user_service_active", side_effect=(True, False)),
             ):
                 check = install._service_check(Path("/unused"))
         self.assertEqual(check["state"], "inactive")
-        self.assertIn("Dashboard is running", check["detail"])
+        self.assertIn("dashboard is running", check["detail"])
         self.assertIn("workflow worker", check["detail"])
+
+    def test_service_check_restarts_after_a_code_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            unit_dir = home / ".config" / "systemd" / "user"
+            unit_dir.mkdir(parents=True)
+            for unit in ("mu3lab-ctl.service", "mu3lab-worker.service"):
+                (unit_dir / unit).touch()
+            with (
+                patch("ctl.install.Path.home", return_value=home),
+                patch("ctl.install._rendered_unit", return_value=""),
+                patch("ctl.install.stamps.read", return_value="old"),
+                patch("ctl.install.stamps.control_plane_digest", return_value="new"),
+            ):
+                check = install._service_check(Path("/unused"))
+        self.assertEqual(check["state"], "outdated")
+        self.assertEqual(install.fix_for_state("service", "outdated"), "restart_service")
 
 
 class VaultwardenDomainTests(unittest.TestCase):
@@ -559,7 +579,7 @@ class WorkspaceStepTests(unittest.TestCase):
     def test_join_prompt_guides(self):
         prompt = install._join_prompt("https://login.example/abc")
         self.assertEqual(prompt["kind"], "tailscale_login")
-        for needle in ("Tailscale web login", "https://login.example/abc", "open_tailscale_login.sh"):
+        for needle in ("approve this computer", "https://login.example/abc", "open_tailscale_login.sh"):
             self.assertIn(needle, prompt["body"] + prompt.get("login_url", "") + prompt.get("terminal_command", ""))
         self.assertNotIn("keys_url", prompt)
         self.assertEqual(prompt["login_url"], "https://login.example/abc")
@@ -576,10 +596,13 @@ class WorkspaceStepTests(unittest.TestCase):
                 return_value={"ok": True, "output": "To authenticate, visit: https://login.tailscale.com/a/abc123"},
             ) as run,
             patch("ctl.install.webbrowser.open", return_value=True) as opened,
+            patch("ctl.install.getpass.getuser", return_value="dak"),
         ):
             result = install.fix_tailscale_join({"state": "unjoined"}, self._ctx(Path("/nonexistent")))
         run.assert_called_once_with(
-            ["tailscale", "up", "--hostname=mu3lab", "--timeout=120s"], unittest.mock.ANY, timeout=130
+            ["tailscale", "up", "--hostname=mu3lab", "--operator=dak", "--timeout=120s"],
+            unittest.mock.ANY,
+            timeout=130,
         )
         opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
         self.assertTrue(result["waiting"])
@@ -712,12 +735,15 @@ class DockerSessionTests(unittest.TestCase):
             "host_base": ["missing", "ready"],
             "node": ["absent", "old", "ready"],
             "venv": ["no_venv", "ready"],
-            "pip_deps": ["missing", "ready"],
+            "host_supported": ["unsupported", "ready"],
+            "nvidia_toolkit": ["not_needed", "missing", "ready"],
+            "core_images": ["missing", "ready"],
+            "pip_deps": ["missing", "outdated", "ready"],
             "dashboard_src": ["missing", "ready"],
             "dashboard_build": ["stale", "ready"],
             "root_env": ["missing", "ready"],
             "runtime_layout": ["missing", "ready"],
-            "service": ["no_unit", "inactive", "unhealthy", "ready"],
+            "service": ["no_unit", "outdated", "inactive", "unhealthy", "ready"],
             "docker": [
                 "absent",
                 "daemon_down",
@@ -753,38 +779,12 @@ class DockerSessionTests(unittest.TestCase):
 
 
 class PropagateTests(unittest.TestCase):
-    def test_collect_script(self):
-        job = {
-            "steps": [
-                {
-                    "id": "a",
-                    "log": [
-                        "$ sudo apt-get update",
-                        "plain noise",
-                        "$ sudo apt-get install -y docker-ce",
-                        "$ sudo apt-get update",
-                    ],
-                },
-                {"id": "b", "log": ["$ docker network create foo"]},
-            ]
-        }
-        script = install.collect_privileged_script(job)
-        # Deduped, sudo-prefixed lines only, runnable header present.
-        self.assertIn("set -e", script.splitlines()[3])
-        self.assertEqual(script.count("apt-get update"), 2)  # echo + command
-        self.assertNotIn("plain noise", script)
-        self.assertNotIn("docker network create", script)
-
-    def test_collect_empty(self):
-        self.assertEqual(install.collect_privileged_script({"steps": []}), "")
-
-    def test_terminal_becomes_waiting(self):
+    def test_expired_session_is_a_clear_failure(self):
         result = install._propagate(
-            {"ok": False, "changed": False, "log": [], "need_terminal": True, "terminal_command": "sudo apt-get update"}
+            {"ok": False, "log": [], "need_terminal": True, "terminal_command": "sudo apt-get update"}
         )
-        self.assertTrue(result.get("waiting"))
-        self.assertEqual(result["prompt"]["kind"], "terminal")
-        self.assertIn("apt-get", result["prompt"]["terminal_command"])
+        self.assertFalse(result["ok"])
+        self.assertIn("./install.sh", result["error"])
 
     def test_failure_passes_error(self):
         result = install._propagate({"ok": False, "changed": False, "log": ["boom"]})
@@ -888,7 +888,7 @@ class RunnerTests(unittest.TestCase):
         ctx = {"emit": events.append, "stopped": lambda: False, "wait_input": wait_input}
         with (
             patch.object(install, "STEPS", [meta]),
-            patch("ctl.install.privilege.ensure_elevation", return_value="worker"),
+            patch("ctl.install.privilege.has_fresh_sudo", return_value=True),
         ):
             worker = threading.Thread(target=install.run_job, args=(job, ctx))
             worker.start()

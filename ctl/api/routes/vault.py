@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from ctl import workflow_secrets
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import OwnerMutation
+from ctl.api.security import Operator, OwnerMutation
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
 from ctl.vault_setup import VAULTWARDEN_LOCAL_URL, SeedResult, desired_items, seed
@@ -50,6 +50,12 @@ def _run(owner: dict[str, Any], email: str, password: str, totp: str) -> SeedRes
         return seed(session, items)
 
 
+@router.get("/status")
+def vault_status(_operator: Operator) -> dict[str, Any]:
+    state = ControlState.runtime()
+    return {"ok": True, **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""})}
+
+
 @router.post("/setup")
 async def setup_vault(request: Request, owner: OwnerMutation) -> JSONResponse:
     """Use the master password for this one request only; it is never stored or logged."""
@@ -63,6 +69,8 @@ async def setup_vault(request: Request, owner: OwnerMutation) -> JSONResponse:
         raise ApiError(_STATUS.get(exc.code, 502), str(exc), headers=_NO_STORE, code=exc.code) from exc
     owner_uid = str(owner["subject_id"])
     state = ControlState.runtime()
+    if state:
+        state.mark_vault_seeded(str(owner["username"]))
     for handoff_id in result.saved_handoffs:
         if state:
             state.confirm_handoff(handoff_id, owner_uid)

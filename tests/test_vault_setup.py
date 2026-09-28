@@ -392,3 +392,14 @@ class FreeLlmApiGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VaultSeededMarkerTests(unittest.TestCase):
+    def test_marker_starts_unset_and_records_the_first_save(self):
+        from ctl.control_state import ControlState
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = ControlState(Path(tmp) / "state.sqlite3")
+            self.assertEqual(state.vault_seeded(), {"seeded": False, "seeded_at": ""})
+            state.mark_vault_seeded("owner")
+            self.assertTrue(state.vault_seeded()["seeded"])

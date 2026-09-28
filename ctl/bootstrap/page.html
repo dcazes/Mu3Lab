@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Set up Mu3Lab</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --surface: #fff; --surface-2: #f1f1f3; --border: #e3e3e8;
+    --text: #1b1b1f; --text-2: #5e5e6a; --accent: #5b5bd6; --accent-text: #fff;
+    --green: #1f9d55; --amber: #b7791f; --red: #d23f3f; --radius: 10px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111114; --surface: #19191d; --surface-2: #222228; --border: #2e2e36;
+      --text: #ececf1; --text-2: #9a9aa8; --accent: #7c7cf0; --green: #3fcf7f; --amber: #e0a43a; --red: #f06565; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.5; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+  .brand { font-weight: 700; letter-spacing: .02em; color: var(--accent); font-size: 14px; }
+  h1 { font-size: 26px; margin: 4px 0 6px; }
+  h2 { font-size: 17px; margin: 0 0 6px; }
+  .lead { color: var(--text-2); margin: 0 0 28px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px 22px; margin-bottom: 20px; }
+  .card.turn { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+  .card.bad { border-color: var(--red); }
+  .card.good { border-color: var(--green); }
+  .muted { color: var(--text-2); }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; align-items: center; }
+  button, .button { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; display: inline-block; }
+  button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .55; cursor: default; }
+  ol.next { padding-left: 20px; margin: 10px 0 0; } ol.next li { margin: 6px 0; }
+  .copy { display: flex; gap: 8px; margin-top: 10px; }
+  .copy code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .progress { margin-top: 12px; font-size: 14px; color: var(--text-2); }
+  .phase { margin-top: 26px; }
+  .phase h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2); margin: 0 0 8px; }
+  .steps { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .step { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--border); }
+  .step:first-child { border-top: 0; }
+  .step .label { font-weight: 550; }
+  .step .detail { font-size: 13px; color: var(--text-2); }
+  .step.failed .detail { color: var(--red); }
+  .icon { width: 18px; height: 18px; border-radius: 50%; margin-top: 2px; display: grid; place-items: center;
+    font-size: 11px; font-weight: 700; color: #fff; }
+  .icon.done { background: var(--green); } .icon.todo { border: 2px solid var(--border); }
+  .icon.waiting { background: var(--accent); } .icon.failed { background: var(--red); }
+  .icon.running { border: 2px solid var(--accent); border-top-color: transparent; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  details { margin-top: 6px; } summary { cursor: pointer; font-size: 13px; color: var(--text-2); }
+  pre { background: var(--surface-2); border-radius: 8px; padding: 10px; font-size: 12px; max-height: 260px;
+    overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .hidden { display: none; }
+  .phase:has(> .done-phase) { margin-top: 10px; }
+  .done-phase > summary { display: flex; align-items: center; gap: 10px; list-style: none; font-size: 15px;
+    color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 11px 16px; }
+  .done-phase > summary::-webkit-details-marker { display: none; }
+  .done-phase > summary .muted { margin-left: auto; font-size: 13px; }
+  .done-phase[open] > summary { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">MU3LAB</div>
+  <h1>Set up Mu3Lab</h1>
+  <p class="lead">This page installs everything Mu3Lab needs on this computer and skips anything already done.
+    Keep the terminal window open until setup finishes.</p>
+  <section id="hero" class="card" aria-live="polite"></section>
+  <div id="phases"></div>
+</main>
+<script>
+"use strict";
+const TOKEN_KEY = "mu3lab-setup-token";
+const fromHash = new URLSearchParams(location.hash.slice(1)).get("token");
+if (fromHash) {
+  sessionStorage.setItem(TOKEN_KEY, fromHash);
+  history.replaceState(null, "", location.pathname);
+}
+const token = sessionStorage.getItem(TOKEN_KEY) || "";
+let state = null;
+let recovery = null;
+let busy = false;
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key === "onclick") node.addEventListener("click", value);
+    else if (value !== undefined && value !== null && value !== false) node.setAttribute(key, value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+async function api(method, path) {
+  const response = await fetch(path, { method, headers: { "X-Mu3Lab-Token": token }, cache: "no-store" });
+  if (response.status === 401) throw new Error("session");
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  return body;
+}
+
+async function act(path) {
+  if (busy) return;
+  busy = true;
+  render();
+  try { await api("POST", path); } catch (error) { alert(error.message); }
+  busy = false;
+  await refresh();
+}
+
+function copyButton(text) {
+  const button = el("button", { onclick: async () => {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied";
+    setTimeout(() => (button.textContent = "Copy"), 1500);
+  } }, "Copy");
+  return el("div", { class: "copy" }, el("code", {}, text), button);
+}
+
+function stepState(step) {
+  if (["installing", "verifying"].includes(step.status)) return "running";
+  if (step.status === "waiting") return "waiting";
+  if (step.status === "failed") return "failed";
+  if (step.status === "ready") return "done";
+  const scanned = state.scan[step.id];
+  if (scanned && scanned.done) return "done";
+  return "todo";
+}
+
+function stepDetail(step, kind) {
+  if (kind === "failed") return step.error;
+  if (kind === "running") return (step.progress && step.progress.activity) || "Working…";
+  if (kind === "waiting") return "Waiting for you — see above.";
+  if (kind === "todo") return step.progress && step.progress.activity ? "In the background: " + step.progress.activity : "";
+  if (step.detail && step.detail !== "already done — skipped") return step.detail;
+  const scanned = state.scan[step.id];
+  return scanned ? scanned.detail : "";
+}
+
+function renderPhases() {
+  const root = document.getElementById("phases");
+  root.replaceChildren();
+  for (const phase of state.phases) {
+    const steps = state.job.steps.filter((step) => step.phase === phase);
+    const list = el("div", { class: "steps" });
+    for (const step of steps) {
+      const kind = stepState(step);
+      const mark = { done: "✓", failed: "!", waiting: "…" }[kind] || "";
+      const body = el("div", {}, el("div", { class: "label" }, step.label),
+        el("div", { class: "detail" }, stepDetail(step, kind)));
+      if (step.log && step.log.length && kind !== "done") {
+        body.append(el("details", {}, el("summary", {}, "Technical details"), el("pre", {}, step.log.join("\n"))));
+      }
+      list.append(el("div", { class: `step ${kind}` }, el("span", { class: `icon ${kind}`, "aria-label": kind }, mark), body));
+    }
+    const allDone = steps.every((step) => stepState(step) === "done");
+    if (allDone) {
+      // Finished phases collapse to one line; details stay one click away.
+      root.append(el("section", { class: "phase" }, el("details", { class: "done-phase" },
+        el("summary", {}, el("span", { class: "icon done" }, "✓"), el("span", {}, phase), el("span", { class: "muted" }, "Done")),
+        list)));
+      continue;
+    }
+    root.append(el("section", { class: "phase" }, el("h3", {}, phase), list));
+  }
+}
+
+function heroScan() {
+  const steps = state.job.steps;
+  const blocked = state.scan.host_supported && state.scan.host_supported.blocked;
+  if (blocked) {
+    return { cls: "bad", nodes: [el("h2", {}, "This computer can't run Mu3Lab yet"),
+      el("p", {}, state.scan.host_supported.detail),
+      el("div", { class: "actions" }, el("button", { onclick: () => act("/api/scan") }, "Check again"))] };
+  }
+  const todo = steps.filter((step) => !(state.scan[step.id] || {}).done);
+  if (!todo.length) {
+    return { cls: "good", nodes: [el("h2", {}, "Everything is already installed"),
+      el("p", { class: "muted" }, "Nothing needs to change on this computer."),
+      el("div", { class: "actions" }, el("button", { class: "primary", onclick: () => act("/api/install") }, "Verify and open Mu3Lab"))] };
+  }
+  const phases = [...new Set(todo.map((step) => step.phase))];
+  const done = steps.length - todo.length;
+  return { nodes: [
+    el("h2", {}, done ? `${done} of ${steps.length} steps are already done` : "Ready to install"),
+    el("p", {}, "Mu3Lab will now: ", phases.map((p) => p.charAt(0).toLowerCase() + p.slice(1)).join(", ") + "."),
+    el("p", { class: "muted" }, "Some steps need you — creating two accounts and approving Tailscale. The page will tell you exactly what to do."),
+    el("div", { class: "actions" }, el("button", { class: "primary", disabled: busy, onclick: () => act("/api/install") },
+      done ? "Continue setup" : "Install Mu3Lab")),
+  ] };
+}
+
+function heroTurn(step) {
+  const prompt = step.prompt || {};
+  const nodes = [el("div", { class: "brand" }, "YOUR TURN"), el("h2", {}, prompt.title || step.label)];
+  if (prompt.body) nodes.push(el("p", {}, prompt.body));
+  const buttons = el("div", { class: "actions" });
+  const link = prompt.login_url || prompt.url;
+  if (link) {
+    buttons.append(el("a", { class: "button primary", href: link, target: "_blank", rel: "noreferrer" },
+      prompt.kind === "tailscale_login" ? "Open Tailscale login" : "Open the page"));
+  }
+  if (prompt.kind === "terminal" && prompt.terminal_command) nodes.push(copyButton(prompt.terminal_command));
+  if (prompt.kind === "tailscale_login" && !link && prompt.terminal_command) {
+    nodes.push(el("p", {}, "Tailscale did not show a sign-in link yet. Open a new terminal in the Mu3Lab folder and run:"),
+      copyButton(prompt.terminal_command));
+  }
+  if (link) nodes.push(copyButton(link));
+  if (prompt.recovery_action === "reset_authentik_admin") {
+    if (recovery) {
+      nodes.push(el("p", {}, "Temporary sign-in. Sign in with it, then change the password in Authentik:"),
+        copyButton(recovery.username), copyButton(recovery.temporary_password));
+    } else {
+      buttons.append(el("button", { onclick: resetAuthentik }, "I don't know the admin password"));
+    }
+  }
+  const done = { tailscale_login: "I approved it", terminal: "I ran it" }[prompt.kind] || prompt.done_label || "I've done this";
+  buttons.append(el("button", { class: link ? "" : "primary", disabled: busy, onclick: () => act("/api/continue") }, done));
+  nodes.push(buttons);
+  return { cls: "turn", nodes };
+}
+
+async function resetAuthentik() {
+  if (!confirm("Reset the built-in Authentik administrator (akadmin) to a temporary password?")) return;
+  try {
+    const result = await api("POST", "/api/authentik-admin/reset");
+    recovery = { username: result.username, temporary_password: result.temporary_password };
+  } catch (error) { alert(error.message); }
+  render();
+}
+
+function heroFailed() {
+  const failed = state.job.steps.find((step) => step.status === "failed");
+  const message = state.job.error || (failed && failed.error) || "Setup stopped.";
+  return { cls: "bad", nodes: [
+    el("h2", {}, failed ? `Setup stopped at “${failed.label}”` : "Setup stopped"),
+    el("p", {}, message),
+    el("p", { class: "muted" }, "Nothing already installed is undone. Fix the problem if one is named, then try again — finished steps are skipped."),
+    el("div", { class: "actions" }, el("button", { class: "primary", disabled: busy, onclick: () => act("/api/install") }, "Try again")),
+  ] };
+}
+
+function heroRunning() {
+  const step = state.job.steps.find((item) => ["installing", "verifying"].includes(item.status));
+  const done = state.job.steps.filter((item) => stepState(item) === "done").length;
+  return { nodes: [
+    el("h2", {}, step ? step.label + "…" : "Starting…"),
+    el("div", { class: "progress" }, `${done} of ${state.job.steps.length} steps done`,
+      step && step.progress && step.progress.activity ? ` · ${step.progress.activity}` : ""),
+    el("div", { class: "actions" }, el("button", { onclick: () => act("/api/cancel") }, "Stop")),
+  ] };
+}
+
+function heroReady() {
+  const url = state.dashboard_url;
+  return { cls: "good", nodes: [
+    el("h2", {}, "Mu3Lab is installed"),
+    el("p", {}, "The core apps keep starting in the background — your dashboard shows their progress."),
+    el("ol", { class: "next" },
+      el("li", {}, "Open your Mu3Lab dashboard", url ? "" : " (its private address appears here once Tailscale is connected)", "."),
+      el("li", {}, "Sign in with the Authentik admin account you created."),
+      el("li", {}, "In the dashboard, choose “Save logins to Vaultwarden” so your browser can fill in app passwords."),
+      el("li", {}, "Add an AI provider under Settings → AI providers. Two of the recommended free ones work best.")),
+    el("div", { class: "actions" }, url ? el("a", { class: "button primary", href: url, target: "_blank", rel: "noreferrer" }, "Open dashboard") : null),
+    el("p", { class: "muted" }, "You can close this page and the terminal now. To check or update Mu3Lab later, run ./install.sh again."),
+  ] };
+}
+
+function render() {
+  const hero = document.getElementById("hero");
+  if (!token) {
+    hero.className = "card bad";
+    hero.replaceChildren(el("h2", {}, "Open the link from the terminal"),
+      el("p", {}, "For your security this page only works through the link ./install.sh printed. Copy it from the terminal window."));
+    return;
+  }
+  if (!state) { hero.replaceChildren(el("h2", {}, "Checking this computer…")); return; }
+  const status = state.job.status;
+  const waiting = state.job.steps.find((step) => step.status === "waiting");
+  let view;
+  if (waiting) view = heroTurn(waiting);
+  else if (["running", "queued"].includes(status)) view = heroRunning();
+  else if (status === "failed" || status === "cancelled") view = heroFailed();
+  else if (status === "ready") view = heroReady();
+  else if (state.scanning && !Object.keys(state.scan).length) view = { nodes: [el("h2", {}, "Checking this computer…"),
+    el("p", { class: "muted" }, "Nothing is installed or changed until you choose to.")] };
+  else view = heroScan();
+  hero.className = "card " + (view.cls || "");
+  hero.replaceChildren(...view.nodes);
+  renderPhases();
+}
+
+async function refresh() {
+  try {
+    state = await api("GET", "/api/status");
+  } catch (error) {
+    if (error.message === "session") { sessionStorage.removeItem(TOKEN_KEY); location.reload(); return; }
+    document.getElementById("hero").replaceChildren(el("h2", {}, "The setup page stopped responding"),
+      el("p", {}, "If you closed the terminal, run ./install.sh again. Finished steps are kept."));
+    return;
+  }
+  render();
+}
+
+async function loop() {
+  await refresh();
+  const active = state && (state.scanning || ["running", "queued"].includes(state.job.status));
+  setTimeout(loop, active ? 1000 : 4000);
+}
+
+render();
+if (token) loop();
+</script>
+</body>
+</html>

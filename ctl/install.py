@@ -1,22 +1,21 @@
 """Mu3Lab :: ctl/install.py
 
-WHAT: Card-③ execution engine. Ordered identity-first remediation steps
-      (host → Docker → runtime → local Vaultwarden → Tailscale → Authentik →
-      protected dashboard), each check-first:
-      `ready` states are SKIPPED, every other state maps to exactly one fix.
-      Long user actions (docker-group relogin, tailscale join) surface as
-      `waiting` prompts instead of failures; resume continues from them.
-WHY:  Installing over healthy components is structurally impossible here:
-      no step runs without its check reporting a gap first. Steps never
-      never accept user secrets. Tailscale uses its normal browser approval
-      flow, so the installer never handles reusable tailnet credentials.
-RUN:  Driven by check_server.py (/api/install/*). Pure dispatch helpers
-      (fix_for_state) are unit-testable with mocked actions; live probes run
-      only inside fix()/check() with the real host.
+WHAT: The installer engine behind ./install.sh's setup page. An ordered list
+      of steps (this computer → system software → Mu3Lab → Docker → password
+      vault → Tailscale → sign-in → core app images), each check-first: a
+      `ready` state is skipped, every other state maps to exactly one fix.
+      Steps that need the user (creating accounts, approving Tailscale)
+      pause as `waiting` prompts; running again resumes from them.
+WHY:  Installing over healthy components is structurally impossible: no fix
+      runs without its check reporting a gap first. Checks also compare
+      content fingerprints (ctl/bootstrap/stamps.py), so re-running after an
+      update rebuilds or restarts only what changed. Steps never accept user
+      secrets; Tailscale uses its normal browser approval flow.
+RUN:  Driven by ctl/bootstrap/server.py. Root commands go through
+      ctl/privilege.py using the sudo session ./install.sh opened.
 DEBUG: Every fix logs its commands before running (via actions.py). Job dict
-      shape: {id, status, steps:[{id,label,status,log[]}],
-      events:[...], inputs:{}}. Events mirror tools/run_tests.py JSON lines:
-      {"type": "step|log|prompt|summary", ...}.
+      shape: {status, error, steps:[{id,label,phase,status,log,prompt,...}],
+      events:[...], inputs:{}}.
 """
 
 from __future__ import annotations
@@ -34,8 +33,10 @@ import time
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, TypedDict
 
 from ctl import actions, preflight, privilege
+from ctl.bootstrap import stamps
 from ctl.runtime import RuntimePaths
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,6 +55,11 @@ NODESOURCE_LIST = (
 )
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"]
+# NVIDIA Container Toolkit repository (ASCII-armored key; apt reads .asc).
+NVIDIA_KEY_URL = "https://nvidia.github.io/libnvidia-container/gpgkey"
+NVIDIA_KEYRING = "/etc/apt/keyrings/nvidia-container-toolkit.asc"
+NVIDIA_LIST_PATH = "/etc/apt/sources.list.d/nvidia-container-toolkit.list"
+NVIDIA_LIST = f"deb [signed-by={NVIDIA_KEYRING}] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /\n"
 
 
 def tailscale_key_url(distro: str, codename: str) -> str:
@@ -82,6 +88,11 @@ AUTHENTIK_HTTP_GRACE_TIMEOUT = 60  # Compose health passed; allow host port to s
 VAULTWARDEN_HTTP_GRACE_TIMEOUT = 60  # Rocket may bind just after Compose starts
 
 
+def _row(name: str, status: str, detail: str, state: str, action: str = "") -> dict:
+    """One check result in the shape every step returns."""
+    return {"name": name, "status": status, "detail": detail, "action": action, "state": state, "blocking": False}
+
+
 # ---------------------------------------------------------------------------
 # Pure dispatch: state -> fix action name. Tested without touching the host.
 # ---------------------------------------------------------------------------
@@ -89,6 +100,13 @@ VAULTWARDEN_HTTP_GRACE_TIMEOUT = 60  # Rocket may bind just after Compose starts
 # Maps (step_id, state) to the fix function suffix. "skip" means check-first
 # short-circuit; "wait_*" means user action required (never failure).
 DISPATCH = {
+    ("host_supported", "unsupported"): "report_unsupported",
+    ("host_supported", "ready"): "skip",
+    ("nvidia_toolkit", "not_needed"): "skip",
+    ("nvidia_toolkit", "missing"): "nvidia_install",
+    ("nvidia_toolkit", "ready"): "skip",
+    ("core_images", "missing"): "pull_images",
+    ("core_images", "ready"): "skip",
     ("host_base", "missing"): "apt_base",
     ("host_base", "ready"): "skip",
     ("node", "absent"): "nodesource_install",
@@ -97,6 +115,7 @@ DISPATCH = {
     ("venv", "no_venv"): "create_venv",
     ("venv", "ready"): "skip",
     ("pip_deps", "missing"): "pip_install",
+    ("pip_deps", "outdated"): "pip_install",
     ("pip_deps", "ready"): "skip",
     ("dashboard_src", "missing"): "report_incomplete",
     ("dashboard_src", "ready"): "skip",
@@ -107,6 +126,7 @@ DISPATCH = {
     ("runtime_layout", "missing"): "create_runtime_layout",
     ("runtime_layout", "ready"): "skip",
     ("service", "no_unit"): "render_unit",
+    ("service", "outdated"): "restart_service",
     ("service", "inactive"): "start_service",
     ("service", "unhealthy"): "restart_service",
     ("service", "ready"): "skip",
@@ -241,6 +261,11 @@ def _repair_managed_apt_keys(log: Callable[[str], None]) -> dict:
             tailscale_key_url(_distro_slug(), _repo_codename() or "noble"),
             (Path("/etc/apt/keyrings/tailscale.gpg"),),
         ),
+        (
+            (Path(NVIDIA_LIST_PATH),),
+            NVIDIA_KEY_URL,
+            (Path(NVIDIA_KEYRING),),
+        ),
     ]
     for sources, url, keyrings in managed:
         present = [source for source in sources if source.is_file()]
@@ -278,20 +303,12 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
         activity="Preparing the host package sources.",
         timeout_seconds=600,
     )
-    # A previous Mu3Lab install may have left our repo definitions behind
-    # after a test reset removed their keyrings. Remove only the legacy files
-    # owned by this installer before the first apt update.
-    for repo_file in (
-        "/etc/apt/sources.list.d/nodesource.list",
-        "/etc/apt/sources.list.d/nodesource.sources",
-        "/etc/apt/sources.list.d/docker.list",
-        "/etc/apt/sources.list.d/docker.sources",
-        "/etc/apt/sources.list.d/tailscale.list",
-        "/etc/apt/sources.list.d/tailscale.sources",
-    ):
-        res = actions.remove_root_file(repo_file, ctx["log_fn"]("host_base"))
-        if not res["ok"]:
-            return _propagate(res)
+    # A Mu3Lab package source whose signing key went missing would make the
+    # apt update below fail. Repair the key; never delete the source, because
+    # Docker, Node.js and Tailscale receive their updates through it.
+    res = _repair_managed_apt_keys(ctx["log_fn"]("host_base"))
+    if not res["ok"]:
+        return _propagate(res)
     res = actions.apt_update(ctx["log_fn"]("host_base"))
     if not res["ok"]:
         return _propagate(res)
@@ -417,49 +434,24 @@ def fix_runtime_layout(check: dict, ctx: dict) -> dict:
 
 
 def _pip_check(root: Path) -> dict:
-    """Control-plane deps importable from the venv? States: missing | ready.
+    """Control-plane packages installed AND matching ctl/requirements.txt?
 
-    Probes the real import (not a marker file) so half-finished installs are
-    detected. fastapi stands in for the whole requirements file.
+    States: missing | outdated | ready. The recorded requirements hash makes
+    a changed requirements file (after `git pull`) reinstall packages; the
+    import probe catches a half-finished install.
     """
     venv_py = root / ".venv" / "bin" / "python"
     if not venv_py.exists():
-        return {
-            "name": "pip_deps",
-            "status": "missing",
-            "detail": "No virtualenv yet (venv step runs first).",
-            "action": "step 3 creates it, then installs packages.",
-            "state": "missing",
-            "blocking": False,
-        }
+        return _row("pip_deps", "missing", "The Python environment does not exist yet.", "missing")
+    if stamps.read(root / stamps.REQUIREMENTS_STAMP) != stamps.requirements_digest(root):
+        return _row("pip_deps", "missing", "Python packages need to be installed or updated.", "outdated")
     try:
-        proc = subprocess.run([str(venv_py), "-c", "import fastapi"], capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([str(venv_py), "-c", "import fastapi, yaml, httpx"], capture_output=True, timeout=30)
     except OSError as exc:
-        return {
-            "name": "pip_deps",
-            "status": "missing",
-            "detail": f"Cannot probe venv: {exc}.",
-            "action": "step 3 reinstalls packages.",
-            "state": "missing",
-            "blocking": False,
-        }
+        return _row("pip_deps", "missing", f"Cannot check the Python environment: {exc}.", "missing")
     if proc.returncode != 0:
-        return {
-            "name": "pip_deps",
-            "status": "missing",
-            "detail": "Control-plane packages not installed in .venv.",
-            "action": "step 3 installs them.",
-            "state": "missing",
-            "blocking": False,
-        }
-    return {
-        "name": "pip_deps",
-        "status": "ok",
-        "detail": "Control-plane packages importable.",
-        "action": "",
-        "state": "ready",
-        "blocking": False,
-    }
+        return _row("pip_deps", "missing", "Python packages are incomplete and will be reinstalled.", "missing")
+    return _row("pip_deps", "ok", "Python packages are up to date.", "ready")
 
 
 def _src_check(root: Path) -> dict:
@@ -487,43 +479,12 @@ def _src_check(root: Path) -> dict:
 
 
 def _build_check(root: Path) -> dict:
-    """Built bundle fresh? States: ready | stale (missing OR older than src).
-
-    Compares dist/index.html mtime against the newest file under src/ so
-    edited sources rebuild automatically on re-run.
-    """
-    dist_index = root / "dashboard" / "dist" / "index.html"
-    src_dir = root / "dashboard" / "src"
-    if not dist_index.is_file():
-        return {
-            "name": "dashboard_build",
-            "status": "missing",
-            "detail": "Built dashboard (dist/) missing.",
-            "action": "step 3 builds it.",
-            "state": "stale",
-            "blocking": False,
-        }
-    try:
-        newest_src = max(path.stat().st_mtime for path in src_dir.rglob("*") if path.is_file())
-    except OSError:
-        newest_src = 0.0
-    if newest_src > dist_index.stat().st_mtime:
-        return {
-            "name": "dashboard_build",
-            "status": "missing",
-            "detail": "Sources newer than built bundle.",
-            "action": "step 3 rebuilds it.",
-            "state": "stale",
-            "blocking": False,
-        }
-    return {
-        "name": "dashboard_build",
-        "status": "ok",
-        "detail": "Built dashboard fresh.",
-        "action": "",
-        "state": "ready",
-        "blocking": False,
-    }
+    """Built dashboard matches the current sources? States: stale | ready."""
+    if not (root / "dashboard" / "dist" / "index.html").is_file():
+        return _row("dashboard_build", "missing", "The dashboard has not been built yet.", "stale")
+    if stamps.read(root / stamps.BUILD_STAMP) != stamps.dashboard_digest(root):
+        return _row("dashboard_build", "missing", "The dashboard changed and will be rebuilt.", "stale")
+    return _row("dashboard_build", "ok", "The dashboard is built and up to date.", "ready")
 
 
 def _env_check(root: Path) -> dict:
@@ -570,64 +531,57 @@ def _user_service_active(unit: str) -> bool:
         return False
 
 
-def _service_check(root: Path) -> dict:
-    """Web and durable-worker units installed and healthy?
-    States: no_unit | inactive | unhealthy | ready."""
+SERVICE_UNITS = ("mu3lab-ctl.service", "mu3lab-worker.service")
+
+
+def _unit_dir() -> Path:
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def _rendered_unit(root: Path, unit_name: str) -> str:
+    template = root / "deploy" / unit_name
+    return template.read_text(encoding="utf-8").replace("@MU3LAB_ROOT@", str(root))
+
+
+def _services_stamp() -> Path:
+    return RuntimePaths().runtime / stamps.SERVICES_STAMP_NAME
+
+
+def _dashboard_healthy() -> bool:
     import urllib.request as _url
 
-    unit_dir = Path.home() / ".config" / "systemd" / "user"
-    units = ("mu3lab-ctl.service", "mu3lab-worker.service")
-    if any(not (unit_dir / unit).is_file() for unit in units):
-        return {
-            "name": "service",
-            "status": "missing",
-            "detail": "Control-plane startup entries are not installed.",
-            "action": "step 3 installs and starts it.",
-            "state": "no_unit",
-            "blocking": False,
-        }
-    dashboard_active = _user_service_active("mu3lab-ctl.service")
-    worker_active = _user_service_active("mu3lab-worker.service")
-    if not dashboard_active:
-        return {
-            "name": "service",
-            "status": "missing",
-            "detail": "Dashboard startup entry is present but the dashboard is not running.",
-            "action": "step 3 starts the dashboard service.",
-            "state": "inactive",
-            "blocking": False,
-        }
-    if not worker_active:
-        return {
-            "name": "service",
-            "status": "missing",
-            "detail": "Dashboard is running, but the background workflow worker is not.",
-            "action": "step 3 restarts the workflow worker.",
-            "state": "inactive",
-            "blocking": False,
-        }
     try:
         with _url.urlopen("http://127.0.0.1:8787/api/health", timeout=5) as resp:
-            healthy = resp.status == 200
+            return resp.status == 200
     except OSError:
-        healthy = False
-    if not healthy:
-        return {
-            "name": "service",
-            "status": "missing",
-            "detail": "Running but not answering health checks.",
-            "action": "step 3 restarts it.",
-            "state": "unhealthy",
-            "blocking": False,
-        }
-    return {
-        "name": "service",
-        "status": "ok",
-        "detail": "Dashboard service answering on :8787.",
-        "action": "",
-        "state": "ready",
-        "blocking": False,
-    }
+        return False
+
+
+def _service_check(root: Path) -> dict:
+    """Dashboard and worker installed, current, and healthy?
+    States: no_unit | outdated | inactive | unhealthy | ready."""
+    unit_dir = _unit_dir()
+    if any(not (unit_dir / unit).is_file() for unit in SERVICE_UNITS):
+        return _row("service", "missing", "The dashboard and background worker are not installed yet.", "no_unit")
+    try:
+        units_current = all(
+            (unit_dir / unit).read_text(encoding="utf-8") == _rendered_unit(root, unit) for unit in SERVICE_UNITS
+        )
+    except OSError:
+        units_current = False
+    if not units_current or stamps.read(_services_stamp()) != stamps.control_plane_digest(root):
+        return _row(
+            "service", "missing", "Mu3Lab was updated; the dashboard will restart on the new version.", "outdated"
+        )
+    if not _user_service_active("mu3lab-ctl.service"):
+        return _row("service", "missing", "The dashboard is stopped and will be started.", "inactive")
+    if not _user_service_active("mu3lab-worker.service"):
+        return _row(
+            "service", "missing", "The dashboard is running, but its background workflow worker is not.", "inactive"
+        )
+    if not _dashboard_healthy():
+        return _row("service", "missing", "The dashboard is running but not answering.", "unhealthy")
+    return _row("service", "ok", "The dashboard and background worker are running.", "ready")
 
 
 def fix_pip_deps(check: dict, ctx: dict) -> dict:
@@ -658,6 +612,7 @@ def fix_pip_deps(check: dict, ctx: dict) -> dict:
         log(line)
     if proc.returncode != 0:
         return {"ok": False, "error": "pip install failed (see log)."}
+    stamps.write(ctx["root"] / stamps.REQUIREMENTS_STAMP, stamps.requirements_digest(ctx["root"]))
     return {"ok": True}
 
 
@@ -694,7 +649,11 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
         log("Full npm log: ~/.npm/_logs/ (latest debug-*.log)")
         return {"ok": False, "error": f"{what} failed (see log)."}
 
-    if not (dashdir / "node_modules").is_dir():
+    root = ctx["root"]
+    if (
+        stamps.read(root / stamps.NODE_MODULES_STAMP) != stamps.lock_digest(root)
+        or not (dashdir / "node_modules").is_dir()
+    ):
         if (dashdir / "package-lock.json").is_file():
             _update_progress(
                 ctx,
@@ -712,6 +671,7 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
                 return _log_failure(proc, "npm ci")
             for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
                 log(line)
+            stamps.write(root / stamps.NODE_MODULES_STAMP, stamps.lock_digest(root))
         else:
             # No lockfile (shouldn't happen — repo commits one): npm install
             # resolves fresh instead of failing like `ci` would.
@@ -747,6 +707,7 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
         log(line)
     if proc.returncode != 0:
         return {"ok": False, "error": "dashboard build failed (see log)."}
+    stamps.write(root / stamps.BUILD_STAMP, stamps.dashboard_digest(root))
     return {"ok": True}
 
 
@@ -762,62 +723,57 @@ def fix_root_env(check: dict, ctx: dict) -> dict:
     return {"ok": True, "skipped": not added}
 
 
-def fix_service(check: dict, ctx: dict) -> dict:
-    """Render web/worker units → linger → enable → start → verify web health."""
-    import urllib.request as _url
+def _linger_enabled(user: str) -> bool:
+    rc, out = actions.privilege._exec(["loginctl", "show-user", user, "--property=Linger"])
+    return rc == 0 and out.strip() == "Linger=yes"
 
+
+def fix_service(check: dict, ctx: dict) -> dict:
+    """Render units → keep running after logout → (re)start → verify health."""
     log = ctx["log_fn"]("service")
-    state = check.get("state", "")
-    unit_dir = Path.home() / ".config" / "systemd" / "user"
-    unit_names = ("mu3lab-ctl.service", "mu3lab-worker.service")
-    if state == "no_unit":
-        unit_dir.mkdir(parents=True, exist_ok=True)
-        for unit_name in unit_names:
-            template = ctx["root"] / "deploy" / unit_name
-            if not template.is_file():
-                return {"ok": False, "error": f"deploy/{unit_name} missing from checkout"}
-            rendered = template.read_text(encoding="utf-8").replace("@MU3LAB_ROOT@", str(ctx["root"]))
-            unit_path = unit_dir / unit_name
+    root = ctx["root"]
+    unit_dir = _unit_dir()
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    for unit_name in SERVICE_UNITS:
+        if not (root / "deploy" / unit_name).is_file():
+            return {"ok": False, "error": f"deploy/{unit_name} missing from checkout"}
+        rendered = _rendered_unit(root, unit_name)
+        unit_path = unit_dir / unit_name
+        if not unit_path.is_file() or unit_path.read_text(encoding="utf-8") != rendered:
             unit_path.write_text(rendered, encoding="utf-8")
-            log(f"rendered {unit_path}")
-        res = actions.privilege.run_privileged(["loginctl", "enable-linger", getpass.getuser()], log)
+            log(f"wrote {unit_path}")
+    user = getpass.getuser()
+    if not _linger_enabled(user):
+        # Lets the dashboard keep running when the desktop user logs out.
+        res = actions.privilege.run_privileged(["loginctl", "enable-linger", user], log)
         if res.get("need_terminal") or not res.get("ok"):
             return _propagate(res)
-    if state in ("no_unit", "inactive", "unhealthy"):
-        rc, out = actions.privilege._exec(["systemctl", "--user", "daemon-reload"])
-        log("$ systemctl --user daemon-reload")
-        for unit_name in unit_names:
-            rc, out = actions.privilege._exec(["systemctl", "--user", "enable", unit_name])
-            log(f"$ systemctl --user enable {unit_name}")
-            if rc == 0:
-                rc, out = actions.privilege._exec(["systemctl", "--user", "restart", unit_name])
-                log(f"$ systemctl --user restart {unit_name}")
-            log(out or f"(exit {rc})")
-            if rc != 0:
-                return {"ok": False, "error": f"could not start {unit_name} (see log)"}
-        import time as _time
-
-        for _attempt in range(30):
-            try:
-                with _url.urlopen("http://127.0.0.1:8787/api/health", timeout=2) as resp:
-                    if (
-                        resp.status == 200
-                        and _user_service_active("mu3lab-ctl.service")
-                        and _user_service_active("mu3lab-worker.service")
-                    ):
-                        log("dashboard and workflow worker are running")
-                        return {"ok": True}
-            except OSError:
-                pass
-            _time.sleep(2)
-        dashboard_active = _user_service_active("mu3lab-ctl.service")
-        worker_active = _user_service_active("mu3lab-worker.service")
-        if not dashboard_active:
-            return {"ok": False, "error": "dashboard service did not stay running"}
-        if not worker_active:
-            return {"ok": False, "error": "background workflow worker did not stay running"}
-        return {"ok": False, "error": "dashboard service started but :8787 never answered"}
-    return {"ok": True, "skipped": True}
+    actions.privilege._exec(["systemctl", "--user", "daemon-reload"])
+    log("$ systemctl --user daemon-reload")
+    for unit_name in SERVICE_UNITS:
+        rc, out = actions.privilege._exec(["systemctl", "--user", "enable", unit_name])
+        log(f"$ systemctl --user enable {unit_name}")
+        if rc == 0:
+            rc, out = actions.privilege._exec(["systemctl", "--user", "restart", unit_name])
+            log(f"$ systemctl --user restart {unit_name}")
+        log(out or f"(exit {rc})")
+        if rc != 0:
+            return {"ok": False, "error": f"could not start {unit_name} (see log)"}
+    for _attempt in range(30):
+        if (
+            _dashboard_healthy()
+            and _user_service_active("mu3lab-ctl.service")
+            and _user_service_active("mu3lab-worker.service")
+        ):
+            stamps.write(_services_stamp(), stamps.control_plane_digest(root))
+            log("dashboard and workflow worker are running")
+            return {"ok": True}
+        time.sleep(2)
+    if not _user_service_active("mu3lab-ctl.service"):
+        return {"ok": False, "error": "dashboard service did not stay running"}
+    if not _user_service_active("mu3lab-worker.service"):
+        return {"ok": False, "error": "background workflow worker did not stay running"}
+    return {"ok": False, "error": "dashboard service started but :8787 never answered"}
 
 
 def fix_venv(check: dict, ctx: dict) -> dict:
@@ -1179,7 +1135,7 @@ def _update_progress(
 ) -> None:
     """Publish factual long-step progress when the bootstrap server supports it.
 
-    The pure installer remains usable outside check_server.py, so progress is
+    The pure installer remains usable outside the setup page, so progress is
     an optional context capability rather than a hidden global dependency.
     """
     publish = ctx.get("progress")
@@ -1461,7 +1417,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
                 timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
             )
 
-    result: dict[str, object] = {}
+    result: dict[str, Any] = {}
 
     def start_and_wait() -> None:
         # Docker Compose's documented --wait is the primary completion
@@ -1517,6 +1473,12 @@ def tailnet_https_origin(host: str, port: str) -> str:
 
 
 def check_authentik_setup(ctx: dict) -> dict:
+    if _authentik_check(ctx).get("status") != "ok":
+        return {
+            "status": "waiting",
+            "state": "needs_user",
+            "detail": "Authentik is not running yet; its admin account is created after it starts.",
+        }
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
     setup_pending = _authentik_initial_setup_pending()
     if not setup_pending:
@@ -1724,7 +1686,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         activity="Starting Caddy with the Authentik forward-auth gate.",
         timeout_seconds=240,
     )
-    ingress_result: dict[str, object] = {}
+    ingress_result: dict[str, Any] = {}
 
     def ingress_activity(line: str) -> None:
         clean = re.sub(r"\s+", " ", line).strip()
@@ -1869,9 +1831,9 @@ def _join_prompt(login_url: str) -> dict:
         "kind": "tailscale_login",
         "title": "Connect this computer to your tailnet",
         "body": (
-            "Tailscale is installed — approve this computer in the normal "
-            "Tailscale web login. This bootstrapper never receives an auth key "
-            "or account password. When approval is complete, press Check again."
+            "Sign in to Tailscale (or create a free account) and approve this "
+            "computer. Mu3Lab never sees your Tailscale password. Come back here "
+            "when the Tailscale page says the device is connected."
         ),
         "signup_url": "https://tailscale.com",
         "login_url": login_url.strip().rstrip(".,);"),
@@ -1895,6 +1857,17 @@ def _tailscale_auth_url() -> str:
     return url if isinstance(url, str) else ""
 
 
+def _tailscale_suggested_up(output: str) -> list[str]:
+    """The settings-preserving `tailscale up` command Tailscale suggests, if any."""
+    if "requires mentioning all" not in output:
+        return []
+    for line in output.splitlines():
+        words = line.strip().split()
+        if words[:2] == ["tailscale", "up"] and all(word.startswith("--") for word in words[2:]):
+            return words
+    return []
+
+
 def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     """Join through the installer's existing Polkit worker.
 
@@ -1906,15 +1879,29 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     when the operator presses ``Check again``.
     """
     log = ctx["log_fn"]("tailscale_join")
-    command = ["tailscale", "up", "--hostname=" + TS_HOSTNAME, "--timeout=" + TAILSCALE_JOIN_TIMEOUT]
+    # Restate the operator the previous step granted: `tailscale up` refuses
+    # to run if it would silently drop a non-default setting.
+    command = [
+        "tailscale",
+        "up",
+        "--hostname=" + TS_HOSTNAME,
+        "--operator=" + getpass.getuser(),
+        "--timeout=" + TAILSCALE_JOIN_TIMEOUT,
+    ]
     state = ctx.setdefault("_tailscale_join_state", {})
     thread = state.get("thread")
     if thread is None:
-        log("$ tailscale up --hostname=mu3lab --timeout=120s  (waiting for login link)")
+        log("waiting for Tailscale to provide the approval link")
         state["result"] = None
 
         def run_join() -> None:
-            state["result"] = privilege.run_privileged(command, log, timeout=TAILSCALE_WORKER_TIMEOUT)
+            result = privilege.run_privileged(command, log, timeout=TAILSCALE_WORKER_TIMEOUT)
+            suggested = _tailscale_suggested_up(str(result.get("output", "")))
+            if suggested:
+                # Other settings on this computer are non-default; Tailscale
+                # names the exact command that keeps them. Use it once.
+                result = privilege.run_privileged(suggested, log, timeout=TAILSCALE_WORKER_TIMEOUT)
+            state["result"] = result
 
         thread = threading.Thread(target=run_join, daemon=True, name="mu3lab-tailscale-join")
         state["thread"] = thread
@@ -1994,22 +1981,12 @@ def fix_serve(check: dict, ctx: dict) -> dict:
 
 
 def _propagate(res: dict) -> dict:
-    """Translate an actions.py result into a fix result (terminal fallback
-    becomes a `waiting` prompt with the exact command, never a dead end)."""
-    if res.get("need_terminal") or res.get("terminal_command"):
-        return {
-            "waiting": True,
-            "prompt": {
-                "kind": "terminal",
-                "title": "Needs one terminal command",
-                "body": (
-                    "No system password dialog is available (e.g. SSH session). Run this yourself, then press Retry."
-                ),
-                "terminal_command": res.get("terminal_command", ""),
-            },
-        }
+    """Translate an actions.py result into a fix result."""
+    if res.get("need_terminal"):
+        # The only way to get here is an expired administrator session.
+        return {"ok": False, "error": res.get("error") or privilege.SESSION_EXPIRED}
     if not res.get("ok"):
-        return {"ok": False, "error": "; ".join(res.get("log", []))[-500:]}
+        return {"ok": False, "error": "; ".join(res.get("log", []))[-500:] or "The command failed (see details)."}
     return {"ok": True}
 
 
@@ -2127,7 +2104,189 @@ def _serve_check(ctx: dict) -> dict:
     }
 
 
-STEPS = [
+# ---------------------------------------------------------------------------
+# This computer: the checks the installer cannot fix for the user.
+# ---------------------------------------------------------------------------
+
+
+def _host_supported_check(ctx: dict) -> dict:
+    """Blocking host facts (OS, CPU, Python, free ports) in one row."""
+    report = preflight.run_host_checks()
+    failed = [item for item in report if item["status"] == "fail"]
+    if failed:
+        detail = " ".join(f"{item['detail']} {item.get('action', '')}".strip() for item in failed)
+        return {**_row("host_supported", "fail", detail, "unsupported"), "blocking": True}
+    return _row("host_supported", "ok", "; ".join(item["detail"] for item in report), "ready")
+
+
+def fix_host_supported(check: dict, ctx: dict) -> dict:
+    return {"ok": False, "error": check.get("detail", "This computer is not supported.")}
+
+
+# ---------------------------------------------------------------------------
+# NVIDIA GPU support for containers (Ollama, Immich machine learning).
+# Installed only when an NVIDIA GPU with a working driver is present; the
+# driver itself is never installed or changed.
+# ---------------------------------------------------------------------------
+
+
+def _nvidia_gpu_ready() -> bool:
+    return actions.privilege._exec(["nvidia-smi", "-L"], timeout=10)[0] == 0
+
+
+def _nvidia_toolkit_check(ctx: dict) -> dict:
+    if not _nvidia_gpu_ready():
+        return _row("nvidia_toolkit", "ok", "No NVIDIA GPU with a working driver; apps will use the CPU.", "not_needed")
+    if _dpkg_present("nvidia-container-toolkit"):
+        return _row("nvidia_toolkit", "ok", "NVIDIA GPU support for containers is installed.", "ready")
+    return _row(
+        "nvidia_toolkit", "missing", "An NVIDIA GPU was found; container GPU support will be installed.", "missing"
+    )
+
+
+def fix_nvidia_toolkit(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("nvidia_toolkit")
+    _update_progress(
+        ctx, "nvidia_toolkit", phase="installing", activity="Installing NVIDIA container support.", timeout_seconds=600
+    )
+    key_tmp = Path("/tmp/mu3lab-nvidia-container-toolkit.asc")
+    res = actions.fetch_url(NVIDIA_KEY_URL, key_tmp, log)
+    if not res["ok"]:
+        return _propagate(res)
+    steps = (
+        lambda: actions.write_root_bytes(NVIDIA_KEYRING, key_tmp.read_bytes(), log, mode="644"),
+        lambda: actions.write_root_file(NVIDIA_LIST_PATH, NVIDIA_LIST, log),
+        lambda: actions.apt_update(log),
+        lambda: actions.apt_install(["nvidia-container-toolkit"], log),
+        lambda: actions.privilege.run_privileged(["nvidia-ctk", "runtime", "configure", "--runtime=docker"], log),
+        lambda: actions.privilege.run_privileged(["systemctl", "restart", "docker"], log),
+    )
+    for step in steps:
+        res = step()
+        if res.get("need_terminal") or not res.get("ok"):
+            return _propagate(res)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Core app images. Downloads start in the background as soon as Docker works,
+# so they overlap with the account steps that need the user; the final
+# "core_images" step only waits for whatever is still downloading.
+# ---------------------------------------------------------------------------
+
+# Docker and its GPU runtime are final once this step is done; downloads that
+# start earlier could be interrupted by the Docker restart the GPU step needs.
+PREFETCH_AFTER = "nvidia_toolkit"
+_prefetch_lock = threading.Lock()
+_prefetch_thread: threading.Thread | None = None
+
+
+def core_images(root: Path = ROOT) -> list[tuple[str, str]]:
+    """(service name, image) for the always-on platform, in install order."""
+    from ctl.registry import load
+
+    registry = load(root / "services.yaml")
+    return [
+        (service.name, image)
+        for service in registry.services
+        if service.stage in ("foundation", "core")
+        for image in service.images
+    ]
+
+
+def _image_present(image: str) -> bool:
+    return actions.docker_cmd(["docker", "image", "inspect", image], lambda _line: None, timeout=30)[0] == 0
+
+
+def _missing_images(root: Path) -> list[tuple[str, str]]:
+    return [(name, image) for name, image in core_images(root) if not _image_present(image)]
+
+
+def _core_images_check(ctx: dict) -> dict:
+    try:
+        missing = _missing_images(ctx["root"])
+    except Exception as exc:  # registry or Docker unavailable: report, never crash
+        return _row("core_images", "missing", f"Could not check the app images yet: {exc}.", "missing")
+    if missing:
+        names = sorted({name for name, _image in missing})
+        return _row("core_images", "missing", f"Still to download: {', '.join(names)}.", "missing")
+    return _row("core_images", "ok", "All core app images are downloaded.", "ready")
+
+
+def _pull_missing(ctx: dict) -> list[str]:
+    """Pull every missing core image; return the images that failed."""
+    log = ctx["log_fn"]("core_images")
+    missing = _missing_images(ctx["root"])
+    failed: list[str] = []
+    for index, (name, image) in enumerate(missing, start=1):
+        _update_progress(
+            ctx,
+            "core_images",
+            phase="downloading",
+            activity=f"Downloading {name} ({index} of {len(missing)})",
+            timeout_seconds=1800,
+        )
+        rc, out = actions.docker_cmd(["docker", "pull", image], log, timeout=1800)
+        if rc != 0:
+            log(out[-500:] if out else f"(exit {rc})")
+            failed.append(image)
+    return failed
+
+
+def start_image_prefetch(ctx: dict) -> None:
+    """Begin background downloads once; later calls are no-ops while running."""
+    global _prefetch_thread
+    with _prefetch_lock:
+        if _prefetch_thread is not None and _prefetch_thread.is_alive():
+            return
+
+        def run() -> None:
+            try:
+                _pull_missing(ctx)
+            except Exception as exc:  # the final step retries and reports
+                ctx["log_fn"]("core_images")(f"background download stopped: {exc}")
+
+        _prefetch_thread = threading.Thread(target=run, name="mu3lab-image-prefetch", daemon=True)
+        _prefetch_thread.start()
+
+
+def fix_core_images(check: dict, ctx: dict) -> dict:
+    thread = _prefetch_thread
+    if thread is not None and thread.is_alive():
+        _update_progress(
+            ctx, "core_images", phase="waiting", activity="Finishing background downloads.", timeout_seconds=1800
+        )
+        thread.join()
+    failed = _pull_missing(ctx)
+    if failed:
+        return {
+            "ok": False,
+            "error": "Some app images could not be downloaded. Check the internet connection and retry: "
+            + ", ".join(failed),
+        }
+    return {"ok": True}
+
+
+class Step(TypedDict, total=False):
+    """One installer step: a read-only check plus the fix for each gap."""
+
+    id: str
+    label: str
+    check: Callable[[dict], dict]
+    fix: Callable[[dict, dict], dict]
+    # Optional wait for a started service to become usable before verifying.
+    readiness: Callable[[dict, dict], dict]
+    # States that still count as done because a later step owns the rest.
+    verify_ok_states: tuple[str, ...]
+
+
+STEPS: list[Step] = [
+    {
+        "id": "host_supported",
+        "label": "This computer is supported",
+        "check": _host_supported_check,
+        "fix": fix_host_supported,
+    },
     {
         "id": "host_base",
         "label": "System packages",
@@ -2158,43 +2317,48 @@ STEPS = [
         "check": lambda ctx: preflight.check_node(actions.privilege._exec(["node", "--version"])[1]),
         "fix": fix_node,
     },
-    {"id": "venv", "label": "Project workspace folder", "check": lambda ctx: _venv_check(ctx["root"]), "fix": fix_venv},
+    {"id": "venv", "label": "Python environment", "check": lambda ctx: _venv_check(ctx["root"]), "fix": fix_venv},
     {
         "id": "pip_deps",
-        "label": "Control-plane packages",
+        "label": "Python packages",
         "check": lambda ctx: _pip_check(ctx["root"]),
         "fix": fix_pip_deps,
     },
     {
         "id": "dashboard_src",
-        "label": "Dashboard source",
+        "label": "Dashboard files",
         "check": lambda ctx: _src_check(ctx["root"]),
         "fix": fix_dashboard_src,
     },
     {
         "id": "dashboard_build",
-        "label": "Dashboard interface",
+        "label": "Build the dashboard",
         "check": lambda ctx: _build_check(ctx["root"]),
         "fix": fix_dashboard_build,
     },
-    {"id": "root_env", "label": "Secret keys file", "check": lambda ctx: _env_check(ctx["root"]), "fix": fix_root_env},
+    {
+        "id": "root_env",
+        "label": "Generate private keys",
+        "check": lambda ctx: _env_check(ctx["root"]),
+        "fix": fix_root_env,
+    },
     # The worker service needs this root for its durable SQLite queue.  It is
     # deliberately created before the service is started, not after Docker.
     {
         "id": "runtime_layout",
-        "label": "Persistent data layout",
+        "label": "Data folders",
         "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
         "fix": fix_runtime_layout,
     },
     {
         "id": "service",
-        "label": "Dashboard and workflow services",
+        "label": "Start the dashboard",
         "check": lambda ctx: _service_check(ctx["root"]),
         "fix": fix_service,
     },
     {
         "id": "docker",
-        "label": "Docker engine",
+        "label": "Docker",
         "check": _docker_check,
         "fix": fix_docker,
         # Daemon-level states are owned downstream (networks step); group
@@ -2202,11 +2366,17 @@ STEPS = [
         # Verify passes while any of these hold (the step's own work is done).
         "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access"),
     },
-    {"id": "docker_networks", "label": "Shared networks", "check": _networks_check, "fix": fix_networks_router},
-    {"id": "caddy", "label": "Private ingress", "check": _caddy_check, "fix": fix_caddy},
+    {"id": "docker_networks", "label": "Docker networks", "check": _networks_check, "fix": fix_networks_router},
+    {
+        "id": "nvidia_toolkit",
+        "label": "GPU support for apps",
+        "check": _nvidia_toolkit_check,
+        "fix": fix_nvidia_toolkit,
+    },
+    {"id": "caddy", "label": "Private web gateway", "check": _caddy_check, "fix": fix_caddy},
     {
         "id": "vaultwarden",
-        "label": "Vaultwarden password manager",
+        "label": "Start Vaultwarden",
         "check": _vaultwarden_check,
         "fix": fix_vaultwarden,
         "readiness": lambda ctx, step: _compose_readiness(
@@ -2215,26 +2385,26 @@ STEPS = [
     },
     {
         "id": "vaultwarden_setup",
-        "label": "Vaultwarden first account",
+        "label": "Create your Vaultwarden account",
         "check": check_vaultwarden_setup,
         "fix": fix_vaultwarden_setup,
     },
     {
         "id": "tailscale_pkg",
-        "label": "Tailscale app",
+        "label": "Install Tailscale",
         "check": _tailscale_pkg_check,
         "fix": fix_tailscale_pkg,
         "verify_ok_states": ("ready", "unjoined"),
     },
     {
         "id": "tailscale_operator",
-        "label": "Tailscale operator access",
+        "label": "Let Mu3Lab manage Tailscale",
         "check": _tailscale_operator_check,
         "fix": fix_tailscale_operator,
     },
     {
         "id": "tailscale_join",
-        "label": "Tailscale connection",
+        "label": "Connect to your Tailscale network",
         "check": lambda ctx: (
             lambda r: {
                 "name": "tailscale_join",
@@ -2249,45 +2419,92 @@ STEPS = [
     },
     {
         "id": "vaultwarden_serve",
-        "label": "Vaultwarden private access",
+        "label": "Private address for Vaultwarden",
         "check": lambda ctx: _serve_port_check(VAULTWARDEN_SERVE_PORT),
         "fix": fix_vaultwarden_serve,
     },
     {
         "id": "authentik",
-        "label": "Authentik identity service",
+        "label": "Start Authentik (sign-in)",
         "check": _authentik_check,
         "fix": fix_authentik,
         "readiness": lambda ctx, step: _authentik_readiness(ctx, step, timeout=AUTHENTIK_HTTP_GRACE_TIMEOUT),
     },
     {
         "id": "authentik_serve",
-        "label": "Authentik private access",
+        "label": "Private address for Authentik",
         "check": lambda ctx: _serve_port_check(AUTHENTIK_SERVE_PORT),
         "fix": fix_authentik_serve,
     },
     {
         "id": "lobehub_serve",
-        "label": "LobeChat private route",
+        "label": "Private address for LobeChat",
         "check": lambda ctx: _serve_port_check(LOBEHUB_SERVE_PORT),
         "fix": fix_lobehub_serve,
     },
     {
         "id": "authentik_setup",
-        "label": "Authentik administrator",
+        "label": "Create your Authentik admin account",
         "check": check_authentik_setup,
         "fix": fix_authentik_setup,
     },
     # Publish the private dashboard route before the operator tests the
     # Authentik gate; the route is tailnet-only while the gate is configured.
-    {"id": "serve", "label": "Mu3Lab private dashboard route", "check": _serve_check, "fix": fix_serve},
+    {"id": "serve", "label": "Private address for the dashboard", "check": _serve_check, "fix": fix_serve},
     {
         "id": "dashboard_protection",
-        "label": "Protect the Mu3Lab dashboard",
+        "label": "Require sign-in for the dashboard",
         "check": check_dashboard_protection,
         "fix": fix_dashboard_protection,
     },
+    {
+        "id": "core_images",
+        "label": "Download the core apps",
+        "check": _core_images_check,
+        "fix": fix_core_images,
+    },
 ]
+
+
+# Steps grouped into the phases the bootstrap page shows, in run order.
+PHASES = (
+    ("Check this computer", ("host_supported",)),
+    ("Install system software", ("host_base", "node")),
+    (
+        "Set up Mu3Lab",
+        ("venv", "pip_deps", "dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
+    ),
+    ("Install Docker", ("docker", "docker_networks", "nvidia_toolkit")),
+    ("Start your password vault", ("caddy", "vaultwarden", "vaultwarden_setup")),
+    ("Connect your private network", ("tailscale_pkg", "tailscale_operator", "tailscale_join", "vaultwarden_serve")),
+    (
+        "Set up sign-in",
+        ("authentik", "authentik_serve", "lobehub_serve", "authentik_setup", "serve", "dashboard_protection"),
+    ),
+    ("Download the core apps", ("core_images",)),
+)
+PHASE_OF = {step_id: title for title, ids in PHASES for step_id in ids}
+
+
+def scan(ctx: dict) -> dict[str, dict]:
+    """Run every step's read-only check; nothing is installed or changed.
+
+    Powers the page's first view: which steps are already done, which will be
+    installed, and whether anything blocks installation on this computer.
+    """
+    results: dict[str, dict] = {}
+    for meta in STEPS:
+        try:
+            check = meta["check"](ctx)
+        except Exception as exc:  # a check that cannot run yet is simply "to do"
+            check = {"status": "missing", "state": "unknown", "detail": f"Not checked yet ({type(exc).__name__})."}
+        done = check.get("status") == "ok" or fix_for_state(meta["id"], check.get("state", "")) == "skip"
+        results[meta["id"]] = {
+            "done": done,
+            "blocked": check.get("status") == "fail",
+            "detail": str(check.get("detail", "")),
+        }
+    return results
 
 
 def run_job(job: dict, ctx: dict) -> None:
@@ -2297,20 +2514,12 @@ def run_job(job: dict, ctx: dict) -> None:
     ctx["wait_input"] blocks the join step until the UI supplies a key or a
     continue signal; ctx["stopped"] aborts between steps."""
     job["status"] = "running"
-    # ONE elevation for the whole job (single system dialog, not per step).
-    # ensure_elevation() is a no-op when sudo is already fresh; any worker it
-    # spawns is released in the finally at the end of this function.
-    from ctl import privilege as _priv
-
-    mode = _priv.ensure_elevation(lambda line: ctx["emit"]({"type": "log", "id": "_install_", "line": line}))
-    ctx["emit"](
-        {
-            "type": "log",
-            "id": "_install_",
-            "line": f"elevation mode: {mode} "
-            f"({'no dialogs expected' if mode != 'terminal' else 'terminal commands will be shown'})",
-        }
-    )
+    if not privilege.has_fresh_sudo():
+        job["status"] = "failed"
+        ctx["emit"]({"type": "error", "detail": privilege.SESSION_EXPIRED})
+        job["error"] = privilege.SESSION_EXPIRED
+        return
+    job["error"] = ""
     start_at = next((i for i, s in enumerate(job["steps"]) if s["status"] not in ("ready",)), 0)
     for step in job["steps"][start_at:]:
         if ctx["stopped"]():
@@ -2338,6 +2547,8 @@ def run_job(job: dict, ctx: dict) -> None:
                     "detail": check.get("detail", ""),
                 },
             )
+            if step["id"] == PREFETCH_AFTER:
+                start_image_prefetch(ctx)
             continue
         if action == "unknown":
             _finish_step(job, ctx, step, {"ok": False, "error": f"no fix mapped for state {check.get('state')!r}"})
@@ -2421,6 +2632,8 @@ def run_job(job: dict, ctx: dict) -> None:
                 "detail": verify.get("detail", ""),
             },
         )
+        if step["id"] == PREFETCH_AFTER:
+            start_image_prefetch(ctx)
     # The bootstrap and dashboard now share a durable workflow record.  The
     # early bootstrap UI may still be closed or refreshed, but the real
     # dashboard can always explain exactly what remains after hand-off.
@@ -2535,36 +2748,17 @@ def _finish_step(job: dict, ctx: dict, step: dict, result: dict) -> None:
         ctx["emit"]({"type": "step", "id": step["id"], "status": "failed", "error": step["error"]})
 
 
-def collect_privileged_script(job: dict) -> str:
-    """Assemble every recorded admin command into ONE copy-paste script.
-
-    Source of truth: step logs' `$ sudo ...` lines (written by
-    privilege.run_privileged for every elevation, worker or direct).
-    Headless-session fallback: run the output with `sudo bash script.sh`.
-    Empty string when nothing privileged has run yet.
-    """
-    seen: list[str] = []
-    for step in job.get("steps", []):
-        for line in step.get("log", []):
-            text = line.strip()
-            if text.startswith("$ sudo ") and text[7:] not in seen:
-                seen.append(text[7:])
-    if not seen:
-        return ""
-    from ctl import elevate
-
-    return elevate.build_combined_script(seen)
-
-
 def new_job() -> dict:
     """Blank job with one entry per STEPS id (UI renders rows from this)."""
     return {
         "id": "",
         "status": "queued",
+        "error": "",
         "steps": [
             {
                 "id": m["id"],
                 "label": m["label"],
+                "phase": PHASE_OF[m["id"]],
                 "status": "pending",
                 "log": [],
                 "prompt": None,

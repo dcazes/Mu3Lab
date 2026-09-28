@@ -4,7 +4,7 @@
 # WHY:   One canonical spelling per task so docs and muscle memory agree.
 # DEBUG: `make -n <target>` prints the commands without running them.
 
-.PHONY: install start dev-setup test lint format typecheck verify check dry-run clean nuke
+.PHONY: install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
 
 install:
 	./install.sh
@@ -38,15 +38,15 @@ typecheck:
 verify: lint typecheck test
 	cd dashboard && npm run build
 
-# check: zero-install fresh-user flow. check.sh prechecks python, proves the
-# venv (or warns on), then serves the gated check dashboard on :8799.
-# Nothing here needs sudo, pip, or node.
+# check: read-only report of this computer's readiness (changes nothing).
 check:
-	./check.sh
-
-dry-run:
-	@echo "Dry run is a read-only preflight; host mutations are available only from the bootstrap dashboard."
 	python3 -m ctl.preflight
+
+# vm-test: boot a throwaway Ubuntu VM with this checkout for installer testing.
+vm-test:
+	tools/vm/fresh-vm.sh up
+
+dry-run: check
 
 # clean: stop containers, drop runtime state. Keeps volumes, venv, images.
 clean:
