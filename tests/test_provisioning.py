@@ -159,6 +159,63 @@ class CoreWiringTests(unittest.TestCase):
             self.assertTrue(ok)
             setup.assert_called_once()
 
+    def test_blocked_core_suite_says_why(self):
+        from unittest.mock import patch
+
+        from ctl.core_setup import plan
+
+        refused = {"ok": False, "reasons": ["Docker is not ready"]}
+        with patch("ctl.core_setup.capacity", return_value=refused):
+            checked = plan(Path(__file__).resolve().parents[1])
+        self.assertFalse(checked["ready"])
+        self.assertEqual(checked["error"], "Docker is not ready")
+
+    def test_core_setup_queues_firecrawl_once_with_its_chat_connector_on(self):
+        from unittest.mock import MagicMock, patch
+
+        from ctl.core_setup import _queue_installer_core_apps
+        from ctl.jobs import JobStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "control.sqlite3")
+            control = MagicMock()
+            control.installation.return_value = None
+            with (
+                patch("ctl.control_state.ControlState.runtime", return_value=control),
+                patch("ctl.mcp_ops.preenable") as preenable,
+            ):
+                _queue_installer_core_apps(store, "bootstrap", Path(tmp), lambda _line: None)
+                preenable.assert_called_once_with("firecrawl", Path(tmp))
+                jobs = store.jobs_for_service("firecrawl")
+                self.assertEqual([(job["action"], job["state"]) for job in jobs], [("install", "queued")])
+                store.transition(jobs[0]["id"], "running", actor="worker", detail="installing")
+                store.transition(jobs[0]["id"], "succeeded", actor="worker", detail="installed")
+                control.installation.return_value = {"state": "running"}
+                _queue_installer_core_apps(store, "bootstrap", Path(tmp), lambda _line: None)
+            self.assertEqual(len(store.jobs_for_service("firecrawl")), 1)
+            preenable.assert_called_once()
+
+    def test_preenable_switches_on_the_preferred_mcp_but_respects_later_choices(self):
+        from unittest.mock import patch
+
+        from ctl import mcp_ops
+        from ctl.control_state import ControlState
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = ControlState(Path(tmp) / "control.sqlite3")
+            with (
+                patch("ctl.mcp_ops.ControlState.runtime", return_value=state),
+                patch("ctl.mcp_ops._materialize") as materialize,
+            ):
+                mcp_ops.preenable("firecrawl", Path(tmp))
+                runtime = state.mcp_server("firecrawl-official")
+                self.assertTrue(runtime["enabled"])
+                self.assertEqual(runtime["state"], "prepared")
+                state.set_mcp_server("firecrawl-official", "firecrawl", enabled=False, state="disabled")
+                mcp_ops.preenable("firecrawl", Path(tmp))
+            materialize.assert_called_once()
+            self.assertFalse(state.mcp_server("firecrawl-official")["enabled"])
+
     def test_verification_only_job_never_pulls_or_recreates_services(self):
         from unittest.mock import patch
 

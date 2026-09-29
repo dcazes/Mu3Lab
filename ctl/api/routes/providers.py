@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
@@ -12,7 +13,9 @@ from ctl.api.security import Operator, OperatorMutation
 from ctl.control_state import ControlState
 from ctl.provider_catalog import RECOMMENDED_MINIMUM, prefix_warning, setup_progress
 from ctl.provider_catalog import catalog as provider_catalog
+from ctl.provider_catalog import detect as detect_provider
 from ctl.provider_catalog import get as get_provider
+from ctl.provider_oauth import OAuthError, exchange_openrouter_code
 
 router = APIRouter(prefix="/api/v1/providers", tags=["providers"])
 
@@ -79,28 +82,21 @@ def providers_catalog(_operator: Operator) -> dict[str, Any]:
     return {"ok": True, "providers": provider_catalog(), "recommended_minimum": RECOMMENDED_MINIMUM}
 
 
-@router.post("")
-async def save_provider(request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    """Accept one provider key without ever echoing or logging its value."""
+def _save_key(provider_id: str, label: str, api_key: str, operator: dict[str, Any], key: str | None) -> dict[str, Any]:
     from ctl.provider_secrets import save
 
-    store = runtime.job_store()
-    key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
-    if previous:
-        return {"ok": True, "duplicate": True, "job": previous}
-    payload = await runtime.json_body(request)
     try:
-        definition = get_provider(str(payload.get("provider_id", "")))
-        label = str(payload.get("label", "")).strip() or definition.name
-        api_key = str(payload.get("api_key", ""))
-        result = save(definition.id, label, api_key)
+        definition = get_provider(provider_id) if provider_id else detect_provider(api_key)
+        if definition is None:
+            raise ValueError("Mu3Lab could not tell which provider this key is for. Choose the provider and try again.")
+        result = save(definition.id, label.strip() or definition.name, api_key)
     except (ValueError, TypeError) as exc:
         raise ApiError(400, str(exc)) from exc
     warning = prefix_warning(definition.id, api_key)
     control = ControlState.runtime()
     if control:
         control.set_provider(result["id"], result["label"], enabled=True, state="verifying")
+    store = runtime.job_store()
     job = store.create(
         kind="wiring",
         service_id=f"provider:{result['id']}",
@@ -124,6 +120,44 @@ async def save_provider(request: Request, operator: OperatorMutation) -> dict[st
             "and streamed routing.",
         },
     }
+
+
+@router.post("")
+async def save_provider(request: Request, operator: OperatorMutation) -> dict[str, Any]:
+    """Accept one provider key without ever echoing or logging its value.
+
+    ``provider_id`` is optional: without it the provider is detected from the key."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    previous = store.by_idempotency_key(key or "")
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
+    payload = await runtime.json_body(request)
+    return _save_key(
+        str(payload.get("provider_id", "")),
+        str(payload.get("label", "")),
+        str(payload.get("api_key", "")),
+        operator,
+        key,
+    )
+
+
+@router.post("/openrouter/oauth")
+async def openrouter_oauth(request: Request, operator: OperatorMutation) -> dict[str, Any]:
+    """Trade OpenRouter's one-time sign-in code for an API key, then save it like a pasted key."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    previous = store.by_idempotency_key(key or "")
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
+    payload = await runtime.json_body(request)
+    try:
+        api_key = await run_in_threadpool(
+            exchange_openrouter_code, str(payload.get("code", "")), str(payload.get("code_verifier", ""))
+        )
+    except OAuthError as exc:
+        raise ApiError(502, str(exc)) from exc
+    return _save_key("openrouter", "", api_key, operator, key)
 
 
 @router.get("/{provider_id}/models")

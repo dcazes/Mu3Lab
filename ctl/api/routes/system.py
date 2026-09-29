@@ -12,6 +12,7 @@ import yaml
 from fastapi import APIRouter, Request
 
 from ctl import __version__
+from ctl.actions import docker_argv
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OperatorMutation
@@ -21,7 +22,7 @@ from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.service_state import tailnet_serve_status, tailscale_status
+from ctl.service_state import container_memory, tailnet_serve_status, tailscale_status
 
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG = ROOT / "catalog.yaml"
@@ -82,13 +83,28 @@ def integrations() -> dict[str, Any]:
     }
 
 
+def _worker_state() -> str:
+    """systemd's word for the background worker ("active", "failed", ...), or "unknown"."""
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", "is-active", "mu3lab-worker.service"], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    state = proc.stdout.strip()
+    # No user session bus (e.g. a development run) prints nothing useful.
+    return state if state in {"active", "activating", "deactivating", "inactive", "failed"} else "unknown"
+
+
 @router.get("/system")
 def system() -> dict[str, Any]:
     """Read-only host capacity and private-network status for the dashboard."""
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage(str(RuntimePaths().root.parent))
     try:
-        docker = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=5).returncode == 0
+        docker = (
+            subprocess.run(docker_argv(["docker", "info"]), capture_output=True, text=True, timeout=5).returncode == 0
+        )
     except (OSError, subprocess.SubprocessError):
         docker = False
     tailscale = tailscale_status()
@@ -100,6 +116,8 @@ def system() -> dict[str, Any]:
         "memory": {"total": memory.total, "used": memory.used, "percent": memory.percent},
         "disk": {"total": disk.total, "used": disk.used, "percent": disk.percent},
         "docker_ready": docker,
+        "container_memory": container_memory() if docker else {},
+        "worker_state": _worker_state(),
         "tailnet_dns_name": tailscale["dns_name"],
         "tailscale": tailscale,
         "runtime_root": str(RuntimePaths().root),

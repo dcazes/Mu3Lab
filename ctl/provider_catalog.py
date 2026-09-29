@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 
 
@@ -20,6 +21,12 @@ class Provider:
     account: str = "email"
     recommended: bool = False
     free_tier: str = ""
+    # The sign-up page offers "Continue with Google" (checked 2026-09-29).
+    google_sign_in: bool = False
+    # Mu3Lab can fetch a key through the provider's own sign-in (OAuth) page.
+    oauth: bool = False
+    # For keys without a distinctive prefix: a best-guess shape, JS-compatible.
+    key_pattern: str = ""
 
     def public(self) -> dict:
         value = asdict(self)
@@ -46,6 +53,7 @@ PROVIDERS = (
         keys_url="https://cloud.cerebras.ai/platform/",
         recommended=True,
         free_tier="Very high daily token allowance on fast open models.",
+        google_sign_in=True,
     ),
     Provider(
         "google",
@@ -59,6 +67,7 @@ PROVIDERS = (
         account="google",
         recommended=True,
         free_tier="Gemini free tier; uses your existing Google account.",
+        google_sign_in=True,
     ),
     Provider(
         "groq",
@@ -71,6 +80,7 @@ PROVIDERS = (
         keys_url="https://console.groq.com/keys",
         recommended=True,
         free_tier="Generous per-day request limits across many open models.",
+        google_sign_in=True,
     ),
     Provider(
         "huggingface",
@@ -82,6 +92,7 @@ PROVIDERS = (
         signup_url="https://huggingface.co/join",
         keys_url="https://huggingface.co/settings/tokens",
         free_tier="Small monthly inference credit.",
+        google_sign_in=True,
     ),
     Provider(
         "nvidia",
@@ -110,6 +121,8 @@ PROVIDERS = (
         signup_url="https://openrouter.ai/",
         keys_url="https://openrouter.ai/settings/keys",
         free_tier="Free model variants with a low daily request cap.",
+        google_sign_in=True,
+        oauth=True,
     ),
     Provider(
         "mistral",
@@ -121,6 +134,8 @@ PROVIDERS = (
         signup_url="https://console.mistral.ai/",
         keys_url="https://console.mistral.ai/api-keys",
         free_tier="Free experiment plan; requires phone verification.",
+        google_sign_in=True,
+        key_pattern=r"^[A-Za-z0-9]{32}$",
     ),
     Provider(
         "zhipu",
@@ -132,6 +147,7 @@ PROVIDERS = (
         signup_url="https://z.ai/",
         keys_url="https://z.ai/manage-apikey/apikey-list",
         free_tier="Free GLM Flash models.",
+        key_pattern=r"^[0-9a-f]{32}\.[A-Za-z0-9]{16}$",
     ),
 )
 
@@ -157,6 +173,16 @@ def get(provider_id: str) -> Provider:
 
 def catalog() -> list[dict]:
     return [provider.public() for provider in PROVIDERS]
+
+
+def detect(api_key: str) -> Provider | None:
+    """Guess the provider from the key itself: a distinctive prefix first, then a shape."""
+    key = api_key.strip()
+    by_prefix = [provider for provider in PROVIDERS if provider.prefix and key.startswith(provider.prefix)]
+    if by_prefix:
+        return max(by_prefix, key=lambda provider: len(provider.prefix))
+    by_shape = [provider for provider in PROVIDERS if provider.key_pattern and re.match(provider.key_pattern, key)]
+    return by_shape[0] if len(by_shape) == 1 else None
 
 
 def prefix_warning(provider_id: str, api_key: str) -> str:

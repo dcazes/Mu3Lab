@@ -133,6 +133,17 @@ def _docker_invocation(argv: list[str]) -> list[str] | None:
     return None
 
 
+def docker_argv(argv: list[str]) -> list[str]:
+    """Return ``argv`` wrapped for a process that predates its docker group.
+
+    For read-only probes that run their own subprocess (status snapshots,
+    capacity checks). The user's systemd services start with the login
+    session, so right after install they lack the docker group until the
+    next login; ``sg docker`` bridges that gap exactly as ``docker_cmd`` does.
+    """
+    return _docker_invocation(argv) or argv
+
+
 def docker_cmd_stream(
     argv: list[str],
     log: Callable[[str], None],
@@ -292,12 +303,41 @@ def authentik_set_owner(email: str, name: str, password: str, log: Callable[[str
         "user.name = data['name']\n"
         "user.set_password(data['password'])\n"
         "user.save()\n"
+        # Authentik 2026.x tracks first-run setup with its own flag instead of
+        # inferring it from akadmin's password; finish it the way its setup
+        # flow does, so the root URL stops redirecting to /setup.
+        "try:\n"
+        "    from django.db import transaction\n"
+        "    from authentik.core.apps import Setup\n"
+        "    from authentik.blueprints.models import BlueprintInstance\n"
+        "    from authentik.flows.models import Flow, FlowAuthenticationRequirement\n"
+        "except ImportError:\n"
+        "    Setup = None\n"
+        "if Setup is not None:\n"
+        "    with transaction.atomic():\n"
+        "        Setup.set(True)\n"
+        "        BlueprintInstance.objects.filter(\n"
+        "            **{'metadata__labels__blueprints.goauthentik.io/system-oobe': 'true'}\n"
+        "        ).update(enabled=False)\n"
+        "        Flow.objects.filter(slug='initial-setup').update(\n"
+        "            authentication=FlowAuthenticationRequirement.REQUIRE_SUPERUSER\n"
+        "        )\n"
         "print('MU3LAB_OWNER_OK')\n"
     )
     payload = _json.dumps({"email": email, "name": name or email, "password": password}) + "\n"
-    rc, output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", script], payload, log, timeout=120
-    )
+    # Authentik reports healthy slightly before its shell can reliably reach
+    # the database, so a first attempt can fail; retry before giving up.
+    rc, output = 1, ""
+    for attempt in range(1, 6):
+        rc, output = docker_cmd_with_stdin(
+            ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", script], payload, log, timeout=120
+        )
+        if rc == 0 and "MU3LAB_OWNER_OK" in output:
+            break
+        detail = [ln for ln in output.splitlines() if ln.strip() and not ln.startswith('{"')]
+        log(f"Authentik account save attempt {attempt} failed (exit {rc}): " + " | ".join(detail[-6:]))
+        if attempt < 5:
+            _time.sleep(10)
     if rc != 0 or "MU3LAB_OWNER_OK" not in output:
         return {
             "ok": False,

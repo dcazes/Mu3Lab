@@ -1,6 +1,6 @@
 import { ArrowRight, CheckCircle2, Circle } from 'lucide-react';
 import { useState } from 'react';
-import type { ProviderMetadataResponse } from '../../api';
+import type { ProviderMetadataResponse, VaultStatus } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
@@ -32,10 +32,19 @@ function useManualDone() {
   return [done, mark] as const;
 }
 
-function ExtensionGuide({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function ExtensionGuide({
+  browsers,
+  onClose,
+  onDone,
+}: {
+  browsers: string[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const { data } = useDashboard();
   const vaultwarden = data.services.services.find((service) => service.id === 'vaultwarden');
   const vaultUrl = (vaultwarden && launchTarget(vaultwarden)?.url) || '';
+  const preinstalled = browsers.length > 0;
   return (
     <Dialog
       open
@@ -44,22 +53,35 @@ function ExtensionGuide({ onClose, onDone }: { onClose: () => void; onDone: () =
       description="Mu3Lab saved every app login in your password vault. The free Bitwarden extension fills them in for you."
     >
       <div className="form">
-        <ol className="guide-steps">
-          <li>
-            Click <b>Get the extension</b> below and add Bitwarden to your browser.
-          </li>
-          <li>Click the Bitwarden icon in your browser's toolbar (it looks like a shield).</li>
-          <li>
-            On its sign-in screen, find <b>Logging in on</b> (or <b>Accessing</b>) and choose <b>Self-hosted</b>.
-          </li>
-          <li>Paste this address into the Server URL box and save:</li>
-        </ol>
-        {vaultUrl && <CopyField value={vaultUrl} label="Server URL" />}
-        <ol className="guide-steps" start={5}>
-          <li>Sign in with your Mu3Lab email and password.</li>
-        </ol>
+        {preinstalled ? (
+          <ol className="guide-steps">
+            <li>
+              Setup already added Bitwarden to {browsers.join(' and ')} and connected it to your vault. If you
+              don&apos;t see it, close the browser and open it again.
+            </li>
+            <li>Click the Bitwarden icon in your browser's toolbar (it looks like a shield).</li>
+            <li>Sign in with your Mu3Lab email and password.</li>
+          </ol>
+        ) : (
+          <>
+            <ol className="guide-steps">
+              <li>
+                Click <b>Get the extension</b> below and add Bitwarden to your browser.
+              </li>
+              <li>Click the Bitwarden icon in your browser's toolbar (it looks like a shield).</li>
+              <li>
+                On its sign-in screen, find <b>Logging in on</b> (or <b>Accessing</b>) and choose <b>Self-hosted</b>.
+              </li>
+              <li>Paste this address into the Server URL box and save:</li>
+            </ol>
+            {vaultUrl && <CopyField value={vaultUrl} label="Server URL" />}
+            <ol className="guide-steps" start={5}>
+              <li>Sign in with your Mu3Lab email and password.</li>
+            </ol>
+          </>
+        )}
         <footer className="form-footer">
-          <ExternalButton href={EXTENSION_URL}>Get the extension</ExternalButton>
+          {!preinstalled && <ExternalButton href={EXTENSION_URL}>Get the extension</ExternalButton>}
           <span className="spacer" />
           <Button
             variant="primary"
@@ -115,7 +137,7 @@ export function GetStarted() {
   const { data } = useDashboard();
   const operator = data.identity.writes_enabled;
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
-  const vault = useApi<{ seeded: boolean }>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
+  const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
   const [manual, markDone] = useManualDone();
   const [guide, setGuide] = useState<Guide | null>(null);
   const setup = providers.data?.setup;
@@ -194,7 +216,13 @@ export function GetStarted() {
       <button type="button" className="get-started-hide" onClick={() => markDone('hidden')}>
         Hide this list
       </button>
-      {guide === 'extension' && <ExtensionGuide onClose={() => setGuide(null)} onDone={() => markDone('extension')} />}
+      {guide === 'extension' && (
+        <ExtensionGuide
+          browsers={vault.data.browser_extension?.browsers || []}
+          onClose={() => setGuide(null)}
+          onDone={() => markDone('extension')}
+        />
+      )}
       {guide === 'devices' && <DevicesGuide onClose={() => setGuide(null)} onDone={() => markDone('devices')} />}
     </section>
   );

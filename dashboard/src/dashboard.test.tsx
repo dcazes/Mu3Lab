@@ -35,7 +35,67 @@ describe('Home', () => {
       'https://host.ts.net:8449/auth/login?autoLaunch=1',
     );
     expect(screen.getByRole('link', { name: 'Mealie: Stopped' })).toHaveAttribute('href', '/apps/mealie');
-    expect(screen.queryByText('Ollama')).not.toBeInTheDocument();
+    const launcher = screen.getByRole('region', { name: 'Your apps' });
+    expect(within(launcher).queryByText('Ollama')).not.toBeInTheDocument();
+  });
+
+  it('groups status into Security, AI and System chips that expand with real usage figures', () => {
+    stubFetch(() => ({ handoffs: [] }));
+    const GB = 1024 ** 3;
+    const data = dashboardData([
+      service('ingress', 'Caddy', 'foundation'),
+      service('authentik', 'Authentik', 'foundation'),
+      service('ollama', 'Ollama', 'core', {
+        state: 'failed',
+        detail: 'Container exited.',
+        containers: [
+          { service: 'ollama', name: 'mu3lab-ollama', state: 'running', status: 'Up', health: 'unknown', image: 'x' },
+        ],
+      }),
+      service('firecrawl', 'Firecrawl', 'optional', { state: 'not_installed' }),
+    ]);
+    data.system = {
+      ...data.system,
+      worker_state: 'failed',
+      container_memory: { 'mu3lab-ollama': 3.5 * GB },
+      memory: { total: 16 * GB, used: 10 * GB, percent: 62 },
+      disk: { total: 100 * GB, used: 96 * GB, percent: 96 },
+      tailscale: {
+        state: 'connected',
+        backend_state: 'Running',
+        online: true,
+        dns_name: 'host.ts.net',
+        detail: '',
+        serve: { state: 'available', ports: [] },
+      },
+    };
+    renderWithDashboard(<HomePage />, data);
+    const strip = screen.getByRole('region', { name: 'System status' });
+    // Collapsed: three chips, no detail rows, real figures on hover.
+    const chips = within(strip).getAllByRole('button');
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      'Security3/3 healthy',
+      'AI1 needs attention',
+      'SystemRAM 62% · Disk 96%',
+    ]);
+    expect(within(strip).queryByRole('link')).not.toBeInTheDocument();
+    expect(chips[2]).toHaveAttribute('title', 'Memory 10.0 GB of 16.0 GB · Disk 96.0 GB of 100.0 GB');
+
+    fireEvent.click(chips[0]);
+    expect(within(strip).getByRole('link', { name: 'Caddy: Running' })).toHaveAttribute('href', '/apps/ingress');
+    expect(within(strip).getByRole('link', { name: 'Tailscale: Connected' })).toBeInTheDocument();
+
+    fireEvent.click(chips[1]);
+    expect(chips[0]).toHaveAttribute('aria-expanded', 'false');
+    const ollama = within(strip).getByRole('link', { name: 'Ollama: Failed' });
+    expect(ollama).toHaveAttribute('title', '3.5 GB — Container exited.');
+    expect(within(strip).getByRole('link', { name: 'Firecrawl: Not installed' })).toBeInTheDocument();
+
+    fireEvent.click(chips[2]);
+    expect(within(strip).getByRole('link', { name: 'Background worker: failed' })).toBeInTheDocument();
+    expect(within(strip).getByRole('link', { name: 'Docker: Running' })).toBeInTheDocument();
+    expect(within(strip).getByRole('link', { name: 'Memory: 62%' })).toHaveAttribute('title', '10.0 GB of 16.0 GB');
+    expect(within(strip).getByRole('link', { name: 'Disk: 96%' })).toBeInTheDocument();
   });
 
   it('surfaces problems and saved-password reminders in one strip', async () => {

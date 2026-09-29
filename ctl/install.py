@@ -158,6 +158,10 @@ DISPATCH = {
     ("tailscale_join", "ready"): "skip",
     ("vaultwarden_serve", "unshared"): "share_vaultwarden",
     ("vaultwarden_serve", "ready"): "skip",
+    ("browser_extension", "missing"): "write_browser_policy",
+    ("browser_extension", "not_needed"): "skip",
+    ("browser_extension", "no_address"): "skip",  # a convenience; never block the install on it
+    ("browser_extension", "ready"): "skip",
     ("authentik", "down"): "authentik_up",
     ("authentik", "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
@@ -1329,6 +1333,48 @@ def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
     return _tailscale_serve_port(VAULTWARDEN_SERVE_PORT, f"http://127.0.0.1:{VAULTWARDEN_PROXY_PORT}", log)
 
 
+def _browser_extension_check(ctx: dict) -> dict:
+    from ctl import browser_extension
+
+    server = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
+    if not server:
+        return _row("browser_extension", "missing", "Vaultwarden's private address is not known yet.", "no_address")
+    found = browser_extension.plan(server)
+    names = browser_extension.names
+    skipped = (
+        f" Left {names(found['conflict'])} alone: it already has extension rules from someone else."
+        if found["conflict"]
+        else ""
+    )
+    if found["to_write"]:
+        return _row(
+            "browser_extension", "missing", f"Bitwarden will be added to {names(found['to_write'])}.", "missing"
+        )
+    if found["ready"]:
+        return _row("browser_extension", "ok", f"Bitwarden is in {names(found['ready'])}.{skipped}", "ready")
+    return _row(
+        "browser_extension",
+        "ok",
+        ("No Chrome, Chromium or Brave found; the dashboard shows how to add Bitwarden by hand." + skipped).strip(),
+        "not_needed",
+    )
+
+
+def fix_browser_extension(check: dict, ctx: dict) -> dict:
+    from ctl import browser_extension
+
+    log = ctx["log_fn"]("browser_extension")
+    server = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
+    content = browser_extension.render(server)
+    for browser in browser_extension.plan(server)["to_write"]:
+        res = actions.privilege.run_privileged(["mkdir", "-p", browser.policy_dir], log)
+        if res.get("ok"):
+            res = actions.write_root_file(browser.policy_path, content, log)
+        if res.get("need_terminal") or not res.get("ok"):
+            return _propagate(res)
+    return {"ok": True}
+
+
 def fix_authentik_serve(check: dict, ctx: dict) -> dict:
     _update_progress(
         ctx,
@@ -2070,13 +2116,14 @@ _prefetch_thread: threading.Thread | None = None
 
 def core_images(root: Path = ROOT) -> list[tuple[str, str]]:
     """(service name, image) for the always-on platform, in install order."""
+    from ctl.core_setup import INSTALLER_CORE_APPS
     from ctl.registry import load
 
     registry = load(root / "services.yaml")
     return [
         (service.name, image)
         for service in registry.services
-        if service.stage in ("foundation", "core")
+        if service.stage in ("foundation", "core") or service.id in INSTALLER_CORE_APPS
         for image in service.images
     ]
 
@@ -2311,6 +2358,12 @@ STEPS: list[Step] = [
         "fix": fix_vaultwarden_serve,
     },
     {
+        "id": "browser_extension",
+        "label": "Add Bitwarden to your browser",
+        "check": _browser_extension_check,
+        "fix": fix_browser_extension,
+    },
+    {
         "id": "authentik",
         "label": "Start Authentik (sign-in)",
         "check": _authentik_check,
@@ -2363,7 +2416,10 @@ PHASES = (
     ),
     ("Install Docker", ("docker", "docker_networks", "nvidia_toolkit")),
     ("Start your password vault", ("caddy", "vaultwarden", "vaultwarden_setup")),
-    ("Connect your private network", ("tailscale_pkg", "tailscale_operator", "tailscale_join", "vaultwarden_serve")),
+    (
+        "Connect your private network",
+        ("tailscale_pkg", "tailscale_operator", "tailscale_join", "vaultwarden_serve", "browser_extension"),
+    ),
     (
         "Set up sign-in",
         ("authentik", "authentik_serve", "lobehub_serve", "authentik_setup", "serve", "dashboard_protection"),

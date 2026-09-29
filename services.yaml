@@ -184,7 +184,9 @@ services:
     maturity: supported
     name: Firecrawl
     category: research
-    lifecycle: optional
+    # Part of the core suite: installed and connected to chat by core setup.
+    # Its stage stays "optional" so it uses the full app installer.
+    lifecycle: always_on
     compose_dir: apps/firecrawl
     https_port: 3002
     private_https_port: 8456
@@ -193,7 +195,7 @@ services:
     auth: excluded
     stage: optional
     availability: available
-    required: false
+    required: true
     route: pending
     dependencies: []
     ui: {available: true, authentication: excluded}

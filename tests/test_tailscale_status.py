@@ -10,8 +10,15 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from ctl import service_state
 from ctl.app import app
-from ctl.service_state import tailnet_dns_name, tailnet_serve_ports, tailnet_serve_status, tailscale_status
+from ctl.service_state import (
+    container_memory,
+    tailnet_dns_name,
+    tailnet_serve_ports,
+    tailnet_serve_status,
+    tailscale_status,
+)
 
 
 def result(stdout: str, returncode: int = 0) -> SimpleNamespace:
@@ -118,6 +125,29 @@ class TailscaleStatusTests(unittest.TestCase):
             self.assertIsInstance(tailnet_serve_ports(), set)
 
 
+class ContainerMemoryTests(unittest.TestCase):
+    def setUp(self):
+        service_state._memory_cache = (0.0, {})
+
+    def test_parses_docker_stats_and_caches_briefly(self):
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            return result("mu3lab-ollama\t3.5GiB / 15GiB\nmu3lab-caddy\t20.5MiB / 15GiB\nbroken\t--\n")
+
+        clock = iter([100.0, 105.0, 200.0, 200.0])
+        first = container_memory(run=run, now=lambda: next(clock))
+        self.assertEqual(first, {"mu3lab-ollama": int(3.5 * 1024**3), "mu3lab-caddy": int(20.5 * 1024**2)})
+        self.assertEqual(container_memory(run=run, now=lambda: next(clock)), first)
+        self.assertEqual(len(calls), 1)
+        container_memory(run=run, now=lambda: next(clock))
+        self.assertEqual(len(calls), 2)
+
+    def test_failure_returns_last_known_values(self):
+        self.assertEqual(container_memory(run=lambda *a, **k: result("", 1)), {})
+
+
 class SystemTailscaleContractTests(unittest.TestCase):
     def test_system_exposes_only_the_sanitized_snapshot_and_sorted_serve_array(self):
         status = {
@@ -138,9 +168,12 @@ class SystemTailscaleContractTests(unittest.TestCase):
             ),
             patch("ctl.api.routes.system.psutil.cpu_percent", return_value=2.0),
             patch("ctl.api.routes.system.psutil.boot_time", return_value=1),
-            patch("ctl.api.routes.system.subprocess.run", return_value=SimpleNamespace(returncode=0)),
+            patch(
+                "ctl.api.routes.system.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="active\n")
+            ),
             patch("ctl.api.routes.system.RuntimePaths") as runtime_paths,
             patch("ctl.api.routes.system.backup_readiness", return_value={}),
+            patch("ctl.api.routes.system.container_memory", return_value={"mu3lab-ollama": 5}),
             patch("ctl.api.routes.system.tailscale_status", return_value=status) as status_call,
             patch("ctl.api.routes.system.tailnet_serve_status", return_value=serve) as serve_call,
         ):
@@ -154,6 +187,8 @@ class SystemTailscaleContractTests(unittest.TestCase):
         self.assertEqual(body["tailnet_dns_name"], body["tailscale"]["dns_name"])
         self.assertEqual(body["tailscale"]["serve"]["ports"], [443, 8443, 8446])
         self.assertEqual(set(body["tailscale"]), {"state", "backend_state", "online", "dns_name", "detail", "serve"})
+        self.assertEqual(body["worker_state"], "active")
+        self.assertEqual(body["container_memory"], {"mu3lab-ollama": 5})
         self.assertNotIn("Peer", body)
         self.assertNotIn("PublicKey", json.dumps(body))
         status_call.assert_called_once_with()

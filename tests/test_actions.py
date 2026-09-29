@@ -119,6 +119,16 @@ class SystemTests(unittest.TestCase):
         self.assertIn("docker", flat)
         self.assertIn("mu3lab_backend", flat)
 
+    def test_docker_argv_bridges_a_session_that_predates_the_docker_group(self):
+        # The user's systemd services start with the login session, so right
+        # after install they lack the docker group until the next login.
+        with (
+            patch("os.getgroups", return_value=[]),
+            patch("shutil.which", return_value="/usr/bin/sg"),
+            patch("ctl.preflight._db_has_group", return_value=True),
+        ):
+            self.assertEqual(actions.docker_argv(["docker", "info"]), ["sg", "docker", "-c", "docker info"])
+
     def test_runtime_layout_keeps_secrets_root_only(self):
         seen: list[list[str]] = []
 

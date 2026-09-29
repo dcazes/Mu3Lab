@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import workflow_secrets
+from ctl import browser_extension, workflow_secrets
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OwnerMutation
@@ -53,7 +53,11 @@ def _run(owner: dict[str, Any], email: str, password: str, totp: str) -> SeedRes
 @router.get("/status")
 def vault_status(_operator: Operator) -> dict[str, Any]:
     state = ControlState.runtime()
-    return {"ok": True, **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""})}
+    return {
+        "ok": True,
+        **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
+        "browser_extension": browser_extension.status(),
+    }
 
 
 @router.post("/setup")

@@ -20,6 +20,13 @@ installer continues on its own once you approve. At the end it saves your app
 logins to your vault and opens the dashboard, whose Home page lists what to do
 next.
 
+If Google Chrome, Chromium or Brave is installed, setup also adds the Bitwarden
+extension to it, already connected to your vault, so you only sign in. It does
+this with a browser policy that sets nothing else. As a result the browser
+shows "Managed by your organization", and Bitwarden can be turned off but not
+removed. `./uninstall.sh` deletes the policy, and the browser then removes the
+extension.
+
 Run `./install.sh` again at any time, for example after `git pull`: finished
 steps are skipped, changed code is rebuilt, and the dashboard restarts on the
 new version. `make check` prints a read-only readiness report.

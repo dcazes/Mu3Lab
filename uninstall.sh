@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Mu3Lab :: uninstall.sh
 # WHAT:  Removes Mu3Lab from this computer: its apps, containers, images,
-#        volumes, data (/srv/mu3lab), background services and private
-#        addresses. With --everything it also removes the shared tools the
+#        volumes, data (/srv/mu3lab), background services, private addresses
+#        and the browser policy that added the Bitwarden extension. With --everything it also removes the shared tools the
 #        installer added: Docker, Tailscale (after logging out), Node.js and
 #        NVIDIA container support, plus their package sources.
 # NEVER: Touches system Python, GPU drivers, base packages (curl, git, ...),
@@ -61,6 +61,7 @@ This removes Mu3Lab from this computer, including ALL of its data:
   - every app and its files (photos, documents, recipes, ...)
   - your Vaultwarden vault and Authentik accounts
   - the dashboard and its settings
+  - the Bitwarden browser extension Mu3Lab added to your browser
 EOF
 if $EVERYTHING; then
   cat <<'EOF'
@@ -145,6 +146,20 @@ if have docker; then
   done | sort -u)
   [[ ${#images[@]} -gt 0 ]] && run "${DOCKER[@]}" rmi -f "${images[@]}"
   run "${DOCKER[@]}" image prune -f
+fi
+
+# --- Browser extension policy -------------------------------------------------------
+# Only Mu3Lab's own policy file is deleted; the browser then removes the Bitwarden
+# extension it installed and stops saying "Managed by your organization" (unless
+# something else manages it).
+policies=()
+for dir in /etc/opt/chrome /etc/chromium /etc/chromium-browser /etc/brave; do
+  [[ -f "$dir/policies/managed/mu3lab-bitwarden.json" ]] && policies+=("$dir/policies/managed/mu3lab-bitwarden.json")
+done
+if [[ ${#policies[@]} -gt 0 ]]; then
+  step "Removing the Bitwarden extension Mu3Lab added to your browser"
+  for policy in "${policies[@]}"; do run sudo -n rm -f "$policy"; done
+  echo "  Close and reopen your browser to finish removing it."
 fi
 
 # --- Data ---------------------------------------------------------------------------

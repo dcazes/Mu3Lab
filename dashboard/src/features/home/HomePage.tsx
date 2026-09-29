@@ -2,7 +2,6 @@ import { AlertTriangle, ArrowRight, KeyRound, Loader2, Plus, Rocket } from 'luci
 import type { CredentialHandoff, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
-import { duration } from '../../lib/format';
 import { Link } from '../../lib/router';
 import {
   isEverydayApp,
@@ -18,6 +17,7 @@ import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { Agenda } from './Agenda';
 import { GetStarted } from './GetStarted';
+import { SystemStatus } from './SystemStatus';
 
 function greeting() {
   const hour = new Date().getHours();
@@ -110,24 +110,6 @@ function Attention() {
   );
 }
 
-function SystemLine() {
-  const { data } = useDashboard();
-  const { system } = data;
-  const running = data.services.services.filter(isRunning).length;
-  return (
-    <Link to="/settings/system" className="system-line">
-      <span>
-        <Dot tone={system.docker_ready ? 'green' : 'red'} />
-        {running} services running
-      </span>
-      <span>CPU {Math.round(system.cpu_percent)}%</span>
-      <span>Memory {Math.round(system.memory.percent)}%</span>
-      <span>Disk {Math.round(system.disk.percent)}%</span>
-      <span>Up {duration(system.uptime_seconds)}</span>
-    </Link>
-  );
-}
-
 export function HomePage() {
   const { data } = useDashboard();
   const services = data.services.services;
@@ -142,6 +124,7 @@ export function HomePage() {
         </h1>
         <p>{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
       </header>
+      <SystemStatus />
       <Attention />
       <GetStarted />
       <section aria-labelledby="apps-heading">
@@ -162,7 +145,6 @@ export function HomePage() {
         </div>
       </section>
       <Agenda nextcloud={services.find((service) => service.id === 'nextcloud')} />
-      <SystemLine />
     </div>
   );
 }

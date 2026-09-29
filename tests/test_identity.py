@@ -83,6 +83,7 @@ class IdentityContractTests(unittest.TestCase):
             self.assertIn("preserved-secret", content)
             self.assertIn("email_verified", content)
             self.assertIn("preferred_username", content)
+            self.assertIn('meta_launch_url: "blank://blank"', content)
             self.assertEqual((project / ".env").read_text(encoding="utf-8").count("preserved-secret"), 1)
 
     def test_mealie_owner_requires_oidc_link_and_admin_role(self):

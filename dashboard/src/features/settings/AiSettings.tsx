@@ -1,5 +1,6 @@
-import { CheckCircle2, KeyRound, Pencil, Plus, Power, Sparkles, Trash2 } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { CheckCircle2, ClipboardPaste, KeyRound, LogIn, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import {
   deleteApi,
   type JobDetailResponse,
@@ -22,6 +23,7 @@ import { isRunning, stateLabel } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { detectProvider, openRouterSignInUrl, takeOpenRouterReturn } from './providerKeys';
 
 const ROUTE = [
   { id: 'ollama', label: 'Ollama', role: 'Local models & embeddings' },
@@ -233,17 +235,187 @@ function ProviderRow({
   );
 }
 
+function KeyPaste({
+  catalog,
+  providers,
+  awaiting,
+  clearAwaiting,
+  saved,
+}: {
+  catalog: ProviderCatalogItem[];
+  providers: ProviderMetadata[];
+  awaiting: string;
+  clearAwaiting: () => void;
+  saved: () => void;
+}) {
+  const [apiKey, setApiKey] = useState('');
+  const [choice, setChoice] = useState('');
+  const { pending, run } = useAction();
+  const submitted = useRef('');
+  const detection = detectProvider(apiKey, catalog);
+  const providerId = choice || detection?.provider.id || '';
+  const provider = catalog.find((item) => item.id === providerId);
+  const replacing = providers.some((item) => item.id === providerId);
+
+  const connect = useCallback(
+    async (key: string, id: string) => {
+      const name = catalog.find((item) => item.id === id)?.name || 'Provider';
+      submitted.current = key;
+      const result = await run(
+        'save',
+        () => postJsonApi<{ warning?: string }>('/api/v1/providers', { provider_id: id, api_key: key }),
+        (response) => response.warning || `${name} key saved. Mu3Lab is verifying it now.`,
+      );
+      if (result) {
+        setApiKey('');
+        setChoice('');
+        clearAwaiting();
+        saved();
+      }
+    },
+    [catalog, clearAwaiting, run, saved],
+  );
+
+  const take = useCallback(
+    (text: string) => {
+      const key = text.trim();
+      setApiKey(key);
+      setChoice('');
+      const found = detectProvider(key, catalog);
+      // A distinctive prefix is certain enough to connect straight away.
+      if (found?.certain && key !== submitted.current) void connect(key, found.provider.id);
+    },
+    [catalog, connect],
+  );
+
+  const paste = async () => {
+    try {
+      take(await navigator.clipboard.readText());
+    } catch {
+      toast.error('Your browser blocked reading the clipboard. Click the box and press Ctrl+V instead.');
+    }
+  };
+
+  // After "Get key", coming back to this tab picks the copied key up by itself
+  // once the browser has allowed clipboard access (it asks the first time).
+  useEffect(() => {
+    if (!awaiting) return;
+    const onFocus = async () => {
+      try {
+        const permission = await navigator.permissions.query({ name: 'clipboard-read' as PermissionName });
+        if (permission.state !== 'granted') return;
+        const key = (await navigator.clipboard.readText()).trim();
+        const found = detectProvider(key, catalog);
+        if (found?.certain && found.provider.id === awaiting && key !== submitted.current) take(key);
+      } catch {
+        // No clipboard access: the Paste button still works.
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [awaiting, catalog, take]);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (apiKey && providerId) void connect(apiKey.trim(), providerId);
+  };
+
+  return (
+    <form className="key-paste" onSubmit={submit}>
+      <div className="key-paste-row">
+        <input
+          aria-label="API key"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={apiKey}
+          onChange={(event) => {
+            setApiKey(event.target.value);
+            setChoice('');
+          }}
+          onPaste={(event) => {
+            event.preventDefault();
+            take(event.clipboardData.getData('text'));
+          }}
+          placeholder="Paste any provider's API key"
+        />
+        <Button icon={ClipboardPaste} onClick={() => void paste()} loading={pending === 'save' && !apiKey}>
+          Paste
+        </Button>
+        <Button variant="primary" type="submit" loading={pending === 'save' && !!apiKey} disabled={!providerId}>
+          {replacing ? 'Replace key' : 'Connect'}
+        </Button>
+      </div>
+      {awaiting && !apiKey && (
+        <p className="key-paste-note">
+          Copied your {catalog.find((item) => item.id === awaiting)?.name} key? Come back here and click <b>Paste</b>.
+        </p>
+      )}
+      {apiKey && (
+        <div className="key-paste-note">
+          {detection?.certain && !choice ? (
+            <span>
+              <Badge tone="green">
+                <CheckCircle2 />
+                {detection.provider.name} key
+              </Badge>
+            </span>
+          ) : (
+            <label className="key-paste-choice">
+              <span>
+                {detection
+                  ? `Looks like a ${detection.provider.name} key. Not right? Choose:`
+                  : 'Which provider is this key for?'}
+              </span>
+              <select value={providerId} onChange={(event) => setChoice(event.target.value)}>
+                <option value="">Choose a provider…</option>
+                {catalog.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {provider && replacing && <span> This replaces your saved {provider.name} key.</span>}
+        </div>
+      )}
+    </form>
+  );
+}
+
+function OpenRouterConnect() {
+  const { pending, run } = useAction();
+  return (
+    <Button
+      size="sm"
+      variant="primary"
+      icon={LogIn}
+      loading={pending === 'oauth'}
+      onClick={() =>
+        void run('oauth', async () => {
+          window.location.assign(await openRouterSignInUrl());
+        })
+      }
+    >
+      Connect with OpenRouter
+    </Button>
+  );
+}
+
 function ProviderChecklist({
   catalog,
   providers,
   setup,
-  add,
+  saved,
 }: {
   catalog: ProviderCatalogItem[];
   providers: ProviderMetadata[];
   setup?: ProviderSetupProgress;
-  add: (id: string) => void;
+  saved: () => void;
 }) {
+  const [awaiting, setAwaiting] = useState('');
+  const clearAwaiting = useCallback(() => setAwaiting(''), []);
   if (!catalog.length) return null;
   const minimum = setup?.recommended_minimum ?? 2;
   const done = setup?.recommended_verified.length ?? 0;
@@ -265,6 +437,13 @@ function ProviderChecklist({
           With only one recommended provider, chat stops when it reaches its free limit for the day.
         </Callout>
       )}
+      <KeyPaste
+        catalog={catalog}
+        providers={providers}
+        awaiting={awaiting}
+        clearAwaiting={clearAwaiting}
+        saved={saved}
+      />
       <div className="rows">
         {ordered.map((item) => {
           const connection = byId.get(item.id);
@@ -273,12 +452,10 @@ function ProviderChecklist({
             <div className="row" key={item.id}>
               <span className="row-text">
                 <b>
-                  {item.name} {item.recommended && <Badge tone="blue">Recommended</Badge>}
+                  {item.name} {item.recommended && <Badge tone="blue">Recommended</Badge>}{' '}
+                  {item.google_sign_in && <Badge>One-click Google sign-in</Badge>}
                 </b>
-                <small>
-                  {item.free_tier}
-                  {item.account === 'google' ? ' Sign in with Google.' : ''}
-                </small>
+                <small>{item.free_tier}</small>
               </span>
               <span className="row-actions">
                 {connection ? (
@@ -290,6 +467,8 @@ function ProviderChecklist({
                   ) : (
                     <StateBadge state={connection.state} />
                   )
+                ) : item.oauth ? (
+                  <OpenRouterConnect />
                 ) : (
                   <>
                     {item.signup_url && (
@@ -298,13 +477,10 @@ function ProviderChecklist({
                       </ExternalButton>
                     )}
                     {item.keys_url && (
-                      <ExternalButton size="sm" href={item.keys_url}>
+                      <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
                         Get key
                       </ExternalButton>
                     )}
-                    <Button size="sm" icon={Plus} onClick={() => add(item.id)}>
-                      Add key
-                    </Button>
                   </>
                 )}
               </span>
@@ -315,8 +491,9 @@ function ProviderChecklist({
       <p className="hint">
         <KeyRound />
         <span>
-          Signing up with email? Your Vaultwarden has a ready-made entry with a unique password for each provider in the{' '}
-          <b>Mu3Lab/AI providers</b> folder. <Link to="/settings/sign-in">Create them</Link> if you haven&apos;t yet.
+          Rather sign up with email? Your vault has a ready-made login with a unique password for each provider in the{' '}
+          <b>Mu3Lab/AI providers</b> folder, and Bitwarden offers it on the sign-up page.{' '}
+          <Link to="/settings/sign-in">Create them</Link> if you haven&apos;t yet.
         </span>
       </p>
     </Card>
@@ -330,6 +507,22 @@ export function AiSettings() {
   const catalog = useApi<{ providers: ProviderCatalogItem[] }>('/api/v1/providers/catalog');
   const [dialog, setDialog] = useState<{ id: string } | null>(null);
   const list = providers.data?.providers || [];
+  const reload = providers.reload;
+
+  // OpenRouter sends the owner back here with a one-time code after sign-in.
+  useEffect(() => {
+    const back = takeOpenRouterReturn();
+    if (!back) return;
+    if (!back.code || !back.code_verifier) {
+      toast.error('The OpenRouter sign-in did not finish. Click Connect with OpenRouter to try again.');
+      return;
+    }
+    void run(
+      'oauth',
+      () => postJsonApi('/api/v1/providers/openrouter/oauth', back),
+      'OpenRouter connected. Mu3Lab is verifying it now.',
+    ).then(() => reload());
+  }, [run, reload]);
 
   const act = async (provider: ProviderMetadata, action: 'verify' | 'enable' | 'disable' | 'remove') => {
     if (
@@ -358,11 +551,6 @@ export function AiSettings() {
       <PageHeader
         title="AI providers"
         description="Connect the model providers you want chat to use. Free tiers are never guaranteed."
-        actions={
-          <Button variant="primary" icon={Plus} onClick={() => setDialog({ id: '' })}>
-            Add provider
-          </Button>
-        }
       />
       <Card title="Connected providers" flush>
         {providers.error ? (
@@ -379,16 +567,8 @@ export function AiSettings() {
             ))}
           </div>
         ) : (
-          <EmptyState
-            icon={KeyRound}
-            title="No providers yet"
-            action={
-              <Button icon={Plus} onClick={() => setDialog({ id: '' })}>
-                Add provider
-              </Button>
-            }
-          >
-            Local models work without one. Add a provider for larger hosted models.
+          <EmptyState icon={KeyRound} title="No providers yet">
+            Local models work without one. Connect a provider below for larger hosted models.
           </EmptyState>
         )}
       </Card>
@@ -396,7 +576,7 @@ export function AiSettings() {
         catalog={catalog.data?.providers || []}
         providers={list}
         setup={providers.data?.setup}
-        add={(id) => setDialog({ id })}
+        saved={() => void reload()}
       />
       <ChatRoute />
       {dialog && (
@@ -407,7 +587,7 @@ export function AiSettings() {
           catalog={catalog.data?.providers || []}
           providers={list}
           initialId={dialog.id}
-          saved={() => void providers.reload()}
+          saved={() => void reload()}
         />
       )}
     </>

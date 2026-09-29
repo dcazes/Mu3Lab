@@ -11,10 +11,12 @@ import json
 import re
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+from ctl.actions import docker_argv
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
@@ -154,15 +156,17 @@ def _compose_state(compose_file: Path, run=subprocess.run) -> str:
     """Read containers by Compose labels without evaluating private env files."""
     try:
         proc = run(
-            [
-                "docker",
-                "ps",
-                "--all",
-                "--filter",
-                f"label=com.docker.compose.project.working_dir={compose_file.parent.resolve()}",
-                "--format",
-                "{{json .}}",
-            ],
+            docker_argv(
+                [
+                    "docker",
+                    "ps",
+                    "--all",
+                    "--filter",
+                    f"label=com.docker.compose.project.working_dir={compose_file.parent.resolve()}",
+                    "--format",
+                    "{{json .}}",
+                ]
+            ),
             capture_output=True,
             text=True,
             timeout=8,
@@ -202,13 +206,15 @@ def compose_states(run=subprocess.run) -> dict[str, str]:
     """Inspect all Compose working directories with one bounded Docker call."""
     try:
         proc = run(
-            [
-                "docker",
-                "ps",
-                "--all",
-                "--format",
-                '{{.Label "com.docker.compose.project.working_dir"}}\t{{.State}}',
-            ],
+            docker_argv(
+                [
+                    "docker",
+                    "ps",
+                    "--all",
+                    "--format",
+                    '{{.Label "com.docker.compose.project.working_dir"}}\t{{.State}}',
+                ]
+            ),
             capture_output=True,
             text=True,
             timeout=8,
@@ -229,18 +235,64 @@ def compose_states(run=subprocess.run) -> dict[str, str]:
     }
 
 
+_MEM_UNITS = {"b": 1, "kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4}
+_MEMORY_TTL = 15.0
+_memory_cache: tuple[float, dict[str, int]] = (0.0, {})
+
+
+def _memory_bytes(text: str) -> int | None:
+    """Parse the "used" half of Docker's "3.2GiB / 15GiB" memory column."""
+    match = re.match(r"\s*([\d.]+)\s*([KMGT]?i?B)\b", text, re.IGNORECASE)
+    if not match:
+        return None
+    return int(float(match.group(1)) * _MEM_UNITS.get(match.group(2).lower(), 1))
+
+
+def container_memory(run=subprocess.run, now=time.monotonic) -> dict[str, int]:
+    """Memory in bytes used by each running container, keyed by container name.
+
+    ``docker stats`` samples for about a second and the dashboard polls every
+    few seconds, so the answer is cached briefly.
+    """
+    global _memory_cache
+    stamp, cached = _memory_cache
+    if stamp and now() - stamp < _MEMORY_TTL:
+        return cached
+    try:
+        proc = run(
+            docker_argv(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}"]),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return cached
+    if proc.returncode != 0:
+        return cached
+    usage: dict[str, int] = {}
+    for line in proc.stdout.splitlines():
+        name, separator, used = line.partition("\t")
+        amount = _memory_bytes(used) if separator else None
+        if amount is not None:
+            usage[name] = amount
+    _memory_cache = (now(), usage)
+    return usage
+
+
 def compose_snapshot(run=subprocess.run) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
     """Inspect all Compose projects and safe container fields in one Docker call."""
     try:
         proc = run(
-            [
-                "docker",
-                "ps",
-                "--all",
-                "--format",
-                '{{.Label "com.docker.compose.project.working_dir"}}\t'
-                '{{.Label "com.docker.compose.service"}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Image}}',
-            ],
+            docker_argv(
+                [
+                    "docker",
+                    "ps",
+                    "--all",
+                    "--format",
+                    '{{.Label "com.docker.compose.project.working_dir"}}\t'
+                    '{{.Label "com.docker.compose.service"}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Image}}',
+                ]
+            ),
             capture_output=True,
             text=True,
             timeout=8,

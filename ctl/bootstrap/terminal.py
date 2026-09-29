@@ -34,13 +34,13 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from ctl import install
+from ctl import browser_extension, install
 
 ROOT = Path(__file__).resolve().parents[2]
 MIN_PASSWORD = 12
 CORE_TIMEOUT = 45 * 60
 # Checks that pass without anything ever being installed; "already set up" would mislead.
-NO_SKIP_NOTE = frozenset({"host_supported", "dashboard_src", "nvidia_toolkit"})
+NO_SKIP_NOTE = frozenset({"host_supported", "dashboard_src", "nvidia_toolkit", "browser_extension"})
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 BOLD, DIM, GREEN, RED, BLUE, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[34m", "\033[0m"
@@ -247,6 +247,51 @@ def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
     return False, "The core apps are taking longer than expected."
 
 
+def _chat_connected(service_id: str) -> bool:
+    from ctl.control_state import ControlState
+    from ctl.mcp_catalog import load as load_catalog
+    from ctl.registry import load
+
+    state = ControlState.runtime()
+    if state is None:
+        return False
+    servers = [server for server in load_catalog(load(ROOT / "services.yaml")) if server.service_id == service_id]
+    return any((state.mcp_server(server.id) or {}).get("state") == "live" for server in servers)
+
+
+def wait_for_installer_core_apps(screen: Screen) -> list[tuple[str, bool, str]]:
+    """Wait for the core apps the core job queued (Firecrawl): (name, ok, detail) each."""
+    from ctl.core_setup import INSTALLER_CORE_APPS
+    from ctl.jobs import JobStore
+    from ctl.registry import load
+
+    store = JobStore.runtime()
+    if store is None:
+        return []
+    results = []
+    for service_id in INSTALLER_CORE_APPS:
+        name = load(ROOT / "services.yaml").get(service_id).name
+        screen.start(f"Starting {name} (web research for the AI chat)")
+        deadline = time.monotonic() + CORE_TIMEOUT
+        outcome: tuple[str, bool, str] = (name, False, f"{name} is taking longer than expected.")
+        while time.monotonic() < deadline:
+            jobs = store.jobs_for_service(service_id, limit=1)
+            if not jobs:
+                outcome = (name, False, f"{name} was not queued; the dashboard has a Retry button.")
+                break
+            latest = jobs[0]
+            if latest["state"] == "succeeded":
+                outcome = (name, True, "and connected to chat" if _chat_connected(service_id) else "")
+                break
+            if latest["state"] in {"failed", "cancelled"}:
+                outcome = (name, False, str(latest.get("detail") or ""))
+                break
+            screen.progress(str(latest.get("detail") or ""))
+            time.sleep(3)
+        results.append(outcome)
+    return results
+
+
 def save_logins(account: dict[str, str], host: str) -> tuple[bool, str]:
     from ctl import vault_setup, vaultwarden_api
     from ctl.control_state import ControlState
@@ -381,6 +426,13 @@ def run() -> int:
         screen.say(
             f"    {detail or 'See the dashboard for details.'} The dashboard shows what went wrong and a Retry button."
         )
+    if ok:
+        for name, app_ok, app_detail in wait_for_installer_core_apps(screen):
+            if app_ok:
+                screen.finish(screen.color(GREEN, "✓"), f"{name} is running {app_detail}".rstrip())
+            else:
+                screen.finish(screen.color(RED, "!"), f"{name} did not start yet")
+                screen.say(f"    {app_detail or 'See the dashboard for details.'}")
 
     host = tailnet_name()
     if account and fresh:
@@ -430,6 +482,12 @@ def report_success(screen: Screen, dashboard: str, needs_provider: bool) -> int:
         print(f"    {screen.color(BLUE, dashboard)}")
         print()
         print("  Sign in with the email and password you chose.")
+        browsers = browser_extension.status()["browsers"]
+        if browsers:
+            print()
+            print(f"  Bitwarden (fills in your passwords) was added to {' and '.join(browsers)}.")
+            print("  If the browser was already open, close it and open it again. Then click the")
+            print("  Bitwarden shield next to the address bar and sign in with the same email and password.")
         if needs_provider:
             print("  First thing to do there: connect a free AI provider so the AI chat works.")
         print("  The dashboard's Home page lists every next step in order.")

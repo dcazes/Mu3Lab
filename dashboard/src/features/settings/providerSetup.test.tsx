@@ -26,9 +26,10 @@ const catalogItem = (id: string, name: string, extra: Partial<ProviderCatalogIte
 });
 
 const catalog = [
-  catalogItem('openrouter', 'OpenRouter'),
-  catalogItem('groq', 'Groq', { recommended: true }),
-  catalogItem('cerebras', 'Cerebras', { recommended: true }),
+  catalogItem('openrouter', 'OpenRouter', { prefix: 'sk-or-v1-', oauth: true, google_sign_in: true }),
+  catalogItem('groq', 'Groq', { recommended: true, prefix: 'gsk_', google_sign_in: true }),
+  catalogItem('cerebras', 'Cerebras', { recommended: true, prefix: 'csk-' }),
+  catalogItem('mistral', 'Mistral', { key_pattern: '^[A-Za-z0-9]{32}$' }),
 ];
 
 const connection = (id: string, name: string): ProviderMetadata => ({
@@ -78,9 +79,12 @@ describe('AI provider checklist', () => {
     expect(rows.map((link) => link.getAttribute('href'))).toEqual([
       'https://groq.example/keys',
       'https://cerebras.example/keys',
-      'https://openrouter.example/keys',
+      'https://mistral.example/keys',
     ]);
     expect(screen.getAllByText('Recommended')).toHaveLength(2);
+    expect(screen.getAllByText('One-click Google sign-in')).toHaveLength(2);
+    // OpenRouter hands over a key through its own sign-in page: no key to copy.
+    expect(screen.getByRole('button', { name: /Connect with OpenRouter/ })).toBeInTheDocument();
   });
 
   it('accepts one provider but recommends a backup', async () => {
@@ -99,11 +103,66 @@ describe('AI provider checklist', () => {
   });
 });
 
+describe('One key field for every provider', () => {
+  const posted = (fetchMock: ReturnType<typeof stubFetch>, path: string) =>
+    fetchMock.mock.calls
+      .filter(([url, init]) => url === path && init?.method === 'POST')
+      .map(([, init]) => JSON.parse(String(init?.body)));
+
+  const api = (path: string, init?: RequestInit) =>
+    init?.method === 'POST' ? { ok: true, job: { id: 'job-1' } } : providersApi([], [])(path);
+
+  it('detects the provider from a pasted key and connects it straight away', async () => {
+    const fetchMock = stubFetch(api);
+    renderWithDashboard(<AiSettings />, dashboardData([]));
+    fireEvent.paste(await screen.findByLabelText('API key'), { clipboardData: { getData: () => ' gsk_abc ' } });
+    await waitFor(() =>
+      expect(posted(fetchMock, '/api/v1/providers')).toEqual([{ provider_id: 'groq', api_key: 'gsk_abc' }]),
+    );
+  });
+
+  it('asks which provider a key is for when it cannot tell', async () => {
+    const fetchMock = stubFetch(api);
+    renderWithDashboard(<AiSettings />, dashboardData([]));
+    fireEvent.change(await screen.findByLabelText('API key'), { target: { value: 'mystery-key' } });
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Which provider is this key for/), { target: { value: 'cerebras' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(posted(fetchMock, '/api/v1/providers')).toEqual([{ provider_id: 'cerebras', api_key: 'mystery-key' }]),
+    );
+  });
+
+  it('offers a best guess for keys without a prefix but waits for the owner', async () => {
+    const fetchMock = stubFetch(api);
+    renderWithDashboard(<AiSettings />, dashboardData([]));
+    fireEvent.paste(await screen.findByLabelText('API key'), { clipboardData: { getData: () => 'A1b2'.repeat(8) } });
+    expect(await screen.findByText(/Looks like a Mistral key/)).toBeInTheDocument();
+    expect(posted(fetchMock, '/api/v1/providers')).toEqual([]);
+  });
+
+  it('finishes the OpenRouter sign-in when OpenRouter sends the owner back', async () => {
+    const fetchMock = stubFetch(api);
+    sessionStorage.setItem('mu3lab.openrouter.verifier', 'v'.repeat(43));
+    window.history.pushState({}, '', '/settings/ai?provider_oauth=openrouter&code=one-time');
+    renderWithDashboard(<AiSettings />, dashboardData([]));
+    await waitFor(() =>
+      expect(posted(fetchMock, '/api/v1/providers/openrouter/oauth')).toEqual([
+        { code: 'one-time', code_verifier: 'v'.repeat(43) },
+      ]),
+    );
+    expect(window.location.search).toBe('');
+    expect(sessionStorage.getItem('mu3lab.openrouter.verifier')).toBeNull();
+  });
+});
+
 describe('Get started', () => {
-  const api = (seeded: boolean, connected: ProviderMetadata[]) => (path: string) =>
-    path === '/api/v1/vault/status'
-      ? { ok: true, seeded, seeded_at: '' }
-      : (providersApi(connected, [])(path) ?? { handoffs: [] });
+  const api =
+    (seeded: boolean, connected: ProviderMetadata[], browsers: string[] = []) =>
+    (path: string) =>
+      path === '/api/v1/vault/status'
+        ? { ok: true, seeded, seeded_at: '', browser_extension: { browsers, server_url: '' } }
+        : (providersApi(connected, [])(path) ?? { handoffs: [] });
 
   beforeEach(() => localStorage.clear());
 
@@ -134,6 +193,16 @@ describe('Get started', () => {
     expect(screen.getByText(/choose/)).toHaveTextContent('Self-hosted');
     fireEvent.click(screen.getByRole('button', { name: "I've done this" }));
     expect(await screen.findByText('1 of 5 done')).toBeInTheDocument();
+  });
+
+  it('skips the server setup when the installer already added Bitwarden', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch(api(true, [], ['Google Chrome']));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    fireEvent.click(await screen.findByRole('button', { name: /Let your browser fill in your passwords/ }));
+    expect(screen.getByText(/already added Bitwarden to Google Chrome/)).toBeInTheDocument();
+    expect(screen.queryByText(/Self-hosted/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Get the extension' })).not.toBeInTheDocument();
   });
 });
 

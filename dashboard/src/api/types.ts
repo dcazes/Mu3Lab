@@ -181,6 +181,10 @@ export interface SystemResponse {
   cpu_percent: number;
   uptime_seconds?: number;
   docker_ready: boolean;
+  /** systemd state of the background worker, or 'unknown'. */
+  worker_state?: string;
+  /** Memory in bytes used by each running container, keyed by container name. */
+  container_memory?: Record<string, number>;
   tailnet_dns_name: string;
   tailscale?: TailscaleStatus;
   runtime_root: string;
@@ -260,6 +264,19 @@ export interface ProviderCatalogItem {
   account?: 'email' | 'google';
   recommended?: boolean;
   free_tier?: string;
+  /** The sign-up page offers "Continue with Google". */
+  google_sign_in?: boolean;
+  /** Mu3Lab can fetch the key through the provider's own sign-in page. */
+  oauth?: boolean;
+  /** Best-guess key shape for providers without a distinctive prefix. */
+  key_pattern?: string;
+}
+
+export interface VaultStatus {
+  seeded: boolean;
+  seeded_at?: string;
+  /** Browsers the installer added Bitwarden to, already pointed at this vault. */
+  browser_extension?: { browsers: string[]; server_url: string };
 }
 
 export interface ProviderSetupProgress {

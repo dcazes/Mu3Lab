@@ -18,6 +18,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 _TAILNET_NAME = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.ts\.net\Z")
+# Authentik's documented launch URL for "hide from the user's library". Only
+# the Mu3Lab dashboard is listed there; every other app is opened from the
+# dashboard. Blueprints re-apply it, so an app un-hidden by hand is hidden again.
+HIDDEN_FROM_LIBRARY = "blank://blank"
 
 
 def _quote(value: str) -> str:
@@ -188,7 +192,7 @@ entries:
     attrs:
       name: Mu3Lab LiteLLM
       slug: mu3lab-litellm
-      meta_launch_url: {_quote(litellm_origin + "/ui/")}
+      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
       meta_description: Private LiteLLM administration UI
       policy_engine_mode: any
       provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab LiteLLM provider]]
@@ -215,7 +219,7 @@ entries:
     attrs:
       name: Mu3Lab FreeLLMAPI
       slug: mu3lab-freellmapi
-      meta_launch_url: {_quote(freellmapi_origin + "/")}
+      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
       meta_description: Private FreeLLMAPI provider dashboard
       policy_engine_mode: any
       provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab FreeLLMAPI provider]]
@@ -397,7 +401,7 @@ entries:
       name: {_quote(name)}
       slug: mu3lab-{service_id}
       provider: !KeyOf mu3lab-{service_id}-provider
-      meta_launch_url: {_quote(launch)}
+      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
       policy_engine_mode: any
   - model: authentik_policies.policybinding
     state: present

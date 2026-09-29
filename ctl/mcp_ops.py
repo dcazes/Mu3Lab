@@ -334,6 +334,26 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
     return success
 
 
+def preenable(service_id: str, root: Path) -> None:
+    """Switch on an app's preferred MCP before the app itself is installed.
+
+    Used for core apps whose chat connector is on by default. The app
+    installer's final ``sync_application`` starts the MCP and links it to
+    LobeChat once the app is healthy. An MCP the owner has already enabled
+    or disabled is left as it is.
+    """
+    state = ControlState.runtime()
+    if state is None:
+        return
+    for server in load_catalog(load_registry()):
+        if server.service_id != service_id or server.status != "accepted" or not server.preferred:
+            continue
+        if state.mcp_server(server.id):
+            continue
+        _materialize(server, root)
+        state.set_mcp_server(server.id, service_id, enabled=True, state="prepared")
+
+
 def reconcile_lifecycle(root: Path, log) -> None:
     """Recover MCP state after host boots or out-of-band app state changes."""
     state = ControlState.runtime()

@@ -67,7 +67,9 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertIn("slug: mu3lab", content)
         self.assertIn("name: Mu3Lab LiteLLM provider", content)
         self.assertIn('external_host: "https://mu3lab-4.taile2cc7a.ts.net:8454"', content)
-        self.assertIn('meta_launch_url: "https://mu3lab-4.taile2cc7a.ts.net:8454/ui/"', content)
+        # Only the dashboard appears in the Authentik library; the rest are hidden.
+        self.assertIn('meta_launch_url: "https://mu3lab-4.taile2cc7a.ts.net:8446"', content)
+        self.assertEqual(content.count('meta_launch_url: "blank://blank"'), 2)
         self.assertIn("name, Mu3Lab LiteLLM provider", content)
         self.assertIn("name: mu3lab-operators", content)
         self.assertIn("authentik_policies.policybinding", content)

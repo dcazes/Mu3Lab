@@ -761,6 +761,7 @@ class DockerSessionTests(unittest.TestCase):
             "vaultwarden_setup": ["needs_user", "ready"],
             "tailscale_operator": ["missing", "ready"],
             "vaultwarden_serve": ["unshared", "ready"],
+            "browser_extension": ["missing", "no_address", "not_needed", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
             "lobehub_serve": ["unshared", "ready"],

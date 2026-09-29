@@ -27,6 +27,9 @@ from ctl.service_state import status as service_status
 from ctl.service_state import tailnet_dns_name
 
 CORE_ORDER = ("ollama", "freellmapi", "litellm", "lobehub")
+# Core apps that need the full app installer (private route, image pinning,
+# chat connector). The core job queues them once the AI suite is running.
+INSTALLER_CORE_APPS = ("firecrawl",)
 HEALTH_TIMEOUT_SECONDS = 120
 MODEL_TIMEOUT_SECONDS = 600
 
@@ -47,7 +50,9 @@ def capacity() -> dict:
     except (AttributeError, OSError, ValueError):
         pass
     try:
-        docker_ready = subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0
+        docker_ready = (
+            subprocess.run(actions.docker_argv(["docker", "info"]), capture_output=True, timeout=5).returncode == 0
+        )
     except (OSError, subprocess.SubprocessError):
         docker_ready = False
     reasons: list[str] = []
@@ -83,7 +88,9 @@ def plan(root: Path) -> dict:
     admission = capacity()
     ready = not missing and admission["ok"]
     error = (
-        "" if ready else ("Core manifests are not ready for execution." if missing else "; ".join(admission["reasons"]))
+        ""
+        if ready
+        else ("missing app manifests for " + ", ".join(missing) if missing else "; ".join(admission["reasons"]))
     )
     return {"ready": ready, "error": error, "services": list(CORE_ORDER), "missing": missing, "capacity": admission}
 
@@ -312,6 +319,27 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     )
 
 
+def _queue_installer_core_apps(store: JobStore, actor: str, root: Path, log: Callable[[str], None]) -> None:
+    """Queue each installer-managed core app that is not installed yet, chat connector on."""
+    from ctl.control_state import ControlState
+    from ctl.mcp_ops import preenable
+
+    control = ControlState.runtime()
+    for service_id in INSTALLER_CORE_APPS:
+        installation = control.installation(service_id) if control else None
+        if installation and installation.get("state") in {"running", "stopped"}:
+            continue
+        preenable(service_id, root)
+        job = store.create(
+            kind="lifecycle",
+            service_id=service_id,
+            action="install",
+            actor=actor,
+            detail="Queued by core setup: this app is part of the core suite.",
+        )
+        log(f"{service_id}: installation queued (job {job['id']})")
+
+
 def _run(
     store: JobStore,
     job_id: str,
@@ -329,9 +357,7 @@ def _run(
         store.transition(job_id, "running", actor=actor, detail="Core suite execution started.")
         checked = plan(root)
         if not checked["ready"]:
-            store.transition(
-                job_id, "failed", actor=actor, detail="Core suite blocked: " + ", ".join(checked["missing"])
-            )
+            store.transition(job_id, "failed", actor=actor, detail="Core suite blocked: " + checked["error"])
             return
         runtime = RuntimePaths()
         env_files = ensure_core_envs(runtime.root)
@@ -423,6 +449,11 @@ def _run(
                 log(detail)
                 wiring = configure_wiring(runtime)
                 envs = _runtime_envs(env_files, wiring)
+        try:
+            _queue_installer_core_apps(store, actor, root, log)
+        except (OSError, ValueError) as exc:
+            # The AI suite itself is up; the app shows its own Install/Retry button.
+            log("Could not queue the remaining core apps: " + redact(str(exc)))
         verified, detail = _verify_platform(runtime, wiring)
         if not verified:
             state = "waiting_for_confirmation" if not wiring["chat_configured"] else "failed"
