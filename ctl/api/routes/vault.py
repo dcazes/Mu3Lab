@@ -14,6 +14,7 @@ from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OwnerMutation
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
+from ctl.runtime import RuntimePaths
 from ctl.vault_setup import VAULTWARDEN_LOCAL_URL, SeedResult, desired_items, seed
 from ctl.vaultwarden_api import VaultError, VaultSession
 
@@ -56,7 +57,9 @@ def vault_status(_operator: Operator) -> dict[str, Any]:
     return {
         "ok": True,
         **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
-        "browser_extension": browser_extension.status(),
+        "browser_extension": browser_extension.status(
+            vault_database=RuntimePaths().data / "vaultwarden" / "db.sqlite3"
+        ),
     }
 
 

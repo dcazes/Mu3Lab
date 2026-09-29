@@ -1,4 +1,10 @@
-"""Durable provider reconciliation and live-route verification."""
+"""Durable provider reconciliation and verification through FreeLLMAPI.
+
+FreeLLMAPI is the source of truth for free models: it validates each key the
+way that provider needs, ranks the provider's models, and tests them. Mu3Lab
+keeps no model lists of its own, so nothing here goes stale when a provider
+retires or adds a model.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +17,9 @@ from pathlib import Path
 from ctl import actions
 from ctl.control_state import ControlState
 from ctl.core_wiring import configure
+from ctl.freellmapi_admin import GatewayAdmin, GatewayAdminError
 from ctl.jobs import JobStore, redact
-from ctl.provider_catalog import get
+from ctl.provider_catalog import BY_ID, get, key_problem
 from ctl.provider_secrets import delete as delete_secret
 from ctl.provider_secrets import metadata, records, save
 from ctl.registry import load
@@ -20,17 +27,13 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
 SUPPORTED_ACTIONS = frozenset({"save", "verify", "enable", "disable", "remove"})
-
-
-def _request_json(url: str, key: str) -> tuple[int, dict]:
-    request = urllib.request.Request(url, headers={"Accept": "application/json", "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, {}
-    except (OSError, ValueError, urllib.error.URLError):
-        return 0, {}
+# How far down FreeLLMAPI's ranking to go: its catalog can briefly list a model
+# the provider has just retired, and real chats fall through the same way.
+MAX_MODEL_TESTS = 5
+# FreeLLMAPI's key verdicts that mean the provider accepted the key.
+KEY_ACCEPTED = frozenset({"healthy", "rate_limited"})
+# Enough room for reasoning models, which think before they answer.
+PROBE_MAX_TOKENS = 256
 
 
 @dataclass(frozen=True)
@@ -43,65 +46,13 @@ class StreamProbe:
     detail: str
 
 
-class ModelCatalogUnavailable(RuntimeError):
-    """The local FreeLLMAPI catalog could not be read."""
-
-
-def _available_models(key: str) -> list[str]:
-    status, payload = _request_json("http://127.0.0.1:3001/v1/models", key)
-    if status != 200:
-        raise ModelCatalogUnavailable(f"FreeLLMAPI model discovery returned HTTP {status or 'unavailable'}.")
-    rows = payload.get("data", []) if isinstance(payload, dict) else []
-    result: list[str] = []
-    for item in rows:
-        if not isinstance(item, dict):
-            continue
-        if item.get("available") is False:
-            continue
-        model_id = str(item.get("id", ""))
-        if model_id and model_id not in result:
-            result.append(model_id)
-    return result
-
-
-def _canonical_model_id(value: str) -> str:
-    """Compare FreeLLMAPI's normalized IDs with curated provider aliases.
-
-    The gateway intentionally reports every model as owned by `freellmapi`.
-    Provider ownership therefore cannot establish whether a stored key works;
-    the streamed route header is the authoritative check.  This helper only
-    finds sensible probe candidates, preserving the curated order.
-    """
-    normalized = value.strip().lower()
-    for prefix in ("openai/", "qwen/", "meta-llama/", "meta/", "nvidia/", "groq/", "google/"):
-        if normalized.startswith(prefix):
-            normalized = normalized[len(prefix) :]
-            break
-    return normalized
-
-
-def _probe_candidates(provider_id: str, available: list[str]) -> list[str]:
-    """Return actual gateway IDs in curated probe order, without duplicates."""
-    exact = set(available)
-    normalized: dict[str, list[str]] = {}
-    for model in available:
-        normalized.setdefault(_canonical_model_id(model), []).append(model)
-    result: list[str] = []
-    for probe in get(provider_id).probe_models:
-        candidates = [probe] if probe in exact else normalized.get(_canonical_model_id(probe), [])
-        for candidate in candidates:
-            if candidate not in result:
-                result.append(candidate)
-    return result
-
-
 def _probe_stream(
     model: str, key: str, *, gateway: str = "FreeLLMAPI", url: str = "http://127.0.0.1:3001/v1/chat/completions"
 ) -> StreamProbe:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": "Reply with OK."}],
-        "max_tokens": 4,
+        "max_tokens": PROBE_MAX_TOKENS,
         "temperature": 0,
         "stream": True,
     }
@@ -109,7 +60,11 @@ def _probe_stream(
         url,
         method="POST",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Accept": "text/event-stream", "Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        headers={
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
@@ -159,24 +114,6 @@ def _probe_stream(
         )
 
 
-def _groq_access_diagnostic() -> tuple[int, str]:
-    """Use Groq's read-only models endpoint to explain opaque gateway 502s."""
-    key = next((item["api_key"] for item in records() if item["id"] == "groq"), "")
-    if not key:
-        return 0, "No saved Groq credential was found."
-    request = urllib.request.Request(
-        "https://api.groq.com/openai/v1/models",
-        headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.status, "Groq accepted the key for model discovery."
-    except urllib.error.HTTPError as exc:
-        return exc.code, f"Groq's models endpoint returned HTTP {exc.code}."
-    except (OSError, urllib.error.URLError):
-        return 0, "Groq's models endpoint was unreachable."
-
-
 def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
     paths = RuntimePaths()
     try:
@@ -195,6 +132,7 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
         if rc:
             return False, f"{service.name} reconciliation failed: {redact(output)}", []
     service_key = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")
+    _forget_removed_keys(log)
     return (
         bool(service_key),
         ("Provider gateway reconciled." if service_key else "FreeLLMAPI service key is unavailable."),
@@ -202,105 +140,99 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
     )
 
 
+def _forget_removed_keys(log) -> None:
+    """Delete gateway keys for providers removed in Mu3Lab.
+
+    FreeLLMAPI's config import only adds and updates keys, so a provider
+    missing from the file would otherwise keep routing on its old key.
+    """
+    saved = {str(item["id"]) for item in records()}
+    try:
+        admin = GatewayAdmin.sign_in()
+        for key in admin.api_keys():
+            platform = str(key.get("platform", ""))
+            if platform in BY_ID and platform not in saved:
+                admin.delete_key(int(key["id"]))
+                log(f"Removed the {BY_ID[platform].name} key from FreeLLMAPI.")
+    except (GatewayAdminError, KeyError, TypeError, ValueError) as exc:
+        log(f"Could not tidy FreeLLMAPI keys: {exc}")
+
+
+def _chat_route_check(log) -> StreamProbe:
+    """Confirm chat's own path (LiteLLM's mu3lab-chat through FreeLLMAPI) streams."""
+    lite_key = read_runtime_env(RuntimePaths().projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
+    if not lite_key:
+        return StreamProbe(
+            False, 0, "", "", "litellm_unavailable", "LiteLLM master key is missing after reconciliation."
+        )
+    log("LiteLLM probe: mu3lab-chat")
+    probe = _probe_stream("mu3lab-chat", lite_key, gateway="LiteLLM", url="http://127.0.0.1:4000/v1/chat/completions")
+    log(f"LiteLLM probe result: HTTP {probe.http_status or 'unavailable'}, {probe.error_code or 'complete'}")
+    return probe
+
+
 def _verify(provider_id: str, root: Path, log) -> StreamProbe:
+    provider = get(provider_id)
+    saved = next((str(item["api_key"]) for item in records() if item["id"] == provider_id), "")
+    if key_problem(saved):  # saved before Mu3Lab checked pastes, e.g. a copied sentence
+        return StreamProbe(False, 0, "", "", "credential_rejected", key_problem(saved))
     ok, detail, _ = _reconcile(root, log)
     if not ok:
         return StreamProbe(False, 0, "", "", "gateway_unavailable", detail)
-    key = read_runtime_env(RuntimePaths().projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")
     try:
-        available = set(_available_models(key))
-    except ModelCatalogUnavailable as exc:
-        return StreamProbe(False, 0, "", "", "gateway_unavailable", str(exc))
-    candidates = _probe_candidates(provider_id, list(available))
-    if not candidates:
-        return StreamProbe(
-            False,
-            200,
-            "",
-            "",
-            "catalog_mismatch",
-            "None of Mu3Lab's curated probe models are present in this FreeLLMAPI catalog.",
-        )
-    last = StreamProbe(False, 0, "", "", "stream_failed", "No provider probe completed.")
-    for model in candidates:
-        log(f"FreeLLMAPI probe: {model}")
-        probe = _probe_stream(model, key)
-        log(
-            f"FreeLLMAPI probe result: HTTP {probe.http_status or 'unavailable'}, "
-            f"route {probe.routed_via or 'unreported'}, {probe.error_code or 'complete'}"
-        )
-        last = probe
-        if not probe.success:
-            if probe.error_code in {"credential_rejected", "rate_limited_or_quota", "gateway_unavailable"}:
-                return probe
-            continue
-        routed_provider = probe.routed_via.split("/", 1)[0].strip().lower()
-        if routed_provider == provider_id:
-            lite_key = read_runtime_env(RuntimePaths().projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
-            if not lite_key:
-                return StreamProbe(
-                    False,
-                    0,
-                    probe.routed_via,
-                    model,
-                    "litellm_unavailable",
-                    "LiteLLM master key is missing after reconciliation.",
-                )
-            log("LiteLLM probe: mu3lab-chat")
-            end_to_end = _probe_stream(
-                "mu3lab-chat", lite_key, gateway="LiteLLM", url="http://127.0.0.1:4000/v1/chat/completions"
-            )
-            log(
-                f"LiteLLM probe result: HTTP {end_to_end.http_status or 'unavailable'}, "
-                f"{end_to_end.error_code or 'complete'}"
-            )
-            if not end_to_end.success:
-                return StreamProbe(
-                    False, end_to_end.http_status, probe.routed_via, model, "litellm_route_failed", end_to_end.detail
-                )
-            if end_to_end.routed_via and end_to_end.routed_via.split("/", 1)[0].strip().lower() != provider_id:
-                return StreamProbe(
-                    False,
-                    end_to_end.http_status,
-                    end_to_end.routed_via,
-                    model,
-                    "provider_route_mismatch",
-                    f"LiteLLM completed through {end_to_end.routed_via}, not {provider_id}.",
-                )
+        admin = GatewayAdmin.sign_in()
+        key = next((item for item in admin.api_keys() if item.get("platform") == provider_id), None)
+        if key is None:
             return StreamProbe(
-                True,
-                end_to_end.http_status,
-                probe.routed_via,
-                model,
-                "",
-                f"{provider_id} routed via {probe.routed_via}; LiteLLM streamed mu3lab-chat successfully."
-                + (" LiteLLM did not expose upstream provider attribution." if not end_to_end.routed_via else ""),
+                False, 0, "", "", "gateway_unavailable", f"FreeLLMAPI did not load the {provider.name} key."
             )
-        last = StreamProbe(
-            False,
-            probe.http_status,
-            probe.routed_via,
-            model,
-            "provider_route_mismatch",
-            f"The test completed through {probe.routed_via or 'an unidentified provider'}, not {provider_id}.",
-        )
-    if provider_id == "groq" and not last.routed_via and last.error_code == "stream_failed":
-        status, diagnostic = _groq_access_diagnostic()
-        log(diagnostic)
-        if status in {401, 403}:
+        log(f"FreeLLMAPI key check: {provider.name}")
+        verdict, reason = admin.check_key(int(key["id"]))
+        log(f"FreeLLMAPI key check result: {verdict}")
+        if verdict == "invalid":
+            where = f" Copy the key again from {provider.keys_url} and paste it." if provider.keys_url else ""
             return StreamProbe(
                 False,
-                status,
+                0,
                 "",
-                last.model,
-                "upstream_access_denied",
-                diagnostic + " Check the Groq key and account access.",
+                "",
+                "credential_rejected",
+                f"{provider.name} rejected this key: {reason or 'no reason given'}.{where}",
             )
-        if status == 429:
-            return StreamProbe(
-                False, status, "", last.model, "rate_limited_or_quota", diagnostic + " Check Groq quota or rate limits."
-            )
-    return last
+        tested = ""
+        last_error = f"FreeLLMAPI has no usable {provider.name} model right now."
+        for model in admin.ranked_models(provider_id)[:MAX_MODEL_TESTS]:
+            name = str(model.get("modelId", ""))
+            log(f"FreeLLMAPI model test: {name}")
+            passed, error = admin.test_model(int(model["id"]))
+            log(f"FreeLLMAPI model test result: {'passed' if passed else redact(error) or 'failed'}")
+            if passed:
+                tested = name
+                break
+            last_error = error or last_error
+    except (GatewayAdminError, KeyError, TypeError, ValueError) as exc:
+        return StreamProbe(False, 0, "", "", "gateway_unavailable", str(exc))
+    if not tested and verdict not in KEY_ACCEPTED:
+        return StreamProbe(False, 0, "", "", "stream_failed", redact(last_error))
+    chat = _chat_route_check(log)
+    if not chat.success:
+        return StreamProbe(False, chat.http_status, "", tested, "litellm_route_failed", chat.detail)
+    if tested:
+        return StreamProbe(
+            True, 200, f"{provider_id}/{tested}", tested, "", f"{provider.name} answered with {tested}; chat is ready."
+        )
+    # FreeLLMAPI vouched for the key; its models were busy or just retired,
+    # and real chats move on to the next model the same way.
+    log(f"No {provider.name} model answered the test: {redact(last_error)}")
+    return StreamProbe(
+        True,
+        200,
+        "",
+        "",
+        "",
+        f"{provider.name} accepted the key. Its models were busy during the test, "
+        "so chat will start using them as soon as they are free.",
+    )
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
@@ -365,7 +297,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             label,
             enabled=True,
             state="verified",
-            models=[probe.model],
+            models=[probe.model] if probe.model else [],
             attempted=True,
             verified=True,
             job_id="",
@@ -395,8 +327,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             )
     else:
         recommendations = {
-            "credential_rejected": "Replace the rejected key, then verify again.",
-            "upstream_access_denied": "Check the Groq credential and account access, then verify again.",
+            "credential_rejected": "Copy a fresh key from the provider and paste it again.",
             "rate_limited_or_quota": "Check provider quota or wait for its rate limit to reset, then verify again.",
             "gateway_unavailable": "Confirm FreeLLMAPI is healthy, then verify again.",
             "litellm_unavailable": "Confirm LiteLLM is healthy and its runtime credential is configured.",

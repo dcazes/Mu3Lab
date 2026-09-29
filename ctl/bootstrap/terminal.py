@@ -387,7 +387,8 @@ def run() -> int:
             elif status == "ready":
                 quiet = step_id in NO_SKIP_NOTE
                 note = screen.color(DIM, " (already set up)") if event.get("skipped") and not quiet else ""
-                screen.finish(screen.color(GREEN, "✓"), labels[step_id] + note)
+                label = bitwarden_line() if step_id == "browser_extension" else ""
+                screen.finish(screen.color(GREEN, "✓"), (label or labels[step_id]) + note)
             elif status == "failed":
                 screen.finish(screen.color(RED, "✗"), labels[step_id])
         elif event.get("type") == "log":
@@ -448,6 +449,14 @@ def run() -> int:
             warm_up(install.tailnet_https_origin(host, port))
         screen.finish(screen.color(GREEN, "✓"), "Private addresses are ready")
     return report_success(screen, dashboard, needs_provider)
+
+
+def bitwarden_line() -> str:
+    """Name what was installed and where to find it, like the other finished steps."""
+    browsers = browser_extension.status()["browsers"]
+    if not browsers:
+        return ""
+    return f"Bitwarden password manager added to {' and '.join(browsers)} (the shield icon by the address bar)"
 
 
 def report_failure(screen: Screen, job: dict, log_path: Path) -> int:

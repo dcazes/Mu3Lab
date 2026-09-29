@@ -37,11 +37,23 @@ def install_nextcloud_if_needed(project: Path, log: Log) -> tuple[bool, str]:
     """
     if nextcloud_installed(project, log):
         return True, "Nextcloud base installation is already complete."
-    # Apache/PHP need a moment after db and Redis are healthy. Compose's health
-    # wait cannot be used: the app health check requires an installed instance.
-    deadline = time.monotonic() + 120
+    # The image's entrypoint copies Nextcloud into the volume and, because the
+    # bootstrap override sets NEXTCLOUD_ADMIN_*, installs it itself while
+    # holding this lock. A second `maintenance:install` racing it creates the
+    # tables under two different database roles and fails with "permission
+    # denied for table oc_migrations". Wait for the entrypoint to finish and
+    # only install explicitly when it did not. Compose's health wait cannot be
+    # used: the app health check requires an installed instance.
+    deadline = time.monotonic() + 600
     last = "Nextcloud occ is not ready yet."
     while time.monotonic() < deadline:
+        rc, _output = actions.compose_exec(
+            project, "app", ["test", "-e", "/var/www/html/nextcloud-init-sync.lock"], log, timeout=30
+        )
+        if rc == 0:
+            last = "The Nextcloud container is still initializing."
+            time.sleep(3)
+            continue
         rc, output = actions.compose_exec(project, "app", [*OCC, "status", "--output=json"], log, timeout=30)
         if rc == 0:
             break
@@ -49,6 +61,8 @@ def install_nextcloud_if_needed(project: Path, log: Log) -> tuple[bool, str]:
         time.sleep(2)
     else:
         return False, "Nextcloud did not become ready for first-run installation: " + last
+    if nextcloud_installed(project, log):
+        return True, "Nextcloud base installation completed during container start."
     script = (
         "set -eu; "
         'test -n "${NEXTCLOUD_ADMIN_USER:-}"; '

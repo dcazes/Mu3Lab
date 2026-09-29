@@ -86,6 +86,21 @@ class IdentityContractTests(unittest.TestCase):
             self.assertIn('meta_launch_url: "blank://blank"', content)
             self.assertEqual((project / ".env").read_text(encoding="utf-8").count("preserved-secret"), 1)
 
+    def test_installed_trusted_header_app_is_registered_with_the_outpost(self):
+        # Caddy sends Baby Buddy through the outpost; without a provider for
+        # its host the outpost answers every request with a 404.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp) / "runtime")
+            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-dashboard.yaml"
+            reconcile_blueprints(load(), "mu3lab.example.ts.net", paths)
+            self.assertNotIn("Baby Buddy", blueprint.read_text(encoding="utf-8"))
+            (paths.projects / "baby-buddy").mkdir(parents=True)
+            reconcile_blueprints(load(), "mu3lab.example.ts.net", paths)
+            content = blueprint.read_text(encoding="utf-8")
+            self.assertIn('external_host: "https://mu3lab.example.ts.net:8458"', content)
+            outpost = content.split("authentik_outposts.outpost", 1)[1]
+            self.assertIn("[name, Mu3Lab Baby Buddy provider]", outpost)
+
     def test_mealie_owner_requires_oidc_link_and_admin_role(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime")

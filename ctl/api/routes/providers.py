@@ -11,7 +11,7 @@ from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OperatorMutation
 from ctl.control_state import ControlState
-from ctl.provider_catalog import RECOMMENDED_MINIMUM, prefix_warning, setup_progress
+from ctl.provider_catalog import RECOMMENDED_MINIMUM, key_problem, prefix_warning, setup_progress
 from ctl.provider_catalog import catalog as provider_catalog
 from ctl.provider_catalog import detect as detect_provider
 from ctl.provider_catalog import get as get_provider
@@ -23,9 +23,9 @@ router = APIRouter(prefix="/api/v1/providers", tags=["providers"])
 def _provider_view(item: dict[str, Any]) -> dict[str, Any]:
     try:
         definition = get_provider(str(item["provider_id"]))
-        hint, name, examples, supported = definition.key_hint, definition.name, list(definition.example_models), True
+        hint, name, supported = definition.key_hint, definition.name, True
     except ValueError:
-        hint, name, examples, supported = "Unknown legacy format", str(item["label"]), [], False
+        hint, name, supported = "Unknown legacy format", str(item["label"]), False
     last_error = item["last_error"] or {}
     return {
         "id": item["provider_id"],
@@ -35,8 +35,9 @@ def _provider_view(item: dict[str, Any]) -> dict[str, Any]:
         "state": item["state"],
         "key_hint": hint,
         "credential_indicator": hint.replace("…", "••••"),
-        "model_samples": item["model_samples"] or examples,
-        "models_are_examples": not bool(item["model_samples"]),
+        # The model FreeLLMAPI answered with during verification, if any.
+        "model_samples": item["model_samples"] or [],
+        "models_are_examples": False,
         "last_attempt_at": item["last_attempt_at"],
         "last_verified_at": item["last_verified_at"],
         "updated_at": item["updated_at"],
@@ -85,6 +86,10 @@ def providers_catalog(_operator: Operator) -> dict[str, Any]:
 def _save_key(provider_id: str, label: str, api_key: str, operator: dict[str, Any], key: str | None) -> dict[str, Any]:
     from ctl.provider_secrets import save
 
+    api_key = api_key.strip()
+    problem = key_problem(api_key)
+    if problem:
+        raise ApiError(400, problem)
     try:
         definition = get_provider(provider_id) if provider_id else detect_provider(api_key)
         if definition is None:

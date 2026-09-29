@@ -50,26 +50,27 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
     if not service_key or not litellm_env.get("LITELLM_MASTER_KEY"):
         raise ValueError("core service credentials have not been initialized")
 
-    providers = records(paths)
     from ctl.control_state import ControlState
+    from ctl.provider_catalog import BY_ID
 
     state = ControlState.runtime(paths)
-    if state:
-        providers = [
-            item
-            for item in providers
-            if (connection := state.provider(item["id"]))
-            and connection["enabled"]
-            and connection["state"] in {"verifying", "verified"}
-        ]
-    # This is the Mu3Lab-owned, supported declarative hand-off.  The adapter
-    # records provider names/keys privately; the runtime verifier refuses to
-    # claim chat readiness until the pinned FreeLLMAPI image accepts it.
+
+    def routable(provider_id: str) -> bool:
+        if state is None:
+            return True
+        connection = state.provider(provider_id)
+        return bool(connection and connection["enabled"] and connection["state"] in {"verifying", "verified"})
+
+    # This is the Mu3Lab-owned, supported declarative hand-off. Every saved key
+    # is listed with its on/off state: FreeLLMAPI's import only adds and
+    # updates, so leaving a disabled key out would keep it routing.
+    keys = [
+        {"platform": item["id"], "key": item["api_key"], "label": item["label"], "enabled": routable(item["id"])}
+        for item in records(paths)
+        if item["id"] in BY_ID
+    ]
     free_config = {
-        "keys": [
-            {"platform": item["id"], "key": item["api_key"], "label": item["label"], "enabled": True}
-            for item in providers
-        ],
+        "keys": keys,
         "routing": {"strategy": "smartest"},
     }
     free_config_path = _write_private(
@@ -116,6 +117,6 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
     return {
         "litellm_config": litellm_config_path,
         "freellmapi_config": free_config_path,
-        "provider_count": len(providers),
-        "chat_configured": bool(providers),
+        "provider_count": sum(1 for item in keys if item["enabled"]),
+        "chat_configured": any(item["enabled"] for item in keys),
     }

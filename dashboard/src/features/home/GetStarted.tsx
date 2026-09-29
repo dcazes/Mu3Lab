@@ -5,7 +5,7 @@ import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
 import { Link } from '../../lib/router';
-import { isEverydayApp, isInstalled, launchTarget } from '../../lib/services';
+import { displayStage, isInstalled, launchTarget } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 
@@ -32,15 +32,7 @@ function useManualDone() {
   return [done, mark] as const;
 }
 
-function ExtensionGuide({
-  browsers,
-  onClose,
-  onDone,
-}: {
-  browsers: string[];
-  onClose: () => void;
-  onDone: () => void;
-}) {
+function ExtensionGuide({ browsers, onClose }: { browsers: string[]; onClose: () => void }) {
   const { data } = useDashboard();
   const vaultwarden = data.services.services.find((service) => service.id === 'vaultwarden');
   const vaultUrl = (vaultwarden && launchTarget(vaultwarden)?.url) || '';
@@ -59,7 +51,7 @@ function ExtensionGuide({
               Setup already added Bitwarden to {browsers.join(' and ')} and connected it to your vault. If you
               don&apos;t see it, close the browser and open it again.
             </li>
-            <li>Click the Bitwarden icon in your browser's toolbar (it looks like a shield).</li>
+            <li>Click the Bitwarden shield icon next to the address bar.</li>
             <li>Sign in with your Mu3Lab email and password.</li>
           </ol>
         ) : (
@@ -83,14 +75,9 @@ function ExtensionGuide({
         <footer className="form-footer">
           {!preinstalled && <ExternalButton href={EXTENSION_URL}>Get the extension</ExternalButton>}
           <span className="spacer" />
-          <Button
-            variant="primary"
-            onClick={() => {
-              onDone();
-              onClose();
-            }}
-          >
-            I've done this
+          <span className="guide-note">This step ticks itself off once Bitwarden signs in.</span>
+          <Button variant="primary" onClick={onClose}>
+            Close
           </Button>
         </footer>
       </div>
@@ -142,7 +129,10 @@ export function GetStarted() {
   const [guide, setGuide] = useState<Guide | null>(null);
   const setup = providers.data?.setup;
   if (!operator || !setup || !vault.data || manual.hidden) return null;
-  const hasApp = data.services.services.some((service) => isEverydayApp(service) && isInstalled(service));
+  // Only apps the owner chose count; setup installs the core ones by itself.
+  const hasApp = data.services.services.some((service) => displayStage(service) === 'optional' && isInstalled(service));
+  const extension = vault.data.browser_extension;
+  const preinstalled = Boolean(extension?.browsers.length);
   const steps = [
     {
       key: 'provider',
@@ -155,8 +145,13 @@ export function GetStarted() {
       : [{ key: 'vault', text: 'Save your app logins to your password vault', done: false, to: '/settings/sign-in' }]),
     {
       key: 'extension',
-      text: 'Let your browser fill in your passwords',
-      done: Boolean(manual.extension),
+      text: preinstalled
+        ? 'Sign in to Bitwarden so your browser fills in your passwords'
+        : 'Add Bitwarden so your browser fills in your passwords',
+      hint: preinstalled
+        ? 'Click the shield icon next to the address bar, then sign in with your Mu3Lab email and password.'
+        : '',
+      done: Boolean(extension?.signed_in),
       guide: 'extension' as const,
     },
     {
@@ -191,6 +186,7 @@ export function GetStarted() {
               {step.done ? <CheckCircle2 className="get-started-done" /> : <Circle />}
               <span>
                 {index + 1}. {step.text}
+                {!step.done && 'hint' in step && step.hint && <small className="get-started-hint">{step.hint}</small>}
               </span>
               {!step.done && <ArrowRight className="attention-arrow" />}
             </>
@@ -216,13 +212,7 @@ export function GetStarted() {
       <button type="button" className="get-started-hide" onClick={() => markDone('hidden')}>
         Hide this list
       </button>
-      {guide === 'extension' && (
-        <ExtensionGuide
-          browsers={vault.data.browser_extension?.browsers || []}
-          onClose={() => setGuide(null)}
-          onDone={() => markDone('extension')}
-        />
-      )}
+      {guide === 'extension' && <ExtensionGuide browsers={extension?.browsers || []} onClose={() => setGuide(null)} />}
       {guide === 'devices' && <DevicesGuide onClose={() => setGuide(null)} onDone={() => markDone('devices')} />}
     </section>
   );

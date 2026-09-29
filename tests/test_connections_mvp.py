@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,7 +50,11 @@ class ProviderCatalogTests(unittest.TestCase):
             state.set_provider("groq", "Groq", state="verified", verified=True)
             self.assertEqual(configure(paths)["provider_count"], 1)
             state.set_provider("groq", "Groq", enabled=False, state="disabled")
-            self.assertEqual(configure(paths)["provider_count"], 0)
+            wiring = configure(paths)
+            self.assertEqual(wiring["provider_count"], 0)
+            # Listed as off: FreeLLMAPI's import never removes a key that is merely left out.
+            keys = json.loads(Path(wiring["freellmapi_config"]).read_text(encoding="utf-8"))["keys"]
+            self.assertEqual([(key["platform"], key["enabled"]) for key in keys], [("groq", False)])
 
     def test_successful_provider_verification_queues_verification_only_job(self):
         from ctl.provider_ops import execute_claimed
@@ -83,66 +88,6 @@ class ProviderCatalogTests(unittest.TestCase):
                 )
             )
             self.assertTrue(any(item["id"] == core["id"] and item["state"] == "cancelled" for item in jobs))
-
-    def test_model_catalog_does_not_infer_provider_from_owned_by(self):
-        from ctl.provider_ops import _available_models
-
-        payload = {
-            "data": [
-                {"id": "model-a", "owned_by": "freellmapi", "available": True},
-                {"id": "model-b", "owned_by": "freellmapi", "available": True},
-                {"id": "model-c", "owned_by": "groq", "available": False},
-            ]
-        }
-        with patch("ctl.provider_ops._request_json", return_value=(200, payload)):
-            self.assertEqual(_available_models("internal-key"), ["model-a", "model-b"])
-
-    def test_groq_verification_uses_routed_via_not_owned_by(self):
-        from ctl.provider_ops import StreamProbe, _verify
-
-        with (
-            patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])),
-            patch(
-                "ctl.provider_ops.read_runtime_env",
-                return_value={"FREELLMAPI_SERVICE_KEY": "internal", "LITELLM_MASTER_KEY": "master"},
-            ),
-            patch("ctl.provider_ops._available_models", return_value=["llama-3.3-70b-versatile"]),
-            patch(
-                "ctl.provider_ops._probe_stream",
-                return_value=StreamProbe(
-                    True, 200, "groq/llama-3.3-70b-versatile", "llama-3.3-70b-versatile", "", "done"
-                ),
-            ),
-        ):
-            result = _verify("groq", Path("."), lambda _line: None)
-        self.assertTrue(result.success)
-        self.assertEqual(result.routed_via.split("/", 1)[0], "groq")
-
-    def test_verification_classifies_catalog_and_route_failures(self):
-        from ctl.provider_ops import ModelCatalogUnavailable, StreamProbe, _verify
-
-        common = [
-            patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])),
-            patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}),
-        ]
-        with common[0], common[1], patch("ctl.provider_ops._available_models", return_value=[]):
-            self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code, "catalog_mismatch")
-        with (
-            patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])),
-            patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}),
-            patch("ctl.provider_ops._available_models", side_effect=ModelCatalogUnavailable("offline")),
-        ):
-            self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code, "gateway_unavailable")
-        with (
-            patch("ctl.provider_ops._reconcile", return_value=(True, "ready", [])),
-            patch("ctl.provider_ops.read_runtime_env", return_value={"FREELLMAPI_SERVICE_KEY": "internal"}),
-            patch("ctl.provider_ops._available_models", return_value=["llama-3.3-70b-versatile"]),
-            patch(
-                "ctl.provider_ops._probe_stream",
-                return_value=StreamProbe(True, 200, "openrouter/llama", "llama-3.3-70b-versatile", "", "done"),
-            ),
-        ):
-            self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code, "provider_route_mismatch")
 
 
 class SurfSenseContractTests(unittest.TestCase):

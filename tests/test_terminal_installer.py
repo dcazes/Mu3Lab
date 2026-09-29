@@ -26,7 +26,7 @@ class RegisterTests(unittest.TestCase):
         client = httpx.Client(base_url="http://vault", transport=httpx.MockTransport(handler))
         vaultwarden_api.register("http://vault", "Alex@Example.com", "correct horse battery", "Alex", client=client)
         body = seen["body"]
-        self.assertEqual(seen["path"], "/api/accounts/register")
+        self.assertEqual(seen["path"], "/identity/accounts/register")
         self.assertEqual(body["email"], "alex@example.com")
         self.assertNotIn("correct horse battery", json.dumps(body))
         master_key = vaultwarden_api.derive_master_key("correct horse battery", "alex@example.com", body)

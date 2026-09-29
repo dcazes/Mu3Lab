@@ -157,6 +157,18 @@ def _append_runtime_diagnostics(store: JobStore, job_id: str, project: Path) -> 
         pass
 
 
+def _sync_chat_assistants(log: Callable[[str], None]) -> None:
+    """Show an app's LobeChat assistant only while the app is installed.
+
+    A convenience: a failure is logged and never fails the app's own job.
+    """
+    from ctl.lobehub_ops import sync_agents
+
+    ok, detail = sync_agents(log)
+    if not ok:
+        log(f"LobeChat assistants were not updated: {detail}")
+
+
 def _failure_code(default: str, detail: str) -> str:
     """Turn common Docker failure text into stable, user-actionable codes."""
     value = detail.lower()
@@ -498,6 +510,8 @@ def _install(
         if not ready:
             _fail(store, state, job_id, service.id, actor, "lobehub_policy", "lobehub_policy_failed", detail)
             return
+    else:
+        _sync_chat_assistants(log)
     from ctl.mcp_ops import sync_application
 
     if not sync_application(service.id, running=True, root=root, log=log):
@@ -697,6 +711,11 @@ def _configure_identity(
                     else "Verified Authentik account linking and administrator role; browser password login is disabled."
                 )
         elif mode == "trusted_header":
+            from ctl.service_state import tailnet_dns_name
+
+            # Caddy already routes this app through the outpost; register its
+            # host there too, or every request is answered with a 404.
+            reconcile_blueprints(registry, tailnet_dns_name())
             detail = "Authentik trusted-header access is configured; live route health remains authoritative."
             target = "ready"
         elif mode == "proxy_gate":
@@ -799,6 +818,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             return
         if state:
             state.reset_service(service.id)
+        _sync_chat_assistants(log)
         store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
         return
     if action == "stop" and service.lifecycle == "always_on":

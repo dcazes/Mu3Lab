@@ -16,6 +16,7 @@ SCOPE: No other policy is set, so every other browser feature keeps its normal
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ from typing import Any
 BITWARDEN_ID = "nngceckbapebfimnlniiiahkandclblb"
 CHROME_WEB_STORE_UPDATES = "https://clients2.google.com/service/update2/crx"
 POLICY_FILE = "mu3lab-bitwarden.json"
+# Bitwarden's DeviceType ids for its browser extensions (Chrome also covers
+# Brave; Edge, Opera, Vivaldi, Firefox and Safari have their own).
+EXTENSION_DEVICE_TYPES = (2, 3, 4, 5, 19, 20)
 
 
 @dataclass(frozen=True)
@@ -124,10 +128,33 @@ def plan(server_url: str, root: Path = Path("/")) -> dict[str, list[Browser]]:
     return result
 
 
-def status(root: Path = Path("/")) -> dict[str, Any]:
+def signed_in(vault_database: Path) -> bool:
+    """Whether a Bitwarden browser extension has signed in to this vault.
+
+    Reads only Vaultwarden's device list (read-only), never vault contents.
+    Vaultwarden records a device on the first successful sign-in.
+    """
+    if not vault_database.is_file():
+        return False
+    marks = ",".join("?" * len(EXTENSION_DEVICE_TYPES))
+    try:
+        connection = sqlite3.connect(f"file:{vault_database}?mode=ro", uri=True, timeout=2)
+        try:
+            row = connection.execute(
+                f"SELECT 1 FROM devices WHERE atype IN ({marks}) LIMIT 1", EXTENSION_DEVICE_TYPES
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return False
+    return row is not None
+
+
+def status(root: Path = Path("/"), vault_database: Path | None = None) -> dict[str, Any]:
     """What the dashboard needs to tailor its Bitwarden guide."""
     browsers = [browser for browser in BROWSERS if configured_server(browser, root)]
     return {
         "browsers": list(dict.fromkeys(browser.name for browser in browsers)),
         "server_url": configured_server(browsers[0], root) if browsers else "",
+        "signed_in": signed_in(vault_database) if vault_database else False,
     }

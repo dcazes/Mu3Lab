@@ -422,6 +422,31 @@ class VaultwardenReadinessTests(unittest.TestCase):
         self.assertTrue(any("Connection reset" in e["activity"] for e in events))
         self.assertTrue(any(e["phase"] == "ready" for e in events))
 
+    def test_a_running_vault_on_an_older_image_is_updated(self):
+        wanted = "vaultwarden/server:1.37.3-alpine@sha256:abc"
+        answers = {
+            "config": (0, wanted + "\n"),
+            "ps": (0, "c0ffee\n"),
+            "inspect": (0, "vaultwarden/server:1.34.3-alpine\n"),
+        }
+
+        def docker(argv, _log, timeout=0):
+            return next(answer for word, answer in answers.items() if word in argv)
+
+        ctx = {**_ctx(), "root": Path(".")}
+        healthy = {"status": "ok", "state": "ready", "detail": "healthy"}
+        with (
+            patch("ctl.install._compose_health", return_value=healthy),
+            patch("ctl.install.actions.docker_cmd", side_effect=docker),
+        ):
+            self.assertEqual(install._vaultwarden_check(ctx)["state"], "outdated")
+            answers["inspect"] = (0, wanted + "\n")
+            self.assertEqual(install._vaultwarden_check(ctx)["state"], "ready")
+            # If Docker cannot answer, a healthy vault is left alone.
+            answers["ps"] = (1, "permission denied")
+            self.assertEqual(install._vaultwarden_check(ctx)["state"], "ready")
+        self.assertEqual(install.DISPATCH[("vaultwarden", "outdated")], "vaultwarden_up")
+
     def test_account_check_requires_a_real_local_user(self):
         import sqlite3
         import tempfile

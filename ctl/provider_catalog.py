@@ -11,9 +11,9 @@ class Provider:
     id: str
     name: str
     key_hint: str
-    prefix: str = ""
+    # Distinctive key prefixes; providers that changed key formats list each one.
+    prefixes: tuple[str, ...] = ()
     instructions: str = ""
-    probe_models: tuple[str, ...] = ()
     signup_url: str = ""
     keys_url: str = ""
     # "email" providers get a pre-generated Vaultwarden sign-up entry;
@@ -30,15 +30,8 @@ class Provider:
 
     def public(self) -> dict:
         value = asdict(self)
-        value["probe_models"] = list(self.probe_models)
-        # Compatibility alias for dashboards that predate routed probes.
-        value["example_models"] = list(self.probe_models)
+        value["prefixes"] = list(self.prefixes)
         return value
-
-    @property
-    def example_models(self) -> tuple[str, ...]:
-        """Compatibility alias used by an already-running dashboard backend."""
-        return self.probe_models
 
 
 PROVIDERS = (
@@ -46,9 +39,8 @@ PROVIDERS = (
         "cerebras",
         "Cerebras",
         "csk-…",
-        "csk-",
+        ("csk-",),
         "Create a key in Cerebras Cloud.",
-        ("llama-3.3-70b", "qwen-3-32b", "gpt-oss-120b"),
         signup_url="https://cloud.cerebras.ai/",
         keys_url="https://cloud.cerebras.ai/platform/",
         recommended=True,
@@ -58,10 +50,9 @@ PROVIDERS = (
     Provider(
         "google",
         "Google AI Studio",
-        "AIza…",
-        "AIza",
+        "AIza… or AQ.…",
+        ("AIza", "AQ."),
         "Create a Gemini API key in Google AI Studio.",
-        ("gemini-2.5-flash", "gemini-2.5-pro", "gemma-3-27b-it"),
         signup_url="https://aistudio.google.com/",
         keys_url="https://aistudio.google.com/app/apikey",
         account="google",
@@ -73,9 +64,8 @@ PROVIDERS = (
         "groq",
         "Groq",
         "gsk_…",
-        "gsk_",
+        ("gsk_",),
         "Create a key in the Groq console.",
-        ("compound-mini", "compound", "llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen/qwen3-32b"),
         signup_url="https://console.groq.com/",
         keys_url="https://console.groq.com/keys",
         recommended=True,
@@ -86,9 +76,8 @@ PROVIDERS = (
         "huggingface",
         "Hugging Face",
         "hf_…",
-        "hf_",
+        ("hf_",),
         "Create a fine-grained access token in Hugging Face settings.",
-        ("meta-llama/Llama-3.3-70B-Instruct", "Qwen/Qwen3-32B", "openai/gpt-oss-120b"),
         signup_url="https://huggingface.co/join",
         keys_url="https://huggingface.co/settings/tokens",
         free_tier="Small monthly inference credit.",
@@ -98,15 +87,8 @@ PROVIDERS = (
         "nvidia",
         "NVIDIA",
         "nvapi-…",
-        "nvapi-",
+        ("nvapi-",),
         "Create a key in the NVIDIA API Catalog.",
-        (
-            "nemotron-3-super-120b",
-            "nemotron-3-ultra-550b",
-            "nemotron-3.5-lightning-30b-a3b",
-            "meta/llama-3.3-70b-instruct",
-            "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-        ),
         signup_url="https://build.nvidia.com/",
         keys_url="https://build.nvidia.com/settings/api-keys",
         free_tier="Rate-limited trial access to NVIDIA-hosted models.",
@@ -115,9 +97,8 @@ PROVIDERS = (
         "openrouter",
         "OpenRouter",
         "sk-or-v1-…",
-        "sk-or-v1-",
+        ("sk-or-v1-",),
         "Create a key in OpenRouter settings.",
-        ("openrouter/free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen3-coder:free"),
         signup_url="https://openrouter.ai/",
         keys_url="https://openrouter.ai/settings/keys",
         free_tier="Free model variants with a low daily request cap.",
@@ -128,9 +109,8 @@ PROVIDERS = (
         "mistral",
         "Mistral",
         "Paste the key from Mistral Console",
-        "",
+        ("mstrl",),
         "Create a key in Mistral La Plateforme.",
-        ("mistral-small-latest", "open-mistral-nemo", "codestral-latest"),
         signup_url="https://console.mistral.ai/",
         keys_url="https://console.mistral.ai/api-keys",
         free_tier="Free experiment plan; requires phone verification.",
@@ -141,9 +121,8 @@ PROVIDERS = (
         "zhipu",
         "Z.ai",
         "Paste the key from Z.ai",
-        "",
+        (),
         "Create an API key in the Z.ai developer console.",
-        ("glm-4.5-flash", "glm-4.5", "glm-4.5-air"),
         signup_url="https://z.ai/",
         keys_url="https://z.ai/manage-apikey/apikey-list",
         free_tier="Free GLM Flash models.",
@@ -178,17 +157,35 @@ def catalog() -> list[dict]:
 def detect(api_key: str) -> Provider | None:
     """Guess the provider from the key itself: a distinctive prefix first, then a shape."""
     key = api_key.strip()
-    by_prefix = [provider for provider in PROVIDERS if provider.prefix and key.startswith(provider.prefix)]
-    if by_prefix:
-        return max(by_prefix, key=lambda provider: len(provider.prefix))
+    matches = [
+        (len(prefix), provider) for provider in PROVIDERS for prefix in provider.prefixes if key.startswith(prefix)
+    ]
+    if matches:
+        return max(matches, key=lambda match: match[0])[1]
     by_shape = [provider for provider in PROVIDERS if provider.key_pattern and re.match(provider.key_pattern, key)]
     return by_shape[0] if len(by_shape) == 1 else None
 
 
 def prefix_warning(provider_id: str, api_key: str) -> str:
     provider = get(provider_id)
-    if provider.prefix and not api_key.startswith(provider.prefix):
+    if provider.prefixes and not api_key.startswith(provider.prefixes):
         return f"This key does not use the usual {provider.key_hint} format. Mu3Lab will still verify it live."
+    return ""
+
+
+MAX_KEY_LENGTH = 256
+
+
+def key_problem(api_key: str) -> str:
+    """Catch pastes that cannot be an API key (mirrors the dashboard's check).
+
+    A wrong clipboard is the usual cause: a sentence, a link or several lines.
+    """
+    key = api_key.strip()
+    if not key:
+        return "Paste an API key."
+    if any(char.isspace() for char in key) or "://" in key or len(key) > MAX_KEY_LENGTH:
+        return "That doesn't look like an API key. Copy the key itself from the provider's keys page and paste again."
     return ""
 
 

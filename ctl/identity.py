@@ -170,6 +170,11 @@ def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = Ru
     dashboard = registry.get("ingress")
     litellm = registry.get("litellm")
     freellmapi = registry.get("freellmapi")
+    gated_apps = tuple(
+        (service.id, service.name, service.private_https_port)
+        for service in (registry.get(service_id) for service_id in sorted(TRUSTED_HEADER))
+        if service.private_https_port and (paths.projects / service.id).is_dir()
+    )
     write_dashboard_blueprint(
         paths.root,
         host,
@@ -179,6 +184,7 @@ def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = Ru
         dashboard_host=f"https://{host}:{dashboard.private_https_port or 8446}",
         litellm_port=litellm.private_https_port or 8454,
         freellmapi_port=freellmapi.private_https_port or 8455,
+        gated_apps=gated_apps,
     )
     written: list[str] = []
     for service_id, contract in OIDC_CONTRACTS.items():

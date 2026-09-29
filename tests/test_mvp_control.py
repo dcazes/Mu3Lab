@@ -10,15 +10,20 @@ from unittest.mock import patch
 
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
-from ctl.lifecycle.nextcloud import configure_nextcloud
+from ctl.lifecycle.nextcloud import configure_nextcloud, install_nextcloud_if_needed
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl.registry import load
-from ctl.routes import render
+from ctl.routes import base_matches, rebase, render
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import allowed_actions, execute_claimed
 from tests.support import runtime_paths
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _nextcloud_exec_without_lock(_project, _service, command, _log, timeout=0):
+    """Container exec where the entrypoint has already released its init lock."""
+    return (1, "") if command[0] == "test" else (0, "installed")
 
 
 class ControlStateTests(unittest.TestCase):
@@ -96,6 +101,22 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn(":19471 {", rendered)
         self.assertIn(":19472 {", rendered)
         self.assertIn(":19467 {", rendered)
+
+    def test_an_updated_base_keeps_the_deployed_app_routes(self):
+        deployed = render("{\n  admin off\n}\n", [load().get("mealie")])
+        new_base = "{\n  admin off\n  auto_https off\n}\n"
+        self.assertFalse(base_matches(new_base, deployed))
+        updated = rebase(new_base, deployed)
+        self.assertTrue(base_matches(new_base, updated))
+        self.assertIn("auto_https off", updated)
+        self.assertEqual(updated.count(":19467 {"), 1)
+        self.assertEqual(rebase(new_base, updated), updated)
+
+    def test_dashboard_sign_in_returns_to_the_dashboard_port(self):
+        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        dashboard = caddy.split(":19460 {", 1)[1].split(":19461 {", 1)[0]
+        self.assertIn("header_up Host {http.request.hostport}", dashboard)
+        self.assertIn("header_up X-Forwarded-Host {http.request.hostport}", dashboard)
 
     def test_core_route_pending_offers_repair_not_retry_install(self):
         self.assertEqual(allowed_actions(load().get("litellm"), "needs_setup"), ["repair", "restart"])
@@ -201,8 +222,8 @@ class InstallationWorkflowTests(unittest.TestCase):
                 patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")),
                 patch("ctl.service_ops.actions.docker_image_digest", return_value=(0, "example@sha256:abc")),
                 patch("ctl.service_ops.actions.compose_up", side_effect=[(0, "started"), (0, "recreated")]) as up,
-                patch("ctl.service_ops.actions.compose_exec", return_value=(0, "installed")),
-                patch("ctl.lifecycle.nextcloud.nextcloud_installed", side_effect=[False, False, True]),
+                patch("ctl.service_ops.actions.compose_exec", side_effect=_nextcloud_exec_without_lock),
+                patch("ctl.lifecycle.nextcloud.nextcloud_installed", side_effect=[False, False, False, True]),
                 patch("ctl.service_ops.verify_bootstrap_account", return_value=(True, "ok")),
                 patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
                 patch("ctl.service_ops.configure_nextcloud", return_value=(True, "configured")),
@@ -213,6 +234,28 @@ class InstallationWorkflowTests(unittest.TestCase):
             final = store.get(created["id"])
             self.assertEqual(final["state"], "succeeded")
             self.assertIsNone(up.call_args_list[0].kwargs["wait_timeout"])
+
+    def test_nextcloud_waits_for_the_entrypoint_install_instead_of_racing_it(self):
+        # The image installs itself under a lock; a second install racing it
+        # fails with "permission denied for table oc_migrations".
+        commands: list[list[str]] = []
+        lock_checks = iter([0, 0, 1])
+
+        def compose_exec(_project, _service, command, _log, timeout=0):
+            commands.append(command)
+            if command[0] == "test":
+                return next(lock_checks), ""
+            return 0, "{}"
+
+        with (
+            patch("ctl.lifecycle.nextcloud.actions.compose_exec", side_effect=compose_exec),
+            patch("ctl.lifecycle.nextcloud.nextcloud_installed", side_effect=[False, True]),
+            patch("ctl.lifecycle.nextcloud.time.sleep"),
+        ):
+            installed, _detail = install_nextcloud_if_needed(Path("/unused"), lambda _line: None)
+        self.assertTrue(installed)
+        self.assertEqual(sum(command[0] == "test" for command in commands), 3)
+        self.assertFalse(any("maintenance:install" in " ".join(command) for command in commands))
 
     def test_optional_install_executes_the_bounded_stage_contract(self):
         with tempfile.TemporaryDirectory() as tmp:

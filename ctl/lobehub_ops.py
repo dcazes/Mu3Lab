@@ -85,18 +85,30 @@ def _quoted(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _sql() -> str:
+def installed_apps() -> set[str]:
+    """Apps with an assistant that finished installing at least once.
+
+    A stopped app keeps its assistant (and its chats); only an app that was
+    never installed, or was removed, has none.
+    """
+    from ctl.control_state import ControlState
+
+    state = ControlState.runtime()
+    if state is None:
+        return set()
+    return {slug for slug, *_ in AGENTS if (state.installation(slug) or {}).get("installed_at")}
+
+
+def _agent_sql(installed: set[str]) -> str:
+    """Give each installed app its assistant; drop unused ones for other apps."""
     rows = [
         {"slug": f"mu3lab-{slug}", "title": title, "description": description, "system_role": prompt}
         for slug, title, description, prompt in AGENTS
+        if slug in installed
     ]
     agent_json = _quoted(json.dumps(rows, ensure_ascii=False))
+    absent = ", ".join(_quoted(f"mu3lab-{slug}") for slug, *_ in AGENTS if slug not in installed) or "NULL"
     return f"""
-BEGIN;
-UPDATE ai_providers SET enabled = false WHERE id <> 'openai' AND enabled IS DISTINCT FROM false;
-UPDATE ai_providers SET enabled = true WHERE id = 'openai' AND enabled IS DISTINCT FROM true;
-UPDATE ai_models SET enabled = false
- WHERE enabled IS TRUE AND (provider_id <> 'openai' OR id <> 'mu3lab-chat');
 CREATE OR REPLACE FUNCTION mu3lab_seed_default_agents() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -121,7 +133,26 @@ SELECT 'agt_mu3lab_' || replace(data.slug, '-', '_') || '_' || substr(md5(users.
 FROM users CROSS JOIN jsonb_to_recordset({agent_json}::jsonb)
   AS data(slug text, title text, description text, system_role text)
 ON CONFLICT (slug, user_id) WHERE workspace_id IS NULL DO NOTHING;
-CREATE OR REPLACE FUNCTION mu3lab_provider_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+-- An assistant someone already chatted with stays, so no conversation is lost.
+DELETE FROM agents a
+ WHERE a.workspace_id IS NULL
+   AND a.slug IN ({absent})
+   AND NOT EXISTS (SELECT 1 FROM topics t WHERE t.agent_id = a.id)
+   AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.agent_id = a.id)
+   AND NOT EXISTS (SELECT 1 FROM agents_to_sessions s JOIN messages m ON m.session_id = s.session_id
+                    WHERE s.agent_id = a.id)
+   AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.coordinator_agent_id = a.id);
+"""
+
+
+def _sql(installed: set[str]) -> str:
+    return f"""
+BEGIN;
+UPDATE ai_providers SET enabled = false WHERE id <> 'openai' AND enabled IS DISTINCT FROM false;
+UPDATE ai_providers SET enabled = true WHERE id = 'openai' AND enabled IS DISTINCT FROM true;
+UPDATE ai_models SET enabled = false
+ WHERE enabled IS TRUE AND (provider_id <> 'openai' OR id <> 'mu3lab-chat');
+{_agent_sql(installed)}CREATE OR REPLACE FUNCTION mu3lab_provider_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.id <> 'openai' AND NEW.enabled IS DISTINCT FROM false THEN
     RAISE EXCEPTION 'Mu3Lab allows only the LiteLLM OpenAI-compatible provider';
@@ -163,25 +194,42 @@ COMMIT;
 """
 
 
+PSQL = [
+    "docker",
+    "exec",
+    "-i",
+    "mu3lab-lobehub-postgres-1",
+    "psql",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-U",
+    "postgres",
+    "-d",
+    "lobehub",
+]
+
+
+def sync_agents(log) -> tuple[bool, str]:
+    """Follow an app install or removal: its assistant appears or goes away.
+
+    LobeChat's own start runs the same statements through `reconcile`, so an
+    app changed while LobeChat is stopped is picked up when it starts.
+    """
+    from ctl.control_state import ControlState
+
+    state = ControlState.runtime()
+    lobehub = state.installation("lobehub") if state else None
+    if not lobehub or lobehub.get("state") != "running":
+        return True, "LobeChat is not running; its assistants sync when it starts."
+    rc, output = actions.docker_cmd_stdin(PSQL, f"BEGIN;\n{_agent_sql(installed_apps())}COMMIT;\n", log)
+    if rc:
+        return False, redact(output)
+    return True, "LobeChat assistants match the installed apps."
+
+
 def reconcile(log) -> tuple[bool, str]:
     """Keep existing conversations while adding app agents and enforcing model rows."""
-    rc, output = actions.docker_cmd_stdin(
-        [
-            "docker",
-            "exec",
-            "-i",
-            "mu3lab-lobehub-postgres-1",
-            "psql",
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-U",
-            "postgres",
-            "-d",
-            "lobehub",
-        ],
-        _sql(),
-        log,
-    )
+    rc, output = actions.docker_cmd_stdin(PSQL, _sql(installed_apps()), log)
     if rc:
         return False, redact(output)
     from ctl.control_state import ControlState

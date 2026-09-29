@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderCatalogItem, ProviderMetadata } from '../../api';
-import { dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
+import { dashboardData, renderWithDashboard, service, stubFetch } from '../../test/fixtures';
 import { AiSettings } from './AiSettings';
 import { VaultSetupDialog } from './VaultSetup';
 
@@ -15,9 +15,8 @@ const catalogItem = (id: string, name: string, extra: Partial<ProviderCatalogIte
   id,
   name,
   key_hint: 'key…',
-  prefix: '',
+  prefixes: [],
   instructions: '',
-  example_models: [],
   signup_url: `https://${id}.example/`,
   keys_url: `https://${id}.example/keys`,
   account: 'email',
@@ -26,9 +25,9 @@ const catalogItem = (id: string, name: string, extra: Partial<ProviderCatalogIte
 });
 
 const catalog = [
-  catalogItem('openrouter', 'OpenRouter', { prefix: 'sk-or-v1-', oauth: true, google_sign_in: true }),
-  catalogItem('groq', 'Groq', { recommended: true, prefix: 'gsk_', google_sign_in: true }),
-  catalogItem('cerebras', 'Cerebras', { recommended: true, prefix: 'csk-' }),
+  catalogItem('openrouter', 'OpenRouter', { prefixes: ['sk-or-v1-'], oauth: true, google_sign_in: true }),
+  catalogItem('groq', 'Groq', { recommended: true, prefixes: ['gsk_'], google_sign_in: true }),
+  catalogItem('cerebras', 'Cerebras', { recommended: true, prefixes: ['csk-'] }),
   catalogItem('mistral', 'Mistral', { key_pattern: '^[A-Za-z0-9]{32}$' }),
 ];
 
@@ -158,10 +157,10 @@ describe('One key field for every provider', () => {
 
 describe('Get started', () => {
   const api =
-    (seeded: boolean, connected: ProviderMetadata[], browsers: string[] = []) =>
+    (seeded: boolean, connected: ProviderMetadata[], browsers: string[] = [], signedIn = false) =>
     (path: string) =>
       path === '/api/v1/vault/status'
-        ? { ok: true, seeded, seeded_at: '', browser_extension: { browsers, server_url: '' } }
+        ? { ok: true, seeded, seeded_at: '', browser_extension: { browsers, server_url: '', signed_in: signedIn } }
         : (providersApi(connected, [])(path) ?? { handoffs: [] });
 
   beforeEach(() => localStorage.clear());
@@ -189,17 +188,45 @@ describe('Get started', () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(true, []));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    fireEvent.click(await screen.findByRole('button', { name: /Let your browser fill in your passwords/ }));
-    expect(screen.getByText(/choose/)).toHaveTextContent('Self-hosted');
+    fireEvent.click(await screen.findByRole('button', { name: /Use Mu3Lab on your phone or laptop/ }));
     fireEvent.click(screen.getByRole('button', { name: "I've done this" }));
     expect(await screen.findByText('1 of 5 done')).toBeInTheDocument();
+  });
+
+  it('explains the Self-hosted server when Bitwarden has to be added by hand', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch(api(true, []));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    fireEvent.click(await screen.findByRole('button', { name: /Add Bitwarden so your browser fills in/ }));
+    expect(screen.getByText(/choose/)).toHaveTextContent('Self-hosted');
+  });
+
+  it('ticks the Bitwarden step off by itself once the extension signs in', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch(api(true, [], ['Google Chrome'], true));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    expect(await screen.findByText('1 of 5 done')).toBeInTheDocument();
+    expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
+  });
+
+  it('does not count the apps setup installs by itself as the first app', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    stubFetch(api(true, []));
+    const preinstalled = [
+      service('vaultwarden', 'Vaultwarden', 'foundation'),
+      service('firecrawl', 'Firecrawl', 'optional'),
+    ];
+    renderWithDashboard(<HomePage />, dashboardData(preinstalled));
+    expect(await screen.findByText('0 of 5 done')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Add your first app/ })).toBeInTheDocument();
   });
 
   it('skips the server setup when the installer already added Bitwarden', async () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(true, [], ['Google Chrome']));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    fireEvent.click(await screen.findByRole('button', { name: /Let your browser fill in your passwords/ }));
+    expect(await screen.findByText(/Click the shield icon next to the address bar/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Sign in to Bitwarden so your browser fills in/ }));
     expect(screen.getByText(/already added Bitwarden to Google Chrome/)).toBeInTheDocument();
     expect(screen.queryByText(/Self-hosted/)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Get the extension' })).not.toBeInTheDocument();

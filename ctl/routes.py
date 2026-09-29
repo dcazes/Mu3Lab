@@ -147,6 +147,21 @@ def render(base: str, services: list[Service]) -> str:
     return "\n\n".join(piece for piece in pieces if piece != "") + "\n"
 
 
+def base_matches(base: str, deployed: str) -> bool:
+    """Whether the deployed Caddyfile was rendered from this checked-in base."""
+    return deployed.split(START, 1)[0].strip() == base.split(START, 1)[0].strip()
+
+
+def rebase(base: str, deployed: str) -> str:
+    """Render a new checked-in base while keeping the deployed app routes."""
+    if START not in deployed:
+        return render(base, [])
+    section = deployed.split(START, 1)[1]
+    body = section.split(END, 1)[0].strip() if END in section else ""
+    before = base.split(START, 1)[0].rstrip()
+    return "\n\n".join(piece for piece in (before, START, body, END) if piece) + "\n"
+
+
 def apply(registry: Registry, current: Service, root: Path, log) -> tuple[bool, str]:
     """Render Caddy and publish one route, using registry-owned port values."""
     if current.private_https_port is None or current.proxy_port is None:

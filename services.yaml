@@ -65,8 +65,8 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8081/alive"}
     auth: excluded
     stage: foundation
-    images: ["vaultwarden/server:1.34.3-alpine"]
-    update: {repository: dani-garcia/vaultwarden, current_version: "1.34.3"}
+    images: ["vaultwarden/server:1.37.3-alpine@sha256:9a905c5cf5df61bb827da3805e160170741c0b53b0c63bb07e1afd3d2e21b1c8"]
+    update: {repository: dani-garcia/vaultwarden, current_version: "1.37.3"}
     route: pending
     ui: {available: true, authentication: local}
     required: true

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from ctl import browser_extension, install
 from ctl.api import create_app
-from ctl.provider_catalog import PROVIDERS, catalog, detect
+from ctl.provider_catalog import PROVIDERS, catalog, detect, key_problem
 from ctl.provider_oauth import OAuthError, exchange_openrouter_code
 
 SERVER = "https://mu3lab.example.ts.net:8443"
@@ -63,7 +63,27 @@ class BrowserPolicyTests(unittest.TestCase):
             self.assertEqual(browser_extension.plan(SERVER, root)["ready"], [chrome])
             # A new tailnet address makes the file outdated.
             self.assertEqual(browser_extension.plan("https://new.example.ts.net:8443", root)["to_write"], [chrome])
-            self.assertEqual(browser_extension.status(root), {"browsers": ["Google Chrome"], "server_url": SERVER})
+            self.assertEqual(
+                browser_extension.status(root),
+                {"browsers": ["Google Chrome"], "server_url": SERVER, "signed_in": False},
+            )
+
+    def test_an_extension_sign_in_is_read_from_the_vaults_device_list(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "db.sqlite3"
+            self.assertFalse(browser_extension.signed_in(database))
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE devices (uuid TEXT, atype INTEGER)")
+            # Mu3Lab's own sign-in while saving app logins is not a browser.
+            connection.execute("INSERT INTO devices VALUES ('mu3lab', 25)")
+            connection.commit()
+            self.assertFalse(browser_extension.signed_in(database))
+            connection.execute("INSERT INTO devices VALUES ('chrome', 2)")
+            connection.commit()
+            connection.close()
+            self.assertTrue(browser_extension.signed_in(database))
 
     def test_existing_extension_rules_from_someone_else_are_left_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,17 +136,30 @@ class KeyDetectionTests(unittest.TestCase):
         cases = {
             "csk-abc": "cerebras",
             "AIzaSyExample": "google",
+            "AQ.Ab8RN6Example": "google",
             "gsk_abc": "groq",
             "hf_abc": "huggingface",
             "nvapi-abc": "nvidia",
             "sk-or-v1-abc": "openrouter",
             "A1b2" * 8: "mistral",
+            "mstrl" + "a" * 40: "mistral",
             "0123456789abcdef" * 2 + ".ABCDEFGHijklmnop": "zhipu",
         }
         for key, provider_id in cases.items():
             with self.subTest(key=key):
                 self.assertEqual(getattr(detect(f"  {key} "), "id", None), provider_id)
         self.assertIsNone(detect("not-a-known-key"))
+
+    def test_rejects_pastes_that_cannot_be_a_key(self):
+        for text in (
+            "compare these two products: https://example.com/item",
+            "gsk_abc\nsecond line",
+            "x" * 300,
+            "   ",
+        ):
+            with self.subTest(text=text[:20]):
+                self.assertTrue(key_problem(text))
+        self.assertEqual(key_problem("  gsk_" + "a" * 52 + "  "), "")
 
     def test_google_sign_in_labels_and_oauth_are_exposed_to_the_dashboard(self):
         by_id = {item["id"]: item for item in catalog()}

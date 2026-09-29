@@ -172,7 +172,7 @@ def register(base_url: str, email: str, password: str, name: str, *, client: htt
     owned = client is None
     http = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=30.0)
     try:
-        response = http.post("/api/accounts/register", json=body)
+        response = http.post("/identity/accounts/register", json=body)
         if response.status_code == 400 and "already" in response.text.lower():
             raise VaultError("A Vaultwarden account with this email already exists.", "exists")
         if response.status_code >= 400:

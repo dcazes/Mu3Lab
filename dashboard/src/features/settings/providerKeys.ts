@@ -6,14 +6,30 @@ export interface Detection {
   certain: boolean;
 }
 
+const MAX_KEY_LENGTH = 256;
+
+/**
+ * Catch pastes that cannot be an API key, usually the wrong clipboard: a
+ * sentence, a link or several lines. Mirrors ctl/provider_catalog.py `key_problem`.
+ */
+export function keyProblem(key: string): string {
+  const value = key.trim();
+  if (!value) return '';
+  if (/\s/.test(value) || value.includes('://') || value.length > MAX_KEY_LENGTH) {
+    return "That doesn't look like an API key. Copy the key itself from the provider's keys page and paste again.";
+  }
+  return '';
+}
+
 /** Guess the provider from the key itself; mirrors ctl/provider_catalog.py `detect`. */
 export function detectProvider(key: string, catalog: ProviderCatalogItem[]): Detection | null {
   const value = key.trim();
-  if (!value) return null;
+  if (!value || keyProblem(value)) return null;
   const byPrefix = catalog
-    .filter((item) => item.prefix && value.startsWith(item.prefix))
+    .flatMap((provider) => (provider.prefixes ?? []).map((prefix) => ({ provider, prefix })))
+    .filter(({ prefix }) => value.startsWith(prefix))
     .sort((a, b) => b.prefix.length - a.prefix.length);
-  if (byPrefix.length) return { provider: byPrefix[0], certain: true };
+  if (byPrefix.length) return { provider: byPrefix[0].provider, certain: true };
   const byShape = catalog.filter((item) => item.key_pattern && new RegExp(item.key_pattern).test(value));
   return byShape.length === 1 ? { provider: byShape[0], certain: false } : null;
 }

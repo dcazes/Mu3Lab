@@ -23,7 +23,7 @@ import { isRunning, stateLabel } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
-import { detectProvider, openRouterSignInUrl, takeOpenRouterReturn } from './providerKeys';
+import { detectProvider, keyProblem, openRouterSignInUrl, takeOpenRouterReturn } from './providerKeys';
 
 const ROUTE = [
   { id: 'ollama', label: 'Ollama', role: 'Local models & embeddings' },
@@ -253,6 +253,7 @@ function KeyPaste({
   const { pending, run } = useAction();
   const submitted = useRef('');
   const detection = detectProvider(apiKey, catalog);
+  const problem = keyProblem(apiKey);
   const providerId = choice || detection?.provider.id || '';
   const provider = catalog.find((item) => item.id === providerId);
   const replacing = providers.some((item) => item.id === providerId);
@@ -317,7 +318,7 @@ function KeyPaste({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (apiKey && providerId) void connect(apiKey.trim(), providerId);
+    if (apiKey && providerId && !problem) void connect(apiKey.trim(), providerId);
   };
 
   return (
@@ -342,7 +343,12 @@ function KeyPaste({
         <Button icon={ClipboardPaste} onClick={() => void paste()} loading={pending === 'save' && !apiKey}>
           Paste
         </Button>
-        <Button variant="primary" type="submit" loading={pending === 'save' && !!apiKey} disabled={!providerId}>
+        <Button
+          variant="primary"
+          type="submit"
+          loading={pending === 'save' && !!apiKey}
+          disabled={!providerId || !!problem}
+        >
           {replacing ? 'Replace key' : 'Connect'}
         </Button>
       </div>
@@ -351,7 +357,12 @@ function KeyPaste({
           Copied your {catalog.find((item) => item.id === awaiting)?.name} key? Come back here and click <b>Paste</b>.
         </p>
       )}
-      {apiKey && (
+      {apiKey && problem && (
+        <p className="key-paste-note is-error" role="alert">
+          {problem}
+        </p>
+      )}
+      {apiKey && !problem && (
         <div className="key-paste-note">
           {detection?.certain && !choice ? (
             <span>

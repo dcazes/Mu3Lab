@@ -145,6 +145,7 @@ DISPATCH = {
     ("caddy", "down"): "caddy_up",
     ("caddy", "ready"): "skip",
     ("vaultwarden", "down"): "vaultwarden_up",
+    ("vaultwarden", "outdated"): "vaultwarden_up",
     ("vaultwarden", "ready"): "skip",
     ("vaultwarden_setup", "needs_user"): "create_account",
     ("vaultwarden_setup", "ready"): "skip",
@@ -1190,8 +1191,37 @@ def _authentik_readiness(ctx: dict, step: dict, timeout: int = AUTHENTIK_READINE
         time.sleep(AUTHENTIK_READINESS_INTERVAL)
 
 
+def _compose_image_outdated(projdir: Path) -> bool:
+    """Whether the running containers use other images than the checked-in Compose file.
+
+    Only a definite mismatch counts; if Docker cannot answer, a healthy
+    service is left alone.
+    """
+    base = ["docker", "compose", "-f", str(projdir / "docker-compose.yml"), "--project-directory", str(projdir)]
+
+    def lines(argv: list[str]) -> set[str] | None:
+        rc, output = actions.docker_cmd(argv, lambda _line: None, timeout=60)
+        # Warnings Docker mixes into the output contain spaces; references never do.
+        return (
+            None if rc else {line.strip() for line in output.splitlines() if line.strip() and " " not in line.strip()}
+        )
+
+    wanted = lines([*base, "config", "--images"])
+    ids = lines([*base, "ps", "-q"])
+    if not wanted or not ids:
+        return False
+    # `compose ps` shortens digest-pinned images; the container's config keeps
+    # the exact reference it was created from.
+    running = lines(["docker", "inspect", "--format", "{{.Config.Image}}", *sorted(ids)])
+    return running is not None and running != wanted
+
+
 def _vaultwarden_check(ctx: dict) -> dict:
-    return _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
+    health = _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
+    if health["state"] == "ready" and _compose_image_outdated(ctx["root"] / "core" / "vaultwarden"):
+        # Bitwarden's apps update themselves and stop signing in to an old server.
+        return {"status": "missing", "state": "outdated", "detail": "Vaultwarden will be updated."}
+    return health
 
 
 def _vaultwarden_account_exists() -> bool:
@@ -1229,9 +1259,14 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
         if clean:
             _update_progress(ctx, "vaultwarden", phase="starting_service", activity=clean[:180], timeout_seconds=300)
 
-    rc, out = actions.compose_up(
-        projdir, log, env={"MU3LAB_DATA_ROOT": str(RuntimePaths().data)}, on_output=compose_activity
-    )
+    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data)}
+    extra_files: list[Path] = []
+    # Once Tailscale is joined, keep the private URL a restart or update would otherwise drop.
+    domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
+    if domain:
+        env["VAULTWARDEN_DOMAIN"] = domain
+        extra_files.append(projdir / "docker-compose.tailnet.yml")
+    rc, out = actions.compose_up(projdir, log, env=env, extra_files=extra_files, on_output=compose_activity)
     log(out or f"(exit {rc})")
     if rc != 0:
         return {"ok": False, "error": "Vaultwarden could not start (see log)."}
@@ -1560,10 +1595,37 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
     return result if not result.get("ok") else {"ok": True}
 
 
+def _dashboard_blueprint(host: str) -> str:
+    from ctl.authentik_blueprints import render_dashboard_blueprint
+
+    return render_dashboard_blueprint(
+        host,
+        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT).rstrip("/"),
+        tailnet_https_origin(host, DASHBOARD_SERVE_PORT).rstrip("/"),
+    )
+
+
+def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
+    """A Mu3Lab update changed the sign-in gate or the Authentik apps it relies on."""
+    from ctl import routes
+
+    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
+    blueprint = RuntimePaths().projects / "authentik" / "blueprints" / "mu3lab-dashboard.yaml"
+    try:
+        if not routes.base_matches(source.read_text(encoding="utf-8"), target.read_text(encoding="utf-8")):
+            return True
+        return blueprint.read_text(encoding="utf-8") != _dashboard_blueprint(host)
+    except (OSError, ValueError):
+        return True
+
+
 def check_dashboard_protection(ctx: dict) -> dict:
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     if target.is_file():
+        if host != "127.0.0.1" and _dashboard_protection_outdated(ctx, host):
+            return {"status": "missing", "state": "needs_apply", "detail": "The sign-in gate has an update."}
         verdict = _dashboard_access_probe_with_retry(host)
         if verdict["state"] == "ready":
             return {"status": "ok", "state": "ready", "detail": "The dashboard requires signing in."}
@@ -1616,10 +1678,14 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         timeout_seconds=240,
     )
 
+    from ctl import routes
+
     source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    # Keep the routes of apps installed from the dashboard across updates.
+    deployed = target.read_text(encoding="utf-8") if target.is_file() else ""
+    target.write_text(routes.rebase(source.read_text(encoding="utf-8"), deployed), encoding="utf-8")
     _update_progress(
         ctx,
         "dashboard_protection",
@@ -1640,6 +1706,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         ctx["root"] / "core" / "ingress",
         log,
         env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        recreate=True,  # the file path is unchanged on updates, so Caddy must restart to read it
         on_output=ingress_activity,
     )
     log(str(ingress_result.get("out") or f"(exit {ingress_result['rc']})"))
@@ -2359,7 +2426,7 @@ STEPS: list[Step] = [
     },
     {
         "id": "browser_extension",
-        "label": "Add Bitwarden to your browser",
+        "label": "Add the Bitwarden password manager to your browser",
         "check": _browser_extension_check,
         "fix": fix_browser_extension,
     },

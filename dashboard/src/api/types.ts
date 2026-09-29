@@ -254,10 +254,9 @@ export interface ProviderCatalogItem {
   id: string;
   name: string;
   key_hint: string;
-  prefix: string;
+  /** Distinctive key prefixes; a provider that changed key formats lists each one. */
+  prefixes: string[];
   instructions: string;
-  probe_models?: string[];
-  example_models: string[];
   signup_url?: string;
   keys_url?: string;
   /** `email` providers get a pre-generated Vaultwarden entry; `google` uses a Google account. */
@@ -275,8 +274,11 @@ export interface ProviderCatalogItem {
 export interface VaultStatus {
   seeded: boolean;
   seeded_at?: string;
-  /** Browsers the installer added Bitwarden to, already pointed at this vault. */
-  browser_extension?: { browsers: string[]; server_url: string };
+  /**
+   * Browsers the installer added Bitwarden to, already pointed at this vault,
+   * and whether any Bitwarden extension has signed in to the vault yet.
+   */
+  browser_extension?: { browsers: string[]; server_url: string; signed_in?: boolean };
 }
 
 export interface ProviderSetupProgress {
