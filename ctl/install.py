@@ -1765,8 +1765,9 @@ def _dashboard_access_probe(host: str | None = None) -> dict:
         headers={
             # Caddy is loopback-bound, but Authentik selects the forward-auth
             # provider by the original tailnet host. A loopback Host header is
-            # not a valid security test and correctly returns 404.
-            "Host": host or (_tailscale_dns_name_for_install() or "127.0.0.1"),
+            # not a valid security test and correctly returns 404. Caddy passes
+            # the port through, and the provider's external host includes it.
+            "Host": f"{host or (_tailscale_dns_name_for_install() or '127.0.0.1')}:{DASHBOARD_SERVE_PORT}",
             "X-Forwarded-Proto": "https",
         },
     )
