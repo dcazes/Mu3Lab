@@ -12,7 +12,14 @@ from starlette.concurrency import run_in_threadpool
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import IdentityData, Operator, OperatorMutation, Owner, VerifiedAccount, job_identity
+from ctl.api.security import (
+    IdentityData,
+    Member,
+    MemberMutation,
+    Owner,
+    VerifiedAccount,
+    job_identity,
+)
 from ctl.app_sizes import AppSizeStore, summarize
 from ctl.download_manager import progress_key
 from ctl.image_downloads import ImageDownloadStore
@@ -124,7 +131,7 @@ def _free_bytes() -> int:
 
 
 @router.get("/app-sizes")
-def app_sizes(operator: Operator, ids: str = "") -> dict[str, Any]:
+def app_sizes(operator: Member, ids: str = "") -> dict[str, Any]:
     """Per-app sizes, plus totals for a selection with shared layers counted once."""
     store = AppSizeStore.runtime()
     sizes = store.all() if store else {}
@@ -152,13 +159,13 @@ def latest_install_batch(owner: Owner) -> dict[str, Any]:
 
 
 @router.get("/service-install-batches/{batch_id}")
-def get_install_batch(batch_id: str, operator: Operator) -> dict[str, Any]:
+def get_install_batch(batch_id: str, operator: Member) -> dict[str, Any]:
     _, batch = _owned_batch(batch_id, operator)
     return {"ok": True, **_batch_view(batch)}
 
 
 @router.post("/service-install-batches/{batch_id}/resume")
-def resume_install_batch(batch_id: str, operator: OperatorMutation) -> dict[str, Any]:
+def resume_install_batch(batch_id: str, operator: MemberMutation) -> dict[str, Any]:
     batches, _ = _owned_batch(batch_id, operator)
     try:
         return {"ok": True, "batch": batches.resume(batch_id, runtime.job_store())}
@@ -178,17 +185,17 @@ async def _batch_change(batch_id: str, operator: IdentityData, change) -> dict[s
 
 
 @router.post("/service-install-batches/{batch_id}/downloads/{service_id}/pause")
-async def pause_download(batch_id: str, service_id: str, operator: OperatorMutation) -> dict[str, Any]:
+async def pause_download(batch_id: str, service_id: str, operator: MemberMutation) -> dict[str, Any]:
     return await _batch_change(batch_id, operator, lambda batches: batches.pause_download(batch_id, service_id))
 
 
 @router.post("/service-install-batches/{batch_id}/downloads/{service_id}/resume")
-async def resume_download(batch_id: str, service_id: str, operator: OperatorMutation) -> dict[str, Any]:
+async def resume_download(batch_id: str, service_id: str, operator: MemberMutation) -> dict[str, Any]:
     return await _batch_change(batch_id, operator, lambda batches: batches.resume_download(batch_id, service_id))
 
 
 @router.post("/service-install-batches/{batch_id}/order")
-async def reorder_batch(batch_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
+async def reorder_batch(batch_id: str, request: Request, operator: MemberMutation) -> dict[str, Any]:
     service_ids = (await runtime.json_body(request)).get("service_ids", [])
     if not isinstance(service_ids, list) or not all(isinstance(item, str) for item in service_ids):
         raise ApiError(409, "service_ids must list the batch's apps in the wanted order")
@@ -196,7 +203,7 @@ async def reorder_batch(batch_id: str, request: Request, operator: OperatorMutat
 
 
 @router.post("/service-install-batches/{batch_id}/parallel-downloads")
-async def set_parallel_downloads(batch_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
+async def set_parallel_downloads(batch_id: str, request: Request, operator: MemberMutation) -> dict[str, Any]:
     count = (await runtime.json_body(request)).get("parallel_downloads")
     if not isinstance(count, int) or isinstance(count, bool):
         raise ApiError(409, "parallel_downloads must be a whole number")
@@ -204,7 +211,7 @@ async def set_parallel_downloads(batch_id: str, request: Request, operator: Oper
 
 
 @router.post("/service-install-batches/{batch_id}/cancel")
-def cancel_install_batch(batch_id: str, operator: OperatorMutation) -> dict[str, Any]:
+def cancel_install_batch(batch_id: str, operator: MemberMutation) -> dict[str, Any]:
     batches, _ = _owned_batch(batch_id, operator)
     jobs_store = JobStore.runtime()
     if not jobs_store or not batches.cancel(batch_id, jobs_store):
@@ -213,7 +220,7 @@ def cancel_install_batch(batch_id: str, operator: OperatorMutation) -> dict[str,
 
 
 @router.post("/service-install-batches/{batch_id}/reset")
-def reset_install_batch(batch_id: str, operator: OperatorMutation) -> JSONResponse:
+def reset_install_batch(batch_id: str, operator: MemberMutation) -> JSONResponse:
     batches, batch = _owned_batch(batch_id, operator)
     jobs_store = JobStore.runtime()
     if not jobs_store or not runtime.control_state():

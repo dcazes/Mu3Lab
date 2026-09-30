@@ -188,7 +188,13 @@ class SystemTailscaleContractTests(unittest.TestCase):
             patch("ctl.api.routes.system.tailnet_serve_status", return_value=serve) as serve_call,
         ):
             runtime_paths.return_value.root = __import__("pathlib").Path("/tmp/mu3lab")
-            response = TestClient(app).get("/api/v1/system")
+            from ctl.api.security import require_member
+
+            app.dependency_overrides[require_member] = lambda: {"writes_enabled": True, "role": "member"}
+            try:
+                response = TestClient(app).get("/api/v1/system")
+            finally:
+                app.dependency_overrides.pop(require_member, None)
 
         self.assertEqual(response.status_code, 200)
         body = response.json()

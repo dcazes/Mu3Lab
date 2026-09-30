@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from ctl import browser_extension, onboarding_state, workflow_secrets
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Operator, OwnerMutation
+from ctl.api.security import Member, OwnerMutation
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
 from ctl.runtime import RuntimePaths
@@ -52,7 +52,7 @@ def _run(owner: dict[str, Any], email: str, password: str, totp: str) -> SeedRes
 
 
 @router.get("/status")
-def vault_status(_operator: Operator) -> dict[str, Any]:
+def vault_status(_operator: Member) -> dict[str, Any]:
     state = ControlState.runtime()
     return {
         "ok": True,

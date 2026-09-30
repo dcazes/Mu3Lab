@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from ctl import actions, mcp_config, mcp_console
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import IdentityData, Operator, OperatorMutation
+from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.api.service_view import service_states
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
@@ -33,12 +33,12 @@ def _server_view(server_id: str, identity: IdentityData) -> dict[str, Any]:
 
 
 @router.get("")
-def list_servers(operator: Operator) -> dict[str, Any]:
+def list_servers(operator: Member) -> dict[str, Any]:
     return mcp_snapshot(runtime.registry(), service_states(operator))
 
 
 @router.get("/{server_id}/tools")
-def list_tools(server_id: str, operator: Operator) -> dict[str, Any]:
+def list_tools(server_id: str, operator: Member) -> dict[str, Any]:
     server = _server_view(server_id, operator)
     return {"ok": True, "server_id": server_id, "state": server["state"], "tools": server["tools"]}
 
@@ -50,7 +50,7 @@ def activity(server_id: str, _operator: Operator, before: int = 0, limit: int = 
 
 
 @router.get("/{server_id}/jobs")
-def server_jobs(server_id: str, _operator: Operator, limit: int = 30) -> dict[str, Any]:
+def server_jobs(server_id: str, _operator: Member, limit: int = 30) -> dict[str, Any]:
     runtime.mcp_server(server_id)
     store = JobStore.runtime()
     return {
@@ -61,7 +61,7 @@ def server_jobs(server_id: str, _operator: Operator, limit: int = 30) -> dict[st
 
 
 @router.get("/{server_id}/updates")
-def server_updates(server_id: str, _operator: Operator) -> dict[str, Any]:
+def server_updates(server_id: str, _operator: Member) -> dict[str, Any]:
     server = runtime.mcp_server(server_id)
     return {
         "ok": True,

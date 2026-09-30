@@ -9,7 +9,15 @@ from fastapi.responses import JSONResponse
 
 from ctl import workflow_secrets
 from ctl.api.errors import ApiError
-from ctl.api.security import Identity, Operator, Owner, OwnerMutation, csrf_token, mutation_allowed, resolve_identity
+from ctl.api.security import (
+    Identity,
+    Member,
+    Owner,
+    OwnerMutation,
+    csrf_token,
+    mutation_allowed,
+    resolve_identity,
+)
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
 
@@ -24,7 +32,7 @@ def identity(value: Identity) -> dict[str, Any]:
 
 
 @router.get("/session")
-def session(request: Request, _operator: Operator) -> dict[str, Any]:
+def session(request: Request, _operator: Member) -> dict[str, Any]:
     """Issue browser-readable CSRF material only after verified proxy identity."""
     token = csrf_token(request)
     if not token:

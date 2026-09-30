@@ -16,7 +16,7 @@ from ctl import __version__
 from ctl.actions import docker_argv
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import IdentityData, Operator, OperatorMutation
+from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.backups import readiness as backup_readiness
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl.provisioning import ProvisioningStore
@@ -39,7 +39,7 @@ def health() -> dict[str, Any]:
 
 
 @router.get("/catalog")
-def catalog() -> dict[str, Any]:
+def catalog(_member: Member) -> dict[str, Any]:
     """Project bundle definitions and UI copy from the typed service manifest."""
     empty = {"ok": False, "profiles": [], "services": {}}
     try:
@@ -67,7 +67,7 @@ def catalog() -> dict[str, Any]:
 
 
 @router.get("/integrations")
-def integrations() -> dict[str, Any]:
+def integrations(_member: Member) -> dict[str, Any]:
     """Expose reviewed wiring declarations only; no credentials or mutations."""
     try:
         registry = load_registry()
@@ -99,7 +99,7 @@ def _worker_state() -> str:
 
 
 @router.get("/system")
-def system() -> dict[str, Any]:
+def system(_member: Member) -> dict[str, Any]:
     """Read-only host capacity and private-network status for the dashboard."""
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage(str(RuntimePaths().root.parent))
@@ -171,13 +171,13 @@ def _set_compute_mode(mode: str, operator: IdentityData) -> dict[str, Any]:
 
 
 @router.get("/backups")
-def backups() -> dict[str, Any]:
+def backups(_member: Member) -> dict[str, Any]:
     """Local encrypted-backup readiness; execution needs an authenticated job."""
     return {"ok": True, **backup_readiness()}
 
 
 @router.get("/provisioning")
-def provisioning() -> dict[str, Any]:
+def provisioning(_member: Member) -> dict[str, Any]:
     """Durable first-run state, never transient browser progress."""
     store = ProvisioningStore.runtime()
     if store is None:

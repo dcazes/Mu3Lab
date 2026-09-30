@@ -13,7 +13,17 @@ from starlette.concurrency import run_in_threadpool
 from ctl import actions, onboarding_state, service_config
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Identity, IdentityData, Operator, OperatorMutation, VerifiedAccount, job_identity
+from ctl.api.security import (
+    AdminVerifiedAccount,
+    Identity,
+    IdentityData,
+    Member,
+    MemberMutation,
+    Operator,
+    OperatorMutation,
+    VerifiedAccount,
+    job_identity,
+)
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
 from ctl.backups import readiness as backup_readiness
 from ctl.control_state import ControlState
@@ -96,8 +106,12 @@ def _effective_state(service: Any, control: ControlState | None) -> str:
     return current_state
 
 
+# Household members may add apps; running, stopping and removing them is administration.
+MEMBER_ACTIONS = frozenset({"install", "retry_setup"})
+
+
 @router.post("/{service_id}/actions")
-async def service_action(service_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
+async def service_action(service_id: str, request: Request, operator: MemberMutation) -> dict[str, Any]:
     """Queue one allowlisted service lifecycle action for the durable worker."""
     body = await runtime.json_body(request)
     # State checks probe apps and read stores; keep them off the event loop.
@@ -106,6 +120,8 @@ async def service_action(service_id: str, request: Request, operator: OperatorMu
 
 def _queue_service_action(service_id: str, body: dict, request: Request, operator: IdentityData) -> dict[str, Any]:
     action = str(body.get("action", ""))
+    if action not in MEMBER_ACTIONS and not operator.get("is_admin"):
+        raise ApiError(403, "Only a Mu3Lab administrator can do this.", code="admin_required")
     if action not in SUPPORTED_ACTIONS:
         raise ApiError(400, "unsupported service action")
     service = runtime.service(service_id)
@@ -165,7 +181,7 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
 
 
 @router.post("/{service_id}/identity/reconcile")
-def reconcile_service_identity(service_id: str, request: Request, operator: VerifiedAccount) -> dict[str, Any]:
+def reconcile_service_identity(service_id: str, request: Request, operator: AdminVerifiedAccount) -> dict[str, Any]:
     """Queue bounded identity configuration without disguising it as repair."""
     service = runtime.service(service_id)
     if service.is_blocked:
@@ -263,7 +279,7 @@ def _managed_keys(service: Any) -> set[str]:
 
 
 @router.get("/{service_id}/configuration")
-def get_service_configuration(service_id: str, _operator: Operator) -> dict[str, Any]:
+def get_service_configuration(service_id: str, _operator: Member) -> dict[str, Any]:
     service = runtime.service(service_id)
     managed = _managed_keys(service)
     return {
@@ -304,7 +320,7 @@ def _write_service_configuration(service_id: str, values: Any, operator: Identit
 
 
 @router.get("/{service_id}/updates")
-def service_updates(service_id: str, _operator: Operator) -> dict[str, Any]:
+def service_updates(service_id: str, _operator: Member) -> dict[str, Any]:
     """Check the curated upstream repository for its latest stable release."""
     service = runtime.service(service_id)
     repository = str(service.update.get("repository", ""))

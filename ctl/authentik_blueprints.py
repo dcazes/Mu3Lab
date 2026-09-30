@@ -149,6 +149,13 @@ entries:
       name: mu3lab-operators
     attrs:
       name: mu3lab-operators
+  # Household members: the dashboard and every app, but no administration.
+  - model: authentik_core.group
+    state: present
+    identifiers:
+      name: mu3lab-household
+    attrs:
+      name: mu3lab-household
   - model: authentik_providers_proxy.proxyprovider
     state: present
     identifiers:
@@ -247,6 +254,13 @@ entries:
       order: 1
     attrs:
       group: !Find [authentik_core.group, [name, mu3lab-operators]]
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      target: !KeyOf mu3lab-dashboard-application
+      order: 2
+    attrs:
+      group: !Find [authentik_core.group, [name, mu3lab-household]]
   - model: authentik_policies.policybinding
     state: present
     identifiers:
@@ -467,6 +481,13 @@ entries:
       order: 1
     attrs:
       group: !Find [authentik_core.group, [name, mu3lab-operators]]
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      target: !KeyOf mu3lab-{service_id}-application
+      order: 2
+    attrs:
+      group: !Find [authentik_core.group, [name, mu3lab-household]]
 """
     if service_id == "actual-budget":
         # One expression replaces the two group bindings. The first OIDC user
@@ -481,7 +502,7 @@ entries:
         expression = (
             f"return request.user.username == {initial_owner!r} and request.user.ak_groups.filter(name__in=['authentik Admins', 'mu3lab-operators']).exists()"
             if initial_owner
-            else 'return request.user.ak_groups.filter(name__in=["authentik Admins", "mu3lab-operators"]).exists()'
+            else 'return request.user.ak_groups.filter(name__in=["authentik Admins", "mu3lab-operators", "mu3lab-household"]).exists()'
         )
         content += f"""  - model: authentik_policies_expression.expressionpolicy
     id: mu3lab-actual-owner-policy

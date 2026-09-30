@@ -217,7 +217,8 @@ class OnboardingTests(unittest.TestCase):
         )
         entries = yaml.load(content, Loader=yaml.BaseLoader)["entries"]
         bindings = [e for e in entries if e["model"] == "authentik_policies.policybinding"]
-        self.assertEqual([e["state"] for e in bindings], ["absent", "absent", "present"])
+        # Every group binding (admins, operators, household) is withdrawn; only the owner rule admits.
+        self.assertEqual([e["state"] for e in bindings], ["absent", "absent", "absent", "present"])
         policy = next(e for e in entries if e["model"] == "authentik_policies_expression.expressionpolicy")
         self.assertIn("request.user.username == 'owner'", policy["attrs"]["expression"])
         self.assertIn("default-provider-authorization-implicit-consent", content)

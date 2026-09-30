@@ -23,6 +23,9 @@ from ctl.workflow_secrets import JobIdentity
 
 ROOT = Path(__file__).resolve().parents[2]
 OPERATOR_GROUPS = frozenset({"mu3lab-operators", "authentik Admins"})
+# Household members use the dashboard and every app; administration stays with operators.
+HOUSEHOLD_GROUP = "mu3lab-household"
+MEMBER_GROUPS = OPERATOR_GROUPS | {HOUSEHOLD_GROUP}
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 IdentityData = dict[str, Any]
@@ -119,6 +122,7 @@ def resolve_identity(request: Request) -> IdentityData:
     groups = tuple(value.strip() for value in header("x-authentik-groups").split("|") if value.strip())
     authenticated = bool(username)
     operator = authenticated and bool(OPERATOR_GROUPS.intersection(groups))
+    member = authenticated and bool(MEMBER_GROUPS.intersection(groups))
     if operator:
         _record_operator_traversal()
     return {
@@ -131,10 +135,13 @@ def resolve_identity(request: Request) -> IdentityData:
         "groups": list(groups),
         "detail": (
             "Authenticated through Authentik."
-            if operator
+            if member
             else "Tailnet access is private, but Authentik protection and operator role mapping are not configured yet."
         ),
-        "writes_enabled": operator,
+        "role": "admin" if operator else "member" if member else "",
+        "is_admin": operator,
+        # May make the changes their role allows; each endpoint checks which.
+        "writes_enabled": member,
     }
 
 
@@ -146,12 +153,32 @@ Identity = Annotated[IdentityData, Depends(current_identity)]
 
 
 def require_operator(identity: Identity) -> IdentityData:
-    if not identity["writes_enabled"]:
-        raise ApiError(403, "operator identity required")
+    """Administration: system settings, app lifecycle, AI providers, chat tools."""
+    if not identity.get("is_admin"):
+        raise ApiError(403, "Only a Mu3Lab administrator can do this.", code="admin_required")
     return identity
 
 
 Operator = Annotated[IdentityData, Depends(require_operator)]
+
+
+def require_member(identity: Identity) -> IdentityData:
+    """Anyone in the household, administrators included."""
+    if not identity.get("writes_enabled"):
+        raise ApiError(403, "operator identity required")
+    return identity
+
+
+Member = Annotated[IdentityData, Depends(require_member)]
+
+
+def require_member_mutation(request: Request, identity: Member) -> IdentityData:
+    if not mutation_allowed(request):
+        raise ApiError(403, "same-origin CSRF verification failed", code="csrf_failed")
+    return identity
+
+
+MemberMutation = Annotated[IdentityData, Depends(require_member_mutation)]
 
 
 def require_operator_mutation(request: Request, identity: Operator) -> IdentityData:
@@ -163,8 +190,8 @@ def require_operator_mutation(request: Request, identity: Operator) -> IdentityD
 OperatorMutation = Annotated[IdentityData, Depends(require_operator_mutation)]
 
 
-def require_owner(identity: Operator) -> IdentityData:
-    """An operator whose Authentik subject is known, for per-user resources."""
+def require_owner(identity: Member) -> IdentityData:
+    """A household member whose Authentik subject is known, for their own resources."""
     if not identity.get("subject_id"):
         raise ApiError(403, "operator identity required")
     return identity
@@ -182,7 +209,7 @@ def require_owner_mutation(request: Request, identity: Owner) -> IdentityData:
 OwnerMutation = Annotated[IdentityData, Depends(require_owner_mutation)]
 
 
-def require_verified_account(identity: OperatorMutation) -> IdentityData:
+def require_verified_account(identity: MemberMutation) -> IdentityData:
     """Workflows that create per-user app accounts need a subject and email."""
     if not identity.get("subject_id") or not identity.get("email"):
         raise ApiError(409, "A verified Authentik subject and email are required.")
@@ -190,6 +217,15 @@ def require_verified_account(identity: OperatorMutation) -> IdentityData:
 
 
 VerifiedAccount = Annotated[IdentityData, Depends(require_verified_account)]
+
+
+def require_admin_verified_account(identity: VerifiedAccount) -> IdentityData:
+    if not identity.get("is_admin"):
+        raise ApiError(403, "Only a Mu3Lab administrator can do this.", code="admin_required")
+    return identity
+
+
+AdminVerifiedAccount = Annotated[IdentityData, Depends(require_admin_verified_account)]
 
 
 def job_identity(identity: IdentityData) -> JobIdentity:

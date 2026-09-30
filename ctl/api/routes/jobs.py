@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Operator, OperatorMutation
+from ctl.api.security import Member, Operator, OperatorMutation
 from ctl.core_setup import CORE_ORDER, start_verify
 from ctl.core_setup import plan as core_plan
 from ctl.core_setup import start as start_core_setup
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/v1", tags=["jobs"])
 
 
 @router.get("/jobs")
-def list_jobs() -> dict[str, Any]:
+def list_jobs(_member: Member) -> dict[str, Any]:
     store = JobStore.runtime()
     if store is None:
         return {"ok": True, "available": False, "jobs": []}
@@ -33,7 +33,7 @@ def list_jobs() -> dict[str, Any]:
 
 
 @router.get("/audit")
-def audit() -> dict[str, Any]:
+def audit(_admin: Operator) -> dict[str, Any]:
     """Append-only, secret-redacted audit metadata."""
     store = JobStore.runtime()
     if store is None:
@@ -50,13 +50,13 @@ def _recent_job(store: JobStore, job_id: str) -> dict[str, Any]:
 
 
 @router.get("/jobs/{job_id}")
-def job_detail(job_id: str, _operator: Operator) -> dict[str, Any]:
+def job_detail(job_id: str, _operator: Member) -> dict[str, Any]:
     store = runtime.job_store()
     return {"ok": True, "job": _recent_job(store, job_id), "events": store.events(job_id)}
 
 
 @router.get("/jobs/{job_id}/events")
-def job_events(job_id: str, _operator: Operator) -> dict[str, Any]:
+def job_events(job_id: str, _operator: Member) -> dict[str, Any]:
     store = runtime.job_store()
     _recent_job(store, job_id)
     return {"ok": True, "events": store.events(job_id)}
@@ -107,7 +107,7 @@ def _active_core_job(store: JobStore) -> dict[str, Any] | None:
 
 
 @router.get("/setup/core")
-def core_setup() -> dict[str, Any]:
+def core_setup(_member: Member) -> dict[str, Any]:
     """Describe the mandatory suite without claiming it is runnable early."""
     try:
         load_registry()

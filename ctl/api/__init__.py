@@ -19,6 +19,7 @@ from ctl.api.routes import (
     install_batches,
     jobs,
     mcp,
+    people,
     providers,
     services,
     system,
@@ -80,7 +81,7 @@ def create_app(dist: Path = DIST) -> FastAPI:
     app = FastAPI(title="Mu3Lab control plane", version=__version__, lifespan=_lifespan)
     app.add_exception_handler(ApiError, api_error_handler)
     app.include_router(system.health_router)
-    for module in (system, identity, services, install_batches, jobs, providers, vault, calendar, mcp, chat):
+    for module in (system, identity, services, install_batches, jobs, providers, vault, calendar, mcp, chat, people):
         app.include_router(module.router)
     if dist.is_dir():
         _mount_dashboard(app, dist)

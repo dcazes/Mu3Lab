@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Operator, OperatorMutation
+from ctl.api.security import Member, OperatorMutation
 from ctl.control_state import ControlState
 from ctl.provider_catalog import RECOMMENDED_MINIMUM, key_problem, prefix_warning, setup_progress
 from ctl.provider_catalog import catalog as provider_catalog
@@ -67,7 +67,7 @@ def _providers() -> list[dict[str, Any]]:
 
 
 @router.get("")
-def list_providers(_operator: Operator) -> dict[str, Any]:
+def list_providers(_operator: Member) -> dict[str, Any]:
     """List safe connection state; encrypted keys never cross this boundary."""
     connections = _connections()
     return {
@@ -78,7 +78,7 @@ def list_providers(_operator: Operator) -> dict[str, Any]:
 
 
 @router.get("/catalog")
-def providers_catalog(_operator: Operator) -> dict[str, Any]:
+def providers_catalog(_operator: Member) -> dict[str, Any]:
     return {"ok": True, "providers": provider_catalog(), "recommended_minimum": RECOMMENDED_MINIMUM}
 
 
@@ -148,7 +148,7 @@ async def save_provider(request: Request, operator: OperatorMutation) -> dict[st
 
 
 @router.get("/{provider_id}/models")
-def provider_models(provider_id: str, _operator: Operator) -> dict[str, Any]:
+def provider_models(provider_id: str, _operator: Member) -> dict[str, Any]:
     provider = next((item for item in _providers() if item["id"] == provider_id), None)
     if not provider:
         raise ApiError(404, "provider connection does not exist")

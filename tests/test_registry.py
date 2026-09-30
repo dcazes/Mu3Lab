@@ -231,7 +231,7 @@ class RegistryTests(unittest.TestCase):
 
         registry = load()
         with patch("ctl.api.routes.system.load_registry", return_value=registry):
-            result = catalog()
+            result = catalog({"writes_enabled": True})
         self.assertTrue(result["ok"])
         self.assertEqual(set(result["services"]), {service.id for service in registry.services})
         for service in registry.services:
@@ -251,7 +251,7 @@ class RegistryTests(unittest.TestCase):
 
         service = replace(load().get("mealie"), summary="")
         with patch("ctl.api.routes.system.load_registry", return_value=SimpleNamespace(services=[service])):
-            result = catalog()
+            result = catalog({"writes_enabled": True})
         self.assertEqual(result["services"][service.id]["summary"], service.setup_action)
 
     def test_dashboard_catalog_uses_curated_service_ids(self):

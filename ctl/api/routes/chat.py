@@ -9,7 +9,7 @@ from fastapi import APIRouter
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Operator
+from ctl.api.security import Member
 from ctl.api.service_view import service_states
 from ctl.identity import mode_for
 from ctl.mcp_registry import snapshot as mcp_snapshot
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
 @router.get("/status")
-def chat_status(operator: Operator) -> dict[str, Any]:
+def chat_status(operator: Member) -> dict[str, Any]:
     dns_name = tailnet_dns_name()
     registry = runtime.registry()
     try:
