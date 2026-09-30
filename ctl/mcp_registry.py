@@ -96,8 +96,10 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             state, error = "unavailable", service.blocked_reason or "Install the application first."
         elif missing:
             state = "authentication_required"
+            # An attempt already told us why the credential could not be made.
+            last_attempt = ((runtime or {}).get("last_error") or {}).get("message")
             error = (
-                "A dedicated credential will be created when you connect this MCP."
+                (last_attempt or "A dedicated credential will be created when you connect this MCP.")
                 if server.auto_provision
                 else "Configure: " + ", ".join(missing)
             )

@@ -44,7 +44,11 @@ export function mcpSummary(server: McpServer, appName: string): { label: string;
       return { label: 'App stopped', tone: 'gray', detail: `Start ${appName} to use it from chat.` };
     case 'authentication_required':
       return server.auth.auto_provision
-        ? { label: 'Ready to connect', tone: 'gray', detail: 'Mu3Lab creates the credential when you connect.' }
+        ? {
+            label: server.enabled ? 'Waiting' : 'Ready to connect',
+            tone: 'gray',
+            detail: server.error || 'Mu3Lab creates the credential when you connect.',
+          }
         : { label: 'Needs credential', tone: 'amber', detail: `Add a credential from ${appName} to connect.` };
     case 'disabled':
     case 'prepared':
