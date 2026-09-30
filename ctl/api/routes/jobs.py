@@ -65,8 +65,22 @@ def job_events(job_id: str, _operator: Operator) -> dict[str, Any]:
 @router.post("/jobs/{job_id}/retry")
 def retry_job(job_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
     store = runtime.job_store()
+    original = store.get(job_id)
+    # Setup and sign-in jobs act for a person. A retry acts for whoever retries
+    # it; the app's recorded owner is kept by the onboarding store regardless.
+    needs_identity = bool(
+        original
+        and original.get("action") in {"install", "retry_setup", "configure_identity"}
+        and operator.get("subject_id")
+        and operator.get("email")
+    )
     try:
-        job = store.retry(job_id, actor=operator["username"], idempotency_key=runtime.idempotency_key(request))
+        job = store.retry(
+            job_id,
+            actor=operator["username"],
+            idempotency_key=runtime.idempotency_key(request),
+            prepare=runtime.identity_for_job(operator) if needs_identity else None,
+        )
     except KeyError as exc:
         raise ApiError(404, "job not found") from exc
     except ValueError as exc:

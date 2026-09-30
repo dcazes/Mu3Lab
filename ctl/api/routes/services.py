@@ -152,21 +152,15 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
             actor=operator["username"],
             detail=f"Operator requested {action} for {service.name}.",
             idempotency_key=key,
+            prepare=runtime.identity_for_job(operator)
+            if provisions_account and operator.get("subject_id") and operator.get("email")
+            else None,
         )
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
     if control and job.get("state") == "queued":
         queued_state = "uninstalling" if action in UNINSTALL_ACTIONS else "queued"
         control.set_installation(service.id, queued_state, job_id=str(job["id"]))
-    if provisions_account and operator.get("subject_id") and operator.get("email"):
-        runtime.hand_identity_to_job(
-            store,
-            job,
-            operator,
-            detail="Encrypted account-bootstrap storage is unavailable.",
-            error_code="bootstrap_contract_unavailable",
-            step_id="account_preflight",
-        )
     return {"ok": True, "job": job}
 
 
@@ -197,14 +191,7 @@ def reconcile_service_identity(service_id: str, request: Request, operator: Veri
         actor=str(operator["username"]),
         detail=f"Operator requested sign-in reconciliation for {service.name}.",
         idempotency_key=runtime.idempotency_key(request),
-    )
-    runtime.hand_identity_to_job(
-        store,
-        job,
-        operator,
-        detail="Encrypted identity handoff storage is unavailable.",
-        error_code="identity_contract_unavailable",
-        step_id="identity_preflight",
+        prepare=runtime.identity_for_job(operator),
     )
     control.set_service_identity(
         service_id,

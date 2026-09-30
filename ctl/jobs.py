@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -141,8 +142,14 @@ class JobStore:
         actor: str,
         detail: str = "",
         idempotency_key: str | None = None,
+        prepare: Callable[[str], None] | None = None,
     ) -> dict[str, str]:
-        """Create a queued job. Callers must authenticate and authorize first."""
+        """Create a queued job. Callers must authenticate and authorize first.
+
+        ``prepare(job_id)`` runs inside the insert's transaction, before the job
+        can be claimed, and only when a new job is actually created; if it
+        raises, no job is created.
+        """
         if kind not in _SAFE_KINDS or not service_id or not action or not actor:
             raise ValueError("invalid safe job request")
         if idempotency_key is not None and (not idempotency_key.strip() or len(idempotency_key) > 128):
@@ -164,6 +171,8 @@ class JobStore:
             ).fetchone()
             if active:
                 return dict(active)
+            if prepare:
+                prepare(job_id)
             conn.execute(
                 """
                 INSERT INTO jobs
@@ -313,7 +322,14 @@ class JobStore:
             row = conn.execute("SELECT * FROM jobs WHERE idempotency_key = ?", (key,)).fetchone()
         return dict(row) if row else None
 
-    def retry(self, job_id: str, *, actor: str, idempotency_key: str | None = None) -> dict[str, str]:
+    def retry(
+        self,
+        job_id: str,
+        *,
+        actor: str,
+        idempotency_key: str | None = None,
+        prepare: Callable[[str], None] | None = None,
+    ) -> dict[str, str]:
         """Queue a new attempt from a retryable terminal/waiting record."""
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -330,6 +346,7 @@ class JobStore:
             actor=actor,
             detail=f"Retry of job {job_id}",
             idempotency_key=idempotency_key,
+            prepare=prepare,
         )
 
     def cancel(self, job_id: str, *, actor: str) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import Request
@@ -64,6 +65,18 @@ async def json_body(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ApiError(400, "JSON body must be an object")
     return payload
+
+
+def identity_for_job(identity: IdentityData) -> Callable[[str], None]:
+    """Save the caller's identity for a new job before the worker can claim it."""
+
+    def save(job_id: str) -> None:
+        try:
+            workflow_secrets.save_job_identity(job_id, **job_identity(identity))
+        except workflow_secrets.WorkflowSecretError as exc:
+            raise ApiError(503, "Encrypted account storage is unavailable; the job was not queued.") from exc
+
+    return save
 
 
 def hand_identity_to_job(

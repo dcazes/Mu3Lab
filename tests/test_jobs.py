@@ -170,3 +170,37 @@ class JobHistoryTests(unittest.TestCase):
             finally:
                 gc.enable()
         self.assertLess(after - before, 5)
+
+
+class RetryIdentityTests(unittest.TestCase):
+    def test_retry_saves_the_retrying_persons_identity_before_queueing(self):
+        from unittest.mock import patch
+
+        from ctl.api import runtime
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            failed = store.create(kind="lifecycle", service_id="nextcloud", action="install", actor="owner")
+            store.transition(failed["id"], "running", actor="worker")
+            store.transition(failed["id"], "failed", actor="worker", detail="boom")
+            saved: list[tuple[str, str, bool]] = []
+
+            def record(job_id: str, **identity) -> None:
+                saved.append((job_id, identity["owner_uid"], store.get(job_id) is None))
+
+            operator = {"subject_id": "uid-1", "email": "o@example.test", "username": "owner", "name": "Owner"}
+            with patch("ctl.api.runtime.workflow_secrets.save_job_identity", side_effect=record):
+                retried = store.retry(failed["id"], actor="owner", prepare=runtime.identity_for_job(operator))
+        # Saved for the new job, under the retrying person, before the job existed.
+        self.assertEqual(saved, [(retried["id"], "uid-1", True)])
+
+    def test_failed_identity_save_creates_no_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+
+            def broken(_job_id: str) -> None:
+                raise RuntimeError("storage unavailable")
+
+            with self.assertRaises(RuntimeError):
+                store.create(kind="lifecycle", service_id="immich", action="install", actor="o", prepare=broken)
+            self.assertEqual(store.jobs(), [])
