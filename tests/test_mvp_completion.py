@@ -66,7 +66,7 @@ class RegistryAccountTests(unittest.TestCase):
         self.assertEqual(services["paperless-ngx"]["account"]["mode"], "environment_bootstrap")
         self.assertEqual(services["adventurelog"]["configuration"], [])
         self.assertEqual(services["actual-budget"]["account"]["mode"], "oidc_first_login")
-        self.assertEqual(services["surfsense"]["account"]["mode"], "local_account_manual")
+        self.assertEqual(services["surfsense"]["account"]["mode"], "api_bootstrap")
 
     def test_surfsense_materialization_includes_internal_embedding_contract(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as runtime_tmp:

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import browser_extension, workflow_secrets
+from ctl import browser_extension, onboarding_state, workflow_secrets
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OwnerMutation
@@ -57,6 +57,7 @@ def vault_status(_operator: Operator) -> dict[str, Any]:
     return {
         "ok": True,
         **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
+        "pending_logins": len(onboarding_state.pending_logins(str(_operator.get("subject_id") or ""))),
         "browser_extension": browser_extension.status(
             vault_database=RuntimePaths().data / "vaultwarden" / "db.sqlite3"
         ),
@@ -75,6 +76,14 @@ async def setup_vault(request: Request, owner: OwnerMutation) -> JSONResponse:
     except VaultError as exc:
         raise ApiError(_STATUS.get(exc.code, 502), str(exc), headers=_NO_STORE, code=exc.code) from exc
     owner_uid = str(owner["subject_id"])
+    for service_id in result.saved_onboarding:
+        onboarding_state.vault_saved(service_id, owner_uid)
+        # Remove legacy handoffs only after the same managed login is saved.
+        for meta in workflow_secrets.metadata(owner_uid):
+            if meta["service_id"] == service_id:
+                if state := ControlState.runtime():
+                    state.confirm_handoff(meta["id"], owner_uid)
+                workflow_secrets.delete(meta["id"], owner_uid)
     state = ControlState.runtime()
     if state:
         state.mark_vault_seeded(str(owner["username"]))

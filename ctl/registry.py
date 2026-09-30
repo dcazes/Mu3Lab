@@ -29,6 +29,7 @@ VALID_ACCOUNT_MODES = frozenset(
         "trusted_header",
         "oidc_first_login",
         "environment_bootstrap",
+        "api_bootstrap",
         "browser_registration",
         "local_account_manual",
         "internal",

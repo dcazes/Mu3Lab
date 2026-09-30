@@ -9,6 +9,7 @@ import {
   type IdentityResponse,
   type JobsResponse,
   onSignedOut,
+  postApi,
   type ProvisioningResponse,
   type ServicesResponse,
   type SystemResponse,
@@ -86,6 +87,7 @@ export function useDashboardLoader(): DashboardValue {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [connection, setConnection] = useState<Connection>('connecting');
   const inFlight = useRef<Promise<void> | null>(null);
+  const resumedOnboarding = useRef(false);
 
   const load = useCallback(() => {
     if (inFlight.current) return inFlight.current;
@@ -131,6 +133,15 @@ export function useDashboardLoader(): DashboardValue {
       window.removeEventListener('focus', resume);
     };
   }, [load]);
+
+  useEffect(() => {
+    if (connection !== 'online' || !data.identity.writes_enabled || resumedOnboarding.current) return;
+    resumedOnboarding.current = true;
+    // Existing installations also get automatic first-login verification.
+    void postApi('/api/v1/services/onboarding/resume').catch(() => {
+      resumedOnboarding.current = false;
+    });
+  }, [connection, data.identity.writes_enabled]);
 
   return { data, connection, refresh: load };
 }

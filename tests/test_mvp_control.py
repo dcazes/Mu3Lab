@@ -179,6 +179,7 @@ class InstallationWorkflowTests(unittest.TestCase):
                 (0, json.dumps(app_list)),
                 (0, "provider configured"),
                 (0, "mu3lab clientid=mu3lab-nextcloud"),
+                (0, json.dumps({"id": 7, "identifier": "mu3lab"})),
                 (0, "auto_provision enabled"),
                 (0, "soft_auto_provision enabled"),
                 (0, "Config value allow_multiple_user_backends set to 1"),

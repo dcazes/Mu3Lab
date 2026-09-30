@@ -174,11 +174,11 @@ services:
     required: false
     route: pending
     ui: {available: true, authentication: proxy}
-    identity_note: "Authentik protects the private route, then SurfSense uses a separate local account. This is intentionally not SSO. Create the first local account, then consider disabling registration."
-    setup_action: "Install SurfSense, open its secure route, and create a separate local account after Authentik."
+    identity_note: "Authentik protects the private route; SurfSense keeps a separate local login, generated during installation and ready to save in Bitwarden. This is not SSO."
+    setup_action: "Install SurfSense and save its generated login to Bitwarden."
     resource_guidance: "Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is disabled."
     configuration:
-      - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Allow new local accounts", default: true}
+      - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Enable local sign-in", default: true}
     images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
     update: {repository: MODSetter/SurfSense, current_version: "v0.0.40"}
     backup: {database: surfsense, binds: [object-store, zero-cache]}
@@ -190,9 +190,9 @@ services:
       exposed: false
       tools: []
     account:
-      mode: local_account_manual
-      handoff: false
-      user_action: "Open SurfSense after installation and create its separate local account."
+      mode: api_bootstrap
+      handoff: true
+      user_action: "Save the generated SurfSense login to Bitwarden, then use autofill when opening it."
 
   - id: firecrawl
     summary: "Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping and crawling API and connects it to chat for web research."
@@ -273,7 +273,7 @@ services:
     setup_action: "Install only when you want private budgeting."
     resource_guidance: "Lightweight personal finance service."
     configuration:
-      - {key: oidc_enforced, env: ACTUAL_OPENID_ENFORCE, type: boolean, label: "Require Authentik login", default: false}
+      - {key: oidc_enforced, env: ACTUAL_OPENID_ENFORCE, type: boolean, label: "Require Authentik login", default: true}
       - {key: user_creation, env: ACTUAL_USER_CREATION_MODE, type: enum, label: "OIDC user creation", options: [manual, login], default: login}
     images: ["docker.io/actualbudget/actual-server:26.9.0"]
     backup: {binds: [data]}
@@ -292,7 +292,7 @@ services:
     account:
       mode: oidc_first_login
       handoff: false
-      user_action: "The installing operator must complete the first Authentik login to become the server owner."
+      user_action: "Open Actual Budget; your existing Authentik session creates the server owner automatically."
 
   - id: immich
     summary: "Manages your photo and video library on your server. Upload media from your phone, organize shared albums, and find images using metadata, facial recognition, and visual search."
@@ -318,9 +318,9 @@ services:
     update: {repository: immich-app/immich, current_version: "v3.2.2"}
     backup: {binds: [library, database]}
     account:
-      mode: browser_registration
-      handoff: false
-      user_action: "Open Immich and create the first administrator with your Authentik email."
+      mode: api_bootstrap
+      handoff: true
+      user_action: "The administrator is created during installation. Open Immich to use your existing Authentik session."
 
   - id: mealie
     summary: "Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own, schedule meals, and turn recipe ingredients into shopping lists."
@@ -342,7 +342,7 @@ services:
     setup_action: "Install only when you want private recipe and meal planning."
     resource_guidance: "Lightweight service."
     configuration:
-      - {key: allow_signup, env: MEALIE_ALLOW_SIGNUP, type: boolean, label: "Allow local signup", default: true}
+      - {key: allow_signup, env: MEALIE_ALLOW_SIGNUP, type: boolean, label: "Allow local signup", default: false}
       - {key: oidc_enabled, env: MEALIE_OIDC_ENABLED, type: boolean, label: "Enable Authentik login", default: true}
     backup: {binds: [data]}
     images: ["ghcr.io/mealie-recipes/mealie:v3.22.0"]
@@ -361,7 +361,7 @@ services:
     account:
       mode: oidc_first_login
       handoff: false
-      user_action: "Open Mealie and complete the first Authentik login."
+      user_action: "Open Mealie; your Authentik session creates the account automatically."
 
   - id: adventurelog
     summary: "A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations into collections, plan upcoming trips, and explore your travels on a map."

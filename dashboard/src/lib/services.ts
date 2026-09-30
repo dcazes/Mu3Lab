@@ -84,14 +84,17 @@ export function isEverydayApp(service: Service) {
 const SSO_ENTRY_PATHS: Record<string, string> = {
   mealie: '/api/auth/oauth',
   immich: '/auth/login?autoLaunch=1',
-  'paperless-ngx': '/accounts/oidc/authentik/login/',
+  'paperless-ngx': '/__mu3lab/login',
   nextcloud: '/index.php/apps/user_oidc/login/1',
   adventurelog: '/accounts/oidc/mu3lab-adventurelog/login/',
+  'actual-budget': '/__mu3lab/login',
+  lobehub: '/__mu3lab/login',
 };
 
 function ssoEntry(service: Service, url: string) {
   try {
     const parsed = new URL(url);
+    if (service.id === 'nextcloud' && /^\/index.php\/apps\/user_oidc\/login\/\d+$/.test(parsed.pathname)) return url;
     const path = SSO_ENTRY_PATHS[service.id];
     if (path) return new URL(path, parsed.origin).toString();
     if (service.id !== 'litellm') return url;

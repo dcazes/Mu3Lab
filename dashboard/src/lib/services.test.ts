@@ -3,6 +3,20 @@ import { identity, readyUi, service } from '../test/fixtures';
 import { canInstall, launchTarget, needsAttention, signInSummary } from './services';
 
 describe('launchTarget', () => {
+  it('preserves the managed Nextcloud provider ID reported by the server', () => {
+    const app = service('nextcloud', 'Nextcloud', 'optional', {
+      identity: identity({ launch_url: 'https://host.ts.net:8453/index.php/apps/user_oidc/login/7' }),
+    });
+    expect(launchTarget(app)?.url).toBe('https://host.ts.net:8453/index.php/apps/user_oidc/login/7');
+  });
+
+  it.each(['actual-budget', 'lobehub', 'paperless-ngx'])('starts %s through its session-aware launcher', (id) => {
+    const app = service(id, id, 'optional', {
+      identity: identity({ launch_url: 'https://host.ts.net:8451/login', state: 'migration_required' }),
+    });
+    expect(launchTarget(app)).toEqual({ url: 'https://host.ts.net:8451/__mu3lab/login', label: 'Open' });
+  });
+
   it('enters SSO apps through their Authentik login path', () => {
     const nextcloud = service('nextcloud', 'Nextcloud', 'optional', {
       identity: identity({ launch_url: 'https://host.ts.net:8453' }),

@@ -70,3 +70,24 @@ def configure_adventurelog_oidc(project: Path, log: Log) -> tuple[bool, str]:
     if rc or "MU3LAB_OIDC_APP_OK" not in output:
         return False, "AdventureLog could not confirm its Authentik SocialApp: " + redact(output)
     return True, "AdventureLog Authentik SocialApp is configured."
+
+
+def retire_mealie_default_password(project: Path, log: Log) -> tuple[bool, str]:
+    """Retire only the untouched upstream default; preserve customized accounts."""
+    code = (
+        "import secrets; from mealie.db.db_setup import session_context; "
+        "from mealie.db.models.users.users import User; "
+        "from mealie.core.security.hasher import get_hasher; "
+        'exec("with session_context() as session:\\n'
+        " u=session.query(User).filter(User.email=='changeme@example.com').first()\\n"
+        " if u and u.password and get_hasher().verify('MyPassword',u.password):\\n"
+        '  u.password=get_hasher().hash(secrets.token_urlsafe(48)); session.commit()\\n"); '
+        "print('MU3LAB_DEFAULT_LOGIN_RETIRED')"
+    )
+    rc, output = actions.compose_exec(project, "mealie", ["/opt/mealie/bin/python", "-c", code], log, timeout=60)
+    return (
+        rc == 0 and "MU3LAB_DEFAULT_LOGIN_RETIRED" in output,
+        "Mealie default login hardening completed."
+        if rc == 0
+        else "Mealie could not verify its default login hardening.",
+    )

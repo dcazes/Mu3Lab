@@ -227,4 +227,7 @@ def uninstall_application(
     if not ok:
         return False, "delete_data", detail
     _remove_images(images, log)
+    from ctl import onboarding_state
+
+    onboarding_state.forget(service.id, paths)
     return True, "", f"{service.name} and all of its data were deleted."

@@ -4,7 +4,6 @@ import type { Service } from '../../api';
 import { postApi } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
-import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Facts, PageHeader, Tabs } from '../../components/Layout';
 import { Menu } from '../../components/Menu';
 import { Badge, Dot, StatusBadge } from '../../components/Status';
@@ -68,7 +67,6 @@ function HeaderActions({ service }: { service: Service }) {
 }
 
 function NextSteps({ service }: { service: Service }) {
-  const confirm = useConfirm();
   const { refresh } = useDashboard();
   const { pending, run } = useAction();
   const target = launchTarget(service);
@@ -113,31 +111,11 @@ function NextSteps({ service }: { service: Service }) {
         key="account"
         tone="info"
         icon={UserPlus}
-        title="Complete account setup"
-        action={
-          <Button
-            loading={pending === 'init'}
-            onClick={async () => {
-              if (
-                !(await confirm({
-                  title: `Have you completed account setup for ${service.name}?`,
-                  confirmLabel: 'Confirm setup',
-                }))
-              )
-                return;
-              await run(
-                'init',
-                () => postApi(`/api/v1/services/${service.id}/initialization/confirm`),
-                'Setup confirmed',
-              );
-              void refresh();
-            }}
-          >
-            Confirm setup complete
-          </Button>
-        }
+        title="Ready for your first visit"
+        action={target && <ExternalButton href={target.url}>Open {service.name}</ExternalButton>}
       >
-        {service.account?.user_action || `Open ${service.name} and create the first account.`}
+        {service.account?.user_action ||
+          `Open ${service.name} to finish signing in. Mu3Lab checks setup automatically.`}
       </Callout>,
     );
 
@@ -147,11 +125,10 @@ function NextSteps({ service }: { service: Service }) {
         key="sso"
         tone="info"
         icon={KeyRound}
-        title="Finish single sign-on"
+        title="Open with single sign-on"
         action={target && <ExternalButton href={target.url}>Open {service.name}</ExternalButton>}
       >
-        Sign in to {service.name} with Authentik to link your account. Mu3Lab must verify account ownership and
-        administrator access before disabling local browser sign-in.
+        Your existing Authentik session links your account on the first visit. Mu3Lab completes setup automatically.
       </Callout>,
     );
   else if (signInSummary(service).repairable && identity?.state !== 'configuring' && isRunning(service))

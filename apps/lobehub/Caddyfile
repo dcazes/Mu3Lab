@@ -4,6 +4,7 @@
 }
 
 :3211 {
+	# MU3LAB_LOGIN
 	handle /__mu3lab_lobehub_health {
 		respond 200
 	}

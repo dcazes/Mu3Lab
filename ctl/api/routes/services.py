@@ -9,10 +9,10 @@ import yaml
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ctl import actions, service_config
+from ctl import actions, onboarding_state, service_config
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Identity, Operator, OperatorMutation, VerifiedAccount
+from ctl.api.security import Identity, Operator, OperatorMutation, VerifiedAccount, job_identity
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
 from ctl.backups import readiness as backup_readiness
 from ctl.control_state import ControlState
@@ -35,6 +35,54 @@ router = APIRouter(prefix="/api/v1/services", tags=["services"])
 @router.get("")
 def list_services(identity: Identity) -> dict[str, Any]:
     return service_snapshot(identity)
+
+
+@router.post("/onboarding/resume")
+def resume_onboarding(operator: VerifiedAccount) -> dict[str, Any]:
+    """Adopt pending pre-upgrade identity setup; the worker verifies real app evidence."""
+    control = runtime.control_state()
+    store = runtime.job_store()
+    active = {
+        job["service_id"] for job in store.jobs() if job["state"] in {"queued", "running", "waiting_for_confirmation"}
+    }
+    adopted = []
+    for service in runtime.registry().services:
+        if mode_for(service) != "native_oidc":
+            continue
+        if (control.installation(service.id) or {}).get("state") != "running":
+            continue
+        saved = control.service_identity(service.id) or {}
+        if saved.get("state") not in {None, "unconfigured", "migration_required", "ready"} or service.id in active:
+            continue
+        record = onboarding_state.read(service.id)
+        if record.get("config_version") == onboarding_state.CONFIG_VERSION:
+            continue
+        owner_uid = (
+            record.get("owner", {}).get("owner_uid")
+            or saved.get("owner_uid")
+            or (control.initialization(service.id) or {}).get("owner_uid")
+        )
+        if owner_uid == operator["subject_id"]:
+            # Upgrade only the installing owner's apps. Unknown legacy ownership
+            # requires the existing explicit sign-in reconciliation action.
+            onboarding_state.remember_owner(service.id, job_identity(operator))
+            job = store.create(
+                kind="lifecycle",
+                service_id=service.id,
+                action="configure_identity",
+                actor=operator["username"],
+                detail="Applying automatic sign-in setup to the existing installation.",
+            )
+            control.set_service_identity(
+                service.id,
+                "native_oidc",
+                "configuring",
+                owner_uid=owner_uid,
+                job_id=job["id"],
+                detail="Updating first-use sign-in automatically.",
+            )
+            adopted.append(service.id)
+    return {"ok": True, "adopted": adopted}
 
 
 def _effective_state(service: Any, control: ControlState | None) -> str:
@@ -66,7 +114,7 @@ async def service_action(service_id: str, request: Request, operator: OperatorMu
     provisions_account = action in {"install", "retry_setup"}
     if (
         provisions_account
-        and service.account.get("mode") == "environment_bootstrap"
+        and (service.account.get("mode") in {"environment_bootstrap", "api_bootstrap"} or service.id == "actual-budget")
         and (not operator.get("subject_id") or not operator.get("email"))
     ):
         raise ApiError(

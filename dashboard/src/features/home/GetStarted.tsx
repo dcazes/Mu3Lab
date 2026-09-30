@@ -147,7 +147,7 @@ export function GetStarted() {
       done: Boolean(extension?.signed_in),
       guide: 'extension' as const,
     },
-    ...(vault.data.seeded
+    ...(vault.data.seeded && !vault.data.pending_logins
       ? []
       : [{ key: 'vault', text: 'Save your app logins to your password vault', done: false, to: '/settings/sign-in' }]),
     {
