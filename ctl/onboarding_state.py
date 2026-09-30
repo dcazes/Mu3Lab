@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import read_or_create_key, write_atomic
 from ctl.workflow_secrets import JobIdentity, WorkflowSecretError, generate_password
 
 CONFIG_VERSION = 1
@@ -37,11 +38,7 @@ def _path(service_id: str, paths: RuntimePaths) -> Path:
 def _cipher(paths: RuntimePaths):
     from cryptography.fernet import Fernet
 
-    key = paths.runtime / "onboarding.key"
-    if not key.exists():
-        with os.fdopen(os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as handle:
-            handle.write(Fernet.generate_key())
-    return Fernet(key.read_bytes())
+    return Fernet(read_or_create_key(paths.runtime / "onboarding.key", Fernet.generate_key))
 
 
 def _read(service_id: str, paths: RuntimePaths) -> dict:
@@ -58,11 +55,7 @@ def _read(service_id: str, paths: RuntimePaths) -> dict:
 
 
 def _write(service_id: str, record: dict, paths: RuntimePaths) -> None:
-    path = _path(service_id, paths)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_bytes(_cipher(paths).encrypt(json.dumps(record).encode()))
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    write_atomic(_path(service_id, paths), _cipher(paths).encrypt(json.dumps(record).encode()))
 
 
 def read(service_id: str, paths: RuntimePaths = RuntimePaths()) -> dict:

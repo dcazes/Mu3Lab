@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import read_or_create_key, serialized, write_atomic
 
 PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 
@@ -28,12 +28,7 @@ def _cipher(paths: RuntimePaths):
         raise ProviderSecretError("encrypted provider storage is unavailable") from exc
     key_path, _ = _paths(paths)
     paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if key_path.is_file():
-        key = key_path.read_bytes()
-    else:
-        key = Fernet.generate_key()
-        key_path.write_bytes(key)
-        os.chmod(key_path, 0o600)
+    key = read_or_create_key(key_path, Fernet.generate_key)
     if len(key) != 44:
         raise ProviderSecretError("encrypted provider key is invalid")
     return Fernet(key)
@@ -52,6 +47,13 @@ def _read(paths: RuntimePaths) -> list[dict[str, str]]:
     return value if isinstance(value, list) else []
 
 
+def _write(records: list[dict[str, str]], paths: RuntimePaths) -> None:
+    # An interrupted update leaves either the old or the complete new ciphertext.
+    _, store_path = _paths(paths)
+    write_atomic(store_path, _cipher(paths).encrypt(json.dumps(records).encode("utf-8")))
+
+
+@serialized("provider-secrets.lock")
 def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
     """Upsert one credential and return metadata only."""
     from ctl.provider_catalog import get
@@ -74,34 +76,22 @@ def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = Runti
     }
     records = [item for item in records if item.get("id") != provider_id]
     records.append(record)
-    cipher = _cipher(paths)
-    _, store_path = _paths(paths)
-    # An interrupted credential update must leave either the old ciphertext or
-    # the complete new ciphertext, never a truncated secret store.
-    temporary = store_path.with_suffix(".enc.tmp")
-    temporary.write_bytes(cipher.encrypt(json.dumps(records).encode("utf-8")))
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, store_path)
-    os.chmod(store_path, 0o600)
+    _write(records, paths)
     return {"id": provider_id, "label": label, "updated_at": record["updated_at"]}
 
 
+@serialized("provider-secrets.lock")
 def delete(provider_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     """Delete one credential atomically without exposing any other record."""
     records = _read(paths)
     retained = [item for item in records if item.get("id") != provider_id]
     if len(retained) == len(records):
         return False
-    cipher = _cipher(paths)
-    _, store_path = _paths(paths)
-    temporary = store_path.with_suffix(".enc.tmp")
-    temporary.write_bytes(cipher.encrypt(json.dumps(retained).encode("utf-8")))
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, store_path)
-    os.chmod(store_path, 0o600)
+    _write(retained, paths)
     return True
 
 
+@serialized("provider-secrets.lock")
 def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     """Return provider ids and labels only; never return encrypted values."""
     return [
@@ -111,6 +101,7 @@ def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     ]
 
 
+@serialized("provider-secrets.lock")
 def records(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     """Return private records for Mu3Lab's internal configuration renderer.
 

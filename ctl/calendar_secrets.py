@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import read_or_create_key, serialized, write_atomic
 
 
 class CalendarSecretError(ValueError):
@@ -21,12 +21,7 @@ def _cipher(paths: RuntimePaths):
 
     key_path, _ = _paths(paths)
     paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if key_path.is_file():
-        key = key_path.read_bytes()
-    else:
-        key = Fernet.generate_key()
-        key_path.write_bytes(key)
-        os.chmod(key_path, 0o600)
+    key = read_or_create_key(key_path, Fernet.generate_key)
     return Fernet(key)
 
 
@@ -43,13 +38,10 @@ def _read(paths: RuntimePaths) -> dict[str, dict[str, str]]:
 
 def _write(records: dict[str, dict[str, str]], paths: RuntimePaths) -> None:
     _, target = _paths(paths)
-    temporary = target.with_suffix(".enc.tmp")
-    temporary.write_bytes(_cipher(paths).encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, target)
-    os.chmod(target, 0o600)
+    write_atomic(target, _cipher(paths).encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
 
 
+@serialized("calendar-secrets.lock")
 def save(owner_uid: str, username: str, app_password: str, paths: RuntimePaths = RuntimePaths()) -> None:
     if not owner_uid or len(owner_uid) > 256 or not username or len(username) > 256:
         raise CalendarSecretError("valid calendar owner and username are required")
@@ -60,11 +52,13 @@ def save(owner_uid: str, username: str, app_password: str, paths: RuntimePaths =
     _write(records, paths)
 
 
+@serialized("calendar-secrets.lock")
 def get(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str] | None:
     value = _read(paths).get(owner_uid)
     return dict(value) if isinstance(value, dict) else None
 
 
+@serialized("calendar-secrets.lock")
 def delete(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> None:
     records = _read(paths)
     if owner_uid in records:

@@ -8,7 +8,6 @@ credentials for at most 24 hours without reusing the provider-secret key.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Any, TypedDict
 from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import read_or_create_key, serialized, write_atomic
 
 TTL_HOURS = 24
 PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_!@#%"
@@ -40,12 +40,7 @@ def _cipher(paths: RuntimePaths):
         raise WorkflowSecretError("encrypted workflow storage is unavailable") from exc
     key_path, _ = _paths(paths)
     paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if key_path.is_file():
-        key = key_path.read_bytes()
-    else:
-        key = Fernet.generate_key()
-        key_path.write_bytes(key)
-        os.chmod(key_path, 0o600)
+    key = read_or_create_key(key_path, Fernet.generate_key)
     if len(key) != 44:
         raise WorkflowSecretError("encrypted workflow key is invalid")
     return Fernet(key)
@@ -64,16 +59,8 @@ def _read(paths: RuntimePaths) -> list[dict[str, Any]]:
 
 
 def _write(records: list[dict[str, Any]], paths: RuntimePaths) -> None:
-    cipher = _cipher(paths)
     _, store_path = _paths(paths)
-    temporary = store_path.with_suffix(".enc.tmp")
-    with temporary.open("wb") as handle:
-        handle.write(cipher.encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, store_path)
-    os.chmod(store_path, 0o600)
+    write_atomic(store_path, _cipher(paths).encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
 
 
 def generate_password() -> str:
@@ -97,6 +84,7 @@ class JobIdentity(TypedDict):
     display_name: str
 
 
+@serialized("workflow-secrets.lock")
 def save_job_identity(
     job_id: str, *, owner_uid: str, email: str, username: str, display_name: str, paths: RuntimePaths = RuntimePaths()
 ) -> None:
@@ -122,6 +110,7 @@ def save_job_identity(
     _write(records, paths)
 
 
+@serialized("workflow-secrets.lock")
 def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> JobIdentity | None:
     cleanup(paths)
     for item in _read(paths):
@@ -135,6 +124,7 @@ def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> JobIdenti
     return None
 
 
+@serialized("workflow-secrets.lock")
 def create_handoff(
     *,
     service_id: str,
@@ -171,6 +161,7 @@ def create_handoff(
     }
 
 
+@serialized("workflow-secrets.lock")
 def metadata(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     cleanup(paths)
     keys = ("id", "service_id", "job_id", "created_at", "expires_at", "login_url")
@@ -181,6 +172,7 @@ def metadata(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict[
     ]
 
 
+@serialized("workflow-secrets.lock")
 def reveal(handoff_id: str, owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str] | None:
     cleanup(paths)
     for item in _read(paths):
@@ -201,6 +193,7 @@ def reveal(handoff_id: str, owner_uid: str, paths: RuntimePaths = RuntimePaths()
     return None
 
 
+@serialized("workflow-secrets.lock")
 def delete(record_id: str, owner_uid: str = "", paths: RuntimePaths = RuntimePaths()) -> bool:
     records = _read(paths)
     retained = [
@@ -214,6 +207,7 @@ def delete(record_id: str, owner_uid: str = "", paths: RuntimePaths = RuntimePat
     return True
 
 
+@serialized("workflow-secrets.lock")
 def delete_by_job(job_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     records = _read(paths)
     retained = [item for item in records if item.get("job_id") != job_id]
@@ -223,6 +217,7 @@ def delete_by_job(job_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     return True
 
 
+@serialized("workflow-secrets.lock")
 def cleanup(paths: RuntimePaths = RuntimePaths()) -> list[str]:
     now = _now()
     records = _read(paths)
