@@ -21,6 +21,23 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+# Apps download in parallel (up to this many at once, the owner can change
+# it) and are set up one at a time as each download finishes, so a small app
+# is usable while a large one is still downloading.
+DEFAULT_PARALLEL_DOWNLOADS = 3
+MAX_PARALLEL_DOWNLOADS = 8
+# download_state: '' waiting, 'downloading', 'paused', or 'ready' (images are
+# present, or the setup step will fall back to Docker's own pull).
+DOWNLOAD_STATES = frozenset({"", "downloading", "paused", "ready"})
+
+
+def _clamp_parallel(count: int) -> int:
+    try:
+        return max(1, min(MAX_PARALLEL_DOWNLOADS, int(count)))
+    except (TypeError, ValueError):
+        return DEFAULT_PARALLEL_DOWNLOADS
+
+
 class InstallBatchStore:
     def __init__(self, database: Path) -> None:
         self.database = database
@@ -59,6 +76,21 @@ class InstallBatchStore:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(install_batch_items)")}
         if "depends_on_json" not in columns:
             conn.execute("ALTER TABLE install_batch_items ADD COLUMN depends_on_json TEXT NOT NULL DEFAULT '[]'")
+        if "priority" not in columns:
+            conn.execute("ALTER TABLE install_batch_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
+            conn.execute("UPDATE install_batch_items SET priority = ordinal")
+        if "download_state" not in columns:
+            # Items of batches from before parallel downloads fetch their own images during setup.
+            conn.execute("ALTER TABLE install_batch_items ADD COLUMN download_state TEXT NOT NULL DEFAULT ''")
+            conn.execute("UPDATE install_batch_items SET download_state = 'ready'")
+        if "download_error" not in columns:
+            conn.execute("ALTER TABLE install_batch_items ADD COLUMN download_error TEXT NOT NULL DEFAULT ''")
+        batch_columns = {row[1] for row in conn.execute("PRAGMA table_info(install_batches)")}
+        if "parallel_downloads" not in batch_columns:
+            conn.execute(
+                "ALTER TABLE install_batches ADD COLUMN parallel_downloads INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_PARALLEL_DOWNLOADS}"
+            )
         return conn
 
     def plan(self, registry: Registry, requested: list[str], control: ControlState) -> list[tuple[str, bool]]:
@@ -182,7 +214,11 @@ class InstallBatchStore:
         idempotency_key: str,
         jobs: JobStore,
         control: ControlState,
+        parallel_downloads: int = DEFAULT_PARALLEL_DOWNLOADS,
     ) -> dict[str, Any]:
+        """Record the plan; the worker's download manager then starts downloads,
+        and each app is set up once its download is ready."""
+        parallel_downloads = _clamp_parallel(parallel_downloads)
         with self._connect() as conn:
             if idempotency_key:
                 existing = conn.execute(
@@ -199,16 +235,16 @@ class InstallBatchStore:
             conn.execute(
                 """
                 INSERT INTO install_batches
-                (id, actor, owner_uid, state, idempotency_key, created_at, updated_at)
-                VALUES (?, ?, ?, 'queued', ?, ?, ?)
+                (id, actor, owner_uid, state, idempotency_key, parallel_downloads, created_at, updated_at)
+                VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
             """,
-                (batch_id, actor, owner_uid, idempotency_key or None, now, now),
+                (batch_id, actor, owner_uid, idempotency_key or None, parallel_downloads, now, now),
             )
             conn.executemany(
                 """
                 INSERT INTO install_batch_items
-                (batch_id, service_id, ordinal, explicitly_selected, state, depends_on_json)
-                VALUES (?, ?, ?, ?, 'pending', ?)
+                (batch_id, service_id, ordinal, explicitly_selected, state, depends_on_json, priority)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?)
             """,
                 (
                     (
@@ -217,12 +253,12 @@ class InstallBatchStore:
                         ordinal,
                         int(explicit),
                         json.dumps(list(registry.get(service_id).dependencies)),
+                        ordinal,
                     )
                     for ordinal, (service_id, explicit) in enumerate(plan)
                 ),
             )
         workflow_secrets.save_job_identity(f"batch:{batch_id}", **identity)
-        self._enqueue(batch_id, 0, actor, jobs)
         return self.get(batch_id) or {}
 
     def get(self, batch_id: str) -> dict[str, Any] | None:
@@ -230,7 +266,7 @@ class InstallBatchStore:
             batch = conn.execute("SELECT * FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
             items = conn.execute(
                 """
-                SELECT * FROM install_batch_items WHERE batch_id = ? ORDER BY ordinal
+                SELECT * FROM install_batch_items WHERE batch_id = ? ORDER BY priority, ordinal
             """,
                 (batch_id,),
             ).fetchall()
@@ -393,25 +429,11 @@ class InstallBatchStore:
                                 candidate["ordinal"],
                             ),
                         )
-                next_item = conn.execute(
-                    """SELECT ordinal FROM install_batch_items
-                                            WHERE batch_id = ? AND state = 'pending' ORDER BY ordinal LIMIT 1""",
-                    (batch_id,),
-                ).fetchone()
-                actor = conn.execute("SELECT actor FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
-                if not next_item:
-                    conn.execute(
-                        """UPDATE install_batches SET state = 'completed_with_failures', error_json = ?,
-                                    updated_at = ? WHERE id = ?""",
-                        (json.dumps(error), now, batch_id),
-                    )
-                    workflow_secrets.delete_by_job(f"batch:{batch_id}")
-                    return
                 conn.execute(
-                    "UPDATE install_batches SET state = 'running', error_json = ?, updated_at = ? WHERE id = ?",
+                    "UPDATE install_batches SET error_json = ?, updated_at = ? WHERE id = ?",
                     (json.dumps(error), now, batch_id),
                 )
-            self._enqueue(batch_id, int(next_item["ordinal"]), str(actor["actor"]), jobs)
+            self.continue_batch(batch_id, jobs)
             return
         with self._connect() as conn:
             conn.execute(
@@ -419,26 +441,175 @@ class InstallBatchStore:
                             WHERE batch_id = ? AND ordinal = ?""",
                 (now, batch_id, ordinal),
             )
-            next_item = conn.execute(
-                """SELECT ordinal FROM install_batch_items
-                                        WHERE batch_id = ? AND ordinal > ? AND state = 'pending'
-                                        ORDER BY ordinal LIMIT 1""",
-                (batch_id, ordinal),
+        self.continue_batch(batch_id, jobs)
+
+    # --- Parallel downloads, setup one at a time ------------------------------------
+
+    @staticmethod
+    def _ready_ordinal(conn: sqlite3.Connection, batch_id: str) -> int | None:
+        """The first app, in the owner's order, whose download is ready and whose
+        in-batch dependencies are installed."""
+        states = {
+            str(row["service_id"]): str(row["state"])
+            for row in conn.execute("SELECT service_id, state FROM install_batch_items WHERE batch_id = ?", (batch_id,))
+        }
+        rows = conn.execute(
+            """SELECT ordinal, depends_on_json FROM install_batch_items
+               WHERE batch_id = ? AND state = 'pending' AND download_state = 'ready'
+               ORDER BY priority, ordinal""",
+            (batch_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                dependencies = [dep for dep in json.loads(row["depends_on_json"]) if dep in states]
+            except (TypeError, ValueError):
+                dependencies = []
+            if all(states[dep] == "succeeded" for dep in dependencies):
+                return int(row["ordinal"])
+        return None
+
+    def continue_batch(self, batch_id: str, jobs: JobStore) -> None:
+        """Set up the next ready app, or finish the batch when nothing is left.
+
+        Called when a setup job ends and when a download becomes ready; the
+        claim happens under one write lock so two callers cannot both start a
+        setup.
+        """
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            batch = conn.execute("SELECT state, actor FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
+            if not batch or batch["state"] not in {"queued", "running"}:
+                return
+            active = conn.execute(
+                "SELECT 1 FROM install_batch_items WHERE batch_id = ? AND state IN ('queued', 'running') LIMIT 1",
+                (batch_id,),
             ).fetchone()
-            if not next_item:
+            if active:
+                return
+            ordinal = self._ready_ordinal(conn, batch_id)
+            if ordinal is None:
+                waiting = conn.execute(
+                    "SELECT 1 FROM install_batch_items WHERE batch_id = ? AND state = 'pending' LIMIT 1", (batch_id,)
+                ).fetchone()
+                if waiting:
+                    return  # still downloading (or paused)
                 any_failure = conn.execute(
                     """SELECT 1 FROM install_batch_items WHERE batch_id = ?
-                                              AND state IN ('failed', 'cancelled', 'blocked_by_dependency') LIMIT 1""",
+                       AND state IN ('failed', 'cancelled', 'blocked_by_dependency') LIMIT 1""",
                     (batch_id,),
                 ).fetchone()
                 conn.execute(
                     "UPDATE install_batches SET state = ?, updated_at = ? WHERE id = ?",
                     ("completed_with_failures" if any_failure else "succeeded", now, batch_id),
                 )
-                workflow_secrets.delete_by_job(f"batch:{batch_id}")
-                return
-            actor = conn.execute("SELECT actor FROM install_batches WHERE id = ?", (batch_id,)).fetchone()
-        self._enqueue(batch_id, int(next_item["ordinal"]), str(actor["actor"]), jobs)
+                finished = True
+            else:
+                conn.execute(
+                    "UPDATE install_batch_items SET state = 'queued' WHERE batch_id = ? AND ordinal = ?",
+                    (batch_id, ordinal),
+                )
+                finished = False
+            actor = str(batch["actor"])
+        if finished or ordinal is None:
+            workflow_secrets.delete_by_job(f"batch:{batch_id}")
+            return
+        self._enqueue(batch_id, ordinal, actor, jobs)
+
+    def download_queue(self) -> list[dict[str, Any]]:
+        """Apps of running batches that still need their images, in the owner's order."""
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT i.batch_id, i.ordinal, i.service_id, i.download_state, i.priority, b.parallel_downloads
+                FROM install_batch_items i JOIN install_batches b ON b.id = i.batch_id
+                WHERE b.state IN ('queued', 'running') AND i.state = 'pending' AND i.download_state != 'ready'
+                ORDER BY b.created_at, i.priority, i.ordinal
+            """).fetchall()
+        return [dict(row) for row in rows]
+
+    def download_state(self, batch_id: str, ordinal: int) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT download_state FROM install_batch_items WHERE batch_id = ? AND ordinal = ?", (batch_id, ordinal)
+            ).fetchone()
+        return str(row["download_state"]) if row else ""
+
+    def set_download_state(self, batch_id: str, ordinal: int, state: str, error: str = "") -> None:
+        if state not in DOWNLOAD_STATES:
+            raise ValueError("unknown download state")
+        with self._connect() as conn:
+            # A pause the owner asked for wins over a download that was already starting.
+            conn.execute(
+                """UPDATE install_batch_items SET download_state = ?, download_error = ?
+                   WHERE batch_id = ? AND ordinal = ? AND state = 'pending'
+                   AND NOT (download_state = 'paused' AND ? = 'downloading')""",
+                (state, error[:500], batch_id, ordinal, state),
+            )
+
+    def _item_ordinal(self, batch_id: str, service_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT ordinal FROM install_batch_items WHERE batch_id = ? AND service_id = ?", (batch_id, service_id)
+            ).fetchone()
+        if not row:
+            raise ValueError("app is not part of this batch")
+        return int(row["ordinal"])
+
+    def pause_download(self, batch_id: str, service_id: str) -> dict[str, Any]:
+        ordinal = self._item_ordinal(batch_id, service_id)
+        with self._connect() as conn:
+            changed = conn.execute(
+                """UPDATE install_batch_items SET download_state = 'paused'
+                   WHERE batch_id = ? AND ordinal = ? AND state = 'pending' AND download_state IN ('', 'downloading')""",
+                (batch_id, ordinal),
+            ).rowcount
+        if not changed:
+            raise ValueError("only a waiting or downloading app can be paused")
+        return self.get(batch_id) or {}
+
+    def resume_download(self, batch_id: str, service_id: str) -> dict[str, Any]:
+        ordinal = self._item_ordinal(batch_id, service_id)
+        with self._connect() as conn:
+            changed = conn.execute(
+                """UPDATE install_batch_items SET download_state = ''
+                   WHERE batch_id = ? AND ordinal = ? AND state = 'pending' AND download_state = 'paused'""",
+                (batch_id, ordinal),
+            ).rowcount
+        if not changed:
+            raise ValueError("this app's download is not paused")
+        return self.get(batch_id) or {}
+
+    def reorder(self, batch_id: str, service_ids: list[str]) -> dict[str, Any]:
+        """Apply the owner's order to apps not yet being set up; others keep their place."""
+        if len(service_ids) != len(set(service_ids)):
+            raise ValueError("list each app once")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            known = {
+                str(row["service_id"])
+                for row in conn.execute("SELECT service_id FROM install_batch_items WHERE batch_id = ?", (batch_id,))
+            }
+            if not known:
+                raise ValueError("batch not found")
+            if set(service_ids) - known:
+                raise ValueError("the order lists an app that is not in this batch")
+            for position, service_id in enumerate(service_ids):
+                conn.execute(
+                    """UPDATE install_batch_items SET priority = ?
+                       WHERE batch_id = ? AND service_id = ? AND state = 'pending'""",
+                    (position, batch_id, service_id),
+                )
+        return self.get(batch_id) or {}
+
+    def set_parallel_downloads(self, batch_id: str, count: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE install_batches SET parallel_downloads = ?, updated_at = ? WHERE id = ?",
+                (_clamp_parallel(count), _now(), batch_id),
+            ).rowcount
+        if not changed:
+            raise ValueError("batch not found")
+        return self.get(batch_id) or {}
 
     def reconcile(self, jobs: JobStore) -> None:
         """Advance terminal children left between job commit and worker shutdown."""
@@ -452,6 +623,11 @@ class InstallBatchStore:
             job = jobs.get(str(row["job_id"]))
             if job and job["state"] in {"succeeded", "failed", "cancelled"}:
                 self.advance_for_job(str(row["job_id"]), jobs)
+        # A download can finish while no setup is running; start its setup.
+        with self._connect() as conn:
+            waiting = [str(row["id"]) for row in conn.execute("SELECT id FROM install_batches WHERE state = 'running'")]
+        for batch_id in waiting:
+            self.continue_batch(batch_id, jobs)
 
     def cancel(self, batch_id: str, jobs: JobStore) -> bool:
         now = _now()

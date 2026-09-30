@@ -26,6 +26,7 @@ import time as _time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from typing import IO
 
 from ctl import privilege
 
@@ -581,6 +582,111 @@ def docker_container_statuses(project: str) -> tuple[int, str]:
         lambda _line: None,
         timeout=15,
     )
+
+
+def compose_image_list(
+    projdir: Path, log: Callable[[str], None], *, env: dict[str, str] | None = None
+) -> tuple[int, list[str]]:
+    """Resolved registry images of one curated project, each listed once.
+
+    Services built locally from a Dockerfile have nothing to download.
+    """
+    command = [
+        "docker",
+        "compose",
+        "-f",
+        str(projdir / "docker-compose.yml"),
+        "--project-directory",
+        str(projdir),
+        "config",
+        "--format",
+        "json",
+    ]
+    rc, output = docker_cmd(command, log, timeout=60, env=env)
+    if rc:
+        return rc, []
+    try:
+        services = _json.loads(output[output.index("{") :]).get("services", {})
+    except ValueError:
+        return 1, []
+    images = [
+        str(service["image"]) for service in services.values() if service.get("image") and not service.get("build")
+    ]
+    return 0, list(dict.fromkeys(images))
+
+
+def docker_image_present(image: str) -> bool:
+    if not image or any(char.isspace() for char in image):
+        return False
+    rc, _output = docker_cmd(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", image], lambda _line: None, timeout=30
+    )
+    return rc == 0
+
+
+def docker_image_remove(image: str, log: Callable[[str], None]) -> None:
+    docker_cmd(["docker", "image", "rm", "--force", image], log, timeout=60)
+
+
+def docker_local_images() -> list[dict]:
+    """Registry digests and uncompressed layer ids of every local image."""
+    rc, ids = docker_cmd(["docker", "image", "ls", "--quiet", "--no-trunc"], lambda _line: None, timeout=30)
+    unique = list(dict.fromkeys(ids.split()))
+    if rc or not unique:
+        return []
+    rc, output = docker_cmd(
+        ["docker", "image", "inspect", "--format", "{{json .RepoDigests}} {{json .RootFS.Layers}}", *unique],
+        lambda _line: None,
+        timeout=60,
+    )
+    images = []
+    for line in output.splitlines() if rc == 0 else []:
+        digests, _, layers = line.partition(" ")
+        try:
+            images.append({"repo_digests": _json.loads(digests) or [], "layers": _json.loads(layers) or []})
+        except ValueError:
+            continue
+    return images
+
+
+def docker_load_stream(
+    write: Callable[[IO[bytes]], None], log: Callable[[str], None], *, timeout: int = 1800
+) -> tuple[int, str]:
+    """Stream an image archive into ``docker load`` without a temporary file."""
+    log("$ docker load")
+    command = _docker_invocation(["docker", "load"])
+    if command is None:
+        return 1, "docker unavailable: no live group and no DB membership"
+    try:
+        proc = _subprocess.Popen(
+            command,
+            stdin=_subprocess.PIPE,
+            stdout=_subprocess.PIPE,
+            stderr=_subprocess.STDOUT,
+            env={**_os.environ, **_docker_config_env()},
+        )
+    except OSError as exc:
+        return 126, f"{command[0]}: {exc}"
+    chunks: list[bytes] = []
+    reader = _threading.Thread(target=lambda: chunks.append(proc.stdout.read() if proc.stdout else b""), daemon=True)
+    reader.start()
+    assert proc.stdin is not None
+    try:
+        write(proc.stdin)
+        proc.stdin.close()
+    except (BrokenPipeError, OSError):
+        pass
+    try:
+        rc = proc.wait(timeout=timeout)
+    except _subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return 124, "docker load timed out"
+    reader.join(timeout=10)
+    output = b"".join(chunks).decode("utf-8", "replace").strip()
+    for line in output.splitlines()[-5:]:
+        log(line[:500])
+    return rc, output
 
 
 def docker_image_digest(image: str) -> tuple[int, str]:

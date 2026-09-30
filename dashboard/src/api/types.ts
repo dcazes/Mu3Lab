@@ -265,8 +265,6 @@ export interface ProviderCatalogItem {
   free_tier?: string;
   /** The sign-up page offers "Continue with Google". */
   google_sign_in?: boolean;
-  /** Mu3Lab can fetch the key through the provider's own sign-in page. */
-  oauth?: boolean;
   /** Best-guess key shape for providers without a distinctive prefix. */
   key_pattern?: string;
 }
@@ -516,6 +514,26 @@ export interface InstallBatchItem {
   error_json?: string;
   started_at: string;
   completed_at: string;
+  /** Setup order among apps not yet being set up; lower goes first. */
+  priority: number;
+  /** '' waiting, then downloading → ready; paused only when the owner pauses it. */
+  download_state: '' | 'downloading' | 'paused' | 'ready';
+  /** Why the fast download failed; setup then retries with Docker's own pull. */
+  download_error?: string;
+  /** Live image download for this item, before or during setup. */
+  download?: ImageDownload | null;
+}
+
+export interface ImageDownload {
+  /** `docker` means Docker's own pull is running, which reports no totals. */
+  state: 'downloading' | 'loading' | 'done' | 'docker';
+  total_bytes: number;
+  done_bytes: number;
+  rate_bps: number;
+  images_total: number;
+  images_done: number;
+  connections: number;
+  updated_at: string;
 }
 
 export interface InstallBatch {
@@ -532,6 +550,8 @@ export interface InstallBatch {
     | 'reset_failed'
     | 'reset';
   current_ordinal: number;
+  /** How many apps download at the same time. */
+  parallel_downloads: number;
   created_at: string;
   updated_at: string;
   error?: { code?: string; message?: string };
@@ -575,4 +595,24 @@ export interface CredentialReveal extends CredentialHandoff {
   username: string;
   email: string;
   password: string;
+}
+
+export interface AppSize {
+  /** Everything the app downloads, compressed. */
+  download_bytes: number;
+  /** What is left to download after layers this server already has. */
+  needed_bytes: number;
+  /** Space the app uses once installed (compressed plus unpacked copies). */
+  disk_bytes: number;
+  /** Extra space it needs here, leaving out layers already on the server. */
+  needed_disk_bytes: number;
+}
+
+export interface AppSizesResponse {
+  apps: Record<string, AppSize & { updated_at: string; complete: boolean }>;
+  /** Totals for the requested apps, with shared layers counted once. */
+  selection: AppSize;
+  /** False until every requested app has been measured. */
+  measured: boolean;
+  free_bytes: number;
 }

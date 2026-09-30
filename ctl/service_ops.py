@@ -8,8 +8,9 @@ from pathlib import Path
 
 import yaml
 
-from ctl import actions, workflow_secrets
+from ctl import actions, image_fetch, workflow_secrets
 from ctl.control_state import ControlState
+from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
 from ctl.lifecycle.accounts import (
     account_username,
@@ -280,8 +281,8 @@ def _install(
             f"Compose validation failed: {output}",
         )
         return
-    _event(store, job_id, "pull_images", "Pulling pinned application images.")
-    rc, output = actions.compose_pull(project, log)
+    _event(store, job_id, "pull_images", "Downloading pinned application images.")
+    rc, output = _download_images(project, service.id, job_id, log)
     if rc:
         _fail(
             store, state, job_id, service.id, actor, "pull_images", "image_pull_failed", f"Image pull failed: {output}"
@@ -747,6 +748,26 @@ def _configure_identity(
             service.id, mode, target, owner_uid=owner_uid, job_id=job_id, detail=detail, verified=target == "ready"
         )
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
+def _download_images(project: Path, service_id: str, job_id: str, log: Callable[[str], None]) -> tuple[int, str]:
+    """Download images with Mu3Lab's verified parallel fetcher, else Docker's pull."""
+    downloads = ImageDownloadStore.runtime()
+
+    def report(snapshot: dict) -> None:
+        if downloads:
+            downloads.update(service_id, job_id, snapshot)
+
+    rc, images = actions.compose_image_list(project, log)
+    if rc == 0 and images:
+        try:
+            image_fetch.fetch_images(images, RuntimePaths().runtime / "image-cache", log, report=report)
+            return 0, ""
+        except image_fetch.FetchError as exc:
+            log(f"Fast download unavailable ({exc}); using Docker's own download instead.")
+    # Docker's pull reports no totals, so the dashboard shows it without a percentage.
+    report({"state": "docker"})
+    return actions.compose_pull(project, log)
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:

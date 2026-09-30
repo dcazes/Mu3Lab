@@ -1376,6 +1376,33 @@ a.row-main:hover b,
   color: var(--red);
 }
 
+.key-paste-note.is-warning {
+  color: var(--amber);
+}
+
+.key-paste-note.is-success {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+.key-paste-note.is-success svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--green);
+}
+
+/* Keys stay visible so the owner can see exactly what was pasted. */
+.key-input {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
 .key-paste-choice {
   display: flex;
   flex-wrap: wrap;
@@ -2286,10 +2313,147 @@ a.row-main:hover b,
 }
 
 .install-items li {
+  display: grid;
+  gap: 4px;
+}
+
+.install-item-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.install-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.install-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.install-grip {
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+  cursor: grab;
+}
+
+.install-items li.is-movable {
+  cursor: grab;
+}
+
+.install-items li.is-dragging {
+  opacity: 0.5;
+}
+
+.discover-size {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.action-bar-size {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.install-plan {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.install-plan li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: grab;
+}
+
+.install-plan li.is-dragging {
+  opacity: 0.5;
+}
+
+.install-plan-name {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.install-plan-name small {
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.install-plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.install-plan-summary p {
+  margin: 0;
+}
+
+.install-header-side {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.install-parallel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.install-parallel select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.download-status {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-status p {
+  margin: 0;
+}
+
+.download-status .progress {
+  height: 4px;
 }
 
 .install-items small {

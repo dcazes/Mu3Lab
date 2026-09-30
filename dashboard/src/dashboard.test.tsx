@@ -231,11 +231,27 @@ describe('Apps', () => {
     expect(reads).toBe(2);
   });
 
-  it('installs several selected apps in one batch', async () => {
+  it('installs several selected apps in one batch, smallest download first', async () => {
+    const size = (needed: number) => ({
+      download_bytes: needed,
+      needed_bytes: needed,
+      disk_bytes: needed * 4,
+      needed_disk_bytes: needed * 4,
+      updated_at: '',
+      complete: true,
+    });
     const fetchMock = stubFetch((path) =>
       path === '/api/v1/services/install-batch'
         ? { ok: true, batch: { id: 'b', state: 'queued', current_ordinal: 0, items: [] } }
-        : { ok: true, batch: null },
+        : path.startsWith('/api/v1/app-sizes')
+          ? {
+              ok: true,
+              apps: { mealie: size(400 * 1024 ** 2), immich: size(100 * 1024 ** 2) },
+              selection: size(500 * 1024 ** 2),
+              measured: true,
+              free_bytes: 100 * 1024 ** 3,
+            }
+          : { ok: true, batch: null },
     );
     const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
     renderWithDashboard(
@@ -249,14 +265,44 @@ describe('Apps', () => {
     expect(screen.getByText('Under review')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select Mealie for installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Select Immich for installation' }));
+    expect(await screen.findByText('400.0 MB download · about 1.6 GB on disk')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install 2 apps' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Install' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getAllByRole('listitem').map((item) => item.querySelector('b')?.textContent)).toEqual([
+      'Immich',
+      'Mealie',
+    ]);
+    fireEvent.click(dialog.getByRole('button', { name: 'Install all selected' }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/install-batch',
-        expect.objectContaining({ body: JSON.stringify({ service_ids: ['mealie', 'immich'] }) }),
+        expect.objectContaining({
+          body: JSON.stringify({ service_ids: ['immich', 'mealie'], parallel_downloads: 3 }),
+        }),
       ),
     );
+  });
+
+  it('will not start an install that cannot fit on the disk', async () => {
+    const big = { download_bytes: 10, needed_bytes: 10, disk_bytes: 50 * 1024 ** 3, needed_disk_bytes: 50 * 1024 ** 3 };
+    stubFetch((path) =>
+      path.startsWith('/api/v1/app-sizes')
+        ? {
+            ok: true,
+            apps: { mealie: { ...big, updated_at: '', complete: true } },
+            selection: big,
+            measured: true,
+            free_bytes: 10 * 1024 ** 3,
+          }
+        : { ok: true, batch: null },
+    );
+    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    renderWithDashboard(<AppsPage discover />, dashboardData([service('mealie', 'Mealie', 'optional', available)]));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Mealie for installation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install Mealie' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(await dialog.findByText('Not enough free disk space')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Install all selected' })).toBeDisabled();
   });
 });
 
@@ -328,7 +374,7 @@ describe('Settings', () => {
     );
     renderWithDashboard(<SecuritySettings />, dashboardData([]));
     expect(await screen.findByRole('button', { name: 'Export credentials' })).toBeInTheDocument();
-    expect(screen.getByText(/Authentik sign-in needs no password/)).toBeInTheDocument();
+    expect(screen.getByText(/Handoff expiry removes access to the saved copy/)).toBeInTheDocument();
   });
 
   it('copies exactly the tailnet address', async () => {

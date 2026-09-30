@@ -1,10 +1,11 @@
 import { Check, ChevronRight, PackageSearch, Plus, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { Service } from '../../api';
+import type { AppSize, AppSizesResponse, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton } from '../../components/Button';
 import { EmptyState, PageHeader, Tabs } from '../../components/Layout';
 import { Badge, StatusBadge } from '../../components/Status';
+import { bytes } from '../../lib/format';
 import { Link } from '../../lib/router';
 import {
   canInstall,
@@ -16,7 +17,9 @@ import {
   type Stage,
   stageLabel,
 } from '../../lib/services';
+import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
 import { useInstallBatch } from './useInstallBatch';
 
@@ -26,7 +29,7 @@ function matches(service: Service, term: string, summary = '') {
   return !term || `${service.name} ${service.category} ${summary}`.toLowerCase().includes(term);
 }
 
-function InstalledRow({ service }: { service: Service }) {
+function InstalledRow({ service, summary }: { service: Service; summary: string }) {
   const target = launchTarget(service);
   const signIn = signInSummary(service);
   return (
@@ -35,7 +38,7 @@ function InstalledRow({ service }: { service: Service }) {
         <AppIcon id={service.id} />
         <span className="row-text">
           <b>{service.name}</b>
-          <small>{categoryLabel(service.category)}</small>
+          <small style={{ whiteSpace: 'normal' }}>{summary || categoryLabel(service.category)}</small>
         </span>
       </Link>
       <span className="row-meta hide-mobile">
@@ -65,11 +68,13 @@ function InstalledRow({ service }: { service: Service }) {
 function DiscoverCard({
   service,
   summary,
+  size,
   selected,
   toggle,
 }: {
   service: Service;
   summary: string;
+  size?: AppSize;
   selected: boolean;
   toggle: () => void;
 }) {
@@ -84,6 +89,7 @@ function DiscoverCard({
         </Link>
       </header>
       <p>{installable ? summary : service.blocked_reason || summary}</p>
+      {installable && <small className="discover-size">{sizeLabel(size)}</small>}
       <footer>
         {installable ? (
           <Button
@@ -97,7 +103,7 @@ function DiscoverCard({
             {selected ? 'Selected' : 'Add'}
           </Button>
         ) : (
-          <Badge tone="gray">{service.stage === 'blocked' ? 'Coming later' : 'Unavailable'}</Badge>
+          <Badge tone="gray">Unavailable</Badge>
         )}
       </footer>
     </article>
@@ -110,7 +116,13 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const catalog = data.catalog.services;
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
+  const [planning, setPlanning] = useState(false);
   const installBatch = useInstallBatch();
+  // Sizes are measured in the background by the worker; re-read them now and then.
+  const sizes = useApi<AppSizesResponse>(
+    discover ? `/api/v1/app-sizes?ids=${encodeURIComponent(selected.join(','))}` : null,
+    { interval: 30000 },
+  ).data;
   const term = query.trim().toLowerCase();
 
   const installed = useMemo(() => services.filter(isInstalled), [services]);
@@ -129,7 +141,11 @@ export function AppsPage({ discover }: { discover: boolean }) {
     <div className="page">
       <PageHeader
         title="Apps"
-        description={discover ? 'Add reviewed apps to your private cloud.' : 'Everything running on your Mu3Lab.'}
+        description={
+          discover
+            ? 'Explore apps you can install on your Mu3Lab server.'
+            : 'Manage installed apps and supporting services.'
+        }
       />
       <div className="toolbar">
         <Tabs
@@ -157,15 +173,19 @@ export function AppsPage({ discover }: { discover: boolean }) {
           services={services}
           onAction={(action) => void installBatch.act(action)}
           onDismiss={installBatch.dismiss}
+          controls={installBatch.controls}
         />
       )}
       {!shown.length ? (
-        <EmptyState icon={PackageSearch} title={term ? 'No matching apps' : 'Nothing here yet'}>
+        <EmptyState
+          icon={PackageSearch}
+          title={term ? 'No matching apps' : discover ? 'No apps available to install' : 'No apps installed'}
+        >
           {term
             ? 'Try a different search.'
             : discover
-              ? 'Every available app is installed.'
-              : 'Install apps from Discover.'}
+              ? 'No additional apps are currently available to install.'
+              : 'Open Discover to choose apps to install.'}
         </EmptyState>
       ) : discover ? (
         <>
@@ -174,13 +194,14 @@ export function AppsPage({ discover }: { discover: boolean }) {
             if (!group.length) return null;
             return (
               <section key={stage} className="group">
-                <h2 className="group-title">{stage === 'blocked' ? 'Coming later' : 'Available to install'}</h2>
+                <h2 className="group-title">{stage === 'blocked' ? 'Unavailable' : 'Available to install'}</h2>
                 <div className="discover-grid">
                   {group.map((service) => (
                     <DiscoverCard
                       key={service.id}
                       service={service}
                       summary={catalog[service.id]?.summary || service.detail}
+                      size={sizes?.apps[service.id]}
                       selected={selected.includes(service.id)}
                       toggle={() => toggle(service.id)}
                     />
@@ -199,7 +220,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
               <h2 className="group-title">{stageLabel[stage]}</h2>
               <div className="card card-flush rows">
                 {group.map((service) => (
-                  <InstalledRow key={service.id} service={service} />
+                  <InstalledRow key={service.id} service={service} summary={catalog[service.id]?.summary || ''} />
                 ))}
               </div>
             </section>
@@ -210,20 +231,36 @@ export function AppsPage({ discover }: { discover: boolean }) {
         <div className="action-bar" role="region" aria-label="Selected apps">
           <span>
             <b>{selected.length}</b> selected · {names(selected).join(', ')}
+            {sizes?.measured && (
+              <small className="action-bar-size">
+                {' '}
+                · {bytes(sizes.selection.needed_bytes)} to download · about {bytes(sizes.selection.needed_disk_bytes)}{' '}
+                of disk space
+              </small>
+            )}
           </span>
           <Button variant="ghost" onClick={() => setSelected([])}>
             Clear
           </Button>
-          <Button
-            variant="primary"
-            loading={installBatch.pending}
-            onClick={async () => {
-              if (await installBatch.install(selected, names(selected))) setSelected([]);
-            }}
-          >
+          <Button variant="primary" loading={installBatch.pending} onClick={() => setPlanning(true)}>
             Install {selected.length === 1 ? names(selected)[0] : `${selected.length} apps`}
           </Button>
         </div>
+      )}
+      {planning && (
+        <InstallPlanDialog
+          ids={selected}
+          names={Object.fromEntries(selected.map((id, index) => [id, names(selected)[index]]))}
+          sizes={sizes}
+          pending={installBatch.pending}
+          onClose={() => setPlanning(false)}
+          onInstall={async (order, parallel) => {
+            if (await installBatch.install(order, parallel)) {
+              setSelected([]);
+              setPlanning(false);
+            }
+          }}
+        />
       )}
     </div>
   );

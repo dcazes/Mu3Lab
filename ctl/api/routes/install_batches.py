@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -10,7 +12,10 @@ from fastapi.responses import JSONResponse
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import IdentityData, Operator, OperatorMutation, Owner, VerifiedAccount, job_identity
-from ctl.install_batches import InstallBatchStore
+from ctl.app_sizes import AppSizeStore, summarize
+from ctl.download_manager import progress_key
+from ctl.image_downloads import ImageDownloadStore
+from ctl.install_batches import DEFAULT_PARALLEL_DOWNLOADS, InstallBatchStore
 from ctl.jobs import JobStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
@@ -36,10 +41,18 @@ def _owned_batch(batch_id: str, identity: IdentityData) -> tuple[InstallBatchSto
 
 
 def _batch_view(batch: dict[str, Any] | None) -> dict[str, Any]:
-    """Enrich a batch with its live child job and a redacted event tail."""
+    """Enrich a batch with its live child job, a redacted event tail and download progress."""
     if not batch:
         return {"batch": None, "current_job": None}
     items = batch.get("items", [])
+    downloads = ImageDownloadStore.runtime()
+    keys = {str(item.get("job_id") or "") or progress_key(str(batch["id"]), int(item["ordinal"])) for item in items}
+    progress = downloads.for_jobs(sorted(keys)) if downloads else {}
+    for item in items:
+        # Before setup the background download reports progress; during setup, the job does.
+        item["download"] = progress.get(str(item.get("job_id") or "")) or progress.get(
+            progress_key(str(batch["id"]), int(item["ordinal"]))
+        )
     current_item = next(
         (
             item
@@ -69,9 +82,14 @@ def _batch_view(batch: dict[str, Any] | None) -> dict[str, Any]:
 
 @router.post("/services/install-batch")
 async def create_install_batch(request: Request, operator: VerifiedAccount) -> dict[str, Any]:
-    service_ids = (await runtime.json_body(request)).get("service_ids", [])
+    """Install apps in the order given; ``parallel_downloads`` apps download at once."""
+    payload = await runtime.json_body(request)
+    service_ids = payload.get("service_ids", [])
     if not isinstance(service_ids, list) or not all(isinstance(item, str) for item in service_ids):
         raise ApiError(409, "service_ids must be a list of curated application IDs")
+    parallel = payload.get("parallel_downloads", DEFAULT_PARALLEL_DOWNLOADS)
+    if not isinstance(parallel, int) or isinstance(parallel, bool):
+        raise ApiError(409, "parallel_downloads must be a whole number")
     batches, jobs_store, control = _batch_store(), runtime.job_store(), runtime.control_state()
     try:
         result = batches.create(
@@ -83,10 +101,43 @@ async def create_install_batch(request: Request, operator: VerifiedAccount) -> d
             idempotency_key=request.headers.get("idempotency-key", ""),
             jobs=jobs_store,
             control=control,
+            parallel_downloads=parallel,
         )
     except (ValueError, RegistryError) as exc:
         raise ApiError(409, str(exc)) from exc
     return {"ok": True, "batch": result}
+
+
+def _free_bytes() -> int:
+    """Free space where Docker keeps images (the web process only reads disk stats)."""
+    for path in (Path("/var/lib/docker"), Path("/var/lib/containerd"), Path("/")):
+        try:
+            return shutil.disk_usage(path).free
+        except OSError:
+            continue
+    return 0
+
+
+@router.get("/app-sizes")
+def app_sizes(operator: Operator, ids: str = "") -> dict[str, Any]:
+    """Per-app sizes, plus totals for a selection with shared layers counted once."""
+    store = AppSizeStore.runtime()
+    sizes = store.all() if store else {}
+    selection = [item for item in ids.split(",") if item]
+    return {
+        "ok": True,
+        "apps": {
+            service_id: {
+                **summarize(sizes, [service_id]),
+                "updated_at": entry["updated_at"],
+                "complete": not entry["error"],
+            }
+            for service_id, entry in sizes.items()
+        },
+        "selection": summarize(sizes, selection),
+        "measured": all(item in sizes for item in selection),
+        "free_bytes": _free_bytes(),
+    }
 
 
 @router.get("/service-install-batches")
@@ -108,6 +159,40 @@ def resume_install_batch(batch_id: str, operator: OperatorMutation) -> dict[str,
         return {"ok": True, "batch": batches.resume(batch_id, runtime.job_store())}
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
+
+
+async def _batch_change(batch_id: str, operator: IdentityData, change) -> dict[str, Any]:
+    batches, _ = _owned_batch(batch_id, operator)
+    try:
+        return {"ok": True, **_batch_view(change(batches))}
+    except ValueError as exc:
+        raise ApiError(409, str(exc)) from exc
+
+
+@router.post("/service-install-batches/{batch_id}/downloads/{service_id}/pause")
+async def pause_download(batch_id: str, service_id: str, operator: OperatorMutation) -> dict[str, Any]:
+    return await _batch_change(batch_id, operator, lambda batches: batches.pause_download(batch_id, service_id))
+
+
+@router.post("/service-install-batches/{batch_id}/downloads/{service_id}/resume")
+async def resume_download(batch_id: str, service_id: str, operator: OperatorMutation) -> dict[str, Any]:
+    return await _batch_change(batch_id, operator, lambda batches: batches.resume_download(batch_id, service_id))
+
+
+@router.post("/service-install-batches/{batch_id}/order")
+async def reorder_batch(batch_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
+    service_ids = (await runtime.json_body(request)).get("service_ids", [])
+    if not isinstance(service_ids, list) or not all(isinstance(item, str) for item in service_ids):
+        raise ApiError(409, "service_ids must list the batch's apps in the wanted order")
+    return await _batch_change(batch_id, operator, lambda batches: batches.reorder(batch_id, service_ids))
+
+
+@router.post("/service-install-batches/{batch_id}/parallel-downloads")
+async def set_parallel_downloads(batch_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
+    count = (await runtime.json_body(request)).get("parallel_downloads")
+    if not isinstance(count, int) or isinstance(count, bool):
+        raise ApiError(409, "parallel_downloads must be a whole number")
+    return await _batch_change(batch_id, operator, lambda batches: batches.set_parallel_downloads(batch_id, count))
 
 
 @router.post("/service-install-batches/{batch_id}/cancel")

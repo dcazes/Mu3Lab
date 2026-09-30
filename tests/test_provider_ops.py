@@ -100,10 +100,11 @@ class VerifyTests(unittest.TestCase):
         ):
             self.assertEqual(_verify("groq", Path("."), lambda _line: None).error_code, "gateway_unavailable")
 
-    def test_a_saved_sentence_is_rejected_plainly(self):
-        result = _run(FakeGateway(), saved_key="compare these\ntwo products")
+    def test_an_empty_saved_key_is_rejected_plainly(self):
+        # Odd-looking keys are the provider's to judge; only nothing at all is refused here.
+        result = _run(FakeGateway(), saved_key="   ")
         self.assertEqual(result.error_code, "credential_rejected")
-        self.assertIn("doesn't look like an API key", result.detail)
+        self.assertIn("Paste an API key", result.detail)
 
 
 class GatewayKeyCleanupTests(unittest.TestCase):

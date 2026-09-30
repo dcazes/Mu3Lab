@@ -20,6 +20,14 @@ from ctl.service_ops import reset_failed_application
 from tests.support import runtime_paths
 
 
+def _downloads_ready(batches: InstallBatchStore, batch: dict, jobs: JobStore) -> dict:
+    """Stand in for the worker's download manager: every app's images are present."""
+    for item in batch["items"]:
+        batches.set_download_state(batch["id"], item["ordinal"], "ready")
+    batches.continue_batch(batch["id"], jobs)
+    return batches.get(batch["id"])
+
+
 class WorkflowSecretTests(unittest.TestCase):
     def test_generated_password_meets_fixed_contract(self):
         password = workflow_secrets.generate_password()
@@ -106,6 +114,10 @@ class BatchPersistenceTests(unittest.TestCase):
                     jobs=jobs,
                     control=control,
                 )
+                # Nothing is set up until its download is ready.
+                self.assertEqual([item["state"] for item in batch["items"]], ["pending", "pending"])
+                self.assertEqual(jobs.jobs(), [])
+                batch = _downloads_ready(batches, batch, jobs)
                 self.assertEqual([item["state"] for item in batch["items"]], ["queued", "pending"])
                 first = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(first["id"], "running", actor="worker")
@@ -153,6 +165,7 @@ class BatchPersistenceTests(unittest.TestCase):
                     jobs=jobs,
                     control=control,
                 )
+                batch = _downloads_ready(batches, batch, jobs)
                 failed_job = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(
                     failed_job["id"],
@@ -197,6 +210,7 @@ class BatchPersistenceTests(unittest.TestCase):
                     jobs=jobs,
                     control=control,
                 )
+                batch = _downloads_ready(batches, batch, jobs)
                 child = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(child["id"], "failed", actor="worker", detail="failed")
                 batches.advance_for_job(child["id"], jobs)
@@ -238,6 +252,7 @@ class BatchPersistenceTests(unittest.TestCase):
                     jobs=jobs,
                     control=control,
                 )
+                batch = _downloads_ready(batches, batch, jobs)
                 first = jobs.get(batch["items"][0]["job_id"])
                 jobs.transition(first["id"], "failed", actor="worker", detail="failed")
                 batches.advance_for_job(first["id"], jobs)

@@ -13,6 +13,10 @@ from ctl.secrets import read_runtime_env
 
 Log = Callable[[str], None]
 OCC = ["runuser", "-u", "www-data", "--", "php", "occ"]
+# The entrypoint holds a flock on this file while it copies and installs, and
+# never deletes it, so the file existing says nothing: only a held lock does.
+INIT_LOCK = "/var/www/html/nextcloud-init-sync.lock"
+INIT_LOCK_IDLE = ["sh", "-c", f"test ! -e {INIT_LOCK} || flock -n {INIT_LOCK} true"]
 REQUIRED_APPS = ("calendar", "user_oidc")
 
 
@@ -47,10 +51,8 @@ def install_nextcloud_if_needed(project: Path, log: Log) -> tuple[bool, str]:
     deadline = time.monotonic() + 600
     last = "Nextcloud occ is not ready yet."
     while time.monotonic() < deadline:
-        rc, _output = actions.compose_exec(
-            project, "app", ["test", "-e", "/var/www/html/nextcloud-init-sync.lock"], log, timeout=30
-        )
-        if rc == 0:
+        rc, _output = actions.compose_exec(project, "app", INIT_LOCK_IDLE, log, timeout=30)
+        if rc != 0:
             last = "The Nextcloud container is still initializing."
             time.sleep(3)
             continue

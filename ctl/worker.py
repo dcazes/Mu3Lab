@@ -43,6 +43,12 @@ def run() -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    # App images download in the background, several at once, while setup
+    # jobs run one at a time below.
+    downloads_stopping = threading.Event()
+    from ctl import download_manager
+
+    download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait
@@ -127,6 +133,7 @@ def run() -> int:
                     control.expire_handoffs(expired)
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
                 print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
+    downloads_stopping.set()
     return 0
 
 

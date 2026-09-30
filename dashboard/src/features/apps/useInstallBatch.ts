@@ -51,19 +51,13 @@ export function useInstallBatch() {
     return () => window.clearInterval(timer);
   }, [batchId, batchState, apply]);
 
-  const install = async (serviceIds: string[], names: string[]) => {
-    if (
-      !(await confirm({
-        title: `Install ${serviceIds.length} app${serviceIds.length === 1 ? '' : 's'}?`,
-        description: `${names.join(', ')} will be installed one at a time, along with anything they depend on.`,
-        confirmLabel: 'Install',
-      }))
-    )
-      return false;
+  /** Start installing apps in this order; the install dialog is the confirmation. */
+  const install = async (serviceIds: string[], parallelDownloads: number) => {
     setPending(true);
     try {
       const result = await postJsonApi<{ batch: InstallBatch }>('/api/v1/services/install-batch', {
         service_ids: serviceIds,
+        parallel_downloads: parallelDownloads,
       });
       setBatch(result.batch);
       setJob(null);
@@ -118,5 +112,37 @@ export function useInstallBatch() {
     void refresh();
   };
 
-  return { batch, job, pending, install, act, dismiss: () => setBatch(null) };
+  /** Pause, resume, reorder or change how many apps download at once. */
+  const control = async (path: string, body?: unknown) => {
+    if (!batch) return;
+    try {
+      const url = `/api/v1/service-install-batches/${batch.id}/${path}`;
+      apply(
+        await (body === undefined ? postApi<InstallBatchResponse>(url) : postJsonApi<InstallBatchResponse>(url, body)),
+      );
+    } catch (error) {
+      toast.error(errorText(error));
+    }
+  };
+
+  const controls = {
+    pause: (serviceId: string) => control(`downloads/${serviceId}/pause`),
+    resume: (serviceId: string) => control(`downloads/${serviceId}/resume`),
+    reorder: (serviceIds: string[]) => {
+      // Show the new order immediately; the server's answer replaces it.
+      setBatch(
+        (current) =>
+          current && {
+            ...current,
+            items: [...current.items].sort(
+              (a, b) => serviceIds.indexOf(a.service_id) - serviceIds.indexOf(b.service_id),
+            ),
+          },
+      );
+      return control('order', { service_ids: serviceIds });
+    },
+    setParallel: (count: number) => control('parallel-downloads', { parallel_downloads: count }),
+  };
+
+  return { batch, job, pending, install, act, controls, dismiss: () => setBatch(null) };
 }
