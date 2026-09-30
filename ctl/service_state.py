@@ -123,6 +123,39 @@ def _healthy(service: Service) -> tuple[bool, str]:
         return False, f"unreachable: {exc.reason if isinstance(exc, urllib.error.URLError) else exc}"
 
 
+ROUTE_PROBE_TTL = 60.0
+_route_probes: dict[str, tuple[float, bool]] = {}
+
+
+def route_answers(url: str, now=time.monotonic) -> bool:
+    """Whether the app's private HTTPS address really answers, checked at most once a minute.
+
+    A published Tailscale port only shows the route is configured. This
+    fetches it through Tailscale and Caddy with certificate checks on. A
+    redirect to sign in, or an app's own "please log in", still counts as
+    answering; 404 (for example an app the sign-in gate does not know) and
+    server errors do not.
+    """
+    cached = _route_probes.get(url)
+    if cached and now() - cached[0] < ROUTE_PROBE_TTL:
+        return cached[1]
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_args, **_kwargs):
+            return None
+
+    try:
+        opener = urllib.request.build_opener(NoRedirect)
+        with opener.open(urllib.request.Request(url, method="GET"), timeout=4) as response:
+            answered = response.status < 400
+    except urllib.error.HTTPError as exc:
+        answered = exc.code in {301, 302, 303, 307, 308, 401, 403}
+    except (urllib.error.URLError, OSError, ValueError):
+        answered = False
+    _route_probes[url] = (now(), answered)
+    return answered
+
+
 def _tailnet_route_present(port: int) -> bool:
     """Check only the local Tailscale Serve configuration, never a URL input."""
     try:
@@ -390,15 +423,33 @@ def status(
             lifecycle_state = "needs_attention"
     route_port = service.private_https_port
     route_required = route_port is not None
-    route_verified = (
+    route_configured = (
         route_port is None
         or service.route == "ready"
         or (route_port in route_ports if route_ports is not None else _tailnet_route_present(route_port))
     )
     healthy = lifecycle_state == "ready"
     health_state = "healthy" if healthy else ("starting" if lifecycle_state == "starting" else "unknown")
-    route_state = "not_required" if not route_required else "verified" if route_verified and healthy else service.route
-    route_ready = route_required and route_state == "verified"
+    # "verified" means a real request through the private address succeeded;
+    # a published port alone is only "configured".
+    route_probed = bool(
+        route_required
+        and route_configured
+        and healthy
+        and dns_name
+        and route_answers(f"https://{dns_name}:{route_port}{service.ui.get('path', '') or '/'}")
+    )
+    route_state = (
+        "not_required"
+        if not route_required
+        else "verified"
+        if route_probed
+        else "configured"
+        if route_configured and healthy
+        else service.route
+    )
+    # Usable once configured; "verified" additionally records a real request.
+    route_ready = route_required and route_state in {"verified", "configured"}
     # A healthy process is not yet a usable app unless its declared private
     # route has also been verified. Keep that distinction visible so the UI
     # cannot call a merely-installed service "ready".

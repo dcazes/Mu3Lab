@@ -315,7 +315,8 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "LobeChat's private Tailscale route is not published"
     return (
         True,
-        "Private LobeChat route, Authentik sign-in configuration, streamed chat, and embeddings passed live checks.",
+        "Private LobeChat route, streamed chat and embeddings passed live checks. Authentik sign-in is configured; "
+        "it is confirmed the first time you sign in to LobeChat.",
     )
 
 
