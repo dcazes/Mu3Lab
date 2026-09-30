@@ -20,7 +20,7 @@ from ctl.service_state import status as service_status
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLED_STATES = frozenset({"ready", "running", "starting", "stopped", "needs_setup"})
-ACTIVE_WORKFLOW_STATES = frozenset({"queued", "installing", "starting", "verifying", "config_required"})
+ACTIVE_WORKFLOW_STATES = frozenset({"queued", "installing", "starting", "verifying", "uninstalling", "config_required"})
 
 
 def service_snapshot(identity: IdentityData | None = None) -> dict[str, Any]:

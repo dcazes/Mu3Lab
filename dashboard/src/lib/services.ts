@@ -24,6 +24,7 @@ export const stateLabel: Record<Service['state'], string> = {
   configured: 'Configured',
   starting: 'Starting',
   verifying: 'Verifying',
+  uninstalling: 'Uninstalling',
   running: 'Running',
   ready: 'Running',
   stopped: 'Stopped',
@@ -34,7 +35,7 @@ export const stateLabel: Record<Service['state'], string> = {
   blocked: 'Unavailable',
 };
 
-const WORKING = new Set(['queued', 'installing', 'starting', 'verifying', 'updating']);
+const WORKING = new Set(['queued', 'installing', 'starting', 'verifying', 'uninstalling', 'updating']);
 const PROBLEM = new Set(['failed', 'needs_attention', 'degraded']);
 const SETUP = new Set(['config_required', 'needs_setup']);
 

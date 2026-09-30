@@ -16,12 +16,12 @@ START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
 
 
-def _optional_services(registry: Registry, root: Path) -> list[Service]:
+def _optional_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
     """Return installed or currently usable optional routes."""
     state = ControlState.runtime()
     enabled: list[Service] = []
     for service in registry.services:
-        if service.stage != "optional" or service.proxy_port is None:
+        if service.stage != "optional" or service.proxy_port is None or service.id in exclude:
             continue
         installed = state.installation(service.id) if state else None
         live = service_status(service, tailnet_dns_name(), root)
@@ -32,7 +32,7 @@ def _optional_services(registry: Registry, root: Path) -> list[Service]:
     return enabled
 
 
-def _write_candidate(registry: Registry, root: Path) -> tuple[Path, Path, str]:
+def _write_candidate(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> tuple[Path, Path, str]:
     """Render from the checked-in base so runtime route files cannot go stale."""
     paths = RuntimePaths()
     target = paths.projects / "ingress" / "Caddyfile"
@@ -42,7 +42,7 @@ def _write_candidate(registry: Registry, root: Path) -> tuple[Path, Path, str]:
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     candidate = target.with_suffix(".candidate")
     candidate.write_text(
-        render(source.read_text(encoding="utf-8"), _optional_services(registry, root)), encoding="utf-8"
+        render(source.read_text(encoding="utf-8"), _optional_services(registry, root, exclude)), encoding="utf-8"
     )
     ingress_token = read_runtime_env(root / ".env").get("MU3LAB_INGRESS_TOKEN", "")
     return target, candidate, ingress_token
@@ -183,6 +183,29 @@ def apply(registry: Registry, current: Service, root: Path, log) -> tuple[bool, 
             )
         return False, str(published.get("log", ["Tailscale Serve failed."])[-1])
     return True, "Private HTTPS route published."
+
+
+def withdraw(registry: Registry, current: Service, root: Path, log) -> tuple[bool, str]:
+    """Remove one uninstalled app's Caddy route and Tailscale HTTPS port."""
+    if current.private_https_port is None or current.proxy_port is None:
+        return True, "Service is internal-only; no private route to remove."
+    try:
+        target, temporary, ingress_token = _write_candidate(registry, root, frozenset({current.id}))
+    except OSError as exc:
+        return False, str(exc)
+    activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
+    if not activated:
+        return False, detail
+    removed = actions.tailscale_serve_off(current.private_https_port, log)
+    if not removed.get("ok"):
+        terminal_command = removed.get("terminal_command")
+        if terminal_command:
+            return False, (
+                "Administrator action required before this route can be removed. "
+                f"Run `{terminal_command}` once, then retry the uninstall."
+            )
+        return False, str(removed.get("log", ["Tailscale Serve failed."])[-1])
+    return True, "Private HTTPS route removed."
 
 
 def reconcile_core(registry: Registry, root: Path, log) -> tuple[bool, str]:

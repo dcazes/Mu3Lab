@@ -1,4 +1,5 @@
 import { AlertTriangle, KeyRound, Plug, UserPlus, Wrench } from 'lucide-react';
+import { useState } from 'react';
 import type { Service } from '../../api';
 import { postApi } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
@@ -19,10 +20,12 @@ import { useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
 import { ConfigurationForm } from './ConfigurationForm';
 import { DevicesSection } from './DevicesSection';
+import { UninstallDialog } from './UninstallDialog';
 import { ACTIONS, type ServiceAction, useServiceActions } from './useServiceActions';
 
 function HeaderActions({ service }: { service: Service }) {
   const { pending, perform, actions } = useServiceActions(service);
+  const [uninstalling, setUninstalling] = useState(false);
   const target = launchTarget(service);
   const primaryAction = (['start', 'install', 'retry_setup'] as ServiceAction[]).find((action) =>
     actions.includes(action),
@@ -50,15 +53,16 @@ function HeaderActions({ service }: { service: Service }) {
       <Menu
         label={`${service.name} actions`}
         items={menuActions
-          .filter((action) => !(target && action === 'start'))
+          .filter((action) => !(target && action === 'start') && action !== 'uninstall_delete_data')
           .map((action) => ({
             label: ACTIONS[action].label,
             icon: ACTIONS[action].icon,
             danger: ACTIONS[action].danger,
             disabled: Boolean(pending),
-            onSelect: () => void perform(action),
+            onSelect: () => (action === 'uninstall' ? setUninstalling(true) : void perform(action)),
           }))}
       />
+      <UninstallDialog service={service} open={uninstalling} onClose={() => setUninstalling(false)} />
     </>
   );
 }

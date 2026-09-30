@@ -76,6 +76,9 @@ class IdentityContractTests(unittest.TestCase):
                 "NEXTCLOUD_OIDC_CLIENT_ID=mu3lab-nextcloud\nNEXTCLOUD_OIDC_CLIENT_SECRET=preserved-secret\n",
                 encoding="utf-8",
             )
+            # Uninstalled with data kept: credentials remain but it is not registered.
+            self.assertEqual(reconcile_blueprints(load(), "mu3lab.example.ts.net", paths), [])
+            (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
             written = reconcile_blueprints(load(), "mu3lab.example.ts.net", paths)
             self.assertIn("nextcloud", written)
             blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-nextcloud.yaml"
@@ -95,6 +98,7 @@ class IdentityContractTests(unittest.TestCase):
             reconcile_blueprints(load(), "mu3lab.example.ts.net", paths)
             self.assertNotIn("Baby Buddy", blueprint.read_text(encoding="utf-8"))
             (paths.projects / "baby-buddy").mkdir(parents=True)
+            (paths.projects / "baby-buddy" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
             reconcile_blueprints(load(), "mu3lab.example.ts.net", paths)
             content = blueprint.read_text(encoding="utf-8")
             self.assertIn('external_host: "https://mu3lab.example.ts.net:8458"', content)

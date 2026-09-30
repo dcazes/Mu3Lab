@@ -8,7 +8,12 @@ from unittest.mock import patch
 
 from ctl.runtime import RuntimePaths
 
-_RUNTIME_PATH_USERS = ("ctl.service_ops", "ctl.lifecycle.materialize", "ctl.lifecycle.accounts")
+_RUNTIME_PATH_USERS = (
+    "ctl.service_ops",
+    "ctl.lifecycle.materialize",
+    "ctl.lifecycle.accounts",
+    "ctl.lifecycle.uninstall",
+)
 
 
 @contextmanager

@@ -23,7 +23,14 @@ class ServiceOperationTests(unittest.TestCase):
         self.assertEqual(allowed_actions(load().get("mealie"), "blocked"), [])
 
     def test_stopped_service_offers_start_without_restart(self):
-        self.assertEqual(allowed_actions(load().get("actual-budget"), "stopped"), ["start"])
+        self.assertEqual(allowed_actions(load().get("actual-budget"), "stopped"), ["start", "uninstall"])
+
+    def test_only_catalog_apps_can_be_uninstalled(self):
+        self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "ready"))
+        self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "failed"))
+        self.assertNotIn("uninstall", allowed_actions(load().get("nextcloud"), "planned"))
+        self.assertNotIn("uninstall", allowed_actions(load().get("ollama"), "ready"))
+        self.assertNotIn("uninstall", allowed_actions(load().get("lobehub"), "stopped"))
 
     def test_stopped_core_lobechat_starts_from_runtime_project(self):
         service = load().get("lobehub")

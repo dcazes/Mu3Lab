@@ -29,8 +29,20 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 
 SUPPORTED_ACTIONS = frozenset(
-    {"install", "retry_setup", "start", "stop", "restart", "repair", "reset", "configure_identity"}
+    {
+        "install",
+        "retry_setup",
+        "start",
+        "stop",
+        "restart",
+        "repair",
+        "reset",
+        "configure_identity",
+        "uninstall",
+        "uninstall_delete_data",
+    }
 )
+UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})
 
 
 def project_path(service: Service, root: Path) -> Path:
@@ -89,19 +101,21 @@ def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, s
 
 
 def allowed_actions(service: Service, state: str) -> list[str]:
+    """Actions for this state. "uninstall" also admits "uninstall_delete_data"."""
     if service.is_blocked:
         return []
     if service.stage == "optional" and state in {"planned", "not_installed"}:
         return ["install"]
+    uninstall = ["uninstall"] if service.stage == "optional" else []
     if state in {"failed", "needs_attention", "needs_setup", "degraded"}:
-        return ["repair", "restart"] if service.stage == "core" else ["retry_setup", "restart"]
+        return ["repair", "restart"] if service.stage == "core" else ["retry_setup", "restart", *uninstall]
     if state == "stopped":
-        return ["start"]
+        return ["start", *uninstall]
     if state in {"ready", "running", "starting", "configured", "installed"}:
         result = ["repair", "restart"] if service.stage == "optional" else ["restart"]
         if service.lifecycle != "always_on":
             result.insert(0, "stop")
-        return result
+        return [*result, *uninstall]
     return []
 
 
@@ -449,6 +463,18 @@ def _install(
     if not routed:
         _fail(store, state, job_id, service.id, actor, "configure_route", "route_configuration_failed", detail)
         return
+    from ctl.identity import TRUSTED_HEADER
+
+    if service.id in TRUSTED_HEADER:
+        # Caddy sends this app through the Authentik outpost, which answers 404
+        # until the app is registered there (and a past uninstall is withdrawn).
+        from ctl.identity import reconcile_blueprints
+        from ctl.service_state import tailnet_dns_name
+
+        try:
+            reconcile_blueprints(registry, tailnet_dns_name())
+        except (OSError, ValueError) as exc:
+            log(f"Authentik sign-in was not registered yet: {exc}")
     if state:
         state.set_installation(
             service.id,
@@ -750,6 +776,50 @@ def _configure_identity(
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
 
 
+def _uninstall(
+    store: JobStore, state: ControlState | None, job: dict, service: Service, registry: Registry, actor: str, root: Path
+) -> None:
+    from ctl.lifecycle.uninstall import uninstall_application
+
+    job_id = str(job["id"])
+    delete = job.get("action") == "uninstall_delete_data"
+    if service.stage != "optional":
+        _fail(
+            store,
+            state,
+            job_id,
+            service.id,
+            actor,
+            "validate_service",
+            "uninstall_not_optional",
+            "Only apps installed from the catalog can be uninstalled.",
+        )
+        return
+    store.transition(
+        job_id,
+        "running",
+        actor=actor,
+        detail=f"Uninstalling {service.name}" + (" and deleting its data." if delete else "; its data is kept."),
+        step_id="disconnect_chat",
+    )
+    if state:
+        state.set_installation(service.id, "uninstalling", job_id=job_id)
+    log = _job_log(store, job_id)
+    ok, stage, detail = uninstall_application(
+        service, registry, root, log, lambda step, text: _event(store, job_id, step, text), delete=delete
+    )
+    if not ok:
+        _fail(store, state, job_id, service.id, actor, stage, "uninstall_failed", detail)
+        return
+    if state:
+        if delete:
+            for handoff_id in state.handoff_ids(service.id):
+                workflow_secrets.delete(handoff_id)
+        state.reset_service(service.id, keep_handoffs=not delete)
+    _sync_chat_assistants(log)
+    store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
 def _download_images(project: Path, service_id: str, job_id: str, log: Callable[[str], None]) -> tuple[int, str]:
     """Download images with Mu3Lab's verified parallel fetcher, else Docker's pull."""
     downloads = ImageDownloadStore.runtime()
@@ -811,6 +881,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         return
     if action == "configure_identity":
         _configure_identity(store, state, job, service, registry, actor, root)
+        return
+    if action in UNINSTALL_ACTIONS:
+        _uninstall(store, state, job, service, registry, actor, root)
         return
     if action == "reset":
         if service.stage != "optional":

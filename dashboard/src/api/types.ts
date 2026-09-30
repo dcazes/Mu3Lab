@@ -14,6 +14,7 @@ export type LifecycleState =
   | 'configured'
   | 'starting'
   | 'verifying'
+  | 'uninstalling'
   | 'running'
   | 'ready'
   | 'stopped'
@@ -71,7 +72,9 @@ export interface Service {
   // These fields were added with the v1 operator surface. Keep them optional
   // while an already-running control plane is being upgraded: the static
   // dashboard can be refreshed before the Python process is restarted.
-  allowed_actions?: Array<'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair'>;
+  allowed_actions?: Array<
+    'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair' | 'uninstall' | 'uninstall_delete_data'
+  >;
   last_job?: Job | null;
   update?: { repository: string; current_version: string };
   configuration?: ServiceConfigField[];

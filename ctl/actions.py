@@ -871,15 +871,30 @@ def tailscale_serve(port: int, loopback_port: int, log: Callable[[str], None]) -
     if not (1 <= int(port) <= 65535 and 1 <= int(loopback_port) <= 65535):
         return _fail(["invalid curated Tailscale route"])
     argv = ["tailscale", "serve", "--bg", f"--https={int(port)}", f"http://127.0.0.1:{int(loopback_port)}"]
+    return _tailscale_serve(argv, "Private HTTPS route published.", "publish", log)
+
+
+def tailscale_serve_off(port: int, log: Callable[[str], None]) -> dict:
+    """Stop publishing one registry-owned Tailscale HTTPS port."""
+    if not 1 <= int(port) <= 65535:
+        return _fail(["invalid curated Tailscale route"])
+    argv = ["tailscale", "serve", f"--https={int(port)}", "off"]
+    return _tailscale_serve(argv, "Private HTTPS route removed.", "remove", log, absent_ok=True)
+
+
+def _tailscale_serve(
+    argv: list[str], success: str, verb: str, log: Callable[[str], None], *, absent_ok: bool = False
+) -> dict:
     # Tailscale can delegate Serve configuration to the dashboard operator
     # (`tailscale set --operator=<user>`). Try that supported unprivileged path
     # first so a background worker does not invoke a polkit dialog needlessly.
     try:
         direct = _subprocess.run(argv, capture_output=True, text=True, timeout=60)
         direct_output = (direct.stdout + direct.stderr).strip()
-        if direct.returncode == 0:
-            log(direct_output or "Private HTTPS route published.")
-            return _ok(["Private HTTPS route published."], changed=True)
+        # Removing a port that is already gone is the goal, not a failure.
+        if direct.returncode == 0 or (absent_ok and "does not exist" in direct_output.lower()):
+            log(direct_output or success)
+            return _ok([success], changed=True)
         log(direct_output or f"(exit {direct.returncode}, no output)")
     except (OSError, _subprocess.TimeoutExpired) as exc:
         log(str(exc))
@@ -889,9 +904,9 @@ def tailscale_serve(port: int, loopback_port: int, log: Callable[[str], None]) -
             ["Tailscale Serve requires an administrator command."], terminal_command=result["terminal_command"]
         )
     return (
-        _ok(["Private HTTPS route published."], changed=True)
+        _ok([success], changed=True)
         if result.get("ok")
-        else _fail(["Tailscale Serve could not publish the curated route."])
+        else _fail([f"Tailscale Serve could not {verb} the curated route."])
     )
 
 

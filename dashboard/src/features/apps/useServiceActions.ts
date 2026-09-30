@@ -1,4 +1,4 @@
-import { Download, Play, RefreshCw, RotateCcw, Square, Wrench, type LucideIcon } from 'lucide-react';
+import { Download, Play, RefreshCw, RotateCcw, Square, Trash2, Wrench, type LucideIcon } from 'lucide-react';
 import { postJsonApi, type Service } from '../../api';
 import { useConfirm } from '../../components/Dialog';
 import { useAction } from '../../lib/useAction';
@@ -22,6 +22,9 @@ export const ACTIONS: Record<ServiceAction, { label: string; icon: LucideIcon; c
     icon: Wrench,
     confirm: 'Containers are recreated with the current configuration. Data is kept and nothing is downloaded.',
   },
+  // Both open UninstallDialog, which asks about data; `perform` never runs them.
+  uninstall: { label: 'Uninstall…', icon: Trash2, danger: true },
+  uninstall_delete_data: { label: 'Uninstall…', icon: Trash2, danger: true },
 };
 
 /** Runs allowlisted lifecycle actions as background jobs, confirming disruptive ones first. */

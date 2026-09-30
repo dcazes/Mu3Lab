@@ -20,7 +20,7 @@ from ctl.identity import mode_for
 from ctl.jobs import JobStore, redact
 from ctl.releases import latest as latest_release
 from ctl.runtime import RuntimePaths
-from ctl.service_ops import SUPPORTED_ACTIONS, allowed_actions, project_path
+from ctl.service_ops import SUPPORTED_ACTIONS, UNINSTALL_ACTIONS, allowed_actions, project_path
 from ctl.service_state import status as service_status
 from ctl.service_state import tailnet_dns_name
 
@@ -52,12 +52,17 @@ def _effective_state(service: Any, control: ControlState | None) -> str:
 @router.post("/{service_id}/actions")
 async def service_action(service_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
     """Queue one allowlisted service lifecycle action for the durable worker."""
-    action = str((await runtime.json_body(request)).get("action", ""))
+    body = await runtime.json_body(request)
+    action = str(body.get("action", ""))
     if action not in SUPPORTED_ACTIONS:
         raise ApiError(400, "unsupported service action")
     service = runtime.service(service_id)
     if service.is_blocked:
         raise ApiError(409, service.blocked_reason)
+    # Deleting data cannot be undone: the request must repeat the app's name,
+    # so a replayed or scripted "uninstall" can never escalate to it.
+    if action == "uninstall_delete_data" and str(body.get("confirm", "")).strip() != service.name:
+        raise ApiError(400, f"type {service.name} to confirm deleting its data")
     provisions_account = action in {"install", "retry_setup"}
     if (
         provisions_account
@@ -79,7 +84,8 @@ async def service_action(service_id: str, request: Request, operator: OperatorMu
     if not (service.compose_path(ROOT) / "docker-compose.yml").is_file():
         raise ApiError(409, "service manifest is not deployable")
     control = ControlState.runtime()
-    if action not in allowed_actions(service, _effective_state(service, control)):
+    required = "uninstall" if action in UNINSTALL_ACTIONS else action
+    if required not in allowed_actions(service, _effective_state(service, control)):
         raise ApiError(409, "action is not valid for the current service state")
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
@@ -98,7 +104,8 @@ async def service_action(service_id: str, request: Request, operator: OperatorMu
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
     if control and job.get("state") == "queued":
-        control.set_installation(service.id, "queued", job_id=str(job["id"]))
+        queued_state = "uninstalling" if action in UNINSTALL_ACTIONS else "queued"
+        control.set_installation(service.id, queued_state, job_id=str(job["id"]))
     if provisions_account and operator.get("subject_id") and operator.get("email"):
         runtime.hand_identity_to_job(
             store,

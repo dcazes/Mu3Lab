@@ -183,6 +183,45 @@ describe('App page', () => {
     );
   });
 
+  it('uninstalls keeping data by default and deletes data only after the name is typed', async () => {
+    const fetchMock = stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '', job: { id: 'j' } }));
+    const app = service('mealie', 'Mealie', 'optional', {
+      allowed_actions: ['stop', 'restart', 'uninstall'],
+      identity: identity({ launch_url: 'https://host.ts.net:8450' }),
+    });
+    renderWithDashboard(<AppDetailPage id="mealie" tab="overview" />, dashboardData([app]));
+    const open = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mealie actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
+      return screen.findByRole('dialog', { name: 'Uninstall Mealie?' });
+    };
+    let dialog = await open();
+    expect(within(dialog).getByRole('radio', { name: /Keep my data/ })).toBeChecked();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Uninstall' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/mealie/actions',
+        expect.objectContaining({ body: JSON.stringify({ action: 'uninstall', confirm: '' }) }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    dialog = await open();
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Delete everything/ }));
+    const destroy = within(dialog).getByRole('button', { name: 'Uninstall and delete data' });
+    expect(destroy).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /to confirm/ }), { target: { value: 'mealie' } });
+    expect(destroy).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /to confirm/ }), { target: { value: 'Mealie' } });
+    fireEvent.click(destroy);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/mealie/actions',
+        expect.objectContaining({ body: JSON.stringify({ action: 'uninstall_delete_data', confirm: 'Mealie' }) }),
+      ),
+    );
+  });
+
   it('helps connect companion apps with the server address right on the overview', () => {
     stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '' }));
     const immich = service('immich', 'Immich', 'optional', {

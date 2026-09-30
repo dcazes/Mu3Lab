@@ -173,7 +173,7 @@ def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = Ru
     gated_apps = tuple(
         (service.id, service.name, service.private_https_port)
         for service in (registry.get(service_id) for service_id in sorted(TRUSTED_HEADER))
-        if service.private_https_port and (paths.projects / service.id).is_dir()
+        if service.private_https_port and (paths.projects / service.id / "docker-compose.yml").is_file()
     )
     write_dashboard_blueprint(
         paths.root,
@@ -191,7 +191,9 @@ def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = Ru
         service = registry.get(service_id)
         project = paths.projects / service_id
         env_path = project / ".env"
-        if not env_path.is_file() or not service.private_https_port:
+        # An app uninstalled with its data kept still has its .env; only a
+        # Compose project means it is installed and should be registered.
+        if not env_path.is_file() or not (project / "docker-compose.yml").is_file() or not service.private_https_port:
             continue
         values = read_runtime_env(env_path)
         client_id = values.get(contract.client_id_key, "")

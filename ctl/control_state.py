@@ -24,6 +24,7 @@ INSTALL_STATES = frozenset(
         "installing",
         "starting",
         "verifying",
+        "uninstalling",
         "running",
         "stopped",
         "degraded",
@@ -365,21 +366,34 @@ class ControlState:
                 result[key] = {}
         return result
 
-    def reset_service(self, service_id: str) -> None:
-        """Forget a failed optional install without touching application data.
+    def reset_service(self, service_id: str, *, keep_handoffs: bool = False) -> None:
+        """Forget a failed or uninstalled optional app without touching application data.
 
         Runtime containers/projects are cleaned by the service operation.  The
         control-plane projection is removed here so the next catalog refresh
         derives a fresh planned/not-installed state instead of preserving a
-        stale failed or initialization record.
+        stale failed or initialization record.  An app uninstalled with its
+        data kept still has the account a handoff describes, so the caller
+        may keep those until they expire.
         """
         if not service_id:
             return
         with self._connect() as conn:
             conn.execute("DELETE FROM service_installations WHERE service_id = ?", (service_id,))
             conn.execute("DELETE FROM service_initializations WHERE service_id = ?", (service_id,))
-            conn.execute("DELETE FROM credential_handoffs WHERE service_id = ?", (service_id,))
+            if not keep_handoffs:
+                conn.execute("DELETE FROM credential_handoffs WHERE service_id = ?", (service_id,))
             conn.execute("DELETE FROM service_identity_state WHERE service_id = ?", (service_id,))
+
+    def handoff_ids(self, service_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id FROM credential_handoffs WHERE service_id = ?", (service_id,)).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def calendar_owner_uids(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT owner_uid FROM calendar_connections").fetchall()
+        return [str(row[0]) for row in rows]
 
     def provider(self, provider_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
