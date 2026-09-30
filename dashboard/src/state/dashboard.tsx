@@ -32,6 +32,8 @@ export type Connection = 'connecting' | 'online' | 'offline' | 'signed_out';
 export interface DashboardValue {
   data: DashboardData;
   connection: Connection;
+  /** Data sources whose latest refresh failed, so what is shown may be older. */
+  failedSources?: string[];
   refresh: () => Promise<void>;
 }
 
@@ -82,10 +84,14 @@ export function useDashboard(): DashboardValue {
   return value;
 }
 
+const isSignedOut = (error: unknown) => error instanceof ApiError && error.kind === 'signed_out';
+
 /** Polls the control plane and reports whether it is reachable and signed in. */
 export function useDashboardLoader(): DashboardValue {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [connection, setConnection] = useState<Connection>('connecting');
+  // Sources whose last refresh failed; their data on screen is from an earlier refresh.
+  const [failedSources, setFailedSources] = useState<string[]>([]);
   const inFlight = useRef<Promise<void> | null>(null);
   const resumedOnboarding = useRef(false);
 
@@ -95,10 +101,21 @@ export function useDashboardLoader(): DashboardValue {
       try {
         await api('/api/health');
       } catch (error) {
-        setConnection(error instanceof ApiError && error.kind === 'signed_out' ? 'signed_out' : 'offline');
+        if (isSignedOut(error)) setData((previous) => ({ ...previous, identity: emptyData.identity }));
+        setConnection(isSignedOut(error) ? 'signed_out' : 'offline');
         return;
       }
       const results = await Promise.allSettled(SOURCES.map((source) => api<unknown>(source.path)));
+      // Signing out wins over a refresh that had already started: drop the
+      // identity and its privileges rather than show stale operator state.
+      if (results.some((result) => result.status === 'rejected' && isSignedOut(result.reason))) {
+        setData((previous) => ({ ...previous, identity: emptyData.identity }));
+        setConnection('signed_out');
+        return;
+      }
+      setFailedSources(
+        SOURCES.filter((_source, index) => results[index].status === 'rejected').map((source) => source.key),
+      );
       setData((previous) => {
         const next = { ...previous };
         results.forEach((result, index) => {
@@ -143,5 +160,5 @@ export function useDashboardLoader(): DashboardValue {
     });
   }, [connection, data.identity.writes_enabled]);
 
-  return { data, connection, refresh: load };
+  return { data, connection, failedSources, refresh: load };
 }

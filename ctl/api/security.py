@@ -156,7 +156,7 @@ Operator = Annotated[IdentityData, Depends(require_operator)]
 
 def require_operator_mutation(request: Request, identity: Operator) -> IdentityData:
     if not mutation_allowed(request):
-        raise ApiError(403, "same-origin CSRF verification failed")
+        raise ApiError(403, "same-origin CSRF verification failed", code="csrf_failed")
     return identity
 
 
@@ -175,7 +175,7 @@ Owner = Annotated[IdentityData, Depends(require_owner)]
 
 def require_owner_mutation(request: Request, identity: Owner) -> IdentityData:
     if not mutation_allowed(request):
-        raise ApiError(403, "same-origin CSRF verification failed")
+        raise ApiError(403, "same-origin CSRF verification failed", code="csrf_failed")
     return identity
 
 

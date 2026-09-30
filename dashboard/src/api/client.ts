@@ -20,6 +20,11 @@ export function onSignedOut(listener: SessionListener) {
   return () => sessionListeners.delete(listener);
 }
 
+/** The CSRF token is bound to the Authentik session; forget it when that changes. */
+function forgetSession() {
+  csrfToken = null;
+}
+
 async function request(path: string, init: RequestInit): Promise<Response> {
   let res: Response;
   try {
@@ -30,6 +35,7 @@ async function request(path: string, init: RequestInit): Promise<Response> {
     throw new ApiError('Mu3Lab is unreachable.', 'offline');
   }
   if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+    forgetSession();
     sessionListeners.forEach((listener) => listener());
     throw new ApiError('Your session expired. Sign in again.', 'signed_out', res.status);
   }
@@ -60,27 +66,43 @@ export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 let csrfToken: Promise<string> | null = null;
+let csrfFetchedAt = 0;
+// Authentik renews its session token while the dashboard stays open; never
+// keep a CSRF token much longer than the session evidence it was made from.
+const CSRF_MAX_AGE_MS = 10 * 60 * 1000;
 
 function csrf(): Promise<string> {
-  if (!csrfToken)
+  if (csrfToken && Date.now() - csrfFetchedAt > CSRF_MAX_AGE_MS) csrfToken = null;
+  if (!csrfToken) {
+    csrfFetchedAt = Date.now();
     csrfToken = api<{ csrf_token: string }>('/api/v1/session')
       .then((result) => result.csrf_token)
       .catch((error) => {
         csrfToken = null;
         throw error;
       });
+  }
   return csrfToken;
 }
 
 async function mutate<T>(method: string, path: string, body?: unknown, idempotent = true): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json', 'X-Mu3Lab-CSRF': await csrf() };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (idempotent) headers['Idempotency-Key'] = crypto.randomUUID();
-  const res = await request(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  // One key for every attempt, so a retry after a token refresh cannot act twice.
+  const idempotencyKey = idempotent ? crypto.randomUUID() : '';
+  const send = async () => {
+    const headers: Record<string, string> = { Accept: 'application/json', 'X-Mu3Lab-CSRF': await csrf() };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+    return request(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  };
+  let res = await send();
+  if (res.status === 403) {
+    const error = await failure(res.clone(), method, path);
+    if (error.body.code === 'csrf_failed') {
+      // The session was renewed since the token was issued: fetch a new one once.
+      forgetSession();
+      res = await send();
+    }
+  }
   if (!res.ok) throw await failure(res, method, path);
   return res.json() as Promise<T>;
 }

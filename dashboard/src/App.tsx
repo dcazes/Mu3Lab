@@ -38,7 +38,7 @@ export function Routes() {
 }
 
 function Shell() {
-  const { connection, refresh } = useDashboard();
+  const { connection, failedSources, refresh } = useDashboard();
   const { preference, setPreference } = useTheme();
   const [searchOpen, setSearchOpen] = useState(false);
   const path = usePath();
@@ -51,6 +51,14 @@ function Shell() {
       <MobileBar openSearch={() => setSearchOpen(true)} />
       <main className={path === '/chat' ? 'main main-full' : 'main'}>
         <div className="main-inner">
+          {Boolean(failedSources?.length) && (
+            <p className="stale-note" role="status">
+              Some information could not be refreshed and may be out of date.{' '}
+              <button type="button" className="link-button" onClick={() => void refresh()}>
+                Try again
+              </button>
+            </p>
+          )}
           <Suspense fallback={null}>
             <Routes />
           </Suspense>
