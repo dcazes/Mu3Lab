@@ -194,11 +194,12 @@ COMMIT;
 """
 
 
+DATABASE_CONTAINER = "mu3lab-lobehub-postgres-1"
 PSQL = [
     "docker",
     "exec",
     "-i",
-    "mu3lab-lobehub-postgres-1",
+    DATABASE_CONTAINER,
     "psql",
     "-v",
     "ON_ERROR_STOP=1",
@@ -214,16 +215,22 @@ def sync_agents(log) -> tuple[bool, str]:
 
     LobeChat's own start runs the same statements through `reconcile`, so an
     app changed while LobeChat is stopped is picked up when it starts.
-    """
-    from ctl.control_state import ControlState
 
-    state = ControlState.runtime()
-    lobehub = state.installation("lobehub") if state else None
-    if not lobehub or lobehub.get("state") != "running":
+    LobeChat is core, and the core installer records no installation state
+    for it, so Docker decides whether its database can take the change.
+    """
+    rc, output = actions.docker_container_statuses("mu3lab-lobehub")
+    database_up = f"{DATABASE_CONTAINER}\tUp" in output
+    if rc or not database_up:
         return True, "LobeChat is not running; its assistants sync when it starts."
     rc, output = actions.docker_cmd_stdin(PSQL, f"BEGIN;\n{_agent_sql(installed_apps())}COMMIT;\n", log)
     if rc:
         return False, redact(output)
+    # A connector that went live before its assistant existed had nothing to
+    # attach to; attach it now that the assistant does.
+    ok, detail = _bind_live_connectors(log)
+    if not ok:
+        return False, detail
     return True, "LobeChat assistants match the installed apps."
 
 
@@ -232,6 +239,14 @@ def reconcile(log) -> tuple[bool, str]:
     rc, output = actions.docker_cmd_stdin(PSQL, _sql(installed_apps()), log)
     if rc:
         return False, redact(output)
+    ok, detail = _bind_live_connectors(log)
+    if not ok:
+        return False, detail
+    return True, "LobeChat agents and single-provider policy reconciled."
+
+
+def _bind_live_connectors(log) -> tuple[bool, str]:
+    """Attach every enabled, live connector to its app's assistant."""
     from ctl.control_state import ControlState
     from ctl.mcp_catalog import load as load_mcp_catalog
     from ctl.mcp_registry import credential_path
@@ -254,7 +269,7 @@ def reconcile(log) -> tuple[bool, str]:
             )
             if not ok:
                 return False, detail
-    return True, "LobeChat agents and single-provider policy reconciled."
+    return True, "Live connectors are attached to their assistants."
 
 
 def _encrypt_credential(token: str) -> str:
