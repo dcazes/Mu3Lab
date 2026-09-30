@@ -282,7 +282,7 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 - [ ] More curated apps
 
 > [!NOTE]
-> Backups aren't shipped yet. The dashboard reports backup status as *not configured* until a real, integrity-checked repository exists. Until then, keep your own copy of `/srv/mu3lab/data`, which holds every app's data including your Authentik sign-in accounts. Stop Mu3Lab's containers first (`docker stop $(docker ps -q)`), because a copy of a running database may not restore.
+> Backups aren't shipped yet. The dashboard reports backup status as *not configured* until a real, integrity-checked repository exists. Until then, keep your own copy of `/srv/mu3lab/data`, which holds every app's data including your Authentik sign-in accounts. Run `make pause` first and `make resume` afterwards, because a copy of a running database may not restore. They stop and start only Mu3Lab's containers.
 
 ---
 

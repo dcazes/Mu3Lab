@@ -4,7 +4,7 @@
 # WHY:   One canonical spelling per task so docs and muscle memory agree.
 # DEBUG: `make -n <target>` prints the commands without running them.
 
-.PHONY: install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
+.PHONY: pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
 
 install:
 	./install.sh
@@ -47,6 +47,14 @@ vm-test:
 	tools/vm/fresh-vm.sh up
 
 dry-run: check
+
+# pause/resume: stop and start only Mu3Lab's containers, for example to copy
+# /srv/mu3lab/data while no database is writing. Other containers are untouched.
+pause:
+	@ids="$$(tools/mu3lab-containers.sh)"; [ -z "$$ids" ] || docker stop $$ids >/dev/null; echo "Mu3Lab paused."
+
+resume:
+	@ids="$$(tools/mu3lab-containers.sh --all)"; [ -z "$$ids" ] || docker start $$ids >/dev/null; echo "Mu3Lab resumed."
 
 # clean: stop containers, drop runtime state. Keeps volumes, venv, images.
 clean:
