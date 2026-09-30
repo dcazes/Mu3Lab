@@ -33,6 +33,11 @@ jobs:
       - name: Install dashboard dependencies
         working-directory: dashboard
         run: npm ci
+      - name: Dashboard dependency audit
+        working-directory: dashboard
+        # Fails on moderate or worse advisories; add a reviewed exception here
+        # only when an advisory cannot apply to how Mu3Lab uses the package.
+        run: npm audit --audit-level=moderate
       - name: Dashboard lint, format, and type check
         working-directory: dashboard
         run: |

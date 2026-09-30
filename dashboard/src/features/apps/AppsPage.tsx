@@ -235,7 +235,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
                       key={service.id}
                       service={service}
                       summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
-                      size={sizes?.apps[service.id]}
+                      size={sizes?.apps?.[service.id]}
                       selected={selected.includes(service.id)}
                       toggle={() => toggle(service.id)}
                     />
@@ -269,7 +269,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
         <div className="action-bar" role="region" aria-label="Selected apps">
           <span>
             <b>{selected.length}</b> selected · {names(selected).join(', ')}
-            {sizes?.measured && (
+            {sizes?.measured && sizes.selection && (
               <small className="action-bar-size">
                 {' '}
                 · {bytes(sizes.selection.needed_bytes)} to download · about {bytes(sizes.selection.needed_disk_bytes)}{' '}

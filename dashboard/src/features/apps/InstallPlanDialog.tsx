@@ -30,7 +30,7 @@ export function sizeLabel(size?: AppSize) {
 
 /** Smallest download first, so small apps are ready soonest; unmeasured apps go last. */
 export function smallestFirst(ids: string[], sizes: AppSizesResponse | null) {
-  const needed = (id: string) => sizes?.apps[id]?.needed_bytes ?? Number.MAX_SAFE_INTEGER;
+  const needed = (id: string) => sizes?.apps?.[id]?.needed_bytes ?? Number.MAX_SAFE_INTEGER;
   return [...ids].sort((a, b) => needed(a) - needed(b));
 }
 
@@ -99,7 +99,7 @@ export function InstallPlanDialog({
             <GripVertical className="install-grip" aria-hidden />
             <span className="install-plan-name">
               <b>{names[id] || id}</b>
-              <small>{sizeLabel(sizes?.apps[id])}</small>
+              <small>{sizeLabel(sizes?.apps?.[id])}</small>
             </span>
             <Button
               size="sm"
