@@ -127,3 +127,46 @@ class JobStoreTests(unittest.TestCase):
             retried = store.retry(first["id"], actor="operator", idempotency_key="retry-one")
         self.assertNotEqual(first["id"], retried["id"])
         self.assertEqual(retried["state"], "queued")
+
+
+class JobHistoryTests(unittest.TestCase):
+    def _store_with_old_job(self, tmp: str, state: str = "succeeded") -> tuple[JobStore, str]:
+        store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+        old = store.create(kind="lifecycle", service_id="immich", action="install", actor="owner", detail="old")
+        with sqlite3.connect(store.database) as conn:
+            conn.execute(
+                "UPDATE jobs SET created_at = '2020-01-01T00:00:00+00:00', state = ? WHERE id = ?", (state, old["id"])
+            )
+        for index in range(105):
+            store.create(kind="lifecycle", service_id=f"app-{index}", action="install", actor="owner", detail="new")
+        return store, str(old["id"])
+
+    def test_a_job_stays_reachable_after_100_newer_jobs(self):
+        from ctl.api.routes.jobs import _recent_job
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store, old_id = self._store_with_old_job(tmp)
+            self.assertNotIn(old_id, [job["id"] for job in store.jobs(limit=100)])
+            self.assertEqual(_recent_job(store, old_id)["id"], old_id)
+
+    def test_an_old_active_job_is_never_missed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, old_id = self._store_with_old_job(tmp, state="running")
+            self.assertIn(old_id, [job["id"] for job in store.active_jobs()])
+
+    def test_reads_do_not_leave_connections_open(self):
+        import gc
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store.create(kind="lifecycle", service_id="immich", action="install", actor="owner", detail="x")
+            gc.disable()
+            try:
+                before = len(os.listdir("/proc/self/fd"))
+                for _ in range(100):
+                    store.jobs()
+                after = len(os.listdir("/proc/self/fd"))
+            finally:
+                gc.enable()
+        self.assertLess(after - before, 5)

@@ -222,11 +222,7 @@ def reset_install_batch(batch_id: str, operator: OperatorMutation) -> JSONRespon
         raise ApiError(409, "batch is not resettable")
     # Cleanup is queued for the durable worker rather than running Docker in
     # this request, and must never race an active operation.
-    active = {
-        str(job.get("service_id"))
-        for job in jobs_store.jobs(limit=100)
-        if job.get("state") in {"queued", "running", "waiting_for_confirmation"}
-    }
+    active = {str(job.get("service_id")) for job in jobs_store.active_jobs()}
     for item in batch["items"]:
         if item["state"] in {"failed", "cancelled"} and str(item["service_id"]) in active:
             raise ApiError(409, f"{item['service_id']} still has an active operation")

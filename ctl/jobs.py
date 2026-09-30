@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ctl import sqlite_store
 from ctl.runtime import RuntimePaths
 
 _SECRET = re.compile(
@@ -91,43 +92,44 @@ class JobStore:
 
     def _connect(self) -> sqlite3.Connection:
         self.database.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.database, timeout=15)
-        conn.row_factory = sqlite3.Row
+        conn = sqlite_store.connect(self.database)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY, kind TEXT NOT NULL, service_id TEXT NOT NULL,
-                action TEXT NOT NULL, state TEXT NOT NULL, actor TEXT NOT NULL,
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, detail TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS audit (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, actor TEXT NOT NULL,
-                event TEXT NOT NULL, created_at TEXT NOT NULL, detail TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES jobs(id)
-            );
-            CREATE TABLE IF NOT EXISTS job_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
-                event TEXT NOT NULL, created_at TEXT NOT NULL, detail TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES jobs(id)
-            );
-        """)
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
-        additions = {
-            "idempotency_key": "TEXT",
-            "step_id": "TEXT NOT NULL DEFAULT ''",
-            "lease_owner": "TEXT NOT NULL DEFAULT ''",
-            "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
-            "heartbeat_at": "TEXT NOT NULL DEFAULT ''",
-            "error_code": "TEXT NOT NULL DEFAULT ''",
-        }
-        for name, declaration in additions.items():
-            if name not in existing:
-                conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_key "
-            "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"
-        )
+        with sqlite_store.schema_once(conn, self.database, "jobs") as needed:
+            if needed:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS jobs (
+                        id TEXT PRIMARY KEY, kind TEXT NOT NULL, service_id TEXT NOT NULL,
+                        action TEXT NOT NULL, state TEXT NOT NULL, actor TEXT NOT NULL,
+                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, detail TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS audit (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, actor TEXT NOT NULL,
+                        event TEXT NOT NULL, created_at TEXT NOT NULL, detail TEXT NOT NULL,
+                        FOREIGN KEY(job_id) REFERENCES jobs(id)
+                    );
+                    CREATE TABLE IF NOT EXISTS job_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+                        event TEXT NOT NULL, created_at TEXT NOT NULL, detail TEXT NOT NULL,
+                        FOREIGN KEY(job_id) REFERENCES jobs(id)
+                    );
+                """)
+                existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+                additions = {
+                    "idempotency_key": "TEXT",
+                    "step_id": "TEXT NOT NULL DEFAULT ''",
+                    "lease_owner": "TEXT NOT NULL DEFAULT ''",
+                    "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
+                    "heartbeat_at": "TEXT NOT NULL DEFAULT ''",
+                    "error_code": "TEXT NOT NULL DEFAULT ''",
+                }
+                for name, declaration in additions.items():
+                    if name not in existing:
+                        conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_key "
+                    "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"
+                )
         return conn
 
     def create(
@@ -278,6 +280,15 @@ class JobStore:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def active_jobs(self) -> list[dict[str, Any]]:
+        """Every job still queued, running or waiting, however old."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE state IN ('queued', 'running', 'waiting_for_confirmation') "
+                "ORDER BY created_at DESC"
             ).fetchall()
         return [dict(row) for row in rows]
 

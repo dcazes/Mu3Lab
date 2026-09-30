@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ctl import sqlite_store
 from ctl.runtime import RuntimePaths
 
 COMPUTE_MODES = frozenset({"auto", "cpu", "nvidia", "amd"})
@@ -88,97 +89,98 @@ class ControlState:
 
     def _connect(self) -> sqlite3.Connection:
         self.database.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.database, timeout=15)
-        conn.row_factory = sqlite3.Row
+        conn = sqlite_store.connect(self.database)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS system_config (
-                key TEXT PRIMARY KEY,
-                value_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                updated_by TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS service_installations (
-                service_id TEXT PRIMARY KEY,
-                state TEXT NOT NULL,
-                manifest_version TEXT NOT NULL DEFAULT '',
-                image_digests_json TEXT NOT NULL DEFAULT '{}',
-                config_revision INTEGER NOT NULL DEFAULT 0,
-                route_state TEXT NOT NULL DEFAULT 'unknown',
-                last_job_id TEXT NOT NULL DEFAULT '',
-                last_error_json TEXT NOT NULL DEFAULT '{}',
-                installed_at TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS mcp_servers (
-                server_id TEXT PRIMARY KEY,
-                service_id TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL DEFAULT 'disabled',
-                tool_snapshot_json TEXT NOT NULL DEFAULT '[]',
-                last_verified_at TEXT NOT NULL DEFAULT '',
-                last_error_json TEXT NOT NULL DEFAULT '{}',
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS provider_connections (
-                provider_id TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                state TEXT NOT NULL DEFAULT 'saved',
-                model_samples_json TEXT NOT NULL DEFAULT '[]',
-                last_attempt_at TEXT NOT NULL DEFAULT '',
-                last_verified_at TEXT NOT NULL DEFAULT '',
-                last_error_json TEXT NOT NULL DEFAULT '{}',
-                active_job_id TEXT NOT NULL DEFAULT '',
-                config_revision INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS service_initializations (
-                service_id TEXT PRIMARY KEY,
-                mode TEXT NOT NULL,
-                state TEXT NOT NULL,
-                job_id TEXT NOT NULL DEFAULT '',
-                owner_uid TEXT NOT NULL DEFAULT '',
-                credential_handoff_id TEXT NOT NULL DEFAULT '',
-                last_error_json TEXT NOT NULL DEFAULT '{}',
-                verified_at TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS credential_handoffs (
-                id TEXT PRIMARY KEY,
-                service_id TEXT NOT NULL,
-                job_id TEXT NOT NULL,
-                owner_uid TEXT NOT NULL,
-                state TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                confirmed_at TEXT NOT NULL DEFAULT ''
-            );
-            CREATE INDEX IF NOT EXISTS credential_handoffs_owner
-                ON credential_handoffs(owner_uid, state, expires_at);
-            CREATE TABLE IF NOT EXISTS calendar_connections (
-                owner_uid TEXT PRIMARY KEY,
-                username_hint TEXT NOT NULL,
-                selected_calendar_id TEXT NOT NULL DEFAULT '',
-                calendars_json TEXT NOT NULL DEFAULT '[]',
-                state TEXT NOT NULL DEFAULT 'connected',
-                last_error TEXT NOT NULL DEFAULT '',
-                last_success_at TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS service_identity_state (
-                service_id TEXT PRIMARY KEY,
-                mode TEXT NOT NULL,
-                state TEXT NOT NULL,
-                owner_uid TEXT NOT NULL DEFAULT '',
-                last_job_id TEXT NOT NULL DEFAULT '',
-                detail TEXT NOT NULL DEFAULT '',
-                last_error_json TEXT NOT NULL DEFAULT '{}',
-                last_verified_at TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL
-            );
-        """)
+        with sqlite_store.schema_once(conn, self.database, "control_state") as needed:
+            if needed:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS system_config (
+                        key TEXT PRIMARY KEY,
+                        value_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        updated_by TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS service_installations (
+                        service_id TEXT PRIMARY KEY,
+                        state TEXT NOT NULL,
+                        manifest_version TEXT NOT NULL DEFAULT '',
+                        image_digests_json TEXT NOT NULL DEFAULT '{}',
+                        config_revision INTEGER NOT NULL DEFAULT 0,
+                        route_state TEXT NOT NULL DEFAULT 'unknown',
+                        last_job_id TEXT NOT NULL DEFAULT '',
+                        last_error_json TEXT NOT NULL DEFAULT '{}',
+                        installed_at TEXT NOT NULL DEFAULT '',
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS mcp_servers (
+                        server_id TEXT PRIMARY KEY,
+                        service_id TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 0,
+                        state TEXT NOT NULL DEFAULT 'disabled',
+                        tool_snapshot_json TEXT NOT NULL DEFAULT '[]',
+                        last_verified_at TEXT NOT NULL DEFAULT '',
+                        last_error_json TEXT NOT NULL DEFAULT '{}',
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS provider_connections (
+                        provider_id TEXT PRIMARY KEY,
+                        label TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        state TEXT NOT NULL DEFAULT 'saved',
+                        model_samples_json TEXT NOT NULL DEFAULT '[]',
+                        last_attempt_at TEXT NOT NULL DEFAULT '',
+                        last_verified_at TEXT NOT NULL DEFAULT '',
+                        last_error_json TEXT NOT NULL DEFAULT '{}',
+                        active_job_id TEXT NOT NULL DEFAULT '',
+                        config_revision INTEGER NOT NULL DEFAULT 0,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS service_initializations (
+                        service_id TEXT PRIMARY KEY,
+                        mode TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        job_id TEXT NOT NULL DEFAULT '',
+                        owner_uid TEXT NOT NULL DEFAULT '',
+                        credential_handoff_id TEXT NOT NULL DEFAULT '',
+                        last_error_json TEXT NOT NULL DEFAULT '{}',
+                        verified_at TEXT NOT NULL DEFAULT '',
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS credential_handoffs (
+                        id TEXT PRIMARY KEY,
+                        service_id TEXT NOT NULL,
+                        job_id TEXT NOT NULL,
+                        owner_uid TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        confirmed_at TEXT NOT NULL DEFAULT ''
+                    );
+                    CREATE INDEX IF NOT EXISTS credential_handoffs_owner
+                        ON credential_handoffs(owner_uid, state, expires_at);
+                    CREATE TABLE IF NOT EXISTS calendar_connections (
+                        owner_uid TEXT PRIMARY KEY,
+                        username_hint TEXT NOT NULL,
+                        selected_calendar_id TEXT NOT NULL DEFAULT '',
+                        calendars_json TEXT NOT NULL DEFAULT '[]',
+                        state TEXT NOT NULL DEFAULT 'connected',
+                        last_error TEXT NOT NULL DEFAULT '',
+                        last_success_at TEXT NOT NULL DEFAULT '',
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS service_identity_state (
+                        service_id TEXT PRIMARY KEY,
+                        mode TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        owner_uid TEXT NOT NULL DEFAULT '',
+                        last_job_id TEXT NOT NULL DEFAULT '',
+                        detail TEXT NOT NULL DEFAULT '',
+                        last_error_json TEXT NOT NULL DEFAULT '{}',
+                        last_verified_at TEXT NOT NULL DEFAULT '',
+                        updated_at TEXT NOT NULL
+                    );
+                """)
         return conn
 
     def system_config(self) -> dict[str, Any]:

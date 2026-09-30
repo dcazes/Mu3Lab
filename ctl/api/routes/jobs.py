@@ -42,7 +42,8 @@ def audit() -> dict[str, Any]:
 
 
 def _recent_job(store: JobStore, job_id: str) -> dict[str, Any]:
-    job = next((item for item in store.jobs(limit=100) if item["id"] == job_id), None)
+    # By primary key: a job stays reachable however many newer jobs exist.
+    job = store.get(job_id)
     if not job:
         raise ApiError(404, "job not found")
     return job
@@ -86,7 +87,9 @@ def cancel_job(job_id: str, operator: OperatorMutation) -> dict[str, Any]:
 
 
 def _active_core_job(store: JobStore) -> dict[str, Any] | None:
-    return next((job for job in store.jobs() if job["service_id"] == "core-suite" and job["state"] in ACTIVE), None)
+    return next(
+        (job for job in store.active_jobs() if job["service_id"] == "core-suite" and job["state"] in ACTIVE), None
+    )
 
 
 @router.get("/setup/core")
@@ -98,7 +101,7 @@ def core_setup() -> dict[str, Any]:
         return {"ok": False, "ready_to_run": False, "error": str(exc), "services": []}
     execution = core_plan(ROOT)
     store = JobStore.runtime()
-    current_job = next((job for job in (store.jobs() if store else []) if job["service_id"] == "core-suite"), None)
+    current_job = next(iter(store.jobs_for_service("core-suite", limit=1)), None) if store else None
     provisioning_store = ProvisioningStore.runtime()
     if provisioning_store:
         provisioning_store.reconcile_runtime()

@@ -43,9 +43,7 @@ def resume_onboarding(operator: VerifiedAccount) -> dict[str, Any]:
     """Adopt pending pre-upgrade identity setup; the worker verifies real app evidence."""
     control = runtime.control_state()
     store = runtime.job_store()
-    active = {
-        job["service_id"] for job in store.jobs() if job["state"] in {"queued", "running", "waiting_for_confirmation"}
-    }
+    active = {job["service_id"] for job in store.active_jobs()}
     adopted = []
     for service in runtime.registry().services:
         if mode_for(service) != "native_oidc":
@@ -183,7 +181,7 @@ def reconcile_service_identity(service_id: str, request: Request, operator: Veri
     active = next(
         (
             job
-            for job in store.jobs()
+            for job in store.active_jobs()
             if job["service_id"] == service_id
             and job["action"] == "configure_identity"
             and job["state"] in {"queued", "running"}

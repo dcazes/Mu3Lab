@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 
-from ctl import actions
+from ctl import actions, sqlite_store
 from ctl.image_fetch import FetchError, LocalLayers, Registry, parse_ref, plan_image
 from ctl.runtime import RuntimePaths
 
@@ -94,15 +94,16 @@ class AppSizeStore:
         return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.database, timeout=15)
-        conn.row_factory = sqlite3.Row
+        conn = sqlite_store.connect(self.database)
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS app_sizes (
-                service_id TEXT PRIMARY KEY, layers_json TEXT NOT NULL DEFAULT '[]',
-                error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
-            )
-        """)
+        with sqlite_store.schema_once(conn, self.database, "app_sizes") as needed:
+            if needed:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS app_sizes (
+                        service_id TEXT PRIMARY KEY, layers_json TEXT NOT NULL DEFAULT '[]',
+                        error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+                    )
+                """)
         return conn
 
     def save(self, service_id: str, layers: list[dict[str, Any]], error: str = "") -> None:

@@ -327,7 +327,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         if provisioning:
             provisioning.update("configuration", "verified", detail=f"{provider.name} streamed routing passed.")
         store.transition(job_id, "succeeded", actor=actor, detail=probe.detail, step_id="complete")
-        core_jobs = [item for item in store.jobs(limit=100) if item.get("service_id") == "core-suite"]
+        core_jobs = store.jobs_for_service("core-suite", limit=100)
         waiting_core = next((item for item in core_jobs if item.get("state") == "waiting_for_confirmation"), None)
         if waiting_core:
             store.transition(

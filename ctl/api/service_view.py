@@ -33,7 +33,8 @@ def service_snapshot(identity: IdentityData | None = None) -> dict[str, Any]:
     route_ports = tailnet_serve_ports()
     project_states, container_snapshots = compose_snapshot()
     store = JobStore.runtime()
-    jobs = store.jobs(limit=100) if store else []
+    # Active jobs first, however old, so a long-running one is never missed.
+    jobs = list({job["id"]: job for job in [*store.active_jobs(), *store.jobs(limit=100)]}.values()) if store else []
     control_state = ControlState.runtime()
     operator = bool(identity and identity["writes_enabled"])
     with ThreadPoolExecutor(max_workers=min(4, len(registry.services))) as pool:

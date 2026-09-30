@@ -2677,7 +2677,7 @@ def run_job(job: dict, ctx: dict) -> None:
         if store is not None:
             existing = [
                 item
-                for item in store.jobs()
+                for item in store.jobs_for_service("core-suite", limit=100)
                 if item["service_id"] == "core-suite"
                 and item["state"] in {"queued", "running", "waiting_for_confirmation", "succeeded"}
             ]

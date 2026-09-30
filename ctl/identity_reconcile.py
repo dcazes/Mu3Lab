@@ -18,7 +18,7 @@ def queue_verified(store: JobStore, root: Path, log) -> None:
     if state is None:
         return
     registry = load()
-    active = {j["service_id"] for j in store.jobs() if j["state"] in {"queued", "running", "waiting_for_confirmation"}}
+    active = {j["service_id"] for j in store.active_jobs()}
     for service_id in OIDC_CONTRACTS:
         saved = state.service_identity(service_id) or {}
         installation = state.installation(service_id) or {}

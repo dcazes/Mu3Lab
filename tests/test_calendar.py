@@ -462,19 +462,21 @@ class CalendarEditPreservationTests(unittest.TestCase):
             ):
                 listed = events("owner-race", paths)["events"][0]
             newer = httpx.Response(200, content=ics.encode(), headers={"ETag": '"two"'})
-            with patch("ctl.nextcloud_calendar.httpx.request", return_value=newer) as request:
-                with self.assertRaisesRegex(CalendarError, "changed in another"):
-                    update_event(
-                        "owner-race",
-                        listed["id"],
-                        {
-                            "title": "x",
-                            "start": start.isoformat(),
-                            "end": (start + timedelta(hours=1)).isoformat(),
-                            "revision": listed["revision"],
-                        },
-                        paths,
-                    )
+            with (
+                patch("ctl.nextcloud_calendar.httpx.request", return_value=newer) as request,
+                self.assertRaisesRegex(CalendarError, "changed in another"),
+            ):
+                update_event(
+                    "owner-race",
+                    listed["id"],
+                    {
+                        "title": "x",
+                        "start": start.isoformat(),
+                        "end": (start + timedelta(hours=1)).isoformat(),
+                        "revision": listed["revision"],
+                    },
+                    paths,
+                )
             self.assertEqual([call.args[0] for call in request.call_args_list], ["GET"])
 
 

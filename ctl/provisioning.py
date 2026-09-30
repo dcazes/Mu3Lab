@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ctl import sqlite_store
 from ctl.jobs import redact, redact_data
 from ctl.runtime import RuntimePaths
 
@@ -56,23 +57,24 @@ class ProvisioningStore:
 
     def _connect(self) -> sqlite3.Connection:
         self.database.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.database)
-        conn.row_factory = sqlite3.Row
+        conn = sqlite_store.connect(self.database)
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS provisioning_steps (
-                workflow_version INTEGER NOT NULL,
-                phase_id TEXT NOT NULL,
-                desired_state TEXT NOT NULL,
-                actual_state TEXT NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                detail TEXT NOT NULL DEFAULT '',
-                error TEXT NOT NULL DEFAULT '',
-                inputs_json TEXT NOT NULL DEFAULT '{}',
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (workflow_version, phase_id)
-            )
-        """)
+        with sqlite_store.schema_once(conn, self.database, "provisioning") as needed:
+            if needed:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS provisioning_steps (
+                        workflow_version INTEGER NOT NULL,
+                        phase_id TEXT NOT NULL,
+                        desired_state TEXT NOT NULL,
+                        actual_state TEXT NOT NULL,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        detail TEXT NOT NULL DEFAULT '',
+                        error TEXT NOT NULL DEFAULT '',
+                        inputs_json TEXT NOT NULL DEFAULT '{}',
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (workflow_version, phase_id)
+                    )
+                """)
         return conn
 
     def initialize(self) -> None:
