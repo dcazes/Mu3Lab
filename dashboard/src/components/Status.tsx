@@ -28,7 +28,7 @@ export function StateBadge({ state, tone }: { state: string; tone?: Tone }) {
       ? 'green'
       : ['failed', 'degraded', 'incompatible', 'unsupported_legacy', 'authentication_expired'].includes(state)
         ? 'red'
-        : ['queued', 'running', 'verifying', 'starting', 'resetting'].includes(state)
+        : ['queued', 'running', 'verifying', 'starting', 'resetting', 'removing'].includes(state)
           ? 'blue'
           : 'gray');
   return (

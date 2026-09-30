@@ -152,7 +152,9 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
         if rc:
             return False, f"{service.name} reconciliation failed: {redact(output)}", []
     service_key = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")
-    _forget_removed_keys(log)
+    forgotten, forget_detail = _forget_removed_keys(log)
+    if not forgotten:
+        return False, forget_detail, []
     return (
         bool(service_key),
         ("Provider gateway reconciled." if service_key else "FreeLLMAPI service key is unavailable."),
@@ -160,22 +162,29 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
     )
 
 
-def _forget_removed_keys(log) -> None:
-    """Delete gateway keys for providers removed in Mu3Lab.
+def _forget_removed_keys(log) -> tuple[bool, str]:
+    """Delete gateway keys for providers removed in Mu3Lab, and confirm they are gone.
 
     FreeLLMAPI's config import only adds and updates keys, so a provider
     missing from the file would otherwise keep routing on its old key.
     """
     saved = {str(item["id"]) for item in records()}
+
+    def stale(keys: list[dict]) -> list[dict]:
+        return [key for key in keys if str(key.get("platform", "")) in BY_ID and key.get("platform") not in saved]
+
     try:
         admin = GatewayAdmin.sign_in()
-        for key in admin.api_keys():
-            platform = str(key.get("platform", ""))
-            if platform in BY_ID and platform not in saved:
-                admin.delete_key(int(key["id"]))
-                log(f"Removed the {BY_ID[platform].name} key from FreeLLMAPI.")
+        for key in stale(admin.api_keys()):
+            admin.delete_key(int(key["id"]))
+            log(f"Removed the {BY_ID[str(key['platform'])].name} key from FreeLLMAPI.")
+        remaining = stale(admin.api_keys())
     except (GatewayAdminError, KeyError, TypeError, ValueError) as exc:
-        log(f"Could not tidy FreeLLMAPI keys: {exc}")
+        return False, f"FreeLLMAPI could not remove old provider keys: {redact(str(exc))}"
+    if remaining:
+        names = ", ".join(BY_ID[str(key["platform"])].name for key in remaining)
+        return False, f"FreeLLMAPI still holds a removed key ({names})."
+    return True, "No removed provider keys remain in FreeLLMAPI."
 
 
 def _chat_route_check(log) -> StreamProbe:
@@ -284,12 +293,33 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         store.append_event(job_id, "log", line)
 
     if action == "remove":
+        # Keep a visible "removing" record until the gateway has provably
+        # dropped the key, so a failure can be seen and retried.
+        state.set_provider(resolved_id, label, enabled=False, state="removing", job_id=job_id)
         delete_secret(resolved_id)
-        state.delete_provider(resolved_id)
         try:
-            _reconcile(root, log)
-        except (OSError, ValueError):
-            pass
+            ok, detail, _ = _reconcile(root, log)
+        except (OSError, ValueError) as exc:
+            ok, detail = False, redact(str(exc))
+        if not ok:
+            state.set_provider(
+                resolved_id,
+                label,
+                enabled=False,
+                state="removing",
+                error={"message": detail, "retryable": True},
+                job_id="",
+            )
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=f"{resolved_name} is switched off, but removing its key from the AI gateway failed: {detail}",
+                error_code="provider_removal_incomplete",
+                step_id="remove_gateway_key",
+            )
+            return
+        state.delete_provider(resolved_id)
         store.transition(
             job_id, "succeeded", actor=actor, detail=f"{resolved_name} connection removed.", step_id="complete"
         )

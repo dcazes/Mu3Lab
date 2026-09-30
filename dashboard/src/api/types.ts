@@ -307,7 +307,7 @@ export interface ProviderMetadata {
   name: string;
   label: string;
   enabled: boolean;
-  state: 'saved' | 'verifying' | 'verified' | 'degraded' | 'disabled' | 'unsupported_legacy';
+  state: 'saved' | 'verifying' | 'verified' | 'degraded' | 'disabled' | 'removing' | 'unsupported_legacy';
   key_hint: string;
   credential_indicator: string;
   model_samples: string[];

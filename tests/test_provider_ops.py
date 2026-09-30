@@ -39,6 +39,7 @@ class FakeGateway:
 
     def delete_key(self, key_id):
         self.deleted.append(key_id)
+        self.keys = [key for key in self.keys if key["id"] != key_id]
 
 
 def _run(gateway: FakeGateway, chat: StreamProbe = CHAT_OK, saved_key: str = "gsk_" + "a" * 52) -> StreamProbe:
@@ -132,7 +133,7 @@ class ReconcileRestartTests(unittest.TestCase):
             patch("ctl.provider_ops.load", return_value=registry),
             patch("ctl.provider_ops.actions.compose_up", side_effect=fake_compose_up),
             patch("ctl.provider_ops.read_runtime_env", return_value={}),
-            patch("ctl.provider_ops._forget_removed_keys"),
+            patch("ctl.provider_ops._forget_removed_keys", return_value=(True, "")),
         ):
             _reconcile(Path("."), lambda _line: None)
         return recreated
@@ -158,9 +159,66 @@ class GatewayKeyCleanupTests(unittest.TestCase):
             patch("ctl.provider_ops.records", return_value=[{"id": "groq", "api_key": "gsk_abc"}]),
             patch("ctl.provider_ops.GatewayAdmin.sign_in", return_value=gateway),
         ):
-            _forget_removed_keys(lambda _line: None)
+            ok, _detail = _forget_removed_keys(lambda _line: None)
         # Keys Mu3Lab does not manage (e.g. added in FreeLLMAPI's own dashboard) stay.
         self.assertEqual(gateway.deleted, [2])
+        self.assertTrue(ok)
+
+    def test_a_key_the_gateway_keeps_is_reported_not_ignored(self):
+        class StubbornGateway(FakeGateway):
+            def delete_key(self, key_id):
+                self.deleted.append(key_id)  # accepted, but the key stays
+
+        gateway = StubbornGateway(keys=[{"id": 2, "platform": "zhipu"}])
+        with (
+            patch("ctl.provider_ops.records", return_value=[]),
+            patch("ctl.provider_ops.GatewayAdmin.sign_in", return_value=gateway),
+        ):
+            ok, detail = _forget_removed_keys(lambda _line: None)
+        self.assertFalse(ok)
+        self.assertIn("still holds", detail)
+
+    def test_gateway_sign_in_failure_is_reported(self):
+        with (
+            patch("ctl.provider_ops.records", return_value=[]),
+            patch("ctl.provider_ops.GatewayAdmin.sign_in", side_effect=GatewayAdminError("login failed")),
+        ):
+            ok, _detail = _forget_removed_keys(lambda _line: None)
+        self.assertFalse(ok)
+
+
+class ProviderRemovalTests(unittest.TestCase):
+    def _remove(self, reconcile_result):
+        import tempfile
+        from unittest.mock import MagicMock
+
+        from ctl import provider_ops
+        from ctl.control_state import ControlState
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = ControlState(Path(tmp) / "control.sqlite3")
+            state.set_provider("groq", "Groq", state="verified")
+            store = MagicMock()
+            job = {"id": "job-1", "service_id": "provider:groq", "action": "remove", "actor": "owner"}
+            with (
+                patch("ctl.provider_ops.ControlState.runtime", return_value=state),
+                patch("ctl.provider_ops.delete_secret") as delete_secret,
+                patch("ctl.provider_ops._reconcile", return_value=reconcile_result),
+            ):
+                provider_ops.execute_claimed(store, job, "worker", Path("."))
+            return state.provider("groq"), store.transition.call_args, delete_secret
+
+    def test_removal_fails_visibly_when_the_gateway_keeps_the_key(self):
+        record, transition, _ = self._remove((False, "FreeLLMAPI still holds a removed key (Groq).", []))
+        self.assertEqual(transition.args[1], "failed")
+        self.assertEqual(transition.kwargs["error_code"], "provider_removal_incomplete")
+        self.assertEqual(record["state"], "removing")
+
+    def test_removal_completes_only_after_the_gateway_confirms(self):
+        record, transition, delete_secret = self._remove((True, "ok", []))
+        self.assertEqual(transition.args[1], "succeeded")
+        self.assertIsNone(record)
+        delete_secret.assert_called_once_with("groq")
 
 
 if __name__ == "__main__":

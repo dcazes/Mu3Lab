@@ -57,7 +57,9 @@ INITIALIZATION_STATES = frozenset(
         "failed",
     }
 )
-PROVIDER_STATES = frozenset({"saved", "verifying", "verified", "degraded", "disabled", "unsupported_legacy"})
+PROVIDER_STATES = frozenset(
+    {"saved", "verifying", "verified", "degraded", "disabled", "removing", "unsupported_legacy"}
+)
 IDENTITY_MODES = frozenset({"native_oidc", "trusted_header", "proxy_gate", "local", "none"})
 IDENTITY_STATES = frozenset(
     {
