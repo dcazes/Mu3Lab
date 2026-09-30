@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ctl.actions import docker_argv
 from ctl.registry import Service
@@ -130,8 +131,7 @@ def _tailnet_route_present(port: int) -> bool:
         return False
     if proc.returncode != 0:
         return False
-    output = proc.stdout
-    return f":{port}" in output or f"https={port}" in output
+    return port in serve_ports(proc.stdout)
 
 
 def tailnet_serve_status(run=subprocess.run) -> dict[str, object]:
@@ -142,8 +142,25 @@ def tailnet_serve_status(run=subprocess.run) -> dict[str, object]:
         return {"state": "unavailable", "ports": []}
     if proc.returncode != 0:
         return {"state": "unavailable", "ports": []}
-    ports = sorted({int(value) for value in re.findall(r"(?::|https=)(\d{2,5})", proc.stdout)})
-    return {"state": "available", "ports": ports}
+    return {"state": "available", "ports": sorted(serve_ports(proc.stdout))}
+
+
+def serve_ports(output: str) -> set[int]:
+    """HTTPS listener ports in `tailscale serve status` text output.
+
+    A listener on the default port prints as ``https://host`` with no port, so
+    a missing port means 443. Proxy targets (``http://127.0.0.1:19461``) are
+    backends, not listeners, and are ignored.
+    """
+    ports = {int(value) for value in re.findall(r"https=(\d{2,5})", output)}
+    for token in output.split():
+        if not token.startswith("https://"):
+            continue
+        try:
+            ports.add(urlsplit(token).port or 443)
+        except ValueError:
+            continue
+    return ports
 
 
 def tailnet_serve_ports() -> set[int]:

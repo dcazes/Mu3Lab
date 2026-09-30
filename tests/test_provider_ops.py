@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ctl.freellmapi_admin import GatewayAdminError
-from ctl.provider_ops import StreamProbe, _forget_removed_keys, _verify
+from ctl.provider_ops import StreamProbe, _forget_removed_keys, _reconcile, _verify
 
 CHAT_OK = StreamProbe(True, 200, "", "mu3lab-chat", "", "Stream completed.")
 
@@ -105,6 +105,48 @@ class VerifyTests(unittest.TestCase):
         result = _run(FakeGateway(), saved_key="   ")
         self.assertEqual(result.error_code, "credential_rejected")
         self.assertIn("Paste an API key", result.detail)
+
+
+class ReconcileRestartTests(unittest.TestCase):
+    """Only a gateway whose rendered files changed is recreated."""
+
+    def _reconcile(self, projects: Path, new_key: str) -> dict[str, bool]:
+        def fake_configure(_paths):
+            (projects / "freellmapi" / "freellmapi.config.json").write_text(new_key)
+            return {"freellmapi_config": "f", "litellm_config": "l"}
+
+        recreated: dict[str, bool] = {}
+
+        def fake_compose_up(path, _log, *, env, recreate, wait_timeout):
+            recreated[path.name] = recreate
+            return 0, ""
+
+        registry = {
+            sid: type("S", (), {"name": sid, "compose_path": lambda self, _r, s=sid: Path(s)})()
+            for sid in ("freellmapi", "litellm")
+        }
+        paths = type("P", (), {"projects": projects, "data": projects})()
+        with (
+            patch("ctl.provider_ops.RuntimePaths", return_value=paths),
+            patch("ctl.provider_ops.configure", side_effect=fake_configure),
+            patch("ctl.provider_ops.load", return_value=registry),
+            patch("ctl.provider_ops.actions.compose_up", side_effect=fake_compose_up),
+            patch("ctl.provider_ops.read_runtime_env", return_value={}),
+            patch("ctl.provider_ops._forget_removed_keys"),
+        ):
+            _reconcile(Path("."), lambda _line: None)
+        return recreated
+
+    def test_a_new_key_recreates_only_freellmapi(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            projects = Path(tmp)
+            for sid in ("freellmapi", "litellm"):
+                (projects / sid).mkdir()
+            self.assertEqual(self._reconcile(projects, "key-1"), {"freellmapi": True, "litellm": False})
+            # Rendering the same key again (e.g. after a pass) restarts nothing.
+            self.assertEqual(self._reconcile(projects, "key-1"), {"freellmapi": False, "litellm": False})
 
 
 class GatewayKeyCleanupTests(unittest.TestCase):

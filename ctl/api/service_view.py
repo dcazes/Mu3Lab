@@ -106,9 +106,7 @@ def service_snapshot(identity: IdentityData | None = None) -> dict[str, Any]:
             else:
                 item["installation_state"] = "not_installed"
         else:
-            item["installation_state"] = (
-                "installed" if item["state"] in {"ready", "running", "starting", "stopped"} else "not_installed"
-            )
+            item["installation_state"] = "installed" if item["state"] in INSTALLED_STATES else "not_installed"
         item["operational_state"] = live_state
         if item["installation_state"] == "restore_available":
             item["recommended_action"] = "restore"

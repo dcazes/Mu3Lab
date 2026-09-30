@@ -407,7 +407,10 @@ function ProviderChecklist({
   const minimum = setup?.recommended_minimum ?? 2;
   const done = setup?.recommended_verified.length ?? 0;
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
-  const ordered = [...catalog].sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended));
+  // Anything already connected is listed under Connected providers instead.
+  const ordered = catalog
+    .filter((item) => !byId.has(item.id))
+    .sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended));
   return (
     <Card
       title={setup?.recommendation_met ? 'More free providers' : 'Get free AI capacity'}
@@ -433,41 +436,28 @@ function ProviderChecklist({
         clearAwaiting={clearAwaiting}
         saved={saved}
       />
-      <div className="rows">
-        {ordered.map((item) => {
-          const connection = byId.get(item.id);
-          const verified = connection?.enabled && connection.state === 'verified';
-          return (
+      {ordered.length > 0 && (
+        <div className="rows">
+          {ordered.map((item) => (
             <div className="row" key={item.id}>
               <span className="row-text">
                 <b>
                   {item.name} {item.recommended && <Badge tone="blue">Recommended</Badge>}{' '}
-                  {item.google_sign_in && <Badge>One-click Google sign-in</Badge>}
+                  {item.payment_required && <Badge tone="amber">Payment method required</Badge>}
                 </b>
                 <small>{item.free_tier}</small>
               </span>
               <span className="row-actions">
-                {connection ? (
-                  verified ? (
-                    <Badge tone="green">
-                      <Dot tone="green" />
-                      Connected
-                    </Badge>
-                  ) : (
-                    <StateBadge state={connection.state} />
-                  )
-                ) : (
-                  item.keys_url && (
-                    <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
-                      Get key
-                    </ExternalButton>
-                  )
+                {item.keys_url && (
+                  <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
+                    Get key
+                  </ExternalButton>
                 )}
               </span>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
       <p className="hint">
         <KeyRound />
         <span>

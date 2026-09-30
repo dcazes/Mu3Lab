@@ -18,7 +18,7 @@ import { McpPanel } from '../integrations/McpPanel';
 import { useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
 import { ConfigurationForm } from './ConfigurationForm';
-import { DevicesTab } from './DevicesTab';
+import { DevicesSection } from './DevicesSection';
 import { ACTIONS, type ServiceAction, useServiceActions } from './useServiceActions';
 
 function HeaderActions({ service }: { service: Service }) {
@@ -180,11 +180,10 @@ function NextSteps({ service }: { service: Service }) {
   return steps.length ? <div className="stack">{steps}</div> : null;
 }
 
-function Overview({ service }: { service: Service }) {
+function Overview({ service, address, devices }: { service: Service; address: string; devices: boolean }) {
   const { data } = useDashboard();
   const info = data.catalog.services[service.id];
   const signIn = signInSummary(service);
-  const address = service.ui?.state === 'ready' && service.ui.url ? service.ui.url : '';
   const summary = info?.summary || service.detail;
   const note = service.identity_note && service.identity_note !== summary ? service.identity_note : '';
   const dependencies = service.dependencies
@@ -213,7 +212,10 @@ function Overview({ service }: { service: Service }) {
                 </span>
               ),
             },
-            ...(address ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }] : []),
+            // With a devices section below, its server address card carries the address.
+            ...(address && !devices
+              ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }]
+              : []),
             ...(dependencies.length
               ? [
                   {
@@ -243,6 +245,7 @@ function Overview({ service }: { service: Service }) {
           ]}
         />
       </Card>
+      {devices && <DevicesSection service={service} address={address} />}
     </div>
   );
 }
@@ -262,7 +265,6 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
   const base = `/apps/${id}`;
   const tabs = [
     { label: 'Overview', to: base, key: 'overview' },
-    ...(hasDevices ? [{ label: 'Devices', to: `${base}/devices`, key: 'devices' }] : []),
     ...(mcp ? [{ label: 'Chat', to: `${base}/chat`, key: 'chat' }] : []),
     ...(hasSettings ? [{ label: 'Settings', to: `${base}/settings`, key: 'settings' }] : []),
     ...(installed ? [{ label: 'Advanced', to: `${base}/advanced`, key: 'advanced' }] : []),
@@ -292,8 +294,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
         actions={<HeaderActions service={service} />}
       />
       {tabs.length > 1 && <Tabs label={`${service.name} sections`} items={tabs} />}
-      {active === 'overview' && <Overview service={service} />}
-      {active === 'devices' && <DevicesTab service={service} address={address} />}
+      {active === 'overview' && <Overview service={service} address={address} devices={hasDevices} />}
       {active === 'chat' && mcp && (
         <McpPanel server={mcp} appName={service.name} reload={() => void registry.reload()} />
       )}

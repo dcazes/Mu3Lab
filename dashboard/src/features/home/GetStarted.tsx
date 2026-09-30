@@ -137,15 +137,6 @@ export function GetStarted() {
   const preinstalled = Boolean(extension?.browsers.length);
   const steps = [
     {
-      key: 'provider',
-      text: 'Connect an AI provider for chat',
-      done: setup.complete,
-      to: '/settings/ai',
-    },
-    ...(vault.data.seeded
-      ? []
-      : [{ key: 'vault', text: 'Save your app logins to your password vault', done: false, to: '/settings/sign-in' }]),
-    {
       key: 'extension',
       text: preinstalled
         ? 'Sign in to Bitwarden so your browser fills in your passwords'
@@ -156,19 +147,23 @@ export function GetStarted() {
       done: Boolean(extension?.signed_in),
       guide: 'extension' as const,
     },
+    ...(vault.data.seeded
+      ? []
+      : [{ key: 'vault', text: 'Save your app logins to your password vault', done: false, to: '/settings/sign-in' }]),
+    {
+      key: 'provider',
+      text: 'Connect an AI provider for chat',
+      done: setup.complete,
+      to: '/settings/ai',
+    },
+    { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
     {
       key: 'devices',
       text: 'Use Mu3Lab on your phone or laptop',
       done: Boolean(manual.devices),
       guide: 'devices' as const,
     },
-    { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
-    {
-      key: 'backup',
-      text: 'Connect another AI provider for fallback capacity',
-      done: setup.recommendation_met,
-      to: '/settings/ai',
-    },
+    { key: 'chat', text: 'Start chatting with your AI in LobeChat', done: Boolean(manual.chat), to: '/chat' },
   ];
   const finished = steps.filter((step) => step.done).length;
   if (finished === steps.length) return null;
@@ -203,7 +198,11 @@ export function GetStarted() {
                   {content}
                 </button>
               ) : (
-                <Link className={className} to={step.to!}>
+                <Link
+                  className={className}
+                  to={step.to!}
+                  onClick={step.key === 'chat' ? () => markDone('chat') : undefined}
+                >
                   {content}
                 </Link>
               )}

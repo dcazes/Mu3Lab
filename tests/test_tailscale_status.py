@@ -106,6 +106,16 @@ class TailscaleStatusTests(unittest.TestCase):
         )
         self.assertEqual(serve, {"state": "available", "ports": [443, 8443, 8446]})
 
+    def test_default_https_listener_counts_as_443_and_backends_are_ignored(self):
+        # Real `tailscale serve status` output: the 443 listener prints no port.
+        serve = tailnet_serve_status(
+            run=lambda *args, **kwargs: result(
+                "https://mu3lab.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:19461\n\n"
+                "https://mu3lab.ts.net:8443 (tailnet only)\n|-- / proxy http://127.0.0.1:19462\n"
+            )
+        )
+        self.assertEqual(serve, {"state": "available", "ports": [443, 8443]})
+
     def test_successful_empty_serve_status_is_available(self):
         self.assertEqual(
             tailnet_serve_status(run=lambda *args, **kwargs: result("")), {"state": "available", "ports": []}

@@ -114,13 +114,30 @@ def _probe_stream(
         )
 
 
+RENDERED_FILES = {
+    "freellmapi": (".env", "freellmapi.config.json"),
+    "litellm": (".env", "config.yaml"),
+}
+
+
+def _rendered(projects: Path, service_id: str) -> tuple[bytes | None, ...]:
+    def read(path: Path) -> bytes | None:
+        try:
+            return path.read_bytes()
+        except OSError:
+            return None
+
+    return tuple(read(projects / service_id / name) for name in RENDERED_FILES[service_id])
+
+
 def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
     paths = RuntimePaths()
+    before = {service_id: _rendered(paths.projects, service_id) for service_id in RENDERED_FILES}
     try:
         wiring = configure(paths)
     except ValueError as exc:
         return False, str(exc), []
-    for service_id in ("freellmapi", "litellm"):
+    for service_id in RENDERED_FILES:
         service = load().get(service_id)
         env_path = paths.projects / service_id / ".env"
         env = {"MU3LAB_DATA_ROOT": str(paths.data), "MU3LAB_ENV_FILE": str(env_path)}
@@ -128,7 +145,10 @@ def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
             env["MU3LAB_FREELLMAPI_CONFIG"] = str(wiring["freellmapi_config"])
         else:
             env["MU3LAB_LITELLM_CONFIG"] = str(wiring["litellm_config"])
-        rc, output = actions.compose_up(service.compose_path(root), log, env=env, recreate=True, wait_timeout=120)
+        # Both apps read their config only at startup, but Compose cannot see
+        # changes inside a bind-mounted file; recreate only when it changed.
+        changed = _rendered(paths.projects, service_id) != before[service_id]
+        rc, output = actions.compose_up(service.compose_path(root), log, env=env, recreate=changed, wait_timeout=120)
         if rc:
             return False, f"{service.name} reconciliation failed: {redact(output)}", []
     service_key = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")

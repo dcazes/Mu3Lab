@@ -67,6 +67,7 @@ class Service:
     route: str = "pending"
     required: bool = False
     summary: str = ""
+    tagline: str = ""
     identity_note: str = ""
     resource_guidance: str = ""
     setup_action: str = ""
@@ -109,6 +110,7 @@ class Service:
             "routable": self.route == "ready",
             "required": self.required,
             "summary": self.summary,
+            "tagline": self.tagline,
             "identity_note": self.identity_note,
             "resource_guidance": self.resource_guidance,
             "setup_action": self.setup_action,
@@ -247,6 +249,7 @@ def _service(item: dict[str, Any]) -> Service:
         route=route,
         required=bool(item.get("required", False)),
         summary=str(item.get("summary", "")),
+        tagline=str(item.get("tagline", "")),
         identity_note=str(item.get("identity_note", "")),
         resource_guidance=str(item.get("resource_guidance", "")),
         setup_action=str(item.get("setup_action", "")),

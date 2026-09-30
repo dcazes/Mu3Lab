@@ -15,6 +15,7 @@ settings:
 services:
   - id: ingress
     summary: "Routes requests to Mu3Lab apps over HTTPS. Caddy provides the internal web server and reverse proxy used to publish private app addresses."
+    tagline: "Private HTTPS web server"
     maturity: supported
     name: Caddy
     category: infrastructure
@@ -36,6 +37,7 @@ services:
 
   - id: authentik
     summary: "Manages user accounts and access to Mu3Lab. Authentik provides a shared sign-in for compatible apps and an additional sign-in gate for selected services."
+    tagline: "Single sign-on for your apps"
     maturity: supported
     name: Authentik
     category: infrastructure
@@ -57,6 +59,7 @@ services:
 
   - id: vaultwarden
     summary: "Stores passwords, secure notes, and other vault items on your server. Vaultwarden works with Bitwarden clients to sync your vault and fill saved logins across devices."
+    tagline: "Password manager for Bitwarden apps"
     maturity: supported
     name: Vaultwarden
     category: infrastructure
@@ -80,6 +83,7 @@ services:
 
   - id: ollama
     summary: "Runs AI models and generates text embeddings on your server. Mu3Lab uses Ollama as an internal API for local inference and document search; it has no browser interface."
+    tagline: "Runs AI models on your server"
     maturity: supported
     name: Ollama
     category: ai
@@ -103,6 +107,7 @@ services:
 
   - id: litellm
     summary: "Provides a unified API for local and external AI models. Mu3Lab uses LiteLLM to route chat and embedding requests through one gateway for connected apps."
+    tagline: "One gateway for all AI models"
     maturity: supported
     name: LiteLLM
     category: ai
@@ -128,6 +133,7 @@ services:
 
   - id: freellmapi
     summary: "Connects multiple AI providers through an OpenAI-compatible API, with model routing and automatic failover. Mu3Lab manages provider keys in AI providers settings; availability depends on each provider’s limits."
+    tagline: "Pools free AI providers with failover"
     maturity: supported
     name: FreeLLMAPI
     category: ai
@@ -151,6 +157,7 @@ services:
 
   - id: surfsense
     summary: "An AI research workspace for searching documents and web sources, organizing knowledge, and asking questions with source citations. Mu3Lab connects this self-hosted web app to its AI gateway and local embedding service."
+    tagline: "AI research with cited sources"
     maturity: supported
     name: SurfSense
     category: research
@@ -189,6 +196,7 @@ services:
 
   - id: firecrawl
     summary: "Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping and crawling API and connects it to chat for web research."
+    tagline: "Turns web pages into AI-ready text"
     maturity: supported
     name: Firecrawl
     category: research
@@ -217,6 +225,7 @@ services:
 
   - id: lobehub
     summary: "An AI chat workspace for conversations, assistants, and connected tools. Mu3Lab connects LobeChat to configured models through LiteLLM and stores conversation history on your server."
+    tagline: "Chat with your AI models"
     maturity: supported
     name: LobeChat
     category: ai
@@ -246,6 +255,7 @@ services:
 
   - id: actual-budget
     summary: "A personal finance app built around envelope budgeting. Track accounts and transactions, plan spending, and review financial reports, with budget data synced through your own server."
+    tagline: "Envelope budgeting and spending"
     maturity: supported
     name: Actual Budget
     category: finance
@@ -286,6 +296,7 @@ services:
 
   - id: immich
     summary: "Manages your photo and video library on your server. Upload media from your phone, organize shared albums, and find images using metadata, facial recognition, and visual search."
+    tagline: "Photo and video backup"
     maturity: supported
     name: Immich
     category: media
@@ -313,6 +324,7 @@ services:
 
   - id: mealie
     summary: "Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own, schedule meals, and turn recipe ingredients into shopping lists."
+    tagline: "Recipes, meal plans, and shopping lists"
     maturity: supported
     name: Mealie
     category: home
@@ -353,6 +365,7 @@ services:
 
   - id: adventurelog
     summary: "A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations into collections, plan upcoming trips, and explore your travels on a map."
+    tagline: "Travel journal and trip planner"
     maturity: supported
     name: AdventureLog
     category: travel
@@ -384,6 +397,7 @@ services:
 
   - id: paperless-ngx
     summary: "Turns scanned paperwork and digital files into a searchable document archive. Extract text with OCR, organize documents by tags and correspondents, and find records without sorting through folders."
+    tagline: "Searchable scanned document archive"
     maturity: supported
     name: Paperless-ngx
     category: documents
@@ -415,6 +429,7 @@ services:
 
   - id: nextcloud
     summary: "A self-hosted workspace for files, calendars, and contacts. Sync and share files across devices, manage events, and connect a Nextcloud calendar to Mu3Lab’s calendar and Home agenda."
+    tagline: "Files, calendars, and contacts"
     maturity: supported
     name: Nextcloud
     category: productivity
@@ -442,6 +457,7 @@ services:
 
   - id: baby-buddy
     summary: "A shared baby-care tracker for feedings, sleep, diaper changes, pumping, and growth. Caregivers can record daily routines and review trends from a common activity history."
+    tagline: "Baby feeding, sleep, and diaper tracker"
     maturity: supported
     name: Baby Buddy
     category: family

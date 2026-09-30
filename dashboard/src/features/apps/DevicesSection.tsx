@@ -6,10 +6,10 @@ import { Card } from '../../components/Layout';
 import { QrCode } from '../../components/QrCode';
 import { companionFor } from '../../lib/companions';
 
-export function DevicesTab({ service, address }: { service: Service; address: string }) {
+export function DevicesSection({ service, address }: { service: Service; address: string }) {
   const companion = companionFor(service.id);
   return (
-    <div className="stack">
+    <>
       <Card
         title="Server address"
         description={
@@ -66,6 +66,6 @@ export function DevicesTab({ service, address }: { service: Service; address: st
           </ul>
         </Card>
       )}
-    </div>
+    </>
   );
 }

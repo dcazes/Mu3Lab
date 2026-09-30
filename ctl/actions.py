@@ -121,12 +121,7 @@ def _docker_invocation(argv: list[str]) -> list[str] | None:
 
     from ctl import preflight as _pre
 
-    try:
-        import grp as _grp
-
-        live_groups = [_grp.getgrgid(gid).gr_name for gid in _os.getgroups()]
-    except OSError:
-        live_groups = []
+    live_groups = _pre._live_group_names()
     if "docker" in live_groups:
         return argv
     if _sh.which("sg") and _pre._db_has_group(_gp.getuser(), "docker"):

@@ -421,10 +421,25 @@ def check_tailscale(binary_present: bool, daemon_active: bool, joined: bool) -> 
     return _result("tailscale", "ok", "Installed, service running, tailnet connected.", state="ready")
 
 
+def _group_names(gids) -> list[str]:
+    """Names for ``gids``, skipping any with no /etc/group entry.
+
+    A session can hold a gid whose group was deleted after login (e.g. an
+    uninstall removed ``docker``); getgrgid raises KeyError for those.
+    """
+    names = []
+    for gid in gids:
+        try:
+            names.append(grp.getgrgid(gid).gr_name)
+        except KeyError:
+            continue
+    return names
+
+
 def _live_group_names() -> list[str]:
     """Process credentials (what THIS process can actually use)."""
     try:
-        return [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
+        return _group_names(os.getgroups())
     except OSError:
         return []
 
@@ -455,7 +470,7 @@ def gather_docker(exec_fn=None, which_fn=None, getgroups_fn=None, getuser_fn=Non
         engine = eng if eng_rc == 0 else ""
         compose = exec_fn(["docker", "compose", "version"])[0] == 0
     try:
-        groups = [grp.getgrgid(gid).gr_name for gid in getgroups_fn()]
+        groups = _group_names(getgroups_fn())
     except OSError:
         groups = []
     try:
@@ -494,11 +509,6 @@ def gate_passed(checks: list[dict]) -> bool:
     checks. Card ②'s unlock, the server, and the tests all use this —
     nothing maintains a parallel definition."""
     return not any(check.get("status") == "fail" and check.get("blocking") for check in checks)
-    """Process credentials (what THIS process can actually use)."""
-    try:
-        return [grp.getgrgid(gid).gr_name for gid in os.getgroups()]
-    except OSError:
-        return []
 
 
 def _db_has_group(user: str, group: str) -> bool:

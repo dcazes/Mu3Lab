@@ -54,6 +54,7 @@ def catalog() -> dict[str, Any]:
     services = {
         service.id: {
             "summary": service.summary or service.setup_action,
+            "tagline": service.tagline,
             "category": service.category,
             "stage_label": f"{service.maturity.title()} · {service.stage}",
             "resource_guidance": service.resource_guidance,

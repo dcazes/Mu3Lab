@@ -1,4 +1,4 @@
-import { ChevronRight, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, usePath } from '../lib/router';
 
@@ -18,8 +18,8 @@ export function PageHeader({
       <div className="page-header-text">
         {breadcrumb && (
           <Link to={breadcrumb.to} className="breadcrumb">
+            <ChevronLeft />
             {breadcrumb.label}
-            <ChevronRight />
           </Link>
         )}
         <h1>{title}</h1>

@@ -21,8 +21,8 @@ class Provider:
     account: str = "email"
     recommended: bool = False
     free_tier: str = ""
-    # The sign-up page offers "Continue with Google" (checked 2026-09-29).
-    google_sign_in: bool = False
+    # No free inference until a card is on file (checked 2026-09-30).
+    payment_required: bool = False
     # For keys without a distinctive prefix: a best-guess shape, JS-compatible.
     key_pattern: str = ""
 
@@ -41,9 +41,8 @@ PROVIDERS = (
         "Create a key in Cerebras Cloud.",
         signup_url="https://cloud.cerebras.ai/",
         keys_url="https://cloud.cerebras.ai/platform/",
-        recommended=True,
-        free_tier="Very high daily token allowance on fast open models.",
-        google_sign_in=True,
+        free_tier="$5 trial credit for 30 days on fast open models.",
+        payment_required=True,
     ),
     Provider(
         "google",
@@ -56,7 +55,6 @@ PROVIDERS = (
         account="google",
         recommended=True,
         free_tier="Gemini free tier; uses your existing Google account.",
-        google_sign_in=True,
     ),
     Provider(
         "groq",
@@ -68,7 +66,6 @@ PROVIDERS = (
         keys_url="https://console.groq.com/keys",
         recommended=True,
         free_tier="Generous per-day request limits across many open models.",
-        google_sign_in=True,
     ),
     Provider(
         "huggingface",
@@ -79,7 +76,6 @@ PROVIDERS = (
         signup_url="https://huggingface.co/join",
         keys_url="https://huggingface.co/settings/tokens",
         free_tier="Small monthly inference credit.",
-        google_sign_in=True,
     ),
     Provider(
         "nvidia",
@@ -89,6 +85,7 @@ PROVIDERS = (
         "Create a key in the NVIDIA API Catalog.",
         signup_url="https://build.nvidia.com/",
         keys_url="https://build.nvidia.com/settings/api-keys",
+        recommended=True,
         free_tier="Rate-limited trial access to NVIDIA-hosted models.",
     ),
     Provider(
@@ -100,7 +97,6 @@ PROVIDERS = (
         signup_url="https://openrouter.ai/",
         keys_url="https://openrouter.ai/settings/keys",
         free_tier="Free model variants with a low daily request cap.",
-        google_sign_in=True,
     ),
     Provider(
         "mistral",
@@ -111,7 +107,6 @@ PROVIDERS = (
         signup_url="https://console.mistral.ai/",
         keys_url="https://console.mistral.ai/api-keys",
         free_tier="Free experiment plan; requires phone verification.",
-        google_sign_in=True,
         key_pattern=r"^[A-Za-z0-9]{32}$",
     ),
     Provider(

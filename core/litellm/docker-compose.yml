@@ -16,9 +16,9 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
-      interval: 20s
+      interval: 5s
       timeout: 10s
-      retries: 12
+      retries: 48
 
 networks:
   mu3lab_frontend: {external: true}

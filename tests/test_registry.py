@@ -240,6 +240,9 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual(result["services"][service.id]["summary"], service.summary)
                 self.assertNotEqual(service.summary, service.identity_note)
                 self.assertNotEqual(service.summary, service.setup_action)
+                # The Apps list shows the tagline; the detail page shows the summary.
+                self.assertTrue(0 < len(service.tagline) <= 45, service.tagline)
+                self.assertEqual(result["services"][service.id]["tagline"], service.tagline)
 
     def test_dashboard_catalog_legacy_manifest_uses_setup_copy(self):
         from dataclasses import replace

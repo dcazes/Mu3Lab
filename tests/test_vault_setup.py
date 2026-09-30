@@ -352,12 +352,12 @@ class ProviderSetupProgressTests(unittest.TestCase):
         two = setup_progress(
             [
                 {"provider_id": "groq", "enabled": True, "state": "verified"},
-                {"provider_id": "cerebras", "enabled": True, "state": "verified"},
+                {"provider_id": "nvidia", "enabled": True, "state": "verified"},
                 {"provider_id": "google", "enabled": False, "state": "verified"},
             ]
         )
         self.assertTrue(two["recommendation_met"])
-        self.assertEqual(two["recommended_verified"], ["cerebras", "groq"])
+        self.assertEqual(two["recommended_verified"], ["groq", "nvidia"])
 
     def test_nothing_verified_is_incomplete(self):
         progress = setup_progress([{"provider_id": "groq", "enabled": True, "state": "degraded"}])

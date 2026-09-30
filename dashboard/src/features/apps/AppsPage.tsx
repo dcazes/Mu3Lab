@@ -1,5 +1,5 @@
 import { Check, ChevronRight, PackageSearch, Plus, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 import type { AppSize, AppSizesResponse, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton } from '../../components/Button';
@@ -24,6 +24,27 @@ import { InstallProgress } from './InstallProgress';
 import { useInstallBatch } from './useInstallBatch';
 
 const STAGE_ORDER: Stage[] = ['optional', 'core', 'foundation'];
+const SELECTION_KEY = 'mu3lab.discoverSelection';
+
+/** Discover picks survive a visit to an app's detail page and back. */
+function useSelection() {
+  const [selected, setSelected] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(sessionStorage.getItem(SELECTION_KEY) || '[]');
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SELECTION_KEY, JSON.stringify(selected));
+    } catch {
+      // Storage can be unavailable (private mode); the selection just won't persist.
+    }
+  }, [selected]);
+  return [selected, setSelected] as const;
+}
 
 function matches(service: Service, term: string, summary = '') {
   return !term || `${service.name} ${service.category} ${summary}`.toLowerCase().includes(term);
@@ -38,7 +59,7 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
         <AppIcon id={service.id} />
         <span className="row-text">
           <b>{service.name}</b>
-          <small style={{ whiteSpace: 'normal' }}>{summary || categoryLabel(service.category)}</small>
+          <small>{summary || categoryLabel(service.category)}</small>
         </span>
       </Link>
       <span className="row-meta hide-mobile">
@@ -79,13 +100,21 @@ function DiscoverCard({
   toggle: () => void;
 }) {
   const installable = canInstall(service);
+  const keep = (event: MouseEvent) => event.stopPropagation();
   return (
-    <article className={`discover-card ${selected ? 'selected' : ''} ${installable ? '' : 'unavailable'}`}>
+    // The whole card toggles the selection (the button is its keyboard equivalent);
+    // only the icon and name open the app's details.
+    <article
+      className={`discover-card ${selected ? 'selected' : ''} ${installable ? 'selectable' : 'unavailable'}`}
+      onClick={installable ? toggle : undefined}
+    >
       <header>
-        <AppIcon id={service.id} size="lg" />
-        <Link to={`/apps/${service.id}`} className="discover-name">
-          <b>{service.name}</b>
-          <small>{categoryLabel(service.category)}</small>
+        <Link to={`/apps/${service.id}`} className="discover-link" onClick={keep}>
+          <AppIcon id={service.id} size="lg" />
+          <span className="discover-name">
+            <b>{service.name}</b>
+            <small>{categoryLabel(service.category)}</small>
+          </span>
         </Link>
       </header>
       <p>{installable ? summary : service.blocked_reason || summary}</p>
@@ -98,7 +127,10 @@ function DiscoverCard({
             icon={selected ? Check : Plus}
             aria-pressed={selected}
             aria-label={`${selected ? 'Deselect' : 'Select'} ${service.name} for installation`}
-            onClick={toggle}
+            onClick={(event) => {
+              keep(event);
+              toggle();
+            }}
           >
             {selected ? 'Selected' : 'Add'}
           </Button>
@@ -115,14 +147,9 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const services = data.services.services;
   const catalog = data.catalog.services;
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
+  const [stored, setSelected] = useSelection();
   const [planning, setPlanning] = useState(false);
   const installBatch = useInstallBatch();
-  // Sizes are measured in the background by the worker; re-read them now and then.
-  const sizes = useApi<AppSizesResponse>(
-    discover ? `/api/v1/app-sizes?ids=${encodeURIComponent(selected.join(','))}` : null,
-    { interval: 30000 },
-  ).data;
   const term = query.trim().toLowerCase();
 
   const installed = useMemo(() => services.filter(isInstalled), [services]);
@@ -130,12 +157,19 @@ export function AppsPage({ discover }: { discover: boolean }) {
     () => services.filter((service) => !isInstalled(service) && ['optional', 'blocked'].includes(service.stage)),
     [services],
   );
+  // Drop picks that have since been installed or become unavailable.
+  const selected = stored.filter((id) => available.some((service) => service.id === id && canInstall(service)));
+  // Sizes are measured in the background by the worker; re-read them now and then.
+  const sizes = useApi<AppSizesResponse>(
+    discover ? `/api/v1/app-sizes?ids=${encodeURIComponent(selected.join(','))}` : null,
+    { interval: 30000 },
+  ).data;
   const shown = (discover ? available : installed).filter((service) =>
     matches(service, term, catalog[service.id]?.summary),
   );
   const names = (ids: string[]) => ids.map((id) => services.find((service) => service.id === id)?.name || id);
   const toggle = (id: string) =>
-    setSelected((values) => (values.includes(id) ? values.filter((value) => value !== id) : [...values, id]));
+    setSelected(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
 
   return (
     <div className="page">
@@ -200,7 +234,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
                     <DiscoverCard
                       key={service.id}
                       service={service}
-                      summary={catalog[service.id]?.summary || service.detail}
+                      summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
                       size={sizes?.apps[service.id]}
                       selected={selected.includes(service.id)}
                       toggle={() => toggle(service.id)}
@@ -220,7 +254,11 @@ export function AppsPage({ discover }: { discover: boolean }) {
               <h2 className="group-title">{stageLabel[stage]}</h2>
               <div className="card card-flush rows">
                 {group.map((service) => (
-                  <InstalledRow key={service.id} service={service} summary={catalog[service.id]?.summary || ''} />
+                  <InstalledRow
+                    key={service.id}
+                    service={service}
+                    summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || ''}
+                  />
                 ))}
               </div>
             </section>

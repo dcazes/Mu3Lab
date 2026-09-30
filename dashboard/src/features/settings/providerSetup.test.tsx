@@ -25,9 +25,10 @@ const catalogItem = (id: string, name: string, extra: Partial<ProviderCatalogIte
 });
 
 const catalog = [
-  catalogItem('openrouter', 'OpenRouter', { prefixes: ['sk-or-v1-'], google_sign_in: true }),
-  catalogItem('groq', 'Groq', { recommended: true, prefixes: ['gsk_'], google_sign_in: true }),
-  catalogItem('cerebras', 'Cerebras', { recommended: true, prefixes: ['csk-'] }),
+  catalogItem('openrouter', 'OpenRouter', { prefixes: ['sk-or-v1-'] }),
+  catalogItem('groq', 'Groq', { recommended: true, prefixes: ['gsk_'] }),
+  catalogItem('cerebras', 'Cerebras', { prefixes: ['csk-'], payment_required: true }),
+  catalogItem('nvidia', 'NVIDIA', { recommended: true, prefixes: ['nvapi-'] }),
   catalogItem('mistral', 'Mistral', { key_pattern: '^[A-Za-z0-9]{32}$' }),
 ];
 
@@ -59,7 +60,7 @@ function providersApi(connected: ProviderMetadata[], recommendedVerified: string
         setup: {
           verified: connected.length,
           complete: connected.length > 0,
-          recommended: ['groq', 'cerebras'],
+          recommended: ['groq', 'nvidia'],
           recommended_verified: recommendedVerified,
           recommended_minimum: 2,
           recommendation_met: recommendedVerified.length >= 2,
@@ -77,12 +78,14 @@ describe('AI provider checklist', () => {
     const rows = screen.getAllByRole('link', { name: /Get key/ });
     expect(rows.map((link) => link.getAttribute('href'))).toEqual([
       'https://groq.example/keys',
-      'https://cerebras.example/keys',
+      'https://nvidia.example/keys',
       'https://openrouter.example/keys',
+      'https://cerebras.example/keys',
       'https://mistral.example/keys',
     ]);
     expect(screen.getAllByText('Recommended')).toHaveLength(2);
-    expect(screen.getAllByText('One-click Google sign-in')).toHaveLength(2);
+    expect(screen.getAllByText('Payment method required')).toHaveLength(1);
+    expect(screen.queryByText(/Google sign-in/)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Sign up/ })).not.toBeInTheDocument();
   });
 
@@ -91,11 +94,14 @@ describe('AI provider checklist', () => {
     renderWithDashboard(<AiSettings />, dashboardData([]));
     expect(await screen.findByText('Chat works — add a backup provider')).toBeInTheDocument();
     expect(screen.getByText(/1 of 2 connected/)).toBeInTheDocument();
-    expect(screen.getByText('Connected')).toBeInTheDocument();
+    // Groq now lives under Connected providers, so the checklist no longer offers it.
+    const keyLinks = screen.getAllByRole('link', { name: /Get key/ }).map((link) => link.getAttribute('href'));
+    expect(keyLinks).not.toContain('https://groq.example/keys');
+    expect(keyLinks).toHaveLength(4);
   });
 
   it('stops nagging once two recommended providers work', async () => {
-    stubFetch(providersApi([connection('groq', 'Groq'), connection('cerebras', 'Cerebras')], ['groq', 'cerebras']));
+    stubFetch(providersApi([connection('groq', 'Groq'), connection('nvidia', 'NVIDIA')], ['groq', 'nvidia']));
     renderWithDashboard(<AiSettings />, dashboardData([]));
     expect(await screen.findByText('More free providers')).toBeInTheDocument();
     expect(screen.queryByText('Chat works — add a backup provider')).not.toBeInTheDocument();
@@ -179,8 +185,12 @@ describe('One key field for every provider', () => {
       clipboard: { readText: async () => 'csk-copied' },
     });
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    // Cerebras is the second row; the pickup only takes a key for the provider just opened.
-    fireEvent.click((await screen.findAllByRole('link', { name: /Get key/ }))[1]);
+    // The pickup only takes a key for the provider just opened.
+    fireEvent.click(
+      (await screen.findAllByRole('link', { name: /Get key/ })).find(
+        (link) => link.getAttribute('href') === 'https://cerebras.example/keys',
+      )!,
+    );
     fireEvent.focus(window);
     expect(await screen.findByText(/Picked up your copied Cerebras key/)).toBeInTheDocument();
     expect(screen.getByLabelText('API key')).toHaveValue('csk-copied');
@@ -202,11 +212,23 @@ describe('Get started', () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(true, []));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    const first = await screen.findByRole('link', { name: /1\. Connect an AI provider/ });
-    expect(first).toHaveAttribute('href', '/settings/ai');
+    const first = await screen.findByRole('button', { name: /1\. Add Bitwarden/ });
     expect(first).toHaveClass('is-next');
+    expect(screen.getByRole('link', { name: /2\. Connect an AI provider/ })).toHaveAttribute('href', '/settings/ai');
+    expect(screen.getByRole('link', { name: /3\. Install your first personal app/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /4\. Use Mu3Lab on your phone or laptop/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /5\. Start chatting/ })).toHaveAttribute('href', '/chat');
     expect(screen.getByText('0 of 5 complete')).toBeInTheDocument();
     expect(screen.queryByText(/Save your app logins/)).not.toBeInTheDocument();
+  });
+
+  it('ticks off the chat step once LobeChat is opened from it', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    stubFetch(api(true, []));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    fireEvent.click(await screen.findByRole('link', { name: /Start chatting/ }));
+    expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
   });
 
   it('ticks off detected steps and adds the vault step when it was never done', async () => {
@@ -214,7 +236,7 @@ describe('Get started', () => {
     stubFetch(api(false, [connection('groq', 'Groq')]));
     renderWithDashboard(<HomePage />, dashboardData([]));
     expect(await screen.findByText('1 of 6 complete')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Save your app logins to your password vault/ })).toHaveClass('is-next');
+    expect(screen.getByRole('link', { name: /2\. Save your app logins to your password vault/ })).toBeInTheDocument();
   });
 
   it('opens a numbered guide for steps it cannot detect and remembers them', async () => {

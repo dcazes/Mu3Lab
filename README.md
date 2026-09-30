@@ -97,7 +97,7 @@ LobeChat comes with **one assistant per installed app**. Ask it to plan meals in
 <td valign="top">
 
 ### 💸 Free AI, without the setup
-Paste free API keys from providers like Cerebras, Google AI Studio or Groq, and Mu3Lab checks them and routes chat through them with automatic failover. Local models run on your own hardware through Ollama, on CPU or GPU. One gateway (LiteLLM) serves every app.
+Paste free API keys from providers like Google AI Studio, Groq or NVIDIA, and Mu3Lab checks them and routes chat through them with automatic failover. Local models run on your own hardware through Ollama, on CPU or GPU. One gateway (LiteLLM) serves every app.
 
 </td>
 <td valign="top">

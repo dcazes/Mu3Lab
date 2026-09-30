@@ -194,6 +194,18 @@ class DockerTests(unittest.TestCase):
         for result in cases:
             self.assertNotEqual(result["status"], "fail")
 
+    def test_group_names_skips_deleted_group(self):
+        # Session still holds the gid of a docker group an uninstall deleted.
+        from unittest.mock import patch
+
+        def fake_getgrgid(gid):
+            if gid == 986:
+                raise KeyError("getgrgid(): gid not found: 986")
+            return type("G", (), {"gr_name": f"g{gid}"})()
+
+        with patch("grp.getgrgid", side_effect=fake_getgrgid):
+            self.assertEqual(preflight._group_names([27, 986, 1000]), ["g27", "g1000"])
+
 
 class TailscaleTests(unittest.TestCase):
     def test_ok(self):

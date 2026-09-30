@@ -13,6 +13,7 @@ import { dashboardData, identity, readyUi, renderWithDashboard, service, stubFet
 
 beforeEach(() => {
   window.history.pushState({}, '', '/');
+  sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -82,19 +83,25 @@ describe('Home', () => {
     expect(chips[2]).toHaveAttribute('title', 'Memory 10.0 GB of 16.0 GB · Disk 96.0 GB of 100.0 GB');
 
     fireEvent.click(chips[0]);
-    expect(within(strip).getByRole('link', { name: 'Caddy: Running' })).toHaveAttribute('href', '/apps/ingress');
+    const caddy = within(strip).getByRole('link', { name: 'Caddy: Running' });
+    expect(caddy).toHaveAttribute('href', '/apps/ingress');
+    // Healthy rows leave the state to the dot.
+    expect(caddy).not.toHaveTextContent('Running');
     expect(within(strip).getByRole('link', { name: 'Tailscale: Connected' })).toBeInTheDocument();
 
     fireEvent.click(chips[1]);
     expect(chips[0]).toHaveAttribute('aria-expanded', 'false');
     const ollama = within(strip).getByRole('link', { name: 'Ollama: Failed' });
     expect(ollama).toHaveAttribute('title', '3.5 GB — Container exited.');
+    expect(ollama).toHaveTextContent('Failed');
     expect(within(strip).getByRole('link', { name: 'Firecrawl: Not installed' })).toBeInTheDocument();
 
     fireEvent.click(chips[2]);
-    expect(within(strip).getByRole('link', { name: 'Background worker: failed' })).toBeInTheDocument();
+    expect(within(strip).getByRole('link', { name: 'Background worker: Failed' })).toBeInTheDocument();
     expect(within(strip).getByRole('link', { name: 'Docker: Running' })).toBeInTheDocument();
-    expect(within(strip).getByRole('link', { name: 'Memory: 62%' })).toHaveAttribute('title', '10.0 GB of 16.0 GB');
+    const memory = within(strip).getByRole('link', { name: 'Memory: 62%' });
+    expect(memory).toHaveAttribute('title', '10.0 GB of 16.0 GB');
+    expect(memory).toHaveTextContent('Memory62% of 16.0 GB');
     expect(within(strip).getByRole('link', { name: 'Disk: 96%' })).toBeInTheDocument();
   });
 
@@ -176,14 +183,17 @@ describe('App page', () => {
     );
   });
 
-  it('helps connect companion apps with the server address', () => {
+  it('helps connect companion apps with the server address right on the overview', () => {
     stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '' }));
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity(),
       ui: readyUi('https://host.ts.net:8449'),
     });
-    renderWithDashboard(<AppDetailPage id="immich" tab="devices" />, dashboardData([immich]));
-    expect(screen.getByText('https://host.ts.net:8449')).toBeInTheDocument();
+    renderWithDashboard(<AppDetailPage id="immich" tab="overview" />, dashboardData([immich]));
+    expect(screen.queryByRole('link', { name: 'Devices' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Apps' })).toHaveAttribute('href', '/apps');
+    // Shown once, in the server address card, rather than again under About.
+    expect(screen.getAllByText('https://host.ts.net:8449')).toHaveLength(1);
     expect(screen.getByRole('link', { name: /Android/ })).toHaveAttribute(
       'href',
       'https://play.google.com/store/apps/details?id=app.alextran.immich',
@@ -281,6 +291,40 @@ describe('Apps', () => {
         }),
       ),
     );
+  });
+
+  it('selects an app by clicking anywhere on its card except its name', () => {
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    stubFetch(() => ({ ok: true, batch: null }));
+    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    renderWithDashboard(<AppsPage discover />, dashboardData([service('mealie', 'Mealie', 'optional', available)]));
+    const card = screen.getByRole('article');
+    fireEvent.click(card);
+    expect(screen.getByRole('button', { name: 'Deselect Mealie for installation' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    // The button toggles once, not once for itself and again for the card.
+    fireEvent.click(screen.getByRole('button', { name: 'Deselect Mealie for installation' }));
+    expect(screen.getByRole('button', { name: 'Select Mealie for installation' })).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('link', { name: /Mealie/ }));
+    expect(window.location.pathname).toBe('/apps/mealie');
+    expect(screen.queryByRole('region', { name: 'Selected apps' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the selection after visiting an app page and coming back', () => {
+    stubFetch(() => ({ ok: true, batch: null }));
+    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    const data = dashboardData([
+      service('mealie', 'Mealie', 'optional', available),
+      service('immich', 'Immich', 'optional', available),
+    ]);
+    renderWithDashboard(<AppsPage discover />, data);
+    fireEvent.click(screen.getByRole('button', { name: 'Select Mealie for installation' }));
+    cleanup();
+    renderWithDashboard(<AppsPage discover />, data);
+    expect(screen.getByRole('button', { name: 'Deselect Mealie for installation' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Selected apps' })).toHaveTextContent('1 selected · Mealie');
   });
 
   it('will not start an install that cannot fit on the disk', async () => {

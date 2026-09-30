@@ -11,9 +11,14 @@ interface Row {
   key: string;
   label: string;
   tone: Tone;
+  /** Spoken state; shown only when something is wrong, since the dot already says "fine". */
   status: string;
-  /** Right-aligned figure, e.g. "3.2 GB" or "9.8 GB of 16 GB". */
+  /** Figure for the chip's hover text, e.g. "3.2 GB" or "9.8 GB of 16 GB". */
   value?: string;
+  /** What a healthy row shows on the right, e.g. "3.2 GB" or "62%". */
+  figure?: string;
+  /** Quieter text after the figure, e.g. "of 16 GB". */
+  note?: string;
   /** 0-100; draws a usage bar under the row. */
   percent?: number;
   detail?: string;
@@ -46,6 +51,7 @@ function serviceRow(id: string, services: Service[], memory: Record<string, numb
     tone,
     status: stateLabel[service.state] || service.state,
     value: used ? bytes(used) : undefined,
+    figure: used ? bytes(used) : undefined,
     detail: tone === 'green' ? '' : service.detail,
     to: `/apps/${id}`,
   };
@@ -71,6 +77,8 @@ function usageRow(key: string, label: string, metric: SystemResponse['memory'], 
     tone: percent >= critical ? 'red' : percent >= warn ? 'amber' : 'green',
     status: `${percent}%`,
     value: metric.total ? `${bytes(metric.used)} of ${bytes(metric.total)}` : undefined,
+    figure: `${percent}%`,
+    note: metric.total ? `of ${bytes(metric.total)}` : undefined,
     percent,
     to: SYSTEM_PAGE,
   };
@@ -110,6 +118,7 @@ function buildGroups(system: SystemResponse, services: Service[]): Group[] {
       label: 'CPU',
       tone: cpu >= 95 ? 'amber' : 'green',
       status: `${cpu}%`,
+      figure: `${cpu}%`,
       percent: cpu,
       to: SYSTEM_PAGE,
     },
@@ -124,7 +133,7 @@ function buildGroups(system: SystemResponse, services: Service[]): Group[] {
       key: 'worker',
       label: 'Background worker',
       tone: workerTone,
-      status: worker === 'active' ? 'Running' : worker === 'unknown' ? 'Unknown' : worker,
+      status: worker === 'active' ? 'Running' : worker.charAt(0).toUpperCase() + worker.slice(1),
       detail: workerTone === 'red' ? 'Installs and repairs wait until it runs again.' : '',
       to: SYSTEM_PAGE,
     },
@@ -153,14 +162,17 @@ function buildGroups(system: SystemResponse, services: Service[]): Group[] {
 
 function DetailRow({ row }: { row: Row }) {
   const title = [row.value, row.detail].filter(Boolean).join(' — ');
+  // Usage rows always show their figure (its colour carries the warning); others
+  // show a figure while healthy and their state in words once something is wrong.
+  const problem = row.tone !== 'green' && row.percent === undefined;
   return (
     <li>
       <Link to={row.to} className="status-row" title={title || undefined} aria-label={`${row.label}: ${row.status}`}>
         <Dot tone={row.tone} />
         <span className="status-row-name">{row.label}</span>
-        <span className="status-row-state">
-          {row.status}
-          {row.value && <span className="status-row-value">{row.value}</span>}
+        <span className={`status-row-state${problem ? ` tone-${row.tone}` : ''}`}>
+          {problem ? row.status : row.figure}
+          {!problem && row.note && <span className="status-row-note"> {row.note}</span>}
         </span>
         {row.percent !== undefined && (
           <span className="status-bar" aria-hidden="true">

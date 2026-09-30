@@ -156,12 +156,12 @@ class KeyDetectionTests(unittest.TestCase):
             with self.subTest(text=text[:20]):
                 self.assertEqual(key_problem(text), "")
 
-    def test_google_sign_in_labels_are_exposed_to_the_dashboard(self):
+    def test_payment_required_and_recommended_flags_are_exposed_to_the_dashboard(self):
         by_id = {item["id"]: item for item in catalog()}
-        self.assertEqual(
-            {pid for pid, item in by_id.items() if item["google_sign_in"]},
-            {"cerebras", "google", "groq", "huggingface", "openrouter", "mistral"},
-        )
+        # Cerebras grants no free inference until a card is on file, so it is
+        # flagged and never recommended; OpenRouter's free models need no card.
+        self.assertEqual({pid for pid, item in by_id.items() if item["payment_required"]}, {"cerebras"})
+        self.assertEqual({pid for pid, item in by_id.items() if item["recommended"]}, {"google", "groq", "nvidia"})
         self.assertNotIn("oauth", by_id["openrouter"])
 
 

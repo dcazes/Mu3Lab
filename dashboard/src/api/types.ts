@@ -131,6 +131,8 @@ export interface CatalogProfile {
 
 export interface CatalogService {
   summary: string;
+  /** A few words for lists; `summary` is the full description. */
+  tagline?: string;
   category?: string;
   stage_label?: string;
   resource_guidance?: string;
@@ -263,8 +265,8 @@ export interface ProviderCatalogItem {
   account?: 'email' | 'google';
   recommended?: boolean;
   free_tier?: string;
-  /** The sign-up page offers "Continue with Google". */
-  google_sign_in?: boolean;
+  /** No free inference until a payment method is on file. */
+  payment_required?: boolean;
   /** Best-guess key shape for providers without a distinctive prefix. */
   key_pattern?: string;
 }
