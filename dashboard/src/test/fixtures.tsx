@@ -77,6 +77,8 @@ export function dashboardData(services: Service[], overrides: Partial<DashboardD
       display_name: 'Owner',
       detail: '',
       writes_enabled: true,
+      is_admin: true,
+      role: 'admin',
     },
     system: { ...emptyData.system, ok: true, docker_ready: true, tailnet_dns_name: 'host.ts.net' },
     ...overrides,

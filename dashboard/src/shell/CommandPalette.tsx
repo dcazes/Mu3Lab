@@ -17,7 +17,8 @@ import { navigate } from '../lib/router';
 import { isInstalled, launchTarget } from '../lib/services';
 import type { ThemePreference } from '../lib/theme';
 import { useDashboard } from '../state/dashboard';
-import { SETTINGS_SECTIONS } from '../features/settings/sections';
+import { useIsAdmin } from '../state/dashboard';
+import { settingsSectionsFor } from '../features/settings/sections';
 
 export function CommandPalette({
   open,
@@ -28,6 +29,7 @@ export function CommandPalette({
   setOpen: (open: boolean) => void;
   setTheme: (theme: ThemePreference) => void;
 }) {
+  const isAdmin = useIsAdmin();
   const { data } = useDashboard();
   useEffect(() => {
     const toggle = (event: KeyboardEvent) => {
@@ -93,7 +95,7 @@ export function CommandPalette({
           <Command.Item onSelect={() => go('/calendar')}>
             <CalendarDays /> Calendar
           </Command.Item>
-          {SETTINGS_SECTIONS.map((section) => (
+          {settingsSectionsFor(isAdmin).map((section) => (
             <Command.Item
               key={section.id}
               value={`settings ${section.label}`}

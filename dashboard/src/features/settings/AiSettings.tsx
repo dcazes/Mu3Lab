@@ -1,4 +1,5 @@
 import { CheckCircle2, ClipboardCheck, ClipboardPaste, KeyRound, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import { useIsAdmin } from '../../state/dashboard';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
@@ -182,10 +183,12 @@ function ProviderRow({
   provider,
   act,
   replace,
+  readOnly = false,
 }: {
   provider: ProviderMetadata;
   act: (provider: ProviderMetadata, action: 'verify' | 'enable' | 'disable' | 'remove') => void;
   replace: () => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className="provider">
@@ -208,23 +211,25 @@ function ProviderRow({
           ))}
         </span>
         <StateBadge state={provider.state} />
-        <Menu
-          label={`${provider.name} actions`}
-          items={[
-            ...(provider.supported
-              ? [
-                  { label: 'Verify again', icon: CheckCircle2, onSelect: () => act(provider, 'verify') },
-                  {
-                    label: provider.enabled ? 'Disable' : 'Enable',
-                    icon: Power,
-                    onSelect: () => act(provider, provider.enabled ? 'disable' : 'enable'),
-                  },
-                ]
-              : []),
-            { label: 'Replace key', icon: Pencil, onSelect: replace },
-            { label: 'Remove', icon: Trash2, danger: true, onSelect: () => act(provider, 'remove') },
-          ]}
-        />
+        {!readOnly && (
+          <Menu
+            label={`${provider.name} actions`}
+            items={[
+              ...(provider.supported
+                ? [
+                    { label: 'Verify again', icon: CheckCircle2, onSelect: () => act(provider, 'verify') },
+                    {
+                      label: provider.enabled ? 'Disable' : 'Enable',
+                      icon: Power,
+                      onSelect: () => act(provider, provider.enabled ? 'disable' : 'enable'),
+                    },
+                  ]
+                : []),
+              { label: 'Replace key', icon: Pencil, onSelect: replace },
+              { label: 'Remove', icon: Trash2, danger: true, onSelect: () => act(provider, 'remove') },
+            ]}
+          />
+        )}
       </div>
       {provider.error && (
         <p className="error-text provider-error">
@@ -471,6 +476,7 @@ function ProviderChecklist({
 }
 
 export function AiSettings() {
+  const isAdmin = useIsAdmin();
   const confirm = useConfirm();
   const { run } = useAction();
   const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', { interval: 5000 });
@@ -507,6 +513,11 @@ export function AiSettings() {
         title="AI providers"
         description="Connect the model providers you want chat to use. Free tiers are never guaranteed."
       />
+      {!isAdmin && (
+        <Callout title="Only an administrator can change AI providers">
+          You can see which providers chat uses. Ask an administrator to connect or change one.
+        </Callout>
+      )}
       <Card title="Connected providers" flush>
         {providers.error ? (
           <p className="error-text card-pad">Could not load providers: {providers.error}</p>
@@ -518,6 +529,7 @@ export function AiSettings() {
                 provider={provider}
                 act={(item, action) => void act(item, action)}
                 replace={() => setDialog({ id: provider.id })}
+                readOnly={!isAdmin}
               />
             ))}
           </div>
@@ -527,12 +539,14 @@ export function AiSettings() {
           </EmptyState>
         )}
       </Card>
-      <ProviderChecklist
-        catalog={catalog.data?.providers || []}
-        providers={list}
-        setup={providers.data?.setup}
-        saved={() => void reload()}
-      />
+      {isAdmin && (
+        <ProviderChecklist
+          catalog={catalog.data?.providers || []}
+          providers={list}
+          setup={providers.data?.setup}
+          saved={() => void reload()}
+        />
+      )}
       <ChatRoute />
       {dialog && (
         <ProviderDialog

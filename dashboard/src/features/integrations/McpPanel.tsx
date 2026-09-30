@@ -3,9 +3,10 @@ import { type FormEvent, useState } from 'react';
 import { api, type McpServer, putJsonApi } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
-import { Card, Collapsible } from '../../components/Layout';
+import { Callout, Card, Collapsible } from '../../components/Layout';
 import { Badge, Dot } from '../../components/Status';
 import { useAction } from '../../lib/useAction';
+import { useIsAdmin } from '../../state/dashboard';
 import { mcpSummary, nextMcpStep, openChatFor, queueMcp, setsUpAutomatically } from './mcp';
 import { ToolCategories } from './ToolCategories';
 import { ToolConsole } from './ToolConsole';
@@ -17,6 +18,7 @@ const PERMISSION_LABEL: Record<string, string> = {
 };
 
 function Tools({ server }: { server: McpServer }) {
+  const isAdmin = useIsAdmin();
   const { run } = useAction();
   const [permissions, setPermissions] = useState<Record<string, string>>({});
   if (!server.tools.length) return <p className="muted">Tools appear here once the connection is verified.</p>;
@@ -32,7 +34,7 @@ function Tools({ server }: { server: McpServer }) {
                 {tool.risk === 'read' ? 'Reads data' : tool.risk === 'draft' ? 'Prepares a draft' : 'Changes data'}
               </small>
             </span>
-            {server.state === 'live' ? (
+            {server.state === 'live' && isAdmin ? (
               <select
                 className="select-sm"
                 aria-label={`${tool.title} permission`}
@@ -144,6 +146,7 @@ export function McpPanel({
   reload: () => void;
 }) {
   const confirm = useConfirm();
+  const isAdmin = useIsAdmin();
   const summary = mcpSummary(server, appName);
   const { pending, run } = useAction();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -239,7 +242,12 @@ export function McpPanel({
           </form>
         )}
       </Card>
-      {connectors.length > 1 && (
+      {!isAdmin && (
+        <Callout title="Only an administrator can change what chat can do">
+          You can see which tools {appName}'s assistant has. Ask an administrator to switch tools on or off.
+        </Callout>
+      )}
+      {isAdmin && connectors.length > 1 && (
         <ConnectorPicker key={server.id} server={server} connectors={connectors} appName={appName} reload={reload} />
       )}
       <Card
@@ -250,44 +258,50 @@ export function McpPanel({
             : 'Control which tools are available in chat. Tools that change data require approval or can be disabled.'
         }
       >
-        {server.gateway ? <ToolCategories server={server} reload={reload} /> : <Tools server={server} />}
+        {server.gateway ? (
+          <ToolCategories server={server} reload={reload} readOnly={!isAdmin} />
+        ) : (
+          <Tools server={server} />
+        )}
       </Card>
-      <Collapsible title="Advanced">
-        <div className="stack">
-          <div className="button-row">
-            {server.state === 'live' && (
-              <>
-                <Button icon={CheckCircle2} loading={pending === 'verify'} onClick={() => void act('verify')}>
-                  Verify
+      {isAdmin && (
+        <Collapsible title="Advanced">
+          <div className="stack">
+            <div className="button-row">
+              {server.state === 'live' && (
+                <>
+                  <Button icon={CheckCircle2} loading={pending === 'verify'} onClick={() => void act('verify')}>
+                    Verify
+                  </Button>
+                  <Button icon={RefreshCw} loading={pending === 'restart'} onClick={() => void act('restart')}>
+                    Restart
+                  </Button>
+                  <Button icon={Unplug} className="danger-text" onClick={() => void act('disable')}>
+                    Disconnect
+                  </Button>
+                </>
+              )}
+              {server.enabled && (
+                <Button loading={pending === 'logs'} onClick={() => void loadLogs()}>
+                  View logs
                 </Button>
-                <Button icon={RefreshCw} loading={pending === 'restart'} onClick={() => void act('restart')}>
-                  Restart
-                </Button>
-                <Button icon={Unplug} className="danger-text" onClick={() => void act('disable')}>
-                  Disconnect
-                </Button>
-              </>
-            )}
-            {server.enabled && (
-              <Button loading={pending === 'logs'} onClick={() => void loadLogs()}>
-                View logs
-              </Button>
-            )}
-            {server.review?.repository && (
-              <ExternalButton icon={ShieldCheck} href={server.review.repository}>
-                Reviewed source
-              </ExternalButton>
-            )}
+              )}
+              {server.review?.repository && (
+                <ExternalButton icon={ShieldCheck} href={server.review.repository}>
+                  Reviewed source
+                </ExternalButton>
+              )}
+            </div>
+            <p className="muted">
+              {server.kind} · {server.transport}
+              {server.last_verified_at && ` · verified ${new Date(server.last_verified_at).toLocaleString()}`}
+              {server.review?.note && ` · ${server.review.note}`}
+            </p>
+            {logs && <pre className="log">{logs.join('\n') || 'No recent log lines.'}</pre>}
+            <ToolConsole server={server} />
           </div>
-          <p className="muted">
-            {server.kind} · {server.transport}
-            {server.last_verified_at && ` · verified ${new Date(server.last_verified_at).toLocaleString()}`}
-            {server.review?.note && ` · ${server.review.note}`}
-          </p>
-          {logs && <pre className="log">{logs.join('\n') || 'No recent log lines.'}</pre>}
-          <ToolConsole server={server} />
-        </div>
-      </Collapsible>
+        </Collapsible>
+      )}
     </div>
   );
 }

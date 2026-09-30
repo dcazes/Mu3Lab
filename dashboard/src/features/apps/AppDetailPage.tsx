@@ -13,7 +13,7 @@ import { humanize, relativeTime } from '../../lib/format';
 import { Link } from '../../lib/router';
 import { isInstalled, isRunning, launchTarget, signInSummary } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
-import { useDashboard } from '../../state/dashboard';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
 import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
@@ -233,6 +233,7 @@ function Overview({ service, address, devices }: { service: Service; address: st
 
 export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
   const { data } = useDashboard();
+  const isAdmin = useIsAdmin();
   const service = data.services.services.find((item) => item.id === id)!;
   const registry = useMcpRegistry();
   const connectors = connectorsFor(registry.data?.servers || [], id);
@@ -249,7 +250,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
     { label: 'Overview', to: base, key: 'overview' },
     ...(mcp ? [{ label: 'Chat', to: `${base}/chat`, key: 'chat' }] : []),
     ...(hasSettings ? [{ label: 'Settings', to: `${base}/settings`, key: 'settings' }] : []),
-    ...(installed ? [{ label: 'Advanced', to: `${base}/advanced`, key: 'advanced' }] : []),
+    ...(installed && isAdmin ? [{ label: 'Advanced', to: `${base}/advanced`, key: 'advanced' }] : []),
   ];
   const active = tabs.some((item) => item.key === tab) ? tab : 'overview';
 

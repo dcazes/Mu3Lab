@@ -117,7 +117,11 @@ def service_snapshot(identity: IdentityData | None = None) -> dict[str, Any]:
             item["recommended_action"] = "install"
         else:
             item["recommended_action"] = "none"
-        item["allowed_actions"] = allowed_actions(service, str(item["state"])) if operator else []
+        allowed = allowed_actions(service, str(item["state"])) if operator else []
+        if operator and not (identity or {}).get("is_admin"):
+            # Household members may add apps; running and removing them is administration.
+            allowed = [action for action in allowed if action in {"install", "retry_setup"}]
+        item["allowed_actions"] = allowed
         item["identity"] = identity_projection(service, item, control_state)
         result.append(item)
     return {

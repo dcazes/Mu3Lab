@@ -18,11 +18,13 @@ function ToolRow({
   tool,
   categoryOn,
   reload,
+  readOnly,
 }: {
   server: McpServer;
   tool: Tool;
   categoryOn: boolean;
   reload: () => void;
+  readOnly: boolean;
 }) {
   const { pending, run } = useAction();
   const changes = tool.risk === 'write';
@@ -55,7 +57,7 @@ function ToolRow({
           type="checkbox"
           role="switch"
           checked={tool.enabled}
-          disabled={!categoryOn || pending === tool.id || tool.offered === false}
+          disabled={readOnly || !categoryOn || pending === tool.id || tool.offered === false}
           onChange={(event) => void toggle(event.target.checked)}
         />
       </label>
@@ -68,11 +70,13 @@ function Category({
   category,
   tools,
   reload,
+  readOnly,
 }: {
   server: McpServer;
   category: McpCategory;
   tools: Tool[];
   reload: () => void;
+  readOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const { pending, run } = useAction();
@@ -109,7 +113,7 @@ function Category({
             type="checkbox"
             role="switch"
             checked={category.enabled}
-            disabled={pending === 'category'}
+            disabled={readOnly || pending === 'category'}
             onChange={(event) => void toggle(event.target.checked)}
           />
         </label>
@@ -117,7 +121,14 @@ function Category({
       {open && (
         <div className="rows compact" id={bodyId}>
           {tools.map((tool) => (
-            <ToolRow key={tool.id} server={server} tool={tool} categoryOn={category.enabled} reload={reload} />
+            <ToolRow
+              key={tool.id}
+              server={server}
+              tool={tool}
+              categoryOn={category.enabled}
+              reload={reload}
+              readOnly={readOnly}
+            />
           ))}
         </div>
       )}
@@ -126,7 +137,15 @@ function Category({
 }
 
 /** A gateway connector's tools, grouped by category, each with its own switch. */
-export function ToolCategories({ server, reload }: { server: McpServer; reload: () => void }) {
+export function ToolCategories({
+  server,
+  reload,
+  readOnly = false,
+}: {
+  server: McpServer;
+  reload: () => void;
+  readOnly?: boolean;
+}) {
   const categories = server.categories || [];
   return (
     <div className="stack">
@@ -143,6 +162,7 @@ export function ToolCategories({ server, reload }: { server: McpServer; reload: 
             category={category}
             tools={server.tools.filter((tool) => tool.category === category.id)}
             reload={reload}
+            readOnly={readOnly}
           />
         ))}
       </div>

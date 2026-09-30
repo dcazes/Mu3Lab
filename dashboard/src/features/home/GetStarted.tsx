@@ -150,12 +150,10 @@ export function GetStarted() {
     ...(vault.data.seeded && !vault.data.pending_logins
       ? []
       : [{ key: 'vault', text: 'Save your app logins to your password vault', done: false, to: '/settings/sign-in' }]),
-    {
-      key: 'provider',
-      text: 'Connect an AI provider for chat',
-      done: setup.complete,
-      to: '/settings/ai',
-    },
+    // Connecting AI providers is administration; members skip it.
+    ...(data.identity.is_admin
+      ? [{ key: 'provider', text: 'Connect an AI provider for chat', done: setup.complete, to: '/settings/ai' }]
+      : []),
     { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
     {
       key: 'devices',

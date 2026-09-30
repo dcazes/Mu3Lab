@@ -59,16 +59,16 @@ export const emptyData: DashboardData = {
   chat: { ok: false, ready: false, url: '', authentication: '', mcp_enabled_count: 0, detail: '' },
 };
 
-const SOURCES: { key: keyof DashboardData; path: string; operatorOnly?: boolean }[] = [
+const SOURCES: { key: keyof DashboardData; path: string; adminOnly?: boolean }[] = [
   { key: 'services', path: '/api/v1/services' },
   { key: 'catalog', path: '/api/v1/catalog' },
   { key: 'system', path: '/api/v1/system' },
   { key: 'identity', path: '/api/v1/identity' },
   { key: 'jobs', path: '/api/v1/jobs' },
-  { key: 'audit', path: '/api/v1/audit' },
+  { key: 'audit', path: '/api/v1/audit', adminOnly: true },
   { key: 'core', path: '/api/v1/setup/core' },
   { key: 'provisioning', path: '/api/v1/provisioning' },
-  { key: 'chat', path: '/api/v1/chat/status', operatorOnly: true },
+  { key: 'chat', path: '/api/v1/chat/status' },
 ];
 
 const POLL_MS = 10000;
@@ -84,6 +84,11 @@ export function useDashboard(): DashboardValue {
   return value;
 }
 
+/** Administrators run Mu3Lab; household members use it. */
+export function useIsAdmin(): boolean {
+  return Boolean(useDashboard().data.identity.is_admin);
+}
+
 const isSignedOut = (error: unknown) => error instanceof ApiError && error.kind === 'signed_out';
 
 /** Polls the control plane and reports whether it is reachable and signed in. */
@@ -92,6 +97,8 @@ export function useDashboardLoader(): DashboardValue {
   const [connection, setConnection] = useState<Connection>('connecting');
   // Sources whose last refresh failed; their data on screen is from an earlier refresh.
   const [failedSources, setFailedSources] = useState<string[]>([]);
+  // Learned from each refresh's identity; decides whether admin-only sources load.
+  const isAdminRef = useRef(false);
   const inFlight = useRef<Promise<void> | null>(null);
   const resumedOnboarding = useRef(false);
 
@@ -105,7 +112,13 @@ export function useDashboardLoader(): DashboardValue {
         setConnection(isSignedOut(error) ? 'signed_out' : 'offline');
         return;
       }
-      const results = await Promise.allSettled(SOURCES.map((source) => api<unknown>(source.path)));
+      // Household members never load administrator-only sources.
+      const isAdmin = isAdminRef.current;
+      const results = await Promise.allSettled(
+        SOURCES.map((source) =>
+          source.adminOnly && !isAdmin ? Promise.resolve(undefined) : api<unknown>(source.path),
+        ),
+      );
       // Signing out wins over a refresh that had already started: drop the
       // identity and its privileges rather than show stale operator state.
       if (results.some((result) => result.status === 'rejected' && isSignedOut(result.reason))) {
@@ -113,6 +126,10 @@ export function useDashboardLoader(): DashboardValue {
         setConnection('signed_out');
         return;
       }
+      const identityIndex = SOURCES.findIndex((source) => source.key === 'identity');
+      const identity = results[identityIndex];
+      if (identity.status === 'fulfilled' && identity.value && typeof identity.value === 'object')
+        isAdminRef.current = Boolean((identity.value as { is_admin?: boolean }).is_admin);
       setFailedSources(
         SOURCES.filter((_source, index) => results[index].status === 'rejected').map((source) => source.key),
       );

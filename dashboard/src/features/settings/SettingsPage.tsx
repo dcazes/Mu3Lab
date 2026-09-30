@@ -3,7 +3,9 @@ import { Link } from '../../lib/router';
 import { AiSettings } from './AiSettings';
 import { CalendarSettings } from './CalendarSettings';
 import { IntegrationsSettings } from './IntegrationsSettings';
-import { SETTINGS_SECTIONS } from './sections';
+import { useIsAdmin } from '../../state/dashboard';
+import { PeopleSettings } from './PeopleSettings';
+import { settingsSectionsFor } from './sections';
 import { SecuritySettings } from './SecuritySettings';
 import { SignInSettings } from './SignInSettings';
 import { SystemSettings } from './SystemSettings';
@@ -13,17 +15,19 @@ const PAGES: Record<string, () => JSX.Element> = {
   integrations: IntegrationsSettings,
   'sign-in': SignInSettings,
   calendar: CalendarSettings,
+  people: PeopleSettings,
   security: SecuritySettings,
   system: SystemSettings,
 };
 
 export function SettingsPage({ section }: { section: string }) {
-  const Page = PAGES[section];
+  const sections = settingsSectionsFor(useIsAdmin());
+  const Page = sections.some((item) => item.id === section) ? PAGES[section] : undefined;
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Settings">
         <h1 className="settings-nav-title">Settings</h1>
-        {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => (
+        {sections.map(({ id, label, icon: Icon }) => (
           <Link
             key={id}
             to={`/settings/${id}`}

@@ -163,7 +163,13 @@ export function SecuritySettings() {
             { label: 'Email', value: identity.email || '—' },
             {
               label: 'Role',
-              value: identity.writes_enabled ? <Badge tone="green">Administrator</Badge> : <Badge>Read only</Badge>,
+              value: identity.is_admin ? (
+                <Badge tone="green">Administrator</Badge>
+              ) : identity.writes_enabled ? (
+                <Badge>Household member</Badge>
+              ) : (
+                <Badge>Read only</Badge>
+              ),
             },
             {
               label: 'Protection',

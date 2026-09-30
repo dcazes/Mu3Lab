@@ -213,6 +213,9 @@ export interface IdentityResponse {
   display_name?: string;
   groups?: string[];
   detail: string;
+  /** "admin" runs Mu3Lab; "member" is household: uses the dashboard and apps. */
+  role?: 'admin' | 'member' | '';
+  is_admin?: boolean;
   writes_enabled: boolean;
 }
 

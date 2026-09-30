@@ -1,9 +1,11 @@
-import { Bot, CalendarDays, KeyRound, type LucideIcon, Plug, ServerCog, ShieldCheck } from 'lucide-react';
+import { Bot, CalendarDays, KeyRound, type LucideIcon, Plug, ServerCog, ShieldCheck, Users } from 'lucide-react';
 
 export interface SettingsSection {
   id: string;
   label: string;
   icon: LucideIcon;
+  /** Only administrators see it. */
+  adminOnly?: boolean;
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -11,6 +13,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'integrations', label: 'Chat integrations', icon: Plug },
   { id: 'sign-in', label: 'Sign-in', icon: KeyRound },
   { id: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { id: 'people', label: 'People', icon: Users, adminOnly: true },
   { id: 'security', label: 'Security & backups', icon: ShieldCheck },
-  { id: 'system', label: 'System', icon: ServerCog },
+  { id: 'system', label: 'System', icon: ServerCog, adminOnly: true },
 ];
+
+export const settingsSectionsFor = (isAdmin: boolean) =>
+  SETTINGS_SECTIONS.filter((section) => isAdmin || !section.adminOnly);
