@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="t d">
+  <title id="t">How Mu3Lab fits together</title>
+  <desc id="d">Your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. LobeChat talks to your apps through reviewed MCP connectors and to AI models through LiteLLM, which routes to local Ollama or free cloud providers via FreeLLMAPI.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    .card { fill: #f7f7f9; stroke: #dedee6; }
+    .group { fill: none; stroke: #d0d0da; stroke-dasharray: 5 5; }
+    .accent { fill: #eef0ff; stroke: #5e6ad2; }
+    .h { fill: #15151c; }
+    .s { fill: #5d5d6e; }
+    .lbl { fill: #7a7a8c; }
+    .line { stroke: #9a9aae; fill: none; }
+    .mcp { stroke: #8b5cf6; fill: none; stroke-dasharray: 6 5; }
+    .mcptext { fill: #7c4ddf; }
+    .arrow { fill: #9a9aae; }
+    .arrowm { fill: #8b5cf6; }
+    .chip { fill: #ffffff; stroke: #dedee6; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0f0f14; }
+      .card { fill: #17171f; stroke: #2c2c38; }
+      .group { stroke: #34343f; }
+      .accent { fill: #1c1d33; stroke: #6f78e0; }
+      .h { fill: #f0f0f6; }
+      .s { fill: #a3a3b6; }
+      .lbl { fill: #8a8a9e; }
+      .line { stroke: #5c5c70; }
+      .mcp { stroke: #a78bfa; }
+      .mcptext { fill: #b9a2fb; }
+      .arrow { fill: #5c5c70; }
+      .arrowm { fill: #a78bfa; }
+      .chip { fill: #1f1f29; stroke: #34343f; }
+    }
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .h { font-size: 16px; font-weight: 600; }
+    .s { font-size: 13px; }
+    .lbl { font-size: 12px; font-weight: 600; letter-spacing: 1.2px; }
+    .chipt { font-size: 13px; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrow"/>
+    </marker>
+    <marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrowm"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="640" rx="20"/>
+
+  <!-- Column labels -->
+  <text x="40" y="48" class="lbl">YOUR DEVICES</text>
+  <text x="290" y="48" class="lbl">PRIVATE FRONT DOOR</text>
+  <text x="560" y="48" class="lbl">YOUR MU3LAB SERVER</text>
+
+  <!-- Devices -->
+  <rect x="40" y="70" width="200" height="92" rx="12" class="card"/>
+  <text x="60" y="104" class="h">Laptop &amp; phone</text>
+  <text x="60" y="126" class="s">Browser or installed</text>
+  <text x="60" y="144" class="s">dashboard app (PWA)</text>
+
+  <rect x="40" y="182" width="200" height="92" rx="12" class="card"/>
+  <text x="60" y="216" class="h">Bitwarden</text>
+  <text x="60" y="238" class="s">Fills every app login</text>
+  <text x="60" y="256" class="s">from your own vault</text>
+
+  <rect x="40" y="294" width="200" height="92" rx="12" class="card"/>
+  <text x="60" y="328" class="h">Official mobile apps</text>
+  <text x="60" y="350" class="s">Immich, Nextcloud…</text>
+  <text x="60" y="368" class="s">set up by QR code</text>
+
+  <!-- Front door -->
+  <rect x="290" y="70" width="220" height="316" rx="14" class="group"/>
+  <rect x="306" y="86" width="188" height="86" rx="12" class="accent"/>
+  <text x="324" y="118" class="h">Tailscale</text>
+  <text x="324" y="140" class="s">Private HTTPS for your</text>
+  <text x="324" y="157" class="s">devices only</text>
+
+  <rect x="306" y="186" width="188" height="86" rx="12" class="card"/>
+  <text x="324" y="218" class="h">Caddy</text>
+  <text x="324" y="240" class="s">Routes each app to</text>
+  <text x="324" y="257" class="s">its private address</text>
+
+  <rect x="306" y="286" width="188" height="86" rx="12" class="card"/>
+  <text x="324" y="318" class="h">Authentik</text>
+  <text x="324" y="340" class="s">One sign-in for the</text>
+  <text x="324" y="357" class="s">dashboard and apps</text>
+
+  <line x1="400" y1="172" x2="400" y2="184" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="400" y1="272" x2="400" y2="284" class="line" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Devices -> front door -->
+  <path d="M240 116 H290" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M240 228 H270 V140 H290" class="line" stroke-width="2"/>
+  <path d="M240 340 H270 V228" class="line" stroke-width="2"/>
+
+  <!-- Server group -->
+  <rect x="560" y="70" width="600" height="440" rx="14" class="group"/>
+
+  <!-- Dashboard + vault row -->
+  <rect x="580" y="88" width="330" height="96" rx="12" class="accent"/>
+  <text x="600" y="120" class="h">Mu3Lab dashboard</text>
+  <text x="600" y="142" class="s">Install, start, stop and connect apps.</text>
+  <text x="600" y="160" class="s">Every action is a resumable, logged job.</text>
+
+  <rect x="926" y="88" width="214" height="96" rx="12" class="card"/>
+  <text x="946" y="120" class="h">Vaultwarden</text>
+  <text x="946" y="142" class="s">Your password vault,</text>
+  <text x="946" y="160" class="s">pre-filled with app logins</text>
+
+  <!-- Apps -->
+  <rect x="580" y="202" width="560" height="126" rx="12" class="card"/>
+  <text x="600" y="232" class="h">Your apps</text>
+  <g class="chipt">
+    <rect x="600" y="248" width="82" height="28" rx="14" class="chip"/><text x="641" y="267" text-anchor="middle" class="s">Immich</text>
+    <rect x="690" y="248" width="96" height="28" rx="14" class="chip"/><text x="738" y="267" text-anchor="middle" class="s">Nextcloud</text>
+    <rect x="794" y="248" width="116" height="28" rx="14" class="chip"/><text x="852" y="267" text-anchor="middle" class="s">Paperless-ngx</text>
+    <rect x="918" y="248" width="76" height="28" rx="14" class="chip"/><text x="956" y="267" text-anchor="middle" class="s">Mealie</text>
+    <rect x="1002" y="248" width="120" height="28" rx="14" class="chip"/><text x="1062" y="267" text-anchor="middle" class="s">Actual Budget</text>
+    <rect x="600" y="284" width="116" height="28" rx="14" class="chip"/><text x="658" y="303" text-anchor="middle" class="s">AdventureLog</text>
+    <rect x="724" y="284" width="104" height="28" rx="14" class="chip"/><text x="776" y="303" text-anchor="middle" class="s">Baby Buddy</text>
+    <rect x="836" y="284" width="96" height="28" rx="14" class="chip"/><text x="884" y="303" text-anchor="middle" class="s">SurfSense</text>
+    <rect x="940" y="284" width="92" height="28" rx="14" class="chip"/><text x="986" y="303" text-anchor="middle" class="s">Firecrawl</text>
+  </g>
+
+  <!-- AI row -->
+  <rect x="580" y="376" width="160" height="116" rx="12" class="accent"/>
+  <text x="600" y="408" class="h">LobeChat</text>
+  <text x="600" y="430" class="s">Chat with one</text>
+  <text x="600" y="447" class="s">assistant per app</text>
+
+  <rect x="778" y="376" width="150" height="116" rx="12" class="card"/>
+  <text x="798" y="408" class="h">LiteLLM</text>
+  <text x="798" y="430" class="s">One AI gateway</text>
+  <text x="798" y="447" class="s">for every app</text>
+
+  <rect x="966" y="376" width="174" height="52" rx="12" class="card"/>
+  <text x="984" y="400" class="h">Ollama</text>
+  <text x="984" y="418" class="s">Local models, CPU/GPU</text>
+
+  <rect x="966" y="440" width="174" height="52" rx="12" class="card"/>
+  <text x="984" y="464" class="h">FreeLLMAPI</text>
+  <text x="984" y="482" class="s">Free cloud providers</text>
+
+  <path d="M740 434 H776" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M928 434 H946 V402 H964" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M946 434 V466 H964" class="line" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- MCP -->
+  <path d="M660 376 V330" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <text x="672" y="352" class="mcptext" font-size="13" font-weight="600">MCP connectors · write actions ask first</text>
+
+  <!-- Front door -> server -->
+  <path d="M510 228 H540 V136 H578" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M540 228 V265 H578" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M540 265 V434 H578" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M510 228 H540" class="line" stroke-width="2"/>
+
+  <!-- Footer -->
+  <rect x="40" y="540" width="1120" height="64" rx="12" class="card"/>
+  <text x="64" y="568" class="h">Data stays in /srv/mu3lab on your machine</text>
+  <text x="64" y="589" class="s">Nothing listens on your home network or the internet · every image is pinned to a reviewed digest · secrets are encrypted and never in Git</text>
+</svg>

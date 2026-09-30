@@ -1,9 +1,44 @@
-# Mu3Lab
+<p align="center">
+  <img src="docs/images/banner.svg" alt="Mu3Lab: your private cloud and AI assistant, installed with one command" width="100%">
+</p>
 
-Mu3Lab is a curated, private homelab control plane for Linux desktops running
-Ubuntu 22.04+, Debian 12+, or a derivative such as Linux Mint (x86-64 or arm64).
+<p align="center">
+  <a href="https://github.com/dcazes/Mu3Lab/actions/workflows/ci.yml"><img src="https://github.com/dcazes/Mu3Lab/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-5e6ad2" alt="License: AGPL-3.0-or-later"></a>
+  <img src="https://img.shields.io/badge/Ubuntu%2022.04%2B%20·%20Debian%2012%2B%20·%20Mint-supported-2ea44f" alt="Ubuntu 22.04+, Debian 12+, Linux Mint">
+  <img src="https://img.shields.io/badge/x86--64%20·%20arm64-supported-2ea44f" alt="x86-64 and arm64">
+</p>
 
-## Install
+<p align="center">
+  <b>Mu3Lab turns a Linux computer into a private home cloud.</b><br>
+  Photos, files, documents, recipes, budgets and an AI assistant that can use them all,<br>
+  behind one sign-in, reachable from your devices anywhere, with no ports open to the internet.
+</p>
+
+<p align="center">
+  <a href="#-quick-start">Quick start</a> ·
+  <a href="#-why-mu3lab">Why Mu3Lab</a> ·
+  <a href="#-whats-included">What's included</a> ·
+  <a href="#-how-it-works">How it works</a> ·
+  <a href="#-security-model">Security</a> ·
+  <a href="#-roadmap">Roadmap</a>
+</p>
+
+<!--
+  SCREENSHOT: hero image goes here. Save a 1440×900 capture of Home in both themes
+  as docs/images/screenshots/home-dark.png and home-light.png, then uncomment:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/screenshots/home-dark.png">
+    <img src="docs/images/screenshots/home-light.png" alt="The Mu3Lab Home screen: system status, your apps and your agenda" width="100%">
+  </picture>
+</p>
+-->
+
+---
+
+## ⚡ Quick start
 
 ```bash
 git clone https://github.com/dcazes/Mu3Lab.git
@@ -11,154 +46,269 @@ cd Mu3Lab
 ./install.sh
 ```
 
-`./install.sh` runs entirely in the terminal. It asks for your computer
-password once, then for the email and password you want for Mu3Lab (the same
-password signs you in to the dashboard and unlocks your Vaultwarden password
-vault). Everything else installs by itself. The only other thing you do is
-approve this computer in Tailscale: your browser opens the page, and the
-installer continues on its own once you approve. At the end it saves your app
-logins to your vault and opens the dashboard, whose Home page lists what to do
-next.
+That's the whole install. Here is what happens:
 
-If Google Chrome, Chromium or Brave is installed, setup also adds the Bitwarden
-extension to it, already connected to your vault, so you only sign in. It does
-this with a browser policy that sets nothing else. As a result the browser
-shows "Managed by your organization", and Bitwarden can be turned off but not
-removed. `./uninstall.sh` deletes the policy, and the browser then removes the
-extension.
+1. **Enter your computer password once.** Setup installs Docker, Tailscale and Node.js for you.
+2. **Choose an email and one password for Mu3Lab.** The same password signs you in to the dashboard and unlocks your password vault.
+3. **Approve this computer in Tailscale.** Your browser opens the page, and the installer carries on by itself once you approve.
+4. **Done.** Your app logins are saved to your vault, the dashboard opens, and its Home page lists what to do next.
 
-Run `./install.sh` again at any time, for example after `git pull`: finished
-steps are skipped, changed code is rebuilt, and the dashboard restarts on the
-new version. `make check` prints a read-only readiness report.
+> [!TIP]
+> Run `./install.sh` again at any time, for example after `git pull`. Finished steps are skipped, changed code is rebuilt, and the dashboard restarts on the new version. `make check` prints a read-only readiness report.
 
-To remove Mu3Lab and all of its data, run `./uninstall.sh`. Add
-`--everything` to also remove Docker, Tailscale, Node.js and NVIDIA container
-support; `--dry-run` shows what would be removed first.
+**You need:** a desktop or laptop running Ubuntu 22.04+, Debian 12+ or a derivative such as Linux Mint (x86-64 or arm64), with at least **8 GB of RAM** and **20 GB of free disk space**, plus a free [Tailscale](https://tailscale.com) account. An NVIDIA or AMD GPU is optional; Mu3Lab detects it and uses it for local AI.
 
-The permanent dashboard is reached through private Tailscale HTTPS, manages
-only Mu3Lab's curated services, and never treats arbitrary Docker projects as
-trusted apps.
+---
 
-## Product safety rules
+## ✨ Why Mu3Lab
 
-- Tailscale and Authentik are mandatory infrastructure for the completed
-  platform; reusable Tailscale auth keys are never accepted by the dashboard.
-- Persistent data lives under `/srv/mu3lab`, not in the Git checkout.
-- Git contains definitions and safe defaults, never application data, backups,
-  or unencrypted secrets.
-- Install-time images are resolved to immutable digests. Automated update,
-  backup, and restore execution are intentionally deferred until after the MVP.
-- Vaultwarden and infrastructure lifecycle are always excluded from MCP exposure.
-- SurfSense is installable through a reviewed v0.0.40 stack with its privileged
-  sandbox disabled. Its tailnet route is Authentik-gated and SurfSense then uses
-  a separate local account. Firecrawl is available as a private, login-free API
-  with durable queue, browser, cache, and database services.
+Most homelab dashboards are app stores: they start containers for you and leave the rest to you. Mu3Lab covers the rest too: private access, sign-in, passwords, AI and honest status, **already wired together**.
 
-## Current development state
+<table>
+<tr>
+<td width="50%" valign="top">
 
-The identity-first bootstrapper and registry-backed dashboard foundation are
-active work.
-`services.yaml` is the deployment source of truth and `catalog.yaml` is the
-user-facing curated catalog. The permanent dashboard has Home, My Apps,
-Connections, Security & Backups, and System views. It truthfully distinguishes
-foundation, core, optional, and policy-blocked services, and never offers a
-browser route until that route is actually published through the tailnet.
+### 🔒 Private by default
+Every app gets a private HTTPS address on your Tailscale network. **Nothing listens on your home network or the internet.** No port forwarding, no dynamic DNS, no exposed admin pages. Your phone reaches your photos from anywhere, and no one else can reach them at all.
 
-Baby Buddy is available as an optional family tracker for feeding, sleep,
-diapers, pumping, growth, and other care activity. It appears in the React
-Home workspace and My Apps catalog, stores its data under the normal Mu3Lab
-data root, and uses Authentik trusted-header SSO on its private Tailnet route.
+</td>
+<td width="50%" valign="top">
 
-The control plane keeps leased, resumable, secret-redacted SQLite jobs and
-structured events under `/srv/mu3lab/runtime`; a persistent worker reclaims
-expired work after a restart. The supported AI slice is Ollama, FreeLLMAPI,
-LiteLLM, and LobeChat. It verifies generated provider
-configuration, streamed chat, embedding dimensions, private routes, and
-Authentik-protected identity before reporting the slice verified. The dashboard
-provides a full-screen LobeChat Chat view.
+### 🔑 One sign-in, one password
+Authentik, an identity server, is set up for you and connected to each app with that app's best method: native single sign-on, trusted headers, or a sign-in gate in front of it. You sign in once. You don't make a separate account for every app.
 
-Authenticated operators can install supported optional apps and manage them
-from their detail pages. Install, start, stop, restart, retry, and MCP runtime
-requests are durable jobs; the worker resolves every Compose path and command
-from checked-in registries. The single host-wide compute setting selects the
-reviewed CPU, NVIDIA, or AMD Ollama runtime contract; apps that do not use
-acceleration ignore it. Basic application logs are bounded and redacted before
-reaching the browser. Update execution is deferred from the MVP.
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-Provider Accounts accepts a curated eight-provider allowlist, stores one
-write-only encrypted credential per provider, and reports the provider's
-FreeLLMAPI route plus a streamed LiteLLM `mu3lab-chat` check. The screen shows
-API authorization failures and verification job progress separately from an
-empty list. LobeChat offers only `mu3lab-chat`; Mu3Lab disables other persisted
-provider/model rows and blocks re-enabling them while preserving chat history.
-Eight saved LobeChat agents cover Actual Budget, Mealie, Immich, Paperless-ngx,
-SurfSense, Firecrawl, Nextcloud, and AdventureLog. Mu3Lab seeds them for existing
-LobeChat accounts and automatically for accounts created later.
+### 🗝️ Your passwords, handled
+Mu3Lab installs **Vaultwarden**, a self-hosted server that works with the Bitwarden apps, and saves every app login into it. If you use Chrome, Chromium or Brave, the Bitwarden extension is added already pointed at your vault, so you only sign in.
 
-Advanced Integrations separates automatically managed connections from apps
-that still require a user-scoped credential or approval. Mu3Lab handles MCP
-preparation, verification, chat registration, and lifecycle reconciliation
-after the required application credential is available. Enabled MCPs start
-after their application is healthy and stop before it stops; the worker
-reconciles those states after a host restart. Verified Streamable HTTP tools
-are bound and pinned only to their matching LobeChat agent, with approval
-required for write tools. Connections → Advanced integrations also offers prepared
-runtime status, per-tool permissions, an operator tool console, metadata-only
-action history from the dashboard and LobeChat, job diagnostics, and reviewed
-update status. Write calls in the console require a one-use confirmation.
-Mealie uses a pinned stdio-to-HTTP bridge; Firecrawl uses its official HTTP
-MCP server against the self-hosted API. Mu3Lab's small Nextcloud and
-AdventureLog adapters expose scoped files and travel data operations. Baby
-Buddy's official MCP remains manual because it acts as the user represented by
-an API token copied from Baby Buddy settings.
-All accepted MCP runtimes can be prepared while their apps are stopped. A
-connection is not reported live until credentials, health, and tool discovery
-pass; Nextcloud and AdventureLog also perform an app-data read check.
+</td>
+<td valign="top">
 
-## Development
+### 🤖 A chat assistant that uses your apps
+LobeChat comes with **one assistant per installed app**. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **anything that changes data asks you first**.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 💸 Free AI, without the setup
+Paste free API keys from providers like Cerebras, Google AI Studio or Groq, and Mu3Lab checks them and routes chat through them with automatic failover. Local models run on your own hardware through Ollama, on CPU or GPU. One gateway (LiteLLM) serves every app.
+
+</td>
+<td valign="top">
+
+### ✅ Status you can trust
+An app shows as ready only after its container is healthy, its private address answers and its sign-in works. Every action (install, start, stop, connect) runs as a resumable, logged job that picks up where it left off after a restart. **The dashboard never shows a green check it hasn't verified.**
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📦 Curated, not a free-for-all
+Every app is reviewed before it ships: pinned image digests, a sign-in method, health checks, a storage plan and resource guidance. Arbitrary Docker projects are never treated as trusted apps. You get fewer apps, and each one works properly.
+
+</td>
+<td valign="top">
+
+### 🧭 Built for people, not just sysadmins
+The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<kbd>K</kbd> command palette, and a phone-installable web app. Each app's page shows its official mobile apps with a QR code for the server address. The technical detail is still there, in an Advanced tab.
+
+</td>
+</tr>
+</table>
+
+### How it compares
+
+| | **Mu3Lab** | **Typical app-store homelab dashboards** |
+|---|---|---|
+| Remote access | Private Tailscale HTTPS for every app, built in | Port forwarding or a reverse proxy you configure |
+| Sign-in | One account across apps, wired up automatically | A separate login for each app |
+| Passwords | Vault created and filled with every app login | Up to you |
+| AI assistant | A chat assistant per app that can read and act, with approval for changes | None, or a separate project |
+| AI models | Free cloud providers plus local models, with automatic failover | Bring your own |
+| App catalog | Curated and reviewed, pinned to digests, one integration contract per app | Large, community-submitted |
+| Health | "Ready" means health, route and sign-in all verified | "Running" means the container started |
+| Removal | `./uninstall.sh` removes everything it added, and `--dry-run` shows what first | Varies |
+
+<sub>Some projects offer one or two of these, such as built-in SSO or a VPN add-on. What sets Mu3Lab apart is that all of them are on by default and work together from the first install.</sub>
+
+---
+
+## 🖼️ Tour
+
+<!--
+  SCREENSHOTS: capture these at 1440×900 (dark theme reads best on GitHub),
+  save them under docs/images/screenshots/, then uncomment the table below.
+
+  apps.png               /apps                     Installed apps with status and sign-in type
+  chat-integrations.png  /settings/integrations    Apps connected to chat, with per-tool permissions
+  ai-providers.png       /settings/ai              Free AI providers, verified and routed
+  install.png            /apps/discover → Add      Install plan with sizes and parallel downloads
+  app-devices.png        /apps/immich/devices      Official mobile apps with QR code
+  mobile-home.png        Home on a phone (390×844)
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/screenshots/apps.png" alt="Apps: installed apps with status and sign-in type"><p align="center"><b>Apps.</b> Install, start and stop, with honest status.</p></td>
+<td width="50%"><img src="docs/images/screenshots/chat-integrations.png" alt="Chat integrations with per-tool permissions"><p align="center"><b>Chat integrations.</b> Connected for you, and you control each tool.</p></td>
+</tr>
+<tr>
+<td><img src="docs/images/screenshots/ai-providers.png" alt="AI providers settings"><p align="center"><b>AI providers.</b> Paste a free key and it's checked and routed.</p></td>
+<td><img src="docs/images/screenshots/install.png" alt="Install plan with download sizes"><p align="center"><b>Installs.</b> See the download size first, then fetch apps in parallel.</p></td>
+</tr>
+<tr>
+<td><img src="docs/images/screenshots/app-devices.png" alt="Official mobile apps with QR code"><p align="center"><b>Your devices.</b> Official apps, set up by QR code.</p></td>
+<td><img src="docs/images/screenshots/mobile-home.png" alt="Mu3Lab on a phone" width="60%"><p align="center"><b>On your phone.</b> Install it as an app from the browser.</p></td>
+</tr>
+</table>
+-->
+
+> 📸 Screenshots coming soon.
+
+---
+
+## 📦 What's included
+
+### Installed for you
+
+| | App | What it does |
+|---|---|---|
+| 🛡️ | **Tailscale** | Private, encrypted access from your own devices, from anywhere |
+| 🚦 | **Caddy** | Gives each app its own private HTTPS address |
+| 🔑 | **Authentik** | One account and sign-in for the dashboard and your apps |
+| 🗝️ | **Vaultwarden** | Your password vault, compatible with every Bitwarden app |
+| 💬 | **LobeChat** | Chat workspace with an assistant for each of your apps |
+| 🔀 | **LiteLLM** | One AI gateway for chat and embeddings |
+| 🆓 | **FreeLLMAPI** | Routes chat to free cloud AI providers, with failover |
+| 🦙 | **Ollama** | Local AI models and embeddings, on CPU, NVIDIA or AMD |
+| 🕷️ | **Firecrawl** | Turns web pages into clean text so chat can research the web |
+
+### Add with one click
+
+| | App | What it does | Sign-in | Chat |
+|---|---|---|:---:|:---:|
+| 📷 | **[Immich](https://immich.app)** | Photo and video library with phone backup, face recognition and smart search | SSO | ✅ |
+| ☁️ | **[Nextcloud](https://nextcloud.com)** | Files, calendar and contacts, synced across devices. Its calendar also feeds your Home agenda | SSO | ✅ |
+| 📄 | **[Paperless-ngx](https://docs.paperless-ngx.com)** | Scans and files paperwork into a searchable archive with OCR | SSO | ✅ |
+| 🍳 | **[Mealie](https://mealie.io)** | Recipes, meal plans and shopping lists | SSO | ✅ |
+| 💰 | **[Actual Budget](https://actualbudget.org)** | Envelope budgeting, accounts and reports | SSO | ✅ |
+| 🗺️ | **[AdventureLog](https://adventurelog.app)** | Travel journal and trip planner with maps | SSO | ✅ |
+| 🔬 | **[SurfSense](https://github.com/MODSetter/SurfSense)** | AI research workspace with cited answers | Gated + own login | ✅ |
+| 👶 | **[Baby Buddy](https://docs.baby-buddy.net)** | Shared tracker for feeding, sleep, diapers and growth | SSO | Manual |
+
+<sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: LobeChat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
+
+**Supported free AI providers:** Cerebras · Google AI Studio · Groq · Hugging Face · NVIDIA · OpenRouter · Mistral · Zhipu
+
+---
+
+## 🧩 How it works
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. LobeChat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Ollama or FreeLLMAPI." width="100%">
+</p>
+
+- **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
+- **One source of truth.** [`services.yaml`](services.yaml) declares every app: images, ports, sign-in method, health checks, storage and backups. The dashboard's copy and state come from it, so the UI can't drift from reality.
+- **Durable jobs.** The FastAPI control plane queues every action as a leased, resumable SQLite job. A background worker runs it, reclaims interrupted work after a reboot and redacts secrets from logs.
+- **Connectors that follow their app.** MCP connectors start after their app is healthy and stop before it stops. A connector counts as live only after its credentials, health check and tool discovery all pass.
+
+---
+
+## 🛡️ Security model
+
+- **No public exposure.** Apps are reachable only from devices on your Tailscale network. Reusable Tailscale auth keys are never accepted.
+- **Forged identities are ignored.** The control plane trusts Authentik identity headers only when they arrive with a shared proxy token, and every change needs a same-origin request and a CSRF token bound to your session.
+- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and write tools need your approval each time.
+- **Pinned supply chain.** Images are resolved to immutable digests at install time. Updates are shown for review, never applied silently.
+- **Data outside Git.** Everything lives under `/srv/mu3lab`. The repository holds definitions and safe defaults, never app data, backups or unencrypted secrets.
+
+<details>
+<summary><b>About the "Managed by your organization" browser notice</b></summary>
+<br>
+
+To add Bitwarden to Chrome, Chromium or Brave, setup writes a browser policy that installs the extension and sets its server address, and nothing else. Because it is a policy, the browser shows "Managed by your organization", and Bitwarden can be turned off but not removed. `./uninstall.sh` deletes the policy, and the browser then removes the extension.
+
+</details>
+
+<details>
+<summary><b>Where your data lives</b></summary>
+
+```text
+/srv/mu3lab/
+├── data/       app databases, uploads and media
+├── backups/    local encrypted backup repository (planned)
+├── secrets/    generated credentials, never in Git
+├── runtime/    job queue, event log and control-plane state
+└── projects/   generated per-app Compose projects
+```
+
+</details>
+
+---
+
+## 🧹 Uninstall
 
 ```bash
-./install.sh --no-open   # first run: creates .venv and installs the control plane
-make dev-setup           # linters, type checkers, and dashboard dependencies
+./uninstall.sh --dry-run      # show what would be removed
+./uninstall.sh                # remove Mu3Lab and all of its data
+./uninstall.sh --everything   # also remove Docker, Tailscale, Node.js and NVIDIA container support
+```
+
+> [!WARNING]
+> `--everything` removes Docker **and everything stored in it**, including containers that aren't part of Mu3Lab. Run it with `--dry-run` first.
+
+Uninstall never touches system Python, GPU drivers or base packages.
+
+---
+
+## 🗺️ Roadmap
+
+Mu3Lab is in active development, and the core platform, AI slice and app catalog listed above work today.
+
+- [x] One-command, resumable installer with a guided Tailscale step
+- [x] Authentik SSO wired into every app, plus a pre-filled Vaultwarden vault
+- [x] AI slice: LobeChat, LiteLLM, FreeLLMAPI and Ollama, with GPU detection
+- [x] Per-app chat assistants through reviewed MCP connectors with write approval
+- [x] Parallel image downloads with size estimates before install
+- [ ] **Encrypted local backups** with Restic (7 daily, 4 weekly, 12 monthly) and guided restore
+- [ ] **One-click updates** with a snapshot first (depends on backups)
+- [ ] More curated apps
+
+> [!NOTE]
+> Backups aren't shipped yet. The dashboard reports backup status as *not configured* until a real, integrity-checked repository exists. Until then, keep your own copy of `/srv/mu3lab/data`.
+
+---
+
+## 🛠️ Development
+
+```bash
+./install.sh             # first run: creates .venv and installs the control plane
+make dev-setup           # linters, type checkers and dashboard dependencies
 make verify              # everything CI runs: lint, type check, tests, build
 make format              # apply ruff and prettier formatting
 ```
 
-Code layout:
+| Path | What's there |
+|---|---|
+| [`ctl/api/`](ctl/api) | FastAPI control plane. `security.py` resolves the caller's Authentik identity; `routes/` has one router per dashboard area under `/api/v1` |
+| [`ctl/service_ops.py`](ctl/service_ops.py), [`ctl/lifecycle/`](ctl/lifecycle) | Lifecycle jobs run by the worker, and the steps they sequence |
+| [`dashboard/src/`](dashboard/src) | React + TypeScript dashboard: `api/`, `components/`, `features/<area>/`, `shell/` |
+| [`services.yaml`](services.yaml), [`catalog.yaml`](catalog.yaml), [`mcp-catalog.yaml`](mcp-catalog.yaml) | App registry, bundles and reviewed chat connectors |
+| [`apps/`](apps), [`core/`](core) | Compose definitions for optional apps and core infrastructure |
 
-- `ctl/api/` — the FastAPI control plane. `security.py` resolves the caller's
-  Authentik identity and provides the `Operator`/`OperatorMutation`
-  dependencies every route uses; `routes/` has one router per dashboard area,
-  all under `/api/v1` (plus the unversioned `/api/health` probe).
-- `ctl/service_ops.py` runs lifecycle jobs in the worker; `ctl/lifecycle/`
-  holds the steps it sequences (runtime project generation, health checks,
-  account linking, per-app setup).
-- `dashboard/src/` — `api/` (typed client), `components/` (shared UI),
-  `features/<area>/` (one folder per dashboard page), `lib/` (helpers).
+Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier, the dashboard build, YAML and Compose validation, and a secret scan.
 
-Tests never touch the host's `/srv/mu3lab`: `tests/__init__.py` points
-`MU3LAB_RUNTIME_ROOT` at an empty temporary directory.
+---
 
-CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier,
-the dashboard build, YAML and Compose validation, and a secret scan.
+## 📄 License
 
-## Storage and backups
+Mu3Lab is licensed under the [GNU AGPL-3.0-or-later](LICENSE). Each curated app keeps its own license and operational requirements.
 
-```text
-/srv/mu3lab/
-├── data/
-├── backups/
-├── secrets/
-├── runtime/
-└── projects/
-```
-
-The intended local encrypted Restic policy is 7 daily, 4 weekly, and 12 monthly
-snapshots. Backups currently report `not_configured` until a real repository is
-initialized, and `verified` only after snapshot and integrity-check metadata
-exist. Scheduled backup and restore execution are not shipped yet.
-
-## License
-
-Mu3Lab is licensed under the AGPL-3.0-or-later. Individual curated apps retain
-their own licenses and operational requirements.
+<p align="center"><sub>Built for people who want their own cloud without taking on a second job to run it.</sub></p>

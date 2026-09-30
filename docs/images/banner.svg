@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-labelledby="t d">
+  <title id="t">Mu3Lab</title>
+  <desc id="d">Your private cloud and AI assistant, installed with one command.</desc>
+  <style>
+    .bg { fill: #f7f7f9; }
+    .grid { stroke: #e4e4ea; }
+    .title { fill: #111118; }
+    .tag { fill: #4b4b5a; }
+    .pill { fill: #ffffff; stroke: #dcdce4; }
+    .pilltext { fill: #2a2a36; }
+    .dot { fill: #5e6ad2; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0f0f14; }
+      .grid { stroke: #1d1d26; }
+      .title { fill: #f4f4f8; }
+      .tag { fill: #a6a6b8; }
+      .pill { fill: #17171f; stroke: #2c2c38; }
+      .pilltext { fill: #dcdce6; }
+      .dot { fill: #8b93f0; }
+    }
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  </style>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5e6ad2"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7c6cf0" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#7c6cf0" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="p" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" class="grid" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect class="bg" width="1280" height="400" rx="24"/>
+  <rect width="1280" height="400" rx="24" fill="url(#p)"/>
+  <circle cx="250" cy="200" r="230" fill="url(#glow)"/>
+
+  <!-- Logo -->
+  <rect x="150" y="100" width="200" height="200" rx="44" fill="url(#g)"/>
+  <text x="250" y="238" text-anchor="middle" font-size="130" font-weight="700" fill="#ffffff">μ</text>
+
+  <!-- Wordmark -->
+  <text x="420" y="178" class="title" font-size="76" font-weight="700" letter-spacing="-2">Mu3Lab</text>
+  <text x="422" y="226" class="tag" font-size="26">Your private cloud and AI assistant, installed with one command.</text>
+
+  <!-- Feature pills -->
+  <g font-size="17" font-weight="500">
+    <rect x="420" y="262" width="176" height="40" rx="20" class="pill"/>
+    <circle cx="442" cy="282" r="5" class="dot"/>
+    <text x="456" y="288" class="pilltext">No open ports</text>
+
+    <rect x="608" y="262" width="150" height="40" rx="20" class="pill"/>
+    <circle cx="630" cy="282" r="5" class="dot"/>
+    <text x="644" y="288" class="pilltext">One sign-in</text>
+
+    <rect x="770" y="262" width="212" height="40" rx="20" class="pill"/>
+    <circle cx="792" cy="282" r="5" class="dot"/>
+    <text x="806" y="288" class="pilltext">Chat runs your apps</text>
+
+    <rect x="994" y="262" width="122" height="40" rx="20" class="pill"/>
+    <circle cx="1016" cy="282" r="5" class="dot"/>
+    <text x="1030" y="288" class="pilltext">Free AI</text>
+  </g>
+</svg>
