@@ -3,6 +3,13 @@
 }
 
 :80 {
+	# The upstream root is a product landing page; open the installed app.
+	# Probe the frontend without following the interactive login redirect.
+	handle /__mu3lab_surfsense_health {
+		rewrite * /
+		reverse_proxy frontend:3000
+	}
+	redir / /login 302
 	request_body {
 		max_size 5GB
 	}

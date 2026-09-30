@@ -59,6 +59,9 @@ OIDC_CONTRACTS: dict[str, OidcContract] = {
 
 TRUSTED_HEADER = {"baby-buddy"}
 PROXY_GATE = {"litellm", "freellmapi", "surfsense"}
+# LiteLLM and FreeLLMAPI are already declared by the dashboard blueprint.
+# Other gated apps need an installed-project provider and outpost membership.
+GATED_APPS = TRUSTED_HEADER | (PROXY_GATE - {"litellm", "freellmapi"})
 LOCAL = {"authentik", "vaultwarden"}
 NO_UI = {"ingress", "ollama"}
 # Start the native OIDC flow from Home so an existing Authentik session can
@@ -172,7 +175,7 @@ def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = Ru
     freellmapi = registry.get("freellmapi")
     gated_apps = tuple(
         (service.id, service.name, service.private_https_port)
-        for service in (registry.get(service_id) for service_id in sorted(TRUSTED_HEADER))
+        for service in (registry.get(service_id) for service_id in sorted(GATED_APPS))
         if service.private_https_port and (paths.projects / service.id / "docker-compose.yml").is_file()
     )
     write_dashboard_blueprint(
