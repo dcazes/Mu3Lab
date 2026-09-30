@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
-from starlette.concurrency import run_in_threadpool
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
@@ -15,7 +14,6 @@ from ctl.provider_catalog import RECOMMENDED_MINIMUM, key_problem, prefix_warnin
 from ctl.provider_catalog import catalog as provider_catalog
 from ctl.provider_catalog import detect as detect_provider
 from ctl.provider_catalog import get as get_provider
-from ctl.provider_oauth import OAuthError, exchange_openrouter_code
 
 router = APIRouter(prefix="/api/v1/providers", tags=["providers"])
 
@@ -145,24 +143,6 @@ async def save_provider(request: Request, operator: OperatorMutation) -> dict[st
         operator,
         key,
     )
-
-
-@router.post("/openrouter/oauth")
-async def openrouter_oauth(request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    """Trade OpenRouter's one-time sign-in code for an API key, then save it like a pasted key."""
-    store = runtime.job_store()
-    key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
-    if previous:
-        return {"ok": True, "duplicate": True, "job": previous}
-    payload = await runtime.json_body(request)
-    try:
-        api_key = await run_in_threadpool(
-            exchange_openrouter_code, str(payload.get("code", "")), str(payload.get("code_verifier", ""))
-        )
-    except OAuthError as exc:
-        raise ApiError(502, str(exc)) from exc
-    return _save_key("openrouter", "", api_key, operator, key)
 
 
 @router.get("/{provider_id}/models")

@@ -90,7 +90,7 @@ function RecoveryCredentials() {
   return (
     <Card
       title="New app passwords"
-      description="Authentik sign-in needs no password, but Mu3Lab created these backup admin logins while installing apps. Save them in Vaultwarden; they expire after 24 hours."
+      description="Mu3Lab generated these app credentials during setup. Save them in Vaultwarden before the temporary handoff expires. Handoff expiry removes access to the saved copy; it does not change the app password."
       actions={
         <>
           <Button icon={Download} loading={pending === 'export'} onClick={() => void exportAll()}>
@@ -114,7 +114,7 @@ function RecoveryCredentials() {
               <div className="row">
                 <span className="row-text">
                   <b>{item.service_id}</b>
-                  <small>Expires {relativeTime(item.expires_at)}</small>
+                  <small>Handoff expires {relativeTime(item.expires_at)}</small>
                 </span>
                 {!secret && (
                   <Button
@@ -134,7 +134,7 @@ function RecoveryCredentials() {
                   <div className="button-row">
                     {secret.login_url && <ExternalButton href={secret.login_url}>Open app</ExternalButton>}
                     <Button variant="primary" onClick={() => void saved(item.id)}>
-                      I saved it
+                      Mark as saved
                     </Button>
                   </div>
                 </div>
@@ -184,7 +184,7 @@ export function SecuritySettings() {
             itself.
           </Callout>
         ) : (
-          <Callout tone="warning" icon={ShieldAlert} title="Backups aren’t set up yet">
+          <Callout tone="warning" icon={ShieldAlert} title="Backup protection is not verified">
             Mu3Lab won’t report your data as protected until a snapshot and integrity check succeed. Automatic backups
             and restore are coming in a future update.
           </Callout>

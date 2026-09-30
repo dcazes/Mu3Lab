@@ -4,10 +4,10 @@ export type Stage = Service['stage'];
 export type Tone = 'green' | 'amber' | 'red' | 'gray' | 'blue';
 
 export const stageLabel: Record<Stage, string> = {
-  optional: 'Productivity',
+  optional: 'Personal apps',
   core: 'AI',
   foundation: 'Infrastructure',
-  blocked: 'Coming later',
+  blocked: 'Unavailable',
 };
 
 export const displayStage = (service: Service): Stage =>

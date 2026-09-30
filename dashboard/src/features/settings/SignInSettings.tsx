@@ -68,7 +68,7 @@ export function SignInSettings() {
     <>
       <PageHeader
         title="Sign-in"
-        description="Apps connected to Authentik share one login. Add family members in Authentik to give them access."
+        description="Manage sign-in for your apps. Compatible apps use Authentik single sign-on; others retain separate accounts. Manage users and access policies in Authentik."
         actions={
           authentikTarget && <ExternalButton href={authentikTarget.url}>Manage users in Authentik</ExternalButton>
         }
@@ -92,7 +92,7 @@ export function SignInSettings() {
           {other.length > 0 && (
             <Card
               title="Separate logins"
-              description="These apps are protected by your private network but keep their own accounts. Store their passwords in Vaultwarden."
+              description="These apps retain separate accounts. Some also require Authentik before opening. Save their login credentials in Vaultwarden."
               flush
             >
               <div className="rows">

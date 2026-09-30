@@ -27,7 +27,9 @@ function Tools({ server }: { server: McpServer }) {
           <div className="row" key={tool.id}>
             <span className="row-text">
               <b>{tool.title || tool.id}</b>
-              <small>{tool.risk === 'read' ? 'Reads data' : 'Changes data'}</small>
+              <small>
+                {tool.risk === 'read' ? 'Reads data' : tool.risk === 'draft' ? 'Prepares a draft' : 'Changes data'}
+              </small>
             </span>
             {server.state === 'live' ? (
               <select
@@ -86,7 +88,7 @@ export function McpPanel({ server, appName, reload }: { server: McpServer; appNa
       }))
     )
       return;
-    await run(action, () => queueMcp(server, action), 'Working on it — this takes a moment.');
+    await run(action, () => queueMcp(server, action), 'Connection job started.');
     window.setTimeout(reload, 1200);
   };
   const save = async (event: FormEvent) => {
@@ -158,7 +160,10 @@ export function McpPanel({ server, appName, reload }: { server: McpServer; appNa
           </form>
         )}
       </Card>
-      <Card title="What chat can do" description="Choose which actions need your approval in chat.">
+      <Card
+        title="What chat can do"
+        description="Control which tools are available in chat. Tools that change data require approval or can be disabled."
+      >
         <Tools server={server} />
       </Card>
       <Collapsible title="Advanced">

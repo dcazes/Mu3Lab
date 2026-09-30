@@ -66,6 +66,7 @@ class Service:
     images: tuple[str, ...] = ()
     route: str = "pending"
     required: bool = False
+    summary: str = ""
     identity_note: str = ""
     resource_guidance: str = ""
     setup_action: str = ""
@@ -107,6 +108,7 @@ class Service:
             "route": self.route,
             "routable": self.route == "ready",
             "required": self.required,
+            "summary": self.summary,
             "identity_note": self.identity_note,
             "resource_guidance": self.resource_guidance,
             "setup_action": self.setup_action,
@@ -244,6 +246,7 @@ def _service(item: dict[str, Any]) -> Service:
         images=images,
         route=route,
         required=bool(item.get("required", False)),
+        summary=str(item.get("summary", "")),
         identity_note=str(item.get("identity_note", "")),
         resource_guidance=str(item.get("resource_guidance", "")),
         setup_action=str(item.get("setup_action", "")),

@@ -84,7 +84,7 @@ export function IntegrationsSettings() {
     <>
       <PageHeader
         title="Chat integrations"
-        description="Let chat read and act on data in your apps. Each app only exposes the tools you allow."
+        description="Connect supported apps to chat and control which tools can run or require approval."
       />
       {registry.data && servers.length > 0 && (
         <div className="stat-row" aria-label="Integration summary">
@@ -111,7 +111,11 @@ export function IntegrationsSettings() {
         </EmptyState>
       ) : (
         <>
-          <Card title="Set up automatically" description="Mu3Lab creates credentials and keeps these connected." flush>
+          <Card
+            title="Set up automatically"
+            description="Mu3Lab can create the credentials for these integrations when you connect them."
+            flush
+          >
             <section className="rows" aria-label="Set up automatically">
               {automatic.length ? (
                 automatic.map((server) => <IntegrationRow key={server.id} server={server} reload={reload} />)
@@ -123,7 +127,7 @@ export function IntegrationsSettings() {
           {manual.length > 0 && (
             <Card
               title="Needs your credential"
-              description="These apps require a key or password only you can create."
+              description="Create a credential in the app, then add it to Mu3Lab to connect the integration."
               flush
             >
               <section className="rows" aria-label="Manual integration">

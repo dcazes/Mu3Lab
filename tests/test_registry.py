@@ -226,6 +226,31 @@ class RegistryTests(unittest.TestCase):
     def test_ingress_health_uses_dedicated_caddy_endpoint(self):
         self.assertTrue(load().get("ingress").health["url"].endswith("/__mu3lab_caddy_health"))
 
+    def test_dashboard_catalog_describes_apps_separately_from_sign_in(self):
+        from ctl.api.routes.system import catalog
+
+        registry = load()
+        with patch("ctl.api.routes.system.load_registry", return_value=registry):
+            result = catalog()
+        self.assertTrue(result["ok"])
+        self.assertEqual(set(result["services"]), {service.id for service in registry.services})
+        for service in registry.services:
+            with self.subTest(service=service.id):
+                self.assertTrue(service.summary.strip())
+                self.assertEqual(result["services"][service.id]["summary"], service.summary)
+                self.assertNotEqual(service.summary, service.identity_note)
+                self.assertNotEqual(service.summary, service.setup_action)
+
+    def test_dashboard_catalog_legacy_manifest_uses_setup_copy(self):
+        from dataclasses import replace
+
+        from ctl.api.routes.system import catalog
+
+        service = replace(load().get("mealie"), summary="")
+        with patch("ctl.api.routes.system.load_registry", return_value=SimpleNamespace(services=[service])):
+            result = catalog()
+        self.assertEqual(result["services"][service.id]["summary"], service.setup_action)
+
     def test_dashboard_catalog_uses_curated_service_ids(self):
         root = Path(__file__).resolve().parents[1]
         catalog = yaml.safe_load((root / "catalog.yaml").read_text(encoding="utf-8"))

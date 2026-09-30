@@ -53,7 +53,7 @@ def catalog() -> dict[str, Any]:
         return empty | {"error": str(exc)}
     services = {
         service.id: {
-            "summary": service.identity_note or service.setup_action,
+            "summary": service.summary or service.setup_action,
             "category": service.category,
             "stage_label": f"{service.maturity.title()} · {service.stage}",
             "resource_guidance": service.resource_guidance,

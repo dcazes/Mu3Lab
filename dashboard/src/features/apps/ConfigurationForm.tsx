@@ -87,7 +87,7 @@ function Form({ service, config }: { service: Service; config: ServiceConfigResp
 export function ConfigurationForm({ service }: { service: Service }) {
   const config = useApi<ServiceConfigResponse>(`/api/v1/services/${service.id}/configuration`);
   return (
-    <Card title="Settings" description={`Reviewed options for ${service.name}.`}>
+    <Card title="Settings" description={`Configure the options Mu3Lab manages for ${service.name}.`}>
       {config.error ? (
         <p className="error-text">{config.error}</p>
       ) : !config.data ? (
@@ -95,7 +95,7 @@ export function ConfigurationForm({ service }: { service: Service }) {
       ) : config.data.fields.length ? (
         <Form key={JSON.stringify(config.data.fields)} service={service} config={config.data} />
       ) : (
-        <EmptyState title="No settings">This app has nothing to configure.</EmptyState>
+        <EmptyState title="No settings">No app settings are available through Mu3Lab.</EmptyState>
       )}
     </Card>
   );

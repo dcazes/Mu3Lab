@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardPaste, KeyRound, LogIn, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, ClipboardPaste, KeyRound, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
@@ -23,7 +23,7 @@ import { isRunning, stateLabel } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
-import { detectProvider, keyProblem, openRouterSignInUrl, takeOpenRouterReturn } from './providerKeys';
+import { detectProvider, keyWarning } from './providerKeys';
 
 const ROUTE = [
   { id: 'ollama', label: 'Ollama', role: 'Local models & embeddings' },
@@ -158,8 +158,9 @@ function ProviderDialog({
           <span>API key</span>
           <input
             required
-            type="password"
-            autoComplete="new-password"
+            className="key-input"
+            autoComplete="off"
+            spellCheck={false}
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
             placeholder={selected?.key_hint || ''}
@@ -250,44 +251,25 @@ function KeyPaste({
 }) {
   const [apiKey, setApiKey] = useState('');
   const [choice, setChoice] = useState('');
+  const [changing, setChanging] = useState(false);
+  // True when the key came from the clipboard by itself, so the owner knows not to paste it again.
+  const [pickedUp, setPickedUp] = useState(false);
   const { pending, run } = useAction();
   const submitted = useRef('');
-  const detection = detectProvider(apiKey, catalog);
-  const problem = keyProblem(apiKey);
+  const key = apiKey.trim();
+  const detection = detectProvider(key, catalog);
+  const warning = keyWarning(key);
   const providerId = choice || detection?.provider.id || '';
   const provider = catalog.find((item) => item.id === providerId);
   const replacing = providers.some((item) => item.id === providerId);
 
-  const connect = useCallback(
-    async (key: string, id: string) => {
-      const name = catalog.find((item) => item.id === id)?.name || 'Provider';
-      submitted.current = key;
-      const result = await run(
-        'save',
-        () => postJsonApi<{ warning?: string }>('/api/v1/providers', { provider_id: id, api_key: key }),
-        (response) => response.warning || `${name} key saved. Mu3Lab is verifying it now.`,
-      );
-      if (result) {
-        setApiKey('');
-        setChoice('');
-        clearAwaiting();
-        saved();
-      }
-    },
-    [catalog, clearAwaiting, run, saved],
-  );
-
-  const take = useCallback(
-    (text: string) => {
-      const key = text.trim();
-      setApiKey(key);
-      setChoice('');
-      const found = detectProvider(key, catalog);
-      // A distinctive prefix is certain enough to connect straight away.
-      if (found?.certain && key !== submitted.current) void connect(key, found.provider.id);
-    },
-    [catalog, connect],
-  );
+  // Nothing is saved until the owner clicks Connect; any text is treated as a key.
+  const take = useCallback((text: string, fromClipboard = false) => {
+    setApiKey(text.trim());
+    setChoice('');
+    setChanging(false);
+    setPickedUp(fromClipboard);
+  }, []);
 
   const paste = async () => {
     try {
@@ -297,7 +279,7 @@ function KeyPaste({
     }
   };
 
-  // After "Get key", coming back to this tab picks the copied key up by itself
+  // After "Get key", coming back to this tab fills the box with the copied key
   // once the browser has allowed clipboard access (it asks the first time).
   useEffect(() => {
     if (!awaiting) return;
@@ -305,76 +287,89 @@ function KeyPaste({
       try {
         const permission = await navigator.permissions.query({ name: 'clipboard-read' as PermissionName });
         if (permission.state !== 'granted') return;
-        const key = (await navigator.clipboard.readText()).trim();
-        const found = detectProvider(key, catalog);
-        if (found?.certain && found.provider.id === awaiting && key !== submitted.current) take(key);
+        const text = (await navigator.clipboard.readText()).trim();
+        if (!text || text === apiKey || text === submitted.current) return;
+        if (detectProvider(text, catalog)?.provider.id === awaiting) take(text, true);
       } catch {
-        // No clipboard access: the Paste button still works.
+        // No clipboard access: pasting still works.
       }
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [awaiting, catalog, take]);
+  }, [apiKey, awaiting, catalog, take]);
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (apiKey && providerId && !problem) void connect(apiKey.trim(), providerId);
+    if (!key || !provider) return;
+    submitted.current = key;
+    const result = await run(
+      'save',
+      () => postJsonApi<{ warning?: string }>('/api/v1/providers', { provider_id: provider.id, api_key: key }),
+      (response) => response.warning || `${provider.name} key saved. Mu3Lab is verifying it now.`,
+    );
+    if (result) {
+      take('');
+      clearAwaiting();
+      saved();
+    }
   };
 
   return (
-    <form className="key-paste" onSubmit={submit}>
+    <form className="key-paste" onSubmit={(event) => void submit(event)}>
       <div className="key-paste-row">
         <input
           aria-label="API key"
-          type="password"
+          className="key-input"
           autoComplete="off"
           spellCheck={false}
           value={apiKey}
-          onChange={(event) => {
-            setApiKey(event.target.value);
-            setChoice('');
-          }}
+          onChange={(event) => take(event.target.value)}
           onPaste={(event) => {
             event.preventDefault();
             take(event.clipboardData.getData('text'));
           }}
-          placeholder="Paste any provider's API key"
+          placeholder="Paste a supported provider’s API key"
         />
-        <Button icon={ClipboardPaste} onClick={() => void paste()} loading={pending === 'save' && !apiKey}>
+        <Button icon={ClipboardPaste} onClick={() => void paste()}>
           Paste
         </Button>
-        <Button
-          variant="primary"
-          type="submit"
-          loading={pending === 'save' && !!apiKey}
-          disabled={!providerId || !!problem}
-        >
+        <Button variant="primary" type="submit" loading={pending === 'save'} disabled={!key || !provider}>
           {replacing ? 'Replace key' : 'Connect'}
         </Button>
       </div>
-      {awaiting && !apiKey && (
+      {awaiting && !key && (
         <p className="key-paste-note">
-          Copied your {catalog.find((item) => item.id === awaiting)?.name} key? Come back here and click <b>Paste</b>.
+          Copied your {catalog.find((item) => item.id === awaiting)?.name} key? Come back here and paste it.
         </p>
       )}
-      {apiKey && problem && (
-        <p className="key-paste-note is-error" role="alert">
-          {problem}
+      {key && pickedUp && (
+        <p className="key-paste-note is-success" role="status">
+          <ClipboardCheck />
+          Picked up your copied {provider?.name || ''} key from the clipboard. No need to paste it — check it and click{' '}
+          <b>{replacing ? 'Replace key' : 'Connect'}</b>.
         </p>
       )}
-      {apiKey && !problem && (
-        <div className="key-paste-note">
-          {detection?.certain && !choice ? (
-            <span>
+      {key && warning && (
+        <p className="key-paste-note is-warning" role="status">
+          {warning}
+        </p>
+      )}
+      {key && (
+        <div className="key-paste-note key-paste-choice">
+          {detection?.certain && !changing ? (
+            <>
               <Badge tone="green">
                 <CheckCircle2 />
                 {detection.provider.name} key
               </Badge>
-            </span>
+              <Button size="sm" variant="ghost" onClick={() => setChanging(true)}>
+                Not {detection.provider.name}? Change
+              </Button>
+            </>
           ) : (
             <label className="key-paste-choice">
               <span>
-                {detection
+                {detection && !changing
                   ? `Looks like a ${detection.provider.name} key. Not right? Choose:`
                   : 'Which provider is this key for?'}
               </span>
@@ -388,29 +383,10 @@ function KeyPaste({
               </select>
             </label>
           )}
-          {provider && replacing && <span> This replaces your saved {provider.name} key.</span>}
+          {provider && replacing && <span>This replaces your saved {provider.name} key.</span>}
         </div>
       )}
     </form>
-  );
-}
-
-function OpenRouterConnect() {
-  const { pending, run } = useAction();
-  return (
-    <Button
-      size="sm"
-      variant="primary"
-      icon={LogIn}
-      loading={pending === 'oauth'}
-      onClick={() =>
-        void run('oauth', async () => {
-          window.location.assign(await openRouterSignInUrl());
-        })
-      }
-    >
-      Connect with OpenRouter
-    </Button>
   );
 }
 
@@ -435,17 +411,19 @@ function ProviderChecklist({
   return (
     <Card
       title={setup?.recommendation_met ? 'More free providers' : 'Get free AI capacity'}
-      description={`Free tiers have daily limits. Connect at least ${minimum} recommended providers so chat can switch when one runs out — ${Math.min(done, minimum)} of ${minimum} done.`}
+      description={`Free-tier quotas and availability vary by provider. Connect ${minimum} recommended providers for fallback capacity — ${Math.min(done, minimum)} of ${minimum} connected.`}
       flush
     >
       {setup && !setup.complete && (
         <Callout tone="info" icon={Sparkles} title="Connect one provider to finish setup">
-          Any provider works. The recommended ones have the most generous free tiers.
+          Connect and verify a supported provider. Recommended providers are selected for their available free-tier
+          capacity.
         </Callout>
       )}
       {setup?.complete && !setup.recommendation_met && (
         <Callout tone="warning" icon={Sparkles} title="Chat works — add a backup provider">
-          With only one recommended provider, chat stops when it reaches its free limit for the day.
+          Another verified provider can help keep chat available when a provider reaches its quota or is temporarily
+          unavailable.
         </Callout>
       )}
       <KeyPaste
@@ -478,21 +456,12 @@ function ProviderChecklist({
                   ) : (
                     <StateBadge state={connection.state} />
                   )
-                ) : item.oauth ? (
-                  <OpenRouterConnect />
                 ) : (
-                  <>
-                    {item.signup_url && (
-                      <ExternalButton size="sm" href={item.signup_url} className="hide-mobile">
-                        Sign up
-                      </ExternalButton>
-                    )}
-                    {item.keys_url && (
-                      <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
-                        Get key
-                      </ExternalButton>
-                    )}
-                  </>
+                  item.keys_url && (
+                    <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
+                      Get key
+                    </ExternalButton>
+                  )
                 )}
               </span>
             </div>
@@ -502,9 +471,9 @@ function ProviderChecklist({
       <p className="hint">
         <KeyRound />
         <span>
-          Rather sign up with email? Your vault has a ready-made login with a unique password for each provider in the{' '}
-          <b>Mu3Lab/AI providers</b> folder, and Bitwarden offers it on the sign-up page.{' '}
-          <Link to="/settings/sign-in">Create them</Link> if you haven&apos;t yet.
+          For email registration, Mu3Lab can save suggested logins with unique passwords in the{' '}
+          <b>Mu3Lab/AI providers</b> folder in Vaultwarden. These entries help you register; they do not create provider
+          accounts. <Link to="/settings/sign-in">Save registration entries</Link> if you haven&apos;t yet.
         </span>
       </p>
     </Card>
@@ -519,21 +488,6 @@ export function AiSettings() {
   const [dialog, setDialog] = useState<{ id: string } | null>(null);
   const list = providers.data?.providers || [];
   const reload = providers.reload;
-
-  // OpenRouter sends the owner back here with a one-time code after sign-in.
-  useEffect(() => {
-    const back = takeOpenRouterReturn();
-    if (!back) return;
-    if (!back.code || !back.code_verifier) {
-      toast.error('The OpenRouter sign-in did not finish. Click Connect with OpenRouter to try again.');
-      return;
-    }
-    void run(
-      'oauth',
-      () => postJsonApi('/api/v1/providers/openrouter/oauth', back),
-      'OpenRouter connected. Mu3Lab is verifying it now.',
-    ).then(() => reload());
-  }, [run, reload]);
 
   const act = async (provider: ProviderMetadata, action: 'verify' | 'enable' | 'disable' | 'remove') => {
     if (

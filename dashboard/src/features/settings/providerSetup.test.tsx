@@ -25,7 +25,7 @@ const catalogItem = (id: string, name: string, extra: Partial<ProviderCatalogIte
 });
 
 const catalog = [
-  catalogItem('openrouter', 'OpenRouter', { prefixes: ['sk-or-v1-'], oauth: true, google_sign_in: true }),
+  catalogItem('openrouter', 'OpenRouter', { prefixes: ['sk-or-v1-'], google_sign_in: true }),
   catalogItem('groq', 'Groq', { recommended: true, prefixes: ['gsk_'], google_sign_in: true }),
   catalogItem('cerebras', 'Cerebras', { recommended: true, prefixes: ['csk-'] }),
   catalogItem('mistral', 'Mistral', { key_pattern: '^[A-Za-z0-9]{32}$' }),
@@ -70,7 +70,7 @@ function providersApi(connected: ProviderMetadata[], recommendedVerified: string
 }
 
 describe('AI provider checklist', () => {
-  it('lists recommended providers first with sign-up and key links', async () => {
+  it('lists recommended providers first with one key link each', async () => {
     stubFetch(providersApi([], []));
     renderWithDashboard(<AiSettings />, dashboardData([]));
     expect(await screen.findByText('Connect one provider to finish setup')).toBeInTheDocument();
@@ -78,19 +78,19 @@ describe('AI provider checklist', () => {
     expect(rows.map((link) => link.getAttribute('href'))).toEqual([
       'https://groq.example/keys',
       'https://cerebras.example/keys',
+      'https://openrouter.example/keys',
       'https://mistral.example/keys',
     ]);
     expect(screen.getAllByText('Recommended')).toHaveLength(2);
     expect(screen.getAllByText('One-click Google sign-in')).toHaveLength(2);
-    // OpenRouter hands over a key through its own sign-in page: no key to copy.
-    expect(screen.getByRole('button', { name: /Connect with OpenRouter/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Sign up/ })).not.toBeInTheDocument();
   });
 
   it('accepts one provider but recommends a backup', async () => {
     stubFetch(providersApi([connection('groq', 'Groq')], ['groq']));
     renderWithDashboard(<AiSettings />, dashboardData([]));
     expect(await screen.findByText('Chat works — add a backup provider')).toBeInTheDocument();
-    expect(screen.getByText(/1 of 2 done/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 connected/)).toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
   });
 
@@ -111,12 +111,30 @@ describe('One key field for every provider', () => {
   const api = (path: string, init?: RequestInit) =>
     init?.method === 'POST' ? { ok: true, job: { id: 'job-1' } } : providersApi([], [])(path);
 
-  it('detects the provider from a pasted key and connects it straight away', async () => {
+  it('shows the pasted key and waits for Connect', async () => {
     const fetchMock = stubFetch(api);
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    fireEvent.paste(await screen.findByLabelText('API key'), { clipboardData: { getData: () => ' gsk_abc ' } });
+    const input = await screen.findByLabelText('API key');
+    fireEvent.paste(input, { clipboardData: { getData: () => ' gsk_abc ' } });
+    expect(input).toHaveValue('gsk_abc');
+    expect(input).not.toHaveAttribute('type', 'password');
+    expect(screen.getByText('Groq key')).toBeInTheDocument();
+    expect(posted(fetchMock, '/api/v1/providers')).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     await waitFor(() =>
       expect(posted(fetchMock, '/api/v1/providers')).toEqual([{ provider_id: 'groq', api_key: 'gsk_abc' }]),
+    );
+  });
+
+  it('lets the owner change a recognised provider', async () => {
+    const fetchMock = stubFetch(api);
+    renderWithDashboard(<AiSettings />, dashboardData([]));
+    fireEvent.paste(await screen.findByLabelText('API key'), { clipboardData: { getData: () => 'gsk_abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Not Groq? Change' }));
+    fireEvent.change(screen.getByLabelText(/Which provider is this key for/), { target: { value: 'cerebras' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(posted(fetchMock, '/api/v1/providers')).toEqual([{ provider_id: 'cerebras', api_key: 'gsk_abc' }]),
     );
   });
 
@@ -132,6 +150,19 @@ describe('One key field for every provider', () => {
     );
   });
 
+  it('never blocks an unusual paste; it warns and asks for the provider', async () => {
+    const fetchMock = stubFetch(api);
+    renderWithDashboard(<AiSettings />, dashboardData([]));
+    const text = 'CEREBRAS_API_KEY = csk-abc';
+    fireEvent.paste(await screen.findByLabelText('API key'), { clipboardData: { getData: () => text } });
+    expect(screen.getByText(/spaces or line breaks/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Which provider is this key for/), { target: { value: 'cerebras' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(posted(fetchMock, '/api/v1/providers')).toEqual([{ provider_id: 'cerebras', api_key: text }]),
+    );
+  });
+
   it('offers a best guess for keys without a prefix but waits for the owner', async () => {
     const fetchMock = stubFetch(api);
     renderWithDashboard(<AiSettings />, dashboardData([]));
@@ -140,18 +171,20 @@ describe('One key field for every provider', () => {
     expect(posted(fetchMock, '/api/v1/providers')).toEqual([]);
   });
 
-  it('finishes the OpenRouter sign-in when OpenRouter sends the owner back', async () => {
+  it('says clearly when it picked a copied key up from the clipboard, without saving it', async () => {
     const fetchMock = stubFetch(api);
-    sessionStorage.setItem('mu3lab.openrouter.verifier', 'v'.repeat(43));
-    window.history.pushState({}, '', '/settings/ai?provider_oauth=openrouter&code=one-time');
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      permissions: { query: async () => ({ state: 'granted' }) },
+      clipboard: { readText: async () => 'csk-copied' },
+    });
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    await waitFor(() =>
-      expect(posted(fetchMock, '/api/v1/providers/openrouter/oauth')).toEqual([
-        { code: 'one-time', code_verifier: 'v'.repeat(43) },
-      ]),
-    );
-    expect(window.location.search).toBe('');
-    expect(sessionStorage.getItem('mu3lab.openrouter.verifier')).toBeNull();
+    // Cerebras is the second row; the pickup only takes a key for the provider just opened.
+    fireEvent.click((await screen.findAllByRole('link', { name: /Get key/ }))[1]);
+    fireEvent.focus(window);
+    expect(await screen.findByText(/Picked up your copied Cerebras key/)).toBeInTheDocument();
+    expect(screen.getByLabelText('API key')).toHaveValue('csk-copied');
+    expect(posted(fetchMock, '/api/v1/providers')).toEqual([]);
   });
 });
 
@@ -169,10 +202,10 @@ describe('Get started', () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(true, []));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    const first = await screen.findByRole('link', { name: /1\. Connect a free AI provider/ });
+    const first = await screen.findByRole('link', { name: /1\. Connect an AI provider/ });
     expect(first).toHaveAttribute('href', '/settings/ai');
     expect(first).toHaveClass('is-next');
-    expect(screen.getByText('0 of 5 done')).toBeInTheDocument();
+    expect(screen.getByText('0 of 5 complete')).toBeInTheDocument();
     expect(screen.queryByText(/Save your app logins/)).not.toBeInTheDocument();
   });
 
@@ -180,7 +213,7 @@ describe('Get started', () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(false, [connection('groq', 'Groq')]));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    expect(await screen.findByText('1 of 6 done')).toBeInTheDocument();
+    expect(await screen.findByText('1 of 6 complete')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Save your app logins to your password vault/ })).toHaveClass('is-next');
   });
 
@@ -189,8 +222,8 @@ describe('Get started', () => {
     stubFetch(api(true, []));
     renderWithDashboard(<HomePage />, dashboardData([]));
     fireEvent.click(await screen.findByRole('button', { name: /Use Mu3Lab on your phone or laptop/ }));
-    fireEvent.click(screen.getByRole('button', { name: "I've done this" }));
-    expect(await screen.findByText('1 of 5 done')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as complete' }));
+    expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
   });
 
   it('explains the Self-hosted server when Bitwarden has to be added by hand', async () => {
@@ -205,7 +238,7 @@ describe('Get started', () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(true, [], ['Google Chrome'], true));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    expect(await screen.findByText('1 of 5 done')).toBeInTheDocument();
+    expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
     expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
   });
 
@@ -217,8 +250,8 @@ describe('Get started', () => {
       service('firecrawl', 'Firecrawl', 'optional'),
     ];
     renderWithDashboard(<HomePage />, dashboardData(preinstalled));
-    expect(await screen.findByText('0 of 5 done')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Add your first app/ })).toBeInTheDocument();
+    expect(await screen.findByText('0 of 5 complete')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Install your first personal app/ })).toBeInTheDocument();
   });
 
   it('skips the server setup when the installer already added Bitwarden', async () => {
@@ -245,7 +278,7 @@ describe('Vault setup', () => {
     fireEvent.change(screen.getByLabelText('Master password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save to vault' }));
     expect(await screen.findByText('2 logins saved')).toBeInTheDocument();
-    expect(screen.getByText(/Already in your vault, left untouched: Authentik/)).toBeInTheDocument();
+    expect(screen.getByText(/Already saved: Authentik/)).toBeInTheDocument();
     const call = fetchMock.mock.calls.find(([path]) => path === '/api/v1/vault/setup');
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
       email: 'me@example.test',

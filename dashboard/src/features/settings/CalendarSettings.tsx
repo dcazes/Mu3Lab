@@ -77,7 +77,10 @@ export function CalendarSettings() {
 
   return (
     <>
-      <PageHeader title="Calendar" description="Show your Nextcloud calendar on Home and edit events from Mu3Lab." />
+      <PageHeader
+        title="Calendar"
+        description="Connect a Nextcloud calendar to your Home agenda and manage its events in Mu3Lab."
+      />
       {!installed ? (
         <EmptyState
           icon={CalendarDays}
@@ -89,7 +92,7 @@ export function CalendarSettings() {
       ) : (
         <Card
           title="Nextcloud calendar"
-          description="Mu3Lab uses one calendar you choose. You approve access in Nextcloud; no password is copied."
+          description="Choose one Nextcloud calendar to display and edit. Mu3Lab stores an encrypted app credential for calendar access; you do not need to enter your Nextcloud password."
           actions={connection.data && <StateBadge state={state === 'connected' ? 'connected' : state || 'unknown'} />}
         >
           {state === 'service_stopped' && (

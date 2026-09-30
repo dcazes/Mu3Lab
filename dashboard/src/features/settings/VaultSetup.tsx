@@ -22,7 +22,7 @@ function Summary({ result }: { result: VaultSetupResult }) {
   const lines = [
     result.created.length ? `Added: ${result.created.join(', ')}.` : '',
     result.updated.length ? `Updated passwords: ${result.updated.join(', ')}.` : '',
-    result.skipped.length ? `Already in your vault, left untouched: ${result.skipped.join(', ')}.` : '',
+    result.skipped.length ? `Already saved: ${result.skipped.join(', ')}.` : '',
   ];
   return (
     <Callout tone="success" icon={CheckCircle2} title={saved ? `${saved} logins saved` : 'Your vault is up to date'}>
@@ -152,7 +152,7 @@ export function VaultSetupCard({ onSaved }: { onSaved?: () => void }) {
   return (
     <Card
       title="Password vault"
-      description="Save Mu3Lab's generated app logins and ready-made AI provider sign-up entries to Vaultwarden, so your browser can fill them in. Running it again only adds what's missing."
+      description="Save generated app credentials and suggested AI provider registration entries to Vaultwarden for browser autofill. Existing entries are preserved or updated when generated credentials change."
       actions={
         <Button variant="primary" icon={Vault} onClick={() => setOpen(true)}>
           Save logins to Vaultwarden

@@ -10,7 +10,8 @@ export const ACTIONS: Record<ServiceAction, { label: string; icon: LucideIcon; c
   install: {
     label: 'Install',
     icon: Download,
-    confirm: 'Mu3Lab downloads the reviewed images, creates its accounts, and publishes a private route.',
+    confirm:
+      'Mu3Lab downloads the configured images and sets up the app and its private route. Some apps require you to complete account setup.',
   },
   retry_setup: { label: 'Retry setup', icon: RotateCcw, confirm: 'Setup runs again. Existing data is kept.' },
   start: { label: 'Start', icon: Play },

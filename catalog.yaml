@@ -4,5 +4,5 @@ schema_version: 1
 profiles:
   - id: core-suite
     name: Core suite
-    description: "The supported Mu3Lab AI slice: local embeddings, external-provider routing, private chat, and web research."
+    description: "The core AI services for local models and embeddings, external provider connections, chat, and web research."
     services: [ollama, freellmapi, litellm, lobehub, firecrawl]

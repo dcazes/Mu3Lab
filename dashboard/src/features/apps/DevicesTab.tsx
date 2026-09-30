@@ -13,14 +13,16 @@ export function DevicesTab({ service, address }: { service: Service; address: st
       <Card
         title="Server address"
         description={
-          companion?.serverHint || `Open this address on any device connected to your tailnet to use ${service.name}.`
+          companion?.serverHint ||
+          `Open this address on a device with access to your Tailscale network to use ${service.name}.`
         }
       >
         <div className="device-address">
           <div className="stack">
             <CopyField value={address} label="Server address" />
             <p className="muted">
-              Devices must be signed in to Tailscale to reach this address. Scan the code with your phone’s camera.
+              Connect your device to an authorized Tailscale network before opening this address. Scan the QR code with
+              your phone’s camera.
             </p>
           </div>
           <QrCode value={address} label={`QR code for ${address}`} />
@@ -38,14 +40,15 @@ export function DevicesTab({ service, address }: { service: Service; address: st
         </Card>
       ) : (
         <Card
-          title="Install as an app"
-          description={`${service.name} has no official mobile app, but it installs from your browser and opens in its own window.`}
+          title="Browser shortcuts"
+          description={`Add a shortcut to ${service.name} for convenient access. Browser installation and window behavior depend on the app, browser, and device.`}
         >
           <ul className="steps">
             <li>
               <Laptop />
               <span>
-                <b>Computer (Chrome or Edge)</b>Open {service.name}, then choose the install icon in the address bar.
+                <b>Computer (Chrome or Edge)</b>Open {service.name} and use the browser’s install option if available,
+                or bookmark the page.
               </span>
             </li>
             <li>

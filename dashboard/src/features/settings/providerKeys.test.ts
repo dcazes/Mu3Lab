@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderCatalogItem } from '../../api';
-import { detectProvider, keyProblem } from './providerKeys';
+import { detectProvider, keyWarning } from './providerKeys';
 
 const item = (id: string, prefix: string | string[], key_pattern = ''): ProviderCatalogItem => ({
   id,
@@ -35,11 +35,11 @@ describe('detectProvider', () => {
     expect(detectProvider(`${'0123456789abcdef'.repeat(2)}.ABCDEFGHijklmnop`, catalog)?.provider.id).toBe('zhipu');
   });
 
-  it('refuses text that cannot be a key, like a pasted sentence', () => {
+  it('warns about odd pastes without refusing them', () => {
     const sentence = 'compare these two products: https://example.com/item';
-    expect(keyProblem(sentence)).toMatch(/doesn't look like an API key/);
-    expect(detectProvider(sentence, catalog)).toBeNull();
-    expect(keyProblem('gsk_abc')).toBe('');
+    expect(keyWarning(sentence)).toMatch(/spaces or line breaks/);
+    expect(keyWarning('https://example.com')).toMatch(/web address/);
+    expect(keyWarning(' gsk_abc ')).toBe('');
   });
 
   it('gives up on anything else', () => {

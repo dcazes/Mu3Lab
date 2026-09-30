@@ -41,8 +41,8 @@ function ExtensionGuide({ browsers, onClose }: { browsers: string[]; onClose: ()
     <Dialog
       open
       onClose={onClose}
-      title="Let your browser fill in your passwords"
-      description="Mu3Lab saved every app login in your password vault. The free Bitwarden extension fills them in for you."
+      title="Set up password autofill"
+      description="Use the Bitwarden extension to fill logins saved in your Vaultwarden vault."
     >
       <div className="form">
         {preinstalled ? (
@@ -52,7 +52,7 @@ function ExtensionGuide({ browsers, onClose }: { browsers: string[]; onClose: ()
               don&apos;t see it, close the browser and open it again.
             </li>
             <li>Click the Bitwarden shield icon next to the address bar.</li>
-            <li>Sign in with your Mu3Lab email and password.</li>
+            <li>Sign in with your Vaultwarden email and master password.</li>
           </ol>
         ) : (
           <>
@@ -68,14 +68,16 @@ function ExtensionGuide({ browsers, onClose }: { browsers: string[]; onClose: ()
             </ol>
             {vaultUrl && <CopyField value={vaultUrl} label="Server URL" />}
             <ol className="guide-steps" start={5}>
-              <li>Sign in with your Mu3Lab email and password.</li>
+              <li>Sign in with your Vaultwarden email and master password.</li>
             </ol>
           </>
         )}
         <footer className="form-footer">
           {!preinstalled && <ExternalButton href={EXTENSION_URL}>Get the extension</ExternalButton>}
           <span className="spacer" />
-          <span className="guide-note">This step ticks itself off once Bitwarden signs in.</span>
+          <span className="guide-note">
+            This step is marked complete when Mu3Lab detects a signed-in Bitwarden extension.
+          </span>
           <Button variant="primary" onClick={onClose}>
             Close
           </Button>
@@ -91,14 +93,14 @@ function DevicesGuide({ onClose, onDone }: { onClose: () => void; onDone: () => 
       open
       onClose={onClose}
       title="Use Mu3Lab on your phone or laptop"
-      description="Mu3Lab is private: it only opens on your own devices that are signed in to Tailscale."
+      description="Access Mu3Lab from devices authorized on your Tailscale network."
     >
       <div className="form">
         <ol className="guide-steps">
           <li>
-            On your phone or other computer, install the free <b>Tailscale</b> app.
+            On your phone or other computer, install the <b>Tailscale</b> app.
           </li>
-          <li>Open it and sign in with the same account you used while installing Mu3Lab.</li>
+          <li>Sign in to the Tailscale network used by your Mu3Lab server and connect the device.</li>
           <li>Open this address in that device's browser (bookmark it):</li>
         </ol>
         <CopyField value={window.location.origin + '/'} label="Dashboard address" />
@@ -112,7 +114,7 @@ function DevicesGuide({ onClose, onDone }: { onClose: () => void; onDone: () => 
               onClose();
             }}
           >
-            I've done this
+            Mark as complete
           </Button>
         </footer>
       </div>
@@ -136,7 +138,7 @@ export function GetStarted() {
   const steps = [
     {
       key: 'provider',
-      text: 'Connect a free AI provider so the AI chat can answer',
+      text: 'Connect an AI provider for chat',
       done: setup.complete,
       to: '/settings/ai',
     },
@@ -160,10 +162,10 @@ export function GetStarted() {
       done: Boolean(manual.devices),
       guide: 'devices' as const,
     },
-    { key: 'app', text: 'Add your first app, like photos or recipes', done: hasApp, to: '/apps/discover' },
+    { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
     {
       key: 'backup',
-      text: 'Add a second free AI provider as a backup',
+      text: 'Connect another AI provider for fallback capacity',
       done: setup.recommendation_met,
       to: '/settings/ai',
     },
@@ -176,7 +178,7 @@ export function GetStarted() {
       <div className="section-title">
         <h2 id="get-started-heading">Get started</h2>
         <span className="get-started-count">
-          {finished} of {steps.length} done
+          {finished} of {steps.length} complete
         </span>
       </div>
       <ol className="get-started-list">

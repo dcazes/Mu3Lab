@@ -21,9 +21,13 @@ from tests.support import runtime_paths
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _is_lock_check(command) -> bool:
+    return "flock" in " ".join(command)
+
+
 def _nextcloud_exec_without_lock(_project, _service, command, _log, timeout=0):
     """Container exec where the entrypoint has already released its init lock."""
-    return (1, "") if command[0] == "test" else (0, "installed")
+    return (0, "") if _is_lock_check(command) else (0, "installed")
 
 
 class ControlStateTests(unittest.TestCase):
@@ -219,6 +223,7 @@ class InstallationWorkflowTests(unittest.TestCase):
                     return_value={"id": "handoff", "created_at": "now", "expires_at": "later"},
                 ),
                 patch("ctl.service_ops.actions.compose_config", return_value=(0, "")),
+                patch("ctl.service_ops.actions.compose_image_list", return_value=(1, [])),
                 patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")),
                 patch("ctl.service_ops.actions.docker_image_digest", return_value=(0, "example@sha256:abc")),
                 patch("ctl.service_ops.actions.compose_up", side_effect=[(0, "started"), (0, "recreated")]) as up,
@@ -239,11 +244,11 @@ class InstallationWorkflowTests(unittest.TestCase):
         # The image installs itself under a lock; a second install racing it
         # fails with "permission denied for table oc_migrations".
         commands: list[list[str]] = []
-        lock_checks = iter([0, 0, 1])
+        lock_checks = iter([1, 1, 0])  # flock -n fails while the entrypoint holds the lock
 
         def compose_exec(_project, _service, command, _log, timeout=0):
             commands.append(command)
-            if command[0] == "test":
+            if _is_lock_check(command):
                 return next(lock_checks), ""
             return 0, "{}"
 
@@ -254,8 +259,26 @@ class InstallationWorkflowTests(unittest.TestCase):
         ):
             installed, _detail = install_nextcloud_if_needed(Path("/unused"), lambda _line: None)
         self.assertTrue(installed)
-        self.assertEqual(sum(command[0] == "test" for command in commands), 3)
+        self.assertEqual(sum(_is_lock_check(command) for command in commands), 3)
         self.assertFalse(any("maintenance:install" in " ".join(command) for command in commands))
+
+    def test_a_leftover_lock_file_does_not_hold_the_install_up(self):
+        # The entrypoint never deletes its lock file; only a held lock means busy.
+        seen: list[list[str]] = []
+
+        def compose_exec(_project, _service, command, _log, timeout=0):
+            seen.append(command)
+            return 0, "{}"
+
+        with (
+            patch("ctl.lifecycle.nextcloud.actions.compose_exec", side_effect=compose_exec),
+            patch("ctl.lifecycle.nextcloud.nextcloud_installed", side_effect=[False, True]),
+            patch("ctl.lifecycle.nextcloud.time.sleep") as sleep,
+        ):
+            installed, _detail = install_nextcloud_if_needed(Path("/unused"), lambda _line: None)
+        self.assertTrue(installed)
+        sleep.assert_not_called()
+        self.assertIn("flock -n", " ".join(next(c for c in seen if _is_lock_check(c))))
 
     def test_optional_install_executes_the_bounded_stage_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -271,6 +294,7 @@ class InstallationWorkflowTests(unittest.TestCase):
                 runtime_paths(paths),
                 patch("ctl.service_ops.ControlState.runtime", return_value=state),
                 patch("ctl.service_ops.actions.compose_config", return_value=(0, "")),
+                patch("ctl.service_ops.actions.compose_image_list", return_value=(1, [])),
                 patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")),
                 patch(
                     "ctl.service_ops.actions.docker_image_digest",

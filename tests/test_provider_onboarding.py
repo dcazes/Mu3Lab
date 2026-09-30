@@ -9,13 +9,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
 from fastapi.testclient import TestClient
 
 from ctl import browser_extension, install
 from ctl.api import create_app
-from ctl.provider_catalog import PROVIDERS, catalog, detect, key_problem
-from ctl.provider_oauth import OAuthError, exchange_openrouter_code
+from ctl.provider_catalog import catalog, detect, key_problem
 
 SERVER = "https://mu3lab.example.ts.net:8443"
 OPERATOR_WITH_CSRF = {
@@ -27,7 +25,6 @@ OPERATOR_WITH_CSRF = {
     "origin": "https://testserver",
     "x-mu3lab-csrf": "bound",
 }
-VERIFIER = "v" * 43
 
 
 def _install_browser(root: Path, marker: str) -> None:
@@ -150,48 +147,22 @@ class KeyDetectionTests(unittest.TestCase):
                 self.assertEqual(getattr(detect(f"  {key} "), "id", None), provider_id)
         self.assertIsNone(detect("not-a-known-key"))
 
-    def test_rejects_pastes_that_cannot_be_a_key(self):
-        for text in (
-            "compare these two products: https://example.com/item",
-            "gsk_abc\nsecond line",
-            "x" * 300,
-            "   ",
-        ):
+    def test_only_empty_or_oversized_pastes_are_refused(self):
+        for text in ("   ", "x" * 5000):
             with self.subTest(text=text[:20]):
                 self.assertTrue(key_problem(text))
-        self.assertEqual(key_problem("  gsk_" + "a" * 52 + "  "), "")
+        # Anything else is treated as a key; the provider's live check decides.
+        for text in ("  gsk_" + "a" * 52 + "  ", "CEREBRAS_API_KEY=csk-abc", "gsk_abc\nsecond line"):
+            with self.subTest(text=text[:20]):
+                self.assertEqual(key_problem(text), "")
 
-    def test_google_sign_in_labels_and_oauth_are_exposed_to_the_dashboard(self):
+    def test_google_sign_in_labels_are_exposed_to_the_dashboard(self):
         by_id = {item["id"]: item for item in catalog()}
         self.assertEqual(
             {pid for pid, item in by_id.items() if item["google_sign_in"]},
             {"cerebras", "google", "groq", "huggingface", "openrouter", "mistral"},
         )
-        self.assertEqual([p.id for p in PROVIDERS if p.oauth], ["openrouter"])
-
-
-class OpenRouterOAuthTests(unittest.TestCase):
-    def _client(self, handler) -> httpx.Client:
-        return httpx.Client(transport=httpx.MockTransport(handler))
-
-    def test_exchanges_code_and_verifier_for_a_key(self):
-        seen = {}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen.update(json.loads(request.content))
-            return httpx.Response(200, json={"key": "sk-or-v1-new"})
-
-        key = exchange_openrouter_code("code-1", VERIFIER, client=self._client(handler))
-        self.assertEqual(key, "sk-or-v1-new")
-        self.assertEqual(seen, {"code": "code-1", "code_verifier": VERIFIER, "code_challenge_method": "S256"})
-
-    def test_rejects_bad_input_and_failed_exchanges_without_leaking_the_code(self):
-        with self.assertRaises(OAuthError):
-            exchange_openrouter_code("code-1", "short")
-        client = self._client(lambda _request: httpx.Response(403, json={"error": "expired"}))
-        with self.assertRaises(OAuthError) as caught:
-            exchange_openrouter_code("secret-code", VERIFIER, client=client)
-        self.assertNotIn("secret-code", str(caught.exception))
+        self.assertNotIn("oauth", by_id["openrouter"])
 
 
 class ProviderRouteTests(unittest.TestCase):
@@ -226,18 +197,6 @@ class ProviderRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Choose the provider", response.json()["error"])
         self.save.assert_not_called()
-
-    def test_openrouter_sign_in_saves_the_returned_key(self):
-        with patch("ctl.api.routes.providers.exchange_openrouter_code", return_value="sk-or-v1-new") as exchange:
-            response = self.client.post(
-                "/api/v1/providers/openrouter/oauth",
-                headers=self.HEADERS,
-                json={"code": "code-1", "code_verifier": VERIFIER},
-            )
-        self.assertEqual(response.status_code, 200, response.text)
-        exchange.assert_called_once_with("code-1", VERIFIER)
-        self.assertEqual(self.save.call_args.args, ("openrouter", "OpenRouter", "sk-or-v1-new"))
-        self.assertNotIn("sk-or-v1-new", response.text)
 
 
 if __name__ == "__main__":

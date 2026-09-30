@@ -114,7 +114,7 @@ function Tailnet({ status }: { status: TailscaleStatus }) {
           <Network className="inline-icon" /> Private network
         </>
       }
-      description="Tailscale keeps Mu3Lab reachable only from your own devices."
+      description="Tailscale provides private access to Mu3Lab for authorized devices on your network."
       actions={
         <ExternalButton size="sm" href="https://login.tailscale.com/admin">
           Tailscale admin
@@ -221,7 +221,7 @@ export function SystemSettings() {
   };
   return (
     <>
-      <PageHeader title="System" description="The health of the machine running Mu3Lab." />
+      <PageHeader title="System" description="Monitor server health, network access, and local AI acceleration." />
       <Setup />
       <Card title="Server">
         <div className="meters">
@@ -249,7 +249,7 @@ export function SystemSettings() {
       </Card>
       <Tailnet status={tailscale} />
       <Compute />
-      <Card title="Activity" description="Background jobs Mu3Lab ran recently." flush>
+      <Card title="Activity" description="Recent installation, maintenance, and configuration jobs." flush>
         {data.jobs.jobs.length ? (
           <div className="rows">
             {data.jobs.jobs.slice(0, 15).map((job) => (

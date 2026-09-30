@@ -63,7 +63,16 @@ export function Agenda({ nextcloud }: { nextcloud?: Service }) {
       </div>
     );
   else if (loading && !result) body = <p className="agenda-empty">Loading events…</p>;
-  else if (!events.length) body = <p className="agenda-empty">Nothing scheduled in the next two weeks.</p>;
+  else if (state !== 'connected' && state !== 'stale')
+    body = <p className="agenda-empty">{result?.error || 'Calendar events are temporarily unavailable.'}</p>;
+  else if (!events.length)
+    body = (
+      <p className="agenda-empty">
+        {state === 'stale'
+          ? 'No upcoming events in the last calendar sync.'
+          : 'No upcoming events in the next two weeks.'}
+      </p>
+    );
   else
     body = (
       <div className="agenda-list">

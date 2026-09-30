@@ -145,7 +145,7 @@ export function CalendarPage() {
           ? 'Nextcloud rejected the saved authorization. Reconnect to keep syncing.'
           : state === 'sso_not_ready'
             ? 'Nextcloud sign-in needs repair before its calendar can be connected.'
-            : 'Approve access once in Nextcloud; no password needs to be copied.'}
+            : 'Connect your Nextcloud calendar in Settings. Mu3Lab uses an encrypted app credential; you do not need to enter your Nextcloud password.'}
       </EmptyState>
     );
   else

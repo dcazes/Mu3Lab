@@ -174,7 +174,7 @@ def _chat_route_check(log) -> StreamProbe:
 def _verify(provider_id: str, root: Path, log) -> StreamProbe:
     provider = get(provider_id)
     saved = next((str(item["api_key"]) for item in records() if item["id"] == provider_id), "")
-    if key_problem(saved):  # saved before Mu3Lab checked pastes, e.g. a copied sentence
+    if key_problem(saved):  # e.g. an empty or oversized record
         return StreamProbe(False, 0, "", "", "credential_rejected", key_problem(saved))
     ok, detail, _ = _reconcile(root, log)
     if not ok:

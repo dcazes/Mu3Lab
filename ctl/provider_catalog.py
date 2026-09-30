@@ -23,8 +23,6 @@ class Provider:
     free_tier: str = ""
     # The sign-up page offers "Continue with Google" (checked 2026-09-29).
     google_sign_in: bool = False
-    # Mu3Lab can fetch a key through the provider's own sign-in (OAuth) page.
-    oauth: bool = False
     # For keys without a distinctive prefix: a best-guess shape, JS-compatible.
     key_pattern: str = ""
 
@@ -103,7 +101,6 @@ PROVIDERS = (
         keys_url="https://openrouter.ai/settings/keys",
         free_tier="Free model variants with a low daily request cap.",
         google_sign_in=True,
-        oauth=True,
     ),
     Provider(
         "mistral",
@@ -173,19 +170,18 @@ def prefix_warning(provider_id: str, api_key: str) -> str:
     return ""
 
 
-MAX_KEY_LENGTH = 256
+# Far beyond any real key; only stops a whole document landing in the vault.
+MAX_KEY_LENGTH = 4096
 
 
 def key_problem(api_key: str) -> str:
-    """Catch pastes that cannot be an API key (mirrors the dashboard's check).
-
-    A wrong clipboard is the usual cause: a sentence, a link or several lines.
-    """
+    """Refuse only what cannot be stored. Anything else is treated as a key and
+    the provider's live check decides; the owner can always see what they pasted."""
     key = api_key.strip()
     if not key:
         return "Paste an API key."
-    if any(char.isspace() for char in key) or "://" in key or len(key) > MAX_KEY_LENGTH:
-        return "That doesn't look like an API key. Copy the key itself from the provider's keys page and paste again."
+    if len(key) > MAX_KEY_LENGTH:
+        return "That is far too long to be an API key. Copy just the key and paste again."
     return ""
 
 

@@ -109,15 +109,15 @@ function NextSteps({ service }: { service: Service }) {
         key="account"
         tone="info"
         icon={UserPlus}
-        title="Create your account"
+        title="Complete account setup"
         action={
           <Button
             loading={pending === 'init'}
             onClick={async () => {
               if (
                 !(await confirm({
-                  title: `Did you finish creating your ${service.name} account?`,
-                  confirmLabel: 'Yes, done',
+                  title: `Have you completed account setup for ${service.name}?`,
+                  confirmLabel: 'Confirm setup',
                 }))
               )
                 return;
@@ -129,7 +129,7 @@ function NextSteps({ service }: { service: Service }) {
               void refresh();
             }}
           >
-            I’ve done this
+            Confirm setup complete
           </Button>
         }
       >
@@ -146,7 +146,8 @@ function NextSteps({ service }: { service: Service }) {
         title="Finish single sign-on"
         action={target && <ExternalButton href={target.url}>Open {service.name}</ExternalButton>}
       >
-        Open {service.name} once and sign in with Authentik. Mu3Lab then turns off the separate password login.
+        Sign in to {service.name} with Authentik to link your account. Mu3Lab must verify account ownership and
+        administrator access before disabling local browser sign-in.
       </Callout>,
     );
   else if (signInSummary(service).repairable && identity?.state !== 'configuring' && isRunning(service))
@@ -155,7 +156,7 @@ function NextSteps({ service }: { service: Service }) {
         key="repair"
         tone="warning"
         icon={Wrench}
-        title="Single sign-on isn’t set up"
+        title="Sign-in configuration needs attention"
         action={
           <Button
             loading={pending === 'repair'}
