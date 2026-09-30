@@ -472,7 +472,24 @@ export interface McpServer {
     enabled: boolean;
     permission?: string;
     parameters?: Record<string, unknown>;
+    /** Gateway connectors only. */
+    category?: string;
+    core?: boolean;
+    offered?: boolean;
   }>;
+  /** True when the connector is served through Mu3Lab's tool gateway. */
+  gateway?: boolean;
+  categories?: McpCategory[];
+  blocked?: Array<{ id: string; reason: string }>;
+  unreviewed?: string[];
+}
+
+export interface McpCategory {
+  id: string;
+  title: string;
+  summary: string;
+  enabled: boolean;
+  default_on: boolean;
 }
 
 export interface McpRegistryResponse {

@@ -1,5 +1,5 @@
 schema_version: 1
-reviewed_at: "2026-09-19"
+reviewed_at: "2026-09-30"
 servers:
   - id: mealie-community
     service_id: mealie
@@ -37,23 +37,44 @@ servers:
       - {key: password, env: ACTUAL_PASSWORD, type: secret, label: "Actual server password", required: true}
       - {key: sync_id, env: ACTUAL_BUDGET_SYNC_ID, type: string, label: "Budget Sync ID", required: true}
 
-  - id: immich-community
+  - id: immich-photo-manager
     service_id: immich
-    name: Immich MCP
+    name: Immich Photo Manager
     status: accepted
     preferred: true
     provenance: community
-    repository: https://github.com/barryw/ImmichMCP
-    revision: 1fb31c38724ef5f80b348c7e1b103fdcce7a9142
-    image: ghcr.io/barryw/immichmcp:v3.3.3
+    repository: https://github.com/drolosoft/immich-photo-manager
+    revision: "2.0.11"
+    image: ghcr.io/drolosoft/immich-photo-manager:2.0.11
     transport: streamable-http
-    endpoint: http://immich-mcp:5000/mcp
-    local_health: http://127.0.0.1:8815/health/ready
-    compose_dir: apps/mcp/immich
+    endpoint: http://immich-photo-manager:8626/mcp
+    local_health: http://127.0.0.1:8815/health
+    compose_dir: apps/mcp/immich-photo-manager
+    review: mcp-reviews/immich-photo-manager.yaml
     auto_provision: true
     auto_provision_note: "Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator."
     credentials:
       - {key: api_key, env: IMMICH_API_KEY, type: secret, label: "Immich API key", required: true}
+
+  - id: immich-control
+    service_id: immich
+    name: Immich Control
+    status: accepted
+    preferred: false
+    provenance: community
+    repository: https://github.com/lidless-labs/immichctrl
+    revision: "0.5.2"
+    package: immich-mcp@0.5.2
+    transport: streamable-http
+    endpoint: http://immich-control:8000/mcp
+    local_health: http://127.0.0.1:8821/healthz
+    compose_dir: apps/mcp/immich-control
+    review: mcp-reviews/immich-control.yaml
+    auto_provision: true
+    auto_provision_note: "Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator."
+    credentials:
+      - {key: api_key, env: IMMICH_API_KEY, type: secret, label: "Immich API key", required: true}
+    review_note: "Writes are enabled in the connector so Mu3Lab's switches decide; destructive tools still need confirm: true."
 
   - id: paperless-community
     service_id: paperless-ngx

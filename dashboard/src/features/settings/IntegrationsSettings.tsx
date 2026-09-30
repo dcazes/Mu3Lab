@@ -10,6 +10,7 @@ import {
   mcpSummary,
   nextMcpStep,
   openChatFor,
+  primaryConnectors,
   queueMcp,
   setsUpAutomatically,
   useMcpRegistry,
@@ -75,7 +76,7 @@ function IntegrationRow({ server, reload }: { server: McpServer; reload: () => v
 
 export function IntegrationsSettings() {
   const registry = useMcpRegistry();
-  const servers = registry.data?.servers || [];
+  const servers = primaryConnectors(registry.data?.servers || []);
   const automatic = servers.filter(setsUpAutomatically);
   const manual = servers.filter((server) => !setsUpAutomatically(server));
   const live = servers.filter((server) => server.state === 'live').length;

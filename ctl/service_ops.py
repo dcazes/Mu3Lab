@@ -601,8 +601,14 @@ def _install(
             return
     else:
         _sync_chat_assistants(log)
-    from ctl.mcp_ops import sync_application
+    from ctl.mcp_ops import preenable, sync_application
 
+    # Chat can use a newly installed app straight away: its default connector
+    # is switched on, given a credential and attached to its assistant.
+    try:
+        preenable(service.id, root)
+    except (OSError, ValueError) as exc:
+        log(f"The chat connector could not be prepared: {redact(str(exc))}")
     if not sync_application(service.id, running=True, root=root, log=log):
         log("One enabled MCP needs attention after application installation.")
     onboarding_state.mark_configured(service.id, RuntimePaths())

@@ -1,0 +1,156 @@
+schema_version: 1
+server: immich-photo-manager
+revision: "2.0.11"
+reviewed_at: "2026-09-30"
+guidance: |
+  Asset ids come from search results; pass them to other tools rather than guessing.
+  Search by what is in the picture with search_smart ("dog on a beach"); search by date, place,
+  camera or person with search_metadata. Deleting moves photos to Immich's trash, where the
+  owner can restore them.
+
+categories:
+  - id: search
+    title: Search and details
+    summary: Find photos and videos by what is in them, text in them, date, place or camera; read a photo's details and library statistics.
+  - id: albums
+    title: Albums
+    summary: List and open albums; create, rename and delete albums and add or remove photos.
+  - id: people
+    title: People and faces
+    summary: List and find recognised people and their photos; rename, merge or fix faces.
+  - id: timeline
+    title: Timeline and memories
+    summary: Browse the library by month and day, and list or edit "on this day" memories.
+  - id: tags
+    title: Tags
+    summary: List tags and the photos under them; create, rename and delete tags and tag photos.
+  - id: duplicates
+    title: Duplicates and stacks
+    summary: Find duplicate photos and stacked shots (RAW and JPEG, bursts); resolve duplicates and edit stacks.
+  - id: editing
+    title: Editing details
+    summary: Change a photo's description, date, location, rating, favourite or archive state, and rotate photos.
+  - id: viewing
+    title: Viewing images
+    summary: Load photos, thumbnails and video frames into the chat so a model that can see images can describe them.
+    default_on: false
+  - id: sharing
+    title: Sharing
+    summary: List and create public share links, partner sharing, and comments and likes.
+    default_on: false
+  - id: trash
+    title: Trash
+    summary: Move photos to the trash and restore them from it.
+    default_on: false
+  - id: review_notes
+    title: Cleanup notes
+    summary: Keep notes on which photos were already reviewed during a long cleanup, so nothing is checked twice.
+    default_on: false
+
+tools:
+  search_smart: {category: search, access: read, core: true}
+  search_metadata: {category: search, access: read, core: true}
+  get_asset_info: {category: search, access: read, core: true}
+  get_statistics: {category: search, access: read, core: true}
+  search_explore: {category: search, access: read}
+  search_cities: {category: search, access: read}
+  search_places: {category: search, access: read}
+  search_suggestions: {category: search, access: read}
+  search_random: {category: search, access: read}
+  search_statistics: {category: search, access: read}
+  search_large_assets: {category: search, access: read}
+  list_assets: {category: search, access: read}
+  get_map_markers: {category: search, access: read}
+  reverse_geocode: {category: search, access: read}
+
+  list_albums: {category: albums, access: read, core: true}
+  get_album: {category: albums, access: read}
+  create_album: {category: albums, access: write}
+  update_album: {category: albums, access: write}
+  delete_album: {category: albums, access: write}
+  add_assets_to_album: {category: albums, access: write}
+  remove_assets_from_album: {category: albums, access: write}
+
+  list_people: {category: people, access: read, core: true}
+  get_person: {category: people, access: read}
+  search_people: {category: people, access: read}
+  get_person_thumbnail: {category: people, access: read}
+  get_asset_faces: {category: people, access: read}
+  update_person: {category: people, access: write}
+  merge_people: {category: people, access: write}
+  reassign_face: {category: people, access: write}
+
+  get_timeline_buckets: {category: timeline, access: read}
+  get_timeline_bucket: {category: timeline, access: read}
+  get_calendar_heatmap: {category: timeline, access: read}
+  list_memories: {category: timeline, access: read}
+  create_memory: {category: timeline, access: write}
+  update_memory: {category: timeline, access: write}
+  delete_memory: {category: timeline, access: write}
+
+  list_tags: {category: tags, access: read}
+  get_tag: {category: tags, access: read}
+  create_tag: {category: tags, access: write}
+  update_tag: {category: tags, access: write}
+  delete_tag: {category: tags, access: write}
+  tag_assets: {category: tags, access: write}
+  untag_assets: {category: tags, access: write}
+
+  get_duplicates: {category: duplicates, access: read}
+  list_stacks: {category: duplicates, access: read}
+  get_stack: {category: duplicates, access: read}
+  resolve_duplicates: {category: duplicates, access: write}
+  create_stack: {category: duplicates, access: write}
+  update_stack: {category: duplicates, access: write}
+  delete_stack: {category: duplicates, access: write}
+
+  update_asset_metadata: {category: editing, access: write}
+  update_assets_metadata: {category: editing, access: write}
+  rotate_assets: {category: editing, access: write}
+  revert_asset_edits: {category: editing, access: write}
+
+  get_asset_image: {category: viewing, access: read}
+  get_album_images: {category: viewing, access: read}
+  get_images_batch: {category: viewing, access: read}
+  get_asset_thumbnail: {category: viewing, access: read}
+  get_album_thumbnails: {category: viewing, access: read}
+  get_thumbnails_batch: {category: viewing, access: read}
+  get_video_frames: {category: viewing, access: read}
+  get_video_frames_json: {category: viewing, access: read}
+
+  list_shared_links: {category: sharing, access: read}
+  get_shared_link: {category: sharing, access: read}
+  list_users: {category: sharing, access: read}
+  list_partners: {category: sharing, access: read}
+  list_activities: {category: sharing, access: read}
+  create_shared_link: {category: sharing, access: write}
+  update_shared_link: {category: sharing, access: write}
+  delete_shared_link: {category: sharing, access: write}
+  create_partner: {category: sharing, access: write}
+  update_partner: {category: sharing, access: write}
+  remove_partner: {category: sharing, access: write}
+  create_activity: {category: sharing, access: write}
+  delete_activity: {category: sharing, access: write}
+
+  delete_assets: {category: trash, access: write}
+  restore_trash: {category: trash, access: write}
+  restore_assets: {category: trash, access: write}
+
+  review_assets: {category: review_notes, access: read}
+  get_asset_notes: {category: review_notes, access: read}
+  get_assets_notes: {category: review_notes, access: read}
+  record_action: {category: review_notes, access: write}
+  clear_asset_notes: {category: review_notes, access: write}
+
+blocked:
+  update_credentials: Lets a chat change which server and API key the connector uses.
+  get_connection_info: Reveals the connector's server address and key details; Mu3Lab reports connection health itself.
+  empty_trash: Permanently deletes everything in the trash in one call. Empty the trash in Immich itself.
+  upload_asset: Uploads from a file path inside the connector's container, where chat has no files.
+  export_pdf: Writes files inside the connector's container, which the owner cannot reach from chat.
+  get_export_preview: Only useful with export_pdf, which is blocked.
+  download_archive: Builds a download inside the connector's container, which the owner cannot reach from chat.
+  get_download_info: Only useful with download_archive, which is blocked.
+  ping: Diagnostics; Mu3Lab checks connector health itself.
+  get_server_version: Diagnostics; Mu3Lab checks connector health itself.
+  get_capabilities: Diagnostics; Mu3Lab checks connector health itself.

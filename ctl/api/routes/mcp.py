@@ -21,7 +21,7 @@ from ctl.runtime import RuntimePaths
 
 router = APIRouter(prefix="/api/v1/mcp/servers", tags=["mcp"])
 
-QUEUED_ACTIONS = ("enable", "prepare", "install", "restart", "update", "disable", "verify")
+QUEUED_ACTIONS = ("enable", "prepare", "install", "restart", "update", "disable", "verify", "switch")
 
 
 def _server_view(server_id: str, identity: IdentityData) -> dict[str, Any]:
@@ -103,12 +103,49 @@ async def put_configuration(server_id: str, request: Request, operator: Operator
     return {"ok": True, "server": _server_view(server_id, operator)}
 
 
+def _apply_switches(server, actor: str, detail: str) -> None:
+    """Push a switch change to the gateway and the app's assistant."""
+    from ctl.mcp_ops import rebind_app
+
+    ok, message = rebind_app(server.service_id, lambda _line: None)
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=actor, event="mcp.switches.changed", detail=detail)
+    if not ok:
+        raise ApiError(502, redact(message))
+
+
+@router.put("/{server_id}/categories/{category_id}")
+async def put_category(
+    server_id: str, category_id: str, request: Request, operator: OperatorMutation
+) -> dict[str, Any]:
+    from ctl.mcp_gateway import review_for
+
+    server = runtime.mcp_server(server_id)
+    if not server.gateway or review_for(server).category(category_id) is None:
+        raise ApiError(404, "unknown tool category")
+    enabled = (await runtime.json_body(request)).get("enabled")
+    if not isinstance(enabled, bool):
+        raise ApiError(422, "enabled must be true or false")
+    McpActivity().set_category(server.id, category_id, enabled)
+    await run_in_threadpool(
+        _apply_switches,
+        server,
+        operator["username"],
+        f"{server.id}: category {category_id} switched {'on' if enabled else 'off'}.",
+    )
+    return {"ok": True, "server": _server_view(server_id, operator)}
+
+
 @router.put("/{server_id}/tools/{tool_name}/permission")
 async def put_tool_permission(
     server_id: str, tool_name: str, request: Request, _operator: OperatorMutation
 ) -> dict[str, Any]:
     from ctl.lobehub_ops import set_tool_permission
 
+    catalog_server = runtime.mcp_server(server_id)
+    if catalog_server.gateway:
+        return await _put_gateway_tool(catalog_server, tool_name, request, _operator)
     state = ControlState.runtime()
     server_runtime = state.mcp_server(server_id) if state else None
     tools = (server_runtime or {}).get("tool_snapshot", [])
@@ -126,6 +163,23 @@ async def put_tool_permission(
     except (ValueError, TypeError, KeyError) as exc:
         raise ApiError(422, str(exc)) from exc
     return {"ok": True, "server_id": server_id, "tool_name": tool_name, "permission": permission}
+
+
+async def _put_gateway_tool(server, tool_name: str, request: Request, operator: IdentityData) -> dict[str, Any]:
+    from ctl.mcp_gateway import review_for
+
+    tool = review_for(server).tools.get(tool_name)
+    if tool is None:
+        raise ApiError(404, "tool is not in this connector's review")
+    permission = str((await runtime.json_body(request)).get("permission", ""))
+    allowed = {"auto", "disabled"} if tool.access == "read" else {"needs_approval", "disabled"}
+    if permission not in allowed:
+        raise ApiError(422, "tools that change data must ask for approval or be switched off")
+    McpActivity().set_permission(server.id, tool_name, permission)
+    await run_in_threadpool(
+        _apply_switches, server, operator["username"], f"{server.id}: {tool_name} set to {permission}."
+    )
+    return {"ok": True, "server_id": server.id, "tool_name": tool_name, "permission": permission}
 
 
 @router.post("/{server_id}/tools/{tool_name}/prepare")

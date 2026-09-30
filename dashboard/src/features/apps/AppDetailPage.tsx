@@ -15,7 +15,7 @@ import { isInstalled, isRunning, launchTarget, signInSummary } from '../../lib/s
 import { useAction } from '../../lib/useAction';
 import { useDashboard } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
-import { useMcpRegistry } from '../integrations/mcp';
+import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
 import { ConfigurationForm } from './ConfigurationForm';
 import { DevicesSection } from './DevicesSection';
@@ -235,7 +235,8 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
   const { data } = useDashboard();
   const service = data.services.services.find((item) => item.id === id)!;
   const registry = useMcpRegistry();
-  const mcp = registry.data?.servers.find((server) => server.service_id === id);
+  const connectors = connectorsFor(registry.data?.servers || [], id);
+  const mcp = connectors[0];
   const installed = isInstalled(service);
   const address = service.ui?.state === 'ready' && service.ui.url ? service.ui.url : '';
   const hasDevices =
@@ -277,7 +278,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
       {tabs.length > 1 && <Tabs label={`${service.name} sections`} items={tabs} />}
       {active === 'overview' && <Overview service={service} address={address} devices={hasDevices} />}
       {active === 'chat' && mcp && (
-        <McpPanel server={mcp} appName={service.name} reload={() => void registry.reload()} />
+        <McpPanel server={mcp} connectors={connectors} appName={service.name} reload={() => void registry.reload()} />
       )}
       {active === 'settings' && <ConfigurationForm service={service} />}
       {active === 'advanced' && <AdvancedTab service={service} />}

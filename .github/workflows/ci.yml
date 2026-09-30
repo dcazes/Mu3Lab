@@ -107,6 +107,8 @@ jobs:
             NEXTCLOUD_REDIS_PASSWORD=ci-placeholder \
             BABY_BUDDY_PUBLIC_URL=https://example.ts.net:8458 \
             BABY_BUDDY_SECRET_KEY=ci-placeholder \
+            MU3LAB_UID=1000 \
+            MU3LAB_GID=1000 \
               docker compose -f "$compose_file" config --quiet
           done < <(find core apps -name docker-compose.yml -type f | sort)
       - name: Scan tracked files for accidental private environment files

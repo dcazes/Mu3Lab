@@ -1,4 +1,4 @@
-import { CheckCircle2, MessageSquare, PlugZap, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, MessageSquare, PlugZap, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { api, type McpServer, putJsonApi } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
@@ -7,6 +7,7 @@ import { Card, Collapsible } from '../../components/Layout';
 import { Badge, Dot } from '../../components/Status';
 import { useAction } from '../../lib/useAction';
 import { mcpSummary, nextMcpStep, openChatFor, queueMcp, setsUpAutomatically } from './mcp';
+import { ToolCategories } from './ToolCategories';
 import { ToolConsole } from './ToolConsole';
 
 const PERMISSION_LABEL: Record<string, string> = {
@@ -63,7 +64,85 @@ function Tools({ server }: { server: McpServer }) {
   );
 }
 
-export function McpPanel({ server, appName, reload }: { server: McpServer; appName: string; reload: () => void }) {
+/** Apps with more than one reviewed connector: pick which one chat uses. Only one runs at a time. */
+function ConnectorPicker({
+  server,
+  connectors,
+  appName,
+  reload,
+}: {
+  server: McpServer;
+  connectors: McpServer[];
+  appName: string;
+  reload: () => void;
+}) {
+  const confirm = useConfirm();
+  const { pending, run } = useAction();
+  const [choice, setChoice] = useState(server.id);
+  const target = connectors.find((item) => item.id === choice) || server;
+  const changed = target.id !== server.id;
+  const apply = async () => {
+    if (
+      server.enabled &&
+      !(await confirm({
+        title: `Switch ${appName} to ${target.name}?`,
+        description: `${server.name} is stopped first, so only one connector runs. ${appName}'s assistant and its chats stay the same, and each connector keeps its own switches.`,
+        confirmLabel: 'Switch',
+      }))
+    )
+      return;
+    await run(
+      'switch',
+      () => queueMcp(target, server.enabled ? 'switch' : 'install'),
+      `Switching ${appName} to ${target.name}…`,
+    );
+    window.setTimeout(reload, 1200);
+  };
+  return (
+    <Card
+      title="Connector"
+      description={`${appName} has ${connectors.length} reviewed connectors. Chat uses one at a time.`}
+    >
+      <div className="button-row">
+        <select
+          className="select-sm"
+          aria-label={`${appName} connector`}
+          value={choice}
+          onChange={(event) => setChoice(event.target.value)}
+        >
+          {connectors.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+              {item.review?.preferred ? ' (default)' : ''}
+              {item.enabled ? ' — in use' : ''}
+            </option>
+          ))}
+        </select>
+        <Button icon={ArrowLeftRight} disabled={!changed} loading={pending === 'switch'} onClick={() => void apply()}>
+          {server.enabled ? 'Switch' : 'Use this connector'}
+        </Button>
+        {target.review?.repository && (
+          <ExternalButton icon={ShieldCheck} href={target.review.repository}>
+            Source
+          </ExternalButton>
+        )}
+      </div>
+      {target.review?.note && <p className="muted">{target.review.note}</p>}
+    </Card>
+  );
+}
+
+export function McpPanel({
+  server,
+  connectors = [server],
+  appName,
+  reload,
+}: {
+  server: McpServer;
+  connectors?: McpServer[];
+  appName: string;
+  reload: () => void;
+}) {
   const confirm = useConfirm();
   const summary = mcpSummary(server, appName);
   const { pending, run } = useAction();
@@ -160,11 +239,18 @@ export function McpPanel({ server, appName, reload }: { server: McpServer; appNa
           </form>
         )}
       </Card>
+      {connectors.length > 1 && (
+        <ConnectorPicker key={server.id} server={server} connectors={connectors} appName={appName} reload={reload} />
+      )}
       <Card
         title="What chat can do"
-        description="Control which tools are available in chat. Tools that change data require approval or can be disabled."
+        description={
+          server.gateway
+            ? 'Switch tool categories and individual tools on or off.'
+            : 'Control which tools are available in chat. Tools that change data require approval or can be disabled.'
+        }
       >
-        <Tools server={server} />
+        {server.gateway ? <ToolCategories server={server} reload={reload} /> : <Tools server={server} />}
       </Card>
       <Collapsible title="Advanced">
         <div className="stack">

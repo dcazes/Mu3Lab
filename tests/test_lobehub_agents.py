@@ -49,15 +49,49 @@ class AgentSyncTests(unittest.TestCase):
             self.assertEqual(lobehub_ops.installed_apps(), {"mealie"})
 
     def test_sync_waits_for_lobechat_to_run(self):
-        state = MagicMock()
-        state.installation.return_value = {"state": "stopped", "installed_at": "x"}
+        stopped = (0, "mu3lab-lobehub-postgres-1\tExited (0) 2 minutes ago\n")
         with (
-            patch("ctl.control_state.ControlState.runtime", return_value=state),
+            patch("ctl.lobehub_ops.actions.docker_container_statuses", return_value=stopped),
             patch("ctl.lobehub_ops.actions.docker_cmd_stdin") as run,
         ):
             ok, _detail = lobehub_ops.sync_agents(lambda _line: None)
         self.assertTrue(ok)
         run.assert_not_called()
+
+    def test_sync_runs_without_a_lobechat_installation_record(self):
+        # The core installer starts LobeChat without recording its state.
+        running = (0, "mu3lab-lobehub-app-1\tUp 5 minutes\nmu3lab-lobehub-postgres-1\tUp 5 minutes (healthy)\n")
+        state = MagicMock()
+        state.installation.side_effect = lambda slug: (
+            {"state": "running", "installed_at": "x"} if slug == "mealie" else None
+        )
+        with (
+            patch("ctl.control_state.ControlState.runtime", return_value=state),
+            patch("ctl.lobehub_ops.actions.docker_container_statuses", return_value=running),
+            patch("ctl.lobehub_ops.actions.docker_cmd_stdin", return_value=(0, "")) as run,
+        ):
+            ok, _detail = lobehub_ops.sync_agents(lambda _line: None)
+        self.assertTrue(ok)
+        self.assertIn("mu3lab-mealie", run.call_args.args[1])
+
+    def test_sync_attaches_a_connector_that_went_live_before_its_assistant(self):
+        running = (0, "mu3lab-lobehub-postgres-1\tUp 5 minutes (healthy)\n")
+        state = MagicMock()
+        state.installation.return_value = {"state": "running", "installed_at": "x"}
+        state.mcp_server.side_effect = lambda server_id: (
+            {"enabled": True, "state": "live", "tool_snapshot": [{"id": "scrape"}]}
+            if server_id == "firecrawl-official"
+            else None
+        )
+        with (
+            patch("ctl.control_state.ControlState.runtime", return_value=state),
+            patch("ctl.lobehub_ops.actions.docker_container_statuses", return_value=running),
+            patch("ctl.lobehub_ops.actions.docker_cmd_stdin", return_value=(0, "")),
+            patch("ctl.lobehub_ops.sync_mcp", return_value=(True, "")) as bind,
+        ):
+            ok, _detail = lobehub_ops.sync_agents(lambda _line: None)
+        self.assertTrue(ok)
+        self.assertEqual([call.args[0].id for call in bind.call_args_list], ["firecrawl-official"])
 
 
 if __name__ == "__main__":

@@ -23,6 +23,49 @@ def missing_credentials(server) -> list[str]:
     ]
 
 
+def _gateway_view(server, offered_tools: list[dict], activity: McpActivity) -> dict[str, Any]:
+    """Categories and switches for a connector served through the tool gateway."""
+    from ctl.mcp_gateway import review_for, tool_states
+
+    review = review_for(server)
+    states = tool_states(server, review, activity)
+    offered = {str(tool.get("id", "")): tool for tool in offered_tools}
+    discovered = bool(offered) and any(tool.get("title") for tool in offered.values())
+    tools = [
+        {
+            "id": name,
+            "title": str((offered.get(name) or {}).get("title", "")),
+            "risk": tool.access,
+            "category": tool.category,
+            "core": tool.core,
+            "enabled": states["tools"][name],
+            "offered": name in offered if discovered else True,
+            "permission": ("auto" if tool.access == "read" else "needs_approval")
+            if states["tools"][name]
+            else "disabled",
+        }
+        for name, tool in review.tools.items()
+    ]
+    return {
+        "gateway": True,
+        "categories": [
+            {
+                "id": category.id,
+                "title": category.title,
+                "summary": category.summary,
+                "enabled": states["categories"][category.id],
+                "default_on": category.default_on,
+            }
+            for category in review.categories
+        ],
+        "blocked": [{"id": name, "reason": reason} for name, reason in review.blocked.items()],
+        "unreviewed": sorted(name for name in offered if name not in review.tools and name not in review.blocked)
+        if discovered
+        else [],
+        "tools": tools,
+    }
+
+
 def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, Any]:
     services = {service.id: service for service in registry.services}
     persisted = ControlState.runtime()
@@ -53,8 +96,10 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             state, error = "unavailable", service.blocked_reason or "Install the application first."
         elif missing:
             state = "authentication_required"
+            # An attempt already told us why the credential could not be made.
+            last_attempt = ((runtime or {}).get("last_error") or {}).get("message")
             error = (
-                "A dedicated credential will be created when you connect this MCP."
+                (last_attempt or "A dedicated credential will be created when you connect this MCP.")
                 if server.auto_provision
                 else "Configure: " + ", ".join(missing)
             )
@@ -82,8 +127,12 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             | {"permission": activity.permission(server.id, str(tool.get("id", "")), str(tool.get("risk", "write")))}
             for tool in tools
         ]
+        gateway_view = _gateway_view(server, tools, activity) if server.gateway else {}
+        if gateway_view:
+            tools = gateway_view.pop("tools")
         servers.append(
-            {
+            gateway_view
+            | {
                 "id": server.id,
                 "name": server.name,
                 "service_id": server.service_id,

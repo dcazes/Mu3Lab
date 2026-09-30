@@ -49,6 +49,11 @@ class McpActivity:
           CREATE TABLE IF NOT EXISTS call_keys (
             idempotency_key TEXT PRIMARY KEY, created_at TEXT NOT NULL
           );
+          CREATE TABLE IF NOT EXISTS category_switches (
+            server_id TEXT NOT NULL, category_id TEXT NOT NULL,
+            enabled INTEGER NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY(server_id,category_id)
+          );
         """)
         if "source_ref" not in {row[1] for row in db.execute("PRAGMA table_info(calls)")}:
             db.execute("ALTER TABLE calls ADD COLUMN source_ref TEXT")
@@ -109,6 +114,37 @@ class McpActivity:
         except (OSError, sqlite3.Error):
             return default
         return str(row[0]) if row else default
+
+    def _read_only(self, sql: str, params: tuple) -> list[sqlite3.Row]:
+        """Query without creating the runtime tree; a missing store means no choices yet."""
+        if not self.path.is_file():
+            return []
+        try:
+            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
+            db.row_factory = sqlite3.Row
+            try:
+                return db.execute(sql, params).fetchall()
+            finally:
+                db.close()
+        except (OSError, sqlite3.Error):
+            return []
+
+    def explicit_permissions(self, server_id: str) -> dict[str, str]:
+        """Only the tool choices the owner actually made, without defaults."""
+        rows = self._read_only("SELECT tool_name, permission FROM tool_permissions WHERE server_id=?", (server_id,))
+        return {str(row["tool_name"]): str(row["permission"]) for row in rows}
+
+    def category_switches(self, server_id: str) -> dict[str, bool]:
+        rows = self._read_only("SELECT category_id, enabled FROM category_switches WHERE server_id=?", (server_id,))
+        return {str(row["category_id"]): bool(row["enabled"]) for row in rows}
+
+    def set_category(self, server_id: str, category_id: str, enabled: bool) -> None:
+        with self._db() as db:
+            db.execute(
+                "INSERT INTO category_switches VALUES (?,?,?,?) ON CONFLICT(server_id,category_id) "
+                "DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at",
+                (server_id, category_id, int(enabled), _now()),
+            )
 
     def set_permission(self, server_id: str, tool_name: str, permission: str) -> None:
         if permission not in {"auto", "needs_approval", "disabled"}:
