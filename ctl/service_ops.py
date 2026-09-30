@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from ctl import actions, image_fetch, onboarding_state, workflow_secrets
+from ctl import actions, image_fetch, job_guard, onboarding_state, workflow_secrets
 from ctl.control_state import ControlState
 from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
@@ -1093,6 +1093,8 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             f"{service.name} {action} failed: {output}",
         )
         return
+    # The command finished; stop here if the job was cancelled meanwhile.
+    job_guard.checkpoint()
     target_state = "stopped" if action == "stop" else "running"
     if target_state == "running":
         healthy, detail = wait_healthy(service)

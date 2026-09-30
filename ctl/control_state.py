@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl import sqlite_store
+from ctl import job_guard, sqlite_store
 from ctl.runtime import RuntimePaths
 
 COMPUTE_MODES = frozenset({"auto", "cpu", "nvidia", "amd"})
@@ -322,6 +322,7 @@ class ControlState:
         error: dict[str, Any] | None = None,
         verified: bool = False,
     ) -> dict[str, Any]:
+        job_guard.checkpoint()
         if not service_id or mode not in IDENTITY_MODES or state not in IDENTITY_STATES:
             raise ValueError("invalid service identity state")
         now = _now()
@@ -380,6 +381,7 @@ class ControlState:
         data kept still has the account a handoff describes, so the caller
         may keep those until they expire.
         """
+        job_guard.checkpoint()
         if not service_id:
             return
         with self._connect() as conn:
@@ -489,6 +491,7 @@ class ControlState:
         route_state: str = "unknown",
         error: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        job_guard.checkpoint()
         if not service_id or state not in INSTALL_STATES:
             raise ValueError("invalid service installation state")
         now = _now()
@@ -555,6 +558,7 @@ class ControlState:
         handoff_id: str = "",
         error: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        job_guard.checkpoint()
         if not service_id or state not in INITIALIZATION_STATES:
             raise ValueError("invalid service initialization state")
         now = _now()
@@ -636,6 +640,7 @@ class ControlState:
             )
 
     def bump_config_revision(self, service_id: str) -> int:
+        job_guard.checkpoint()
         now = _now()
         with self._connect() as conn:
             conn.execute(
@@ -680,6 +685,7 @@ class ControlState:
         error: dict[str, Any] | None = None,
         verified: bool = False,
     ) -> dict[str, Any]:
+        job_guard.checkpoint()
         if state not in MCP_STATES:
             raise ValueError("invalid MCP state")
         now = _now()

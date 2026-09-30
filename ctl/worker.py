@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 
+from ctl import job_guard
 from ctl.core_setup import execute_claimed
 from ctl.jobs import JobStore
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
@@ -24,10 +25,60 @@ ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
 
 
-def _maintain_lease(store: JobStore, job: dict, worker_id: str, stop: threading.Event) -> None:
+def _maintain_lease(store: JobStore, job: dict, worker_id: str, stop: threading.Event, lost: threading.Event) -> None:
     while not stop.wait(10):
-        if not store.heartbeat(str(job["id"]), worker_id, step_id=str(job.get("step_id") or "")):
+        try:
+            renewed = store.heartbeat(str(job["id"]), worker_id, step_id=str(job.get("step_id") or ""))
+        except Exception:  # a locked or unreadable store cannot prove we still own the job
+            renewed = False
+        if not renewed:
+            # Another worker may reclaim the job; stop this one at its next checkpoint.
+            lost.set()
             return
+
+
+def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
+    if job.get("service_id") == "core-suite":
+        execute_claimed(store, job, worker_id, ROOT)
+    elif str(job.get("service_id") or "").startswith("mcp:"):
+        execute_mcp_claimed(store, job, worker_id, ROOT)
+    elif str(job.get("service_id") or "").startswith("provider:"):
+        execute_provider_claimed(store, job, worker_id, ROOT)
+    else:
+        execute_service_claimed(store, job, worker_id, ROOT)
+
+
+def run_job(store: JobStore, job: dict, worker_id: str) -> None:
+    """Run one claimed job, stopping it cleanly if it is cancelled or its lease is lost."""
+    job_id = str(job["id"])
+    with job_guard.executing(store, job_id, worker_id) as execution:
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=_maintain_lease, args=(store, job, worker_id, heartbeat_stop, execution.lost), daemon=True
+        )
+        heartbeat_thread.start()
+        try:
+            _dispatch(store, job, worker_id)
+        except job_guard.JobInterrupted as interruption:
+            if interruption.reason == job_guard.CANCELLED:
+                store.acknowledge_cancel(job_id, worker_id)
+                print(f"Mu3Lab job {job_id} stopped after cancellation.", flush=True)
+            else:
+                print(f"Mu3Lab job {job_id} stopped: this worker no longer holds its lease.", flush=True)
+        except Exception as exc:  # final containment for all future dispatchers
+            try:
+                store.transition(
+                    job_id,
+                    "failed",
+                    actor=worker_id,
+                    detail=f"Worker stopped safely: {exc}",
+                    error_code="worker_failure",
+                )
+            except (KeyError, ValueError, job_guard.JobInterrupted):
+                pass
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=2)
 
 
 def run() -> int:
@@ -99,34 +150,9 @@ def run() -> int:
         if job is None:
             time.sleep(POLL_SECONDS)
             continue
-        heartbeat_stop = threading.Event()
-        heartbeat_thread = threading.Thread(
-            target=_maintain_lease, args=(store, job, worker_id, heartbeat_stop), daemon=True
-        )
-        heartbeat_thread.start()
         try:
-            if job.get("service_id") == "core-suite":
-                execute_claimed(store, job, worker_id, ROOT)
-            elif str(job.get("service_id") or "").startswith("mcp:"):
-                execute_mcp_claimed(store, job, worker_id, ROOT)
-            elif str(job.get("service_id") or "").startswith("provider:"):
-                execute_provider_claimed(store, job, worker_id, ROOT)
-            else:
-                execute_service_claimed(store, job, worker_id, ROOT)
-        except Exception as exc:  # final containment for all future dispatchers
-            try:
-                store.transition(
-                    str(job["id"]),
-                    "failed",
-                    actor=worker_id,
-                    detail=f"Worker stopped safely: {exc}",
-                    error_code="worker_failure",
-                )
-            except (KeyError, ValueError):
-                pass
+            run_job(store, job, worker_id)
         finally:
-            heartbeat_stop.set()
-            heartbeat_thread.join(timeout=2)
             try:
                 from ctl.install_batches import InstallBatchStore
 

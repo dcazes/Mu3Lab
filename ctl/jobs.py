@@ -123,6 +123,9 @@ class JobStore:
                     "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
                     "heartbeat_at": "TEXT NOT NULL DEFAULT ''",
                     "error_code": "TEXT NOT NULL DEFAULT ''",
+                    # Set when someone asks to cancel a running job; the runner
+                    # stops at its next checkpoint and marks it cancelled.
+                    "cancel_requested_at": "TEXT NOT NULL DEFAULT ''",
                 }
                 for name, declaration in additions.items():
                     if name not in existing:
@@ -191,15 +194,33 @@ class JobStore:
     def transition(
         self, job_id: str, state: str, *, actor: str, detail: str = "", error_code: str = "", step_id: str = ""
     ) -> None:
-        """Move an existing job to a reviewed state and append its audit event."""
+        """Move an existing job to a reviewed state and append its audit event.
+
+        While a worker runs the job, only that worker's lease may move it, and
+        a cancelled job cannot be moved on; both raise JobInterrupted.
+        """
+        from ctl import job_guard
+
         if state not in _SAFE_STATES or not actor:
             raise ValueError("invalid job state transition")
+        execution = job_guard.current()
+        runner = execution.worker_id if execution and execution.job_id == job_id else ""
         now = _now()
         with self._connect() as conn:
-            row = conn.execute("SELECT state FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state, lease_owner, cancel_requested_at FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
             if not row:
                 raise KeyError(job_id)
             current = str(row["state"])
+            if runner:
+                if current == "running" and row["lease_owner"] != runner:
+                    raise job_guard.JobInterrupted(job_guard.LEASE_LOST)
+                if current == "cancelled" and state != "cancelled":
+                    raise job_guard.JobInterrupted(job_guard.CANCELLED)
+                if row["cancel_requested_at"] and state in {"running", "waiting_for_confirmation"}:
+                    raise job_guard.JobInterrupted(job_guard.CANCELLED)
             if state != current and state not in _TRANSITIONS.get(current, frozenset()):
                 raise ValueError(f"invalid job transition: {current} -> {state}")
             conn.execute(
@@ -224,6 +245,27 @@ class JobStore:
         expires = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # A job whose runner died after someone asked to cancel it is
+            # finished as cancelled, never started again.
+            abandoned = conn.execute(
+                """
+                SELECT id FROM jobs WHERE state = 'running' AND cancel_requested_at != ''
+                  AND lease_expires_at != '' AND lease_expires_at < ?
+            """,
+                (now,),
+            ).fetchall()
+            for item in abandoned:
+                conn.execute(
+                    """
+                    UPDATE jobs SET state = 'cancelled', lease_owner = '', lease_expires_at = '',
+                        updated_at = ?, detail = 'Cancelled; its worker stopped before finishing.' WHERE id = ?
+                """,
+                    (now, item["id"]),
+                )
+                conn.execute(
+                    "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                    (item["id"], worker_id, "job.cancelled", now, "Cancelled after its worker's lease expired."),
+                )
             row = conn.execute(
                 """
                 SELECT * FROM jobs
@@ -264,6 +306,10 @@ class JobStore:
         return result.rowcount == 1
 
     def append_event(self, job_id: str, event: str, detail: str) -> None:
+        from ctl import job_guard
+
+        # Steps log as they go; this is the most frequent safe place to stop.
+        job_guard.checkpoint()
         if not event or len(event) > 64:
             raise ValueError("invalid job event")
         with self._connect() as conn:
@@ -349,9 +395,68 @@ class JobStore:
             prepare=prepare,
         )
 
-    def cancel(self, job_id: str, *, actor: str) -> None:
-        """Request cancellation at the next executor boundary."""
+    def cancel(self, job_id: str, *, actor: str) -> str:
+        """Cancel a job; a running one stops at its next checkpoint.
+
+        Returns the job's state: "cancelled", or "cancelling" while its worker
+        finishes the command it is in and acknowledges.
+        """
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT state FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if not row:
+                raise KeyError(job_id)
+            if row["state"] == "running":
+                conn.execute(
+                    "UPDATE jobs SET cancel_requested_at = ?, updated_at = ? WHERE id = ? AND cancel_requested_at = ''",
+                    (now, now, job_id),
+                )
+                conn.execute(
+                    "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                    (job_id, actor, "job.cancel_requested", now, "Cancellation requested by the operator."),
+                )
+                return "cancelling"
         self.transition(job_id, "cancelled", actor=actor, detail="Cancellation requested by the operator.")
+        return "cancelled"
+
+    def interruption(self, job_id: str, worker_id: str) -> str:
+        """Why the runner ``worker_id`` must stop this job now, or "" to carry on."""
+        from ctl import job_guard
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT state, lease_owner, cancel_requested_at FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        if not row:
+            return job_guard.LEASE_LOST
+        if row["state"] == "cancelled":
+            return job_guard.CANCELLED
+        if row["state"] == "queued" or (row["state"] == "running" and row["lease_owner"] != worker_id):
+            return job_guard.LEASE_LOST
+        if row["state"] == "running" and row["cancel_requested_at"]:
+            return job_guard.CANCELLED
+        # waiting/succeeded/failed: the runner moved it there itself.
+        return ""
+
+    def acknowledge_cancel(self, job_id: str, worker_id: str) -> bool:
+        """The runner stopped at a checkpoint; record the job as cancelled."""
+        now = _now()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE jobs SET state = 'cancelled', lease_owner = '', lease_expires_at = '', updated_at = ?,
+                    detail = 'Cancelled. Steps already finished were kept; nothing after them ran.'
+                WHERE id = ? AND state = 'running' AND lease_owner = ?
+            """,
+                (now, job_id, worker_id),
+            )
+            if result.rowcount:
+                conn.execute(
+                    "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
+                    (job_id, worker_id, "job.cancelled", now, "Worker stopped at a checkpoint."),
+                )
+        return result.rowcount == 1
 
     def audit(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._connect() as conn:

@@ -28,7 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import IO
 
-from ctl import privilege
+from ctl import job_guard, privilege
 
 
 def _ok(log_lines: list[str], changed: bool = True, **extra) -> dict:
@@ -91,6 +91,7 @@ def docker_cmd(
 
 def docker_cmd_stdin(argv: list[str], data: str, log: Callable[[str], None], timeout: int = 60) -> tuple[int, str]:
     """Send private SQL/configuration over stdin without logging its contents."""
+    job_guard.checkpoint()
     log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
     command = _docker_invocation(argv)
     if command is None:
@@ -155,6 +156,7 @@ def docker_cmd_stream(
     limited to installer-owned Docker commands.  It never invokes a shell and
     keeps the same group and isolated-DOCKER_CONFIG rules as ``docker_cmd``.
     """
+    job_guard.checkpoint()
     log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv))
     command = _docker_invocation(argv)
     if command is None:
@@ -227,6 +229,7 @@ def docker_cmd_with_stdin(
     It exists for tools such as Authentik's interactive password-reset command
     whose supported interface reads the new value from standard input.
     """
+    job_guard.checkpoint()
     log("$ docker " + " ".join(argv[1:] if argv[:1] == ["docker"] else argv) + "  (private input supplied securely)")
     command = _docker_invocation(argv)
     if command is None:
@@ -648,6 +651,7 @@ def docker_load_stream(
     write: Callable[[IO[bytes]], None], log: Callable[[str], None], *, timeout: int = 1800
 ) -> tuple[int, str]:
     """Stream an image archive into ``docker load`` without a temporary file."""
+    job_guard.checkpoint()
     log("$ docker load")
     command = _docker_invocation(["docker", "load"])
     if command is None:

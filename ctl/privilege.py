@@ -22,6 +22,8 @@ import shlex
 import subprocess
 from collections.abc import Callable
 
+from ctl import job_guard
+
 SESSION_EXPIRED = (
     "Mu3Lab no longer has administrator access. Go back to the terminal window, "
     "stop the installer with Ctrl+C, and run ./install.sh again."
@@ -34,6 +36,7 @@ def _exec(argv: list[str], timeout: int = 300, env: dict | None = None) -> tuple
     `env` merges over os.environ (used for DOCKER_CONFIG isolation); None
     inherits the environment unchanged.
     """
+    job_guard.checkpoint()
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env={**os.environ, **(env or {})})
         return proc.returncode, (proc.stdout + proc.stderr).strip()

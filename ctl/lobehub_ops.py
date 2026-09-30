@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 
-from ctl import actions
+from ctl import actions, job_guard
 from ctl.jobs import redact
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -229,6 +229,7 @@ def sync_agents(log) -> tuple[bool, str]:
     LobeChat is core, and the core installer records no installation state
     for it, so Docker decides whether its database can take the change.
     """
+    job_guard.checkpoint()
     rc, output = actions.docker_container_statuses("mu3lab-lobehub")
     database_up = f"{DATABASE_CONTAINER}\tUp" in output
     if rc or not database_up:
@@ -246,6 +247,7 @@ def sync_agents(log) -> tuple[bool, str]:
 
 def reconcile(log) -> tuple[bool, str]:
     """Keep existing conversations while adding app agents and enforcing model rows."""
+    job_guard.checkpoint()
     rc, output = actions.docker_cmd_stdin(PSQL, _sql(installed_apps()), log)
     if rc:
         return False, redact(output)
@@ -387,6 +389,7 @@ def _sync_connector(
     exclusive: bool = False,
     instructions: str = "",
 ) -> bool:
+    job_guard.checkpoint()
     if not (RuntimePaths().projects / "lobehub" / ".env").is_file():
         return True
     try:

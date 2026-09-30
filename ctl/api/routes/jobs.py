@@ -92,12 +92,12 @@ def retry_job(job_id: str, request: Request, operator: OperatorMutation) -> dict
 def cancel_job(job_id: str, operator: OperatorMutation) -> dict[str, Any]:
     store = runtime.job_store()
     try:
-        store.cancel(job_id, actor=operator["username"])
+        state = store.cancel(job_id, actor=operator["username"])
     except KeyError as exc:
         raise ApiError(404, "job not found") from exc
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
-    return {"ok": True, "state": "cancelled"}
+    return {"ok": True, "state": state}
 
 
 def _active_core_job(store: JobStore) -> dict[str, Any] | None:

@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ctl import actions
+from ctl import actions, job_guard
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import Review
@@ -176,6 +176,7 @@ def build_policy() -> dict[str, Any]:
 
 
 def write_policy(policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    job_guard.checkpoint()
     policy = build_policy() if policy is None else policy
     directory = project() / "policy"
     directory.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -218,6 +219,7 @@ def healthy() -> bool:
 
 def refresh(log) -> tuple[bool, str]:
     """Write the current policy and make sure the gateway is running it."""
+    job_guard.checkpoint()
     try:
         write_policy()
     except (OSError, ValueError) as exc:

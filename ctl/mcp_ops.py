@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ctl import actions
+from ctl import actions, job_guard
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
@@ -33,6 +33,7 @@ def _app_name(service_id: str) -> str:
 
 def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
     """Attach a live connector to its app's assistant, through the gateway when reviewed."""
+    job_guard.checkpoint()
     from ctl.lobehub_ops import sync_gateway, sync_mcp
 
     if not server.gateway:
@@ -52,6 +53,7 @@ def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
 
 def unbind(server, log) -> tuple[bool, str]:
     """Detach a connector from its app's assistant; call after its state is updated."""
+    job_guard.checkpoint()
     from ctl.lobehub_ops import sync_gateway, sync_mcp
 
     if not server.gateway:
@@ -320,6 +322,7 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
 
 def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool:
     """Follow an installed application's lifecycle without enabling new MCPs."""
+    job_guard.checkpoint()
     state = ControlState.runtime()
     if state is None:
         return True
