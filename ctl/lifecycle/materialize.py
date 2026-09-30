@@ -26,7 +26,13 @@ Values = dict[str, str]
 
 
 def _token(length: int) -> str:
-    return secrets.token_urlsafe(length)
+    # Secrets reach app CLIs as separate arguments (Nextcloud's entrypoint runs
+    # `occ maintenance:install --database-pass $POSTGRES_PASSWORD`), where a
+    # leading "-" is parsed as an option. token_urlsafe starts with one 1 in 64.
+    while True:
+        token = secrets.token_urlsafe(length)
+        if not token.startswith("-"):
+            return token
 
 
 def _database_and_oidc(

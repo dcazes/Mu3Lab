@@ -274,6 +274,12 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(ports), len(set(ports)))
         self.assertEqual(len(proxies), len(set(proxies)))
 
+    def test_generated_tokens_never_start_with_an_option_dash(self):
+        from ctl.lifecycle.materialize import _token
+
+        with patch("ctl.lifecycle.materialize.secrets.token_urlsafe", side_effect=["-jAbc", "_ok", "kOk"]):
+            self.assertEqual(_token(36), "_ok")
+
     def test_nextcloud_materialization_generates_private_runtime_secrets_and_oidc(self):
         from ctl.lifecycle.accounts import fresh_account_storage
         from ctl.lifecycle.materialize import materialize
