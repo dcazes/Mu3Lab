@@ -2,7 +2,7 @@ name: mu3lab-paperless-ngx
 
 services:
   broker:
-    image: docker.io/valkey/valkey:9.0.1-alpine
+    image: docker.io/valkey/valkey:9.0.1-alpine@sha256:c106a0c03bcb23cbdf9febe693114cb7800646b11ca8b303aee7409de005faa8
     restart: unless-stopped
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/paperless/redis:/data
@@ -10,7 +10,7 @@ services:
     security_opt: [no-new-privileges:true]
 
   db:
-    image: docker.io/library/postgres:18.0-alpine
+    image: docker.io/library/postgres:18.0-alpine@sha256:48c8ad3a7284b82be4482a52076d47d879fd6fb084a1cbfccbd551f9331b0e40
     restart: unless-stopped
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/paperless/postgres:/var/lib/postgresql
@@ -27,7 +27,7 @@ services:
       retries: 10
 
   webserver:
-    image: ghcr.io/paperless-ngx/paperless-ngx:3.1.3
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.1.3@sha256:aa810a36942c63d4ee70d00eda7236cd3d6acfb7eb3f7987fb568ed14df8817a
     restart: unless-stopped
     depends_on:
       db: {condition: service_healthy}

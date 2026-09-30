@@ -1,7 +1,7 @@
 name: mu3lab-mcp-paperless
 services:
   paperless-mcp:
-    image: node:22.19.0-alpine3.22
+    image: node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9
     restart: "no"
     command: ["npx", "-y", "paperless-ngx-mcp@3.1.1", "--http", "--port", "3000"]
     environment:

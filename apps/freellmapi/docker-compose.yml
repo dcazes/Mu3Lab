@@ -2,7 +2,7 @@ name: mu3lab-freellmapi
 
 services:
   freellmapi:
-    image: ghcr.io/tashfeenahmed/freellmapi:v0.11.0
+    image: ghcr.io/tashfeenahmed/freellmapi:v0.11.0@sha256:7e54541a352b3d5eef53cd6a85789362eef7f1fe3dabe9adbeee3cdb82d3b4eb
     restart: unless-stopped
     ports: ["127.0.0.1:3001:3001"]
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]

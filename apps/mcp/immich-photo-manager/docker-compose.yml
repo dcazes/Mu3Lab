@@ -1,7 +1,7 @@
 name: mu3lab-mcp-immich-photo-manager
 services:
   immich-photo-manager:
-    image: ghcr.io/drolosoft/immich-photo-manager:2.0.11
+    image: ghcr.io/drolosoft/immich-photo-manager:2.0.11@sha256:4a3cf85563e9df0c1b65b71af254be6a97ab6bbf7b705a582dff7c822a9d17d4
     restart: "no"
     environment:
       IMMICH_BASE_URL: http://immich-server:2283
