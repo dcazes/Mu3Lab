@@ -163,6 +163,8 @@ DISPATCH = {
     ("browser_extension", "not_needed"): "skip",
     ("browser_extension", "no_address"): "skip",  # a convenience; never block the install on it
     ("browser_extension", "ready"): "skip",
+    ("authentik_storage", "needs_migration"): "move_authentik_data",
+    ("authentik_storage", "ready"): "skip",
     ("authentik", "down"): "authentik_up",
     ("authentik", "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
@@ -1434,9 +1436,53 @@ def _authentik_check(ctx: dict) -> dict:
     return _compose_health(9001, "http://127.0.0.1:9001/-/health/ready/")
 
 
+def _authentik_compose_env(blueprints: Path, log) -> dict[str, str]:
+    """Values Authentik's Compose file interpolates; never logged."""
+    from ctl import secrets as _secrets
+
+    env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
+    if added:
+        log("generated Authentik runtime configuration: " + ", ".join(added))
+    generated = _secrets.read_runtime_env(env_file)
+    return {
+        "AUTHENTIK_ENV_FILE": str(env_file),
+        "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.5.0"),
+        "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
+        "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", ""),
+        "AUTHENTIK_BLUEPRINTS_DIR": str(blueprints),
+        "MU3LAB_DATA_ROOT": str(RuntimePaths().data),
+    }
+
+
+def _authentik_storage_check(ctx: dict) -> dict:
+    from ctl.lifecycle import authentik_storage
+
+    state = authentik_storage.status()
+    return {
+        "name": "authentik_storage",
+        "status": state,
+        "detail": "Authentik's data is in Mu3Lab's data folder."
+        if state == "ready"
+        else "Authentik's data is still in Docker volumes, outside /srv/mu3lab/data, so a copy of that folder "
+        "would miss your accounts.",
+        "action": "" if state == "ready" else "Move it (Authentik stops for about a minute).",
+    }
+
+
+def fix_authentik_storage(check: dict, ctx: dict) -> dict:
+    from ctl.lifecycle import authentik_storage
+
+    log = ctx["log_fn"]("authentik_storage")
+    blueprints = RuntimePaths().projects / "authentik" / "blueprints"
+    ok, detail = authentik_storage.migrate(
+        ctx["root"] / "core" / "authentik", _authentik_compose_env(blueprints, log), log
+    )
+    log(detail)
+    return {"ok": True} if ok else {"ok": False, "error": detail}
+
+
 def fix_authentik(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("authentik")
-    from ctl import secrets as _secrets
     from ctl.authentik_blueprints import write_dashboard_blueprint
 
     dns_name = _tailscale_dns_name_for_install()
@@ -1449,17 +1495,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         tailnet_https_origin(dns_name, DASHBOARD_SERVE_PORT).rstrip("/"),
     )
     log("rendered the Authentik dashboard Blueprint (no credentials)")
-    env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
-    if added:
-        log("generated Authentik runtime configuration: " + ", ".join(added))
-    generated = _secrets.read_runtime_env(env_file)
-    values = {
-        "AUTHENTIK_ENV_FILE": str(env_file),
-        "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.5.0"),
-        "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
-        "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", ""),
-        "AUTHENTIK_BLUEPRINTS_DIR": str(blueprint.parent),
-    }
+    values = _authentik_compose_env(blueprint.parent, log)
     # Compose needs these values for interpolation. actions.compose_up passes
     # them in the process environment but never includes env values in logs.
     _update_progress(
@@ -2432,6 +2468,12 @@ STEPS: list[Step] = [
         "fix": fix_browser_extension,
     },
     {
+        "id": "authentik_storage",
+        "label": "Keep Authentik's data with Mu3Lab's other data",
+        "check": _authentik_storage_check,
+        "fix": fix_authentik_storage,
+    },
+    {
         "id": "authentik",
         "label": "Start Authentik (sign-in)",
         "check": _authentik_check,
@@ -2490,7 +2532,15 @@ PHASES = (
     ),
     (
         "Set up sign-in",
-        ("authentik", "authentik_serve", "lobehub_serve", "authentik_setup", "serve", "dashboard_protection"),
+        (
+            "authentik_storage",
+            "authentik",
+            "authentik_serve",
+            "lobehub_serve",
+            "authentik_setup",
+            "serve",
+            "dashboard_protection",
+        ),
     ),
     ("Download the core apps", ("core_images",)),
 )

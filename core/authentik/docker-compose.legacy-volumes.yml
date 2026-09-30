@@ -1,0 +1,19 @@
+# Fallback only: runs Authentik on the Docker volumes older installs used,
+# if moving its data into /srv/mu3lab/data fails. See ctl/lifecycle/authentik_storage.py.
+services:
+  postgresql:
+    volumes:
+      - authentik-postgresql:/var/lib/postgresql/data
+  server:
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+  worker:
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+
+volumes:
+  authentik-postgresql:
+  authentik-media:
+  authentik-templates:

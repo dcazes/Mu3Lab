@@ -1,4 +1,5 @@
 # Mu3Lab Authentik identity service. Only Caddy/Tailscale expose it remotely.
+# Its data lives under Mu3Lab's data folder so backups include every account.
 services:
   postgresql:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -8,7 +9,7 @@ services:
       POSTGRES_USER: authentik
       POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD}
     volumes:
-      - authentik-postgresql:/var/lib/postgresql/data
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/authentik/postgresql:/var/lib/postgresql/data
     networks: [mu3lab_backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"]
@@ -27,8 +28,8 @@ services:
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD}
     volumes:
-      - authentik-media:/media
-      - authentik-templates:/templates
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/authentik/media:/media
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/authentik/templates:/templates
       - ${AUTHENTIK_BLUEPRINTS_DIR:-./blueprints}:/blueprints/custom:ro
     ports: ["127.0.0.1:9001:9000"]
     networks: [mu3lab_frontend, mu3lab_backend]
@@ -51,8 +52,8 @@ services:
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL__PASSWORD}
     volumes:
-      - authentik-media:/media
-      - authentik-templates:/templates
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/authentik/media:/media
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/authentik/templates:/templates
       - ${AUTHENTIK_BLUEPRINTS_DIR:-./blueprints}:/blueprints/custom:ro
     networks: [mu3lab_frontend, mu3lab_backend]
     depends_on:
@@ -62,11 +63,6 @@ services:
       interval: 15s
       timeout: 10s
       retries: 12
-
-volumes:
-  authentik-postgresql:
-  authentik-media:
-  authentik-templates:
 
 networks:
   mu3lab_frontend: {external: true}

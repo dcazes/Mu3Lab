@@ -1034,6 +1034,22 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     project = project_path(service, root)
+    if service.id == "authentik" and action in {"start", "restart"}:
+        from ctl.lifecycle import authentik_storage
+
+        if authentik_storage.status() != "ready":
+            # Starting now would bring Authentik up on an empty data folder.
+            _fail(
+                store,
+                state,
+                job_id,
+                service.id,
+                worker_id,
+                "validate_service",
+                "authentik_storage_pending",
+                "Run ./install.sh once to move Authentik's data into /srv/mu3lab before restarting it.",
+            )
+            return
     if not (project / "docker-compose.yml").is_file():
         _fail(
             store,
