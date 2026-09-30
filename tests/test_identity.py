@@ -105,6 +105,41 @@ class IdentityContractTests(unittest.TestCase):
             outpost = content.split("authentik_outposts.outpost", 1)[1]
             self.assertIn("[name, Mu3Lab Baby Buddy provider]", outpost)
 
+    def test_surfsense_provider_tracks_install_uninstall_and_reinstall(self):
+        from ctl.authentik_blueprints import write_removal_blueprint
+        from ctl.lifecycle.uninstall import _remove_sign_in
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp) / "runtime")
+            registry = load()
+            project = paths.projects / "surfsense"
+            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-dashboard.yaml"
+            project.mkdir(parents=True)
+            (project / ".env").write_text("REGISTRATION_ENABLED=TRUE\n", encoding="utf-8")
+            reconcile_blueprints(registry, "mu3lab.example.ts.net", paths)
+            self.assertNotIn("Mu3Lab SurfSense provider", blueprint.read_text(encoding="utf-8"))
+
+            compose = project / "docker-compose.yml"
+            compose.write_text("services: {}\n", encoding="utf-8")
+            removal = write_removal_blueprint(paths.root, "surfsense", "SurfSense", oidc=False)
+            reconcile_blueprints(registry, "mu3lab.example.ts.net", paths)
+            content = blueprint.read_text(encoding="utf-8")
+            self.assertIn('external_host: "https://mu3lab.example.ts.net:8447"', content)
+            self.assertIn("[name, Mu3Lab SurfSense provider]", content.split("authentik_outposts.outpost", 1)[1])
+            self.assertEqual(content.count("name: Mu3Lab LiteLLM provider"), 2)
+            self.assertFalse(removal.exists())
+
+            compose.unlink()
+            with patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"):
+                _remove_sign_in(registry.get("surfsense"), registry, paths)
+            self.assertNotIn("Mu3Lab SurfSense provider", blueprint.read_text(encoding="utf-8"))
+            self.assertTrue(removal.exists())
+
+            compose.write_text("services: {}\n", encoding="utf-8")
+            reconcile_blueprints(registry, "mu3lab.example.ts.net", paths)
+            self.assertIn("Mu3Lab SurfSense provider", blueprint.read_text(encoding="utf-8"))
+            self.assertFalse(removal.exists())
+
     def test_mealie_owner_requires_oidc_link_and_admin_role(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime")

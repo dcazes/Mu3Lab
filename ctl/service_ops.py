@@ -463,9 +463,9 @@ def _install(
     if not routed:
         _fail(store, state, job_id, service.id, actor, "configure_route", "route_configuration_failed", detail)
         return
-    from ctl.identity import TRUSTED_HEADER
+    from ctl.identity import GATED_APPS
 
-    if service.id in TRUSTED_HEADER:
+    if service.id in GATED_APPS:
         # Caddy sends this app through the Authentik outpost, which answers 404
         # until the app is registered there (and a past uninstall is withdrawn).
         from ctl.identity import reconcile_blueprints
@@ -746,6 +746,9 @@ def _configure_identity(
             detail = "Authentik trusted-header access is configured; live route health remains authoritative."
             target = "ready"
         elif mode == "proxy_gate":
+            from ctl.service_state import tailnet_dns_name
+
+            reconcile_blueprints(registry, tailnet_dns_name())
             detail = "Authentik protects this route, but the application has no native per-user OIDC session."
             target = "ready"
         else:

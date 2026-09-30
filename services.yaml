@@ -166,7 +166,7 @@ services:
     https_port: 3929
     private_https_port: 8447
     proxy_port: 19464
-    health: {kind: http, url: "http://127.0.0.1:3929/"}
+    health: {kind: http, url: "http://127.0.0.1:3929/__mu3lab_surfsense_health"}
     auth: local
     dependencies: [litellm, ollama]
     availability: available
