@@ -1,0 +1,128 @@
+schema_version: 1
+server: immich-control
+revision: "0.5.2"
+reviewed_at: "2026-09-30"
+guidance: |
+  Asset ids come from search results; pass them to other tools rather than guessing.
+  Search by what is in the picture with immich_search_smart; search by date, place, camera or
+  person with immich_search_metadata. Tools whose names end in a workflow (for example
+  immich_memories_today or immich_categorize_duplicates) do a whole job in one call; prefer
+  them over chaining smaller tools. Destructive tools also need confirm: true, and duplicate
+  tools do a dry run unless told otherwise; show the owner the dry run first.
+
+categories:
+  - id: search
+    title: Search and details
+    summary: Find photos and videos by what is in them, date, place, camera, person, album or tag; read a photo's details, EXIF data and library statistics.
+  - id: albums
+    title: Albums
+    summary: List and open albums; create, rename and delete albums, add or remove photos, or build an album from a search in one step.
+  - id: people
+    title: People and faces
+    summary: List people and their photos, and suggest names for unnamed faces; rename, hide or merge people.
+  - id: memories
+    title: Memories
+    summary: Today's "years ago" memories and a daily digest of new uploads and stats.
+  - id: tags
+    title: Tags
+    summary: List tags; create, rename and delete tags and tag photos.
+  - id: duplicates
+    title: Duplicates and stacks
+    summary: Find, explain and compare duplicate photos and stacked shots; resolve duplicates with a dry run first and edit stacks.
+  - id: editing
+    title: Editing details
+    summary: Change a photo's description, date, location, rating, favourite or archive state, one at a time or in bulk.
+  - id: sharing
+    title: Sharing
+    summary: List and create public share links, and comments and likes.
+    default_on: false
+  - id: trash
+    title: Trash
+    summary: List the trash, move photos to it, and restore photos from it.
+    default_on: false
+
+tools:
+  immich_search_smart: {category: search, access: read, core: true}
+  immich_search_metadata: {category: search, access: read, core: true}
+  immich_get_asset: {category: search, access: read, core: true}
+  immich_get_server_statistics: {category: search, access: read, core: true}
+  immich_search_explore: {category: search, access: read}
+  immich_list_assets: {category: search, access: read}
+  immich_get_asset_exif: {category: search, access: read}
+  immich_get_asset_statistics: {category: search, access: read}
+  immich_get_storage: {category: search, access: read}
+
+  immich_list_albums: {category: albums, access: read, core: true}
+  immich_get_album: {category: albums, access: read}
+  immich_get_album_statistics: {category: albums, access: read}
+  immich_create_album: {category: albums, access: write}
+  immich_update_album: {category: albums, access: write}
+  immich_add_assets_to_album: {category: albums, access: write}
+  immich_remove_assets_from_album: {category: albums, access: write}
+  immich_delete_album: {category: albums, access: write}
+  immich_search_then_album: {category: albums, access: write}
+
+  immich_list_people: {category: people, access: read, core: true}
+  immich_get_person: {category: people, access: read}
+  immich_get_person_assets: {category: people, access: read}
+  immich_suggest_face_names: {category: people, access: read}
+  immich_update_person: {category: people, access: write}
+  immich_hide_person: {category: people, access: write}
+  immich_merge_people: {category: people, access: write}
+
+  immich_list_memories: {category: memories, access: read}
+  immich_get_memory: {category: memories, access: read}
+  immich_memories_today: {category: memories, access: read}
+  immich_daily_digest: {category: memories, access: read}
+
+  immich_list_tags: {category: tags, access: read}
+  immich_get_tag: {category: tags, access: read}
+  immich_create_tag: {category: tags, access: write}
+  immich_update_tag: {category: tags, access: write}
+  immich_delete_tag: {category: tags, access: write}
+  immich_add_tag_to_assets: {category: tags, access: write}
+  immich_remove_tag_from_assets: {category: tags, access: write}
+
+  immich_list_duplicates: {category: duplicates, access: read}
+  immich_categorize_duplicates: {category: duplicates, access: read}
+  immich_find_byte_dupes: {category: duplicates, access: read}
+  immich_explain_duplicate_group: {category: duplicates, access: read}
+  immich_find_clip_dupes: {category: duplicates, access: read}
+  immich_compare_assets: {category: duplicates, access: read}
+  immich_audit_active: {category: duplicates, access: read}
+  immich_list_stacks: {category: duplicates, access: read}
+  immich_resolve_duplicates: {category: duplicates, access: write}
+  immich_resolve_with_keep_strategy: {category: duplicates, access: write}
+  immich_create_stack: {category: duplicates, access: write}
+  immich_update_stack: {category: duplicates, access: write}
+  immich_delete_stack: {category: duplicates, access: write}
+
+  immich_update_asset: {category: editing, access: write}
+  immich_bulk_update_assets: {category: editing, access: write}
+
+  immich_list_shared_links: {category: sharing, access: read}
+  immich_get_shared_link: {category: sharing, access: read}
+  immich_list_activities: {category: sharing, access: read}
+  immich_get_activity_statistics: {category: sharing, access: read}
+  immich_create_shared_link: {category: sharing, access: write}
+  immich_update_shared_link: {category: sharing, access: write}
+  immich_delete_shared_link: {category: sharing, access: write}
+  immich_create_activity: {category: sharing, access: write}
+  immich_delete_activity: {category: sharing, access: write}
+
+  immich_list_trash: {category: trash, access: read}
+  immich_audit_trash: {category: trash, access: read}
+  immich_delete_asset: {category: trash, access: write}
+  immich_restore_from_trash: {category: trash, access: write}
+  immich_restore_by_query: {category: trash, access: write}
+
+blocked:
+  immich_empty_trash: Permanently deletes everything in the trash in one call. Empty the trash in Immich itself.
+  immich_upload_asset_from_path: Uploads from a file path inside the connector's container, where chat has no files.
+  immich_run_job: Controls Immich's background jobs, which is server administration.
+  immich_list_jobs: Server administration; Mu3Lab reports app health itself.
+  immich_get_server_info: Server configuration details; not needed to work with photos.
+  immich_get_capabilities: Diagnostics; Mu3Lab checks connector health itself.
+  immich_ping: Diagnostics; Mu3Lab checks connector health itself.
+  immich_download_asset_original: Returns an Immich-internal URL the owner's devices cannot open from chat.
+  immich_download_asset_thumbnail: Returns an Immich-internal URL the owner's devices cannot open from chat.

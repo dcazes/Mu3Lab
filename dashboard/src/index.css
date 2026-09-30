@@ -3206,3 +3206,126 @@ a.row-main:hover b,
     transition: none !important;
   }
 }
+
+/* Chat tool categories */
+.tool-categories {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.tool-category + .tool-category {
+  border-top: 1px solid var(--border);
+}
+
+.tool-category-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 12px;
+}
+
+.tool-category-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-category-toggle:hover b {
+  color: var(--accent);
+}
+
+.tool-category-toggle > svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+
+.tool-category-toggle > svg.is-open {
+  transform: rotate(90deg);
+}
+
+.tool-category.is-off .row-text b {
+  color: var(--text-2);
+}
+
+.tool-count {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.tool-category .rows {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2, var(--surface));
+  padding-left: 25px;
+}
+
+.tool-row .row-text b {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.switch-inline {
+  display: inline-flex;
+  flex: none;
+}
+
+.switch-inline input[role='switch'] {
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--border-strong);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch-inline input[role='switch']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s;
+}
+
+.switch-inline input[role='switch']:checked {
+  background: var(--accent);
+}
+
+.switch-inline input[role='switch']:checked::after {
+  transform: translateX(14px);
+}
+
+.switch-inline input[role='switch']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .tool-count {
+    display: none;
+  }
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -249,7 +250,7 @@ def _bind_live_connectors(log) -> tuple[bool, str]:
     """Attach every enabled, live connector to its app's assistant."""
     from ctl.control_state import ControlState
     from ctl.mcp_catalog import load as load_mcp_catalog
-    from ctl.mcp_registry import credential_path
+    from ctl.mcp_ops import bind
     from ctl.registry import load as load_registry
 
     state = ControlState.runtime()
@@ -263,10 +264,7 @@ def _bind_live_connectors(log) -> tuple[bool, str]:
                 or runtime["state"] != "live"
             ):
                 continue
-            values = read_runtime_env(credential_path(server.id))
-            ok, detail = sync_mcp(
-                server, runtime.get("tool_snapshot") or [], values.get("MCP_AUTH_TOKEN", ""), enabled=True, log=log
-            )
+            ok, detail = bind(server, runtime.get("tool_snapshot") or [], log)
             if not ok:
                 return False, detail
     return True, "Live connectors are attached to their assistants."
@@ -288,30 +286,109 @@ def sync_mcp(server, tools: list[dict], token: str, *, enabled: bool, log) -> tu
     """Bind a reviewed live MCP to only its corresponding saved app agent."""
     if server.transport != "streamable-http":
         return True, "LobeChat requires Streamable HTTP MCP."
-    if not (RuntimePaths().projects / "lobehub" / ".env").is_file():
-        return True, "LobeChat is not installed."
-    try:
-        credential = _quoted(_encrypt_credential(token)) if token else "NULL"
-    except (ValueError, OSError) as exc:
-        return False, str(exc)
-    identifier = _quoted(f"mu3lab-{server.id}")
-    slug = _quoted(f"mu3lab-{server.service_id}")
-    name = _quoted(server.name)
-    endpoint = _quoted(server.endpoint)
     from ctl.mcp_activity import McpActivity
 
     activity = McpActivity()
-    tool_rows = [
-        {
-            "name": str(tool.get("id", "")),
-            "title": str(tool.get("title", ""))[:255],
-            "risk": "write" if tool.get("risk") == "write" else "read",
-            "permission": activity.permission(server.id, str(tool.get("id", "")), str(tool.get("risk", "write"))),
-            "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
-        }
+    rows = [
+        _tool_row(tool, activity.permission(server.id, str(tool.get("id", "")), str(tool.get("risk", "write"))))
         for tool in tools
         if tool.get("id")
     ]
+    ok = _sync_connector(
+        f"mu3lab-{server.id}", server.service_id, server.name, server.endpoint, rows, token, enabled=enabled, log=log
+    )
+    return ok, (
+        f"{server.name} synced to its LobeChat agent."
+        if ok
+        else f"LobeChat rejected the {server.name} connector sync; check its database logs."
+    )
+
+
+def sync_gateway(service_id: str, app_name: str, tools: list[dict], *, enabled: bool, log) -> tuple[bool, str]:
+    """Connect an app's assistant to its tool gateway path, and only that.
+
+    The assistant's instructions carry the gateway's category map while it is
+    connected and go back to the default when it is not, unless the owner has
+    edited them in LobeChat.
+    """
+    from ctl import mcp_gateway
+
+    rows = [_tool_row(tool, "auto" if tool.get("risk") == "read" else "needs_approval") for tool in tools]
+    instructions = ""
+    if enabled:
+        policy = json.loads((mcp_gateway.project() / "policy" / "policy.json").read_text(encoding="utf-8"))
+        instructions = str(policy["apps"][service_id]["instructions"])
+    else:
+        instructions = next((prompt for slug, _t, _d, prompt in AGENTS if slug == service_id), "")
+    ok = _sync_connector(
+        f"mu3lab-{service_id}",
+        service_id,
+        app_name,
+        mcp_gateway.endpoint(service_id),
+        rows,
+        mcp_gateway.app_token(service_id) if enabled else "",
+        enabled=enabled,
+        log=log,
+        exclusive=True,
+        instructions=instructions,
+    )
+    return ok, (
+        f"{app_name}'s assistant is connected through the tool gateway."
+        if ok
+        else f"LobeChat rejected the {app_name} connector sync; check its database logs."
+    )
+
+
+def _tool_row(tool: dict, permission: str) -> dict:
+    return {
+        "name": str(tool.get("id", "")),
+        "title": str(tool.get("title", ""))[:255],
+        "risk": "write" if tool.get("risk") == "write" else "read",
+        "permission": permission,
+        "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+    }
+
+
+def _instructions_sql(slug: str, service_id: str, instructions: str) -> str:
+    """Replace a Mu3Lab-written system role; never one the owner has edited."""
+    seeded = next((prompt for key, _t, _d, prompt in AGENTS if key == service_id), "")
+    digest = hashlib.sha256(instructions.encode()).hexdigest()
+    return f"""
+UPDATE agents a SET system_role = {_quoted(instructions)},
+  metadata = COALESCE(a.metadata, '{{}}'::jsonb) || jsonb_build_object('mu3lab_system_role_sha', {_quoted(digest)}),
+  updated_at = now()
+WHERE a.slug = {slug} AND a.workspace_id IS NULL
+  AND a.system_role IS DISTINCT FROM {_quoted(instructions)}
+  AND (a.system_role = {_quoted(seeded)}
+       OR a.metadata ->> 'mu3lab_system_role_sha'
+          = encode(sha256(convert_to(COALESCE(a.system_role, ''), 'UTF8')), 'hex'));
+"""
+
+
+def _sync_connector(
+    raw_identifier: str,
+    service_id: str,
+    raw_name: str,
+    raw_endpoint: str,
+    tool_rows: list[dict],
+    token: str,
+    *,
+    enabled: bool,
+    log,
+    exclusive: bool = False,
+    instructions: str = "",
+) -> bool:
+    if not (RuntimePaths().projects / "lobehub" / ".env").is_file():
+        return True
+    try:
+        credential = _quoted(_encrypt_credential(token)) if token else "NULL"
+    except (ValueError, OSError) as exc:
+        log(str(exc))
+        return False
+    identifier = _quoted(raw_identifier)
+    slug = _quoted(f"mu3lab-{service_id}")
+    name = _quoted(raw_name)
+    endpoint = _quoted(raw_endpoint)
     tool_json = _quoted(json.dumps(tool_rows, ensure_ascii=False))
     status = "connected" if enabled else "disconnected"
     insert_sql = (
@@ -326,9 +403,37 @@ FROM agents a WHERE a.slug = {slug} AND a.workspace_id IS NULL
         if enabled
         else ""
     )
+    # An assistant connected through the gateway keeps no other Mu3Lab connector.
+    exclusive_sql = (
+        f"""
+UPDATE agents a SET plugins = COALESCE((
+    SELECT jsonb_agg(item.value)
+    FROM jsonb_array_elements(COALESCE(a.plugins, '[]'::jsonb)) AS item(value)
+    WHERE CASE WHEN jsonb_typeof(item.value) = 'string' THEN item.value #>> '{{}}'
+               ELSE item.value ->> 'identifier' END NOT LIKE 'mu3lab-%'
+       OR CASE WHEN jsonb_typeof(item.value) = 'string' THEN item.value #>> '{{}}'
+               ELSE item.value ->> 'identifier' END = {identifier}
+  ), '[]'::jsonb), updated_at = now()
+WHERE a.slug = {slug} AND a.workspace_id IS NULL;
+DELETE FROM user_connectors c USING agents a
+ WHERE c.agent_id = a.id AND a.slug = {slug} AND a.workspace_id IS NULL
+   AND c.identifier LIKE 'mu3lab-%' AND c.identifier <> {identifier};
+"""
+        if exclusive
+        else ""
+    )
+    stale_sql = (
+        f"""
+DELETE FROM user_connector_tools t USING user_connectors c, agents a
+ WHERE t.user_connector_id = c.id AND c.agent_id = a.id AND a.slug = {slug} AND c.identifier = {identifier}
+   AND t.tool_name NOT IN (SELECT r.name FROM jsonb_to_recordset({tool_json}::jsonb) AS r(name text));
+"""
+        if enabled
+        else ""
+    )
     sql = f"""
 BEGIN;
-{insert_sql}
+{exclusive_sql}{insert_sql}
 UPDATE user_connectors c SET status = '{status}', is_enabled = {"true" if enabled else "false"},
   mcp_server_url = {endpoint}, mcp_connection_type = 'http',
   credentials = COALESCE({credential}, c.credentials), updated_at = now()
@@ -347,6 +452,7 @@ UPDATE agents a SET plugins = CASE WHEN {"true" if enabled else "false"} THEN
                ELSE item.value ->> 'identifier' END IS DISTINCT FROM {identifier}
   ), '[]'::jsonb) END, updated_at = now()
 WHERE a.slug = {slug} AND a.workspace_id IS NULL;
+{stale_sql}
 INSERT INTO user_connector_tools (user_connector_id, user_id, tool_name, display_name,
   description, input_schema, crud_type, permission, created_at, updated_at)
 SELECT c.id, c.user_id, t.name, t.title, t.title, t.parameters,
@@ -360,30 +466,10 @@ ON CONFLICT (user_connector_id, tool_name) DO UPDATE SET
   input_schema = EXCLUDED.input_schema, crud_type = EXCLUDED.crud_type,
   permission = EXCLUDED.permission,
   updated_at = now();
-COMMIT;
+{_instructions_sql(slug, service_id, instructions) if instructions else ""}COMMIT;
 """
-    rc, _output = actions.docker_cmd_stdin(
-        [
-            "docker",
-            "exec",
-            "-i",
-            "mu3lab-lobehub-postgres-1",
-            "psql",
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-U",
-            "postgres",
-            "-d",
-            "lobehub",
-        ],
-        sql,
-        log,
-    )
-    return rc == 0, (
-        f"{server.name} synced to its LobeChat agent."
-        if rc == 0
-        else f"LobeChat rejected the {server.name} connector sync; check its database logs."
-    )
+    rc, _output = actions.docker_cmd_stdin(PSQL, sql, log)
+    return rc == 0
 
 
 def set_tool_permission(server_id: str, tool_name: str, permission: str) -> tuple[bool, str]:

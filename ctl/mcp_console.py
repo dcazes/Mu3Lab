@@ -36,6 +36,18 @@ def _resolve(server_id: str, tool_name: str):
     tool = next((item for item in runtime.get("tool_snapshot", []) if item.get("id") == tool_name), None)
     if not tool:
         raise ValueError("tool is not in the verified tool list")
+    if server.gateway:
+        # The console follows the same review and switches as chat does.
+        from ctl.mcp_gateway import review_for, tool_states
+
+        review = review_for(server)
+        reviewed = review.tools.get(tool_name)
+        if reviewed is None:
+            raise ValueError(review.blocked.get(tool_name) or "tool has not been reviewed for Mu3Lab")
+        states = tool_states(server, review)
+        if not states["categories"][reviewed.category] or not states["tools"][tool_name]:
+            raise ValueError("tool is switched off")
+        return server, tool | {"risk": reviewed.access}, "auto" if reviewed.access == "read" else "needs_approval"
     permission = McpActivity().permission(server_id, tool_name, str(tool.get("risk", "write")))
     if permission == "disabled":
         raise ValueError("tool is disabled")

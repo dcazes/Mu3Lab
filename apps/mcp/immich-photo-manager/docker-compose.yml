@@ -1,0 +1,17 @@
+name: mu3lab-mcp-immich-photo-manager
+services:
+  immich-photo-manager:
+    image: ghcr.io/drolosoft/immich-photo-manager:2.0.11
+    restart: "no"
+    environment:
+      IMMICH_BASE_URL: http://immich-server:2283
+      IMMICH_API_KEY: ${IMMICH_API_KEY:?IMMICH_API_KEY is required}
+      MCP_TRANSPORT: http
+      # The gateway reaches it by service name; loopback is Mu3Lab's health probe.
+      MCP_ALLOWED_HOSTS: immich-photo-manager,immich-photo-manager:8626,127.0.0.1,127.0.0.1:8815,localhost
+    ports: ["127.0.0.1:8815:8626"]
+    networks: [mu3lab_backend, mu3lab_mcp_upstream]
+    security_opt: [no-new-privileges:true]
+networks:
+  mu3lab_backend: {external: true}
+  mu3lab_mcp_upstream: {external: true}

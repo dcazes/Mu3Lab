@@ -35,6 +35,12 @@ class McpServer:
     auto_provision_note: str = ""
     review_note: str = ""
     reviewed_update: dict[str, str] | None = None
+    # A checked-in tool review; connectors with one are served through the tool gateway.
+    review: str = ""
+
+    @property
+    def gateway(self) -> bool:
+        return bool(self.review)
 
     def compose_path(self, root: Path = ROOT) -> Path | None:
         if not self.compose_dir:
@@ -43,6 +49,14 @@ class McpServer:
         if root.resolve() not in path.parents:
             raise ValueError("MCP compose path escapes the checkout")
         return path
+
+
+def for_service(servers: tuple[McpServer, ...], service_id: str) -> list[McpServer]:
+    """An app's reviewed connectors, default first."""
+    return sorted(
+        (server for server in servers if server.service_id == service_id and server.status == "accepted"),
+        key=lambda server: not server.preferred,
+    )
 
 
 def load(registry: Registry, path: Path = CATALOG) -> tuple[McpServer, ...]:
@@ -76,6 +90,11 @@ def load(registry: Registry, path: Path = CATALOG) -> tuple[McpServer, ...]:
         compose_dir = str(item.get("compose_dir", ""))
         if compose_dir.startswith("/") or ".." in Path(compose_dir).parts:
             raise ValueError(f"MCP server {server_id} has unsafe compose_dir")
+        review = str(item.get("review", ""))
+        if review and (
+            Path(review).is_absolute() or ".." in Path(review).parts or not (path.parent / review).is_file()
+        ):
+            raise ValueError(f"MCP server {server_id} has a missing or unsafe review file")
         update = item.get("reviewed_update")
         if update is not None:
             if not isinstance(update, dict) or not all(
@@ -104,6 +123,7 @@ def load(registry: Registry, path: Path = CATALOG) -> tuple[McpServer, ...]:
                 auto_provision_note=str(item.get("auto_provision_note", "")),
                 review_note=str(item.get("review_note", "")),
                 reviewed_update={str(key): str(value) for key, value in update.items()} if update else None,
+                review=review,
             )
         )
         ids.add(server_id)

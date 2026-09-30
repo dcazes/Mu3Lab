@@ -133,7 +133,7 @@ if have docker; then
   mapfile -t volumes < <("${DOCKER[@]}" volume ls --format '{{.Name}} {{.Label "com.docker.compose.project"}}' \
     | awk -v re="$is_ours" '$2 ~ re || $1 ~ /^(mu3lab|ingress_|authentik_|vaultwarden_)/ {print $1}')
   [[ ${#volumes[@]} -gt 0 ]] && run "${DOCKER[@]}" volume rm -f "${volumes[@]}"
-  for net in mu3lab_frontend mu3lab_backend mu3lab_mcp; do
+  for net in mu3lab_frontend mu3lab_backend mu3lab_mcp mu3lab_mcp_upstream; do
     "${DOCKER[@]}" network inspect "$net" >/dev/null 2>&1 && run "${DOCKER[@]}" network rm "$net"
   done
   mapfile -t listed < <(grep -hoE '"[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?"' \

@@ -174,6 +174,8 @@ def _immich(log) -> dict[str, str]:
         timeout=60,
     )
     admins = [line.strip() for line in output.splitlines() if line.strip()] if rc == 0 else []
+    if rc == 0 and not admins:
+        raise ValueError("Open Immich and sign in once; chat connects after your Immich account exists")
     if len(admins) != 1 or not re.fullmatch(r"[0-9a-f-]{36}", admins[0]):
         raise ValueError("Immich needs exactly one active administrator for automatic MCP registration")
     token = secrets.token_urlsafe(32).replace("-", "").replace("_", "")
@@ -214,7 +216,8 @@ PROVISIONERS = {
     "mealie-community": _mealie,
     "surfsense-official": _surfsense,
     "nextcloud-context-agent": _nextcloud,
-    "immich-community": _immich,
+    "immich-photo-manager": _immich,
+    "immich-control": _immich,
 }
 
 

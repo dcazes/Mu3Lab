@@ -24,7 +24,85 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 
-SUPPORTED_ACTIONS = frozenset({"prepare", "enable", "install", "restart", "disable", "verify", "update"})
+SUPPORTED_ACTIONS = frozenset({"prepare", "enable", "install", "restart", "disable", "verify", "update", "switch"})
+
+
+def _app_name(service_id: str) -> str:
+    return next((service.name for service in load_registry().services if service.id == service_id), service_id)
+
+
+def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
+    """Attach a live connector to its app's assistant, through the gateway when reviewed."""
+    from ctl.lobehub_ops import sync_gateway, sync_mcp
+
+    if not server.gateway:
+        token = read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", "")
+        return sync_mcp(server, tools, token, enabled=True, log=log)
+    from ctl import mcp_gateway
+
+    ok, detail = mcp_gateway.refresh(log)
+    if not ok:
+        return False, detail
+    try:
+        surface = mcp_gateway.surface(server.service_id)
+    except (OSError, ValueError, KeyError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        return False, f"The tool gateway did not list {server.name}'s tools: {redact(str(exc))}"
+    return sync_gateway(server.service_id, _app_name(server.service_id), surface, enabled=True, log=log)
+
+
+def unbind(server, log) -> tuple[bool, str]:
+    """Detach a connector from its app's assistant; call after its state is updated."""
+    from ctl.lobehub_ops import sync_gateway, sync_mcp
+
+    if not server.gateway:
+        return sync_mcp(server, [], "", enabled=False, log=log)
+    from ctl import mcp_gateway
+
+    try:
+        mcp_gateway.write_policy()
+    except (OSError, ValueError) as exc:
+        log(f"Tool gateway policy could not be written: {exc}")
+    return sync_gateway(server.service_id, _app_name(server.service_id), [], enabled=False, log=log)
+
+
+def rebind_app(service_id: str, log) -> tuple[bool, str]:
+    """Apply changed switches: new policy, new tool list, new category map."""
+    state = ControlState.runtime()
+    for server in load_catalog(load_registry()):
+        runtime = state.mcp_server(server.id) if state else None
+        if server.service_id == service_id and runtime and runtime["enabled"] and runtime["state"] == "live":
+            return bind(server, runtime.get("tool_snapshot") or [], log)
+    if state:
+        from ctl import mcp_gateway
+
+        try:
+            mcp_gateway.write_policy()
+        except (OSError, ValueError) as exc:
+            return False, str(exc)
+    return True, "No live connector; the switches apply when it connects."
+
+
+def _siblings(server, state: ControlState) -> list:
+    """This app's other connectors that are switched on."""
+    return [
+        other
+        for other in load_catalog(load_registry())
+        if other.service_id == server.service_id
+        and other.id != server.id
+        and (runtime := state.mcp_server(other.id))
+        and runtime["enabled"]
+    ]
+
+
+def _stop_connector(server, state: ControlState, log) -> tuple[bool, str]:
+    project = credential_path(server.id).parent
+    if (project / "docker-compose.yml").is_file():
+        rc, output = actions.compose_action(project, "stop", log)
+        if rc:
+            return False, redact(output)
+    state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+    ok, detail = unbind(server, log)
+    return ok, detail
 
 
 def _materialize(server, root: Path) -> Path:
@@ -276,9 +354,7 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
                 error={} if rc == 0 else {"message": redact(output)},
             )
             success = success and rc == 0
-            from ctl.lobehub_ops import sync_mcp
-
-            linked, detail = sync_mcp(server, [], "", enabled=False, log=log)
+            linked, detail = unbind(server, log)
             if not linked:
                 log(detail)
             continue
@@ -312,15 +388,7 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
         try:
             tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
             state.set_mcp_server(server.id, service_id, enabled=True, state="live", tools=tools, verified=True)
-            from ctl.lobehub_ops import sync_mcp
-
-            linked, link_detail = sync_mcp(
-                server,
-                tools,
-                read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
-                enabled=True,
-                log=log,
-            )
+            linked, link_detail = bind(server, tools, log)
             if not linked:
                 state.set_mcp_server(
                     server.id, service_id, enabled=True, state="incompatible", error={"message": link_detail}
@@ -335,20 +403,22 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
 
 
 def preenable(service_id: str, root: Path) -> None:
-    """Switch on an app's preferred MCP before the app itself is installed.
+    """Switch on an app's default connector when the app is installed.
 
-    Used for core apps whose chat connector is on by default. The app
-    installer's final ``sync_application`` starts the MCP and links it to
-    LobeChat once the app is healthy. An MCP the owner has already enabled
-    or disabled is left as it is.
+    The installer's final ``sync_application`` creates its credential, starts
+    it and links it to the app's assistant once the app is healthy. An app
+    whose connectors the owner already enabled, disabled or switched is left
+    as it is.
     """
     state = ControlState.runtime()
     if state is None:
         return
-    for server in load_catalog(load_registry()):
+    catalog = load_catalog(load_registry())
+    # The owner chose before: any of this app's connectors has a record.
+    if any(state.mcp_server(server.id) for server in catalog if server.service_id == service_id):
+        return
+    for server in catalog:
         if server.service_id != service_id or server.status != "accepted" or not server.preferred:
-            continue
-        if state.mcp_server(server.id):
             continue
         _materialize(server, root)
         state.set_mcp_server(server.id, service_id, enabled=True, state="prepared")
@@ -443,18 +513,10 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
             if not healthy:
                 raise ValueError("Updated MCP health check failed: " + redact(detail))
             tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
-            from ctl.lobehub_ops import sync_mcp
-
-            linked, detail = sync_mcp(
-                server,
-                tools,
-                read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""),
-                enabled=True,
-                log=log,
-            )
+            state.set_mcp_server(server.id, server.service_id, enabled=True, state="live", tools=tools, verified=True)
+            linked, detail = bind(server, tools, log)
             if not linked:
                 raise ValueError(detail)
-            state.set_mcp_server(server.id, server.service_id, enabled=True, state="live", tools=tools, verified=True)
             store.transition(
                 job_id,
                 "succeeded",
@@ -504,6 +566,17 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             actor=worker_id,
             detail="The worker rejected an unavailable MCP operation.",
             error_code="unsupported_mcp_action",
+            step_id="validate",
+        )
+        return
+    others = _siblings(server, state)
+    if others and action not in {"switch", "disable"}:
+        store.transition(
+            job_id,
+            "failed",
+            actor=actor,
+            detail=f"{others[0].name} is this app's active connector. Switch connectors instead.",
+            error_code="mcp_other_connector_active",
             step_id="validate",
         )
         return
@@ -577,9 +650,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
                 )
                 return
         state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-        from ctl.lobehub_ops import sync_mcp
-
-        linked, link_detail = sync_mcp(server, [], "", enabled=False, log=log)
+        linked, link_detail = unbind(server, log)
         if not linked:
             store.transition(
                 job_id,
@@ -592,6 +663,19 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             return
         store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
         return
+    for other in others:
+        log(f"Switching off {other.name}.")
+        stopped, stop_detail = _stop_connector(other, state, log)
+        if not stopped:
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=f"{other.name} could not be switched off: {stop_detail}",
+                error_code="mcp_switch_failed",
+                step_id="switch",
+            )
+            return
     missing = missing_credentials(server)
     if missing:
         provisioned, provision_detail = ensure_credentials(server, log)
@@ -599,10 +683,12 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             log(provision_detail)
         missing = missing_credentials(server)
     if missing:
+        # Stay switched on: the worker retries, so the connector connects as
+        # soon as the app can issue a credential (for example after first sign-in).
         state.set_mcp_server(
             server.id,
             server.service_id,
-            enabled=False,
+            enabled=True,
             state="authentication_required",
             error={"message": provision_detail},
         )
@@ -663,11 +749,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     state.set_mcp_server(server.id, server.service_id, enabled=True, state="live", tools=tools, verified=True)
-    from ctl.lobehub_ops import sync_mcp
-
-    linked, link_detail = sync_mcp(
-        server, tools, read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", ""), enabled=True, log=log
-    )
+    linked, link_detail = bind(server, tools, log)
     if not linked:
         state.set_mcp_server(
             server.id, server.service_id, enabled=True, state="incompatible", error={"message": link_detail}

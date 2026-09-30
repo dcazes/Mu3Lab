@@ -77,7 +77,7 @@ PORT_INFO = {
 }
 
 # Docker networks Step 1a must create before any compose project starts.
-MU3LAB_NETWORKS = ("mu3lab_frontend", "mu3lab_backend", "mu3lab_mcp")
+MU3LAB_NETWORKS = ("mu3lab_frontend", "mu3lab_backend", "mu3lab_mcp", "mu3lab_mcp_upstream")
 
 # Repo root = parent of this file's directory (ctl/ -> Mu3Lab/).
 ROOT = Path(__file__).resolve().parent.parent

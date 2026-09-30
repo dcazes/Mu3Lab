@@ -30,12 +30,16 @@ export const mcpStateLabel: Record<McpServer['state'], string> = {
 /** A short, plain-language status line for a connection. */
 export function mcpSummary(server: McpServer, appName: string): { label: string; tone: Tone; detail: string } {
   switch (server.state) {
-    case 'live':
+    case 'live': {
+      const on = server.gateway ? server.tools.filter(toolIsOn(server)).length : server.tools.length;
       return {
         label: 'Connected',
         tone: 'green',
-        detail: `${server.tools.length} tool${server.tools.length === 1 ? '' : 's'} available in chat`,
+        detail: server.gateway
+          ? `${on} of ${server.tools.length} tools on`
+          : `${on} tool${on === 1 ? '' : 's'} available in chat`,
       };
+    }
     case 'stopped':
       return { label: 'App stopped', tone: 'gray', detail: `Start ${appName} to use it from chat.` };
     case 'authentication_required':
@@ -61,7 +65,29 @@ export function useMcpRegistry() {
   });
 }
 
-export type McpAction = 'prepare' | 'install' | 'restart' | 'disable' | 'verify' | 'update';
+export type McpAction = 'prepare' | 'install' | 'restart' | 'disable' | 'verify' | 'update' | 'switch';
+
+/** A gateway tool is usable when both it and its category are switched on. */
+export const toolIsOn =
+  (server: McpServer) =>
+  (tool: McpServer['tools'][number]): boolean =>
+    tool.enabled && Boolean(server.categories?.find((category) => category.id === tool.category)?.enabled);
+
+/** An app's connectors: the enabled one first, then the default, then the rest. */
+export function connectorsFor(servers: McpServer[], serviceId: string): McpServer[] {
+  const rank = (server: McpServer) => (server.enabled ? 0 : server.review?.preferred ? 1 : 2);
+  return servers.filter((server) => server.service_id === serviceId).sort((a, b) => rank(a) - rank(b));
+}
+
+/** One connector per app: the one chat uses, or would use once connected. */
+export function primaryConnectors(servers: McpServer[]): McpServer[] {
+  const seen = new Set<string>();
+  return servers.flatMap((server) => {
+    if (seen.has(server.service_id)) return [];
+    seen.add(server.service_id);
+    return [connectorsFor(servers, server.service_id)[0]];
+  });
+}
 
 export const queueMcp = (server: McpServer, action: McpAction) => postApi(`/api/v1/mcp/servers/${server.id}/${action}`);
 
