@@ -10,12 +10,13 @@ from typing import Any
 import psutil
 import yaml
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 
 from ctl import __version__
 from ctl.actions import docker_argv
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Operator, OperatorMutation
+from ctl.api.security import IdentityData, Operator, OperatorMutation
 from ctl.backups import readiness as backup_readiness
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl.provisioning import ProvisioningStore
@@ -152,6 +153,10 @@ def system_config(_operator: Operator) -> dict[str, Any]:
 @router.put("/system/config")
 async def update_system_config(request: Request, operator: OperatorMutation) -> dict[str, Any]:
     mode = str((await runtime.json_body(request)).get("compute_mode", ""))
+    return await run_in_threadpool(_set_compute_mode, mode, operator)
+
+
+def _set_compute_mode(mode: str, operator: IdentityData) -> dict[str, Any]:
     if mode not in COMPUTE_MODES:
         raise ApiError(422, "compute_mode must be auto, cpu, nvidia, or amd")
     state = runtime.control_state()

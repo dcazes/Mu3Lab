@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from ctl import nextcloud_calendar as calendar
 from ctl.api import runtime
@@ -116,8 +117,11 @@ def get_connection(reader: Reader) -> dict[str, Any]:
 async def save_connection(request: Request, writer: Writer) -> dict[str, Any]:
     payload = await runtime.json_body(request)
     try:
-        return calendar.connect(
-            str(writer["subject_id"]), str(payload.get("username", "")).strip(), str(payload.get("app_password", ""))
+        return await run_in_threadpool(
+            calendar.connect,
+            str(writer["subject_id"]),
+            str(payload.get("username", "")).strip(),
+            str(payload.get("app_password", "")),
         )
     except calendar.CalendarError as exc:
         raise _raise(exc) from exc
@@ -128,7 +132,9 @@ async def select_connection(request: Request, writer: Writer) -> dict[str, Any]:
     state = _state()
     payload = await runtime.json_body(request)
     try:
-        return calendar.select(str(writer["subject_id"]), str(payload.get("calendar_id", "")), state)
+        return await run_in_threadpool(
+            calendar.select, str(writer["subject_id"]), str(payload.get("calendar_id", "")), state
+        )
     except calendar.CalendarError as exc:
         raise _raise(exc) from exc
 
@@ -226,7 +232,7 @@ def list_events(request: Request, reader: Reader) -> dict[str, Any]:
 async def create_event(request: Request, writer: Writer) -> dict[str, Any]:
     payload = await runtime.json_body(request)
     try:
-        return calendar.create_event(str(writer["subject_id"]), payload)
+        return await run_in_threadpool(calendar.create_event, str(writer["subject_id"]), payload)
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 
@@ -235,7 +241,7 @@ async def create_event(request: Request, writer: Writer) -> dict[str, Any]:
 async def update_event(event_id: str, request: Request, writer: Writer) -> dict[str, Any]:
     payload = await runtime.json_body(request)
     try:
-        return calendar.update_event(str(writer["subject_id"]), event_id, payload)
+        return await run_in_threadpool(calendar.update_event, str(writer["subject_id"]), event_id, payload)
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 
@@ -248,6 +254,6 @@ async def delete_event(event_id: str, request: Request, writer: Writer) -> dict[
         payload = {}
     revision = str(payload.get("revision", "")) if isinstance(payload, dict) else ""
     try:
-        return calendar.delete_event(str(writer["subject_id"]), event_id, revision)
+        return await run_in_threadpool(calendar.delete_event, str(writer["subject_id"]), event_id, revision)
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc

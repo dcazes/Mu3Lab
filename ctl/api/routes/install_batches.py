@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
@@ -90,6 +91,10 @@ async def create_install_batch(request: Request, operator: VerifiedAccount) -> d
     parallel = payload.get("parallel_downloads", DEFAULT_PARALLEL_DOWNLOADS)
     if not isinstance(parallel, int) or isinstance(parallel, bool):
         raise ApiError(409, "parallel_downloads must be a whole number")
+    return await run_in_threadpool(_create_batch, service_ids, parallel, request, operator)
+
+
+def _create_batch(service_ids: list[str], parallel: int, request: Request, operator: IdentityData) -> dict[str, Any]:
     batches, jobs_store, control = _batch_store(), runtime.job_store(), runtime.control_state()
     try:
         result = batches.create(
@@ -162,11 +167,14 @@ def resume_install_batch(batch_id: str, operator: OperatorMutation) -> dict[str,
 
 
 async def _batch_change(batch_id: str, operator: IdentityData, change) -> dict[str, Any]:
-    batches, _ = _owned_batch(batch_id, operator)
-    try:
-        return {"ok": True, **_batch_view(change(batches))}
-    except ValueError as exc:
-        raise ApiError(409, str(exc)) from exc
+    def apply() -> dict[str, Any]:
+        batches, _ = _owned_batch(batch_id, operator)
+        try:
+            return {"ok": True, **_batch_view(change(batches))}
+        except ValueError as exc:
+            raise ApiError(409, str(exc)) from exc
+
+    return await run_in_threadpool(apply)
 
 
 @router.post("/service-install-batches/{batch_id}/downloads/{service_id}/pause")

@@ -26,9 +26,14 @@ CALDAV = "urn:ietf:params:xml:ns:caldav"
 # Calendar payloads deliberately remain in-memory.  The range cache keeps
 # FullCalendar navigation efficient, while the per-owner snapshot is used only
 # to display the most recent safe projection when Nextcloud is briefly down.
-_CACHE: dict[str, tuple[datetime, dict]] = {}
+_CACHE: dict[str, tuple[datetime, dict, dict[str, dict[str, str]]]] = {}
 _LAST_CACHE: dict[str, tuple[datetime, dict]] = {}
+# Every event seen for an owner, across ranges, so an event shown by any cached
+# view can still be edited after another view was loaded.
 _EVENT_CACHE: dict[str, tuple[datetime, dict[str, dict[str, str]]]] = {}
+_CACHE_TTL = timedelta(minutes=5)
+_MAX_RANGES = 64
+_MAX_EVENTS_PER_OWNER = 5000
 _AUTHORIZATIONS: dict[str, dict[str, str | float]] = {}
 _AUTH_LOCK = threading.RLock()
 _VERIFIED_GROUPS: dict[str, list[str]] = {}
@@ -377,6 +382,22 @@ def _range_key(owner_uid: str, start: datetime, end: datetime, limit: int) -> st
     return f"{owner_uid}:{start.isoformat()}:{end.isoformat()}:{limit}"
 
 
+def _prune_ranges(now: datetime) -> None:
+    """Drop expired range entries, then the oldest beyond the cap."""
+    for key in [key for key, (at, *_rest) in _CACHE.items() if now - at >= _CACHE_TTL]:
+        _CACHE.pop(key, None)
+    for key, _value in sorted(_CACHE.items(), key=lambda item: item[1][0])[: max(0, len(_CACHE) - _MAX_RANGES)]:
+        _CACHE.pop(key, None)
+
+
+def _remember_resources(owner_uid: str, now: datetime, resources: dict[str, dict[str, str]]) -> None:
+    merged = dict(_EVENT_CACHE[owner_uid][1]) if owner_uid in _EVENT_CACHE else {}
+    merged.update(resources)
+    if len(merged) > _MAX_EVENTS_PER_OWNER:
+        merged = dict(list(merged.items())[-_MAX_EVENTS_PER_OWNER:])
+    _EVENT_CACHE[owner_uid] = (now, merged)
+
+
 def connect(owner_uid: str, username: str, app_password: str, paths: RuntimePaths = RuntimePaths()) -> dict:
     calendars = discover(username, app_password)
     selected = next(
@@ -520,7 +541,8 @@ def _calendar_context(owner_uid: str, paths: RuntimePaths) -> tuple[ControlState
     return state, metadata, secret, calendar
 
 
-def _write_ical(payload: dict, uid: str) -> bytes:
+def _event_fields(payload: dict) -> tuple[str, date | datetime, date | datetime]:
+    """Validate the fields the dashboard edits: title, start and end."""
     title = str(payload.get("title", "")).strip()
     if not title:
         raise CalendarError("invalid_event", "An event title is required.")
@@ -544,12 +566,17 @@ def _write_ical(payload: dict, uid: str) -> bytes:
         finish = finish.replace(tzinfo=UTC)
     if finish <= start:
         raise CalendarError("invalid_event", "The event end must be after its start.")
+    return title[:256], start, finish
+
+
+def _write_ical(payload: dict, uid: str) -> bytes:
+    title, start, finish = _event_fields(payload)
     calendar = Calendar()
     calendar.add("prodid", "-//Mu3Lab//Calendar//EN")
     calendar.add("version", "2.0")
     event = Event()
     event.add("uid", uid)
-    event.add("summary", title[:256])
+    event.add("summary", title)
     event.add("dtstart", start)
     event.add("dtend", finish)
     if str(payload.get("location", "")).strip():
@@ -596,7 +623,8 @@ def events(
     persisted because neither cache is durable.
     """
     now = datetime.now(UTC)
-    start = start or now
+    # The Home preview starts "now"; round to the minute so repeated polls share a cache entry.
+    start = start or now.replace(second=0, microsecond=0)
     end = end or (start + timedelta(days=30))
     if start.tzinfo is None:
         start = start.replace(tzinfo=UTC)
@@ -608,8 +636,10 @@ def events(
         raise CalendarError("invalid_range", "Calendar ranges must be between one minute and 93 days.")
     limit = max(1, min(int(limit), 100))
     cache_key = _range_key(owner_uid, start, end, limit)
+    _prune_ranges(now)
     cached = _CACHE.get(cache_key)
-    if cached and now - cached[0] < timedelta(minutes=5):
+    if cached:
+        _remember_resources(owner_uid, now, cached[2])
         return cached[1]
     state = ControlState.runtime(paths)
     metadata = state.calendar_connection(owner_uid) if state else None
@@ -704,9 +734,9 @@ def events(
     state.set_calendar_connection(
         owner_uid, metadata["username_hint"], metadata["calendars"], metadata["selected_calendar_id"], success=True
     )
-    _CACHE[cache_key] = (now, result)
+    _CACHE[cache_key] = (now, result, resources)
     _LAST_CACHE[owner_uid] = (now, result)
-    _EVENT_CACHE[owner_uid] = (now, resources)
+    _remember_resources(owner_uid, now, resources)
     return result
 
 
@@ -739,6 +769,43 @@ def create_event(owner_uid: str, payload: dict, paths: RuntimePaths = RuntimePat
     return {"ok": True, "id": _event_id(uid, str(payload.get("start", "")))}
 
 
+def _edit_ical(original: bytes, payload: dict, uid: str) -> bytes:
+    """Change only what the dashboard edits and keep everything else in the event.
+
+    Notes, location, reminders, attendees, attachments, time zones and any
+    other properties or components survive a title or time change.
+    """
+    title, start, finish = _event_fields(payload)
+    try:
+        calendar = Calendar.from_ical(original)
+    except ValueError as exc:
+        raise CalendarError("unavailable", "Nextcloud returned an invalid calendar event.") from exc
+    matches = [event for event in calendar.walk("VEVENT") if str(event.get("UID", "")) == uid]
+    if len(matches) != 1 or matches[0].get("RRULE") is not None or matches[0].get("RECURRENCE-ID") is not None:
+        raise CalendarError("recurring_event", "Recurring events must be edited in Nextcloud Calendar.")
+    event = matches[0]
+    for name in ("SUMMARY", "DTSTART", "DTEND", "DURATION"):
+        event.pop(name, None)
+    event.add("summary", title)
+    event.add("dtstart", start)
+    event.add("dtend", finish)
+    for field, prop, limit in (("location", "LOCATION", 512), ("notes", "DESCRIPTION", 4000)):
+        if field in payload:
+            event.pop(prop, None)
+            value = str(payload.get(field) or "").strip()
+            if value:
+                event.add(prop.lower(), value[:limit])
+    stamp = datetime.now(UTC)
+    for name in ("DTSTAMP", "LAST-MODIFIED"):
+        event.pop(name, None)
+    event.add("dtstamp", stamp)
+    event.add("last-modified", stamp)
+    sequence = int(event.get("SEQUENCE", 0) or 0)
+    event.pop("SEQUENCE", None)
+    event.add("sequence", sequence + 1)
+    return calendar.to_ical()
+
+
 def update_event(owner_uid: str, event_id: str, payload: dict, paths: RuntimePaths = RuntimePaths()) -> dict:
     secret, resource = _resource(owner_uid, event_id, paths)
     if resource.get("editable") != "true":
@@ -746,12 +813,20 @@ def update_event(owner_uid: str, event_id: str, payload: dict, paths: RuntimePat
     revision = str(payload.get("revision", ""))
     if not revision or revision != _revision(resource["etag"]):
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before saving.")
+    current = _dav("GET", resource["href"], secret)
+    if current.status_code == 404:
+        raise CalendarError("not_found", "The calendar event is no longer available. Refresh and try again.")
+    if current.status_code != 200:
+        raise CalendarError("unavailable", f"Nextcloud could not read the event (HTTP {current.status_code}).")
+    etag = current.headers.get("ETag", "") or resource["etag"]
+    if revision != _revision(etag):
+        raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before saving.")
     response = _dav(
         "PUT",
         resource["href"],
         secret,
-        content=_write_ical(payload, resource["uid"]),
-        headers={"Content-Type": "text/calendar", "If-Match": resource["etag"] or "*"},
+        content=_edit_ical(current.content, payload, resource["uid"]),
+        headers={"Content-Type": "text/calendar", "If-Match": etag or "*"},
     )
     if response.status_code == 412:
         raise CalendarError("event_changed", "This event changed in another calendar client. Refresh before saving.")

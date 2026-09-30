@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 
 from ctl.api import runtime
 from ctl.api.errors import ApiError
@@ -136,7 +137,8 @@ async def save_provider(request: Request, operator: OperatorMutation) -> dict[st
     if previous:
         return {"ok": True, "duplicate": True, "job": previous}
     payload = await runtime.json_body(request)
-    return _save_key(
+    return await run_in_threadpool(
+        _save_key,
         str(payload.get("provider_id", "")),
         str(payload.get("label", "")),
         str(payload.get("api_key", "")),

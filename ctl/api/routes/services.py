@@ -8,11 +8,12 @@ from typing import Any
 import yaml
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from ctl import actions, onboarding_state, service_config
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Identity, Operator, OperatorMutation, VerifiedAccount, job_identity
+from ctl.api.security import Identity, IdentityData, Operator, OperatorMutation, VerifiedAccount, job_identity
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
 from ctl.backups import readiness as backup_readiness
 from ctl.control_state import ControlState
@@ -101,6 +102,11 @@ def _effective_state(service: Any, control: ControlState | None) -> str:
 async def service_action(service_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
     """Queue one allowlisted service lifecycle action for the durable worker."""
     body = await runtime.json_body(request)
+    # State checks probe apps and read stores; keep them off the event loop.
+    return await run_in_threadpool(_queue_service_action, service_id, body, request, operator)
+
+
+def _queue_service_action(service_id: str, body: dict, request: Request, operator: IdentityData) -> dict[str, Any]:
     action = str(body.get("action", ""))
     if action not in SUPPORTED_ACTIONS:
         raise ApiError(400, "unsupported service action")
@@ -284,8 +290,12 @@ def get_service_configuration(service_id: str, _operator: Operator) -> dict[str,
 
 @router.put("/{service_id}/configuration")
 async def put_service_configuration(service_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    service = runtime.service(service_id)
     values = (await runtime.json_body(request)).get("values", {})
+    return await run_in_threadpool(_write_service_configuration, service_id, values, operator)
+
+
+def _write_service_configuration(service_id: str, values: Any, operator: IdentityData) -> dict[str, Any]:
+    service = runtime.service(service_id)
     managed = _managed_keys(service)
     if isinstance(values, dict) and set(values).intersection(managed):
         raise ApiError(422, "managed account fields cannot be changed here")

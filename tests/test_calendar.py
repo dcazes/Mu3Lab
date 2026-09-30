@@ -347,5 +347,184 @@ class CalDavTests(unittest.TestCase):
             self.assertEqual(calendar_secrets.get("owner", paths)["username"], "akadmin")
 
 
+def _connected(tmp: str, owner: str) -> tuple[RuntimePaths, str]:
+    paths = RuntimePaths(Path(tmp))
+    state = ControlState(paths.runtime / "control-plane.sqlite3")
+    href = "/remote.php/dav/calendars/alice/personal/"
+    state.set_calendar_connection(owner, "al•••e", [{"id": "cal", "name": "Personal", "href": href}], "cal")
+    calendar_secrets.save(owner, "alice", "secret", paths)
+    return paths, href
+
+
+def _multistatus(href: str, uid: str, ics: str, etag: str = '"one"') -> bytes:
+    return (
+        f'<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response>'
+        f"<d:href>{href}{uid}.ics</d:href><d:propstat><d:prop><d:getetag>{etag}</d:getetag>"
+        f"<c:calendar-data><![CDATA[{ics}]]></c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>"
+    ).encode()
+
+
+def _event_ics(uid: str, start: datetime, extra: list[str] | None = None) -> str:
+    return "\r\n".join(
+        [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "BEGIN:VTIMEZONE",
+            "TZID:Europe/Paris",
+            "BEGIN:STANDARD",
+            "DTSTART:19701025T030000",
+            "TZOFFSETFROM:+0200",
+            "TZOFFSETTO:+0100",
+            "END:STANDARD",
+            "END:VTIMEZONE",
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTART:{start.strftime('%Y%m%dT%H%M%SZ')}",
+            f"DTEND:{(start + timedelta(hours=1)).strftime('%Y%m%dT%H%M%SZ')}",
+            "SUMMARY:Dentist",
+            *(extra or []),
+            "END:VEVENT",
+            "END:VCALENDAR",
+            "",
+        ]
+    )
+
+
+class CalendarEditPreservationTests(unittest.TestCase):
+    def test_title_edit_keeps_notes_location_reminders_attendees_and_timezones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths, href = _connected(tmp, "owner-keep")
+            start = datetime.now(UTC).replace(microsecond=0) + timedelta(days=2)
+            ics = _event_ics(
+                "keep-id",
+                start,
+                [
+                    "DESCRIPTION:Bring the insurance card",
+                    "LOCATION:12 Main Street",
+                    "ORGANIZER:mailto:alice@example.test",
+                    "ATTENDEE;CN=Bob:mailto:bob@example.test",
+                    "X-CUSTOM:kept",
+                    "BEGIN:VALARM",
+                    "ACTION:DISPLAY",
+                    "DESCRIPTION:Reminder",
+                    "TRIGGER:-PT30M",
+                    "END:VALARM",
+                ],
+            )
+            with patch(
+                "ctl.nextcloud_calendar.httpx.request",
+                return_value=httpx.Response(207, content=_multistatus(href, "keep-id", ics)),
+            ):
+                listed = events("owner-keep", paths)["events"][0]
+            replies = [
+                httpx.Response(200, content=ics.encode(), headers={"ETag": '"one"'}),
+                httpx.Response(204),
+            ]
+            with patch("ctl.nextcloud_calendar.httpx.request", side_effect=replies) as request:
+                update_event(
+                    "owner-keep",
+                    listed["id"],
+                    {
+                        "title": "Dentist (moved)",
+                        "start": (start + timedelta(hours=2)).isoformat(),
+                        "end": (start + timedelta(hours=3)).isoformat(),
+                        "all_day": False,
+                        "revision": listed["revision"],
+                    },
+                    paths,
+                )
+            put = request.call_args_list[1]
+            body = put.kwargs["content"].decode()
+            self.assertEqual(put.kwargs["headers"]["If-Match"], '"one"')
+            for kept in (
+                "Bring the insurance card",
+                "12 Main Street",
+                "ATTENDEE;CN=Bob",
+                "ORGANIZER",
+                "BEGIN:VALARM",
+                "TRIGGER:-PT30M",
+                "BEGIN:VTIMEZONE",
+                "X-CUSTOM:kept",
+            ):
+                self.assertIn(kept, body)
+            self.assertIn("SUMMARY:Dentist (moved)", body)
+            self.assertIn("SEQUENCE:1", body)
+            self.assertEqual(body.count("SUMMARY:"), 1)
+
+    def test_edit_refuses_when_the_event_changed_since_it_was_shown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths, href = _connected(tmp, "owner-race")
+            start = datetime.now(UTC) + timedelta(days=2)
+            ics = _event_ics("race-id", start)
+            with patch(
+                "ctl.nextcloud_calendar.httpx.request",
+                return_value=httpx.Response(207, content=_multistatus(href, "race-id", ics)),
+            ):
+                listed = events("owner-race", paths)["events"][0]
+            newer = httpx.Response(200, content=ics.encode(), headers={"ETag": '"two"'})
+            with patch("ctl.nextcloud_calendar.httpx.request", return_value=newer) as request:
+                with self.assertRaisesRegex(CalendarError, "changed in another"):
+                    update_event(
+                        "owner-race",
+                        listed["id"],
+                        {
+                            "title": "x",
+                            "start": start.isoformat(),
+                            "end": (start + timedelta(hours=1)).isoformat(),
+                            "revision": listed["revision"],
+                        },
+                        paths,
+                    )
+            self.assertEqual([call.args[0] for call in request.call_args_list], ["GET"])
+
+
+class CalendarCacheTests(unittest.TestCase):
+    def test_home_preview_does_not_hide_month_events_from_editing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths, href = _connected(tmp, "owner-views")
+            far = datetime.now(UTC).replace(microsecond=0) + timedelta(days=45)
+            far_ics = _event_ics("far-id", far)
+            month_start = far - timedelta(days=10)
+            with patch(
+                "ctl.nextcloud_calendar.httpx.request",
+                return_value=httpx.Response(207, content=_multistatus(href, "far-id", far_ics)),
+            ):
+                month = events("owner-views", paths, start=month_start, end=month_start + timedelta(days=30), limit=100)
+            empty = b'<d:multistatus xmlns:d="DAV:"></d:multistatus>'
+            with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(207, content=empty)):
+                events("owner-views", paths)  # Home preview: next 30 days only
+            # The month view is served from cache again; its event must still be editable.
+            events("owner-views", paths, start=month_start, end=month_start + timedelta(days=30), limit=100)
+            listed = month["events"][0]
+            replies = [httpx.Response(200, content=far_ics.encode(), headers={"ETag": '"one"'}), httpx.Response(204)]
+            with patch("ctl.nextcloud_calendar.httpx.request", side_effect=replies):
+                result = update_event(
+                    "owner-views",
+                    listed["id"],
+                    {
+                        "title": "Later",
+                        "start": far.isoformat(),
+                        "end": (far + timedelta(hours=1)).isoformat(),
+                        "revision": listed["revision"],
+                    },
+                    paths,
+                )
+        self.assertTrue(result["ok"])
+
+    def test_expired_and_excess_ranges_are_evicted(self):
+        from ctl import nextcloud_calendar
+
+        now = datetime.now(UTC)
+        nextcloud_calendar._CACHE.clear()
+        for index in range(nextcloud_calendar._MAX_RANGES + 10):
+            nextcloud_calendar._CACHE[f"o:{index}"] = (now - timedelta(seconds=index), {}, {})
+        nextcloud_calendar._CACHE["o:old"] = (now - timedelta(hours=1), {}, {})
+        nextcloud_calendar._prune_ranges(now)
+        self.assertLessEqual(len(nextcloud_calendar._CACHE), nextcloud_calendar._MAX_RANGES)
+        self.assertNotIn("o:old", nextcloud_calendar._CACHE)
+        self.assertIn("o:0", nextcloud_calendar._CACHE)
+        nextcloud_calendar._CACHE.clear()
+
+
 if __name__ == "__main__":
     unittest.main()
