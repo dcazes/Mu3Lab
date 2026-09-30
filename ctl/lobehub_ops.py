@@ -148,6 +148,15 @@ DELETE FROM agents a
 def _sql(installed: set[str]) -> str:
     return f"""
 BEGIN;
+CREATE OR REPLACE FUNCTION mu3lab_skip_initial_onboarding() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.is_onboarded = true;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS mu3lab_skip_initial_onboarding_trigger ON users;
+CREATE TRIGGER mu3lab_skip_initial_onboarding_trigger BEFORE INSERT ON users
+FOR EACH ROW EXECUTE FUNCTION mu3lab_skip_initial_onboarding();
+UPDATE users SET is_onboarded = true WHERE is_onboarded IS DISTINCT FROM true;
 UPDATE ai_providers SET enabled = false WHERE id <> 'openai' AND enabled IS DISTINCT FROM false;
 UPDATE ai_providers SET enabled = true WHERE id = 'openai' AND enabled IS DISTINCT FROM true;
 UPDATE ai_models SET enabled = false

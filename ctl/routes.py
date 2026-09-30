@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ctl import actions
 from ctl.control_state import ControlState
+from ctl.login_launch import caddy_handler
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -91,6 +92,7 @@ def _block(service: Service) -> str:
 \t\t\tcopy_headers X-Authentik-Username X-Authentik-Email X-Authentik-Name X-Authentik-Groups
 \t\t\ttrusted_proxies private_ranges
 \t\t}}
+\t\trespond /auth/register* "Accounts are provisioned by Mu3Lab." 403
 \t\treverse_proxy 127.0.0.1:{service.https_port} {{
 \t\t\theader_up X-Forwarded-Proto https
 \t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
@@ -124,9 +126,11 @@ def _block(service: Service) -> str:
     return f"""
 :{service.proxy_port} {{
 \tbind 127.0.0.1
-\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\theader_up X-Forwarded-Proto https
-\t\theader_up X-Forwarded-Host {{http.request.hostport}}
+{caddy_handler(service.id)}\thandle {{
+\t\treverse_proxy 127.0.0.1:{service.https_port} {{
+\t\t\theader_up X-Forwarded-Proto https
+\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
+\t\t}}
 \t}}
 }}
 """.strip()

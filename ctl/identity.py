@@ -63,8 +63,16 @@ LOCAL = {"authentik", "vaultwarden"}
 NO_UI = {"ingress", "ollama"}
 # Start the native OIDC flow from Home so an existing Authentik session can
 # sign into the app without stopping at its local login chooser. Applications
-# without a safe GET-based OIDC entry point keep their normal UI URL.
-OIDC_LAUNCH_PATHS = {"nextcloud": "/index.php/apps/user_oidc/login/1"}
+# requiring POST use a same-origin launcher with the app's CSRF/session rules.
+OIDC_LAUNCH_PATHS = {
+    "nextcloud": "/index.php/apps/user_oidc/login/1",
+    "mealie": "/api/auth/oauth",
+    "immich": "/auth/login?autoLaunch=1",
+    "paperless-ngx": "/__mu3lab/login",
+    "adventurelog": "/accounts/oidc/mu3lab-adventurelog/login/",
+    "actual-budget": "/__mu3lab/login",
+    "lobehub": "/__mu3lab/login",
+}
 
 
 def mode_for(service: Service) -> str:
@@ -97,7 +105,13 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     # the legacy ui.url is only a fallback for mixed-version rollouts.
     launch_url = str(item.get("url") or (item.get("ui") or {}).get("url") or "")
     if service.id in OIDC_LAUNCH_PATHS and launch_url:
-        launch_url = launch_url.rstrip("/") + OIDC_LAUNCH_PATHS[service.id]
+        path = OIDC_LAUNCH_PATHS[service.id]
+        if service.id == "nextcloud":
+            values = read_runtime_env(RuntimePaths().projects / service.id / ".env")
+            provider_id = values.get("NEXTCLOUD_OIDC_PROVIDER_ID", "1")
+            if provider_id.isdigit() and int(provider_id) > 0:
+                path = f"/index.php/apps/user_oidc/login/{provider_id}"
+        launch_url = launch_url.rstrip("/") + path
     recovery = service.id in {
         "actual-budget",
         "mealie",
@@ -209,6 +223,7 @@ def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = Ru
             client_id=client_id,
             client_secret=secret,
             redirect_paths=contract.redirects,
+            initial_owner=values.get("MU3LAB_INITIAL_OWNER_USERNAME", ""),
         )
         written.append(service_id)
     return written

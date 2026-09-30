@@ -36,6 +36,7 @@ def run() -> int:
     waiting_for_runtime_reported = False
     next_mcp_reconcile = 0.0
     next_mcp_activity = 0.0
+    next_identity_reconcile = 0.0
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -62,6 +63,14 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         waiting_for_runtime_reported = False
+        if time.monotonic() >= next_identity_reconcile:
+            next_identity_reconcile = time.monotonic() + 60
+            try:
+                from ctl.identity_reconcile import queue_verified
+
+                queue_verified(store, ROOT, lambda line: print(line, flush=True))
+            except Exception as exc:
+                print(f"Mu3Lab sign-in verification deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_mcp_reconcile:
             next_mcp_reconcile = time.monotonic() + 60
             try:

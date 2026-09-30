@@ -124,7 +124,13 @@ def _discovery_url(dns_name: str, service_id: str) -> str:
 
 
 def _register_oidc_client(
-    service: Service, dns_name: str, name: str, client_id: str, client_secret: str, redirect_paths: tuple[str, ...]
+    service: Service,
+    dns_name: str,
+    name: str,
+    client_id: str,
+    client_secret: str,
+    redirect_paths: tuple[str, ...],
+    initial_owner: str = "",
 ) -> None:
     from ctl.authentik_blueprints import write_oidc_application_blueprint
 
@@ -137,6 +143,7 @@ def _register_oidc_client(
         client_id=client_id,
         client_secret=client_secret,
         redirect_paths=redirect_paths,
+        initial_owner=initial_owner,
     )
 
 
@@ -147,7 +154,8 @@ def _mealie_urls(service: Service, values: Values, dns_name: str, public_url: st
     values.setdefault("MEALIE_OIDC_CLIENT_ID", "mu3lab-mealie")
     values.setdefault("MEALIE_OIDC_CLIENT_SECRET", _token(40))
     values.setdefault("MEALIE_OIDC_CONFIGURATION_URL", _discovery_url(dns_name, "mealie"))
-    values.setdefault("MEALIE_OIDC_AUTO_REDIRECT", "false")
+    values.setdefault("MEALIE_OIDC_AUTO_REDIRECT", "true")
+    values.setdefault("MEALIE_ALLOW_SIGNUP", "false")
     values.setdefault("MEALIE_OIDC_REMEMBER_ME", "true")
     values.setdefault("MEALIE_ALLOW_PASSWORD_LOGIN", "true")
     _register_oidc_client(
@@ -165,7 +173,7 @@ def _actual_budget_urls(service: Service, values: Values, dns_name: str, public_
     values.setdefault("ACTUAL_OPENID_CLIENT_SECRET", _token(40))
     values.setdefault("ACTUAL_OPENID_DISCOVERY_URL", _discovery_url(dns_name, "actual-budget"))
     values.setdefault("ACTUAL_OPENID_SERVER_HOSTNAME", public_url)
-    values.setdefault("ACTUAL_OPENID_ENFORCE", "false")
+    values.setdefault("ACTUAL_OPENID_ENFORCE", "true")
     values.setdefault("ACTUAL_USER_CREATION_MODE", "login")
     _register_oidc_client(
         service,
@@ -174,6 +182,7 @@ def _actual_budget_urls(service: Service, values: Values, dns_name: str, public_
         values["ACTUAL_OPENID_CLIENT_ID"],
         values["ACTUAL_OPENID_CLIENT_SECRET"],
         ("/openid/callback",),
+        initial_owner=values.get("MU3LAB_INITIAL_OWNER_USERNAME", ""),
     )
 
 
@@ -215,6 +224,12 @@ def _paperless_urls(service: Service, values: Values, dns_name: str, public_url:
     )
     values.setdefault("PAPERLESS_DISABLE_REGULAR_LOGIN", "false")
     values.setdefault("PAPERLESS_REDIRECT_LOGIN_TO_SSO", "false")
+    providers = json.loads(values["PAPERLESS_SOCIALACCOUNT_PROVIDERS"])
+    for app in providers.get("openid_connect", {}).get("APPS", []):
+        if app.get("provider_id") == "authentik":
+            app.setdefault("settings", {}).update(email_authentication=True)
+    values["PAPERLESS_SOCIALACCOUNT_PROVIDERS"] = json.dumps(providers, separators=(",", ":"))
+    values.setdefault("PAPERLESS_SOCIAL_AUTO_SIGNUP", "true")
     _register_oidc_client(
         service,
         dns_name,
@@ -235,13 +250,14 @@ def _immich_urls(service: Service, values: Values, dns_name: str, _public_url: s
             "scope": "openid email profile",
             "signingAlgorithm": "RS256",
             "autoRegister": True,
-            "autoLaunch": False,
+            "autoLaunch": True,
             "buttonText": "Login with Authentik",
             "roleClaim": "mu3lab_role",
             "mobileOverrideEnabled": False,
             "mobileRedirectUri": "",
         }
     }
+    config["passwordLogin"] = {"enabled": values.get("IMMICH_PASSWORD_LOGIN_ENABLED", "true") == "true"}
     (target / "immich-config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     os.chmod(target / "immich-config.json", 0o600)
     _register_oidc_client(
@@ -323,6 +339,11 @@ def _copy_definition(source: Path, target: Path) -> None:
 def materialize(service: Service, root: Path) -> Path:
     target = RuntimePaths().projects / service.id
     _copy_definition(service.compose_path(root), target)
+    if service.id == "lobehub":
+        from ctl.login_launch import caddy_handler
+
+        caddy = target / "Caddyfile"
+        caddy.write_text(caddy.read_text().replace("\t# MU3LAB_LOGIN", caddy_handler(service.id)), encoding="utf-8")
     env_path = target / ".env"
     values = read_runtime_env(env_path)
     values.setdefault("MU3LAB_DATA_ROOT", str(RuntimePaths().data))

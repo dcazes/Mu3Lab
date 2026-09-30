@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -62,7 +63,7 @@ def verify_bootstrap_account(service_id: str, project: Path, log: Log, expected_
         return True, "No automatic account verification required."
     code = (
         "import os; from django.contrib.auth import get_user_model; "
-        f"u=get_user_model().objects.filter(username=os.environ.get('{variable}','')).first(); "
+        f"u=get_user_model().objects.filter(username={expected_username!r} or os.environ.get('{variable}','')).first(); "
         "print('MU3LAB_ACCOUNT_OK' if u and u.is_superuser else 'MU3LAB_ACCOUNT_MISSING')"
     )
     rc, output = actions.compose_exec(project, container, ["python", "manage.py", "shell", "-c", code], log, timeout=90)
@@ -83,12 +84,20 @@ def _nextcloud_owner_linked(project: Path, owner: Mapping[str, object], email: s
     except (ValueError, json.JSONDecodeError):
         return False
     groups = {str(group) for group in profile.get("groups", [])}
-    return (
+    matches = (
         str(profile.get("user_id", "")) == username
         and str(profile.get("email", "")).strip().lower() == email
         and bool(profile.get("enabled"))
         and "admin" in groups
     )
+    if not matches:
+        return False
+    # Set by user_oidc only after a successful callback, including soft-linked
+    # local users. A local login's last_seen alone is not OIDC evidence.
+    rc, output = actions.compose_exec(
+        project, "app", [*nextcloud.OCC, "config:user:get", username, "user_oidc", "had_token_once"], log, timeout=60
+    )
+    return rc == 0 and output.strip() == "1"
 
 
 def _mealie_owner_linked(email: str) -> bool:
@@ -125,16 +134,48 @@ def _lobehub_owner_linked(project: Path, email: str, log: Log) -> bool:
 
 def _django_owner_linked(service_id: str, project: Path, email: str, log: Log) -> bool:
     container = "webserver" if service_id == "paperless-ngx" else "app"
+    provider = "authentik" if service_id == "paperless-ngx" else "mu3lab-adventurelog"
     code = (
         "import hashlib; from allauth.socialaccount.models import SocialAccount; "
         "print('\\n'.join(hashlib.sha256((x.user.email or '').strip().lower().encode()).hexdigest() "
-        "for x in SocialAccount.objects.select_related('user').all() "
-        "if x.user.is_superuser and x.user.email))"
+        f"for x in SocialAccount.objects.select_related('user').filter(provider={provider!r}) "
+        "if x.uid and x.user.is_superuser and x.user.is_active and x.user.last_login and x.user.email))"
     )
     rc, output = actions.compose_exec(
         project, container, ["python", "manage.py", "shell", "-c", code], log, timeout=120
     )
     return rc == 0 and hashlib.sha256(email.encode()).hexdigest() in output.splitlines()
+
+
+def _immich_owner_linked(project: Path, email: str, log: Log) -> bool:
+    query = (
+        'SELECT md5(lower(email)) FROM "user" WHERE "isAdmin" = true '
+        'AND "deletedAt" IS NULL AND "oauthId" IS NOT NULL AND "oauthId" <> \'\';'
+    )
+    env = read_runtime_env(project / ".env")
+    rc, output = actions.compose_exec(
+        project,
+        "database",
+        ["psql", "-U", env.get("DB_USERNAME", "postgres"), "-d", env.get("DB_DATABASE_NAME", "immich"), "-Atc", query],
+        log,
+        timeout=30,
+    )
+    return rc == 0 and hashlib.md5(email.encode(), usedforsecurity=False).hexdigest() in output.splitlines()
+
+
+def _actual_owner_linked(owner: Mapping[str, object]) -> bool:
+    database = RuntimePaths().data / "actual-budget" / "server-files" / "account.sqlite"
+    try:
+        with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM users u JOIN sessions s ON s.user_id=u.id "
+                "WHERE u.user_name=? AND u.enabled=1 AND u.owner=1 AND u.role='ADMIN' "
+                "AND s.auth_method='openid' AND (s.expires_at=-1 OR s.expires_at>?) LIMIT 1",
+                (str(owner.get("username", "")), int(time.time())),
+            ).fetchone()
+    except (OSError, sqlite3.Error):
+        return False
+    return bool(row)
 
 
 def linked_owner_verified(service: Service, project: Path, owner: Mapping[str, object] | None, log: Log) -> bool:
@@ -148,6 +189,10 @@ def linked_owner_verified(service: Service, project: Path, owner: Mapping[str, o
         return _mealie_owner_linked(email)
     if service.id == "lobehub":
         return _lobehub_owner_linked(project, email, log)
+    if service.id == "immich":
+        return _immich_owner_linked(project, email, log)
+    if service.id == "actual-budget":
+        return _actual_owner_linked(owner)
     if service.id in {"paperless-ngx", "adventurelog"}:
         return _django_owner_linked(service.id, project, email, log)
     return False
@@ -161,14 +206,25 @@ SSO_ONLY_SETTINGS: dict[str, dict[str, str]] = {
     },
     "paperless-ngx": {"PAPERLESS_DISABLE_REGULAR_LOGIN": "true", "PAPERLESS_REDIRECT_LOGIN_TO_SSO": "true"},
     "adventurelog": {"ADVENTURELOG_FORCE_SOCIAL_LOGIN": "true"},
+    "actual-budget": {"ACTUAL_OPENID_ENFORCE": "true", "MU3LAB_INITIAL_OWNER_USERNAME": ""},
+    "immich": {"IMMICH_PASSWORD_LOGIN_ENABLED": "false"},
 }
 
 
-def enforce_identity_settings(service: Service, project: Path) -> None:
+def enforce_identity_settings(service: Service, project: Path) -> bool:
     """Switch an app to SSO-only sign-in once owner linking is verified."""
     settings = SSO_ONLY_SETTINGS.get(service.id)
     if not settings:
-        return
-    values = read_runtime_env(project / ".env") | settings
+        return False
+    before = read_runtime_env(project / ".env")
+    values = before | settings
     (project / ".env").write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(project / ".env", 0o600)
+    if service.id == "immich":
+        path = project / "immich-config.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["passwordLogin"] = {"enabled": False}
+        config["oauth"]["autoLaunch"] = True
+        path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+    return before != values

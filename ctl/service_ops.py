@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from ctl import actions, image_fetch, workflow_secrets
+from ctl import actions, image_fetch, onboarding_state, workflow_secrets
 from ctl.control_state import ControlState
 from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
@@ -229,7 +229,9 @@ def _install(
             "Required configuration is missing: " + ", ".join(missing),
         )
         return
-    if account_mode == "environment_bootstrap" and not account_identity:
+    if (
+        account_mode in {"environment_bootstrap", "api_bootstrap"} or service.id == "actual-budget"
+    ) and not account_identity:
         _fail(
             store,
             state,
@@ -241,10 +243,12 @@ def _install(
             "A verified Authentik email is required. Sign out, sign back in, and retry.",
         )
         return
+    if account_identity:
+        account_identity = onboarding_state.remember_owner(service.id, account_identity, RuntimePaths())
     if state:
         initialization_state = (
             "initializing"
-            if account_mode == "environment_bootstrap"
+            if account_mode in {"environment_bootstrap", "api_bootstrap"}
             else "awaiting_user"
             if account_mode in {"oidc_first_login", "browser_registration", "local_account_manual"}
             else "not_required"
@@ -262,6 +266,15 @@ def _install(
     _event(store, job_id, "validate_service", "Curated service contract accepted.")
     try:
         _event(store, job_id, "materialize_runtime", "Preparing the curated runtime project.")
+        if service.id == "actual-budget" and account_identity:
+            target = RuntimePaths().projects / service.id
+            target.mkdir(parents=True, exist_ok=True)
+            values = read_runtime_env(target / ".env")
+            # Preserve the guard across retries; finalization explicitly clears it.
+            if "MU3LAB_INITIAL_OWNER_USERNAME" not in values:
+                values["MU3LAB_INITIAL_OWNER_USERNAME"] = account_identity["username"]
+                (target / ".env").write_text(runtime_env_text(values), encoding="utf-8")
+                os.chmod(target / ".env", 0o600)
         project = materialize(service, root)
     except OSError as exc:
         _fail(
@@ -327,8 +340,12 @@ def _install(
     bootstrap_username = ""
     fresh_account = account_mode == "environment_bootstrap" and fresh_account_storage(service.id, project, log)
     if fresh_account and account_identity:
-        password = workflow_secrets.generate_password()
-        bootstrap_username = account_username(account_identity)
+        password = onboarding_state.prepare_login(service.id, RuntimePaths())["password"]
+        # user_oidc maps preferred_username verbatim; sanitizing this value
+        # would create a different local owner for e.g. email-based usernames.
+        bootstrap_username = (
+            account_identity["username"] if service.id == "nextcloud" else account_username(account_identity)
+        )
         bootstrap_env = {
             "MU3LAB_BOOTSTRAP_USERNAME": bootstrap_username,
             "MU3LAB_BOOTSTRAP_EMAIL": account_identity["email"],
@@ -388,6 +405,20 @@ def _install(
                 install_detail,
             )
             return
+    if account_mode == "api_bootstrap" and account_identity:
+        from ctl.lifecycle.onboarding import OnboardingError, provision
+
+        _event(store, job_id, "account_bootstrap", "Provisioning the application account and first-run defaults.")
+        try:
+            detail = provision(service, account_identity, RuntimePaths())
+        except OnboardingError as exc:
+            _fail(store, state, job_id, service.id, actor, "account_bootstrap", "account_provisioning_failed", str(exc))
+            return
+        _event(store, job_id, "account_verified", detail)
+        if state:
+            state.set_initialization(
+                service.id, account_mode, "ready", job_id=job_id, owner_uid=account_identity["owner_uid"]
+            )
     if fresh_account:
         account_verified, account_detail = verify_bootstrap_account(service.id, project, log, bootstrap_username)
         _event(store, job_id, "account_cleanup", "Removing bootstrap variables from the running application container.")
@@ -458,6 +489,36 @@ def _install(
                 detail,
             )
             return
+    if service.id in {"adventurelog", "mealie"}:
+        from ctl.lifecycle.integrations import retire_mealie_default_password
+
+        setup = configure_adventurelog_oidc if service.id == "adventurelog" else retire_mealie_default_password
+        configured, detail = setup(project, log)
+        if not configured:
+            _fail(
+                store,
+                state,
+                job_id,
+                service.id,
+                actor,
+                "configure_application",
+                "application_configuration_failed",
+                detail,
+            )
+            return
+    if account_mode == "environment_bootstrap" and account_identity:
+        record = onboarding_state.read(service.id, RuntimePaths())
+        if record.get("password") and not record.get("provisioned"):
+            username = account_identity["username"] if service.id == "nextcloud" else account_username(account_identity)
+            confirmed = fresh_account
+            if not confirmed:
+                confirmed, _ = verify_bootstrap_account(service.id, project, log, username)
+            if confirmed:
+                from ctl.service_state import tailnet_dns_name
+
+                host = tailnet_dns_name()
+                login_url = f"https://{host}:{service.private_https_port}" if host else ""
+                onboarding_state.complete_login(service.id, username, login_url, RuntimePaths())
     _event(store, job_id, "configure_route", "Publishing private HTTPS route.")
     routed, detail = apply_route(registry, service, root, log)
     if not routed:
@@ -504,6 +565,7 @@ def _install(
         except (OSError, ValueError):
             pass
         login_url = f"https://{host}:{service.private_https_port}" if host and service.private_https_port else ""
+        onboarding_state.complete_login(service.id, bootstrap_username, login_url, RuntimePaths())
         handoff = workflow_secrets.create_handoff(
             service_id=service.id,
             job_id=job_id,
@@ -543,6 +605,7 @@ def _install(
 
     if not sync_application(service.id, running=True, root=root, log=log):
         log("One enabled MCP needs attention after application installation.")
+    onboarding_state.mark_configured(service.id, RuntimePaths())
     store.transition(
         job_id, "succeeded", actor=actor, detail=f"{service.name} installed and verified.", step_id="finalize"
     )
@@ -681,6 +744,10 @@ def _configure_identity(
     job_id = str(job["id"])
     mode = mode_for(service)
     owner = workflow_secrets.job_identity(job_id)
+    if owner:
+        owner = onboarding_state.remember_owner(service.id, owner, RuntimePaths())
+    else:
+        owner = onboarding_state.read(service.id, RuntimePaths()).get("owner")
     owner_uid = owner["owner_uid"] if owner else ""
     store.transition(
         job_id,
@@ -692,7 +759,7 @@ def _configure_identity(
     try:
         if mode == "native_oidc":
             project = project_path(service, root)
-            if service.stage == "optional":
+            if service.stage == "optional" or service.id == "lobehub":
                 project = materialize(service, root)
             from ctl.service_state import tailnet_dns_name
 
@@ -707,6 +774,8 @@ def _configure_identity(
             )
             if linked:
                 enforce_identity_settings(service, project)
+                # Rewrite the blueprint after clearing Actual's first-owner guard.
+                reconcile_blueprints(registry, tailnet_dns_name())
             if installation and installation.get("state") == "running":
                 from ctl.compute import compose_overrides
 
@@ -720,12 +789,34 @@ def _configure_identity(
                 )
                 if rc:
                     raise ValueError("The application could not apply its staged OIDC configuration: " + redact(output))
+                if service.account.get("mode") == "api_bootstrap" and owner:
+                    from ctl.lifecycle.onboarding import provision
+
+                    provision(service, owner, RuntimePaths())
+                    if state:
+                        state.set_initialization(
+                            service.id, "api_bootstrap", "ready", job_id=job_id, owner_uid=owner_uid
+                        )
             if service.id == "adventurelog" and installation and installation.get("state") == "running":
                 ok, configured_detail = configure_adventurelog_oidc(
                     project_path(service, root), _job_log(store, job_id)
                 )
                 if not ok:
                     raise ValueError(configured_detail)
+            if installation and installation.get("state") == "running":
+                if service.id == "nextcloud":
+                    ok, configured_detail = configure_nextcloud(project, _job_log(store, job_id))
+                    if not ok:
+                        raise ValueError(configured_detail)
+                if service.id == "mealie":
+                    from ctl.lifecycle.integrations import retire_mealie_default_password
+
+                    ok, configured_detail = retire_mealie_default_password(project, _job_log(store, job_id))
+                    if not ok:
+                        raise ValueError(configured_detail)
+                routed, route_detail = apply_route(registry, service, root, _job_log(store, job_id))
+                if not routed:
+                    raise ValueError(route_detail)
             detail = (
                 "OIDC configuration is installed. Complete a real Authentik callback so Mu3Lab "
                 "can verify the existing owner and administrator role before disabling local login."
@@ -773,6 +864,12 @@ def _configure_identity(
         state.set_service_identity(
             service.id, mode, target, owner_uid=owner_uid, job_id=job_id, detail=detail, verified=target == "ready"
         )
+        if target == "ready" and mode == "native_oidc":
+            state.set_initialization(
+                service.id, str(service.account.get("mode", "none")), "ready", job_id=job_id, owner_uid=owner_uid
+            )
+    if mode == "native_oidc":
+        onboarding_state.mark_configured(service.id, RuntimePaths())
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
 
 

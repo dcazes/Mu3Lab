@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 from ctl import actions
 from ctl.jobs import redact
-from ctl.secrets import read_runtime_env
+from ctl.secrets import read_runtime_env, runtime_env_text
 
 Log = Callable[[str], None]
 OCC = ["runuser", "-u", "www-data", "--", "php", "occ"]
@@ -112,6 +113,10 @@ def configure_nextcloud(project: Path, log: Log) -> tuple[bool, str]:
     if missing:
         return False, "Nextcloud required app(s) are not enabled: " + ", ".join(missing)
     versions = ", ".join(f"{app_id} {enabled[app_id]}" for app_id in REQUIRED_APPS)
+    if "firstrunwizard" in enabled:
+        rc, output = actions.compose_exec(project, "app", [*OCC, "app:disable", "firstrunwizard"], log, timeout=120)
+        if rc:
+            return False, "Nextcloud could not skip its first-run tour: " + redact(output)
     discovery = f"https://{host}/application/o/mu3lab-nextcloud/.well-known/openid-configuration"
     command = [
         *OCC,
@@ -129,6 +134,21 @@ def configure_nextcloud(project: Path, log: Log) -> tuple[bool, str]:
     rc, output = actions.compose_exec(project, "app", [*OCC, "user_oidc:provider", "mu3lab"], log, timeout=120)
     if rc or client_id not in output:
         return False, "Nextcloud did not confirm the Authentik provider configuration."
+    rc, output = actions.compose_exec(project, "app", [*OCC, "user_oidc:providers", "--output=json"], log, timeout=120)
+    provider_id = None
+    if rc == 0:
+        for line in output.splitlines():
+            try:
+                provider = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if provider.get("identifier") == "mu3lab":
+                provider_id = provider.get("id")
+    if not str(provider_id).isdigit() or int(str(provider_id)) < 1:
+        return False, "Nextcloud did not report its managed OIDC provider ID."
+    env["NEXTCLOUD_OIDC_PROVIDER_ID"] = str(provider_id)
+    (project / ".env").write_text(runtime_env_text(env), encoding="utf-8")
+    os.chmod(project / ".env", 0o600)
     for key in ("auto_provision", "soft_auto_provision"):
         rc, output = actions.compose_exec(
             project,

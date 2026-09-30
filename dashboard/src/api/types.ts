@@ -276,6 +276,7 @@ export interface ProviderCatalogItem {
 
 export interface VaultStatus {
   seeded: boolean;
+  pending_logins?: number;
   seeded_at?: string;
   /**
    * Browsers the installer added Bitwarden to, already pointed at this vault,

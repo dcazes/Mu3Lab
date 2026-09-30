@@ -360,6 +360,11 @@ def _run(
             store.transition(job_id, "failed", actor=actor, detail="Core suite blocked: " + checked["error"])
             return
         runtime = RuntimePaths()
+        from ctl import onboarding_state, workflow_secrets
+
+        owner = workflow_secrets.job_identity(job_id)
+        if owner:
+            owner = onboarding_state.remember_owner("lobehub", owner, runtime)
         env_files = ensure_core_envs(runtime.root)
         from ctl.lifecycle.materialize import materialize
 
@@ -381,7 +386,7 @@ def _run(
                 log,
                 env=envs[service_id],
                 extra_files=compose_overrides(service_id, project),
-                recreate=service_id == "freellmapi" and bool(wiring["provider_count"]),
+                recreate=service_id == "lobehub" or (service_id == "freellmapi" and bool(wiring["provider_count"])),
                 timeout=1800,
                 on_output=lambda _line: None,
             )
@@ -420,6 +425,22 @@ def _run(
                         step_id="lobehub_policy",
                     )
                     return
+                from ctl.control_state import ControlState
+
+                control = ControlState.runtime()
+                if control:
+                    control.set_installation("lobehub", "running", job_id=job_id, route_state="ready")
+                    saved = control.service_identity("lobehub") or {}
+                    if saved.get("state") != "ready":
+                        control.set_service_identity(
+                            "lobehub",
+                            "native_oidc",
+                            "migration_required",
+                            owner_uid=owner["owner_uid"] if owner else "",
+                            job_id=job_id,
+                            detail="Open LobeChat; its Authentik account will be verified automatically.",
+                        )
+                onboarding_state.mark_configured("lobehub", runtime)
             if service_id == "ollama":
                 rc, output = actions.compose_exec(
                     project,

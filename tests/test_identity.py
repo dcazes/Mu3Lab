@@ -125,10 +125,10 @@ class IdentityContractTests(unittest.TestCase):
             self.assertTrue(verified)
 
     def test_nextcloud_owner_requires_matching_email_and_admin_role(self):
-        profile = {"user_id": "akadmin", "email": "owner@example.com", "enabled": True, "groups": ["admin"]}
+        profile = {"user_id": "akadmin", "email": "owner@example.com", "enabled": True, "groups": ["admin"], "last_seen": 1}
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime")
-            with patch("ctl.service_ops.actions.compose_exec", return_value=(0, json.dumps(profile))):
+            with patch("ctl.service_ops.actions.compose_exec", side_effect=[(0, json.dumps(profile)), (0, "1")]):
                 verified = linked_owner_verified(
                     load().get("nextcloud"),
                     paths.projects / "nextcloud",
