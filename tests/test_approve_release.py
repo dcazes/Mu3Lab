@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import tempfile
 import unittest
@@ -36,10 +37,21 @@ class PlanTests(unittest.TestCase):
         )
 
     def test_apps_whose_tags_do_not_follow_releases_need_named_images(self):
-        # Firecrawl publishes v2.11.0 but tags its image 2.11.334-production.
-        self.assertEqual(self.plan("firecrawl", "v2.12.0"), {})
-        named = self.plan("firecrawl", "v2.12.0", {"api": "ghcr.io/firecrawl/firecrawl:2.12.1-production"})
+        # As if Firecrawl were approved as v2.11.0 while its image is tagged 2.11.448-production.
+        firecrawl = dataclasses.replace(
+            load().get("firecrawl"), update={"repository": "firecrawl/firecrawl", "approved_version": "v2.11.0"}
+        )
+        self.assertEqual(approve_release.plan(firecrawl, "v2.12.0", {}), {})
+        named = approve_release.plan(firecrawl, "v2.12.0", {"api": "ghcr.io/firecrawl/firecrawl:2.12.1-production"})
         self.assertEqual(named, {"api": "ghcr.io/firecrawl/firecrawl:2.12.1-production"})
+
+    def test_a_moving_latest_tag_is_recorded_by_digest_alone(self):
+        with patch.object(approve_release.actions, "docker_cmd", return_value=(0, f'{{"digest": "{DIGEST}"}}')):
+            self.assertEqual(
+                approve_release.resolve_digest("ghcr.io/firecrawl/nuq-postgres:latest"),
+                f"ghcr.io/firecrawl/nuq-postgres@{DIGEST}",
+            )
+            self.assertEqual(approve_release.resolve_digest("nextcloud:35.0.1"), f"nextcloud:35.0.1@{DIGEST}")
 
     def test_a_misnamed_service_is_refused(self):
         with self.assertRaises(SystemExit):

@@ -3,7 +3,8 @@
     make check-updates                       # which apps have a newer upstream release
     make approve APP=mealie VERSION=v3.23.0  # pin it, digest and all
 
-``approve`` downloads the release's images, pins each to its digest in
+``approve`` looks up the release's images in their registries (metadata
+only, nothing is downloaded), pins each to its digest in
 ``apps/<app>/docker-compose.yml``, and records the version as
 ``update.approved_version`` in ``services.yaml``. Nothing is committed: test
 the update from your own dashboard (Apps -> the app -> Advanced -> Updates),
@@ -59,23 +60,28 @@ def plan(service: Service, version: str, overrides: dict[str, str]) -> dict[str,
     return moved
 
 
-def pull_and_pin(reference: str) -> str:
-    print(f"  pulling {reference}")
+def resolve_digest(reference: str) -> str:
+    """Pin ``reference`` to the digest its tag names now, reading only registry metadata.
+
+    The digest is the multi-platform index's, the same one ``docker pull``
+    records, so every machine gets the image for its own CPU.
+    """
+    print(f"  resolving {reference}")
     # Mu3Lab's own Docker runner works before a fresh login picks up the docker group.
-    rc, output = actions.docker_cmd(["docker", "pull", reference], lambda _line: None, timeout=3600)
-    if rc:
-        raise SystemExit(f"{reference} could not be downloaded; is the tag published?\n{output[-400:]}")
     rc, output = actions.docker_cmd(
-        ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", reference], lambda _line: None, timeout=30
+        ["docker", "buildx", "imagetools", "inspect", "--format", "{{json .Manifest}}", reference],
+        lambda _line: None,
+        timeout=120,
     )
-    repository = app_releases.split_image(reference)[0]
-    # Docker Hub images are recorded without their implicit registry prefix.
-    short = repository.removeprefix("docker.io/").removeprefix("library/")
-    for entry in (json.loads(output) if not rc else None) or []:
-        name, _, digest = str(entry).partition("@")
-        if name.removeprefix("docker.io/").removeprefix("library/") == short and digest.startswith("sha256:"):
-            return f"{reference}@{digest}"
-    raise SystemExit(f"{reference} has no registry digest; is it a locally built image?")
+    try:
+        digest = str(json.loads(output).get("digest", "")) if not rc else ""
+    except ValueError:
+        digest = ""
+    if not digest.startswith("sha256:"):
+        raise SystemExit(f"{reference} could not be found in its registry; is the tag published?\n{output[-400:]}")
+    repository, tag = app_releases.split_image(reference)
+    # "latest" moves; the registry refuses it even beside a digest, which is the real pin.
+    return f"{repository}@{digest}" if tag == "latest" else f"{reference}@{digest}"
 
 
 def _service_block(text: str, service_id: str) -> tuple[int, int]:
@@ -130,7 +136,7 @@ def approve(app: str, version: str, overrides: dict[str, str]) -> None:
         )
     print(f"Approving {service.name} {version} (was {current.version}):")
     # Several containers often share one image (SurfSense's backend and workers).
-    resolved = {reference: pull_and_pin(reference) for reference in dict.fromkeys(moved.values())}
+    resolved = {reference: resolve_digest(reference) for reference in dict.fromkeys(moved.values())}
     pinned = {name: resolved[reference] for name, reference in moved.items()}
     rewrite(service, version, pinned)
     for name, image in pinned.items():

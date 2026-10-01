@@ -30,11 +30,13 @@ The update checks first, using the installer's own checks from the new version. 
    make approve APP=mealie VERSION=v3.28.0
    ```
 
-   This downloads the app's images, pins them by digest in the app's Compose file and sets `approved_version`. Only images whose tag contains the old version move; databases and helpers keep their pins. To move one of those, or for an app whose tags don't follow its versions (Firecrawl), name the images:
+   This looks the release's images up in their registries (metadata only; nothing is downloaded), pins them by digest in the app's Compose file and sets `approved_version`. Your own test install is what downloads them. Only images whose tag contains the old version move; databases and helpers keep their pins. To move one of those, or for an app whose tags don't follow its versions (Firecrawl), name the images:
 
    ```bash
    make approve APP=firecrawl VERSION=v2.12.0 IMAGES="api=ghcr.io/firecrawl/firecrawl:2.12.1-production"
    ```
+
+   Some projects re-publish one tag for every build. SurfSense, for example, publishes every self-hosted server build as `0.0.40`. Naming such a tag again (`IMAGES="backend=ghcr.io/modsetter/surfsense-backend:0.0.40 …"`) pins whatever it points to today. A `latest` tag is recorded by its digest alone.
 
    If the new release changes its Compose setup (new environment variables, services or volumes), edit `apps/<app>/docker-compose.yml` as well.
 

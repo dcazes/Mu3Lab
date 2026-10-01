@@ -214,8 +214,8 @@ services:
             - "Complete Authentik, then let Bitwarden fill in your SurfSense login."
     configuration:
       - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Enable local sign-in", default: true}
-    images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
-    update: {repository: MODSetter/SurfSense, approved_version: "v0.0.40"}
+    images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:f2fb32a3da93118afde191ec8cd0133361aac8c3d9553a50732026f14545580e", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
+    update: {repository: MODSetter/SurfSense, approved_version: "v2.0.3"}
     backup: {database: surfsense, binds: [object-store, zero-cache]}
     mcp:
       kind: official
@@ -253,8 +253,8 @@ services:
     identity_note: "Firecrawl is an API service with no application login. Its route remains private to the tailnet."
     setup_action: "Install the private Firecrawl API, queue workers, Playwright browser service, and durable data services."
     resource_guidance: "Runs Firecrawl workers, Playwright, RabbitMQ, PostgreSQL, and Redis. Browser crawls can use substantial memory; concurrency defaults are intentionally conservative."
-    images: ["ghcr.io/firecrawl/firecrawl:2.11.334-production@sha256:70453d7102cce7000f4e8e80bd11e3e1353cdc9a0b87bb4cd1d4e8edf5a65744", "ghcr.io/firecrawl/playwright-service@sha256:df1a393ce8bfc3801570a826a9b0dcc400ae48789adb4a0ad9d6cbf0229b059b", "ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc", "rabbitmq:3.13-alpine@sha256:d7af1c87c5f1eda13fcfca06db452bf3aeab6619fc3358b68535c0c02c4e52bc", "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"]
-    update: {repository: firecrawl/firecrawl, approved_version: "v2.11.0"}
+    images: ["ghcr.io/firecrawl/firecrawl:2.11.448-production@sha256:d48c5c7b8a33d5d9c5e7a78957911177e48fcd8ddedb61b7ebd7c2d4426dfbfa", "ghcr.io/firecrawl/playwright-service@sha256:47da52c036b55580d5d0812fa530eacfe03533ebad9449a50858ff697db04f71", "ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc", "rabbitmq:3.13-alpine@sha256:d7af1c87c5f1eda13fcfca06db452bf3aeab6619fc3358b68535c0c02c4e52bc", "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"]
+    update: {repository: firecrawl/firecrawl, approved_version: "v2.11.448"}
     backup: {database: firecrawl, binds: [postgres, redis, rabbitmq]}
     account: {mode: none, handoff: false, user_action: "No login is required on the private Firecrawl API route."}
 
@@ -416,8 +416,8 @@ services:
             - "Choose OAuth login and complete the Authentik sign-in in the browser."
             - "Select the albums you want Immich to back up."
 
-    images: ["ghcr.io/immich-app/immich-server:v3.2.2", "ghcr.io/immich-app/immich-machine-learning:v3.2.2", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
-    update: {repository: immich-app/immich, approved_version: "v3.2.2"}
+    images: ["ghcr.io/immich-app/immich-server:v3.2.4", "ghcr.io/immich-app/immich-machine-learning:v3.2.4", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
+    update: {repository: immich-app/immich, approved_version: "v3.2.4"}
     backup: {binds: [library, database]}
     account:
       mode: api_bootstrap
@@ -478,8 +478,8 @@ services:
       - {key: allow_signup, env: MEALIE_ALLOW_SIGNUP, type: boolean, label: "Allow local signup", default: false}
       - {key: oidc_enabled, env: MEALIE_OIDC_ENABLED, type: boolean, label: "Enable Authentik login", default: true}
     backup: {binds: [data]}
-    images: ["ghcr.io/mealie-recipes/mealie:v3.22.0"]
-    update: {repository: mealie-recipes/mealie, approved_version: "v3.22.0"}
+    images: ["ghcr.io/mealie-recipes/mealie:v3.28.0"]
+    update: {repository: mealie-recipes/mealie, approved_version: "v3.28.0"}
     mcp:
       kind: adapter
       endpoint: http://mealie-mcp:8000/mcp
@@ -604,8 +604,8 @@ services:
       - {key: admin_username, env: PAPERLESS_ADMIN_USER, type: string, managed: true}
       - {key: admin_email, env: PAPERLESS_ADMIN_MAIL, type: string, managed: true}
       - {key: admin_password, env: PAPERLESS_ADMIN_PASSWORD, type: secret, managed: true}
-    images: ["ghcr.io/paperless-ngx/paperless-ngx:3.1.3", "docker.io/valkey/valkey:9.0.1-alpine", "docker.io/library/postgres:18.0-alpine"]
-    update: {repository: paperless-ngx/paperless-ngx, approved_version: "v3.1.3"}
+    images: ["ghcr.io/paperless-ngx/paperless-ngx:3.2.1", "docker.io/valkey/valkey:9.0.1-alpine", "docker.io/library/postgres:18.0-alpine"]
+    update: {repository: paperless-ngx/paperless-ngx, approved_version: "v3.2.1"}
     backup: {binds: [data, media, consume, export]}
 
   - id: nextcloud
@@ -646,8 +646,8 @@ services:
             - "Install Nextcloud and enter the Mu3Lab Nextcloud URL."
             - "Complete the browser-based Authentik login and approve the device."
 
-    images: ["nextcloud:33.0.5-apache", "postgres:16-alpine", "redis:8-alpine"]
-    update: {repository: nextcloud/server, approved_version: "v33.0.5"}
+    images: ["nextcloud:35.0.1-apache", "postgres:16-alpine", "redis:8-alpine"]
+    update: {repository: nextcloud/server, approved_version: "v35.0.1"}
     backup: {database: nextcloud, binds: [html, postgres]}
     account:
       mode: environment_bootstrap
@@ -695,8 +695,8 @@ services:
             - "Install the client for your phone."
             - "Open Baby Buddy in a browser and go to User, then Add a Device."
             - "Scan the device QR code in the app, or enter the server URL and API token by hand. The app connects with that token, so it does not need the Authentik sign-in."
-    images: ["lscr.io/linuxserver/babybuddy:version-v2.7.1"]
-    update: {repository: babybuddy/babybuddy, approved_version: "v2.7.1"}
+    images: ["lscr.io/linuxserver/babybuddy:version-v2.11.0"]
+    update: {repository: babybuddy/babybuddy, approved_version: "v2.11.0"}
     backup: {binds: [config]}
     account:
       mode: trusted_header

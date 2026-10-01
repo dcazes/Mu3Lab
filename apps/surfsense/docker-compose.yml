@@ -19,7 +19,7 @@ services:
       retries: 12
 
   migrations:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973
+    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: "no"
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]
     environment:
@@ -60,7 +60,7 @@ services:
       retries: 12
 
   backend:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973
+    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: unless-stopped
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]
     environment:
@@ -95,7 +95,7 @@ services:
       start_period: 200s
 
   celery_worker:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973
+    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: unless-stopped
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]
     environment:
@@ -118,7 +118,7 @@ services:
       backend: {condition: service_healthy}
 
   celery_beat:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973
+    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: unless-stopped
     env_file: ["${MU3LAB_ENV_FILE:-.env}"]
     environment:
@@ -164,7 +164,7 @@ services:
       start_period: 600s
 
   frontend:
-    image: ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55
+    image: ghcr.io/modsetter/surfsense-web:0.0.40@sha256:f2fb32a3da93118afde191ec8cd0133361aac8c3d9553a50732026f14545580e
     restart: unless-stopped
     environment:
       AUTH_TYPE: LOCAL
