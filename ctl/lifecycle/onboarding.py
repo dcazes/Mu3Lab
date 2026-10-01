@@ -7,11 +7,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from http.cookies import CookieError, SimpleCookie
 
 from ctl import onboarding_state
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 from ctl.workflow_secrets import WorkflowSecretError
+
+SURFSENSE_SESSION_COOKIE = "surfsense_session"
 
 
 class OnboardingError(ValueError):
@@ -100,11 +103,17 @@ def provision_surfsense(service: Service, owner: Mapping[str, object], url: str,
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             auth = json.load(response)
-    except (OSError, ValueError):
+            cookies = SimpleCookie()
+            for header in response.headers.get_all("Set-Cookie") or []:
+                cookies.load(header)
+    except (OSError, ValueError, CookieError):
         raise OnboardingError(
             "SurfSense could not verify the generated login. An existing account was left unchanged."
         ) from None
-    token = auth.get("access_token", "")
+    # 0.0.40 moved the access token from the body into a session cookie; it
+    # still accepts that same token as a bearer credential.
+    session = cookies.get(SURFSENSE_SESSION_COOKIE)
+    token = auth.get("access_token", "") or (session.value if session else "")
     if not token:
         raise OnboardingError("SurfSense did not return a valid login.")
     profile = request(service.https_port, "/users/me", token=token)

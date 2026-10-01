@@ -38,6 +38,8 @@ class Execution:
     worker_id: str
     # Set by the heartbeat thread when it can no longer renew the lease.
     lost: threading.Event = field(default_factory=threading.Event)
+    # Inside ``uncancellable`` a cancel request waits until the block ends.
+    shielded: int = 0
 
 
 _local = threading.local()
@@ -58,6 +60,26 @@ def current() -> Execution | None:
     return getattr(_local, "execution", None)
 
 
+@contextmanager
+def uncancellable() -> Iterator[None]:
+    """Finish a step whose half-done state is worse than either end.
+
+    Swapping an app's data or release, or putting it back, must run to the
+    end once begun. A cancel request is honoured at the first checkpoint
+    after the block; losing the lease still stops it, since another worker
+    may then own the job.
+    """
+    execution = current()
+    if execution is None:
+        yield
+        return
+    execution.shielded += 1
+    try:
+        yield
+    finally:
+        execution.shielded -= 1
+
+
 def checkpoint() -> None:
     """Raise JobInterrupted if the job running on this thread must stop now."""
     execution = current()
@@ -66,5 +88,5 @@ def checkpoint() -> None:
     if execution.lost.is_set():
         raise JobInterrupted(LEASE_LOST)
     reason = execution.store.interruption(execution.job_id, execution.worker_id)
-    if reason:
+    if reason and not (reason == CANCELLED and execution.shielded):
         raise JobInterrupted(reason)

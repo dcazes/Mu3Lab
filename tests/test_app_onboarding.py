@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import email.message
 import io
 import json
 import sqlite3
@@ -24,6 +25,15 @@ from ctl.vault_setup import DesiredItem, seed
 from ctl.workflow_secrets import WorkflowSecretError
 from tests.support import runtime_paths
 from tests.test_vault_setup import EMAIL, PASSWORD, FakeVaultwarden, session_for
+
+
+def login_response(body: dict, *cookies: str) -> io.BytesIO:
+    response = io.BytesIO(json.dumps(body).encode())
+    response.headers = email.message.Message()
+    for cookie in cookies:
+        response.headers["Set-Cookie"] = cookie
+    return response
+
 
 OWNER = {"owner_uid": "owner", "username": "owner", "email": "owner@example.test", "display_name": "Owner"}
 
@@ -94,7 +104,7 @@ class OnboardingTests(unittest.TestCase):
 
     def test_surfsense_recovers_registration_hook_failure_and_verifies_workspace(self):
         onboarding_state.remember_owner("surfsense", OWNER, self.paths)
-        response = io.BytesIO(json.dumps({"access_token": "test-token"}).encode())
+        response = login_response({"access_token": "test-token"})
         with (
             patch("ctl.lifecycle.onboarding.urllib.request.urlopen", return_value=response),
             patch(
@@ -113,6 +123,35 @@ class OnboardingTests(unittest.TestCase):
         with patch("ctl.lifecycle.onboarding.request") as api:
             provision_surfsense(load().get("surfsense"), OWNER, "https://host.test:8447", self.paths)
             api.assert_not_called()
+
+    def test_surfsense_reads_the_session_cookie_login(self):
+        onboarding_state.remember_owner("surfsense", OWNER, self.paths)
+        response = login_response(
+            {"authenticated": True},
+            "surfsense_session=cookie-token; HttpOnly; Path=/; SameSite=lax",
+            "surfsense_refresh=refresh-token; HttpOnly; Path=/; SameSite=lax",
+        )
+        with (
+            patch("ctl.lifecycle.onboarding.urllib.request.urlopen", return_value=response),
+            patch(
+                "ctl.lifecycle.onboarding.request",
+                side_effect=[{}, {"email": OWNER["email"], "is_active": True}, [{"id": 1}]],
+            ) as api,
+        ):
+            provision_surfsense(load().get("surfsense"), OWNER, "https://host.test:8447", self.paths)
+            self.assertEqual(api.call_args_list[1].kwargs["token"], "cookie-token")
+
+    def test_surfsense_without_any_login_token_fails(self):
+        onboarding_state.remember_owner("surfsense", OWNER, self.paths)
+        with (
+            patch(
+                "ctl.lifecycle.onboarding.urllib.request.urlopen",
+                return_value=login_response({"authenticated": True}),
+            ),
+            patch("ctl.lifecycle.onboarding.request", return_value={}),
+            self.assertRaisesRegex(OnboardingError, "valid login"),
+        ):
+            provision_surfsense(load().get("surfsense"), OWNER, "https://host.test:8447", self.paths)
 
     def test_nextcloud_local_admin_login_is_not_mistaken_for_oidc_callback(self):
         profile = {

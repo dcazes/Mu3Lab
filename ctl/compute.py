@@ -31,4 +31,21 @@ def compose_overrides(service_id: str, project: Path) -> list[Path]:
     """Return only checked-in/runtime-materialized overrides, never browser paths."""
     mode = resolved_mode()
     candidate = project / f"docker-compose.{mode}.yml"
-    return [candidate] if mode != "cpu" and candidate.is_file() else []
+    overrides = [candidate] if mode != "cpu" and candidate.is_file() else []
+    return [*overrides, *_update_override(service_id, project)]
+
+
+def _update_override(service_id: str, project: Path) -> list[Path]:
+    """An app updated past its checked-in release keeps running that release."""
+    from ctl.lifecycle import image_updates
+
+    if not (project / image_updates.OVERRIDE).is_file():
+        return []
+    from ctl.registry import RegistryError, load
+
+    try:
+        service = load().get(service_id)
+    except RegistryError:
+        return []
+    path = image_updates.override_file(service)
+    return [path] if path and path.parent == project else []

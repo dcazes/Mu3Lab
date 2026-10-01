@@ -8,6 +8,7 @@ and auditability.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Callable
@@ -76,6 +77,15 @@ def redact_data(value: Any) -> Any:
     return "[unsupported]"
 
 
+def job_params(job: dict[str, Any]) -> dict[str, str]:
+    """The non-secret inputs a job was queued with."""
+    try:
+        value = json.loads(str(job.get("params_json") or "{}"))
+    except ValueError:
+        return {}
+    return {str(key): str(item) for key, item in value.items()} if isinstance(value, dict) else {}
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -126,6 +136,8 @@ class JobStore:
                     # Set when someone asks to cancel a running job; the runner
                     # stops at its next checkpoint and marks it cancelled.
                     "cancel_requested_at": "TEXT NOT NULL DEFAULT ''",
+                    # Non-secret inputs the worker needs, e.g. which backup to restore.
+                    "params_json": "TEXT NOT NULL DEFAULT '{}'",
                 }
                 for name, declaration in additions.items():
                     if name not in existing:
@@ -146,8 +158,12 @@ class JobStore:
         detail: str = "",
         idempotency_key: str | None = None,
         prepare: Callable[[str], None] | None = None,
+        params: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Create a queued job. Callers must authenticate and authorize first.
+
+        ``params`` holds small, non-secret worker inputs; secrets belong in
+        ``ctl.workflow_secrets``.
 
         ``prepare(job_id)`` runs inside the insert's transaction, before the job
         can be claimed, and only when a new job is actually created; if it
@@ -180,10 +196,22 @@ class JobStore:
                 """
                 INSERT INTO jobs
                 (id, kind, service_id, action, state, actor, created_at, updated_at,
-                 detail, idempotency_key)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 detail, idempotency_key, params_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-                (job_id, kind, service_id, action, "queued", actor, now, now, redact(detail), idempotency_key),
+                (
+                    job_id,
+                    kind,
+                    service_id,
+                    action,
+                    "queued",
+                    actor,
+                    now,
+                    now,
+                    redact(detail),
+                    idempotency_key,
+                    json.dumps(redact_data(params or {}), sort_keys=True),
+                ),
             )
             conn.execute(
                 "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
@@ -393,6 +421,7 @@ class JobStore:
             detail=f"Retry of job {job_id}",
             idempotency_key=idempotency_key,
             prepare=prepare,
+            params=job_params(dict(row)),
         )
 
     def cancel(self, job_id: str, *, actor: str) -> str:

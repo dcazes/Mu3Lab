@@ -327,6 +327,43 @@ class InstallationWorkflowTests(unittest.TestCase):
             ):
                 self.assertIn(stage, stages)
 
+    def test_install_waits_once_more_when_a_first_boot_container_restarts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp) / "runtime-root")
+            paths.projects.mkdir(parents=True)
+            paths.data.mkdir(parents=True)
+            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            store = JobStore(paths.runtime / "control-plane.sqlite3")
+            created = store.create(kind="lifecycle", service_id="mealie", action="install", actor="owner")
+            claimed = store.claim("worker")
+            self.assertIsNotNone(claimed)
+            with (
+                runtime_paths(paths),
+                patch("ctl.service_ops.ControlState.runtime", return_value=state),
+                patch("ctl.service_ops.actions.compose_config", return_value=(0, "")),
+                patch("ctl.service_ops.actions.compose_image_list", return_value=(1, [])),
+                patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")),
+                patch(
+                    "ctl.service_ops.actions.docker_image_digest",
+                    return_value=(0, "ghcr.io/mealie-recipes/mealie@sha256:abc"),
+                ),
+                patch(
+                    "ctl.service_ops.actions.compose_up",
+                    side_effect=[(1, "container mu3lab-mealie-app-1 is unhealthy"), (0, "started"), (0, "started")],
+                ) as compose_up,
+                patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
+                patch(
+                    "ctl.lifecycle.integrations.retire_mealie_default_password",
+                    return_value=(True, "Mealie default login hardening completed."),
+                ),
+                patch("ctl.service_ops.apply_route", return_value=(True, "ready")),
+                patch("ctl.service_state.tailnet_dns_name", return_value=""),
+            ):
+                execute_claimed(store, claimed, "worker", ROOT)
+            final = next(job for job in store.jobs() if job["id"] == created["id"])
+            self.assertEqual(final["state"], "succeeded")
+            self.assertFalse(compose_up.call_args_list[1].kwargs["recreate"])
+
     def test_surfsense_install_allows_bounded_migration_and_zero_cache_startup(self):
         compose = (ROOT / "apps/surfsense/docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn("condition: service_completed_successfully", compose)

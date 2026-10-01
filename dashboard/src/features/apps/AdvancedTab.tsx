@@ -1,8 +1,9 @@
-import { Copy, Download, RefreshCw } from 'lucide-react';
+import { ArrowUpCircle, Copy, Download, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
-import { api, type Service, type ServiceLogsResponse, type UpdateResponse } from '../../api';
+import { api, postJsonApi, type Service, type ServiceLogsResponse, type UpdateResponse } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { copyText } from '../../components/CopyField';
+import { useConfirm } from '../../components/Dialog';
 import { Card, Facts } from '../../components/Layout';
 import { StateBadge } from '../../components/Status';
 import { humanize } from '../../lib/format';
@@ -10,6 +11,7 @@ import { signInSummary } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import { useDashboard } from '../../state/dashboard';
 import { JobDialog, JobRow } from '../activity/JobDialog';
+import { BackupsCard } from './BackupsCard';
 
 function Logs({ service }: { service: Service }) {
   const [lines, setLines] = useState<string[] | null>(null);
@@ -85,8 +87,28 @@ function Logs({ service }: { service: Service }) {
 
 function Updates({ service }: { service: Service }) {
   const [update, setUpdate] = useState<UpdateResponse | null>(null);
+  const confirm = useConfirm();
+  const { refresh } = useDashboard();
   const { pending, run } = useAction();
   if (!service.update?.repository) return null;
+  const apply = async (latest: string) => {
+    if (
+      !(await confirm({
+        title: `Update ${service.name} to ${latest}?`,
+        description: `Mu3Lab downloads ${latest}, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
+        confirmLabel: 'Update',
+      }))
+    )
+      return;
+    const result = await run(
+      'update',
+      () => postJsonApi(`/api/v1/services/${service.id}/actions`, { action: 'update' }),
+      `Updating ${service.name} to ${latest}`,
+    );
+    if (result === undefined) return;
+    setUpdate(null);
+    void refresh();
+  };
   return (
     <Card
       title="Updates"
@@ -112,8 +134,22 @@ function Updates({ service }: { service: Service }) {
               ? `${update.latest_version} is available.`
               : `You’re on the latest release (${update.latest_version || update.current_version}).`}
           </p>
-          {update.update_available && <p className="muted">{update.blocked_reason}</p>}
-          {update.release_url && <ExternalButton href={update.release_url}>Release notes</ExternalButton>}
+          {update.update_available && !update.update_enabled && update.blocked_reason && (
+            <p className="muted">{update.blocked_reason}</p>
+          )}
+          <div className="button-row">
+            {update.update_enabled && (
+              <Button
+                variant="primary"
+                icon={ArrowUpCircle}
+                loading={pending === 'update'}
+                onClick={() => void apply(update.latest_version)}
+              >
+                Update to {update.latest_version}
+              </Button>
+            )}
+            {update.release_url && <ExternalButton href={update.release_url}>Release notes</ExternalButton>}
+          </div>
         </div>
       )}
     </Card>
@@ -139,6 +175,7 @@ export function AdvancedTab({ service }: { service: Service }) {
         )}
       </Card>
       <Updates service={service} />
+      {service.stage === 'optional' && <BackupsCard service={service} />}
       <Card title="Technical details">
         <Facts
           items={[

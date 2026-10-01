@@ -461,6 +461,22 @@ export interface JobDetailResponse {
   events: AuditEvent[];
 }
 
+export interface BackupSnapshot {
+  id: string;
+  short_id: string;
+  time: string;
+  reason: 'manual' | 'pre-update' | 'pre-restore';
+  version: string;
+  paths: string[];
+}
+
+export interface BackupsResponse {
+  ok: boolean;
+  service_id: string;
+  backups: BackupSnapshot[];
+  readiness: BackupReadiness;
+}
+
 export interface UpdateResponse {
   ok: boolean;
   repository: string;

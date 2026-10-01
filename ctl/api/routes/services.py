@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +26,14 @@ from ctl.api.security import (
     job_identity,
 )
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
+from ctl.backups import BackupError
 from ctl.backups import readiness as backup_readiness
+from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
 from ctl.identity import mode_for
 from ctl.jobs import JobStore, redact
+from ctl.lifecycle import image_updates
+from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
 from ctl.releases import latest as latest_release
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import SUPPORTED_ACTIONS, UNINSTALL_ACTIONS, allowed_actions, project_path
@@ -39,6 +44,10 @@ ROOT = Path(__file__).resolve().parents[3]
 MANUAL_INITIALIZATION_MODES = frozenset(
     {"oidc_first_login", "browser_registration", "local_account_manual", "manual_owner", "trusted_header"}
 )
+
+# An app must be installed (running or stopped) to be backed up, restored or updated.
+MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped"})
+SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"])
 
@@ -152,9 +161,13 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     if not (service.compose_path(ROOT) / "docker-compose.yml").is_file():
         raise ApiError(409, "service manifest is not deployable")
     control = ControlState.runtime()
-    required = "uninstall" if action in UNINSTALL_ACTIONS else action
-    if required not in allowed_actions(service, _effective_state(service, control)):
-        raise ApiError(409, "action is not valid for the current service state")
+    params: dict[str, str] = {}
+    if action in MAINTENANCE_ACTIONS:
+        params = _maintenance_params(service, action, body, _effective_state(service, control))
+    else:
+        required = "uninstall" if action in UNINSTALL_ACTIONS else action
+        if required not in allowed_actions(service, _effective_state(service, control)):
+            raise ApiError(409, "action is not valid for the current service state")
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
     previous = store.by_idempotency_key(key or "")
@@ -171,13 +184,41 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
             prepare=runtime.identity_for_job(operator)
             if provisions_account and operator.get("subject_id") and operator.get("email")
             else None,
+            params=params,
         )
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
+    if action in MAINTENANCE_ACTIONS:
+        return {"ok": True, "job": job}
     if control and job.get("state") == "queued":
         queued_state = "uninstalling" if action in UNINSTALL_ACTIONS else "queued"
         control.set_installation(service.id, queued_state, job_id=str(job["id"]))
     return {"ok": True, "job": job}
+
+
+def _maintenance_params(service: Any, action: str, body: dict, state: str) -> dict[str, str]:
+    """Check a backup, restore or update request before it is queued."""
+    if service.stage != "optional":
+        raise ApiError(409, "Only apps installed from the catalog can be backed up, restored or updated here.")
+    if state not in MAINTENANCE_STATES:
+        raise ApiError(409, "Finish setting up the app first.")
+    if action == "backup":
+        return {}
+    if action == "restore":
+        # Restoring replaces the app's current data: repeat its name, as for deleting data.
+        if str(body.get("confirm", "")).strip() != service.name:
+            raise ApiError(400, f"type {service.name} to confirm replacing its data")
+        snapshot_id = str(body.get("snapshot_id", ""))
+        if not SNAPSHOT_ID.fullmatch(snapshot_id):
+            raise ApiError(400, "choose a backup to restore")
+        return {"snapshot_id": snapshot_id}
+    # The target comes from the reviewed upstream source, never from the browser.
+    release = _release(service)
+    if not release["update_available"]:
+        raise ApiError(409, f"{service.name} is already on the latest release.")
+    if not release["update_enabled"]:
+        raise ApiError(409, release["blocked_reason"])
+    return {"target_version": str(release["latest_version"])}
 
 
 @router.post("/{service_id}/identity/reconcile")
@@ -319,22 +360,46 @@ def _write_service_configuration(service_id: str, values: Any, operator: Identit
     }
 
 
-@router.get("/{service_id}/updates")
-def service_updates(service_id: str, _operator: Member) -> dict[str, Any]:
-    """Check the curated upstream repository for its latest stable release."""
-    service = runtime.service(service_id)
+def _release(service: Any) -> dict[str, Any]:
+    """The latest upstream release, and whether Mu3Lab can move this app onto it."""
     repository = str(service.update.get("repository", ""))
     if not repository:
         raise ApiError(409, "no reviewed upstream release source")
+    current = image_updates.installed_version(service)
     try:
-        release = latest_release(repository, str(service.update.get("current_version", "")))
+        release = latest_release(repository, current)
     except (ValueError, RuntimeError) as exc:
         raise ApiError(503, str(exc)) from exc
-    reason = (
-        "A verified service snapshot is required before updating."
-        if backup_readiness().get("state") != "verified"
-        else service.blocked_reason
-        if service.is_blocked
-        else "Update execution remains disabled until the restore executor is available."
-    )
-    return {"ok": True, **release, "update_enabled": False, "blocked_reason": reason}
+    # A different tag is not necessarily a newer one; never offer a downgrade.
+    release["update_available"] = image_updates.is_newer(str(release["latest_version"]), current)
+    reason = ""
+    if service.is_blocked:
+        reason = service.blocked_reason
+    elif service.stage != "optional":
+        reason = f"{service.name} is part of Mu3Lab itself and is updated together with Mu3Lab."
+    elif not image_updates.plan(service, ROOT, str(release["latest_version"])):
+        reason = f"Mu3Lab can’t match {release['latest_version']} to {service.name}’s images, so it can’t update it."
+    elif _effective_state(service, runtime.control_state()) not in MAINTENANCE_STATES:
+        reason = f"Install {service.name} before updating it."
+    elif not backup_readiness().get("available"):
+        reason = "Updates need Docker to save a backup first."
+    return {**release, "update_enabled": release["update_available"] and not reason, "blocked_reason": reason}
+
+
+@router.get("/{service_id}/updates")
+def service_updates(service_id: str, _operator: Member) -> dict[str, Any]:
+    """Check the curated upstream repository for its latest stable release."""
+    return {"ok": True, **_release(runtime.service(service_id))}
+
+
+@router.get("/{service_id}/backups")
+def service_backups(service_id: str, _operator: Operator) -> dict[str, Any]:
+    """The app's local backups, newest first."""
+    service = runtime.service(service_id)
+    if service.stage != "optional":
+        raise ApiError(409, "Only apps installed from the catalog are backed up here.")
+    try:
+        snapshots = list_backups(service.id)
+    except BackupError as exc:
+        raise ApiError(503, str(exc)) from exc
+    return {"ok": True, "service_id": service.id, "backups": snapshots, "readiness": backup_readiness()}

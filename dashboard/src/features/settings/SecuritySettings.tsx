@@ -191,8 +191,9 @@ export function SecuritySettings() {
           </Callout>
         ) : (
           <Callout tone="warning" icon={ShieldAlert} title="Backup protection is not verified">
-            Mu3Lab won’t report your data as protected until a snapshot and integrity check succeed. Automatic backups
-            and restore are coming in a future update.
+            Mu3Lab won’t report your data as protected until a snapshot and integrity check succeed. Back up an app from
+            its Advanced tab; Mu3Lab also saves one before every app update. Scheduled backups are coming in a future
+            update.
           </Callout>
         )}
         <Facts

@@ -12,6 +12,7 @@ from ctl import actions, image_fetch, job_guard, onboarding_state, workflow_secr
 from ctl.control_state import ControlState
 from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
+from ctl.lifecycle import maintenance
 from ctl.lifecycle.accounts import (
     account_username,
     enforce_identity_settings,
@@ -21,6 +22,7 @@ from ctl.lifecycle.accounts import (
 )
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.integrations import configure_adventurelog_oidc, surfsense_embedding_preflight
+from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
 from ctl.lifecycle.materialize import materialize, pin_images
 from ctl.lifecycle.nextcloud import configure_nextcloud, install_nextcloud_if_needed
 from ctl.registry import Registry, RegistryError, Service, load
@@ -40,6 +42,9 @@ SUPPORTED_ACTIONS = frozenset(
         "configure_identity",
         "uninstall",
         "uninstall_delete_data",
+        "backup",
+        "restore",
+        "update",
     }
 )
 UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})
@@ -367,16 +372,26 @@ def _install(
     # healthy until `occ maintenance:install` completes, so start only the
     # dependencies and app first.  Cron is started after bootstrap cleanup.
     requested_services = ["db", "redis", "app"] if service.id == "nextcloud" else None
-    rc, output = actions.compose_up(
-        project,
-        log,
-        timeout=wait_timeout + 300,
-        wait_timeout=initial_wait_timeout,
-        env=bootstrap_env,
-        extra_files=[*compose_overrides(service.id, project), *bootstrap_files],
-        recreate=bool(prior_installation),
-        services=requested_services,
-    )
+
+    def start(recreate: bool) -> tuple[int, str]:
+        return actions.compose_up(
+            project,
+            log,
+            timeout=wait_timeout + 300,
+            wait_timeout=initial_wait_timeout,
+            env=bootstrap_env,
+            extra_files=[*compose_overrides(service.id, project), *bootstrap_files],
+            recreate=recreate,
+            services=requested_services,
+        )
+
+    rc, output = start(bool(prior_installation))
+    if rc and _failure_code("", output) == "dependency_unhealthy":
+        # First boots that fetch data (e.g. AdventureLog's geodata) can crash on
+        # one flaky download; the restart policy brings them back.  Wait on the
+        # same containers once more instead of recreating them.
+        _event(store, job_id, "start_service", "A container stopped during its first start; waiting for its restart.")
+        rc, output = start(False)
     if rc:
         _append_runtime_diagnostics(store, job_id, project)
         _fail(
@@ -990,6 +1005,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         return
     if action in UNINSTALL_ACTIONS:
         _uninstall(store, state, job, service, registry, actor, root)
+        return
+    if action in MAINTENANCE_ACTIONS:
+        maintenance.execute(store, state, job, service, root)
         return
     if action == "reset":
         if service.stage != "optional":

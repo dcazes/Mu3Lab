@@ -474,8 +474,14 @@ def status(
         if ui_state == "route_pending"
         else ""
     )
+    from ctl.lifecycle.image_updates import installed_version
+
     return {
         **service.public(),
+        "update": {
+            "repository": str(service.update.get("repository", "")),
+            "current_version": installed_version(service),
+        },
         "state": lifecycle_state,
         "detail": detail,
         "lifecycle_state": lifecycle_state,
