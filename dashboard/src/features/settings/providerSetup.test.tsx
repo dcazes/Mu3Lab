@@ -234,8 +234,8 @@ describe('Get started', () => {
   it('saves logins by itself and only asks the owner when saving is stuck', async () => {
     const { HomePage } = await import('../home/HomePage');
     const base = api(false, [connection('groq', 'Groq')]);
-    stubFetch((path, init) => {
-      const body = base(path, init);
+    stubFetch((path) => {
+      const body = base(path);
       return path === '/api/v1/vault/status'
         ? { ...(body as object), automatic: { ok: false, error: 'Vaultwarden is not reachable.', people: [] } }
         : body;
