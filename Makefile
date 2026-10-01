@@ -4,7 +4,7 @@
 # WHY:   One canonical spelling per task so docs and muscle memory agree.
 # DEBUG: `make -n <target>` prints the commands without running them.
 
-.PHONY: pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
+.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
 
 install:
 	./install.sh
@@ -37,6 +37,14 @@ typecheck:
 # verify: everything CI checks, in one command.
 verify: lint typecheck test
 	cd dashboard && npm run build
+
+# check-updates / approve: the maintainer's release review. See tools/approve_release.py.
+check-updates:
+	.venv/bin/python -m tools.approve_release check
+
+approve:
+	@[ -n "$(APP)" ] && [ -n "$(VERSION)" ] || { echo 'usage: make approve APP=mealie VERSION=v3.23.0 [IMAGES="service=registry/name:tag"]'; exit 2; }
+	.venv/bin/python -m tools.approve_release approve "$(APP)" "$(VERSION)" $(foreach image,$(IMAGES),--image "$(image)")
 
 # check: read-only report of this computer's readiness (changes nothing).
 check:

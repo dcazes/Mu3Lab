@@ -32,9 +32,8 @@ from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
 from ctl.identity import mode_for
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import image_updates
+from ctl.lifecycle import app_releases
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
-from ctl.releases import latest as latest_release
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import SUPPORTED_ACTIONS, UNINSTALL_ACTIONS, allowed_actions, project_path
 from ctl.service_state import status as service_status
@@ -212,13 +211,13 @@ def _maintenance_params(service: Any, action: str, body: dict, state: str) -> di
         if not SNAPSHOT_ID.fullmatch(snapshot_id):
             raise ApiError(400, "choose a backup to restore")
         return {"snapshot_id": snapshot_id}
-    # The target comes from the reviewed upstream source, never from the browser.
+    # The target is the release checked in as approved, never one from the browser.
     release = _release(service)
     if not release["update_available"]:
-        raise ApiError(409, f"{service.name} is already on the latest release.")
+        raise ApiError(409, f"{service.name} is already on the release Mu3Lab approves.")
     if not release["update_enabled"]:
         raise ApiError(409, release["blocked_reason"])
-    return {"target_version": str(release["latest_version"])}
+    return {"target_version": str(release["approved_version"])}
 
 
 @router.post("/{service_id}/identity/reconcile")
@@ -361,34 +360,44 @@ def _write_service_configuration(service_id: str, values: Any, operator: Identit
 
 
 def _release(service: Any) -> dict[str, Any]:
-    """The latest upstream release, and whether Mu3Lab can move this app onto it."""
-    repository = str(service.update.get("repository", ""))
-    if not repository:
-        raise ApiError(409, "no reviewed upstream release source")
-    current = image_updates.installed_version(service)
-    try:
-        release = latest_release(repository, current)
-    except (ValueError, RuntimeError) as exc:
-        raise ApiError(503, str(exc)) from exc
-    # A different tag is not necessarily a newer one; never offer a downgrade.
-    release["update_available"] = image_updates.is_newer(str(release["latest_version"]), current)
+    """The release Mu3Lab approves for this app, and whether this machine can move to it."""
+    if service.stage != "optional":
+        approved = str(service.update.get("approved_version", ""))
+        release: dict[str, Any] = {
+            "installed_version": approved,
+            "approved_version": approved,
+            "update_available": False,
+            "supporting_only": False,
+        }
+    else:
+        release = app_releases.status(service, ROOT)
     reason = ""
     if service.is_blocked:
         reason = service.blocked_reason
     elif service.stage != "optional":
         reason = f"{service.name} is part of Mu3Lab itself and is updated together with Mu3Lab."
-    elif not image_updates.plan(service, ROOT, str(release["latest_version"])):
-        reason = f"Mu3Lab can’t match {release['latest_version']} to {service.name}’s images, so it can’t update it."
     elif _effective_state(service, runtime.control_state()) not in MAINTENANCE_STATES:
         reason = f"Install {service.name} before updating it."
     elif not backup_readiness().get("available"):
         reason = "Updates need Docker to save a backup first."
-    return {**release, "update_enabled": release["update_available"] and not reason, "blocked_reason": reason}
+    repository = str(service.update.get("repository", ""))
+    notes = (
+        f"https://github.com/{repository}/releases/tag/{release['approved_version']}"
+        if repository and release["approved_version"]
+        else ""
+    )
+    return {
+        **release,
+        "repository": repository,
+        "release_url": notes,
+        "update_enabled": release["update_available"] and not reason,
+        "blocked_reason": reason,
+    }
 
 
 @router.get("/{service_id}/updates")
 def service_updates(service_id: str, _operator: Member) -> dict[str, Any]:
-    """Check the curated upstream repository for its latest stable release."""
+    """Compare the installed release with the one Mu3Lab approves; no network needed."""
     return {"ok": True, **_release(runtime.service(service_id))}
 
 

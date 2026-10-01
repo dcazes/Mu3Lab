@@ -77,7 +77,7 @@ function RestoreDialog({
         </>
       }
     >
-      {backup?.version && backup.version !== service.update?.current_version && (
+      {backup?.version && backup.version !== service.update?.installed_version && (
         <p>
           This backup is from {backup.version}, so {service.name} goes back to {backup.version} as well.
         </p>

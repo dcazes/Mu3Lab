@@ -18,7 +18,8 @@ from pathlib import Path
 from ctl import actions, backups, job_guard
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, job_params, redact
-from ctl.lifecycle import image_updates
+from ctl.lifecycle import app_releases
+from ctl.lifecycle.app_releases import Release
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.uninstall import data_directories
 from ctl.registry import Service
@@ -89,7 +90,7 @@ def _backup(service: Service, project: Path, root: Path, step: Callable[[str, st
                 data_directories(service, root),
                 "manual",
                 log,
-                version=image_updates.installed_version(service),
+                version=app_releases.installed_version(service, root),
             )
         except (backups.BackupError, OSError) as exc:
             error = str(exc)
@@ -103,17 +104,31 @@ def _backup(service: Service, project: Path, root: Path, step: Callable[[str, st
     return f"Backup {_short(saved['snapshot_id'])} saved and checked ({saved['files']} files)."
 
 
-def _release_for(service: Service, version: str, root: Path, log: Log) -> dict | None:
-    """Pinned images that run ``version``, or None for Mu3Lab's own checked-in release."""
-    if not image_updates.is_newer(version, str(service.update.get("current_version", ""))):
-        return None
-    images = image_updates.plan(service, root, version)
-    if not images:
-        raise _Failed("download_images", "update_unsupported", f"Mu3Lab cannot tell which images make up {version}.")
+def _refresh_definition(service: Service, root: Path, log: Log) -> None:
+    """Copy the approved Compose definition, which may differ between releases."""
+    from ctl.lifecycle.materialize import materialize
+
     try:
-        return {"version": version, "images": image_updates.download(images, log)}
+        materialize(service, root)
+    except OSError as exc:
+        log(f"The approved configuration could not be copied ({exc}); keeping the current one.")
+
+
+def _release_for(service: Service, version: str, root: Path, log: Log) -> Release:
+    """The images that make up ``version``, downloaded. Raises _Failed."""
+    target = app_releases.approved(service, root)
+    release = target if target.version == version else app_releases.from_history(service.id, version)
+    if not release:
+        raise _Failed(
+            "download_images",
+            "release_unknown",
+            f"Mu3Lab no longer knows which images make up {service.name} {version}, so it can't restore that backup.",
+        )
+    try:
+        app_releases.download(release.images, log)
     except RuntimeError as exc:
         raise _Failed("download_images", "image_pull_failed", f"Nothing changed: {exc}") from exc
+    return release
 
 
 def _restore(
@@ -132,13 +147,13 @@ def _restore(
         raise _Failed("restore", "restore_failed", str(exc)) from exc
     if not chosen:
         raise _Failed("restore", "restore_failed", "That backup no longer exists.")
-    installed = image_updates.installed_version(service)
-    previous = image_updates.read(service.id)
-    # Data from an older release goes back with that release: restoring the
-    # backup taken before an update is how an update is undone.
-    downgrade = bool(chosen["version"]) and image_updates.is_newer(installed, chosen["version"])
+    previous = app_releases.installed(service, root)
+    installed = previous.version if previous else ""
+    # Data goes back with the release it was saved from: restoring the backup
+    # taken before an update is how an update is undone.
+    switch = bool(chosen["version"]) and chosen["version"] != installed
     release = None
-    if downgrade:
+    if switch:
         step("download_images", f"Downloading {service.name} {chosen['version']}, the release this backup is from.")
         release = _release_for(service, chosen["version"], root, log)
     with job_guard.uncancellable():
@@ -154,13 +169,13 @@ def _restore(
         step("restore", f"Putting back backup {_short(snapshot_id)}.")
         try:
             backups.restore(service.id, snapshot_id, directories, log)
-            if downgrade:
-                image_updates.restore_previous(service.id, release)
+            if release:
+                app_releases.write(service.id, release)
         except (backups.BackupError, OSError) as exc:
             step("rollback", "Restore failed; putting the current data back.")
             try:
                 backups.restore(service.id, safety["snapshot_id"], directories, log)
-                image_updates.restore_previous(service.id, previous)
+                app_releases.restore_previous(service.id, previous)
             except (backups.BackupError, OSError) as undo:
                 raise _Failed(
                     "rollback",
@@ -182,7 +197,7 @@ def _restore(
                     f"Backup {_short(safety['snapshot_id'])} holds the data from before the restore.",
                 )
     when = chosen["time"][:16].replace("T", " ")
-    moved = f" {service.name} is back on {chosen['version']}." if downgrade else ""
+    moved = f" {service.name} is back on {chosen['version']}." if switch else ""
     return (
         f"Restored the backup from {when} UTC.{moved} "
         f"The data from just before is kept as backup {_short(safety['snapshot_id'])}."
@@ -198,44 +213,54 @@ def _update(
     running: bool,
     target: str,
 ):
-    current = image_updates.installed_version(service)
-    if not image_updates.is_newer(target, current):
-        raise _Failed("check_release", "already_current", f"{service.name} is already on {current}.")
-    images = image_updates.plan(service, root, target)
-    if not images:
-        raise _Failed("check_release", "update_unsupported", f"Mu3Lab cannot tell which images make up {target}.")
+    state = app_releases.status(service, root)
+    release = app_releases.approved(service, root)
+    if release.version != target:
+        raise _Failed(
+            "check_release",
+            "approval_changed",
+            f"Mu3Lab now approves {service.name} {release.version} instead of {target}. Check for updates again.",
+        )
+    if not state["update_available"]:
+        raise _Failed("check_release", "already_current", f"{service.name} is already up to date.")
+    previous = app_releases.installed(service, root)
+    current = previous.version if previous else "the installed release"
     step("download_images", f"Downloading {service.name} {target}. The app keeps running meanwhile.")
     try:
-        pinned = image_updates.download(images, log)
+        app_releases.download(release.images, log)
     except RuntimeError as exc:
         raise _Failed("download_images", "image_pull_failed", f"Nothing changed: {exc}") from exc
-    previous = image_updates.read(service.id)
     directories = data_directories(service, root)
     with job_guard.uncancellable():
         step("stop_app", f"Stopping {service.name}.")
         _stop(service, project, root, log)
         step("backup", f"Saving a backup of {service.name} {current}.")
         try:
-            saved = backups.snapshot(service.id, directories, "pre-update", log, version=current)
+            saved = backups.snapshot(
+                service.id, directories, "pre-update", log, version=previous.version if previous else ""
+            )
         except (backups.BackupError, OSError) as exc:
             if running:
                 _start(service, project, root, log)
             raise _Failed("backup", "backup_failed", f"Nothing was updated: {exc}") from exc
         step("apply_update", f"Starting {service.name} {target}. Upgrading its data can take a few minutes.")
-        image_updates.write(service.id, target, pinned)
+        _refresh_definition(service, root, log)
+        app_releases.write(service.id, release)
         started, detail = _start(service, project, root, log)
         if started:
             if not running:
                 _stop(service, project, root, log)
-            return (
-                f"Updated {service.name} from {current} to {target}. "
-                f"Backup {_short(saved['snapshot_id'])} holds the data from before."
+            moved = (
+                f"Updated {service.name}'s supporting services"
+                if state["supporting_only"]
+                else f"Updated {service.name} from {current} to {target}"
             )
+            return f"{moved}. Backup {_short(saved['snapshot_id'])} holds the data from before."
         step("rollback", f"{target} did not start; putting back {current} and its data.")
         try:
             _stop(service, project, root, log)
             backups.restore(service.id, saved["snapshot_id"], directories, log)
-            image_updates.restore_previous(service.id, previous)
+            app_releases.restore_previous(service.id, previous)
         except (_Failed, backups.BackupError, OSError) as exc:
             raise _Failed(
                 "rollback",

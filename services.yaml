@@ -28,7 +28,7 @@ services:
     auth: excluded
     stage: foundation
     images: ["caddy:2.10.2-alpine"]
-    update: {repository: caddyserver/caddy, current_version: v2.10.2}
+    update: {repository: caddyserver/caddy, approved_version: v2.10.2}
     route: ready
     ui: {available: false, unavailable_reason: "Caddy is Mu3Lab's internal reverse proxy and has no end-user dashboard."}
     required: true
@@ -50,7 +50,7 @@ services:
     auth: excluded
     stage: foundation
     images: ["postgres:16-alpine", "ghcr.io/goauthentik/server:2026.5.0"]
-    update: {repository: goauthentik/authentik, current_version: "2026.5.0"}
+    update: {repository: goauthentik/authentik, approved_version: "2026.5.0"}
     route: pending
     ui: {available: true, authentication: local}
     required: true
@@ -91,7 +91,7 @@ services:
             - "Sign in with your Mu3Lab email and password."
 
     images: ["vaultwarden/server:1.37.3-alpine@sha256:9a905c5cf5df61bb827da3805e160170741c0b53b0c63bb07e1afd3d2e21b1c8"]
-    update: {repository: dani-garcia/vaultwarden, current_version: "1.37.3"}
+    update: {repository: dani-garcia/vaultwarden, approved_version: "1.37.3"}
     route: pending
     ui: {available: true, authentication: local}
     required: true
@@ -117,7 +117,7 @@ services:
     route: pending
     ui: {available: false, unavailable_reason: "Ollama is an internal model and embedding API; it does not ship a browser UI."}
     images: ["ollama/ollama:0.34.1"]
-    update: {repository: ollama/ollama, current_version: v0.34.1}
+    update: {repository: ollama/ollama, approved_version: v0.34.1}
     setup_action: "Install and verify the model runner using the host-wide compute setting."
     resource_guidance: "Model downloads determine disk and memory use."
     backup: {binds: [data]}
@@ -144,7 +144,7 @@ services:
     setup_action: "Connect Ollama and optional provider routes, then run a test request."
     resource_guidance: "Low host overhead; provider and model choice determines usage."
     images: ["ghcr.io/berriai/litellm:v1.92.0"]
-    update: {repository: BerriAI/litellm, current_version: v1.92.0}
+    update: {repository: BerriAI/litellm, approved_version: v1.92.0}
     dependencies: [ollama]
     backup: {binds: [config]}
     identity_note: "Authentik protects the private dashboard route. LiteLLM Community does not receive a native per-user OIDC session."
@@ -170,7 +170,7 @@ services:
     setup_action: "Mu3Lab manages provider configuration privately; its native dashboard is available for operator recovery."
     resource_guidance: "Optional provider route inside the mandatory core suite."
     images: ["ghcr.io/tashfeenahmed/freellmapi:v0.11.0"]
-    update: {repository: TashfeenAhmed/FreeLLMAPI, current_version: v0.11.0}
+    update: {repository: TashfeenAhmed/FreeLLMAPI, approved_version: v0.11.0}
     backup: {binds: [data]}
     identity_note: "Authentik protects the private dashboard route. FreeLLMAPI has no header-based login, so its generated local account is saved to your Vaultwarden."
 
@@ -213,26 +213,9 @@ services:
             - "Open the private SurfSense URL in the phone browser."
             - "Complete Authentik, then let Bitwarden fill in your SurfSense login."
     configuration:
-      - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Allow new local accounts", default: true}
-    images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
-    update: {repository: MODSetter/SurfSense, current_version: "v0.0.40"}
-    backup: {database: surfsense, binds: [object-store, zero-cache]}
-    mcp:
-      kind: official
-      endpoint: http://surfsense-mcp:8080/mcp
-      auth: personal-api-token
-      scopes: [workspace-read, knowledge-read, knowledge-write, scraper-run]
-      exposed: false
-      tools: []
-    account:
-      mode: local_account_manual
-      handoff: false
-      user_action: "Open SurfSense after installation and create its separate local account."
-
-    configuration:
       - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Enable local sign-in", default: true}
     images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
-    update: {repository: MODSetter/SurfSense, current_version: "v0.0.40"}
+    update: {repository: MODSetter/SurfSense, approved_version: "v0.0.40"}
     backup: {database: surfsense, binds: [object-store, zero-cache]}
     mcp:
       kind: official
@@ -271,7 +254,7 @@ services:
     setup_action: "Install the private Firecrawl API, queue workers, Playwright browser service, and durable data services."
     resource_guidance: "Runs Firecrawl workers, Playwright, RabbitMQ, PostgreSQL, and Redis. Browser crawls can use substantial memory; concurrency defaults are intentionally conservative."
     images: ["ghcr.io/firecrawl/firecrawl:2.11.334-production@sha256:70453d7102cce7000f4e8e80bd11e3e1353cdc9a0b87bb4cd1d4e8edf5a65744", "ghcr.io/firecrawl/playwright-service@sha256:df1a393ce8bfc3801570a826a9b0dcc400ae48789adb4a0ad9d6cbf0229b059b", "ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc", "rabbitmq:3.13-alpine@sha256:d7af1c87c5f1eda13fcfca06db452bf3aeab6619fc3358b68535c0c02c4e52bc", "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"]
-    update: {repository: firecrawl/firecrawl, current_version: "v2.11.0"}
+    update: {repository: firecrawl/firecrawl, approved_version: "v2.11.0"}
     backup: {database: firecrawl, binds: [postgres, redis, rabbitmq]}
     account: {mode: none, handoff: false, user_action: "No login is required on the private Firecrawl API route."}
 
@@ -330,7 +313,7 @@ services:
             - "Enter the Mu3Lab LobeChat URL as the custom server."
 
     images: ["lobehub/lobehub:2.2.18@sha256:b7c843911259c54c92f03864d9dd2e9099e18525de1d37498b64cc15751d087d", "paradedb/paradedb:0.25.9-pg17@sha256:8da5d202fe31875af32a49e802ce17cfbc146b0672306f4109809efee1e6f916", "redis:8-alpine@sha256:ba6e394f6acc2a695ef1b6944f161b9ca813711739be68319fa0db3470673f1d", "rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff", "rustfs/rc:v0.1.36@sha256:ab024bfebee49a750ce886b4c70963ccd9ddaa03f491704a90710641d7a26699", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
-    update: {repository: lobehub/lobehub, current_version: "v2.2.18"}
+    update: {repository: lobehub/lobehub, approved_version: "v2.2.18"}
     backup: {database: lobehub, binds: [postgres, redis, object-store]}
     account:
       mode: oidc_first_login
@@ -377,7 +360,7 @@ services:
       - {key: user_creation, env: ACTUAL_USER_CREATION_MODE, type: enum, label: "OIDC user creation", options: [manual, login], default: login}
     images: ["docker.io/actualbudget/actual-server:26.9.0"]
     backup: {binds: [data]}
-    update: {repository: actualbudget/actual, current_version: "v26.9.0"}
+    update: {repository: actualbudget/actual, approved_version: "v26.9.0"}
     mcp:
       kind: adapter
       endpoint: http://127.0.0.1:8813/mcp
@@ -434,7 +417,7 @@ services:
             - "Select the albums you want Immich to back up."
 
     images: ["ghcr.io/immich-app/immich-server:v3.2.2", "ghcr.io/immich-app/immich-machine-learning:v3.2.2", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
-    update: {repository: immich-app/immich, current_version: "v3.2.2"}
+    update: {repository: immich-app/immich, approved_version: "v3.2.2"}
     backup: {binds: [library, database]}
     account:
       mode: api_bootstrap
@@ -496,7 +479,7 @@ services:
       - {key: oidc_enabled, env: MEALIE_OIDC_ENABLED, type: boolean, label: "Enable Authentik login", default: true}
     backup: {binds: [data]}
     images: ["ghcr.io/mealie-recipes/mealie:v3.22.0"]
-    update: {repository: mealie-recipes/mealie, current_version: "v3.22.0"}
+    update: {repository: mealie-recipes/mealie, approved_version: "v3.22.0"}
     mcp:
       kind: adapter
       endpoint: http://mealie-mcp:8000/mcp
@@ -558,7 +541,7 @@ services:
       - {key: admin_email, env: DJANGO_ADMIN_EMAIL, type: string, managed: true}
       - {key: admin_password, env: DJANGO_ADMIN_PASSWORD, type: secret, managed: true}
     images: ["ghcr.io/seanmorley15/adventurelog:v0.13.0", "postgis/postgis:16-3.5"]
-    update: {repository: seanmorley15/AdventureLog, current_version: "v0.13.0"}
+    update: {repository: seanmorley15/AdventureLog, approved_version: "v0.13.0"}
     backup: {binds: [data]}
 
   - id: paperless-ngx
@@ -622,7 +605,7 @@ services:
       - {key: admin_email, env: PAPERLESS_ADMIN_MAIL, type: string, managed: true}
       - {key: admin_password, env: PAPERLESS_ADMIN_PASSWORD, type: secret, managed: true}
     images: ["ghcr.io/paperless-ngx/paperless-ngx:3.1.3", "docker.io/valkey/valkey:9.0.1-alpine", "docker.io/library/postgres:18.0-alpine"]
-    update: {repository: paperless-ngx/paperless-ngx, current_version: "v3.1.3"}
+    update: {repository: paperless-ngx/paperless-ngx, approved_version: "v3.1.3"}
     backup: {binds: [data, media, consume, export]}
 
   - id: nextcloud
@@ -664,7 +647,7 @@ services:
             - "Complete the browser-based Authentik login and approve the device."
 
     images: ["nextcloud:33.0.5-apache", "postgres:16-alpine", "redis:8-alpine"]
-    update: {repository: nextcloud/server, current_version: "v33.0.5"}
+    update: {repository: nextcloud/server, approved_version: "v33.0.5"}
     backup: {database: nextcloud, binds: [html, postgres]}
     account:
       mode: environment_bootstrap
@@ -713,7 +696,7 @@ services:
             - "Open Baby Buddy in a browser and go to User, then Add a Device."
             - "Scan the device QR code in the app, or enter the server URL and API token by hand. The app connects with that token, so it does not need the Authentik sign-in."
     images: ["lscr.io/linuxserver/babybuddy:version-v2.7.1"]
-    update: {repository: babybuddy/babybuddy, current_version: "v2.7.1"}
+    update: {repository: babybuddy/babybuddy, approved_version: "v2.7.1"}
     backup: {binds: [config]}
     account:
       mode: trusted_header

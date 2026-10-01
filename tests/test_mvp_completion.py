@@ -263,7 +263,7 @@ class BatchPersistenceTests(unittest.TestCase):
 
 
 class FailedApplicationResetTests(unittest.TestCase):
-    def test_cleanup_removes_transient_files_but_preserves_env_credentials(self):
+    def test_cleanup_removes_transient_files_but_preserves_env_credentials_and_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp) / "nextcloud"
             project.mkdir()
@@ -285,7 +285,8 @@ class FailedApplicationResetTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertIn("persistent data preserved", detail)
             down.assert_called_once()
-            self.assertFalse((project / "docker-compose.digest.yml").exists())
+            # The release record stays: data from an earlier install was migrated to it.
+            self.assertTrue((project / "docker-compose.digest.yml").exists())
             self.assertFalse((project / "docker-compose.bootstrap.yml").exists())
             env = read_runtime_env(project / ".env")
             self.assertEqual(env["NEXTCLOUD_DB_PASSWORD"], "keep-me")

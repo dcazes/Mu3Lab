@@ -126,7 +126,7 @@ class Service:
             "setup_action": self.setup_action,
             "update": {
                 "repository": str(self.update.get("repository", "")),
-                "current_version": str(self.update.get("current_version", "")),
+                "approved_version": str(self.update.get("approved_version", "")),
             },
             "mcp": {"exposed": bool(self.mcp.get("exposed", False)), "risk": self.mcp.get("risk", "")},
             "account": {

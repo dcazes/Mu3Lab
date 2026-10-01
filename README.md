@@ -226,7 +226,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 - **No public exposure.** Apps are reachable only from devices on your Tailscale network. Reusable Tailscale auth keys are never accepted.
 - **Forged identities are ignored.** The control plane trusts Authentik identity headers only when they arrive with a shared proxy token, and every change needs a same-origin request and a CSRF token bound to your session.
 - **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and write tools need your approval each time.
-- **Pinned supply chain.** Images are resolved to immutable digests at install time. Updates are shown for review, never applied silently.
+- **Pinned supply chain.** Every image is pinned to an immutable digest. Apps move only to versions the maintainer has tested and approved, and only when you choose to update, with a backup first. See [App updates](docs/app-updates.md).
 - **Data outside Git.** Everything lives under `/srv/mu3lab`. The repository holds definitions and safe defaults, never app data, backups or unencrypted secrets.
 
 <details>
@@ -277,12 +277,13 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 - [x] AI slice: LobeChat, LiteLLM, FreeLLMAPI and Ollama, with GPU detection
 - [x] Per-app chat assistants through reviewed MCP connectors with write approval
 - [x] Parallel image downloads with size estimates before install
-- [ ] **Encrypted local backups** with Restic (7 daily, 4 weekly, 12 monthly) and guided restore
-- [ ] **One-click updates** with a snapshot first (depends on backups)
+- [x] Encrypted local backups of catalog apps, with guided restore
+- [x] One-click updates to tested versions, with a backup first and automatic rollback
+- [ ] Scheduled and off-device backups, and backups of the core platform
 - [ ] More curated apps
 
 > [!NOTE]
-> Backups aren't shipped yet. The dashboard reports backup status as *not configured* until a real, integrity-checked repository exists. Until then, keep your own copy of `/srv/mu3lab/data`, which holds every app's data including your Authentik sign-in accounts. Run `make pause` first and `make resume` afterwards, because a copy of a running database may not restore. They stop and start only Mu3Lab's containers.
+> Backups cover catalog apps and run when you ask (and before every update); they are not scheduled yet. The core platform, including your Authentik sign-in accounts, is not backed up yet, so also keep your own copy of `/srv/mu3lab/data`. Run `make pause` first and `make resume` afterwards, because a copy of a running database may not restore. They stop and start only Mu3Lab's containers.
 
 ---
 

@@ -474,14 +474,18 @@ def status(
         if ui_state == "route_pending"
         else ""
     )
-    from ctl.lifecycle.image_updates import installed_version
+    from ctl.lifecycle import app_releases
 
+    approved = str(service.update.get("approved_version", ""))
+    release = (
+        app_releases.status(service, root)
+        if service.stage == "optional"
+        # Core services are pinned and move only together with Mu3Lab itself.
+        else {"installed_version": approved, "approved_version": approved, "update_available": False}
+    )
     return {
         **service.public(),
-        "update": {
-            "repository": str(service.update.get("repository", "")),
-            "current_version": installed_version(service),
-        },
+        "update": {"repository": str(service.update.get("repository", "")), "supporting_only": False, **release},
         "state": lifecycle_state,
         "detail": detail,
         "lifecycle_state": lifecycle_state,

@@ -5,7 +5,7 @@ finished uninstall safe to run again: chat connectors, containers, the private
 route, Authentik sign-in, the runtime project, then (only when asked) data.
 
 Keeping data leaves ``/srv/mu3lab/data/<app>``, the project's ``.env``
-(database passwords that unlock that data) and any update override (the
+(database passwords that unlock that data) and the release record (the
 release that data was migrated to), so a reinstall reconnects to it.
 Deleting data removes both, plus the app's images and saved credentials.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from ctl import actions
-from ctl.lifecycle import image_updates
+from ctl.lifecycle import app_releases
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
 
@@ -155,8 +155,8 @@ def _remove_project(project: Path, *, keep_env: bool) -> None:
         shutil.rmtree(project)
         return
     for item in project.iterdir():
-        # The update override records which release the kept data was migrated to.
-        if item.name in {".env", image_updates.OVERRIDE}:
+        # The release record says which release the kept data was migrated to.
+        if item.name in {".env", app_releases.RECORD, app_releases.HISTORY}:
             continue
         if item.is_dir() and not item.is_symlink():
             shutil.rmtree(item)

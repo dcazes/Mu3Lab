@@ -67,7 +67,8 @@ class UninstallTests(unittest.TestCase):
             withdraw.assert_called_once()
             docker.assert_not_called()
             self.assertNotIn("delete_data", stages)
-            self.assertEqual([item.name for item in project.iterdir()], [".env"])
+            # The release record says which release the kept data was migrated to.
+            self.assertEqual(sorted(item.name for item in project.iterdir()), [".env", "docker-compose.digest.yml"])
             self.assertTrue((paths.data / "nextcloud" / "postgres").is_dir())
             blueprints = paths.projects / "authentik" / "blueprints"
             self.assertIn("state: absent", (blueprints / "mu3lab-nextcloud-removed.yaml").read_text(encoding="utf-8"))

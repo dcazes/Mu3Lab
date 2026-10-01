@@ -1,5 +1,5 @@
 import { ArrowUpCircle, Copy, Download, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, postJsonApi, type Service, type ServiceLogsResponse, type UpdateResponse } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { copyText } from '../../components/CopyField';
@@ -8,6 +8,7 @@ import { Card, Facts } from '../../components/Layout';
 import { StateBadge } from '../../components/Status';
 import { humanize } from '../../lib/format';
 import { signInSummary } from '../../lib/services';
+import { useApi } from '../../lib/useApi';
 import { useAction } from '../../lib/useAction';
 import { useDashboard } from '../../state/dashboard';
 import { JobDialog, JobRow } from '../activity/JobDialog';
@@ -86,16 +87,34 @@ function Logs({ service }: { service: Service }) {
 }
 
 function Updates({ service }: { service: Service }) {
-  const [update, setUpdate] = useState<UpdateResponse | null>(null);
   const confirm = useConfirm();
   const { refresh } = useDashboard();
   const { pending, run } = useAction();
+  const installed = service.update?.installed_version ?? '';
+  // A local comparison with the release Mu3Lab approves, so it loads straight away.
+  const { data: update, reload } = useApi<UpdateResponse>(
+    service.update?.repository ? `/api/v1/services/${service.id}/updates` : null,
+  );
+  // An update, a restore or a newer Mu3Lab changed what is installed or approved.
+  const approved = service.update?.approved_version ?? '';
+  const seen = useRef(`${installed} ${approved}`);
+  useEffect(() => {
+    if (seen.current === `${installed} ${approved}`) return;
+    seen.current = `${installed} ${approved}`;
+    void reload();
+  }, [installed, approved, reload]);
   if (!service.update?.repository) return null;
-  const apply = async (latest: string) => {
+  const target = update?.supporting_only
+    ? `updated supporting services for ${update.approved_version}`
+    : update?.approved_version;
+  const apply = async () => {
+    if (!update) return;
     if (
       !(await confirm({
-        title: `Update ${service.name} to ${latest}?`,
-        description: `Mu3Lab downloads ${latest}, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
+        title: update.supporting_only
+          ? `Update ${service.name}’s supporting services?`
+          : `Update ${service.name} to ${update.approved_version}?`,
+        description: `Mu3Lab downloads the new version, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
         confirmLabel: 'Update',
       }))
     )
@@ -103,36 +122,26 @@ function Updates({ service }: { service: Service }) {
     const result = await run(
       'update',
       () => postJsonApi(`/api/v1/services/${service.id}/actions`, { action: 'update' }),
-      `Updating ${service.name} to ${latest}`,
+      `Updating ${service.name}`,
     );
     if (result === undefined) return;
-    setUpdate(null);
     void refresh();
   };
   return (
     <Card
       title="Updates"
-      description={`Installed version ${service.update.current_version || 'unknown'}.`}
-      actions={
-        <Button
-          size="sm"
-          loading={pending === 'check'}
-          onClick={() =>
-            void run('check', async () =>
-              setUpdate(await api<UpdateResponse>(`/api/v1/services/${service.id}/updates`)),
-            )
-          }
-        >
-          Check for updates
-        </Button>
+      description={
+        service.stage === 'optional'
+          ? `Installed version ${installed || 'unknown'}. Mu3Lab offers a new version once it has been tested with Mu3Lab.`
+          : `Version ${installed || 'unknown'}. Updated together with Mu3Lab.`
       }
     >
-      {update && (
+      {update && service.stage === 'optional' && installed && (
         <div className="stack">
           <p>
             {update.update_available
-              ? `${update.latest_version} is available.`
-              : `You’re on the latest release (${update.latest_version || update.current_version}).`}
+              ? `A tested update is ready: ${target}.`
+              : `You’re on the latest tested version (${update.installed_version}).`}
           </p>
           {update.update_available && !update.update_enabled && update.blocked_reason && (
             <p className="muted">{update.blocked_reason}</p>
@@ -143,12 +152,14 @@ function Updates({ service }: { service: Service }) {
                 variant="primary"
                 icon={ArrowUpCircle}
                 loading={pending === 'update'}
-                onClick={() => void apply(update.latest_version)}
+                onClick={() => void apply()}
               >
-                Update to {update.latest_version}
+                {update.supporting_only ? 'Update' : `Update to ${update.approved_version}`}
               </Button>
             )}
-            {update.release_url && <ExternalButton href={update.release_url}>Release notes</ExternalButton>}
+            {update.update_available && update.release_url && !update.supporting_only && (
+              <ExternalButton href={update.release_url}>Release notes</ExternalButton>
+            )}
           </div>
         </div>
       )}

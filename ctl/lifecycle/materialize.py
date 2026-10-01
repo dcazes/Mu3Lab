@@ -15,9 +15,6 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-import yaml
-
-from ctl import actions
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
@@ -360,31 +357,8 @@ def materialize(service: Service, root: Path) -> Path:
         configure(service, values, dns_name, f"https://{dns_name}:{service.private_https_port}", target)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
+    if service.stage == "optional":
+        from ctl.lifecycle import app_releases
+
+        app_releases.align(service, root)
     return target
-
-
-def pin_images(project: Path) -> dict[str, str]:
-    """Resolve every declared image and write a Compose digest override."""
-    definition = yaml.safe_load((project / "docker-compose.yml").read_text(encoding="utf-8")) or {}
-    snapshot: dict[str, str] = {}
-    override: dict[str, dict[str, dict[str, str]]] = {"services": {}}
-    for service_name, contract in (definition.get("services") or {}).items():
-        if not isinstance(contract, dict) or not contract.get("image"):
-            continue
-        image = str(contract["image"])
-        if "@sha256:" in image:
-            pinned = image
-        else:
-            rc, output = actions.docker_image_digest(image)
-            pinned = output.strip()
-            if rc or "@sha256:" not in pinned:
-                raise RuntimeError(f"image {service_name} did not resolve to an immutable digest")
-        snapshot[str(service_name)] = pinned
-        override["services"][str(service_name)] = {"image": pinned}
-    if not snapshot:
-        raise RuntimeError("the curated deployment did not declare any images")
-    target = project / "docker-compose.digest.yml"
-    temporary = target.with_suffix(".tmp")
-    temporary.write_text(yaml.safe_dump(override, sort_keys=True), encoding="utf-8")
-    temporary.replace(target)
-    return snapshot

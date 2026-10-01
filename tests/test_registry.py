@@ -23,7 +23,21 @@ from tests.support import runtime_paths
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """A repeated key silently replaces the earlier one; refuse it instead."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(key, deep=deep) for key, _value in node.value]
+        repeated = {key for key in keys if keys.count(key) > 1}
+        if repeated:
+            raise yaml.constructor.ConstructorError(None, None, f"repeated keys {repeated}", node.start_mark)
+        return super().construct_mapping(node, deep=deep)
+
+
 class RegistryTests(unittest.TestCase):
+    def test_service_entries_never_repeat_a_key(self):
+        yaml.load((ROOT / "services.yaml").read_text(encoding="utf-8"), Loader=_StrictLoader)
+
     def test_baby_buddy_uses_loopback_only_trusted_header_auth(self):
         service = load().get("baby-buddy")
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))

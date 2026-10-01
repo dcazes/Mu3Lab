@@ -63,6 +63,7 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
         </span>
       </Link>
       <span className="row-meta hide-mobile">
+        {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
         {service.identity && service.identity.mode !== 'none' && <Badge tone="gray">{signIn.label}</Badge>}
       </span>
       <StatusBadge state={service.state} />

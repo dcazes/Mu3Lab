@@ -13,6 +13,7 @@ _RUNTIME_PATH_USERS = (
     "ctl.lifecycle.materialize",
     "ctl.lifecycle.accounts",
     "ctl.lifecycle.uninstall",
+    "ctl.lifecycle.app_releases",
 )
 
 

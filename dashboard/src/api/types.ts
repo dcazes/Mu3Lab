@@ -94,7 +94,13 @@ export interface Service {
     'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair' | 'uninstall' | 'uninstall_delete_data'
   >;
   last_job?: Job | null;
-  update?: { repository: string; current_version: string };
+  update?: {
+    repository: string;
+    installed_version: string;
+    approved_version: string;
+    update_available: boolean;
+    supporting_only: boolean;
+  };
   configuration?: ServiceConfigField[];
   account?: { mode: string; handoff: boolean; user_action: string };
   initialization?: {
@@ -480,16 +486,14 @@ export interface BackupsResponse {
 export interface UpdateResponse {
   ok: boolean;
   repository: string;
-  current_version: string;
-  latest_version: string;
+  installed_version: string;
+  approved_version: string;
   release_url: string;
-  published_at: string;
-  release_name: string;
-  notes: string;
   update_available: boolean;
+  /** Same version, newer database or helper images. */
+  supporting_only: boolean;
   update_enabled: boolean;
   blocked_reason: string;
-  checked_at: number;
 }
 
 export interface McpServer {

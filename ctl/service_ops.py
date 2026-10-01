@@ -12,7 +12,7 @@ from ctl import actions, image_fetch, job_guard, onboarding_state, workflow_secr
 from ctl.control_state import ControlState
 from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import maintenance
+from ctl.lifecycle import app_releases, maintenance
 from ctl.lifecycle.accounts import (
     account_username,
     enforce_identity_settings,
@@ -23,7 +23,7 @@ from ctl.lifecycle.accounts import (
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.integrations import configure_adventurelog_oidc, surfsense_embedding_preflight
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
-from ctl.lifecycle.materialize import materialize, pin_images
+from ctl.lifecycle.materialize import materialize
 from ctl.lifecycle.nextcloud import configure_nextcloud, install_nextcloud_if_needed
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.routes import apply as apply_route
@@ -75,7 +75,8 @@ def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, s
     rc, output = actions.compose_down(project, log)
     if rc:
         return False, output or "Failed application containers could not be removed."
-    for name in ("docker-compose.digest.yml", "docker-compose.bootstrap.yml"):
+    # The release record stays: data from an earlier install was migrated to it.
+    for name in ("docker-compose.bootstrap.yml",):
         try:
             (project / name).unlink(missing_ok=True)
         except OSError as exc:
@@ -322,7 +323,7 @@ def _install(
         return
     try:
         _event(store, job_id, "resolve_digests", "Resolving images to immutable OCI digests.")
-        image_snapshot = pin_images(project)
+        image_snapshot = app_releases.pin(service, root, log)
     except (OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
         _fail(store, state, job_id, service.id, actor, "resolve_digests", "image_digest_failed", str(exc))
         return
