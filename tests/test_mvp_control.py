@@ -303,6 +303,10 @@ class InstallationWorkflowTests(unittest.TestCase):
                 ),
                 patch("ctl.service_ops.actions.compose_up", return_value=(0, "started")),
                 patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
+                patch(
+                    "ctl.lifecycle.integrations.retire_mealie_default_password",
+                    return_value=(True, "Mealie default login hardening completed."),
+                ),
                 patch("ctl.service_ops.apply_route", return_value=(True, "ready")),
                 patch("ctl.service_state.tailnet_dns_name", return_value=""),
             ):
