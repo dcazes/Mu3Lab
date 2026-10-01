@@ -336,6 +336,12 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
             continue
         project = credential_path(server.id).parent
         if not (project / "docker-compose.yml").is_file():
+            # Enabled before its files were copied (or they were deleted): restore them from the repo.
+            try:
+                project = _materialize(server, root)
+            except (OSError, ValueError) as exc:
+                log(f"Could not restore {server.name}: {redact(str(exc))}")
+        if not (project / "docker-compose.yml").is_file():
             state.set_mcp_server(
                 server.id,
                 service_id,
