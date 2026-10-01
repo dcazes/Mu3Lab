@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from ctl import browser_extension, onboarding_state, workflow_secrets
 from ctl.api import runtime
 from ctl.api.errors import ApiError
-from ctl.api.security import Member, OwnerMutation
+from ctl.api.security import Member, MemberMutation, OwnerMutation
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
 from ctl.runtime import RuntimePaths
@@ -51,11 +51,34 @@ def _run(owner: dict[str, Any], email: str, password: str, totp: str) -> SeedRes
         return seed(session, items)
 
 
+def _visible(status: dict[str, Any], identity: dict[str, Any]) -> dict[str, Any]:
+    """Administrators see everyone; a household member sees only themselves."""
+    if identity.get("is_admin"):
+        return status
+    mine = [person for person in status.get("people") or [] if person.get("uid") == identity.get("subject_id")]
+    return {**status, "people": mine}
+
+
+@router.post("/sync")
+async def sync_now(_member: MemberMutation) -> dict[str, Any]:
+    """Save waiting logins to everyone's vault now instead of at the next automatic run."""
+    from ctl import vault_sync
+
+    result = await run_in_threadpool(vault_sync.run, lambda _line: None)
+    if result is None:
+        raise ApiError(503, "Authentik or Vaultwarden is not ready yet; Mu3Lab retries automatically.")
+    return {"ok": True, "automatic": _visible(vault_sync.status(), _member)}
+
+
 @router.get("/status")
 def vault_status(_operator: Member) -> dict[str, Any]:
+    from ctl import vault_sync
+
     state = ControlState.runtime()
     return {
         "ok": True,
+        # Logins are saved for everyone automatically; this is the last run.
+        "automatic": _visible(vault_sync.status(), _operator),
         **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
         "pending_logins": len(onboarding_state.pending_logins(str(_operator.get("subject_id") or ""))),
         "browser_extension": browser_extension.status(

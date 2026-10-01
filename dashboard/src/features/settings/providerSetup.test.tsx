@@ -231,12 +231,27 @@ describe('Get started', () => {
     expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
   });
 
-  it('ticks off detected steps and adds the vault step when it was never done', async () => {
+  it('saves logins by itself and only asks the owner when saving is stuck', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    const base = api(false, [connection('groq', 'Groq')]);
+    stubFetch((path, init) => {
+      const body = base(path, init);
+      return path === '/api/v1/vault/status'
+        ? { ...(body as object), automatic: { ok: false, error: 'Vaultwarden is not reachable.', people: [] } }
+        : body;
+    });
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    expect(
+      await screen.findByRole('link', { name: /Check why your app logins are not being saved/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('has no vault step while logins are being saved automatically', async () => {
     const { HomePage } = await import('../home/HomePage');
     stubFetch(api(false, [connection('groq', 'Groq')]));
     renderWithDashboard(<HomePage />, dashboardData([]));
-    expect(await screen.findByText('1 of 6 complete')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /2\. Save your app logins to your password vault/ })).toBeInTheDocument();
+    expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    expect(screen.queryByText(/Save your app logins/)).not.toBeInTheDocument();
   });
 
   it('opens a numbered guide for steps it cannot detect and remembers them', async () => {

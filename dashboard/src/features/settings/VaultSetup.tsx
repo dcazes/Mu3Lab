@@ -1,12 +1,14 @@
 import { CheckCircle2, Vault } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import { ApiError, postJsonApi, type VaultSetupResult } from '../../api';
+import { ApiError, postApi, postJsonApi, type VaultSetupResult, type VaultStatus } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
 import { Callout, Card } from '../../components/Layout';
 import { errorText } from '../../lib/format';
 import { launchTarget } from '../../lib/services';
+import { useAction } from '../../lib/useAction';
+import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 
 const EXTENSION_URL = 'https://bitwarden.com/download/#downloads-web-browser';
@@ -146,19 +148,71 @@ export function VaultSetupDialog({
   );
 }
 
-/** Settings card that opens the one-time vault setup. Safe to run again at any time. */
+const PERSON_STATE: Record<string, string> = {
+  up_to_date: 'Saved. Bitwarden fills these logins in for them.',
+  partly_saved: 'Some logins are not saved yet; Mu3Lab keeps trying.',
+  waiting_for_account:
+    'Waiting for them to create their Vaultwarden account with the same email as their Mu3Lab sign-in. Their logins are saved as soon as they do.',
+  skipped: 'Not saved: this account has no email or has been removed.',
+};
+
+/**
+ * Mu3Lab saves the logins it creates into each person's vault by itself: into a
+ * "Mu3Lab" collection only they can see. Bitwarden then fills them in.
+ */
 export function VaultSetupCard({ onSaved }: { onSaved?: () => void }) {
+  const { data } = useDashboard();
   const [open, setOpen] = useState(false);
+  const { pending, run } = useAction();
+  const status = useApi<VaultStatus>('/api/v1/vault/status', { interval: 30000 });
+  const automatic = status.data?.automatic;
+  const people = automatic?.people || [];
+  const saveNow = async () => {
+    const saved = await run('sync', () => postApi('/api/v1/vault/sync'), 'Logins saved to Vaultwarden');
+    if (saved) {
+      void status.reload();
+      onSaved?.();
+    }
+  };
   return (
     <Card
       title="Password vault"
-      description="Save generated app credentials and suggested AI provider registration entries to Vaultwarden for browser autofill. Existing entries are preserved or updated when generated credentials change."
+      description="Mu3Lab saves the logins it creates for each person into their own Vaultwarden vault, in a collection called Mu3Lab that only they can see. The Bitwarden app or browser extension then fills them in, including for apps that ask for their own login after Authentik."
       actions={
-        <Button variant="primary" icon={Vault} onClick={() => setOpen(true)}>
-          Save logins to Vaultwarden
+        <Button icon={Vault} loading={pending === 'sync'} onClick={() => void saveNow()}>
+          Save now
         </Button>
       }
     >
+      {automatic?.error && (
+        <Callout tone="warning" title="Saving is paused">
+          {automatic.error} Mu3Lab tries again every few minutes.
+        </Callout>
+      )}
+      {people.length > 0 ? (
+        <div className="rows compact">
+          {people.map((person) => (
+            <div className="row" key={person.uid}>
+              <span className="row-text">
+                <b>{person.uid === data.identity.subject_id ? 'You' : person.name}</b>
+                <small>{PERSON_STATE[person.state] || 'Not checked yet.'}</small>
+              </span>
+              {person.state === 'up_to_date' && <CheckCircle2 aria-label="Saved" className="ok-icon" />}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">
+          {automatic?.last_run ? 'Nothing to save yet.' : 'Mu3Lab saves new logins within a few minutes of an install.'}
+        </p>
+      )}
+      <p className="muted">
+        Prefer your personal vault?{' '}
+        <button type="button" className="link-button" onClick={() => setOpen(true)}>
+          Save them there with your master password instead
+        </button>
+        .
+      </p>
       {open && <VaultSetupDialog open onClose={() => setOpen(false)} onSaved={onSaved} />}
     </Card>
   );

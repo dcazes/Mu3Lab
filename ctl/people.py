@@ -47,6 +47,7 @@ def role(user):
 def view(user):
     return {
         "username": user.username,
+        "uid": user.uid,
         "name": user.name,
         "email": user.email,
         "role": role(user),

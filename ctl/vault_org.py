@@ -3,8 +3,9 @@
 Mu3Lab signs in to Vaultwarden as a dedicated service account that owns an
 organization. Each person who uses Mu3Lab is a member of that organization
 with one private collection ("Mu3Lab: <name>") only they can see. Mu3Lab writes
-the logins it generates for a person into their collection, so their Bitwarden
-apps fill them in, without ever asking for their master password.
+the logins it generates for a person into their collection without ever asking
+for their master password. Vaultwarden only stores and shares them; the
+person's Bitwarden app does the filling-in, as it does for any other login.
 
 Mu3Lab holds the organization's key, not anyone's personal key: it can read
 and write the items it put in the organization and nothing in anyone's
@@ -40,8 +41,6 @@ ORG_NAME = "Mu3Lab"
 # Bitwarden organization roles and member states.
 ROLE_OWNER, ROLE_USER = 0, 2
 STATUS_INVITED, STATUS_ACCEPTED, STATUS_CONFIRMED = 0, 1, 2
-# Bitwarden policy type "Activate auto-fill": turns on autofill-on-page-load for members.
-POLICY_ACTIVATE_AUTOFILL = 11
 _OAEP = asym_padding.OAEP(mgf=asym_padding.MGF1(algorithm=hashes.SHA1()), algorithm=hashes.SHA1(), label=None)
 
 
@@ -87,6 +86,9 @@ class OrgSession(VaultSession):
         super().__init__(base_url, **kwargs)
         self._sync: dict[str, Any] | None = None
         self._private_key: rsa.RSAPrivateKey | None = None
+
+    def __enter__(self) -> OrgSession:
+        return self
 
     # ------------------------------------------------------------------ keys
 
@@ -206,20 +208,6 @@ class OrgSession(VaultSession):
         )
         return str(created["id"])
 
-    # -------------------------------------------------------------- policies
-
-    def enable_autofill_on_page_load(self, org_id: str) -> bool:
-        """Best effort: Bitwarden apps then fill Mu3Lab logins as soon as a login page opens."""
-        try:
-            self._api(
-                "PUT",
-                f"/api/organizations/{org_id}/policies/{POLICY_ACTIVATE_AUTOFILL}",
-                {"type": POLICY_ACTIVATE_AUTOFILL, "enabled": True, "data": None},
-            )
-        except VaultError:
-            return False
-        return True
-
     # ----------------------------------------------------------------- items
 
     def logins(self, org_id: str, org_key: SymmetricKey) -> list[OrgLogin]:
@@ -227,9 +215,7 @@ class OrgSession(VaultSession):
         for cipher in self.refresh().get("ciphers", []):
             if cipher.get("organizationId") != org_id or cipher.get("type") != LOGIN_ITEM or cipher.get("deletedDate"):
                 continue
-            key = (
-                SymmetricKey.from_bytes(decrypt_bytes(cipher["key"], org_key)) if cipher.get("key") else org_key
-            )
+            key = SymmetricKey.from_bytes(decrypt_bytes(cipher["key"], org_key)) if cipher.get("key") else org_key
             login = cipher.get("login") or {}
             items.append(
                 OrgLogin(

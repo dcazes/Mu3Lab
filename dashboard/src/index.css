@@ -3376,3 +3376,10 @@ fieldset.field {
   padding: 0;
   margin: 0;
 }
+
+.ok-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--green, #2ea44f);
+  flex: none;
+}

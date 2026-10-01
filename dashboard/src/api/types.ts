@@ -286,6 +286,21 @@ export interface VaultStatus {
    * and whether any Bitwarden extension has signed in to the vault yet.
    */
   browser_extension?: { browsers: string[]; server_url: string; signed_in?: boolean };
+  /** Mu3Lab saves generated logins into each person's vault by itself; the last run. */
+  automatic?: VaultAutomatic;
+}
+
+export interface VaultAutomatic {
+  last_run: string | null;
+  ok: boolean | null;
+  error: string | null;
+  people: Array<{
+    uid: string;
+    name: string;
+    state: 'up_to_date' | 'partly_saved' | 'waiting_for_account' | 'skipped' | '';
+    saved: number;
+    waiting: number;
+  }> | null;
 }
 
 export interface ProviderSetupProgress {

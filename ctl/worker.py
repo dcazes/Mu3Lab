@@ -88,6 +88,7 @@ def run() -> int:
     next_mcp_reconcile = 0.0
     next_mcp_activity = 0.0
     next_identity_reconcile = 0.0
+    next_vault_sync = 0.0
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -122,6 +123,14 @@ def run() -> int:
                 queue_verified(store, ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab sign-in verification deferred safely: {exc}", flush=True)
+        if time.monotonic() >= next_vault_sync:
+            next_vault_sync = time.monotonic() + 300
+            try:
+                from ctl import vault_sync
+
+                vault_sync.run(lambda line: print(line, flush=True))
+            except Exception as exc:
+                print(f"Mu3Lab vault saving deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_mcp_reconcile:
             next_mcp_reconcile = time.monotonic() + 60
             try:
@@ -152,6 +161,8 @@ def run() -> int:
             continue
         try:
             run_job(store, job, worker_id)
+            # A finished install may have created logins; save them within a minute.
+            next_vault_sync = min(next_vault_sync, time.monotonic() + 30)
         finally:
             try:
                 from ctl.install_batches import InstallBatchStore
