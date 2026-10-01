@@ -93,13 +93,10 @@ describe('service state helpers', () => {
     );
   });
 
-  it('offers sign-in repair only for SSO apps that are not ready', () => {
-    expect(
-      signInSummary(service('a', 'A', 'optional', { identity: identity({ state: 'unconfigured' }) })).repairable,
-    ).toBe(true);
-    expect(
-      signInSummary(service('b', 'B', 'optional', { identity: identity({ mode: 'local', state: 'degraded' }) }))
-        .repairable,
-    ).toBe(false);
+  it('marks broken sign-in red and working sign-in green', () => {
+    expect(signInSummary(service('a', 'A', 'optional', { identity: identity({ state: 'degraded' }) })).tone).toBe(
+      'red',
+    );
+    expect(signInSummary(service('b', 'B', 'optional', { identity: identity({ state: 'ready' }) })).tone).toBe('green');
   });
 });

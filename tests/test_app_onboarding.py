@@ -15,15 +15,14 @@ import yaml
 
 from ctl import identity_reconcile, onboarding_state
 from ctl.authentik_blueprints import render_oidc_application_blueprint
-from ctl.control_state import ControlState
 from ctl.jobs import JobStore
-from ctl.lifecycle.accounts import linked_owner_verified
+from ctl.lifecycle.accounts import actual_owner_linked
 from ctl.lifecycle.onboarding import OnboardingError, provision_immich, provision_surfsense
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
+from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl.vault_setup import DesiredItem, seed
 from ctl.workflow_secrets import WorkflowSecretError
-from tests.support import runtime_paths
 from tests.test_vault_setup import EMAIL, PASSWORD, FakeVaultwarden, session_for
 
 
@@ -153,21 +152,6 @@ class OnboardingTests(unittest.TestCase):
         ):
             provision_surfsense(load().get("surfsense"), OWNER, "https://host.test:8447", self.paths)
 
-    def test_nextcloud_local_admin_login_is_not_mistaken_for_oidc_callback(self):
-        profile = {
-            "user_id": "owner",
-            "email": OWNER["email"],
-            "enabled": True,
-            "groups": ["admin"],
-            "last_seen": "2026-09-30T12:00:00Z",
-        }
-        with patch(
-            "ctl.lifecycle.accounts.actions.compose_exec", side_effect=[(0, json.dumps(profile)), (1, "missing")]
-        ):
-            self.assertFalse(
-                linked_owner_verified(load().get("nextcloud"), self.paths.projects / "nextcloud", OWNER, lambda _: None)
-            )
-
     def test_actual_requires_owner_role_and_live_openid_session(self):
         data = self.paths.data / "actual-budget" / "server-files"
         data.mkdir(parents=True)
@@ -177,12 +161,10 @@ class OnboardingTests(unittest.TestCase):
             conn.execute("INSERT INTO users VALUES ('1','owner','ADMIN',1,1)")
             conn.execute("INSERT INTO sessions VALUES ('1','password',-1)")
             conn.commit()
-            with runtime_paths(self.paths), patch("ctl.lifecycle.accounts.time.time", return_value=1000):
+            with patch("ctl.lifecycle.accounts.time.time", return_value=1000):
 
                 def verify():
-                    return linked_owner_verified(
-                        load().get("actual-budget"), self.paths.projects / "actual-budget", OWNER, lambda _: None
-                    )
+                    return actual_owner_linked(OWNER, self.paths)
 
                 self.assertFalse(verify())
                 conn.execute("UPDATE sessions SET auth_method='openid',expires_at=999")
@@ -195,53 +177,29 @@ class OnboardingTests(unittest.TestCase):
                 conn.commit()
                 self.assertFalse(verify())
 
-    def test_worker_queues_finalization_once_and_only_after_callback_evidence(self):
-        state = ControlState(self.paths.runtime / "control.sqlite3")
+    def test_actual_opens_to_the_household_only_after_the_owner_signs_in(self):
+        project = self.paths.projects / "actual-budget"
+        project.mkdir(parents=True)
+        (project / ".env").write_text(runtime_env_text({"MU3LAB_INITIAL_OWNER_USERNAME": "owner"}), encoding="utf-8")
+        onboarding_state.remember_owner("actual-budget", OWNER, self.paths)
         store = JobStore(self.paths.runtime / "control.sqlite3")
-        state.set_installation("immich", "running")
-        state.set_service_identity("immich", "native_oidc", "migration_required", owner_uid="owner")
         with (
-            patch("ctl.identity_reconcile.ControlState.runtime", return_value=state),
-            patch("ctl.identity_reconcile.RuntimePaths", return_value=self.paths),
-            patch("ctl.identity_reconcile.onboarding_state.read", return_value={"owner": OWNER}),
-            patch("ctl.identity_reconcile.linked_owner_verified", return_value=False) as verified,
+            patch("ctl.identity_reconcile.actual_owner_linked", return_value=False) as linked,
+            patch("ctl.identity.reconcile_blueprints") as reconcile,
+            patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
         ):
-            identity_reconcile.queue_verified(store, Path(self.tmp.name), lambda _: None)
-            self.assertEqual(store.jobs(), [])
-            verified.return_value = True
-            identity_reconcile.queue_verified(store, Path(self.tmp.name), lambda _: None)
-            identity_reconcile.queue_verified(store, Path(self.tmp.name), lambda _: None)
-            self.assertEqual(len(store.jobs()), 1)
-            self.assertEqual(store.jobs()[0]["action"], "configure_identity")
-
-    def test_upgrade_preserves_owner_and_stages_existing_ready_app_only_once(self):
-        from ctl.api.routes.services import resume_onboarding
-
-        state = ControlState(self.paths.runtime / "control.sqlite3")
-        store = JobStore(self.paths.runtime / "control.sqlite3")
-        state.set_installation("immich", "running")
-        state.set_service_identity("immich", "native_oidc", "ready", owner_uid="owner")
-        onboarding_state.remember_owner("immich", OWNER, self.paths)
-        record = onboarding_state.read("immich", self.paths)
-        with (
-            patch("ctl.api.routes.services.runtime.control_state", return_value=state),
-            patch("ctl.api.routes.services.runtime.job_store", return_value=store),
-            patch("ctl.api.routes.services.runtime.registry", return_value=load()),
-            patch("ctl.api.routes.services.onboarding_state.read", return_value=record),
-            patch("ctl.api.routes.services.onboarding_state.remember_owner") as remember,
-        ):
-            self.assertEqual(resume_onboarding({"subject_id": "other"})["adopted"], [])
-            remember.assert_not_called()
-            operator = {"subject_id": "owner", "email": OWNER["email"], "username": "owner"}
-            self.assertEqual(resume_onboarding(operator)["adopted"], ["immich"])
-            self.assertEqual(resume_onboarding(operator)["adopted"], [])
-            self.assertEqual(len(store.jobs()), 1)
-            # A current definition does not need to restart on later visits.
-            store.transition(store.jobs()[0]["id"], "running", actor="worker")
-            store.transition(store.jobs()[0]["id"], "succeeded", actor="worker")
-            state.set_service_identity("immich", "native_oidc", "ready", owner_uid="owner")
-            record["config_version"] = onboarding_state.CONFIG_VERSION
-            self.assertEqual(resume_onboarding(operator)["adopted"], [])
+            self.assertFalse(
+                identity_reconcile.lift_owner_guard(store, Path(self.tmp.name), lambda _: None, self.paths)
+            )
+            reconcile.assert_not_called()
+            linked.return_value = True
+            self.assertTrue(identity_reconcile.lift_owner_guard(store, Path(self.tmp.name), lambda _: None, self.paths))
+            self.assertFalse(
+                identity_reconcile.lift_owner_guard(store, Path(self.tmp.name), lambda _: None, self.paths)
+            )
+        self.assertEqual(read_runtime_env(project / ".env")["MU3LAB_INITIAL_OWNER_USERNAME"], "")
+        reconcile.assert_called_once()
+        self.assertEqual(store.jobs(), [])
 
     def test_actual_admission_guard_cannot_be_bypassed_by_group_binding(self):
         content = render_oidc_application_blueprint(

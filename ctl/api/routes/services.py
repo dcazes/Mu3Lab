@@ -11,26 +11,22 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import actions, onboarding_state, service_config
+from ctl import actions, service_config
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import (
-    AdminVerifiedAccount,
     Identity,
     IdentityData,
     Member,
     MemberMutation,
     Operator,
     OperatorMutation,
-    VerifiedAccount,
-    job_identity,
 )
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
 from ctl.backups import BackupError
 from ctl.backups import readiness as backup_readiness
 from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
-from ctl.identity import mode_for
 from ctl.jobs import JobStore, redact
 from ctl.lifecycle import app_releases
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
@@ -54,52 +50,6 @@ router = APIRouter(prefix="/api/v1/services", tags=["services"])
 @router.get("")
 def list_services(identity: Identity) -> dict[str, Any]:
     return service_snapshot(identity)
-
-
-@router.post("/onboarding/resume")
-def resume_onboarding(operator: VerifiedAccount) -> dict[str, Any]:
-    """Adopt pending pre-upgrade identity setup; the worker verifies real app evidence."""
-    control = runtime.control_state()
-    store = runtime.job_store()
-    active = {job["service_id"] for job in store.active_jobs()}
-    adopted = []
-    for service in runtime.registry().services:
-        if mode_for(service) != "native_oidc":
-            continue
-        if (control.installation(service.id) or {}).get("state") != "running":
-            continue
-        saved = control.service_identity(service.id) or {}
-        if saved.get("state") not in {None, "unconfigured", "migration_required", "ready"} or service.id in active:
-            continue
-        record = onboarding_state.read(service.id)
-        if record.get("config_version") == onboarding_state.CONFIG_VERSION:
-            continue
-        owner_uid = (
-            record.get("owner", {}).get("owner_uid")
-            or saved.get("owner_uid")
-            or (control.initialization(service.id) or {}).get("owner_uid")
-        )
-        if owner_uid == operator["subject_id"]:
-            # Upgrade only the installing owner's apps. Unknown legacy ownership
-            # requires the existing explicit sign-in reconciliation action.
-            onboarding_state.remember_owner(service.id, job_identity(operator))
-            job = store.create(
-                kind="lifecycle",
-                service_id=service.id,
-                action="configure_identity",
-                actor=operator["username"],
-                detail="Applying automatic sign-in setup to the existing installation.",
-            )
-            control.set_service_identity(
-                service.id,
-                "native_oidc",
-                "configuring",
-                owner_uid=owner_uid,
-                job_id=job["id"],
-                detail="Updating first-use sign-in automatically.",
-            )
-            adopted.append(service.id)
-    return {"ok": True, "adopted": adopted}
 
 
 def _effective_state(service: Any, control: ControlState | None) -> str:
@@ -218,46 +168,6 @@ def _maintenance_params(service: Any, action: str, body: dict, state: str) -> di
     if not release["update_enabled"]:
         raise ApiError(409, release["blocked_reason"])
     return {"target_version": str(release["approved_version"])}
-
-
-@router.post("/{service_id}/identity/reconcile")
-def reconcile_service_identity(service_id: str, request: Request, operator: AdminVerifiedAccount) -> dict[str, Any]:
-    """Queue bounded identity configuration without disguising it as repair."""
-    service = runtime.service(service_id)
-    if service.is_blocked:
-        raise ApiError(409, service.blocked_reason)
-    store = runtime.job_store()
-    control = runtime.control_state()
-    active = next(
-        (
-            job
-            for job in store.active_jobs()
-            if job["service_id"] == service_id
-            and job["action"] == "configure_identity"
-            and job["state"] in {"queued", "running"}
-        ),
-        None,
-    )
-    if active:
-        return {"ok": True, "duplicate": True, "job": active}
-    job = store.create(
-        kind="lifecycle",
-        service_id=service_id,
-        action="configure_identity",
-        actor=str(operator["username"]),
-        detail=f"Operator requested sign-in reconciliation for {service.name}.",
-        idempotency_key=runtime.idempotency_key(request),
-        prepare=runtime.identity_for_job(operator),
-    )
-    control.set_service_identity(
-        service_id,
-        mode_for(service),
-        "configuring",
-        owner_uid=str(operator["subject_id"]),
-        job_id=str(job["id"]),
-        detail="Sign-in reconciliation is queued.",
-    )
-    return {"ok": True, "job": job}
 
 
 @router.get("/{service_id}/logs")

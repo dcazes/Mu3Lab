@@ -120,9 +120,9 @@ def run() -> int:
         if time.monotonic() >= next_identity_reconcile:
             next_identity_reconcile = time.monotonic() + 60
             try:
-                from ctl.identity_reconcile import queue_verified
+                from ctl.identity_reconcile import lift_owner_guard
 
-                queue_verified(store, ROOT, lambda line: print(line, flush=True))
+                lift_owner_guard(store, ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab sign-in verification deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_vault_sync:

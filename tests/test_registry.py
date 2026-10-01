@@ -87,7 +87,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(registry.get("surfsense").availability, "available")
         self.assertEqual(registry.get("surfsense").stage, "optional")
         self.assertEqual(registry.get("surfsense").auth, "local")
-        self.assertIn("not SSO", registry.get("surfsense").identity_note)
+        self.assertIn("no single sign-on", registry.get("surfsense").identity_note)
         compose = registry.get("surfsense").compose_path(Path(__file__).resolve().parents[1]) / "docker-compose.yml"
         compose_text = compose.read_text(encoding="utf-8")
         self.assertNotIn("docker.sock", compose_text)

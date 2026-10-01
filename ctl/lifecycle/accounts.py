@@ -1,4 +1,4 @@
-"""Application administrator accounts and Authentik owner linking.
+"""Application administrator accounts for Authentik-only apps.
 
 Evidence is read from each application's own data model. Password hashes and
 raw identity data never enter job logs.
@@ -6,7 +6,6 @@ raw identity data never enter job logs.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -70,101 +69,9 @@ def verify_bootstrap_account(service_id: str, project: Path, log: Log, expected_
     return rc == 0 and "MU3LAB_ACCOUNT_OK" in output, output
 
 
-def _nextcloud_owner_linked(project: Path, owner: Mapping[str, object], email: str, log: Log) -> bool:
-    username = str(owner.get("username", "")).strip()
-    if not username:
-        return False
-    rc, output = actions.compose_exec(
-        project, "app", [*nextcloud.OCC, "user:info", username, "--output=json"], log, timeout=120
-    )
-    if rc:
-        return False
-    try:
-        profile = json.loads(output[output.index("{") :])
-    except (ValueError, json.JSONDecodeError):
-        return False
-    groups = {str(group) for group in profile.get("groups", [])}
-    matches = (
-        str(profile.get("user_id", "")) == username
-        and str(profile.get("email", "")).strip().lower() == email
-        and bool(profile.get("enabled"))
-        and "admin" in groups
-    )
-    if not matches:
-        return False
-    # Set by user_oidc only after a successful callback, including soft-linked
-    # local users. A local login's last_seen alone is not OIDC evidence.
-    rc, output = actions.compose_exec(
-        project, "app", [*nextcloud.OCC, "config:user:get", username, "user_oidc", "had_token_once"], log, timeout=60
-    )
-    return rc == 0 and output.strip() == "1"
-
-
-def _mealie_owner_linked(email: str) -> bool:
-    database = RuntimePaths().data / "mealie" / "mealie.db"
-    try:
-        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5)
-        row = conn.execute("SELECT email, admin, auth_method FROM users WHERE lower(email) = ?", (email,)).fetchone()
-        conn.close()
-    except (OSError, sqlite3.Error):
-        return False
-    return bool(row and int(row[1]) == 1 and str(row[2]).upper() == "OIDC")
-
-
-def _lobehub_owner_linked(project: Path, email: str, log: Log) -> bool:
-    # Better Auth stores the linked provider separately from the user. Ask
-    # PostgreSQL for only an irreversible email digest plus two booleans.
-    expected_md5 = hashlib.md5(email.encode(), usedforsecurity=False).hexdigest()
-    query = (
-        "SELECT md5(lower(u.email)), u.email_verified, a.provider_id "
-        "FROM users u JOIN accounts a ON a.user_id = u.id "
-        "WHERE a.provider_id = 'authentik';"
-    )
-    rc, output = actions.compose_exec(
-        project, "postgres", ["psql", "-U", "postgres", "-d", "lobehub", "-Atc", query], log, timeout=120
-    )
-    if rc:
-        return False
-    return any(
-        parts[0] == expected_md5 and parts[1] == "t" and parts[2] == "authentik"
-        for line in output.splitlines()
-        if len(parts := line.strip().split("|")) == 3
-    )
-
-
-def _django_owner_linked(service_id: str, project: Path, email: str, log: Log) -> bool:
-    container = "webserver" if service_id == "paperless-ngx" else "app"
-    provider = "authentik" if service_id == "paperless-ngx" else "mu3lab-adventurelog"
-    code = (
-        "import hashlib; from allauth.socialaccount.models import SocialAccount; "
-        "print('\\n'.join(hashlib.sha256((x.user.email or '').strip().lower().encode()).hexdigest() "
-        f"for x in SocialAccount.objects.select_related('user').filter(provider={provider!r}) "
-        "if x.uid and x.user.is_superuser and x.user.is_active and x.user.last_login and x.user.email))"
-    )
-    rc, output = actions.compose_exec(
-        project, container, ["python", "manage.py", "shell", "-c", code], log, timeout=120
-    )
-    return rc == 0 and hashlib.sha256(email.encode()).hexdigest() in output.splitlines()
-
-
-def _immich_owner_linked(project: Path, email: str, log: Log) -> bool:
-    query = (
-        'SELECT md5(lower(email)) FROM "user" WHERE "isAdmin" = true '
-        'AND "deletedAt" IS NULL AND "oauthId" IS NOT NULL AND "oauthId" <> \'\';'
-    )
-    env = read_runtime_env(project / ".env")
-    rc, output = actions.compose_exec(
-        project,
-        "database",
-        ["psql", "-U", env.get("DB_USERNAME", "postgres"), "-d", env.get("DB_DATABASE_NAME", "immich"), "-Atc", query],
-        log,
-        timeout=30,
-    )
-    return rc == 0 and hashlib.md5(email.encode(), usedforsecurity=False).hexdigest() in output.splitlines()
-
-
-def _actual_owner_linked(owner: Mapping[str, object]) -> bool:
-    database = RuntimePaths().data / "actual-budget" / "server-files" / "account.sqlite"
+def actual_owner_linked(owner: Mapping[str, object], paths: RuntimePaths = RuntimePaths()) -> bool:
+    """Whether the installing owner has signed in to Actual through Authentik and owns it."""
+    database = paths.data / "actual-budget" / "server-files" / "account.sqlite"
     try:
         with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=5) as conn:
             row = conn.execute(
@@ -178,41 +85,16 @@ def _actual_owner_linked(owner: Mapping[str, object]) -> bool:
     return bool(row)
 
 
-def linked_owner_verified(service: Service, project: Path, owner: Mapping[str, object] | None, log: Log) -> bool:
-    """Whether the Authentik owner is linked to the app's administrator account."""
-    email = str((owner or {}).get("email", "")).strip().lower()
-    if not owner or not email:
-        return False
-    if service.id == "nextcloud":
-        return _nextcloud_owner_linked(project, owner, email, log)
-    if service.id == "mealie":
-        return _mealie_owner_linked(email)
-    if service.id == "lobehub":
-        return _lobehub_owner_linked(project, email, log)
-    if service.id == "immich":
-        return _immich_owner_linked(project, email, log)
-    if service.id == "actual-budget":
-        return _actual_owner_linked(owner)
-    if service.id in {"paperless-ngx", "adventurelog"}:
-        return _django_owner_linked(service.id, project, email, log)
-    return False
-
-
+# Settings an app can only switch to after install. Every other Authentik-only
+# setting is written before the app's first start (see materialize.SSO_ONLY).
 SSO_ONLY_SETTINGS: dict[str, dict[str, str]] = {
-    "mealie": {
-        "MEALIE_OIDC_AUTO_REDIRECT": "true",
-        "MEALIE_ALLOW_PASSWORD_LOGIN": "false",
-        "MEALIE_ALLOW_SIGNUP": "false",
-    },
-    "paperless-ngx": {"PAPERLESS_DISABLE_REGULAR_LOGIN": "true", "PAPERLESS_REDIRECT_LOGIN_TO_SSO": "true"},
-    "adventurelog": {"ADVENTURELOG_FORCE_SOCIAL_LOGIN": "true"},
-    "actual-budget": {"ACTUAL_OPENID_ENFORCE": "true", "MU3LAB_INITIAL_OWNER_USERNAME": ""},
+    # Immich's administrator is created through its password API.
     "immich": {"IMMICH_PASSWORD_LOGIN_ENABLED": "false"},
 }
 
 
 def enforce_identity_settings(service: Service, project: Path) -> bool:
-    """Switch an app to SSO-only sign-in once owner linking is verified."""
+    """Apply post-install Authentik-only settings; True when anything changed."""
     settings = SSO_ONLY_SETTINGS.get(service.id)
     if not settings:
         return False

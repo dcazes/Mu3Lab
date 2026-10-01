@@ -72,22 +72,52 @@ def configure_adventurelog_oidc(project: Path, log: Log) -> tuple[bool, str]:
     return True, "AdventureLog Authentik SocialApp is configured."
 
 
-def retire_mealie_default_password(project: Path, log: Log) -> tuple[bool, str]:
-    """Retire only the untouched upstream default; preserve customized accounts."""
-    code = (
-        "import secrets; from mealie.db.db_setup import session_context; "
-        "from mealie.db.models.users.users import User; "
-        "from mealie.core.security.hasher import get_hasher; "
-        'exec("with session_context() as session:\\n'
-        " u=session.query(User).filter(User.email=='changeme@example.com').first()\\n"
-        " if u and u.password and get_hasher().verify('MyPassword',u.password):\\n"
-        '  u.password=get_hasher().hash(secrets.token_urlsafe(48)); session.commit()\\n"); '
-        "print('MU3LAB_DEFAULT_LOGIN_RETIRED')"
+def adopt_mealie_admin(project: Path, owner: dict, log: Log) -> tuple[bool, str]:
+    """Make Mealie's built-in administrator the owner's Authentik account.
+
+    Mealie seeds ``changeme@example.com`` and shows a "first login" screen
+    pre-filled with it while that account exists. Mealie's OIDC sign-in adopts
+    an existing account whose email matches the verified Authentik email, so
+    giving the seeded administrator the owner's email (and a password nobody
+    knows) makes their first Authentik sign-in land on it, with no setup.
+    """
+    email = str(owner.get("email") or "").strip().lower()
+    if not email:
+        return False, "Mealie needs the owner's Authentik email to set up its administrator."
+    request = json.dumps(
+        {
+            "email": email,
+            "username": str(owner.get("username") or email.split("@", 1)[0]),
+            "name": str(owner.get("display_name") or owner.get("username") or email),
+        }
     )
-    rc, output = actions.compose_exec(project, "mealie", ["/opt/mealie/bin/python", "-c", code], log, timeout=60)
-    return (
-        rc == 0 and "MU3LAB_DEFAULT_LOGIN_RETIRED" in output,
-        "Mealie default login hardening completed."
-        if rc == 0
-        else "Mealie could not verify its default login hardening.",
+    rc, output = actions.compose_exec(
+        project, "mealie", ["/opt/mealie/bin/python", "-c", _MEALIE_ADOPT, request], log, timeout=60
     )
+    if rc == 0 and "MU3LAB_MEALIE_OWNER_OK" in output:
+        return True, "Mealie's administrator is your Authentik account."
+    return False, "Mealie could not set up its administrator for Authentik sign-in: " + redact(output)
+
+
+_MEALIE_ADOPT = """
+import json, secrets, sys
+from mealie.core.security.hasher import get_hasher
+from mealie.db.db_setup import session_context
+from mealie.db.models.users.users import AuthMethod, User
+
+r = json.loads(sys.argv[1])
+with session_context() as session:
+    owner = session.query(User).filter(User.email == r["email"]).first()
+    seeded = session.query(User).filter(User.email == "changeme@example.com").first()
+    if seeded is not None:
+        seeded.password = get_hasher().hash(secrets.token_urlsafe(48))
+        if owner is None:
+            seeded.email, seeded.username, seeded.full_name = r["email"], r["username"], r["name"]
+            seeded.auth_method, seeded.admin = AuthMethod.OIDC, True
+            owner = seeded
+        else:
+            seeded.admin = False
+            seeded.email = "retired-" + secrets.token_hex(6) + "@mu3lab.invalid"
+    session.commit()
+    print("MU3LAB_MEALIE_OWNER_OK" if owner is not None and owner.admin else "MU3LAB_MEALIE_OWNER_MISSING")
+"""

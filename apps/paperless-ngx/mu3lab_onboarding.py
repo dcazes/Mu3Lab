@@ -32,5 +32,7 @@ class LoginMiddleware:
             f"default-src 'none'; script-src 'sha256-{digest}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
         response["Cache-Control"] = "no-store"
-        response["Referrer-Policy"] = "no-referrer"
+        # Not "no-referrer": browsers then send "Origin: null" with the form
+        # POST and Django's CSRF check answers 403 Forbidden.
+        response["Referrer-Policy"] = "same-origin"
         return response

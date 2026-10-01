@@ -1,52 +1,49 @@
-"""Automatically finalize pending app identities after their first real login."""
+"""Open Actual Budget to the household once its owner has signed in.
+
+Actual makes the first person who signs in through Authentik its server owner,
+so until the installing owner has done that, Authentik admits only them. Once
+Actual's own database shows their OpenID session, the guard is lifted and
+everyone in the household can sign in. Every other app is fully set up at
+install and needs nothing here.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from ctl import onboarding_state
-from ctl.control_state import ControlState
-from ctl.identity import OIDC_CONTRACTS
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle.accounts import linked_owner_verified
+from ctl.lifecycle.accounts import actual_owner_linked
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
+from ctl.secrets import read_runtime_env, runtime_env_text
+
+GUARD = "MU3LAB_INITIAL_OWNER_USERNAME"
 
 
-def queue_verified(store: JobStore, root: Path, log) -> None:
-    state = ControlState.runtime()
-    if state is None:
-        return
-    registry = load()
-    active = {j["service_id"] for j in store.active_jobs()}
-    for service_id in OIDC_CONTRACTS:
-        saved = state.service_identity(service_id) or {}
-        installation = state.installation(service_id) or {}
-        if installation.get("state") != "running" or service_id in active:
-            continue
-        if saved.get("state", "unconfigured") not in {"unconfigured", "migration_required"}:
-            continue
-        try:
-            owner = onboarding_state.read(service_id).get("owner")
-            if not owner:
-                continue
-            project = RuntimePaths().projects / service_id
-            if not linked_owner_verified(registry.get(service_id), project, owner, lambda _line: None):
-                continue
-            job = store.create(
-                kind="lifecycle",
-                service_id=service_id,
-                action="configure_identity",
-                actor="onboarding",
-                detail="Automatically completing verified Authentik sign-in.",
-            )
-            state.set_service_identity(
-                service_id,
-                "native_oidc",
-                "configuring",
-                owner_uid=owner["owner_uid"],
-                job_id=job["id"],
-                detail="Completing single sign-on automatically.",
-            )
-        except (OSError, ValueError) as exc:
-            log(f"{service_id} sign-in verification deferred: {redact(str(exc))}")
+def lift_owner_guard(_store: JobStore, _root: Path, log, paths: RuntimePaths = RuntimePaths()) -> bool:
+    """Return True when the guard was lifted on this pass."""
+    env_path = paths.projects / "actual-budget" / ".env"
+    values = read_runtime_env(env_path)
+    if not values.get(GUARD):
+        return False
+    try:
+        owner = onboarding_state.read("actual-budget", paths).get("owner")
+        if not owner or not actual_owner_linked(owner, paths):
+            return False
+        values[GUARD] = ""
+        env_path.write_text(runtime_env_text(values), encoding="utf-8")
+        os.chmod(env_path, 0o600)
+        from ctl.identity import reconcile_blueprints
+        from ctl.service_state import tailnet_dns_name
+
+        reconcile_blueprints(load(), tailnet_dns_name(), paths)
+        from ctl.authentik_apply import apply_blueprints
+
+        apply_blueprints(log)
+    except (OSError, ValueError) as exc:
+        log(f"Actual Budget household access deferred: {redact(str(exc))}")
+        return False
+    log("Actual Budget is now open to the whole household.")
+    return True

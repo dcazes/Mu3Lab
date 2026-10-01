@@ -208,6 +208,23 @@ class OrgSession(VaultSession):
         )
         return str(created["id"])
 
+    def rename_collection(
+        self, org_id: str, org_key: SymmetricKey, collection_id: str, name: str, member_ids: list[str]
+    ) -> None:
+        # Vaultwarden replaces the access list on update, so the member is sent again.
+        self._api(
+            "PUT",
+            f"/api/organizations/{org_id}/collections/{collection_id}",
+            {
+                "name": encrypt(name, org_key),
+                "groups": [],
+                "users": [
+                    {"id": member_id, "readOnly": False, "hidePasswords": False, "manage": False}
+                    for member_id in member_ids
+                ],
+            },
+        )
+
     # ----------------------------------------------------------------- items
 
     def logins(self, org_id: str, org_key: SymmetricKey) -> list[OrgLogin]:

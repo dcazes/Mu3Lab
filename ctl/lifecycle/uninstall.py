@@ -146,6 +146,11 @@ def _remove_sign_in(service: Service, registry: Registry, paths: RuntimePaths) -
         # The project is gone, so this rewrite drops the app from the outpost.
         reconcile_blueprints(registry, tailnet_dns_name(), paths)
         write_removal_blueprint(paths.root, service.id, service.name, oidc=False)
+    if service.id in OIDC_CONTRACTS or service.id in GATED_APPS:
+        from ctl.authentik_apply import apply_blueprints
+
+        # Apply now, so a quick reinstall cannot be undone by a late removal.
+        apply_blueprints(lambda _line: None)
 
 
 def _remove_project(project: Path, *, keep_env: bool) -> None:

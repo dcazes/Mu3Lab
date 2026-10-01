@@ -182,7 +182,7 @@ class InstallationWorkflowTests(unittest.TestCase):
                 (0, json.dumps({"id": 7, "identifier": "mu3lab"})),
                 (0, "auto_provision enabled"),
                 (0, "soft_auto_provision enabled"),
-                (0, "Config value allow_multiple_user_backends set to 1"),
+                (0, "Config value allow_multiple_user_backends set to 0"),
                 (0, "Config value allow_local_remote_servers set to 1"),
             ]
             with (
@@ -234,6 +234,8 @@ class InstallationWorkflowTests(unittest.TestCase):
                 patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
                 patch("ctl.service_ops.configure_nextcloud", return_value=(True, "configured")),
                 patch("ctl.service_ops.apply_route", return_value=(True, "ready")),
+                patch("ctl.service_ops.wait_for_provider", return_value={}),
+                patch("ctl.service_ops.verify_sign_in", return_value="Sign-in through Authentik verified."),
                 patch("ctl.service_ops.workflow_secrets.save_job_identity"),
             ):
                 execute_claimed(store, claimed, "worker", ROOT)
@@ -304,9 +306,11 @@ class InstallationWorkflowTests(unittest.TestCase):
                 patch("ctl.service_ops.actions.compose_up", return_value=(0, "started")),
                 patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
                 patch(
-                    "ctl.lifecycle.integrations.retire_mealie_default_password",
-                    return_value=(True, "Mealie default login hardening completed."),
+                    "ctl.lifecycle.integrations.adopt_mealie_admin",
+                    return_value=(True, "Mealie's administrator is your Authentik account."),
                 ),
+                patch("ctl.service_ops.wait_for_provider", return_value={}),
+                patch("ctl.service_ops.verify_sign_in", return_value="Sign-in through Authentik verified."),
                 patch("ctl.service_ops.apply_route", return_value=(True, "ready")),
                 patch("ctl.service_state.tailnet_dns_name", return_value=""),
             ):
@@ -320,12 +324,15 @@ class InstallationWorkflowTests(unittest.TestCase):
                 "materialize_runtime",
                 "pull_images",
                 "resolve_digests",
+                "authentik_ready",
                 "start_service",
                 "verify_application",
                 "configure_route",
+                "verify_sign_in",
                 "finalize",
             ):
                 self.assertIn(stage, stages)
+            self.assertEqual(state.service_identity("mealie")["state"], "ready")
 
     def test_install_waits_once_more_when_a_first_boot_container_restarts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -353,9 +360,11 @@ class InstallationWorkflowTests(unittest.TestCase):
                 ) as compose_up,
                 patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
                 patch(
-                    "ctl.lifecycle.integrations.retire_mealie_default_password",
-                    return_value=(True, "Mealie default login hardening completed."),
+                    "ctl.lifecycle.integrations.adopt_mealie_admin",
+                    return_value=(True, "Mealie's administrator is your Authentik account."),
                 ),
+                patch("ctl.service_ops.wait_for_provider", return_value={}),
+                patch("ctl.service_ops.verify_sign_in", return_value="Sign-in through Authentik verified."),
                 patch("ctl.service_ops.apply_route", return_value=(True, "ready")),
                 patch("ctl.service_state.tailnet_dns_name", return_value=""),
             ):

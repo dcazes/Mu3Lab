@@ -132,6 +132,15 @@ def vault_saved(service_id: str, owner_uid: str, paths: RuntimePaths = RuntimePa
         _write(service_id, record, paths)
 
 
+def discard_password(service_id: str, paths: RuntimePaths = RuntimePaths()) -> None:
+    """Drop an Authentik-only app's generated admin password; nobody signs in with it."""
+    with _locked(paths):
+        record = _read(service_id, paths)
+        if record.get("password"):
+            record.pop("password", None)
+            _write(service_id, record, paths)
+
+
 def forget(service_id: str, paths: RuntimePaths = RuntimePaths()) -> None:
     with _locked(paths):
         _path(service_id, paths).unlink(missing_ok=True)

@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ctl import onboarding_state, workflow_secrets
+from ctl.identity import authentik_only
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, write_atomic
@@ -31,6 +32,9 @@ from ctl.vaultwarden_api import MATCH_HOST, VaultError, register
 
 SERVICE_EMAIL = "mu3lab-service@vault.mu3lab.invalid"
 SERVICE_NAME = "Mu3Lab"
+# Each person sees only their own collection, so one plain name reads best in
+# Bitwarden, next to the "Mu3Lab AI providers" folder the installer creates.
+COLLECTION_NAME = "Mu3Lab app logins"
 
 
 @dataclass
@@ -80,6 +84,8 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
     items: list[Item] = []
     for record in onboarding_state.pending_logins(uid, paths):
         service_id = str(record["service_id"])
+        if authentik_only(service_id):
+            continue
         items.append(
             Item(
                 mu3lab_id=f"service:{service_id}",
@@ -87,13 +93,15 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                 username=str(record["login_username"]),
                 password=str(record["password"]),
                 url=str(record.get("login_url") or ""),
-                notes="Created by Mu3Lab. Normally Authentik signs you in; use this if the app asks for its own login.",
+                notes="Created by Mu3Lab. Bitwarden fills this in when the app asks for its login.",
                 saved=[lambda service_id=service_id: onboarding_state.vault_saved(service_id, uid, paths)],
             )
         )
     for meta in workflow_secrets.metadata(uid, paths):
         credential = workflow_secrets.reveal(meta["id"], uid, paths)
         if not credential or any(item.mu3lab_id == f"service:{credential['service_id']}" for item in items):
+            continue
+        if authentik_only(credential["service_id"]):
             continue
         handoff_id = credential["id"]
         items.append(
@@ -223,9 +231,13 @@ def _sync_person(session, org_id, org_key, person, host, members, names, collect
         return view
     collection = collections.get(uid)
     if collection not in names:
-        collection = session.create_collection(org_id, org_key, f"Mu3Lab: {name}", [member.id])
+        collection = session.create_collection(org_id, org_key, COLLECTION_NAME, [member.id])
         collections[uid] = collection
-        names[collection] = f"Mu3Lab: {name}"
+        names[collection] = COLLECTION_NAME
+    elif names[collection] != COLLECTION_NAME:
+        session.rename_collection(org_id, org_key, collection, COLLECTION_NAME, [member.id])
+        names[collection] = COLLECTION_NAME
+    _retire_authentik_only(session, uid, existing, paths, log)
     for item in items:
         key = f"{uid}:{item.mu3lab_id}"
         fields = {"mu3lab_id": key}
@@ -252,6 +264,25 @@ def _sync_person(session, org_id, org_key, person, host, members, names, collect
     view["waiting"] -= view["saved"]
     view["state"] = "up_to_date" if not view["waiting"] else "partly_saved"
     return view
+
+
+def _retire_authentik_only(session, uid: str, existing: dict[str, Any], paths: RuntimePaths, log) -> None:
+    """Remove admin logins saved before these apps became Authentik-only, and forget them."""
+    prefix = f"{uid}:service:"
+    for key, login in list(existing.items()):
+        if key.startswith(prefix) and authentik_only(key[len(prefix) :]):
+            try:
+                session.delete_login(login.id)
+            except VaultError as exc:
+                log(f"Could not remove the old {login.name} login: {exc}")
+                continue
+            existing.pop(key)
+    for record in onboarding_state.pending_logins(uid, paths):
+        if authentik_only(str(record["service_id"])):
+            onboarding_state.discard_password(str(record["service_id"]), paths)
+    for meta in workflow_secrets.metadata(uid, paths):
+        if authentik_only(str(meta.get("service_id") or "")):
+            workflow_secrets.delete(meta["id"], uid, paths)
 
 
 def run(log) -> dict[str, Any] | None:

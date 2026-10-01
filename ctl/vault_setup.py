@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ctl import onboarding_state, workflow_secrets
+from ctl.identity import authentik_only
 from ctl.provider_catalog import PROVIDERS
 from ctl.registry import Registry
 from ctl.runtime import RuntimePaths
@@ -26,8 +27,10 @@ from ctl.secrets import read_runtime_env
 from ctl.vaultwarden_api import MATCH_HOST, Login, VaultSession
 
 VAULTWARDEN_LOCAL_URL = "http://127.0.0.1:8081"
-FOLDER = "Mu3Lab"
-PROVIDER_FOLDER = "Mu3Lab/AI providers"
+# Two separate folders: logins for Mu3Lab's own apps, and sign-up entries for
+# AI providers the owner registers with.
+FOLDER = "Mu3Lab app logins"
+PROVIDER_FOLDER = "Mu3Lab AI providers"
 FREELLMAPI_ACCOUNT = "mu3lab-gateway@localhost.test"
 
 
@@ -116,6 +119,8 @@ def desired_items(
         if not credential:
             continue
         service_id = credential["service_id"]
+        if authentik_only(service_id):
+            continue
         try:
             name = registry.get(service_id).name
         except (KeyError, ValueError):
@@ -136,6 +141,8 @@ def desired_items(
         )
     for record in onboarding_state.pending_logins(owner_uid, paths):
         service_id = record["service_id"]
+        if authentik_only(service_id):
+            continue
         # A legacy expiring handoff and durable pending login describe one item.
         items = [item for item in items if item.mu3lab_id != f"service:{service_id}"]
         login_url = record.get("login_url", "")

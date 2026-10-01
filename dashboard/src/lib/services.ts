@@ -142,7 +142,7 @@ export const signInLabel: Record<string, string> = {
 
 export function signInSummary(service: Service) {
   const identity = service.identity;
-  if (!identity) return { label: humanizeAuth(service.auth), tone: 'gray' as Tone, repairable: false };
+  if (!identity) return { label: humanizeAuth(service.auth), tone: 'gray' as Tone };
   const tone: Tone =
     identity.state === 'ready'
       ? 'green'
@@ -151,11 +151,7 @@ export function signInSummary(service: Service) {
         : identity.state === 'unsupported'
           ? 'gray'
           : 'amber';
-  return {
-    label: signInLabel[identity.mode] || identity.mode,
-    tone,
-    repairable: !['ready', 'unsupported'].includes(identity.state) && !['none', 'local'].includes(identity.mode),
-  };
+  return { label: signInLabel[identity.mode] || identity.mode, tone };
 }
 
 function humanizeAuth(auth: Service['auth']) {

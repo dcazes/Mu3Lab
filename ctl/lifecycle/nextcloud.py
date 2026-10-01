@@ -159,17 +159,18 @@ def configure_nextcloud(project: Path, log: Log) -> tuple[bool, str]:
         )
         if rc:
             return False, f"Nextcloud could not enable {key}: " + redact(output)
-    # Local login stays available until a real Authentik callback proves the
-    # subject resolves to the existing administrator.
+    # Authentik-only: with a single login backend Nextcloud sends people
+    # straight to Authentik. soft_auto_provision links the owner's Authentik
+    # username to the administrator created at install.
     rc, output = actions.compose_exec(
         project,
         "app",
-        [*OCC, "config:app:set", "user_oidc", "allow_multiple_user_backends", "--value=1"],
+        [*OCC, "config:app:set", "user_oidc", "allow_multiple_user_backends", "--value=0"],
         log,
         timeout=120,
     )
     if rc:
-        return False, "Nextcloud could not stage its safe OIDC migration policy: " + redact(output)
+        return False, "Nextcloud could not switch to Authentik-only sign-in: " + redact(output)
     # The tailnet hostname resolves to a CGNAT address, which Nextcloud's DNS
     # pinning otherwise rejects as a local server during OIDC discovery.
     rc, output = actions.compose_exec(

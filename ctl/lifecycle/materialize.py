@@ -116,6 +116,22 @@ GENERATED_SECRETS: dict[str, Callable[[Values, Path], None]] = {
 }
 
 
+# Apps are Authentik-only from their first start: no local login form, no
+# signup and no first-run screen. Assigned, not defaulted, so a project kept
+# from an older install cannot stay half-configured.
+SSO_ONLY: dict[str, Values] = {
+    "mealie": {
+        "MEALIE_OIDC_ENABLED": "true",
+        "MEALIE_OIDC_AUTO_REDIRECT": "true",
+        "MEALIE_ALLOW_SIGNUP": "false",
+        "MEALIE_ALLOW_PASSWORD_LOGIN": "false",
+    },
+    "actual-budget": {"ACTUAL_OPENID_ENFORCE": "true", "ACTUAL_USER_CREATION_MODE": "login"},
+    "adventurelog": {"ADVENTURELOG_FORCE_SOCIAL_LOGIN": "true"},
+    "paperless-ngx": {"PAPERLESS_DISABLE_REGULAR_LOGIN": "true", "PAPERLESS_REDIRECT_LOGIN_TO_SSO": "true"},
+}
+
+
 def _discovery_url(dns_name: str, service_id: str) -> str:
     return f"https://{dns_name}/application/o/mu3lab-{service_id}/.well-known/openid-configuration"
 
@@ -146,15 +162,12 @@ def _register_oidc_client(
 
 def _mealie_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
     values.setdefault("MEALIE_BASE_URL", public_url)
-    values.setdefault("MEALIE_OIDC_ENABLED", "true")
     values.setdefault("MEALIE_OIDC_SIGNUP_ENABLED", "true")
     values.setdefault("MEALIE_OIDC_CLIENT_ID", "mu3lab-mealie")
     values.setdefault("MEALIE_OIDC_CLIENT_SECRET", _token(40))
     values.setdefault("MEALIE_OIDC_CONFIGURATION_URL", _discovery_url(dns_name, "mealie"))
-    values.setdefault("MEALIE_OIDC_AUTO_REDIRECT", "true")
-    values.setdefault("MEALIE_ALLOW_SIGNUP", "false")
     values.setdefault("MEALIE_OIDC_REMEMBER_ME", "true")
-    values.setdefault("MEALIE_ALLOW_PASSWORD_LOGIN", "true")
+    values.update(SSO_ONLY["mealie"])
     _register_oidc_client(
         service,
         dns_name,
@@ -170,8 +183,7 @@ def _actual_budget_urls(service: Service, values: Values, dns_name: str, public_
     values.setdefault("ACTUAL_OPENID_CLIENT_SECRET", _token(40))
     values.setdefault("ACTUAL_OPENID_DISCOVERY_URL", _discovery_url(dns_name, "actual-budget"))
     values.setdefault("ACTUAL_OPENID_SERVER_HOSTNAME", public_url)
-    values.setdefault("ACTUAL_OPENID_ENFORCE", "true")
-    values.setdefault("ACTUAL_USER_CREATION_MODE", "login")
+    values.update(SSO_ONLY["actual-budget"])
     _register_oidc_client(
         service,
         dns_name,
@@ -186,7 +198,7 @@ def _actual_budget_urls(service: Service, values: Values, dns_name: str, public_
 def _adventurelog_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
     values.setdefault("SITE_URL", public_url)
     values.setdefault("ADVENTURELOG_OIDC_DISCOVERY_URL", _discovery_url(dns_name, "adventurelog"))
-    values.setdefault("ADVENTURELOG_FORCE_SOCIAL_LOGIN", "false")
+    values.update(SSO_ONLY["adventurelog"])
     _register_oidc_client(
         service,
         dns_name,
@@ -219,8 +231,7 @@ def _paperless_urls(service: Service, values: Values, dns_name: str, public_url:
             separators=(",", ":"),
         ),
     )
-    values.setdefault("PAPERLESS_DISABLE_REGULAR_LOGIN", "false")
-    values.setdefault("PAPERLESS_REDIRECT_LOGIN_TO_SSO", "false")
+    values.update(SSO_ONLY["paperless-ngx"])
     providers = json.loads(values["PAPERLESS_SOCIALACCOUNT_PROVIDERS"])
     for app in providers.get("openid_connect", {}).get("APPS", []):
         if app.get("provider_id") == "authentik":

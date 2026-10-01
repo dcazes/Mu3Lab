@@ -11,3 +11,5 @@ from pathlib import Path
 # Tests must never read or write the host's real /srv/mu3lab state. Point the
 # runtime root at a path that does not exist, matching a fresh CI machine.
 os.environ["MU3LAB_RUNTIME_ROOT"] = str(Path(tempfile.mkdtemp(prefix="mu3lab-tests-")) / "runtime-root")
+# Nor reach the host's live Authentik container.
+os.environ["MU3LAB_AUTHENTIK_CONTAINER"] = ""

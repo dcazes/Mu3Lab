@@ -52,7 +52,6 @@ export function identity(overrides: Partial<ServiceIdentity> = {}): ServiceIdent
     launch_url: 'https://host.ts.net:8453',
     detail: '',
     last_verified_at: '',
-    recovery_available: true,
     job_id: '',
     ...overrides,
   };

@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
     environment:
       SITE_URL: ${SITE_URL:-http://127.0.0.1:8015}
+      DJANGO_SETTINGS_MODULE: main.mu3lab_settings
+      DEBUG: "false"
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       PGHOST: db
       POSTGRES_DB: adventurelog
@@ -13,12 +15,13 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       PORT: "3000"
       SOCIALACCOUNT_ALLOW_SIGNUP: "true"
-      FORCE_SOCIALACCOUNT_LOGIN: ${ADVENTURELOG_FORCE_SOCIAL_LOGIN:-false}
+      FORCE_SOCIALACCOUNT_LOGIN: ${ADVENTURELOG_FORCE_SOCIAL_LOGIN:-true}
       ADVENTURELOG_OIDC_CLIENT_ID: ${ADVENTURELOG_OIDC_CLIENT_ID:-}
       ADVENTURELOG_OIDC_CLIENT_SECRET: ${ADVENTURELOG_OIDC_CLIENT_SECRET:-}
       ADVENTURELOG_OIDC_DISCOVERY_URL: ${ADVENTURELOG_OIDC_DISCOVERY_URL:-}
     ports: ["127.0.0.1:8015:80"]
     volumes:
+      - ./mu3lab_settings.py:/code/main/mu3lab_settings.py:ro
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/adventurelog/media:/code/media
     depends_on:
       db: {condition: service_healthy}

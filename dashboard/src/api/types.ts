@@ -120,7 +120,6 @@ export interface ServiceIdentity {
   launch_url: string;
   detail: string;
   last_verified_at: string;
-  recovery_available: boolean;
   job_id: string;
   error?: Record<string, unknown>;
 }

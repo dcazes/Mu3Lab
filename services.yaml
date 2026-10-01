@@ -193,8 +193,8 @@ services:
     required: false
     route: pending
     ui: {available: true, authentication: proxy}
-    identity_note: "Authentik protects the private route; SurfSense keeps a separate local login, generated during installation and ready to save in Bitwarden. This is not SSO."
-    setup_action: "Install SurfSense and save its generated login to Bitwarden."
+    identity_note: "Authentik guards the private address. SurfSense has no single sign-on, so Mu3Lab creates its login at install and saves it to your vault; Bitwarden fills it in."
+    setup_action: "Install SurfSense; its login is saved to your vault for Bitwarden to fill in."
     resource_guidance: "Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is disabled."
     mobile:
       primary: surfsense-web
@@ -227,7 +227,7 @@ services:
     account:
       mode: api_bootstrap
       handoff: true
-      user_action: "Save the generated SurfSense login to Bitwarden, then use autofill when opening it."
+      user_action: "Open SurfSense; Bitwarden fills in the login Mu3Lab saved to your vault."
 
   - id: firecrawl
     summary: "Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping and crawling API and connects it to chat for web research."
@@ -355,9 +355,6 @@ services:
             - "Open the private Actual Budget URL on the phone."
             - "Complete sign-in, then use the browser menu to add Actual to the Home Screen."
 
-    configuration:
-      - {key: oidc_enforced, env: ACTUAL_OPENID_ENFORCE, type: boolean, label: "Require Authentik login", default: true}
-      - {key: user_creation, env: ACTUAL_USER_CREATION_MODE, type: enum, label: "OIDC user creation", options: [manual, login], default: login}
     images: ["docker.io/actualbudget/actual-server:26.9.0"]
     backup: {binds: [data]}
     update: {repository: actualbudget/actual, approved_version: "v26.9.0"}
@@ -375,7 +372,7 @@ services:
     account:
       mode: oidc_first_login
       handoff: false
-      user_action: "Open Actual Budget; your existing Authentik session creates the server owner automatically."
+      user_action: "Open Actual Budget; Authentik signs you in and makes you its owner."
 
   - id: immich
     summary: "Manages your photo and video library on your server. Upload media from your phone, organize shared albums, and find images using metadata, facial recognition, and visual search."
@@ -396,7 +393,7 @@ services:
     ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private photo management."
     resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
-    identity_note: "Supports native Authentik OAuth; password login is disabled only after the existing owner is linked and verified."
+    identity_note: "Signs in only through Authentik; there is no separate Immich password."
     mobile:
       primary: immich-mobile
       clients:
@@ -421,8 +418,8 @@ services:
     backup: {binds: [library, database]}
     account:
       mode: api_bootstrap
-      handoff: true
-      user_action: "The administrator is created during installation. Open Immich to use your existing Authentik session."
+      handoff: false
+      user_action: "Open Immich; Authentik signs you in as its administrator."
 
   - id: mealie
     summary: "Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own, schedule meals, and turn recipe ingredients into shopping lists."
@@ -474,9 +471,6 @@ services:
             - "Open the private Mealie URL and sign in with Authentik."
             - "Use the browser menu to add Mealie to the Home Screen."
 
-    configuration:
-      - {key: allow_signup, env: MEALIE_ALLOW_SIGNUP, type: boolean, label: "Allow local signup", default: false}
-      - {key: oidc_enabled, env: MEALIE_OIDC_ENABLED, type: boolean, label: "Enable Authentik login", default: true}
     backup: {binds: [data]}
     images: ["ghcr.io/mealie-recipes/mealie:v3.28.0"]
     update: {repository: mealie-recipes/mealie, approved_version: "v3.28.0"}
@@ -494,7 +488,7 @@ services:
     account:
       mode: oidc_first_login
       handoff: false
-      user_action: "Open Mealie; your Authentik session creates the account automatically."
+      user_action: "Open Mealie; Authentik signs you in as its administrator."
 
   - id: adventurelog
     summary: "A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations into collections, plan upcoming trips, and explore your travels on a map."
@@ -515,11 +509,11 @@ services:
     ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private travel planning."
     resource_guidance: "Lightweight service with persistent trip data."
-    identity_note: "Supports native Authentik OIDC; social-only login is enabled only after the bootstrap administrator is linked."
+    identity_note: "Signs in only through Authentik; there is no separate AdventureLog password."
     account:
       mode: environment_bootstrap
-      handoff: true
-      user_action: "Save the generated administrator credential after installation."
+      handoff: false
+      user_action: "Open the app; Authentik signs you in as its administrator."
     mobile:
       primary: adventurelog-pwa
       clients:
@@ -563,11 +557,11 @@ services:
     ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private document management."
     resource_guidance: "Storage and OCR usage grow with your document library."
-    identity_note: "Supports native Authentik OIDC through django-allauth; the existing document owner is preserved during migration."
+    identity_note: "Signs in only through Authentik; there is no separate Paperless password."
     account:
       mode: environment_bootstrap
-      handoff: true
-      user_action: "Save the generated administrator credential after installation."
+      handoff: false
+      user_action: "Open the app; Authentik signs you in as its administrator."
     mobile:
       primary: papernext
       clients:
@@ -627,7 +621,7 @@ services:
     ui: {available: true, authentication: oidc}
     setup_action: "Install private files and calendar with Authentik sign-in."
     resource_guidance: "Stores files and calendar data locally; storage use grows with uploaded content."
-    identity_note: "Use Authentik for normal sign-in. A generated local administrator remains available through ?direct=1 for recovery."
+    identity_note: "Signs in only through Authentik; there is no separate Nextcloud password."
     mobile:
       primary: nextcloud-mobile
       clients:
@@ -651,8 +645,8 @@ services:
     backup: {database: nextcloud, binds: [html, postgres]}
     account:
       mode: environment_bootstrap
-      handoff: true
-      user_action: "Use Authentik normally and save the generated recovery administrator credential."
+      handoff: false
+      user_action: "Open Nextcloud; Authentik signs you in as its administrator."
 
   - id: baby-buddy
     summary: "A shared baby-care tracker for feedings, sleep, diaper changes, pumping, and growth. Caregivers can record daily routines and review trends from a common activity history."

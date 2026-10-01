@@ -45,8 +45,8 @@ services:
       PAPERLESS_SOCIALACCOUNT_PROVIDERS: ${PAPERLESS_SOCIALACCOUNT_PROVIDERS:-{}}
       PAPERLESS_SOCIAL_AUTO_SIGNUP: ${PAPERLESS_SOCIAL_AUTO_SIGNUP:-true}
       DJANGO_SETTINGS_MODULE: mu3lab_settings
-      PAPERLESS_DISABLE_REGULAR_LOGIN: ${PAPERLESS_DISABLE_REGULAR_LOGIN:-false}
-      PAPERLESS_REDIRECT_LOGIN_TO_SSO: ${PAPERLESS_REDIRECT_LOGIN_TO_SSO:-false}
+      PAPERLESS_DISABLE_REGULAR_LOGIN: ${PAPERLESS_DISABLE_REGULAR_LOGIN:-true}
+      PAPERLESS_REDIRECT_LOGIN_TO_SSO: ${PAPERLESS_REDIRECT_LOGIN_TO_SSO:-true}
     volumes:
       - ./mu3lab_settings.py:/usr/src/paperless/src/mu3lab_settings.py:ro
       - ./mu3lab_onboarding.py:/usr/src/paperless/src/mu3lab_onboarding.py:ro

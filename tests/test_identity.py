@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,10 +7,8 @@ from unittest.mock import patch
 
 from ctl.control_state import ControlState
 from ctl.identity import mode_for, projection, reconcile_blueprints
-from ctl.lifecycle.accounts import linked_owner_verified
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
-from tests.support import runtime_paths
 
 
 class IdentityContractTests(unittest.TestCase):
@@ -140,59 +136,60 @@ class IdentityContractTests(unittest.TestCase):
             self.assertIn("Mu3Lab SurfSense provider", blueprint.read_text(encoding="utf-8"))
             self.assertFalse(removal.exists())
 
-    def test_mealie_owner_requires_oidc_link_and_admin_role(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp) / "runtime")
-            data = paths.data / "mealie"
-            data.mkdir(parents=True)
-            conn = sqlite3.connect(data / "mealie.db")
-            conn.execute("CREATE TABLE users (email TEXT, admin INTEGER, auth_method TEXT, password TEXT)")
-            conn.execute(
-                "INSERT INTO users VALUES (?, ?, ?, ?)",
-                ("owner@example.com", 1, "OIDC", "password-hash-is-never-selected"),
-            )
-            conn.commit()
-            conn.close()
-            with runtime_paths(paths):
-                verified = linked_owner_verified(
-                    load().get("mealie"), paths.projects / "mealie", {"email": "OWNER@example.com"}, lambda _line: None
-                )
-            self.assertTrue(verified)
+    def test_every_authentik_provider_skips_the_consent_page(self):
+        # A consent page left open loses its place when another app starts a
+        # sign-in in the same browser, and Authentik drops the person on its
+        # own library instead of the app.
+        from ctl.authentik_blueprints import render_dashboard_blueprint, render_oidc_application_blueprint
 
-    def test_nextcloud_owner_requires_matching_email_and_admin_role(self):
-        profile = {
-            "user_id": "akadmin",
-            "email": "owner@example.com",
-            "enabled": True,
-            "groups": ["admin"],
-            "last_seen": 1,
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp) / "runtime")
-            with patch("ctl.service_ops.actions.compose_exec", side_effect=[(0, json.dumps(profile)), (0, "1")]):
-                verified = linked_owner_verified(
-                    load().get("nextcloud"),
-                    paths.projects / "nextcloud",
-                    {"username": "akadmin", "email": "OWNER@example.com"},
-                    lambda _line: None,
-                )
-            self.assertTrue(verified)
+        gated = render_dashboard_blueprint("mu3lab.example.ts.net", gated_apps=(("surfsense", "SurfSense", 8447),))
+        oidc = render_oidc_application_blueprint(
+            "mu3lab.example.ts.net",
+            service_id="mealie",
+            name="Mealie",
+            private_port=8450,
+            client_id="mu3lab-mealie",
+            client_secret="secret",
+            redirect_paths=("/login",),
+        )
+        for content in (gated, oidc):
+            self.assertNotIn("explicit-consent", content)
+            self.assertIn("default-provider-authorization-implicit-consent", content)
 
-    def test_lobehub_owner_requires_verified_authentik_account(self):
-        evidence = "4cb1f144288e5d61695b0d3f9c63835c|t|authentik\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp) / "runtime")
-            with patch("ctl.service_ops.actions.compose_exec", return_value=(0, evidence)) as compose_exec:
-                verified = linked_owner_verified(
-                    load().get("lobehub"),
-                    paths.projects / "lobehub",
-                    {"email": "OWNER@example.com"},
-                    lambda _line: None,
-                )
-            self.assertTrue(verified)
-            command = compose_exec.call_args.args[2]
-            self.assertNotIn("owner@example.com", " ".join(command).lower())
-            self.assertNotIn("access_token", " ".join(command).lower())
+    def test_admitted_people_carry_the_group_names_apps_gate_on(self):
+        from ctl.authentik_blueprints import render_oidc_application_blueprint
+
+        content = render_oidc_application_blueprint(
+            "mu3lab.example.ts.net",
+            service_id="mealie",
+            name="Mealie",
+            private_port=8450,
+            client_id="mu3lab-mealie",
+            client_secret="secret",
+            redirect_paths=("/login",),
+        )
+        expression = content.split("expression: |\n", 1)[1].split("  - id:", 1)[0]
+        body = "\n".join(line[8:] for line in expression.splitlines())
+
+        def claims(*groups: str) -> dict:
+            class Groups:
+                def all(self):
+                    return [type("G", (), {"name": name}) for name in groups]
+
+            user = type("U", (), {"ak_groups": Groups(), "email": "a@b.test", "username": "a", "name": "A"})
+            request = type("R", (), {"user": user})
+            scope: dict = {"request": request}
+            exec("def mapping():\n" + "\n".join("    " + line for line in body.splitlines()), scope)
+            return scope["mapping"]()
+
+        owner = claims("authentik Admins")
+        self.assertIn("mu3lab-users", owner["groups"])
+        self.assertIn("mu3lab-operators", owner["groups"])
+        self.assertEqual(owner["mu3lab_role"], "admin")
+        member = claims("mu3lab-household")
+        self.assertIn("mu3lab-users", member["groups"])
+        self.assertNotIn("mu3lab-operators", member["groups"])
+        self.assertEqual(claims()["groups"], [])
 
 
 if __name__ == "__main__":

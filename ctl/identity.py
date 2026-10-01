@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from ctl.authentik_blueprints import write_dashboard_blueprint, write_oidc_application_blueprint
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
-from ctl.registry import Registry, Service
+from ctl.registry import Registry, RegistryError, Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
@@ -78,6 +78,27 @@ OIDC_LAUNCH_PATHS = {
 }
 
 
+def launch_path(service_id: str) -> str:
+    """Where Home opens an OIDC app so it goes straight into Authentik sign-in."""
+    path = OIDC_LAUNCH_PATHS[service_id]
+    if service_id == "nextcloud":
+        values = read_runtime_env(RuntimePaths().projects / service_id / ".env")
+        provider_id = values.get("NEXTCLOUD_OIDC_PROVIDER_ID", "1")
+        if provider_id.isdigit() and int(provider_id) > 0:
+            path = f"/index.php/apps/user_oidc/login/{provider_id}"
+    return path
+
+
+def authentik_only(service_id: str) -> bool:
+    """Apps people only ever open through Authentik; they have no login to save."""
+    from ctl.registry import load
+
+    try:
+        return mode_for(load().get(service_id)) in {"native_oidc", "trusted_header"}
+    except (KeyError, ValueError, RegistryError):
+        return False
+
+
 def mode_for(service: Service) -> str:
     if service.id in OIDC_CONTRACTS:
         return "native_oidc"
@@ -108,23 +129,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     # the legacy ui.url is only a fallback for mixed-version rollouts.
     launch_url = str(item.get("url") or (item.get("ui") or {}).get("url") or "")
     if service.id in OIDC_LAUNCH_PATHS and launch_url:
-        path = OIDC_LAUNCH_PATHS[service.id]
-        if service.id == "nextcloud":
-            values = read_runtime_env(RuntimePaths().projects / service.id / ".env")
-            provider_id = values.get("NEXTCLOUD_OIDC_PROVIDER_ID", "1")
-            if provider_id.isdigit() and int(provider_id) > 0:
-                path = f"/index.php/apps/user_oidc/login/{provider_id}"
-        launch_url = launch_url.rstrip("/") + path
-    recovery = service.id in {
-        "actual-budget",
-        "mealie",
-        "nextcloud",
-        "immich",
-        "paperless-ngx",
-        "adventurelog",
-        "vaultwarden",
-        "freellmapi",
-    }
+        launch_url = launch_url.rstrip("/") + launch_path(service.id)
     if saved:
         current = str(saved["state"])
         detail = str(saved.get("detail") or "")
@@ -136,7 +141,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
             job = job_store.get(str(saved.get("last_job_id") or "")) if job_store else None
             if job and str(job.get("state")) in {"failed", "cancelled"}:
                 current = "degraded"
-                detail = str(job.get("detail") or "Sign-in reconciliation failed; retry repair.")
+                detail = str(job.get("detail") or "Sign-in setup failed.")
         if current == "ready" and (not route_ready or not healthy):
             current = "degraded"
             detail = "Sign-in is configured, but the application or its private route is unavailable."
@@ -165,7 +170,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     else:
         current, detail = (
             "unconfigured",
-            "Native Authentik sign-in has not completed owner migration and live callback verification.",
+            "Authentik sign-in is checked when the app is installed.",
         )
     return {
         "mode": mode,
@@ -173,7 +178,6 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
         "launch_url": launch_url if service.id not in NO_UI else "",
         "detail": detail,
         "last_verified_at": str((saved or {}).get("last_verified_at", "")),
-        "recovery_available": recovery,
         "job_id": str((saved or {}).get("last_job_id", "")),
         "error": (saved or {}).get("last_error", {}),
     }

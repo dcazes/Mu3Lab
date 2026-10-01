@@ -74,6 +74,12 @@ class FakeOrg:
         )
         return self.items[-1].id
 
+    def rename_collection(self, _org, _key, collection, name, member_ids):
+        self.collections_by_id[collection] = name
+
+    def delete_login(self, login_id):
+        self.items = [item for item in self.items if item.id != login_id]
+
     def update_login(self, existing, _org, _key, **item):
         self.writes += 1
         existing.raw["login"]["password"] = encrypt(item["password"], KEY)
@@ -92,9 +98,9 @@ class VaultSyncTests(unittest.TestCase):
         (self.paths.projects / "litellm").mkdir(parents=True)
         (self.paths.projects / "litellm" / ".env").write_text("LITELLM_MASTER_KEY=sk-master\n")
         identity = {"owner_uid": OWNER["uid"], "email": OWNER["email"], "username": "owner", "display_name": "Owner"}
-        onboarding_state.remember_owner("immich", identity, self.paths)
-        onboarding_state.prepare_login("immich", self.paths)
-        onboarding_state.complete_login("immich", "owner", "https://host.ts.net:8450", self.paths)
+        onboarding_state.remember_owner("surfsense", identity, self.paths)
+        onboarding_state.prepare_login("surfsense", self.paths)
+        onboarding_state.complete_login("surfsense", "owner", "https://host.ts.net:8447", self.paths)
 
     def sync(self, org: FakeOrg, people):
         with patch("ctl.vault_sync._session", return_value=org):
@@ -105,9 +111,9 @@ class VaultSyncTests(unittest.TestCase):
         result = self.sync(org, [OWNER])
         self.assertEqual(result["people"][0]["state"], "up_to_date")
         names = {item.name: item for item in org.items}
-        self.assertEqual(names["Immich"].uris, ["https://host.ts.net:8450"])
+        self.assertEqual(names["SurfSense"].uris, ["https://host.ts.net:8447"])
         self.assertEqual(names["LiteLLM admin"].username, "admin")
-        self.assertEqual(org.collections_by_id, {"c0": "Mu3Lab: Owner"})
+        self.assertEqual(org.collections_by_id, {"c0": "Mu3Lab app logins"})
         # Saved once, it is no longer waiting to be saved.
         self.assertEqual(onboarding_state.pending_logins(OWNER["uid"], self.paths), [])
 
@@ -137,6 +143,35 @@ class VaultSyncTests(unittest.TestCase):
         self.sync(org, [OWNER])
         self.assertEqual(org.confirmed, ["owner@example.test"])
         self.assertTrue(org.items)
+
+    def test_authentik_only_apps_never_reach_the_vault_and_old_logins_are_removed(self):
+        identity = {"owner_uid": OWNER["uid"], "email": OWNER["email"], "username": "owner", "display_name": "Owner"}
+        onboarding_state.remember_owner("paperless-ngx", identity, self.paths)
+        onboarding_state.prepare_login("paperless-ngx", self.paths)
+        onboarding_state.complete_login("paperless-ngx", "owner", "https://host.ts.net:8452", self.paths)
+        self.assertNotIn("service:paperless-ngx", [i.mu3lab_id for i in vault_sync.items_for(OWNER, "", self.paths)])
+        org = FakeOrg({"owner@example.test": STATUS_CONFIRMED})
+        org.create_login(
+            "org",
+            KEY,
+            "c0",
+            name="Paperless-ngx",
+            username="owner",
+            password="old",
+            uris=[("https://host.ts.net:8452", None)],
+            fields={"mu3lab_id": f"{OWNER['uid']}:service:paperless-ngx"},
+        )
+        self.sync(org, [OWNER])
+        self.assertNotIn("Paperless-ngx", [item.name for item in org.items])
+        self.assertIn("SurfSense", [item.name for item in org.items])
+        self.assertNotIn("password", onboarding_state.read("paperless-ngx", self.paths))
+
+    def test_an_older_collection_name_is_renamed(self):
+        org = FakeOrg({"owner@example.test": STATUS_CONFIRMED})
+        org.collections_by_id["c0"] = "Mu3Lab: Owner"
+        with patch("ctl.vault_sync._state", return_value={"collections": {OWNER["uid"]: "c0"}}):
+            self.sync(org, [OWNER])
+        self.assertEqual(org.collections_by_id, {"c0": "Mu3Lab app logins"})
 
     def test_members_never_receive_administrator_logins(self):
         items = vault_sync.items_for(PARTNER, "host.ts.net", self.paths)

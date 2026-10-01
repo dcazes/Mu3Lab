@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from ctl import actions, image_fetch, job_guard, onboarding_state, workflow_secrets
+from ctl.authentik_apply import apply_blueprints
 from ctl.control_state import ControlState
 from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
@@ -17,7 +18,6 @@ from ctl.lifecycle.accounts import (
     account_username,
     enforce_identity_settings,
     fresh_account_storage,
-    linked_owner_verified,
     verify_bootstrap_account,
 )
 from ctl.lifecycle.health import wait_healthy
@@ -25,6 +25,7 @@ from ctl.lifecycle.integrations import configure_adventurelog_oidc, surfsense_em
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
 from ctl.lifecycle.materialize import materialize
 from ctl.lifecycle.nextcloud import configure_nextcloud, install_nextcloud_if_needed
+from ctl.lifecycle.signin_check import SignInError, verify_sign_in, wait_for_provider
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.routes import apply as apply_route
 from ctl.runtime import RuntimePaths
@@ -331,6 +332,20 @@ def _install(
         state.set_installation(
             service.id, "starting", job_id=job_id, manifest_version="3", image_digests=image_snapshot
         )
+    from ctl.identity import OIDC_CONTRACTS, mode_for
+
+    if service.id in OIDC_CONTRACTS:
+        # Authentik applies the new client in the background; an app that
+        # starts first gets a 404 and some (Actual Budget) never retry.
+        _event(store, job_id, "authentik_ready", "Waiting for Authentik to publish this app's sign-in.")
+        apply_blueprints(log)
+        try:
+            from ctl.service_state import tailnet_dns_name
+
+            wait_for_provider(tailnet_dns_name(), service.id)
+        except (SignInError, OSError, ValueError) as exc:
+            _fail(store, state, job_id, service.id, actor, "authentik_ready", "sign_in_unavailable", str(exc))
+            return
     _event(store, job_id, "start_service", "Starting application containers.")
     wait_timeout = 900 if service.id in {"surfsense", "nextcloud", "lobehub"} else 120
     # A fresh Nextcloud intentionally reports unhealthy until its database
@@ -506,10 +521,12 @@ def _install(
             )
             return
     if service.id in {"adventurelog", "mealie"}:
-        from ctl.lifecycle.integrations import retire_mealie_default_password
+        from ctl.lifecycle.integrations import adopt_mealie_admin
 
-        setup = configure_adventurelog_oidc if service.id == "adventurelog" else retire_mealie_default_password
-        configured, detail = setup(project, log)
+        if service.id == "adventurelog":
+            configured, detail = configure_adventurelog_oidc(project, log)
+        else:
+            configured, detail = adopt_mealie_admin(project, dict(account_identity or {}), log)
         if not configured:
             _fail(
                 store,
@@ -522,7 +539,34 @@ def _install(
                 detail,
             )
             return
-    if account_mode == "environment_bootstrap" and account_identity:
+    # Authentik-only apps: their generated administrator is the owner's
+    # Authentik account, so its password is never handed to anyone.
+    sso_only = mode_for(service) in {"native_oidc", "trusted_header"}
+    if service.id == "immich" and enforce_identity_settings(service, project):
+        # Immich's administrator is created through its password API, so its
+        # password login can only be switched off after that.
+        _event(store, job_id, "configure_application", "Switching Immich to Authentik-only sign-in.")
+        rc, output = actions.compose_up(
+            project,
+            log,
+            timeout=wait_timeout + 300,
+            wait_timeout=wait_timeout,
+            extra_files=compose_overrides(service.id, project),
+            recreate=True,
+        )
+        if rc:
+            _fail(
+                store,
+                state,
+                job_id,
+                service.id,
+                actor,
+                "configure_application",
+                "application_configuration_failed",
+                "Immich could not switch to Authentik-only sign-in: " + redact(output),
+            )
+            return
+    if account_mode == "environment_bootstrap" and account_identity and not sso_only:
         record = onboarding_state.read(service.id, RuntimePaths())
         if record.get("password") and not record.get("provisioned"):
             username = account_identity["username"] if service.id == "nextcloud" else account_username(account_identity)
@@ -540,18 +584,29 @@ def _install(
     if not routed:
         _fail(store, state, job_id, service.id, actor, "configure_route", "route_configuration_failed", detail)
         return
-    from ctl.identity import GATED_APPS
+    from ctl.identity import GATED_APPS, reconcile_blueprints
+    from ctl.service_state import tailnet_dns_name
 
     if service.id in GATED_APPS:
         # Caddy sends this app through the Authentik outpost, which answers 404
         # until the app is registered there (and a past uninstall is withdrawn).
-        from ctl.identity import reconcile_blueprints
-        from ctl.service_state import tailnet_dns_name
-
         try:
             reconcile_blueprints(registry, tailnet_dns_name())
+            apply_blueprints(log)
         except (OSError, ValueError) as exc:
             log(f"Authentik sign-in was not registered yet: {exc}")
+    # Healthy is not enough: walk the browser's sign-in path to Authentik so a
+    # broken hand-off fails the install instead of the person's first click.
+    _event(store, job_id, "verify_sign_in", "Checking that Authentik sign-in works.")
+    try:
+        sign_in_detail = verify_sign_in(service.id, tailnet_dns_name(), log)
+    except (SignInError, OSError, ValueError) as exc:
+        _append_runtime_diagnostics(store, job_id, project)
+        _fail(store, state, job_id, service.id, actor, "verify_sign_in", "sign_in_failed", str(exc))
+        return
+    _event(store, job_id, "verify_sign_in", sign_in_detail)
+    if sso_only:
+        onboarding_state.discard_password(service.id, RuntimePaths())
     if state:
         state.set_installation(
             service.id,
@@ -561,22 +616,28 @@ def _install(
             image_digests=image_snapshot,
             route_state="ready",
         )
-        from ctl.identity import mode_for
-
         if mode_for(service) == "native_oidc":
             state.set_service_identity(
                 service.id,
                 "native_oidc",
-                "migration_required",
+                "ready",
                 owner_uid=account_identity["owner_uid"] if account_identity else "",
                 job_id=job_id,
-                detail="Open the application once through Authentik to verify owner linking before local login is disabled.",
+                detail=sign_in_detail,
+                verified=True,
             )
-    if fresh_account and account_identity and state:
+    if state and sso_only:
+        # Nothing is left for the person to set up on their first visit.
+        state.set_initialization(
+            service.id,
+            account_mode,
+            "ready",
+            job_id=job_id,
+            owner_uid=account_identity["owner_uid"] if account_identity else "",
+        )
+    elif fresh_account and account_identity and state:
         host = ""
         try:
-            from ctl.service_state import tailnet_dns_name
-
             host = tailnet_dns_name()
         except (OSError, ValueError):
             pass
@@ -786,21 +847,16 @@ def _configure_identity(
             from ctl.service_state import tailnet_dns_name
 
             written = reconcile_blueprints(registry, tailnet_dns_name())
+            apply_blueprints(_job_log(store, job_id))
             if service.id not in written:
                 raise ValueError("The persisted OIDC client configuration is incomplete.")
             installation = state.installation(service.id) if state else None
-            linked = bool(
-                installation
-                and installation.get("state") == "running"
-                and linked_owner_verified(service, project, owner, _job_log(store, job_id))
-            )
-            if linked:
-                enforce_identity_settings(service, project)
-                # Rewrite the blueprint after clearing Actual's first-owner guard.
-                reconcile_blueprints(registry, tailnet_dns_name())
-            if installation and installation.get("state") == "running":
+            running = bool(installation and installation.get("state") == "running")
+            if running:
                 from ctl.compute import compose_overrides
 
+                if service.id == "immich":
+                    enforce_identity_settings(service, project)
                 rc, output = actions.compose_up(
                     project,
                     _job_log(store, job_id),
@@ -810,46 +866,29 @@ def _configure_identity(
                     recreate=True,
                 )
                 if rc:
-                    raise ValueError("The application could not apply its staged OIDC configuration: " + redact(output))
-                if service.account.get("mode") == "api_bootstrap" and owner:
-                    from ctl.lifecycle.onboarding import provision
-
-                    provision(service, owner, RuntimePaths())
-                    if state:
-                        state.set_initialization(
-                            service.id, "api_bootstrap", "ready", job_id=job_id, owner_uid=owner_uid
-                        )
-            if service.id == "adventurelog" and installation and installation.get("state") == "running":
-                ok, configured_detail = configure_adventurelog_oidc(
-                    project_path(service, root), _job_log(store, job_id)
-                )
-                if not ok:
-                    raise ValueError(configured_detail)
-            if installation and installation.get("state") == "running":
+                    raise ValueError("The application could not apply its sign-in configuration: " + redact(output))
+                if service.id == "adventurelog":
+                    ok, configured_detail = configure_adventurelog_oidc(project, _job_log(store, job_id))
+                    if not ok:
+                        raise ValueError(configured_detail)
                 if service.id == "nextcloud":
                     ok, configured_detail = configure_nextcloud(project, _job_log(store, job_id))
                     if not ok:
                         raise ValueError(configured_detail)
-                if service.id == "mealie":
-                    from ctl.lifecycle.integrations import retire_mealie_default_password
+                if service.id == "mealie" and owner:
+                    from ctl.lifecycle.integrations import adopt_mealie_admin
 
-                    ok, configured_detail = retire_mealie_default_password(project, _job_log(store, job_id))
+                    ok, configured_detail = adopt_mealie_admin(project, dict(owner), _job_log(store, job_id))
                     if not ok:
                         raise ValueError(configured_detail)
                 routed, route_detail = apply_route(registry, service, root, _job_log(store, job_id))
                 if not routed:
                     raise ValueError(route_detail)
-            detail = (
-                "OIDC configuration is installed. Complete a real Authentik callback so Mu3Lab "
-                "can verify the existing owner and administrator role before disabling local login."
-            )
-            target = "ready" if linked else "migration_required"
-            if linked:
-                detail = (
-                    "Verified Authentik account linking; password login is disabled."
-                    if service.id == "lobehub"
-                    else "Verified Authentik account linking and administrator role; browser password login is disabled."
-                )
+                detail = verify_sign_in(service.id, tailnet_dns_name(), _job_log(store, job_id))
+                target = "ready"
+            else:
+                detail = "Sign-in is configured and is checked when the app is installed."
+                target = "unconfigured"
         elif mode == "trusted_header":
             from ctl.service_state import tailnet_dns_name
 
@@ -869,7 +908,7 @@ def _configure_identity(
                 service.identity_note or "This application does not support Mu3Lab-managed native Authentik sign-in."
             )
             target = "unsupported"
-    except (OSError, ValueError, RegistryError) as exc:
+    except (OSError, ValueError, RegistryError, SignInError) as exc:
         detail = redact(str(exc))
         if state:
             state.set_service_identity(

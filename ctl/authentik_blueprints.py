@@ -169,9 +169,10 @@ entries:
       external_host: {_quote(launch_url)}
       access_token_validity: hours=24
       authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      # Nextcloud user_oidc uses the authorization-code grant. The implicit
-      # consent flow rejects that grant in current Authentik releases.
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+      # Implicit consent: no "Continue to app?" page. A consent page left open
+      # loses its place when another app starts a sign-in in the same browser,
+      # and Authentik then drops the person on its own library.
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       intercept_header_auth: true
   - model: authentik_core.application
@@ -198,7 +199,7 @@ entries:
       external_host: {_quote(litellm_origin)}
       access_token_validity: hours=24
       authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       intercept_header_auth: true
   - model: authentik_core.application
@@ -225,7 +226,7 @@ entries:
       external_host: {_quote(freellmapi_origin)}
       access_token_validity: hours=24
       authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       intercept_header_auth: true
   - model: authentik_core.application
@@ -325,7 +326,7 @@ def _gated_app_entries(host: str, service_id: str, name: str, port: int) -> str:
       external_host: {_quote(origin)}
       access_token_validity: hours=24
       authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       intercept_header_auth: true
   - model: authentik_core.application
@@ -423,12 +424,19 @@ entries:
       description: Verified email, groups, and Mu3Lab operator role
       expression: |
         groups = [group.name for group in request.user.ak_groups.all()]
+        admin = "mu3lab-operators" in groups or "authentik Admins" in groups
+        # Apps gate on these two names: every admitted person is a user, and
+        # Authentik's own administrators count as Mu3Lab operators.
+        if admin or "mu3lab-household" in groups:
+          groups.append("mu3lab-users")
+        if admin and "mu3lab-operators" not in groups:
+          groups.append("mu3lab-operators")
         return {{
           "email_verified": bool(request.user.email),
           "preferred_username": request.user.username,
           "name": request.user.name or request.user.username,
           "groups": groups,
-          "mu3lab_role": "admin" if "mu3lab-operators" in groups or "authentik Admins" in groups else "user",
+          "mu3lab_role": "admin" if admin else "user",
         }}
   - id: mu3lab-{service_id}-provider
     model: authentik_providers_oauth2.oauth2provider

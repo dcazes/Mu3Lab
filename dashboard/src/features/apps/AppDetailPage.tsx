@@ -1,7 +1,6 @@
-import { AlertTriangle, KeyRound, Plug, UserPlus, Wrench } from 'lucide-react';
+import { AlertTriangle, KeyRound, Plug, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import type { Service } from '../../api';
-import { postApi } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { Callout, Card, Facts, PageHeader, Tabs } from '../../components/Layout';
@@ -11,7 +10,6 @@ import { CopyField } from '../../components/CopyField';
 import { humanize, relativeTime } from '../../lib/format';
 import { Link } from '../../lib/router';
 import { isInstalled, isRunning, launchTarget, signInSummary } from '../../lib/services';
-import { useAction } from '../../lib/useAction';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
 import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
@@ -66,8 +64,6 @@ function HeaderActions({ service }: { service: Service }) {
 }
 
 function NextSteps({ service }: { service: Service }) {
-  const { refresh } = useDashboard();
-  const { pending, run } = useAction();
   const target = launchTarget(service);
   const identity = service.identity;
   const steps = [];
@@ -118,42 +114,10 @@ function NextSteps({ service }: { service: Service }) {
       </Callout>,
     );
 
-  if (identity?.state === 'migration_required')
+  if (identity?.state === 'degraded' && isRunning(service))
     steps.push(
-      <Callout
-        key="sso"
-        tone="info"
-        icon={KeyRound}
-        title="Open with single sign-on"
-        action={target && <ExternalButton href={target.url}>Open {service.name}</ExternalButton>}
-      >
-        Your existing Authentik session links your account on the first visit. Mu3Lab completes setup automatically.
-      </Callout>,
-    );
-  else if (signInSummary(service).repairable && identity?.state !== 'configuring' && isRunning(service))
-    steps.push(
-      <Callout
-        key="repair"
-        tone="warning"
-        icon={Wrench}
-        title="Sign-in configuration needs attention"
-        action={
-          <Button
-            loading={pending === 'repair'}
-            onClick={async () => {
-              await run(
-                'repair',
-                () => postApi(`/api/v1/services/${service.id}/identity/reconcile`),
-                'Sign-in repair started',
-              );
-              void refresh();
-            }}
-          >
-            Repair sign-in
-          </Button>
-        }
-      >
-        {identity?.detail || `Mu3Lab can connect ${service.name} to Authentik for you.`}
+      <Callout key="sign-in" tone="warning" icon={KeyRound} title="Sign-in is not working">
+        {identity.detail || `${service.name} could not confirm its Authentik sign-in.`}
       </Callout>,
     );
 
