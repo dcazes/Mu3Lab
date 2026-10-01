@@ -845,6 +845,40 @@ def systemctl_enable_now(unit: str, log: Callable[[str], None], user_scope: bool
     return _ok(lines)
 
 
+def ensure_system_group(group: str, log: Callable[[str], None]) -> dict:
+    """`groupadd --system <group>` only when the group is missing.
+
+    changed=False means it already existed. Package installs normally create
+    the docker group, but an upgrade-in-place never re-creates one that was
+    deleted later (e.g. by an uninstall whose package purge didn't finish).
+    """
+    import grp as _grp
+
+    try:
+        _grp.getgrnam(group)
+        return _ok([f"group {group} already exists"], changed=False)
+    except KeyError:
+        pass
+    lines: list[str] = []
+    res = privilege.run_privileged(["groupadd", "--system", group], lines.append)
+    if res.get("need_terminal"):
+        return _fail(lines, terminal_command=res["terminal_command"])
+    if not res["ok"]:
+        return _fail(lines)
+    return _ok(lines, changed=True)
+
+
+def systemctl_restart(units: list[str], log: Callable[[str], None]) -> dict:
+    """`systemctl restart <units...>` (system scope); also starts failed units."""
+    lines: list[str] = []
+    res = privilege.run_privileged(["systemctl", "restart", *units], lines.append)
+    if res.get("need_terminal"):
+        return _fail(lines, terminal_command=res["terminal_command"])
+    if not res["ok"]:
+        return _fail(lines)
+    return _ok(lines)
+
+
 def usermod_add_group(user: str, group: str, log: Callable[[str], None]) -> dict:
     """`usermod -aG <group> <user>` (append-only, never replaces groups)."""
     lines: list[str] = []

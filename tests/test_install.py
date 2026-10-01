@@ -36,7 +36,7 @@ def _ctx(log=None, inputs=None):
 
 
 def _ok(*args, **kwargs):
-    return {"ok": True, "changed": True, "log": []}
+    return {"ok": True, "changed": kwargs.get("changed", True), "log": []}
 
 
 class DispatchTests(unittest.TestCase):
@@ -186,6 +186,7 @@ class DockerFixTests(unittest.TestCase):
         with (
             patch("ctl.install.actions.systemctl_enable_now", return_value=_ok()) as start,
             patch("ctl.install.actions.apt_install") as apt,
+            patch("ctl.install.actions.ensure_system_group", return_value=_ok(changed=False)),
             patch("ctl.install.actions.usermod_add_group", return_value=_ok()),
         ):
             result = install.fix_docker(self._check("daemon_down"), _ctx())
@@ -223,11 +224,40 @@ class DockerFixTests(unittest.TestCase):
     def test_group_ensures_membership_defers_liveness(self):
         # fix_docker ensures membership but NEVER judges liveness (that's the
         # checkpoint's job): no waiting here, just ok.
-        with patch("ctl.install.actions.usermod_add_group", return_value=_ok()) as mod:
+        with (
+            patch("ctl.install.actions.ensure_system_group", return_value=_ok(changed=False)),
+            patch("ctl.install.actions.systemctl_restart") as restart,
+            patch("ctl.install.actions.usermod_add_group", return_value=_ok()) as mod,
+        ):
             result = install.fix_docker(self._check("no_group"), _ctx())
         self.assertTrue(result.get("ok"))
         self.assertIsNone(result.get("waiting"))
         mod.assert_called_once()
+        restart.assert_not_called()
+
+    def test_recreates_deleted_docker_group(self):
+        # REGRESSION: an uninstall deleted the docker group but left Docker
+        # installed; usermod then failed ("group 'docker' does not exist") and
+        # docker.socket couldn't start. Recreate the group, restart the socket.
+        calls: list[str] = []
+        with (
+            patch(
+                "ctl.install.actions.ensure_system_group",
+                side_effect=lambda g, log: calls.append("groupadd") or _ok(changed=True),
+            ),
+            patch(
+                "ctl.install.actions.systemctl_restart",
+                side_effect=lambda units, log: calls.append("restart") or _ok(),
+            ) as restart,
+            patch(
+                "ctl.install.actions.usermod_add_group",
+                side_effect=lambda u, g, log: calls.append("usermod") or _ok(),
+            ),
+        ):
+            result = install.fix_docker(self._check("no_group"), _ctx())
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(calls, ["groupadd", "restart", "usermod"])
+        self.assertEqual(restart.call_args[0][0], ["docker.socket", "docker.service"])
 
     def test_probe_distinguishes_denied_from_down(
         self,

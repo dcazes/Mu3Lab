@@ -198,7 +198,9 @@ if $EVERYTHING; then
   purge docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
   remove_files /var/lib/docker /var/lib/containerd /etc/docker /etc/apt/sources.list.d/docker.list \
     /etc/apt/sources.list.d/docker.sources /etc/apt/keyrings/docker.asc
-  getent group docker >/dev/null && run sudo -n groupdel docker
+  # Only once Docker is really gone: a still-installed Docker needs this group
+  # (docker.socket refuses to start without it, and reinstalls never re-create it).
+  ! dpkg -s docker-ce >/dev/null 2>&1 && getent group docker >/dev/null && run sudo -n groupdel docker
 
   step "Removing NVIDIA container support (the GPU driver is kept)"
   purge nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1

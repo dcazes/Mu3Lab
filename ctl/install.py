@@ -891,6 +891,16 @@ def fix_docker(check: dict, ctx: dict) -> dict:
         # THIS process can use it yet is the restart checkpoint's question —
         # getgrouplist() would lie here (it reads /etc/group, not process
         # credentials), so this step never judges liveness.
+        res = actions.ensure_system_group("docker", log)
+        if not res["ok"]:
+            return _propagate(res)
+        if res.get("changed"):
+            # docker.socket chowns the socket to this group at start and
+            # fails outright while it's missing; restart both so the socket
+            # comes back group-owned and the daemon behind it is up.
+            res = actions.systemctl_restart(["docker.socket", "docker.service"], log)
+            if not res["ok"]:
+                return _propagate(res)
         user = getpass.getuser()
         res = actions.usermod_add_group(user, "docker", log)
         if not res["ok"]:
@@ -1458,15 +1468,16 @@ def _authentik_storage_check(ctx: dict) -> dict:
     from ctl.lifecycle import authentik_storage
 
     state = authentik_storage.status()
-    return {
-        "name": "authentik_storage",
-        "status": state,
-        "detail": "Authentik's data is in Mu3Lab's data folder."
+    return _row(
+        "authentik_storage",
+        "ok" if state == "ready" else "missing",
+        "Authentik's data is in Mu3Lab's data folder."
         if state == "ready"
         else "Authentik's data is still in Docker volumes, outside /srv/mu3lab/data, so a copy of that folder "
         "would miss your accounts.",
-        "action": "" if state == "ready" else "Move it (Authentik stops for about a minute).",
-    }
+        state,
+        "" if state == "ready" else "Move it (Authentik stops for about a minute).",
+    )
 
 
 def fix_authentik_storage(check: dict, ctx: dict) -> dict:

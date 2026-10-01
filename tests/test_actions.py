@@ -94,6 +94,20 @@ class SystemTests(unittest.TestCase):
             actions.usermod_add_group("dak", "docker", _silent)
         self.assertEqual(seen[0], ["usermod", "-aG", "docker", "dak"])
 
+    def test_group_created_only_when_missing(self):
+        seen: list[list[str]] = []
+
+        def fake(argv, log):
+            seen.append(argv)
+            return _privileged_ok(argv, log)
+
+        with patch.object(actions.privilege, "run_privileged", fake), patch("grp.getgrnam", return_value=object()):
+            self.assertFalse(actions.ensure_system_group("docker", _silent)["changed"])
+        self.assertEqual(seen, [])
+        with patch.object(actions.privilege, "run_privileged", fake), patch("grp.getgrnam", side_effect=KeyError):
+            self.assertTrue(actions.ensure_system_group("docker", _silent)["changed"])
+        self.assertEqual(seen, [["groupadd", "--system", "docker"]])
+
     def test_network_unprivileged(self):
         # Network creation must NOT go through elevation (relies on group
         # or the sg fallback inside docker_cmd, never pkexec/sudo).
