@@ -142,6 +142,16 @@ class VaultSyncTests(unittest.TestCase):
         items = vault_sync.items_for(PARTNER, "host.ts.net", self.paths)
         self.assertNotIn("service:litellm", [item.mu3lab_id for item in items])
 
+    def test_a_login_the_old_flow_saved_personally_is_not_duplicated(self):
+        from ctl.control_state import ControlState
+
+        (self.paths.projects / "freellmapi").mkdir(parents=True)
+        (self.paths.projects / "freellmapi" / ".env").write_text("FREELLMAPI_ADMIN_PASSWORD=pw\n")
+        ids = lambda: [item.mu3lab_id for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)]  # noqa: E731
+        self.assertIn("service:freellmapi", ids())
+        ControlState(self.paths.runtime / "control-plane.sqlite3").mark_vault_seeded(OWNER["email"])
+        self.assertNotIn("service:freellmapi", ids())
+
 
 if __name__ == "__main__":
     unittest.main()

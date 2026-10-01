@@ -225,7 +225,11 @@ class ControlState:
         """When the owner last saved Mu3Lab logins to Vaultwarden, if ever."""
         with self._connect() as conn:
             row = conn.execute("SELECT updated_at, updated_by FROM system_config WHERE key = 'vault_seeded'").fetchone()
-        return {"seeded": bool(row), "seeded_at": row["updated_at"] if row else ""}
+        return {
+            "seeded": bool(row),
+            "seeded_at": row["updated_at"] if row else "",
+            "seeded_by": row["updated_by"] if row else "",
+        }
 
     def mark_vault_seeded(self, actor: str) -> None:
         with self._connect() as conn:

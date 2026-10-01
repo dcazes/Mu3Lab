@@ -109,7 +109,7 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
         )
     if person.get("role") == "admin" and host:
         freellmapi = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_ADMIN_PASSWORD", "")
-        if freellmapi:
+        if freellmapi and not _saved_personally(person, paths):
             items.append(
                 Item(
                     "service:freellmapi",
@@ -133,6 +133,17 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                 )
             )
     return [item for item in items if item.password]
+
+
+def _saved_personally(person: dict[str, Any], paths: RuntimePaths) -> bool:
+    """Whether the older master-password flow already saved the FreeLLMAPI login to their personal vault."""
+    from ctl.control_state import ControlState
+
+    state = ControlState.runtime(paths)
+    seeded = state.vault_seeded() if state else {}
+    # Older installs recorded the person's email here, newer ones their username.
+    who = {str(person.get("username") or ""), str(person.get("email") or "").lower()} - {""}
+    return bool(seeded.get("seeded")) and str(seeded.get("seeded_by") or "").lower() in who
 
 
 def _state(paths: RuntimePaths) -> dict[str, Any]:

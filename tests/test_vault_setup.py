@@ -400,6 +400,6 @@ class VaultSeededMarkerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             state = ControlState(Path(tmp) / "state.sqlite3")
-            self.assertEqual(state.vault_seeded(), {"seeded": False, "seeded_at": ""})
+            self.assertEqual(state.vault_seeded(), {"seeded": False, "seeded_at": "", "seeded_by": ""})
             state.mark_vault_seeded("owner")
             self.assertTrue(state.vault_seeded()["seeded"])
