@@ -733,20 +733,28 @@ def _linger_enabled(user: str) -> bool:
     return rc == 0 and out.strip() == "Linger=yes"
 
 
-def fix_service(check: dict, ctx: dict) -> dict:
-    """Render units → keep running after logout → (re)start → verify health."""
-    log = ctx["log_fn"]("service")
-    root = ctx["root"]
+def write_service_units(root: Path, log: Callable[[str], None]) -> str:
+    """Render the dashboard and worker units for this checkout. Returns an error, or ""."""
     unit_dir = _unit_dir()
     unit_dir.mkdir(parents=True, exist_ok=True)
     for unit_name in SERVICE_UNITS:
         if not (root / "deploy" / unit_name).is_file():
-            return {"ok": False, "error": f"deploy/{unit_name} missing from checkout"}
+            return f"deploy/{unit_name} missing from checkout"
         rendered = _rendered_unit(root, unit_name)
         unit_path = unit_dir / unit_name
         if not unit_path.is_file() or unit_path.read_text(encoding="utf-8") != rendered:
             unit_path.write_text(rendered, encoding="utf-8")
             log(f"wrote {unit_path}")
+    return ""
+
+
+def fix_service(check: dict, ctx: dict) -> dict:
+    """Render units → keep running after logout → (re)start → verify health."""
+    log = ctx["log_fn"]("service")
+    root = ctx["root"]
+    error = write_service_units(root, log)
+    if error:
+        return {"ok": False, "error": error}
     user = getpass.getuser()
     if not _linger_enabled(user):
         # Lets the dashboard keep running when the desktop user logs out.

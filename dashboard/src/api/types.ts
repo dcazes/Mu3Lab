@@ -483,6 +483,19 @@ export interface BackupsResponse {
   readiness: BackupReadiness;
 }
 
+export interface Mu3LabUpdate {
+  ok: boolean;
+  version: string;
+  commit: string;
+  date: string;
+  available: boolean;
+  behind: number;
+  changes: string[];
+  /** Why this copy is updated from a terminal instead; empty when the dashboard can do it. */
+  blocked_reason: string;
+  checked_at: number;
+}
+
 export interface UpdateResponse {
   ok: boolean;
   repository: string;

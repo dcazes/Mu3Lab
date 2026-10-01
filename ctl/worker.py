@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from ctl import job_guard
+from ctl import job_guard, self_update
 from ctl.core_setup import execute_claimed
 from ctl.jobs import JobStore
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
@@ -40,6 +40,8 @@ def _maintain_lease(store: JobStore, job: dict, worker_id: str, stop: threading.
 def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
     if job.get("service_id") == "core-suite":
         execute_claimed(store, job, worker_id, ROOT)
+    elif job.get("service_id") == self_update.SERVICE_ID:
+        self_update.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
         execute_mcp_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("provider:"):

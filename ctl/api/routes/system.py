@@ -12,7 +12,7 @@ import yaml
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__
+from ctl import __version__, self_update
 from ctl.actions import docker_argv
 from ctl.api import runtime
 from ctl.api.errors import ApiError
@@ -168,6 +168,39 @@ def _set_compute_mode(mode: str, operator: IdentityData) -> dict[str, Any]:
         detail=f"System compute mode changed to {mode}.",
     )
     return _system_config_response()
+
+
+@router.get("/system/update")
+async def mu3lab_update(_operator: Operator, refresh: bool = False) -> dict[str, Any]:
+    """Whether GitHub has a newer Mu3Lab this copy can move to; fetches at most every few minutes."""
+    return {"ok": True, **await run_in_threadpool(self_update.status, ROOT, refresh=refresh)}
+
+
+@router.post("/system/update")
+def start_mu3lab_update(request: Request, operator: OperatorMutation) -> dict[str, Any]:
+    """Queue the self-update. It restarts the dashboard and worker, so nothing else may be running."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    previous = store.by_idempotency_key(key or "")
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
+    current = self_update.status(ROOT)
+    if current["blocked_reason"]:
+        raise ApiError(409, current["blocked_reason"])
+    if not current["available"]:
+        raise ApiError(409, "Mu3Lab is already up to date.")
+    busy = [job for job in store.active_jobs() if job["kind"] != "verification"]
+    if busy:
+        raise ApiError(409, "Wait for the running tasks to finish first; updating restarts Mu3Lab.")
+    job = store.create(
+        kind="update",
+        service_id=self_update.SERVICE_ID,
+        action=self_update.ACTION,
+        actor=operator["username"],
+        detail="Owner requested a Mu3Lab update.",
+        idempotency_key=key,
+    )
+    return {"ok": True, "job": job}
 
 
 @router.get("/backups")

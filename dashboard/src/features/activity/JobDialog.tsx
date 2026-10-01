@@ -17,6 +17,7 @@ export function useJobSubject() {
     if (kind === 'mcp') return `${service?.name || id} chat integration`;
     if (kind === 'provider') return `${humanize(id)} provider`;
     if (serviceId === 'core-suite') return 'Core platform';
+    if (serviceId === 'mu3lab') return 'Mu3Lab';
     return service?.name || humanize(serviceId);
   };
 }

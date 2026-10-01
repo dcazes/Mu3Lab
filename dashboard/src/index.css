@@ -517,6 +517,15 @@ kbd {
   gap: 14px;
 }
 
+.change-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
 .section-title {
   display: flex;
   align-items: center;

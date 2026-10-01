@@ -54,7 +54,7 @@ That's the whole install. Here is what happens:
 4. **Done.** Your app logins are saved to your vault, the dashboard opens, and its Home page lists what to do next.
 
 > [!TIP]
-> Run `./install.sh` again at any time, for example after `git pull`. Finished steps are skipped, changed code is rebuilt, and the dashboard restarts on the new version. `make check` prints a read-only readiness report.
+> To update, open **Settings → System → Mu3Lab updates** in the dashboard. You can also run `git pull` and then `./install.sh` again at any time: finished steps are skipped, changed code is rebuilt, and the dashboard restarts on the new version. `make check` prints a read-only readiness report.
 
 **You need:** a desktop or laptop running Ubuntu 22.04+, Debian 12+ or a derivative such as Linux Mint (x86-64 or arm64), with at least **8 GB of RAM** and **20 GB of free disk space**, plus a free [Tailscale](https://tailscale.com) account. An NVIDIA or AMD GPU is optional; Mu3Lab detects it and uses it for local AI.
 
@@ -279,6 +279,7 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 - [x] Parallel image downloads with size estimates before install
 - [x] Encrypted local backups of catalog apps, with guided restore
 - [x] One-click updates to tested versions, with a backup first and automatic rollback
+- [x] Update Mu3Lab itself from the dashboard
 - [ ] Scheduled and off-device backups, and backups of the core platform
 - [ ] More curated apps
 

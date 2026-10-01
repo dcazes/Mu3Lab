@@ -1,6 +1,14 @@
-import { CheckCircle2, Copy, Network, Rocket } from 'lucide-react';
+import { CheckCircle2, Copy, Network, RefreshCw, Rocket } from 'lucide-react';
 import { useState } from 'react';
-import { postApi, putJsonApi, type SystemConfig, type TailscaleStatus } from '../../api';
+import {
+  api,
+  postApi,
+  postJsonApi,
+  putJsonApi,
+  type Mu3LabUpdate,
+  type SystemConfig,
+  type TailscaleStatus,
+} from '../../api';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { copyText } from '../../components/CopyField';
 import { useConfirm } from '../../components/Dialog';
@@ -166,6 +174,99 @@ function Tailnet({ status }: { status: TailscaleStatus }) {
   );
 }
 
+export function Mu3LabUpdates() {
+  const { data, refresh } = useDashboard();
+  const confirm = useConfirm();
+  const { pending, run } = useAction();
+  const loaded = useApi<Mu3LabUpdate>('/api/v1/system/update');
+  const [checked, setChecked] = useState<Mu3LabUpdate | null>(null);
+  const update = checked || loaded.data;
+  const job = data.jobs.jobs.find((item) => item.service_id === 'mu3lab');
+  const running = Boolean(job && ['queued', 'running'].includes(job.state));
+  const finished = job?.state === 'succeeded' && job.detail.startsWith('Mu3Lab updated');
+  const check = () =>
+    run('check', async () => setChecked(await api<Mu3LabUpdate>('/api/v1/system/update?refresh=true')));
+  const apply = async () => {
+    if (
+      !(await confirm({
+        title: 'Update Mu3Lab?',
+        description:
+          'Mu3Lab downloads the update from GitHub, installs it, and restarts the dashboard. Your apps keep running, and their versions don’t change: apps with a newly tested version show “Update ready” afterwards.',
+        confirmLabel: 'Update',
+      }))
+    )
+      return;
+    const result = await run('update', () => postJsonApi('/api/v1/system/update', {}), 'Updating Mu3Lab');
+    if (result !== undefined) void refresh();
+  };
+  // An older control plane, mid-restart, may not know this endpoint's shape yet.
+  const changes = update?.changes ?? [];
+  const more = changes.length - 8;
+  return (
+    <Card
+      title="Mu3Lab updates"
+      description={
+        update ? `Version ${update.version} · ${update.commit} (${update.date})` : 'Checking the installed version…'
+      }
+      actions={
+        <Button
+          size="sm"
+          icon={RefreshCw}
+          loading={pending === 'check'}
+          disabled={running}
+          onClick={() => void check()}
+        >
+          Check now
+        </Button>
+      }
+    >
+      {finished ? (
+        <Callout
+          tone="success"
+          icon={CheckCircle2}
+          title="Mu3Lab was updated"
+          action={<Button onClick={() => window.location.reload()}>Reload</Button>}
+        >
+          {job?.detail}
+        </Callout>
+      ) : running ? (
+        <p>Updating Mu3Lab… The dashboard restarts when it’s done.</p>
+      ) : !update ? (
+        loaded.error && <p className="muted">{loaded.error}</p>
+      ) : (
+        <div className="stack">
+          {job?.state === 'failed' && (
+            <Callout tone="warning" title="The last update didn’t finish">
+              {job.detail}
+            </Callout>
+          )}
+          {update.available ? (
+            <>
+              <p>{update.behind === 1 ? 'One change is' : `${update.behind} changes are`} ready to install:</p>
+              <ul className="change-list">
+                {changes.slice(0, 8).map((change) => (
+                  <li key={change}>{change}</li>
+                ))}
+                {more > 0 && <li className="muted">and {more} more</li>}
+              </ul>
+            </>
+          ) : (
+            !update.blocked_reason && <p>Mu3Lab is up to date.</p>
+          )}
+          {update.blocked_reason && <p className="muted">{update.blocked_reason}</p>}
+          {update.available && !update.blocked_reason && (
+            <div className="button-row">
+              <Button variant="primary" icon={Rocket} loading={pending === 'update'} onClick={() => void apply()}>
+                Update Mu3Lab
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Compute() {
   const config = useApi<SystemConfig>('/api/v1/system/config');
   const confirm = useConfirm();
@@ -221,7 +322,10 @@ export function SystemSettings() {
   };
   return (
     <>
-      <PageHeader title="System" description="Monitor server health, network access, and local AI acceleration." />
+      <PageHeader
+        title="System"
+        description="Keep Mu3Lab up to date, and monitor server health, network access, and local AI acceleration."
+      />
       <Setup />
       <Card title="Server">
         <div className="meters">
@@ -247,6 +351,7 @@ export function SystemSettings() {
           ]}
         />
       </Card>
+      <Mu3LabUpdates />
       <Tailnet status={tailscale} />
       <Compute />
       <Card title="Activity" description="Recent installation, maintenance, and configuration jobs." flush>

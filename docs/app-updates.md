@@ -2,6 +2,12 @@
 
 Catalog apps (Mealie, Immich, Paperless-ngx and the rest) update only to versions the maintainer has tested with Mu3Lab. Core services (Authentik, Vaultwarden, LobeHub, LiteLLM, Ollama, Caddy) stay pinned and change only when Mu3Lab itself is updated.
 
+## Updating Mu3Lab
+
+**Settings → System → Mu3Lab updates** checks GitHub and lists the changes waiting. **Update Mu3Lab** does what `git pull` followed by `./install.sh` does, as long as no step needs your computer password. It installs Python packages, rebuilds the dashboard, updates the sign-in gate, downloads core images and restarts. Your apps keep running and stay on their versions. Apps with a newly approved version show **Update ready** afterwards.
+
+The update checks first, using the installer's own checks from the new version. If anything would need administrator access (a new system package, say), it undoes the download before changing anything and tells you to run `git pull && ./install.sh` in a terminal. A copy with its own commits or edited files, such as a developer's, is always updated from the terminal.
+
 ## How it works
 
 - **Approved version.** In the repository, `update.approved_version` in `services.yaml` and the digest-pinned images in `apps/<app>/docker-compose.yml` describe the one release Mu3Lab approves for each app. New installs get that release.
@@ -33,6 +39,6 @@ Catalog apps (Mealie, Immich, Paperless-ngx and the rest) update only to version
    If the new release changes its Compose setup (new environment variables, services or volumes), edit `apps/<app>/docker-compose.yml` as well.
 
 3. Test it on your own server: open the dashboard, go to **Apps → the app → Advanced → Updates** and run the update. Check that the app works, including sign-in and its chat connector.
-4. Commit and push. Every server offers the update once it updates Mu3Lab.
+4. Commit and push. Every server shows the change under **Mu3Lab updates**, and once it updates, the app shows **Update ready**.
 
 Never raise a database's major version (for example PostgreSQL 16 to 17) this way. The new version can't read the old data files, so it needs its own migration.
