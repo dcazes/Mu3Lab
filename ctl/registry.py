@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -35,6 +36,13 @@ VALID_ACCOUNT_MODES = frozenset(
         "internal",
     }
 )
+
+
+# Phone and tablet clients an app offers: store apps, installable web apps, or the mobile site.
+VALID_MOBILE_KINDS = frozenset({"native", "pwa", "web"})
+VALID_MOBILE_SUPPORT = frozenset({"official", "community", "experimental"})
+VALID_MOBILE_PLATFORMS = frozenset({"ios", "android", "web"})
+VALID_MOBILE_SETUP = frozenset({"server_url", "pwa", "web", "api_token", "device_qr", "developer_mode"})
 
 
 class RegistryError(ValueError):
@@ -76,6 +84,7 @@ class Service:
     configuration: tuple[dict[str, Any], ...] = ()
     account: dict[str, Any] = field(default_factory=dict)
     ui: dict[str, Any] = field(default_factory=dict)
+    mobile: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_blocked(self) -> bool:
@@ -131,12 +140,86 @@ class Service:
                 "authentication": str(self.ui.get("authentication", self.auth)),
                 "unavailable_reason": str(self.ui.get("unavailable_reason", "")),
             },
+            "mobile": self.mobile,
             "configuration": [
                 {key: value for key, value in field.items() if key not in {"env", "managed"}}
                 for field in self.configuration
                 if not field.get("managed")
             ],
         }
+
+
+def _https_url(service_id: str, field_name: str, value: Any) -> str:
+    parsed = urlparse(value) if isinstance(value, str) else None
+    if not parsed or parsed.scheme != "https" or not parsed.netloc:
+        raise RegistryError(f"service {service_id}: mobile {field_name} must be an HTTPS URL")
+    return str(value)
+
+
+def _mobile_contract(service_id: str, value: Any) -> dict[str, Any]:
+    """Validate the reviewed phone clients for one app; every link must be HTTPS."""
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict) or not isinstance(value.get("primary"), str):
+        raise RegistryError(f"service {service_id}: invalid mobile contract")
+    clients = value.get("clients")
+    if not isinstance(clients, list) or not clients:
+        raise RegistryError(f"service {service_id}: mobile clients must be a non-empty list")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for client in clients:
+        if not isinstance(client, dict):
+            raise RegistryError(f"service {service_id}: invalid mobile client")
+        client_id = client.get("id")
+        if not isinstance(client_id, str) or not client_id.replace("-", "").isalnum() or client_id in seen:
+            raise RegistryError(f"service {service_id}: invalid or duplicate mobile client id")
+        seen.add(client_id)
+        kind, support, setup, platforms = (client.get(key) for key in ("kind", "support", "setup", "platforms"))
+        if kind not in VALID_MOBILE_KINDS or support not in VALID_MOBILE_SUPPORT:
+            raise RegistryError(f"service {service_id}: invalid mobile kind or support level")
+        if setup not in VALID_MOBILE_SETUP:
+            raise RegistryError(f"service {service_id}: invalid mobile setup method")
+        if (
+            not isinstance(platforms, list)
+            or not platforms
+            or len(platforms) != len(set(platforms))
+            or not set(platforms).issubset(VALID_MOBILE_PLATFORMS)
+        ):
+            raise RegistryError(f"service {service_id}: invalid mobile platforms")
+        install = client.get("install", {})
+        if not isinstance(install, dict) or not set(install).issubset(VALID_MOBILE_PLATFORMS):
+            raise RegistryError(f"service {service_id}: invalid mobile install links")
+        install = {platform: _https_url(service_id, f"install.{platform}", url) for platform, url in install.items()}
+        for field_name in ("homepage", "source"):
+            if client.get(field_name):
+                _https_url(service_id, field_name, client[field_name])
+        steps = client.get("steps", [])
+        if not isinstance(steps, list) or not steps or not all(isinstance(step, str) and step for step in steps):
+            raise RegistryError(f"service {service_id}: mobile steps must be non-empty strings")
+        if not isinstance(client.get("name"), str) or not isinstance(client.get("summary"), str):
+            raise RegistryError(f"service {service_id}: mobile client name and summary are required")
+        if not isinstance(client.get("caveat", ""), str) or not isinstance(client.get("fallback", False), bool):
+            raise RegistryError(f"service {service_id}: invalid mobile client caveat or fallback")
+        normalized.append(
+            {
+                "id": client_id,
+                "name": client["name"],
+                "kind": kind,
+                "support": support,
+                "platforms": list(platforms),
+                "install": install,
+                "setup": setup,
+                "summary": client["summary"],
+                "steps": list(steps),
+                "homepage": str(client.get("homepage", "")),
+                "source": str(client.get("source", "")),
+                "caveat": str(client.get("caveat", "")),
+                "fallback": bool(client.get("fallback", False)),
+            }
+        )
+    if value["primary"] not in seen:
+        raise RegistryError(f"service {service_id}: mobile primary client is not declared")
+    return {"primary": value["primary"], "clients": normalized}
 
 
 def _required(item: dict[str, Any], key: str) -> Any:
@@ -258,6 +341,7 @@ def _service(item: dict[str, Any]) -> Service:
         configuration=tuple(dict(field_item) for field_item in configuration),
         account=dict(account),
         ui=dict(ui),
+        mobile=_mobile_contract(service_id, item.get("mobile", {})),
     )
 
 

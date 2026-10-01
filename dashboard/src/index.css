@@ -3383,3 +3383,19 @@ fieldset.field {
   color: var(--green, #2ea44f);
   flex: none;
 }
+
+.title-with-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.numbered-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+}

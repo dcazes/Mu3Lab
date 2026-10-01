@@ -71,6 +71,25 @@ services:
     health: {kind: http, url: "http://127.0.0.1:8081/alive"}
     auth: excluded
     stage: foundation
+    mobile:
+      primary: bitwarden
+      clients:
+        - id: bitwarden
+          name: Bitwarden
+          kind: native
+          support: official
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/bitwarden-password-manager/id1137397744
+            android: https://play.google.com/store/apps/details?id=com.x8bit.bitwarden
+          homepage: https://bitwarden.com/download/
+          setup: server_url
+          summary: "The official Bitwarden client connects directly to your private Vaultwarden server."
+          steps:
+            - "Install Bitwarden for your phone."
+            - "Before signing in, choose the self-hosted environment and paste the Mu3Lab server URL."
+            - "Sign in with your Mu3Lab email and password."
+
     images: ["vaultwarden/server:1.37.3-alpine@sha256:9a905c5cf5df61bb827da3805e160170741c0b53b0c63bb07e1afd3d2e21b1c8"]
     update: {repository: dani-garcia/vaultwarden, current_version: "1.37.3"}
     route: pending
@@ -177,6 +196,39 @@ services:
     identity_note: "Authentik protects the private route; SurfSense keeps a separate local login, generated during installation and ready to save in Bitwarden. This is not SSO."
     setup_action: "Install SurfSense and save its generated login to Bitwarden."
     resource_guidance: "Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is disabled."
+    mobile:
+      primary: surfsense-web
+      clients:
+        - id: surfsense-web
+          name: SurfSense mobile web
+          kind: web
+          support: official
+          platforms: [ios, android, web]
+          install: {}
+          homepage: https://github.com/MODSetter/SurfSense
+          setup: web
+          summary: "SurfSense has a responsive web interface but no confirmed native app or installable PWA."
+          steps:
+            - "Connect the phone to your Mu3Lab tailnet."
+            - "Open the private SurfSense URL in the phone browser."
+            - "Complete Authentik, then let Bitwarden fill in your SurfSense login."
+    configuration:
+      - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Allow new local accounts", default: true}
+    images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
+    update: {repository: MODSetter/SurfSense, current_version: "v0.0.40"}
+    backup: {database: surfsense, binds: [object-store, zero-cache]}
+    mcp:
+      kind: official
+      endpoint: http://surfsense-mcp:8080/mcp
+      auth: personal-api-token
+      scopes: [workspace-read, knowledge-read, knowledge-write, scraper-run]
+      exposed: false
+      tools: []
+    account:
+      mode: local_account_manual
+      handoff: false
+      user_action: "Open SurfSense after installation and create its separate local account."
+
     configuration:
       - {key: registration_enabled, env: REGISTRATION_ENABLED, type: boolean, label: "Enable local sign-in", default: true}
     images: ["ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:e4cc6dfb2017b804cb29a8e757d2188c263fafacd0ace16bb4319c85b52ed973", "ghcr.io/modsetter/surfsense-web:0.0.40@sha256:47e0f832c4c6ddbc5a144e4960ab1de9cd70c68926436cfc2099553f14595b55", "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f", "redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0", "searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f", "rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
@@ -245,6 +297,38 @@ services:
     identity_note: "LobeChat uses its own Authentik OIDC session and persists conversations in its private database."
     setup_action: "Connect LobeChat to LiteLLM and sign in with Authentik."
     resource_guidance: "Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk use."
+    mobile:
+      primary: lobechat-pwa
+      clients:
+        - id: lobechat-pwa
+          name: LobeChat PWA
+          kind: pwa
+          support: official
+          platforms: [ios, android, web]
+          install: {}
+          homepage: https://lobehub.com/
+          setup: pwa
+          summary: "Use the self-hosted LobeChat web app directly and add it to the Home Screen."
+          steps:
+            - "Open the private LobeChat URL on the phone and sign in with Authentik."
+            - "Use the browser menu to add LobeChat to the Home Screen or install the web app."
+        - id: lobehub-native
+          name: LobeHub native app
+          kind: native
+          support: experimental
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/lobehub-ai-agent-teammates/id6749615954
+            android: https://play.google.com/store/apps/details?id=com.lobehub.app
+          homepage: https://lobehub.com/downloads
+          setup: developer_mode
+          summary: "The official native client can connect to self-hosted LobeChat through its Developer Mode."
+          caveat: "Self-hosted setup currently requires a LobeHub community account and an experimental Developer Mode flow."
+          steps:
+            - "Install LobeHub and sign in to or create a LobeHub community account."
+            - "In Settings, tap the version number repeatedly to enable Developer Mode."
+            - "Enter the Mu3Lab LobeChat URL as the custom server."
+
     images: ["lobehub/lobehub:2.2.18@sha256:b7c843911259c54c92f03864d9dd2e9099e18525de1d37498b64cc15751d087d", "paradedb/paradedb:0.25.9-pg17@sha256:8da5d202fe31875af32a49e802ce17cfbc146b0672306f4109809efee1e6f916", "redis:8-alpine@sha256:ba6e394f6acc2a695ef1b6944f161b9ca813711739be68319fa0db3470673f1d", "rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff", "rustfs/rc:v0.1.36@sha256:ab024bfebee49a750ce886b4c70963ccd9ddaa03f491704a90710641d7a26699", "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"]
     update: {repository: lobehub/lobehub, current_version: "v2.2.18"}
     backup: {database: lobehub, binds: [postgres, redis, object-store]}
@@ -272,6 +356,22 @@ services:
     ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private budgeting."
     resource_guidance: "Lightweight personal finance service."
+    mobile:
+      primary: actual-pwa
+      clients:
+        - id: actual-pwa
+          name: Actual Budget PWA
+          kind: pwa
+          support: official
+          platforms: [ios, android, web]
+          install: {}
+          homepage: https://actualbudget.org/docs/faq/
+          setup: pwa
+          summary: "Actual recommends its responsive installable web app instead of the deprecated native clients."
+          steps:
+            - "Open the private Actual Budget URL on the phone."
+            - "Complete sign-in, then use the browser menu to add Actual to the Home Screen."
+
     configuration:
       - {key: oidc_enforced, env: ACTUAL_OPENID_ENFORCE, type: boolean, label: "Require Authentik login", default: true}
       - {key: user_creation, env: ACTUAL_USER_CREATION_MODE, type: enum, label: "OIDC user creation", options: [manual, login], default: login}
@@ -314,6 +414,25 @@ services:
     setup_action: "Install only when you want private photo management."
     resource_guidance: "Media storage and machine-learning jobs can be resource intensive."
     identity_note: "Supports native Authentik OAuth; password login is disabled only after the existing owner is linked and verified."
+    mobile:
+      primary: immich-mobile
+      clients:
+        - id: immich-mobile
+          name: Immich
+          kind: native
+          support: official
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/immich/id1613945652
+            android: https://play.google.com/store/apps/details?id=app.alextran.immich
+          homepage: https://immich.app/docs/features/mobile-app/
+          setup: server_url
+          summary: "The official Immich client provides photo browsing and automatic mobile backup."
+          steps:
+            - "Install Immich and paste the Mu3Lab Immich server URL."
+            - "Choose OAuth login and complete the Authentik sign-in in the browser."
+            - "Select the albums you want Immich to back up."
+
     images: ["ghcr.io/immich-app/immich-server:v3.2.2", "ghcr.io/immich-app/immich-machine-learning:v3.2.2", "docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf", "ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"]
     update: {repository: immich-app/immich, current_version: "v3.2.2"}
     backup: {binds: [library, database]}
@@ -341,6 +460,37 @@ services:
     ui: {available: true, authentication: oidc}
     setup_action: "Install only when you want private recipe and meal planning."
     resource_guidance: "Lightweight service."
+    mobile:
+      primary: ghee
+      clients:
+        - id: ghee
+          name: Ghee for Mealie
+          kind: native
+          support: community
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/ghee-for-mealie-recipes/id6758328014
+            android: https://play.google.com/store/apps/details?id=casa.dsen.ghee
+          setup: server_url
+          summary: "A polished community client for recipes, meal plans, shopping lists, and cooking."
+          caveat: "Core features are free; expanded offline features are an optional purchase."
+          steps:
+            - "Install Ghee and enter the Mu3Lab Mealie URL."
+            - "Choose OIDC and complete the Authentik sign-in."
+        - id: mealie-pwa
+          name: Mealie PWA
+          kind: pwa
+          support: official
+          platforms: [ios, android, web]
+          install: {}
+          homepage: https://mealie.io/
+          setup: pwa
+          summary: "Use Mealie's responsive web app when you prefer the upstream interface."
+          fallback: true
+          steps:
+            - "Open the private Mealie URL and sign in with Authentik."
+            - "Use the browser menu to add Mealie to the Home Screen."
+
     configuration:
       - {key: allow_signup, env: MEALIE_ALLOW_SIGNUP, type: boolean, label: "Allow local signup", default: false}
       - {key: oidc_enabled, env: MEALIE_OIDC_ENABLED, type: boolean, label: "Enable Authentik login", default: true}
@@ -387,6 +537,22 @@ services:
       mode: environment_bootstrap
       handoff: true
       user_action: "Save the generated administrator credential after installation."
+    mobile:
+      primary: adventurelog-pwa
+      clients:
+        - id: adventurelog-pwa
+          name: AdventureLog PWA
+          kind: pwa
+          support: official
+          platforms: [ios, android, web]
+          install: {}
+          homepage: https://adventurelog.app/
+          setup: pwa
+          summary: "AdventureLog's responsive PWA keeps trip planning close at hand."
+          steps:
+            - "Open the private AdventureLog URL and complete Authentik sign-in."
+            - "Use the browser menu to add AdventureLog to the Home Screen."
+
     configuration:
       - {key: admin_username, env: DJANGO_ADMIN_USERNAME, type: string, managed: true}
       - {key: admin_email, env: DJANGO_ADMIN_EMAIL, type: string, managed: true}
@@ -419,6 +585,38 @@ services:
       mode: environment_bootstrap
       handoff: true
       user_action: "Save the generated administrator credential after installation."
+    mobile:
+      primary: papernext
+      clients:
+        - id: papernext
+          name: PaperNext
+          kind: native
+          support: community
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/papernext/id6754879528
+            android: https://play.google.com/store/apps/details?id=com.rebtsoft.papernext
+          homepage: https://www.papernext.de/
+          setup: api_token
+          summary: "An offline-first community client for browsing, searching, and managing Paperless documents."
+          caveat: "PaperNext is an unofficial open-beta client and its application source is not published."
+          steps:
+            - "Install PaperNext and enter the Mu3Lab Paperless-ngx URL."
+            - "In Paperless, create an API token from your user profile, then enter it in PaperNext."
+            - "Keep the API token private; Mu3Lab never reads or stores it."
+        - id: paperless-web
+          name: Paperless mobile web
+          kind: web
+          support: official
+          platforms: [ios, android, web]
+          install: {}
+          homepage: https://docs.paperless-ngx.com/
+          setup: web
+          summary: "Open the official Paperless-ngx interface in a mobile browser."
+          fallback: true
+          steps:
+            - "Open the private Paperless-ngx URL and complete Authentik sign-in."
+
     configuration:
       - {key: admin_username, env: PAPERLESS_ADMIN_USER, type: string, managed: true}
       - {key: admin_email, env: PAPERLESS_ADMIN_MAIL, type: string, managed: true}
@@ -447,6 +645,24 @@ services:
     setup_action: "Install private files and calendar with Authentik sign-in."
     resource_guidance: "Stores files and calendar data locally; storage use grows with uploaded content."
     identity_note: "Use Authentik for normal sign-in. A generated local administrator remains available through ?direct=1 for recovery."
+    mobile:
+      primary: nextcloud-mobile
+      clients:
+        - id: nextcloud-mobile
+          name: Nextcloud
+          kind: native
+          support: official
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/nextcloud/id1125420102
+            android: https://play.google.com/store/apps/details?id=com.nextcloud.client
+          homepage: https://nextcloud.com/install/
+          setup: server_url
+          summary: "The official Nextcloud client syncs files and uploads photos to your private server."
+          steps:
+            - "Install Nextcloud and enter the Mu3Lab Nextcloud URL."
+            - "Complete the browser-based Authentik login and approve the device."
+
     images: ["nextcloud:33.0.5-apache", "postgres:16-alpine", "redis:8-alpine"]
     update: {repository: nextcloud/server, current_version: "v33.0.5"}
     backup: {database: nextcloud, binds: [html, postgres]}
@@ -476,6 +692,26 @@ services:
     setup_action: "Install Baby Buddy for shared feeding, sleep, diaper, pumping, and growth tracking."
     resource_guidance: "Lightweight family tracker with durable local data and uploaded media. Authentik creates the Baby Buddy user automatically on first access."
     identity_note: "Authentik protects the private route and supplies Baby Buddy's trusted Remote-User identity. Distinct admitted users receive full caregiver access on first login; direct access is loopback-only and client-supplied identity headers are replaced at the proxy."
+    mobile:
+      primary: baby-buddy-native
+      clients:
+        - id: baby-buddy-native
+          name: Baby Buddy native clients
+          kind: native
+          support: community
+          platforms: [ios, android]
+          install:
+            ios: https://apps.apple.com/us/app/baby-buddy-companion/id6788966667
+            android: https://play.google.com/store/apps/details?id=eu.pkgsoftware.babybuddywidgets
+          homepage: https://babybuddy.app/
+          source: https://github.com/babybuddy/babybuddy-for-android
+          setup: device_qr
+          summary: "Use Baby Buddy Companion on iOS or Baby Buddy for Android for fast native tracking."
+          caveat: "The iOS client is unofficial, open source, and requires iOS 17 or newer; the Android client is community maintained."
+          steps:
+            - "Install the client for your phone."
+            - "Open Baby Buddy in a browser and go to User, then Add a Device."
+            - "Scan the device QR code in the app, or enter the server URL and API token by hand. The app connects with that token, so it does not need the Authentik sign-in."
     images: ["lscr.io/linuxserver/babybuddy:version-v2.7.1"]
     update: {repository: babybuddy/babybuddy, current_version: "v2.7.1"}
     backup: {binds: [config]}

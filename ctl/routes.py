@@ -101,10 +101,25 @@ def _block(service: Service) -> str:
 }}
 """.strip()
     if service.id == "baby-buddy":
+        # The phone apps call Baby Buddy's API with a per-person API token and
+        # cannot complete a browser sign-in. Requests that carry one skip the
+        # Authentik gate and Baby Buddy checks the token itself; Remote-User is
+        # always stripped there, so the bypass can never claim someone's identity.
         return f"""
 :{service.proxy_port} {{
 \tbind 127.0.0.1
+\t@api_token {{
+\t\tpath /api/*
+\t\theader Authorization "Token *"
+\t}}
 \troute {{
+\t\thandle @api_token {{
+\t\t\treverse_proxy 127.0.0.1:{service.https_port} {{
+\t\t\t\theader_up -Remote-User
+\t\t\t\theader_up X-Forwarded-Proto https
+\t\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
+\t\t\t}}
+\t\t}}
 \t\treverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
 \t\tforward_auth 127.0.0.1:9001 {{
 \t\t\turi /outpost.goauthentik.io/auth/caddy

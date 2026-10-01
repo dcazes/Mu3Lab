@@ -8,7 +8,6 @@ import { Callout, Card, Facts, PageHeader, Tabs } from '../../components/Layout'
 import { Menu } from '../../components/Menu';
 import { Badge, Dot, StatusBadge } from '../../components/Status';
 import { CopyField } from '../../components/CopyField';
-import { companionFor } from '../../lib/companions';
 import { humanize, relativeTime } from '../../lib/format';
 import { Link } from '../../lib/router';
 import { isInstalled, isRunning, launchTarget, signInSummary } from '../../lib/services';
@@ -243,7 +242,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
   const hasDevices =
     installed &&
     Boolean(address) &&
-    (Boolean(companionFor(id)) || service.stage === 'optional' || id === 'vaultwarden');
+    (Boolean(service.mobile && 'clients' in service.mobile) || service.stage === 'optional' || id === 'vaultwarden');
   const hasSettings = Boolean(service.configuration?.length);
   const base = `/apps/${id}`;
   const tabs = [

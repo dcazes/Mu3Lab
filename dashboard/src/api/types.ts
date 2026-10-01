@@ -24,7 +24,25 @@ export type LifecycleState =
   | 'needs_attention'
   | 'blocked';
 
+export interface MobileClient {
+  id: string;
+  name: string;
+  kind: 'native' | 'pwa' | 'web';
+  support: 'official' | 'community' | 'experimental';
+  platforms: Array<'ios' | 'android' | 'web'>;
+  install: Partial<Record<'ios' | 'android' | 'web', string>>;
+  setup: 'server_url' | 'pwa' | 'web' | 'api_token' | 'device_qr' | 'developer_mode';
+  summary: string;
+  steps: string[];
+  homepage: string;
+  source: string;
+  caveat: string;
+  fallback: boolean;
+}
+
 export interface Service {
+  /** Reviewed phone and tablet clients for this app. */
+  mobile?: { primary: string; clients: MobileClient[] } | Record<string, never>;
   id: string;
   name: string;
   category: string;

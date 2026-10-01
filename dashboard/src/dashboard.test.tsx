@@ -227,13 +227,33 @@ describe('App page', () => {
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity(),
       ui: readyUi('https://host.ts.net:8449'),
+      mobile: {
+        primary: 'immich-mobile',
+        clients: [
+          {
+            id: 'immich-mobile',
+            name: 'Immich',
+            kind: 'native',
+            support: 'official',
+            platforms: ['android'],
+            install: { android: 'https://play.google.com/store/apps/details?id=app.alextran.immich' },
+            setup: 'server_url',
+            summary: '',
+            steps: ['Paste the server URL.'],
+            homepage: '',
+            source: '',
+            caveat: '',
+            fallback: false,
+          },
+        ],
+      },
     });
     renderWithDashboard(<AppDetailPage id="immich" tab="overview" />, dashboardData([immich]));
     expect(screen.queryByRole('link', { name: 'Devices' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Apps' })).toHaveAttribute('href', '/apps');
     // Shown once, in the server address card, rather than again under About.
     expect(screen.getAllByText('https://host.ts.net:8449')).toHaveLength(1);
-    expect(screen.getByRole('link', { name: /Android/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Google Play/ })).toHaveAttribute(
       'href',
       'https://play.google.com/store/apps/details?id=app.alextran.immich',
     );
