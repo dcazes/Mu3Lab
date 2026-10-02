@@ -1512,7 +1512,7 @@ def _authentik_compose_env(blueprints: Path, log) -> dict[str, str]:
     generated = _secrets.read_runtime_env(env_file)
     return {
         "AUTHENTIK_ENV_FILE": str(env_file),
-        "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.5.0"),
+        "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.8.3"),
         "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
         "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", ""),
         "AUTHENTIK_BLUEPRINTS_DIR": str(blueprints),
