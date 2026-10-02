@@ -609,7 +609,8 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertLess(ids.index("root_env"), ids.index("runtime_layout"))
         self.assertLess(ids.index("runtime_layout"), ids.index("service"))
         self.assertLess(ids.index("service"), ids.index("docker"))
-        self.assertLess(ids.index("docker"), ids.index("docker_networks"))
+        self.assertLess(ids.index("docker"), ids.index("docker_address_pools"))
+        self.assertLess(ids.index("docker_address_pools"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
         self.assertLess(ids.index("caddy"), ids.index("vaultwarden"))
         self.assertLess(ids.index("vaultwarden"), ids.index("vaultwarden_setup"))
@@ -810,6 +811,7 @@ class DockerSessionTests(unittest.TestCase):
             "tailscale_pkg": ["absent", "daemon_down", "unjoined", "ready"],
             "tailscale_join": ["unjoined", "ready"],
             "serve": ["unshared", "ready"],
+            "docker_address_pools": ["missing", "ready"],
             "docker_networks": ["missing", "denied", "ready"],
             "caddy": ["down", "ready"],
             "vaultwarden": ["down", "ready"],

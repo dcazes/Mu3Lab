@@ -136,6 +136,10 @@ if have docker; then
   for net in mu3lab_frontend mu3lab_backend mu3lab_mcp mu3lab_mcp_upstream; do
     "${DOCKER[@]}" network inspect "$net" >/dev/null 2>&1 && run "${DOCKER[@]}" network rm "$net"
   done
+  # `docker rm -f` leaves each app's own networks behind. Remove only Mu3Lab's
+  # by name; never `network prune`, which would also delete other projects' networks.
+  mapfile -t app_nets < <("${DOCKER[@]}" network ls --format '{{.Name}}' | grep -E '^mu3lab-')
+  [[ ${#app_nets[@]} -gt 0 ]] && run "${DOCKER[@]}" network rm "${app_nets[@]}"
   mapfile -t listed < <(grep -hoE '"[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?"' \
     "$ROOT/services.yaml" "$ROOT/mcp-catalog.yaml" 2>/dev/null | tr -d '"' | grep -E '[:/]' | sed 's/@sha256:.*//' | sort -u)
   mapfile -t images < <("${DOCKER[@]}" images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do

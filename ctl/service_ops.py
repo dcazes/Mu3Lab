@@ -191,9 +191,20 @@ def _sync_chat_assistants(log: Callable[[str], None]) -> None:
         log(f"LobeChat assistants were not updated: {detail}")
 
 
+def _start_failure_message(output: str) -> str:
+    if _failure_code("", output) == "docker_network_space_exhausted":
+        return (
+            "Docker has run out of private network addresses for apps. Run ./install.sh again: "
+            "it gives Docker a larger address space without touching your apps or data."
+        )
+    return f"Application start failed: {output}"
+
+
 def _failure_code(default: str, detail: str) -> str:
     """Turn common Docker failure text into stable, user-actionable codes."""
     value = detail.lower()
+    if "fully subnetted" in value:
+        return "docker_network_space_exhausted"
     if "password authentication failed" in value or "authentication failed for user" in value:
         return "database_auth_failed"
     if "unhealthy" in value or "dependency failed to start" in value:
@@ -418,7 +429,7 @@ def _install(
             actor,
             "start_service",
             _failure_code("compose_start_failed", output),
-            f"Application start failed: {output}",
+            _start_failure_message(output),
         )
         return
     if service.id == "nextcloud":

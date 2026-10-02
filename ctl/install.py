@@ -34,7 +34,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ctl import actions, preflight, privilege
+from ctl import actions, docker_config, preflight, privilege
 from ctl.bootstrap import stamps
 from ctl.runtime import RuntimePaths
 
@@ -139,6 +139,8 @@ DISPATCH = {
     ("docker", "no_group"): "docker_group",
     ("docker", "no_networks"): "docker_group",  # group first; networks later
     ("docker", "ready"): "skip",
+    ("docker_address_pools", "missing"): "configure_address_pools",
+    ("docker_address_pools", "ready"): "skip",
     ("docker_networks", "missing"): "create_networks",
     ("docker_networks", "denied"): "report_denied",
     ("docker_networks", "ready"): "skip",
@@ -913,6 +915,52 @@ def fix_docker(check: dict, ctx: dict) -> dict:
         res = actions.usermod_add_group(user, "docker", log)
         if not res["ok"]:
             return _propagate(res)
+    return {"ok": True}
+
+
+def _address_pools_check(ctx: dict) -> dict:
+    try:
+        text = Path(docker_config.DAEMON_JSON).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        text = ""
+    except OSError as exc:
+        return _row("docker_address_pools", "missing", f"Docker's settings could not be read: {exc}", "missing")
+    if docker_config.pools_sufficient(text):
+        return _row("docker_address_pools", "ok", "Docker has room for every app's private network.", "ready")
+    return _row(
+        "docker_address_pools",
+        "missing",
+        "Docker's default network space holds about 30 networks, which a full app catalog uses up.",
+        "missing",
+        "Give Docker a larger private network space.",
+    )
+
+
+def fix_address_pools(check: dict, ctx: dict) -> dict:
+    log = ctx["log_fn"]("docker_address_pools")
+    try:
+        current = Path(docker_config.DAEMON_JSON).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        current = ""
+    except OSError as exc:
+        return {"ok": False, "error": f"Docker's settings could not be read: {exc}"}
+    try:
+        updated = docker_config.with_pools(current)
+    except ValueError:
+        # Never overwrite a settings file we cannot understand.
+        return {
+            "ok": False,
+            "error": f"{docker_config.DAEMON_JSON} is not valid JSON. Fix or remove it, then run the installer again.",
+        }
+    res = actions.privilege.run_privileged(["mkdir", "-p", str(Path(docker_config.DAEMON_JSON).parent)], log)
+    if res.get("need_terminal") or not res.get("ok"):
+        return _propagate(res)
+    res = actions.write_root_file(docker_config.DAEMON_JSON, updated, log)
+    if not res["ok"]:
+        return _propagate(res)
+    res = actions.systemctl_restart(["docker.socket", "docker.service"], log)
+    if not res["ok"]:
+        return _propagate(res)
     return {"ok": True}
 
 
@@ -2423,6 +2471,12 @@ STEPS: list[Step] = [
         # Verify passes while any of these hold (the step's own work is done).
         "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access"),
     },
+    {
+        "id": "docker_address_pools",
+        "label": "Room for app networks",
+        "check": _address_pools_check,
+        "fix": fix_address_pools,
+    },
     {"id": "docker_networks", "label": "Docker networks", "check": _networks_check, "fix": fix_networks_router},
     {
         "id": "nvidia_toolkit",
@@ -2543,7 +2597,7 @@ PHASES = (
         "Set up Mu3Lab",
         ("venv", "pip_deps", "dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
     ),
-    ("Install Docker", ("docker", "docker_networks", "nvidia_toolkit")),
+    ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     ("Start your password vault", ("caddy", "vaultwarden", "vaultwarden_setup")),
     (
         "Connect your private network",
