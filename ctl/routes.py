@@ -129,8 +129,10 @@ def _block(service: Service) -> str:
 \t\t\tcopy_headers X-Authentik-Username
 \t\t\ttrusted_proxies private_ranges
 \t\t}}
+\t\t# Set replaces any client-sent Remote-User. Never also delete
+\t\t# Remote-User in this block: Caddy applies deletes after sets, so the
+\t\t# verified identity would be dropped and Baby Buddy shows its login.
 \t\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\t\theader_up -Remote-User
 \t\t\theader_up Remote-User {{http.request.header.X-Authentik-Username}}
 \t\t\theader_up X-Forwarded-Proto https
 \t\t\theader_up X-Forwarded-Host {{http.request.hostport}}

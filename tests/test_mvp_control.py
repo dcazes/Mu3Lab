@@ -148,8 +148,10 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn(":19475 {", block)
         self.assertIn("forward_auth 127.0.0.1:9001", block)
         self.assertIn("copy_headers X-Authentik-Username", block)
-        self.assertIn("header_up -Remote-User", block)
         self.assertIn("header_up Remote-User {http.request.header.X-Authentik-Username}", block)
+        # Caddy runs deletes after sets, so a delete here would drop the identity.
+        gated = block.split("forward_auth", 1)[1]
+        self.assertNotIn("header_up -Remote-User", gated)
         self.assertIn("reverse_proxy 127.0.0.1:8002", block)
 
     def test_authentik_embedded_oidc_is_limited_to_the_dashboard_origin(self):
