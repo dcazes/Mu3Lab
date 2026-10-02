@@ -15,7 +15,7 @@ import {
 } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
-import { Agenda } from './Agenda';
+import { HomeCalendar } from './HomeCalendar';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
 
@@ -144,7 +144,7 @@ export function HomePage() {
           </Link>
         </div>
       </section>
-      <Agenda nextcloud={services.find((service) => service.id === 'nextcloud')} />
+      <HomeCalendar nextcloud={services.find((service) => service.id === 'nextcloud')} />
     </div>
   );
 }

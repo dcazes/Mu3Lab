@@ -1,14 +1,15 @@
-"""Per-user Nextcloud calendar connection and events."""
+"""Per-user calendar: Nextcloud once connected, Mu3Lab's own store until then."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from ctl import local_calendar
 from ctl import nextcloud_calendar as calendar
 from ctl.api import runtime
 from ctl.api.errors import ApiError
@@ -197,18 +198,38 @@ def _parse_time(value: str) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _connected(owner_uid: str, state: ControlState | None) -> bool:
+    """Owners without a Nextcloud connection use the local calendar."""
+    return bool(state and state.calendar_connection(owner_uid))
+
+
+def _with_local(
+    owner_uid: str, result: dict[str, Any], start: datetime | None, end: datetime | None, limit: int
+) -> dict[str, Any]:
+    """Upload local events after connecting; show any that could not move yet."""
+    try:
+        if not local_calendar.has_events(owner_uid):
+            return result
+        moved = local_calendar.push_to_nextcloud(owner_uid)
+        if moved:
+            result = calendar.events(owner_uid, start=start, end=end, limit=limit)
+        if not local_calendar.has_events(owner_uid):
+            return result
+        now = datetime.now(UTC)
+        start = start or now.replace(second=0, microsecond=0)
+        remaining = local_calendar.list_events(owner_uid, start, end or start + timedelta(days=30), limit)
+    except calendar.CalendarError:
+        return result
+    merged = sorted([*result.get("events", []), *remaining], key=lambda item: item["start"])
+    return {**result, "events": merged[: max(1, min(limit, 100))]}
+
+
 @router.get("/events")
 def list_events(request: Request, reader: Reader) -> dict[str, Any]:
     owner_uid = str(reader["subject_id"])
     state = ControlState.runtime()
     if state is None:
         raise ApiError(503, _UNAVAILABLE, state="unavailable")
-    ready = readiness(state)
-    if ready != "ready":
-        cached = calendar.stale_events(owner_uid)
-        if cached:
-            return cached
-        return {"ok": True, "state": ready, "events": [], "error": not_ready_response(ready)["error"]}
     start_value = request.query_params.get("start", "").strip()
     end_value = request.query_params.get("end", "").strip()
     if bool(start_value) != bool(end_value):
@@ -218,8 +239,19 @@ def list_events(request: Request, reader: Reader) -> dict[str, Any]:
         limit = int(request.query_params.get("limit", "5"))
     except ValueError as exc:
         raise ApiError(400, "Calendar range values must be valid ISO 8601 datetimes.", state="invalid_range") from exc
+    ready = readiness(state)
+    if not _connected(owner_uid, state):
+        try:
+            return local_calendar.events(owner_uid, start=start, end=end, limit=limit, nextcloud_ready=ready == "ready")
+        except calendar.CalendarError as exc:
+            raise _raise(exc, 400 if exc.state == "invalid_range" else 503) from exc
+    if ready != "ready":
+        cached = calendar.stale_events(owner_uid)
+        if cached:
+            return cached
+        return {"ok": True, "state": ready, "events": [], "error": not_ready_response(ready)["error"]}
     try:
-        return calendar.events(owner_uid, start=start, end=end, limit=limit)
+        return _with_local(owner_uid, calendar.events(owner_uid, start=start, end=end, limit=limit), start, end, limit)
     except calendar.CalendarError as exc:
         if exc.state == "unavailable":
             cached = calendar.stale_events(owner_uid)
@@ -228,11 +260,17 @@ def list_events(request: Request, reader: Reader) -> dict[str, Any]:
         raise _raise(exc, 401 if exc.state == "authentication_expired" else 503) from exc
 
 
+def _is_local(event_id: str) -> bool:
+    return event_id.startswith(local_calendar.ID_PREFIX)
+
+
 @router.post("/events")
 async def create_event(request: Request, writer: Writer) -> dict[str, Any]:
+    owner_uid = str(writer["subject_id"])
     payload = await runtime.json_body(request)
+    store = calendar if _connected(owner_uid, ControlState.runtime()) else local_calendar
     try:
-        return await run_in_threadpool(calendar.create_event, str(writer["subject_id"]), payload)
+        return await run_in_threadpool(store.create_event, owner_uid, payload)
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 
@@ -240,8 +278,9 @@ async def create_event(request: Request, writer: Writer) -> dict[str, Any]:
 @router.put("/events/{event_id}")
 async def update_event(event_id: str, request: Request, writer: Writer) -> dict[str, Any]:
     payload = await runtime.json_body(request)
+    store = local_calendar if _is_local(event_id) else calendar
     try:
-        return await run_in_threadpool(calendar.update_event, str(writer["subject_id"]), event_id, payload)
+        return await run_in_threadpool(store.update_event, str(writer["subject_id"]), event_id, payload)
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 
@@ -253,7 +292,8 @@ async def delete_event(event_id: str, request: Request, writer: Writer) -> dict[
     except ValueError:
         payload = {}
     revision = str(payload.get("revision", "")) if isinstance(payload, dict) else ""
+    store = local_calendar if _is_local(event_id) else calendar
     try:
-        return await run_in_threadpool(calendar.delete_event, str(writer["subject_id"]), event_id, revision)
+        return await run_in_threadpool(store.delete_event, str(writer["subject_id"]), event_id, revision)
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc

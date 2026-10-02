@@ -26,6 +26,10 @@ export function Dialog({
     if (open && !dialog.open) {
       if (typeof dialog.showModal === 'function') dialog.showModal();
       else dialog.setAttribute('open', '');
+      // React's autoFocus runs while the dialog is still closed, and showModal()
+      // then focuses the first button (Close). Focus the intended control instead,
+      // so typing and pressing Enter submits the form rather than closing it.
+      dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     }
     if (!open && dialog.open) {
       if (typeof dialog.close === 'function') dialog.close();
@@ -92,7 +96,11 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         footer={
           <>
             <Button onClick={() => settle(false)}>Cancel</Button>
-            <Button variant={request?.tone === 'danger' ? 'danger' : 'primary'} onClick={() => settle(true)} autoFocus>
+            <Button
+              variant={request?.tone === 'danger' ? 'danger' : 'primary'}
+              onClick={() => settle(true)}
+              data-autofocus
+            >
               {request?.confirmLabel || 'Continue'}
             </Button>
           </>

@@ -4,6 +4,7 @@ import App from './App';
 import { AppDetailPage } from './features/apps/AppDetailPage';
 import { AppsPage } from './features/apps/AppsPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
+import { HomeCalendar } from './features/home/HomeCalendar';
 import { HomePage } from './features/home/HomePage';
 import { IntegrationsSettings } from './features/settings/IntegrationsSettings';
 import { SecuritySettings } from './features/settings/SecuritySettings';
@@ -592,6 +593,27 @@ describe('Calendar', () => {
     expect(screen.getByRole('heading', { name: 'Personal' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     expect(screen.getByRole('dialog', { name: 'New event' })).toBeInTheDocument();
+  });
+  it('works as a local calendar before Nextcloud is installed', async () => {
+    const fetchMock = stubFetch((path) =>
+      path.startsWith('/api/v1/calendar/events')
+        ? { ok: true, state: 'local', calendar: { id: 'local', name: 'Calendar' }, events: [] }
+        : { ok: true, id: 'local-1' },
+    );
+    renderWithDashboard(<HomeCalendar />, dashboardData([]));
+    expect(await screen.findByText(/Saved on Mu3Lab/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Install Nextcloud' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /New event/ }));
+    const dialog = screen.getByRole('dialog', { name: 'New event' });
+    fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: 'Dentist' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add event' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/calendar/events',
+        expect.objectContaining({ method: 'POST', body: expect.stringContaining('Dentist') }),
+      ),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/v1/calendar/auto-connect', expect.anything());
   });
 });
 

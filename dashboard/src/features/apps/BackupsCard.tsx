@@ -87,7 +87,7 @@ function RestoreDialog({
         <span>
           Type <strong>{service.name}</strong> to confirm
         </span>
-        <input autoComplete="off" autoFocus value={typed} onChange={(event) => setTyped(event.target.value)} />
+        <input autoComplete="off" data-autofocus value={typed} onChange={(event) => setTyped(event.target.value)} />
       </label>
     </Dialog>
   );

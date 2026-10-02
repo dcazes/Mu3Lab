@@ -36,7 +36,7 @@ class UninstallTests(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(runtime_paths(paths))
             stack.enter_context(patch("ctl.lifecycle.uninstall._release_chat_connectors", return_value=True))
-            stack.enter_context(patch("ctl.lifecycle.uninstall._disconnect_calendars"))
+            calendars = stack.enter_context(patch("ctl.lifecycle.uninstall._disconnect_calendars"))
             down = stack.enter_context(patch("ctl.lifecycle.uninstall.actions.compose_down", return_value=(0, "")))
             stack.enter_context(
                 patch("ctl.lifecycle.uninstall.actions.compose_image_list", return_value=(0, ["nextcloud:33"]))
@@ -55,6 +55,7 @@ class UninstallTests(unittest.TestCase):
                 lambda step, _text: stages.append(step),
                 delete=delete,
             )
+        self.calendars = calendars
         return result, stages, down, withdraw, docker
 
     def test_keeping_data_leaves_data_and_database_passwords_for_a_reinstall(self):
@@ -67,6 +68,8 @@ class UninstallTests(unittest.TestCase):
             withdraw.assert_called_once()
             docker.assert_not_called()
             self.assertNotIn("delete_data", stages)
+            # Calendars are copied into Mu3Lab even when Nextcloud's data is kept.
+            self.calendars.assert_called_once()
             # The release record says which release the kept data was migrated to.
             self.assertEqual(sorted(item.name for item in project.iterdir()), [".env", "docker-compose.digest.yml"])
             self.assertTrue((paths.data / "nextcloud" / "postgres").is_dir())

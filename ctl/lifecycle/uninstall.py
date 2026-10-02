@@ -178,7 +178,7 @@ def _remove_images(images: list[str], log: Log) -> None:
 
 
 def _disconnect_calendars(log: Log) -> None:
-    """Revoke calendar app passwords while Nextcloud can still accept the request."""
+    """Copy calendars into Mu3Lab and revoke app passwords while Nextcloud is still running."""
     from ctl import nextcloud_calendar
     from ctl.control_state import ControlState
 
@@ -200,7 +200,9 @@ def uninstall_application(
     stage("disconnect_chat", "Disconnecting the app from chat.")
     if not _release_chat_connectors(service.id, root, log, forget=delete):
         return False, "disconnect_chat", "A chat connector for this app could not be stopped."
-    if delete and service.id == "nextcloud":
+    if service.id == "nextcloud":
+        # Even when its data is kept, the dashboard switches to Mu3Lab's own
+        # calendar; reinstalling reconnects automatically and sends changes back.
         _disconnect_calendars(log)
 
     images: list[str] = []

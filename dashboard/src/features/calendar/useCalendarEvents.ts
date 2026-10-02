@@ -8,7 +8,10 @@ export interface CalendarRange {
 
 let autoConnectAttempted = false;
 
-/** Loads events for a range, connecting the calendar automatically once when Nextcloud is ready. */
+/**
+ * Loads events for a range. Without a Nextcloud connection the API serves
+ * Mu3Lab's own calendar; once Nextcloud is ready it is connected automatically.
+ */
 export function useCalendarEvents(range: CalendarRange | null, nextcloud: Service | undefined, limit = 100) {
   const [result, setResult] = useState<CalendarEvents | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,7 +44,7 @@ export function useCalendarEvents(range: CalendarRange | null, nextcloud: Servic
     setLoading(true);
     try {
       const body = await fetchEvents();
-      if (body.state === 'not_connected' && nextcloudState === 'ready' && !autoConnectAttempted) {
+      if (body.state === 'local' && body.nextcloud_ready && nextcloudState === 'ready' && !autoConnectAttempted) {
         autoConnectAttempted = true;
         try {
           await postApi('/api/v1/calendar/auto-connect');
@@ -66,7 +69,6 @@ export function useCalendarEvents(range: CalendarRange | null, nextcloud: Servic
     return () => window.clearInterval(timer);
   }, [load, start, identityState]);
 
-  const installed = nextcloud && !['planned', 'not_installed', 'blocked'].includes(nextcloud.state);
-  const state = !installed ? 'not_installed' : result?.state || 'loading';
+  const state = result?.state || 'loading';
   return { result, state, loading, reload: load };
 }

@@ -401,6 +401,8 @@ export interface CalendarEvent {
   all_day: boolean;
   editable?: boolean;
   revision?: string;
+  /** Kept by Mu3Lab until Nextcloud is connected. */
+  local?: boolean;
 }
 
 export interface CalendarEvents {
@@ -408,6 +410,8 @@ export interface CalendarEvents {
   state: string;
   calendar?: { id: string; name: string };
   fetched_at?: string;
+  /** In the local state: Nextcloud is ready to be connected. */
+  nextcloud_ready?: boolean;
   events: CalendarEvent[];
   error?: string;
 }

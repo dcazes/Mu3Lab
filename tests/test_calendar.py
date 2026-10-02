@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import httpx
 
-from ctl import calendar_secrets
+from ctl import calendar_secrets, local_calendar
 from ctl.control_state import ControlState
 from ctl.nextcloud_calendar import (
     CalendarError,
@@ -16,6 +16,7 @@ from ctl.nextcloud_calendar import (
     cancel_authorization,
     create_event,
     delete_event,
+    disconnect,
     discover,
     events,
     poll_authorization,
@@ -530,3 +531,178 @@ class CalendarCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+TIMED = {"title": "Dentist", "start": "2026-10-05T15:00:00+00:00", "end": "2026-10-05T16:00:00+00:00"}
+HREF = "/remote.php/dav/calendars/alice/personal/"
+
+
+def _connect_owner(owner: str, paths: RuntimePaths) -> None:
+    state = ControlState(paths.runtime / "control-plane.sqlite3")
+    state.set_calendar_connection(owner, "al•••e", [{"id": "c", "name": "Personal", "href": HREF}], "c")
+    calendar_secrets.save(owner, "alice", "secret", paths)
+
+
+def _export_response(*items: tuple[str, str]) -> httpx.Response:
+    body = "".join(
+        f"<d:response><d:href>{HREF}{name}</d:href><d:propstat><d:prop><c:calendar-data>{ics}</c:calendar-data></d:prop></d:propstat></d:response>"
+        for name, ics in items
+    )
+    xml = f'<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">{body}</d:multistatus>'
+    return httpx.Response(207, content=xml.encode())
+
+
+PHONE_EVENT = """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:phone-1
+SUMMARY:Piano lesson
+DTSTART:20261007T220000Z
+DTEND:20261007T230000Z
+DESCRIPTION:Bring the blue book
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+END:VALARM
+END:VEVENT
+END:VCALENDAR
+"""
+
+WEEKLY = """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:weekly-1
+SUMMARY:Bins out
+DTSTART:20261001T190000Z
+DTEND:20261001T191500Z
+RRULE:FREQ=WEEKLY
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+class LocalCalendarTests(unittest.TestCase):
+    RANGE = (datetime(2026, 10, 1, tzinfo=UTC), datetime(2026, 11, 1, tzinfo=UTC))
+
+    def test_events_are_encrypted_owner_scoped_and_filtered_by_range(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            created = local_calendar.create_event("owner-a", TIMED, paths)
+            self.assertTrue(created["id"].startswith(local_calendar.ID_PREFIX))
+            holiday = {"title": "Holiday", "start": "2026-12-24", "end": "2026-12-26", "all_day": True}
+            local_calendar.create_event("owner-a", holiday, paths)
+            self.assertNotIn(b"Dentist", (paths.runtime / "local-calendar.enc").read_bytes())
+            rows = local_calendar.list_events("owner-a", *self.RANGE, 100, paths)
+            self.assertEqual([row["title"] for row in rows], ["Dentist"])
+            self.assertTrue(rows[0]["editable"])
+            self.assertEqual(local_calendar.list_events("owner-b", *self.RANGE, 100, paths), [])
+            result = local_calendar.events(
+                "owner-a", start=self.RANGE[0], end=self.RANGE[1], limit=5, nextcloud_ready=False, paths=paths
+            )
+            self.assertEqual(result["state"], "local")
+
+    def test_update_and_delete_require_the_current_revision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            event_id = local_calendar.create_event("owner", TIMED | {"notes": "Bring forms"}, paths)["id"]
+            revision = local_calendar.list_events("owner", *self.RANGE, 100, paths)[0]["revision"]
+            with self.assertRaises(CalendarError) as stale:
+                local_calendar.update_event("owner", event_id, TIMED | {"revision": "old"}, paths)
+            self.assertEqual(stale.exception.state, "event_changed")
+            moved = TIMED | {"title": "Dentist (moved)", "revision": revision}
+            local_calendar.update_event("owner", event_id, moved, paths)
+            row = local_calendar.list_events("owner", *self.RANGE, 100, paths)[0]
+            self.assertEqual(row["title"], "Dentist (moved)")
+            with self.assertRaises(CalendarError):
+                local_calendar.delete_event("owner", event_id, revision, paths)
+            local_calendar.delete_event("owner", event_id, row["revision"], paths)
+            self.assertFalse(local_calendar.has_events("owner", paths))
+
+    def test_connecting_nextcloud_moves_local_events_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            _connect_owner("owner", paths)
+            for title in ("First", "Second", "Third"):
+                local_calendar.create_event("owner", TIMED | {"title": title}, paths)
+            # One upload already landed earlier (412); the third fails and stays local.
+            responses = [httpx.Response(412), httpx.Response(201), httpx.Response(503)]
+            with patch("ctl.nextcloud_calendar.httpx.request", side_effect=responses) as request:
+                self.assertEqual(local_calendar.push_to_nextcloud("owner", paths), 2)
+            first = request.call_args_list[0]
+            self.assertEqual(first.args[0], "PUT")
+            self.assertIn(HREF, first.args[1])
+            self.assertEqual(first.kwargs["headers"]["If-None-Match"], "*")
+            failed = request.call_args_list[2].kwargs["content"]
+            remaining = local_calendar.list_events("owner", *self.RANGE, 100, paths)
+            self.assertEqual(len(remaining), 1)
+            self.assertIn(f"SUMMARY:{remaining[0]['title']}".encode(), failed)
+            with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(201)):
+                self.assertEqual(local_calendar.push_to_nextcloud("owner", paths), 1)
+            self.assertFalse(local_calendar.has_events("owner", paths))
+
+    def test_disconnecting_copies_events_back_to_mu3lab(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            _connect_owner("owner", paths)
+            export = _export_response(("phone-1.ics", PHONE_EVENT), ("weekly-1.ics", WEEKLY))
+            with (
+                patch("ctl.nextcloud_calendar.httpx.request", return_value=export) as report,
+                patch("ctl.nextcloud_calendar.httpx.delete", return_value=httpx.Response(200)),
+            ):
+                result = disconnect("owner", paths)
+            self.assertEqual(result["warning"], "")
+            self.assertEqual(report.call_args.args[0], "REPORT")
+            self.assertIsNone(ControlState(paths.runtime / "control-plane.sqlite3").calendar_connection("owner"))
+            rows = local_calendar.list_events("owner", *self.RANGE, 100, paths)
+            self.assertEqual([row["title"] for row in rows if row["title"] == "Bins out"], ["Bins out"] * 5)
+            piano = next(row for row in rows if row["title"] == "Piano lesson")
+            self.assertTrue(piano["editable"])
+            self.assertFalse(next(row for row in rows if row["title"] == "Bins out")["editable"])
+
+    def test_disconnecting_while_nextcloud_is_down_still_disconnects_with_a_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            _connect_owner("owner", paths)
+            with (
+                patch("ctl.nextcloud_calendar.httpx.request", side_effect=httpx.ConnectError("down")),
+                patch("ctl.nextcloud_calendar.httpx.delete", side_effect=httpx.ConnectError("down")),
+            ):
+                result = disconnect("owner", paths)
+            self.assertIn("could not be copied", result["warning"])
+            self.assertIsNone(ControlState(paths.runtime / "control-plane.sqlite3").calendar_connection("owner"))
+
+    def test_copied_events_go_back_unchanged_and_local_edits_and_deletes_follow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            local_calendar.import_from_nextcloud(
+                "owner",
+                [
+                    {"href": "phone-1.ics", "ics": PHONE_EVENT},
+                    {"href": "weekly-1.ics", "ics": WEEKLY},
+                    {"href": "gone.ics", "ics": PHONE_EVENT.replace("phone-1", "gone").replace("Piano", "Old")},
+                ],
+                paths,
+            )
+            rows = local_calendar.list_events("owner", *self.RANGE, 100, paths)
+            piano = next(row for row in rows if row["title"] == "Piano lesson")
+            old = next(row for row in rows if row["title"] == "Old lesson")
+            edit = {"title": "Piano (moved)", "start": "2026-10-08T22:00:00Z", "end": "2026-10-08T23:00:00Z"}
+            local_calendar.update_event("owner", piano["id"], edit | {"revision": piano["revision"]}, paths)
+            local_calendar.delete_event("owner", old["id"], old["revision"], paths)
+            with self.assertRaises(CalendarError):
+                bins = next(row for row in rows if row["title"] == "Bins out")
+                local_calendar.update_event("owner", bins["id"], edit | {"revision": "x"}, paths)
+            _connect_owner("owner", paths)
+            with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(204)) as request:
+                self.assertEqual(local_calendar.push_to_nextcloud("owner", paths), 3)
+            calls = {call.args[1].rsplit("/", 1)[-1]: call for call in request.call_args_list}
+            self.assertEqual(calls["gone.ics"].args[0], "DELETE")
+            moved = calls["phone-1.ics"]
+            self.assertNotIn("If-None-Match", moved.kwargs["headers"])
+            self.assertIn(b"SUMMARY:Piano (moved)", moved.kwargs["content"])
+            # The edit keeps the notes and reminder that came from the phone.
+            self.assertIn(b"Bring the blue book", moved.kwargs["content"])
+            self.assertIn(b"BEGIN:VALARM", moved.kwargs["content"])
+            self.assertEqual(calls["weekly-1.ics"].kwargs["headers"]["If-None-Match"], "*")
+            self.assertIn(b"RRULE:FREQ=WEEKLY", calls["weekly-1.ics"].kwargs["content"])
+            self.assertFalse(local_calendar.has_events("owner", paths))

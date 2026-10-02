@@ -479,9 +479,59 @@ def select(owner_uid: str, calendar_id: str, state: ControlState) -> dict:
     return public_connection(owner_uid, state)
 
 
+_RESOURCE_NAME = re.compile(r"^[A-Za-z0-9@._~-]{1,255}$")
+
+
+def export_events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
+    """Every event in the selected calendar as ``{"href": file name, "ics": text}``.
+
+    Used only to copy the calendar into Mu3Lab before it is disconnected, so
+    the household keeps its events when Nextcloud is disconnected or removed.
+    """
+    _state, _metadata, secret, calendar = _calendar_context(owner_uid, paths)
+    body = """<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"/></c:comp-filter></c:filter></c:calendar-query>"""
+    response = _dav(
+        "REPORT",
+        calendar["href"],
+        secret,
+        content=body.encode(),
+        headers={"Depth": "1", "Content-Type": "application/xml"},
+    )
+    if response.status_code != 207:
+        raise CalendarError("unavailable", f"Nextcloud returned HTTP {response.status_code} while copying events.")
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as exc:
+        raise CalendarError("unavailable", "Nextcloud returned invalid calendar event data.") from exc
+    resources = []
+    for node in root.findall(f"{{{DAV}}}response"):
+        data = node.find(f".//{{{CALDAV}}}calendar-data")
+        href = node.find(f"{{{DAV}}}href")
+        if data is None or not data.text or href is None or not href.text:
+            continue
+        path = _safe_href(secret["username"], href.text)
+        name = path.rsplit("/", 1)[-1]
+        # Only plain resource names inside the selected calendar are kept.
+        if path != calendar["href"] + name or not _RESOURCE_NAME.fullmatch(name):
+            continue
+        resources.append({"href": name, "ics": data.text})
+    return resources
+
+
+def _copy_to_mu3lab(owner_uid: str, paths: RuntimePaths) -> str:
+    """Copy the calendar into Mu3Lab's own; return a warning when that fails."""
+    from ctl import local_calendar
+
+    try:
+        local_calendar.import_from_nextcloud(owner_uid, export_events(owner_uid, paths), paths)
+    except CalendarError:
+        return "Your Nextcloud events could not be copied to Mu3Lab's calendar; they are still in Nextcloud."
+    return ""
+
+
 def disconnect(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
-    """Revoke the generated credential where possible, then forget it locally."""
-    warning = ""
+    """Copy the events into Mu3Lab, revoke the credential where possible, then forget it."""
+    warning = _copy_to_mu3lab(owner_uid, paths) if calendar_secrets.get(owner_uid, paths) else ""
     secret = calendar_secrets.get(owner_uid, paths)
     if secret:
         try:
@@ -493,11 +543,14 @@ def disconnect(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict:
                 timeout=20,
             )
             if response.status_code not in {200, 204}:
-                warning = (
+                warning = warning or (
                     "Nextcloud could not confirm remote app-password revocation; the local connection was removed."
                 )
         except httpx.HTTPError:
-            warning = "Nextcloud was unavailable, so remote app-password revocation could not be confirmed; the local connection was removed."
+            warning = (
+                warning
+                or "Nextcloud was unavailable, so remote app-password revocation could not be confirmed; the local connection was removed."
+            )
     calendar_secrets.delete(owner_uid, paths)
     state = ControlState.runtime(paths)
     if state:

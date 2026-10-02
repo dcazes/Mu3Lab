@@ -2086,56 +2086,6 @@ a.row-main:hover b,
   border-style: dashed;
 }
 
-.agenda {
-  padding: 6px 0;
-}
-
-.agenda-empty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 20px;
-  color: var(--text-2);
-}
-
-.agenda-empty a:not(.btn) {
-  color: var(--accent-text);
-  font-weight: 500;
-}
-
-.agenda-day {
-  padding: 8px 20px;
-}
-
-.agenda-day + .agenda-day {
-  border-top: 1px solid var(--border);
-}
-
-.agenda-day h3 {
-  margin: 4px 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-3);
-}
-
-.agenda-event {
-  display: flex;
-  gap: 16px;
-  padding: 4px 0;
-}
-
-.agenda-event time {
-  width: 72px;
-  flex-shrink: 0;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-
-.agenda-event span {
-  font-weight: 500;
-}
-
 .status-strip {
   display: flex;
   flex-direction: column;
@@ -2793,6 +2743,25 @@ a.row-main:hover b,
 
 .calendar-card .fc-event-time {
   color: var(--text-3);
+}
+
+.calendar-card > .callout {
+  margin-bottom: 16px;
+}
+
+.calendar-compact .fc .fc-daygrid-day-frame {
+  min-height: 64px;
+}
+
+.calendar-note {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.calendar-note a {
+  color: var(--accent-text);
+  font-weight: 500;
 }
 
 /* ---------- Settings ---------- */
