@@ -276,6 +276,7 @@ def _bind_live_connectors(log) -> tuple[bool, str]:
     from ctl.registry import load as load_registry
 
     state = ControlState.runtime()
+    errors = []
     if state:
         for server in load_mcp_catalog(load_registry()):
             runtime = state.mcp_server(server.id)
@@ -288,7 +289,9 @@ def _bind_live_connectors(log) -> tuple[bool, str]:
                 continue
             ok, detail = bind(server, runtime.get("tool_snapshot") or [], log)
             if not ok:
-                return False, detail
+                errors.append(detail)
+    if errors:
+        return False, "; ".join(errors)
     return True, "Live connectors are attached to their assistants."
 
 
