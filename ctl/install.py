@@ -2331,7 +2331,76 @@ def _pull_missing(ctx: dict) -> list[str]:
             activity=f"Downloading {name} ({index} of {len(missing)})",
             timeout_seconds=1800,
         )
-        rc, out = actions.docker_cmd(["docker", "pull", image], log, timeout=1800)
+
+        # Track progress of Docker pull
+        progress_state = {
+            "start_time": time.time(),
+            "last_update": time.time(),
+            "layers": {},
+            "completed_layers": set(),
+        }
+
+        def on_output(line: str) -> None:
+            """Parse Docker pull output and update progress display."""
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                layer_id = parts[0]
+                status = " ".join(parts[1:])
+
+                if "Download complete" in status or "Pulling fs layer" in status:
+                    if "Download complete" in status:
+                        progress_state["completed_layers"].add(layer_id)
+                    match = re.search(r'(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)', status)
+                    if match:
+                        size_str = match.group(1)
+                        unit = match.group(2)
+                        size_bytes = float(size_str)
+                        if unit == "KB":
+                            size_bytes *= 1024
+                        elif unit == "MB":
+                            size_bytes *= 1024**2
+                        elif unit == "GB":
+                            size_bytes *= 1024**3
+                        progress_state["layers"][layer_id] = size_bytes
+
+                elif "Downloading" in status:
+                    match = re.search(r'(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)', status)
+                    if match:
+                        size_str = match.group(1)
+                        unit = match.group(2)
+                        size_bytes = float(size_str)
+                        if unit == "KB":
+                            size_bytes *= 1024
+                        elif unit == "MB":
+                            size_bytes *= 1024**2
+                        elif unit == "GB":
+                            size_bytes *= 1024**3
+                        progress_state["layers"][layer_id] = size_bytes
+
+                now = time.time()
+                if now - progress_state["last_update"] >= 2:
+                    progress_state["last_update"] = now
+                    elapsed = now - progress_state["start_time"]
+
+                    total_bytes = sum(progress_state["layers"].values())
+                    downloaded = sum(
+                        progress_state["layers"][lid]
+                        for lid in progress_state["completed_layers"]
+                        if lid in progress_state["layers"]
+                    )
+
+                    if total_bytes > 0 and elapsed > 1:
+                        speed_mbs = (downloaded / elapsed) / (1024**2)
+                        pct = min(99, int(100 * downloaded / total_bytes))
+                        _update_progress(
+                            ctx,
+                            "core_images",
+                            phase="downloading",
+                            activity=f"Downloading {name} ({index}/{len(missing)}) — {pct}% at {speed_mbs:.1f} MB/s",
+                            timeout_seconds=1800,
+                        )
+
+        rc, out = actions.docker_cmd_stream(["docker", "pull", image], log, timeout=1800, on_output=on_output)
         if rc != 0:
             log(out[-500:] if out else f"(exit {rc})")
             failed.append(image)
