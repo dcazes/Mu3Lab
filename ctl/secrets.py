@@ -44,7 +44,7 @@ def ensure_authentik_env(root: Path, token_factory=None) -> tuple[Path, list[str
                 key, _, value = line.partition("=")
                 existing[key.strip()] = value.strip()
     values = {
-        "AUTHENTIK_TAG": existing.get("AUTHENTIK_TAG", "2026.5.0"),
+        "AUTHENTIK_TAG": existing.get("AUTHENTIK_TAG", "2026.8.3"),
         "AUTHENTIK_SECRET_KEY": existing.get("AUTHENTIK_SECRET_KEY") or token_factory(),
         "AUTHENTIK_POSTGRESQL__PASSWORD": existing.get("AUTHENTIK_POSTGRESQL__PASSWORD") or token_factory(),
     }

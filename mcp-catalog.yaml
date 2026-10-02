@@ -26,8 +26,8 @@ servers:
     preferred: true
     provenance: community
     repository: https://github.com/agigante80/actual-mcp-server
-    revision: 941483c07df79ea814a9176469fe3667d78f6c02
-    image: ghcr.io/agigante80/actual-mcp-server:0.22.4
+    revision: 3961d3140b08e61328dddcd4991b5121404fba96
+    image: ghcr.io/agigante80/actual-mcp-server:0.22.11
     transport: streamable-http
     endpoint: http://actual-budget-mcp:3600/http
     local_health: http://127.0.0.1:8813/health

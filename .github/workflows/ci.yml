@@ -65,7 +65,7 @@ jobs:
           while IFS= read -r compose_file; do
             MU3LAB_ENV_FILE=/dev/null \
             AUTHENTIK_ENV_FILE=/dev/null \
-            AUTHENTIK_TAG=2026.5.0 \
+            AUTHENTIK_TAG=2026.8.3 \
             AUTHENTIK_SECRET_KEY=ci-placeholder \
             AUTHENTIK_POSTGRESQL__PASSWORD=ci-placeholder \
             MU3LAB_INGRESS_TOKEN=ci-placeholder \
