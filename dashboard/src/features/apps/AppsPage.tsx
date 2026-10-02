@@ -92,15 +92,17 @@ function DiscoverCard({
   summary,
   size,
   selected,
+  installing,
   toggle,
 }: {
   service: Service;
   summary: string;
   size?: AppSize;
   selected: boolean;
+  installing?: string;
   toggle: () => void;
 }) {
-  const installable = canInstall(service);
+  const installable = canInstall(service) && !installing;
   const keep = (event: MouseEvent) => event.stopPropagation();
   return (
     // The whole card toggles the selection (the button is its keyboard equivalent);
@@ -135,6 +137,10 @@ function DiscoverCard({
           >
             {selected ? 'Selected' : 'Add'}
           </Button>
+        ) : installing ? (
+          <Button size="sm" disabled>
+            {installing}
+          </Button>
         ) : (
           <Badge tone="gray">Unavailable</Badge>
         )}
@@ -158,8 +164,26 @@ export function AppsPage({ discover }: { discover: boolean }) {
     () => services.filter((service) => !isInstalled(service) && ['optional', 'blocked'].includes(service.stage)),
     [services],
   );
-  // Drop picks that have since been installed or become unavailable.
-  const selected = stored.filter((id) => available.some((service) => service.id === id && canInstall(service)));
+  const queued = new Map(
+    installBatch.batch && ['queued', 'running', 'paused', 'resetting'].includes(installBatch.batch.state)
+      ? installBatch.batch.items
+          .filter((item) => ['pending', 'queued', 'running', 'resetting'].includes(item.state))
+          .map((item) => [
+            item.service_id,
+            item.state === 'pending'
+              ? item.download_state === 'downloading'
+                ? 'Downloading'
+                : item.download_state === 'paused'
+                  ? 'Paused'
+                  : 'Queued'
+              : 'Installing',
+          ])
+      : [],
+  );
+  // Drop picks that have since been installed or joined the queue.
+  const selected = stored.filter((id) =>
+    available.some((service) => service.id === id && canInstall(service) && !queued.has(id)),
+  );
   // Sizes are measured in the background by the worker; re-read them now and then.
   const sizes = useApi<AppSizesResponse>(
     discover ? `/api/v1/app-sizes?ids=${encodeURIComponent(selected.join(','))}` : null,
@@ -238,6 +262,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
                       summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
                       size={sizes?.apps?.[service.id]}
                       selected={selected.includes(service.id)}
+                      installing={queued.get(service.id)}
                       toggle={() => toggle(service.id)}
                     />
                   ))}

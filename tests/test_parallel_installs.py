@@ -77,6 +77,32 @@ class BatchCase(unittest.TestCase):
 
 
 class SchedulingTests(BatchCase):
+    def test_new_selections_append_to_the_active_queue(self):
+        batch = self.create(["mealie"], parallel=1)
+        self.batches.set_download_state(batch["id"], 0, "downloading")
+        extended = self.create(["mealie", "paperless-ngx"], parallel=2)
+        self.assertEqual(extended["id"], batch["id"])
+        self.assertEqual([item["service_id"] for item in extended["items"]], ["mealie", "paperless-ngx"])
+        self.assertEqual(extended["items"][0]["download_state"], "downloading")
+        self.assertEqual(extended["items"][1]["ordinal"], 1)
+        self.assertEqual(extended["parallel_downloads"], 2)
+        with self.assertRaisesRegex(ValueError, "already queued"):
+            self.create(["mealie"])
+
+    def test_duplicate_app_in_another_owners_queue_is_rejected(self):
+        self.create(["mealie"])
+        with self.assertRaisesRegex(ValueError, "another installation queue"):
+            self.batches.create(
+                load(),
+                ["mealie"],
+                actor="other",
+                owner_uid="other",
+                identity=IDENTITY,
+                idempotency_key="",
+                jobs=self.jobs,
+                control=self.control,
+            )
+
     def test_whichever_app_finishes_downloading_first_is_set_up_first(self):
         batch = self.create()
         self.assertEqual(batch["state"], "running")
@@ -202,7 +228,7 @@ class FakeFetch:
 
 class ManagerTests(BatchCase):
     def manager(self, fetch: FakeFetch) -> DownloadManager:
-        return DownloadManager(
+        manager = DownloadManager(
             self.batches,
             self.jobs,
             self.downloads,
@@ -211,6 +237,16 @@ class ManagerTests(BatchCase):
             images_for=lambda app: [app],
             fetch=fetch,
         )
+
+        def stop_downloads():
+            threads = list(manager.active.values())
+            for _thread, stop in threads:
+                stop.set()
+            for thread, _stop in threads:
+                thread.join(timeout=3)
+
+        self.addCleanup(stop_downloads)
+        return manager
 
     def settle(self, manager: DownloadManager, until, seconds: float = 3.0) -> None:
         deadline = time.monotonic() + seconds
@@ -241,6 +277,19 @@ class ManagerTests(BatchCase):
         self.assertEqual(
             self.downloads.for_jobs([progress_key(batch["id"], 0)])[progress_key(batch["id"], 0)]["state"], "done"
         )
+
+    def test_appended_apps_download_after_the_existing_queue(self):
+        fetch = FakeFetch()
+        batch = self.create(["mealie"], parallel=1)
+        manager = self.manager(fetch)
+        self.settle(manager, lambda: fetch.running == {"mealie"})
+        extended = self.create(["paperless-ngx"], parallel=1)
+        self.assertEqual(extended["id"], batch["id"])
+        manager.tick()
+        self.assertEqual(fetch.running, {"mealie"})
+        fetch.release["mealie"].set()
+        self.settle(manager, lambda: fetch.running == {"paperless-ngx"})
+        self.assertEqual(fetch.most, 1)
 
     def test_pausing_stops_the_download_and_resuming_restarts_it(self):
         fetch = FakeFetch()

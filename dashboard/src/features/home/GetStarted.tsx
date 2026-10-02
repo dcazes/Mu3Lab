@@ -1,5 +1,6 @@
 import { ArrowRight, CheckCircle2, Circle } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import type { ProviderMetadataResponse, VaultStatus } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
@@ -128,6 +129,20 @@ export function GetStarted() {
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
   const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
   const [manual, markDone] = useManualDone();
+  const [checking, setChecking] = useState(false);
+  const checkExtension = async () => {
+    setChecking(true);
+    try {
+      const status = await vault.reload();
+      if (!status) toast.error('Could not check Bitwarden login. Try again.');
+      else if (status.browser_extension?.signed_in) toast.success('Bitwarden login confirmed');
+      else toast.info('No signed-in Bitwarden extension detected yet. Sign in, then check again.');
+    } catch {
+      toast.error('Could not check Bitwarden login. Try again.');
+    } finally {
+      setChecking(false);
+    }
+  };
   const [guide, setGuide] = useState<Guide | null>(null);
   const setup = providers.data?.setup;
   if (!operator || !setup || !vault.data || manual.hidden) return null;
@@ -192,6 +207,15 @@ export function GetStarted() {
             <li key={step.key}>
               {step.done ? (
                 <div className={className}>{content}</div>
+              ) : step.key === 'extension' ? (
+                <div className={`${className} get-started-extension`}>
+                  <button type="button" className="get-started-guide" onClick={() => setGuide('extension')}>
+                    {content}
+                  </button>
+                  <Button size="sm" loading={checking} onClick={() => void checkExtension()}>
+                    Check Bitwarden login
+                  </Button>
+                </div>
               ) : step.guide ? (
                 <button type="button" className={className} onClick={() => setGuide(step.guide)}>
                   {content}

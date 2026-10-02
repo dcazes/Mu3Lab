@@ -11,7 +11,7 @@ export function UninstallDialog({ service, open, onClose }: { service: Service; 
   const { pending, run } = useAction();
   const [deleteData, setDeleteData] = useState(false);
   const [typed, setTyped] = useState('');
-  const confirmed = !deleteData || typed.trim() === service.name;
+  const confirmed = !deleteData || typed.trim().toLowerCase() === service.name.toLowerCase();
   const close = () => {
     setDeleteData(false);
     setTyped('');

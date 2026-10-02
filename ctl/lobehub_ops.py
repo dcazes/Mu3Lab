@@ -147,17 +147,28 @@ DELETE FROM agents a
 
 
 def _sql(installed: set[str]) -> str:
+    # Pinned upstream completion contract:
+    # https://github.com/lobehub/lobehub/blob/v2.2.18/src/store/user/slices/onboarding/selectors.ts
+    # https://github.com/lobehub/lobehub/blob/v2.2.18/packages/const/src/user.ts
     return f"""
 BEGIN;
 CREATE OR REPLACE FUNCTION mu3lab_skip_initial_onboarding() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   NEW.is_onboarded = true;
+  NEW.onboarding = COALESCE(NEW.onboarding, '{{}}'::jsonb) || jsonb_build_object(
+    'finishedAt', COALESCE(NEW.onboarding ->> 'finishedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+    'version', COALESCE(NEW.onboarding -> 'version', '2'::jsonb));
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS mu3lab_skip_initial_onboarding_trigger ON users;
 CREATE TRIGGER mu3lab_skip_initial_onboarding_trigger BEFORE INSERT ON users
 FOR EACH ROW EXECUTE FUNCTION mu3lab_skip_initial_onboarding();
-UPDATE users SET is_onboarded = true WHERE is_onboarded IS DISTINCT FROM true;
+-- v2.2.18 checks onboarding.finishedAt; is_onboarded is deprecated.
+UPDATE users SET is_onboarded = true,
+  onboarding = COALESCE(onboarding, '{{}}'::jsonb) || jsonb_build_object(
+    'finishedAt', COALESCE(onboarding ->> 'finishedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+    'version', COALESCE(onboarding -> 'version', '2'::jsonb))
+WHERE is_onboarded IS DISTINCT FROM true OR onboarding ->> 'finishedAt' IS NULL;
 UPDATE ai_providers SET enabled = false WHERE id <> 'openai' AND enabled IS DISTINCT FROM false;
 UPDATE ai_providers SET enabled = true WHERE id = 'openai' AND enabled IS DISTINCT FROM true;
 UPDATE ai_models SET enabled = false

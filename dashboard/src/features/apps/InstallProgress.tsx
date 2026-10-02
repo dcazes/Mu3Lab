@@ -52,8 +52,6 @@ export interface InstallControls {
   setParallel: (count: number) => void;
 }
 
-const MAX_PARALLEL = 8;
-
 /** What an app is doing, before and during setup. */
 function itemStatus(item: InstallBatchItem, job: InstallBatchJob | null, isCurrent: boolean) {
   if (item.state === 'pending') {
@@ -168,21 +166,6 @@ export function InstallProgress({
           </p>
         </div>
         <div className="install-header-side">
-          {running && controls && (
-            <label className="install-parallel">
-              <span>Downloads at once</span>
-              <select
-                value={batch.parallel_downloads || 3}
-                onChange={(event) => controls.setParallel(Number(event.target.value))}
-              >
-                {Array.from({ length: MAX_PARALLEL }, (_, index) => index + 1).map((count) => (
-                  <option key={count} value={count}>
-                    {count}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           <span className="install-count">
             {done}/{total}
           </span>

@@ -233,35 +233,74 @@ class InstallBatchStore:
         if not plan:
             raise ValueError("all selected applications are already installed")
         batch_id, now = uuid4().hex, _now()
+        appended = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                """
-                INSERT INTO install_batches
-                (id, actor, owner_uid, state, idempotency_key, parallel_downloads, created_at, updated_at)
-                VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
-            """,
-                (batch_id, actor, owner_uid, idempotency_key or None, parallel_downloads, now, now),
-            )
+            # Keep one queue visible to its owner and append new selections behind
+            # existing items. The transaction also prevents duplicate submissions.
+            active = conn.execute(
+                "SELECT id FROM install_batches WHERE owner_uid = ? AND state IN ('queued', 'running') "
+                "ORDER BY created_at LIMIT 1",
+                (owner_uid,),
+            ).fetchone()
+            ordinal_start = priority_start = 0
+            if active:
+                appended = True
+                batch_id = str(active["id"])
+                existing = conn.execute(
+                    "SELECT service_id, ordinal, priority FROM install_batch_items WHERE batch_id = ?", (batch_id,)
+                ).fetchall()
+                present = {str(item["service_id"]) for item in existing}
+                plan = [(slug, explicit) for slug, explicit in plan if slug not in present]
+                if not plan:
+                    raise ValueError("all selected applications are already queued")
+                ordinal_start = max((int(item["ordinal"]) for item in existing), default=-1) + 1
+                priority_start = max((int(item["priority"]) for item in existing), default=-1) + 1
+            busy = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT i.service_id FROM install_batch_items i JOIN install_batches b ON b.id = i.batch_id "
+                    "WHERE b.state IN ('queued', 'running', 'paused', 'resetting') "
+                    "AND i.state IN ('pending', 'queued', 'running', 'resetting') AND b.id <> ?",
+                    (batch_id,),
+                )
+            }
+            if any(slug in busy for slug, _ in plan):
+                raise ValueError("a selected application is already in another installation queue")
+            if appended:
+                conn.execute(
+                    "UPDATE install_batches SET parallel_downloads = ?, updated_at = ? WHERE id = ?",
+                    (parallel_downloads, now, batch_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO install_batches
+                    (id, actor, owner_uid, state, idempotency_key, parallel_downloads, created_at, updated_at)
+                    VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
+                    """,
+                    (batch_id, actor, owner_uid, idempotency_key or None, parallel_downloads, now, now),
+                )
             conn.executemany(
                 """
                 INSERT INTO install_batch_items
                 (batch_id, service_id, ordinal, explicitly_selected, state, depends_on_json, priority)
                 VALUES (?, ?, ?, ?, 'pending', ?, ?)
-            """,
+                """,
                 (
                     (
                         batch_id,
                         service_id,
-                        ordinal,
+                        ordinal_start + index,
                         int(explicit),
                         json.dumps(list(registry.get(service_id).dependencies)),
-                        ordinal,
+                        priority_start + index,
                     )
-                    for ordinal, (service_id, explicit) in enumerate(plan)
+                    for index, (service_id, explicit) in enumerate(plan)
                 ),
             )
-        workflow_secrets.save_job_identity(f"batch:{batch_id}", **identity)
+        if not appended:
+            workflow_secrets.save_job_identity(f"batch:{batch_id}", **identity)
         return self.get(batch_id) or {}
 
     def get(self, batch_id: str) -> dict[str, Any] | None:

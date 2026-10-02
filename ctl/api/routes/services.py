@@ -87,7 +87,7 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         raise ApiError(409, service.blocked_reason)
     # Deleting data cannot be undone: the request must repeat the app's name,
     # so a replayed or scripted "uninstall" can never escalate to it.
-    if action == "uninstall_delete_data" and str(body.get("confirm", "")).strip() != service.name:
+    if action == "uninstall_delete_data" and str(body.get("confirm", "")).strip().casefold() != service.name.casefold():
         raise ApiError(400, f"type {service.name} to confirm deleting its data")
     provisions_account = action in {"install", "retry_setup"}
     if (

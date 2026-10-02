@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -147,6 +147,35 @@ class RemovalBlueprintTests(unittest.TestCase):
 
 
 class UninstallApiTests(unittest.TestCase):
+    def test_deleting_data_accepts_mixed_case_app_name(self):
+        headers = {
+            "x-mu3lab-proxy-token": "token",
+            "x-authentik-username": "owner",
+            "x-authentik-uid": "subject",
+            "x-authentik-email": "owner@example.test",
+            "x-authentik-groups": "mu3lab-operators",
+            "host": "testserver",
+            "origin": "https://testserver",
+            "x-mu3lab-csrf": "bound",
+        }
+        jobs = MagicMock()
+        jobs.by_idempotency_key.return_value = None
+        jobs.create.return_value = {"id": "delete-job"}
+        with (
+            patch("ctl.api.security.ingress_token", return_value="token"),
+            patch("ctl.api.security.csrf_token", return_value="bound"),
+            patch("ctl.api.routes.services._effective_state", return_value="ready"),
+            patch("ctl.api.routes.services.runtime.job_store", return_value=jobs),
+            patch("ctl.api.routes.services.ControlState.runtime"),
+        ):
+            response = TestClient(create_app()).post(
+                "/api/v1/services/nextcloud/actions",
+                headers=headers,
+                json={"action": "uninstall_delete_data", "confirm": "  nExTcLoUd  "},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(jobs.create.call_args.kwargs["action"], "uninstall_delete_data")
+
     def test_deleting_data_requires_the_app_name(self):
         headers = {
             "x-mu3lab-proxy-token": "token",
@@ -163,7 +192,7 @@ class UninstallApiTests(unittest.TestCase):
             patch("ctl.api.security.csrf_token", return_value="bound"),
         ):
             client = TestClient(create_app())
-            for confirm in ("", "nextcloud", "Mealie"):
+            for confirm in ("", "nextcloud-wrong", "Mealie"):
                 with self.subTest(confirm=confirm):
                     response = client.post(
                         "/api/v1/services/nextcloud/actions",

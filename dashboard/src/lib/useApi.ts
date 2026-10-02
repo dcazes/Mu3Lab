@@ -6,7 +6,7 @@ export interface ApiState<T> {
   data: T | null;
   error: string;
   loading: boolean;
-  reload: () => Promise<void>;
+  reload: () => Promise<T | undefined>;
 }
 
 /** Fetch a JSON resource, optionally re-polling while the tab is visible. */
@@ -25,6 +25,7 @@ export function useApi<T>(path: string | null, { interval = 0 }: { interval?: nu
       if (request !== latest.current) return;
       setData(result);
       setError('');
+      return result;
     } catch (cause) {
       if (request === latest.current) setError(errorText(cause));
     } finally {

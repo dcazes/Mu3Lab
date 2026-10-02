@@ -108,10 +108,9 @@ describe('InstallProgress controls', () => {
     expect(controls.reorder).toHaveBeenCalledWith(['mealie', 'immich', 'surfsense']);
   });
 
-  it('changes how many apps download at once', () => {
-    const controls = renderProgress([item('mealie', 0)]);
-    fireEvent.change(screen.getByLabelText('Downloads at once'), { target: { value: '5' } });
-    expect(controls.setParallel).toHaveBeenCalledWith(5);
+  it('keeps the download limit in the install dialog only', () => {
+    renderProgress([item('mealie', 0)]);
+    expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
   });
 
   it('says what each waiting app is doing', () => {

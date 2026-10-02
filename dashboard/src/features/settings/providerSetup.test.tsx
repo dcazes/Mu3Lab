@@ -213,7 +213,7 @@ describe('Get started', () => {
     stubFetch(api(true, []));
     renderWithDashboard(<HomePage />, dashboardData([]));
     const first = await screen.findByRole('button', { name: /1\. Add Bitwarden/ });
-    expect(first).toHaveClass('is-next');
+    expect(first.closest('.get-started-item')).toHaveClass('is-next');
     expect(screen.getByRole('link', { name: /2\. Connect an AI provider/ })).toHaveAttribute('href', '/settings/ai');
     expect(screen.getByRole('link', { name: /3\. Install your first personal app/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /4\. Use Mu3Lab on your phone or laptop/ })).toBeInTheDocument();
@@ -269,6 +269,18 @@ describe('Get started', () => {
     renderWithDashboard(<HomePage />, dashboardData([]));
     fireEvent.click(await screen.findByRole('button', { name: /Add Bitwarden so your browser fills in/ }));
     expect(screen.getByText(/choose/)).toHaveTextContent('Self-hosted');
+  });
+
+  it('checks a new Bitwarden login without leaving the page', async () => {
+    const { HomePage } = await import('../home/HomePage');
+    let signedIn = false;
+    stubFetch((path) => api(true, [], ['Google Chrome'], signedIn)(path));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    const check = await screen.findByRole('button', { name: 'Check Bitwarden login' });
+    signedIn = true;
+    fireEvent.click(check);
+    expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
   });
 
   it('ticks the Bitwarden step off by itself once the extension signs in', async () => {

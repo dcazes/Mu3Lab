@@ -210,14 +210,15 @@ describe('App page', () => {
     fireEvent.click(within(dialog).getByRole('radio', { name: /Delete everything/ }));
     const destroy = within(dialog).getByRole('button', { name: 'Uninstall and delete data' });
     expect(destroy).toBeDisabled();
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /to confirm/ }), { target: { value: 'mealie' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /to confirm/ }), { target: { value: 'wrong app' } });
     expect(destroy).toBeDisabled();
-    fireEvent.change(within(dialog).getByRole('textbox', { name: /to confirm/ }), { target: { value: 'Mealie' } });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /to confirm/ }), { target: { value: 'mEaLiE' } });
+    expect(destroy).toBeEnabled();
     fireEvent.click(destroy);
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/mealie/actions',
-        expect.objectContaining({ body: JSON.stringify({ action: 'uninstall_delete_data', confirm: 'Mealie' }) }),
+        expect.objectContaining({ body: JSON.stringify({ action: 'uninstall_delete_data', confirm: 'mEaLiE' }) }),
       ),
     );
   });
@@ -350,6 +351,59 @@ describe('Apps', () => {
         }),
       ),
     );
+  });
+
+  it('disables queued app cards while allowing new selections to join the queue', async () => {
+    const batch = {
+      id: 'b',
+      state: 'running',
+      current_ordinal: 0,
+      items: [
+        {
+          service_id: 'mealie',
+          ordinal: 0,
+          state: 'pending',
+          download_state: 'downloading',
+          explicitly_selected: true,
+        },
+      ],
+    };
+    const fetchMock = stubFetch((path) =>
+      path === '/api/v1/services/install-batch'
+        ? {
+            ok: true,
+            batch: {
+              ...batch,
+              items: [
+                ...batch.items,
+                { service_id: 'immich', ordinal: 1, state: 'pending', download_state: '', explicitly_selected: true },
+              ],
+            },
+          }
+        : { ok: true, batch },
+    );
+    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    renderWithDashboard(
+      <AppsPage discover />,
+      dashboardData([
+        service('mealie', 'Mealie', 'optional', available),
+        service('immich', 'Immich', 'optional', available),
+      ]),
+    );
+    expect(await screen.findByRole('button', { name: 'Downloading' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Select Mealie for installation' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Immich for installation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install Immich' }));
+    expect(screen.getByLabelText('Downloads at once')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install all selected' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/install-batch',
+        expect.objectContaining({ body: JSON.stringify({ service_ids: ['immich'], parallel_downloads: 3 }) }),
+      ),
+    );
+    expect(await screen.findByRole('button', { name: 'Queued' })).toBeDisabled();
   });
 
   it('selects an app by clicking anywhere on its card except its name', () => {

@@ -24,6 +24,13 @@ def _removable(sql: str) -> set[str]:
 
 
 class AgentSyncTests(unittest.TestCase):
+    def test_onboarding_uses_current_completion_field_for_new_and_existing_users(self):
+        sql = lobehub_ops._sql(set())
+        self.assertIn("NEW.onboarding = COALESCE(NEW.onboarding", sql)
+        self.assertIn("onboarding = COALESCE(onboarding", sql)
+        self.assertEqual(sql.count("'finishedAt', COALESCE("), 2)
+        self.assertIn("onboarding ->> 'finishedAt' IS NULL", sql)
+
     def test_only_installed_apps_get_an_assistant(self):
         sql = lobehub_ops._sql({"firecrawl"})
         self.assertEqual(_seeded(sql), {"mu3lab-firecrawl"})
