@@ -383,7 +383,7 @@ class FreeLlmApiGateTests(unittest.TestCase):
         self.assertIn("target: !KeyOf mu3lab-freellmapi-application", content)
 
     def test_caddy_forward_auths_the_freellmapi_route(self):
-        caddy = (Path(__file__).resolve().parents[1] / "core" / "ingress" / "Caddyfile.authenticated").read_text()
+        caddy = (Path(__file__).resolve().parents[1] / "apps" / "ingress" / "Caddyfile.authenticated").read_text()
         block = caddy.split(":19472 {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("forward_auth 127.0.0.1:9001", block)
         self.assertIn("header_up Host {http.request.hostport}", block)

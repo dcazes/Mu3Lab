@@ -14,7 +14,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ctl.backups import Retention
-from ctl.registry import RegistryError, load
+from ctl.manifest.catalog import compose_images
+from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.service_state import _compose_state, public_url
 from ctl.service_state import status as service_status
@@ -35,8 +36,10 @@ class _StrictLoader(yaml.SafeLoader):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_service_entries_never_repeat_a_key(self):
-        yaml.load((ROOT / "services.yaml").read_text(encoding="utf-8"), Loader=_StrictLoader)
+    def test_manifests_never_repeat_a_key(self):
+        for path in sorted((ROOT / "apps").glob("**/*.yaml")):
+            with self.subTest(path=path.relative_to(ROOT)):
+                yaml.load(path.read_text(encoding="utf-8"), Loader=_StrictLoader)
 
     def test_baby_buddy_uses_loopback_only_trusted_header_auth(self):
         service = load().get("baby-buddy")
@@ -84,9 +87,8 @@ class RegistryTests(unittest.TestCase):
 
     def test_checked_in_registry_marks_surfsense_installable_and_local_account(self):
         registry = load()
-        self.assertEqual(registry.get("surfsense").availability, "available")
         self.assertEqual(registry.get("surfsense").stage, "optional")
-        self.assertEqual(registry.get("surfsense").auth, "local")
+        self.assertEqual(registry.get("surfsense").auth, "proxy")
         self.assertIn("no single sign-on", registry.get("surfsense").identity_note)
         compose = registry.get("surfsense").compose_path(Path(__file__).resolve().parents[1]) / "docker-compose.yml"
         compose_text = compose.read_text(encoding="utf-8")
@@ -94,17 +96,7 @@ class RegistryTests(unittest.TestCase):
         image_lines = [line.strip() for line in compose_text.splitlines() if line.strip().startswith("image:")]
         self.assertTrue(image_lines)
         self.assertTrue(all("@sha256:" in line for line in image_lines))
-        self.assertFalse(registry.get("vaultwarden").mcp.get("exposed", False))
-
-    def test_rejects_compose_path_escape(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "services.yaml"
-            path.write_text(
-                """schema_version: 2\nservices:\n  - id: bad\n    maturity: supported\n    name: Bad\n    category: test\n    lifecycle: optional\n    compose_dir: ../outside\n    https_port: 1\n    health: {kind: tcp, port: 1}\n    auth: proxy\n    profiles: [cpu]\n""",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(RegistryError, "unsafe compose_dir"):
-                load(path)
+        self.assertFalse(registry.catalog.get("vaultwarden").connectors)
 
     def test_tailnet_url_never_falls_back_to_localhost(self):
         service = load().get("litellm")
@@ -124,7 +116,6 @@ class RegistryTests(unittest.TestCase):
 
     def test_firecrawl_has_a_complete_private_login_free_runtime(self):
         service = load().get("firecrawl")
-        self.assertEqual(service.availability, "available")
         self.assertEqual(service.stage, "optional")
         self.assertEqual(service.auth, "excluded")
         self.assertEqual(service.private_https_port, 8456)
@@ -196,7 +187,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
         registry = load()
-        self.assertTrue(registry.get("vaultwarden").images)
+        self.assertTrue(compose_images(ROOT / "apps" / "vaultwarden" / "docker-compose.yml"))
         self.assertEqual(registry.get("lobehub").route, "pending")
 
     def test_runtime_paths_are_outside_checkout(self):
@@ -213,25 +204,25 @@ class RegistryTests(unittest.TestCase):
 
     def test_core_compose_files_are_valid_and_pin_identity_images(self):
         root = Path(__file__).resolve().parents[1]
-        for rel in ("core/authentik/docker-compose.yml", "core/vaultwarden/docker-compose.yml"):
+        for rel in ("apps/authentik/docker-compose.yml", "apps/vaultwarden/docker-compose.yml"):
             with self.subTest(rel=rel):
                 compose = yaml.safe_load((root / rel).read_text(encoding="utf-8"))
                 self.assertIn("services", compose)
-        authentik = (root / "core/authentik/.env.example").read_text(encoding="utf-8")
+        authentik = (root / "apps/authentik/.env.example").read_text(encoding="utf-8")
         self.assertNotIn("AUTHENTIK_TAG=latest", authentik)
 
     def test_core_suite_has_a_compose_manifest_and_pinned_registry_images(self):
         registry = load()
         root = Path(__file__).resolve().parents[1]
-        core = [service for service in registry.services if service.required and service.stage == "core"]
-        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub"})
+        core = [service for service in registry.services if service.manifest.tier == "core"]
+        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
         for service in core:
-            self.assertTrue((service.compose_path(root) / "docker-compose.yml").is_file(), service.id)
-            self.assertTrue(service.images, service.id)
-            self.assertTrue(all(":latest" not in image and ":main" not in image for image in service.images))
+            images = compose_images(service.compose_path(root) / "docker-compose.yml")
+            self.assertTrue(images, service.id)
+            self.assertTrue(all("@sha256:" in image for image in images.values()))
 
     def test_ingress_matches_tailnet_host_headers_on_loopback(self):
-        caddyfile = (Path(__file__).resolve().parents[1] / "core/ingress/Caddyfile").read_text(encoding="utf-8")
+        caddyfile = (Path(__file__).resolve().parents[1] / "apps/ingress/Caddyfile").read_text(encoding="utf-8")
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
@@ -268,12 +259,11 @@ class RegistryTests(unittest.TestCase):
             result = catalog({"writes_enabled": True})
         self.assertEqual(result["services"][service.id]["summary"], service.setup_action)
 
-    def test_dashboard_catalog_uses_curated_service_ids(self):
-        root = Path(__file__).resolve().parents[1]
-        catalog = yaml.safe_load((root / "catalog.yaml").read_text(encoding="utf-8"))
-        registry = load()
-        profile_ids = {service_id for profile in catalog["profiles"] for service_id in profile["services"]}
-        self.assertTrue(profile_ids.issubset({service.id for service in registry.services}))
+    def test_core_suite_profile_lists_the_core_tier(self):
+        from ctl.api.routes.system import catalog
+
+        profile = catalog({})["profiles"][0]
+        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
 
     def test_nextcloud_is_curated_productivity_with_unique_private_ports(self):
         registry = load()

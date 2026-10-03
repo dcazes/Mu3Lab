@@ -311,11 +311,11 @@ class PortTests(unittest.TestCase):
             if argv[:2] == ["docker", "ps"]:
                 return 1, "permission denied"
             if argv[:3] == ["sg", "docker", "-c"] and "docker ps" in argv[3]:
-                return 0, "vaultwarden-vaultwarden-1"
+                return 0, "mu3lab-vaultwarden-vaultwarden-1"
             if argv[:2] == ["docker", "inspect"]:
                 return 1, "permission denied"
             if argv[:3] == ["sg", "docker", "-c"] and "docker inspect" in argv[3]:
-                return 0, str(root / "core" / "vaultwarden")
+                return 0, str(root / "apps" / "vaultwarden")
             return 1, "unexpected command"
 
         from unittest.mock import patch as _patch
@@ -330,7 +330,7 @@ class PortTests(unittest.TestCase):
             result = preflight.check_ports(connect_fn=lambda port: port == 8081)
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["owners"]["8081"]["ours"])
-        self.assertEqual(result["owners"]["8081"]["process"], "vaultwarden-vaultwarden-1")
+        self.assertEqual(result["owners"]["8081"]["process"], "mu3lab-vaultwarden-vaultwarden-1")
         self.assertIn("private HTTPS URL on port 8443", result["owners"]["8081"]["port_info"]["access"])
 
     def test_compose_owner_matches_the_container_publishing_that_port(self):
@@ -342,18 +342,18 @@ class PortTests(unittest.TestCase):
             if argv[:2] == ["ss", "-tlnp"]:
                 return 0, ss_out
             if argv[:2] == ["docker", "ps"]:
-                return 0, ("authentik-worker-1\t\nauthentik-server-1\t127.0.0.1:9001->9000/tcp")
+                return 0, ("mu3lab-authentik-worker-1\t\nmu3lab-authentik-server-1\t127.0.0.1:9001->9000/tcp")
             if argv[:2] == ["docker", "inspect"]:
                 inspected.append(argv[-1])
-                return 0, str(root / "core" / "authentik")
+                return 0, str(root / "apps" / "authentik")
             return 1, "unexpected command"
 
         from unittest.mock import patch as _patch
 
         with _patch("ctl.preflight._run", side_effect=fake_run), _patch("ctl.preflight.ROOT", root):
             result = preflight.check_ports(connect_fn=lambda port: port == 9001)
-        self.assertEqual(result["owners"]["9001"]["process"], "authentik-server-1")
-        self.assertEqual(inspected, ["authentik-server-1"])
+        self.assertEqual(result["owners"]["9001"]["process"], "mu3lab-authentik-server-1")
+        self.assertEqual(inspected, ["mu3lab-authentik-server-1"])
 
     def test_ss_missing_still_reports(self):
         from unittest.mock import patch as _patch

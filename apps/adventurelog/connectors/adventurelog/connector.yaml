@@ -1,0 +1,31 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: adventurelog
+name: AdventureLog MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://github.com/seanmorley15/AdventureLog
+revision: v0.13.0-api
+transport: streamable-http
+endpoint: http://adventurelog-mcp:8080/mcp
+local_health: http://127.0.0.1:8820/health
+credentials:
+- key: api_key
+  env: ADVENTURELOG_API_KEY
+  type: secret
+  label: AdventureLog API key
+  required: true
+provision:
+  service: app
+  script: provision.py
+  interpreter:
+  - python
+  - manage.py
+  - shell
+provision_note: Creates a dedicated Mu3Lab MCP API key for the single active AdventureLog superuser.
+review_note: Mu3Lab adapter exposes only collections and locations. Live API compatibility is checked when the app
+  runs.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py

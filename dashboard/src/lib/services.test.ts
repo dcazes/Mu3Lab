@@ -10,21 +10,11 @@ describe('launchTarget', () => {
     expect(launchTarget(app)?.url).toBe('https://host.ts.net:8453/index.php/apps/user_oidc/login/7');
   });
 
-  it.each(['actual-budget', 'lobehub', 'paperless-ngx'])('starts %s through its session-aware launcher', (id) => {
-    const app = service(id, id, 'optional', {
-      identity: identity({ launch_url: 'https://host.ts.net:8451/login', state: 'migration_required' }),
+  it('opens exactly the launch address the control plane built, sign-in path included', () => {
+    const app = service('actual-budget', 'Actual Budget', 'optional', {
+      identity: identity({ launch_url: 'https://host.ts.net:8448/__mu3lab/login', state: 'migration_required' }),
     });
-    expect(launchTarget(app)).toEqual({ url: 'https://host.ts.net:8451/__mu3lab/login', label: 'Open' });
-  });
-
-  it('enters SSO apps through their Authentik login path', () => {
-    const nextcloud = service('nextcloud', 'Nextcloud', 'optional', {
-      identity: identity({ launch_url: 'https://host.ts.net:8453' }),
-    });
-    expect(launchTarget(nextcloud)).toEqual({
-      url: 'https://host.ts.net:8453/index.php/apps/user_oidc/login/1',
-      label: 'Open',
-    });
+    expect(launchTarget(app)).toEqual({ url: 'https://host.ts.net:8448/__mu3lab/login', label: 'Open' });
   });
 
   it('keeps apps launchable while owner migration is pending', () => {
@@ -55,22 +45,15 @@ describe('launchTarget', () => {
     expect(launchTarget(caddy)).toBeNull();
   });
 
-  it('opens a verified legacy route when the identity projection is missing', () => {
+  it('opens the verified route when the identity projection is missing', () => {
     const app = service('mealie', 'Mealie', 'optional', { ui: readyUi('https://host.ts.net:8450') });
-    expect(launchTarget(app)?.url).toBe('https://host.ts.net:8450/api/auth/oauth');
+    expect(launchTarget(app)?.url).toBe('https://host.ts.net:8450');
   });
 
-  it('starts LiteLLM at its HTTPS UI instead of a stale login redirect', () => {
-    const litellm = service('litellm', 'LiteLLM', 'core', {
-      identity: identity({ mode: 'proxy_gate', launch_url: 'http://host.ts.net:8445/sso/key/generate?x=1' }),
-    });
-    expect(launchTarget(litellm)?.url).toBe('https://host.ts.net:8445/ui/');
-  });
-
-  it('labels Firecrawl as an API', () => {
-    const firecrawl = service('firecrawl', 'Firecrawl', 'optional', {
+  it('uses the button label from the app manifest', () => {
+    const firecrawl = service('firecrawl', 'Firecrawl', 'core', {
       identity: identity({ mode: 'none', launch_url: 'https://host.ts.net:8460' }),
-      ui: readyUi('https://host.ts.net:8460'),
+      ui: { ...readyUi('https://host.ts.net:8460')!, launch_label: 'Open API' },
     });
     expect(launchTarget(firecrawl)?.label).toBe('Open API');
   });
@@ -88,7 +71,7 @@ describe('service state helpers', () => {
     expect(
       canInstall(service('a', 'A', 'optional', { state: 'not_installed', installation_state: 'not_installed' })),
     ).toBe(true);
-    expect(canInstall(service('b', 'B', 'blocked', { state: 'blocked', installation_state: 'not_installed' }))).toBe(
+    expect(canInstall(service('b', 'B', 'core', { state: 'not_installed', installation_state: 'not_installed' }))).toBe(
       false,
     );
   });

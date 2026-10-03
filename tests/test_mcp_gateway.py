@@ -19,7 +19,7 @@ from ctl.mcp_review import load as load_review
 from ctl.registry import load as load_registry
 
 ROOT = Path(__file__).resolve().parent.parent
-_spec = importlib.util.spec_from_file_location("mu3lab_gateway", ROOT / "apps" / "mcp" / "gateway" / "gateway.py")
+_spec = importlib.util.spec_from_file_location("mu3lab_gateway", ROOT / "platform" / "tool-gateway" / "gateway.py")
 assert _spec and _spec.loader
 gateway = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gateway)
@@ -57,7 +57,7 @@ class ReviewTests(unittest.TestCase):
                 self.assertFalse(set(review.blocked) & set(review.tools), server.id)
 
     def test_credential_tools_are_never_offered(self):
-        review = load_review("immich-photo-manager", "mcp-reviews/immich-photo-manager.yaml")
+        review = load_review("immich-photo-manager", "apps/immich/connectors/immich-photo-manager/review.yaml")
         self.assertIn("update_credentials", review.blocked)
         self.assertIn("empty_trash", review.blocked)
 

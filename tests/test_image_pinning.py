@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ImagePinningTests(unittest.TestCase):
     def test_every_compose_image_is_pinned(self):
         unpinned = []
-        for path in sorted([*ROOT.glob("core/**/docker-compose.yml"), *ROOT.glob("apps/**/docker-compose.yml")]):
+        for path in sorted([*ROOT.glob("platform/**/docker-compose.yml"), *ROOT.glob("apps/**/docker-compose.yml")]):
             services = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("services") or {}
             for name, service in services.items():
                 image = str((service or {}).get("image", ""))
@@ -26,7 +26,7 @@ class ImagePinningTests(unittest.TestCase):
     def test_every_dockerfile_base_is_pinned(self):
         unpinned = [
             f"{path.relative_to(ROOT)}: {line}"
-            for path in sorted([*ROOT.glob("apps/**/Dockerfile"), *ROOT.glob("core/**/Dockerfile")])
+            for path in sorted([*ROOT.glob("apps/**/Dockerfile"), *ROOT.glob("platform/**/Dockerfile")])
             for line in path.read_text(encoding="utf-8").splitlines()
             if re.match(r"FROM\s", line) and "@sha256:" not in line
         ]

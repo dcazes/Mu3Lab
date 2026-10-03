@@ -267,7 +267,7 @@ def reset_authentik_admin_password(password: str, log: Callable[[str], None]) ->
     if not password or "\n" in password or "\r" in password:
         return {"ok": False, "error": "invalid temporary password"}
     rc, _output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "authentik-server-1", "ak", "changepassword", "akadmin"],
+        ["docker", "exec", "-i", "mu3lab-authentik-server-1", "ak", "changepassword", "akadmin"],
         password + "\n" + password + "\n",
         log,
         timeout=90,
@@ -329,7 +329,10 @@ def authentik_set_owner(email: str, name: str, password: str, log: Callable[[str
     rc, output = 1, ""
     for attempt in range(1, 6):
         rc, output = docker_cmd_with_stdin(
-            ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", script], payload, log, timeout=120
+            ["docker", "exec", "-i", "mu3lab-authentik-server-1", "ak", "shell", "-c", script],
+            payload,
+            log,
+            timeout=120,
         )
         if rc == 0 and "MU3LAB_OWNER_OK" in output:
             break

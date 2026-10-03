@@ -6,7 +6,7 @@ import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
 import { Link } from '../../lib/router';
-import { displayStage, isInstalled, launchTarget } from '../../lib/services';
+import { isInstalled, launchTarget } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 
@@ -147,7 +147,9 @@ export function GetStarted() {
   const setup = providers.data?.setup;
   if (!operator || !setup || !vault.data || manual.hidden) return null;
   // Only apps the owner chose count; setup installs the core ones by itself.
-  const hasApp = data.services.services.some((service) => displayStage(service) === 'optional' && isInstalled(service));
+  const hasApp = data.services.services.some(
+    (service) => service.group === 'apps' && service.stage === 'optional' && isInstalled(service),
+  );
   const extension = vault.data.browser_extension;
   const preinstalled = Boolean(extension?.browsers.length);
   const steps = [

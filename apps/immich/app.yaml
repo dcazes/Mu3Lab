@@ -1,0 +1,89 @@
+# Immich — see ctl/manifest/models.py for every field.
+id: immich
+name: Immich
+tier: optional
+group: apps
+category: media
+tagline: Photo and video backup
+summary: Manages your photo and video library on your server. Upload media from your phone, organize shared albums,
+  and find images using metadata, facial recognition, and visual search.
+version: v3.2.4
+upstream: immich-app/immich
+service:
+  local_port: 2283
+  health:
+    path: /api/server/ping
+route:
+  https_port: 8449
+  caddy_port: 19466
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-immich
+    redirect_paths:
+    - /auth/login
+    - /user-settings
+    - /api/oauth/mobile-redirect
+    launch_path: /auth/login?autoLaunch=1
+    launch: json_post
+    json_launch:
+      path: /api/oauth/authorize
+      body:
+        redirectUri: '{origin}/auth/login'
+      url_key:
+      - url
+    env:
+      client_id: IMMICH_OIDC_CLIENT_ID
+      client_secret: IMMICH_OIDC_CLIENT_SECRET
+  note: Signs in only through Authentik; there is no separate Immich password.
+account:
+  mode: api_bootstrap
+  user_action: Open Immich; Authentik signs you in as its administrator.
+secrets:
+- env: DB_PASSWORD
+- env: DB_USERNAME
+  kind: fixed
+  value: postgres
+- env: DB_DATABASE_NAME
+  kind: fixed
+  value: immich
+- env: IMMICH_PASSWORD_LOGIN_ENABLED
+  kind: fixed
+  value: 'true'
+env:
+  IMMICH_OIDC_ISSUER_URL: https://{{dns_name}}/application/o/mu3lab-immich/.well-known/openid-configuration
+rules:
+- rule: password_login_off_after_setup
+  with:
+    env: IMMICH_PASSWORD_LOGIN_ENABLED
+chat:
+  assistant:
+    title: Immich
+    description: Find and organize photos and videos.
+    instructions: Help find and organize Immich photos and albums. Ask before uploads, edits, or deletions. Use
+      only Immich tools assigned to this agent.
+  connectors:
+  - immich-photo-manager
+  - immich-control
+mobile:
+  primary: immich-mobile
+  clients:
+  - id: immich-mobile
+    name: Immich
+    kind: native
+    support: official
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/us/app/immich/id1613945652
+      android: https://play.google.com/store/apps/details?id=app.alextran.immich
+    homepage: https://immich.app/docs/features/mobile-app/
+    setup: server_url
+    summary: The official Immich client provides photo browsing and automatic mobile backup.
+    steps:
+    - Install Immich and paste the Mu3Lab Immich server URL.
+    - Choose OAuth login and complete the Authentik sign-in in the browser.
+    - Select the albums you want Immich to back up.
+resource_guidance: Media storage and machine-learning jobs can be resource intensive.
+setup_action: Install only when you want private photo management.

@@ -21,8 +21,7 @@ export type LifecycleState =
   | 'updating'
   | 'degraded'
   | 'failed'
-  | 'needs_attention'
-  | 'blocked';
+  | 'needs_attention';
 
 export interface MobileClient {
   id: string;
@@ -49,20 +48,17 @@ export interface Service {
   lifecycle: 'always_on' | 'shared' | 'optional';
   https_port: number;
   private_https_port?: number;
-  maturity: 'supported' | 'experimental' | 'planned';
   auth: 'oidc' | 'proxy' | 'trusted_header' | 'local' | 'excluded';
-  profiles: string[];
   dependencies: string[];
-  availability: 'available' | 'blocked';
-  blocked_reason: string;
-  stage: 'foundation' | 'core' | 'optional' | 'blocked';
+  stage: 'foundation' | 'core' | 'optional';
+  /** How the dashboard groups the app: things people use, AI plumbing, or infrastructure. */
+  group: 'apps' | 'ai' | 'infrastructure';
   route: 'ready' | 'pending' | 'unavailable';
   routable: boolean;
   required: boolean;
   identity_note: string;
   resource_guidance: string;
   setup_action: string;
-  mcp: { exposed: boolean; risk: string };
   state: LifecycleState;
   lifecycle_state: LifecycleState;
   health_state: string;
@@ -86,6 +82,8 @@ export interface Service {
     label: string;
     authentication: string;
     reason: string | null;
+    /** Button text for opening the app, from its manifest. */
+    launch_label?: string;
   };
   // These fields were added with the v1 operator surface. Keep them optional
   // while an already-running control plane is being upgraded: the static
@@ -534,7 +532,7 @@ export interface McpServer {
     | 'stopped';
   error?: string | null;
   last_verified_at?: string;
-  auth: { type: string; scopes: string[]; configured: boolean; auto_provision: boolean; auto_provision_note?: string };
+  auth: { type: string; configured: boolean; auto_provision: boolean; auto_provision_note?: string };
   review?: { status: string; repository: string; revision: string; preferred: boolean; note?: string };
   configuration?: ServiceConfigField[];
   tools: Array<{

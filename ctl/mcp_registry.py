@@ -92,8 +92,8 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             )
         elif app_state == "stopped":
             state, error = "stopped", "Start the application before connecting or verifying its MCP integration."
-        elif service.is_blocked or app_state in {"blocked", "planned", "not_installed", "config_required"}:
-            state, error = "unavailable", service.blocked_reason or "Install the application first."
+        elif app_state in {"planned", "not_installed", "config_required"}:
+            state, error = "unavailable", "Install the application first."
         elif missing:
             state = "authentication_required"
             # An attempt already told us why the credential could not be made.
@@ -107,21 +107,8 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             state, error = str(runtime["state"]), (runtime.get("last_error") or {}).get("message")
         else:
             state, error = "disabled", None
-        manifest = service.mcp
-        tools = (
-            runtime.get("tool_snapshot", [])
-            if runtime and runtime.get("tool_snapshot")
-            else [
-                {
-                    "id": str(tool.get("id", "")),
-                    "title": str(tool.get("title", "")),
-                    "risk": str(tool.get("risk", "read")),
-                    "enabled": enabled,
-                }
-                for tool in manifest.get("tools", [])
-                if isinstance(tool, dict)
-            ]
-        )
+        # Tools are only ever what the connector itself reported when it was checked.
+        tools = list(runtime.get("tool_snapshot") or []) if runtime else []
         tools = [
             tool
             | {"permission": activity.permission(server.id, str(tool.get("id", "")), str(tool.get("risk", "write")))}
@@ -154,7 +141,6 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
                 "last_verified_at": str((runtime or {}).get("last_verified_at", "")),
                 "auth": {
                     "type": "service-credential" if server.credentials else "none",
-                    "scopes": list(manifest.get("scopes", [])),
                     "configured": not missing,
                     "auto_provision": server.auto_provision,
                     "auto_provision_note": server.auto_provision_note,

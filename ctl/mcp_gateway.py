@@ -26,7 +26,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "apps" / "mcp" / "gateway"
+SOURCE = ROOT / "platform" / "tool-gateway"
 PORT = 8822
 ENDPOINT = "http://mcp-gateway:8080/apps/{service_id}/mcp"
 LOCAL_ENDPOINT = f"http://127.0.0.1:{PORT}" + "/apps/{service_id}/mcp"

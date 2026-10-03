@@ -91,7 +91,7 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_caddy_preserves_public_authentik_origin_headers(self):
         root = Path(__file__).resolve().parents[1]
         for name in ("Caddyfile", "Caddyfile.authenticated"):
-            content = (root / "core" / "ingress" / name).read_text(encoding="utf-8")
+            content = (root / "apps" / "ingress" / name).read_text(encoding="utf-8")
             with self.subTest(name=name):
                 self.assertIn("header_up Host {http.request.host}", content)
                 self.assertIn("header_up X-Forwarded-Host {http.request.host}", content)

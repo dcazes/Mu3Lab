@@ -21,7 +21,7 @@ from ctl.jobs import redact
 from ctl.runtime import RuntimePaths
 
 # Blank in the test suite, which must never touch the host's live Authentik.
-CONTAINER = os.environ.get("MU3LAB_AUTHENTIK_CONTAINER", "authentik-server-1")
+CONTAINER = os.environ.get("MU3LAB_AUTHENTIK_CONTAINER", "mu3lab-authentik-server-1")
 _MARK = "MU3LAB_BLUEPRINTS="
 _SCRIPT = r"""
 from pathlib import Path

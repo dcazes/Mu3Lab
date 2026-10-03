@@ -83,8 +83,6 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     if action not in SUPPORTED_ACTIONS:
         raise ApiError(400, "unsupported service action")
     service = runtime.service(service_id)
-    if service.is_blocked:
-        raise ApiError(409, service.blocked_reason)
     # Deleting data cannot be undone: the request must repeat the app's name,
     # so a replayed or scripted "uninstall" can never escalate to it.
     if action == "uninstall_delete_data" and str(body.get("confirm", "")).strip().casefold() != service.name.casefold():
@@ -282,9 +280,7 @@ def _release(service: Any) -> dict[str, Any]:
     else:
         release = app_releases.status(service, ROOT)
     reason = ""
-    if service.is_blocked:
-        reason = service.blocked_reason
-    elif service.stage != "optional":
+    if service.stage != "optional":
         reason = f"{service.name} is part of Mu3Lab itself and is updated together with Mu3Lab."
     elif _effective_state(service, runtime.control_state()) not in MAINTENANCE_STATES:
         reason = f"Install {service.name} before updating it."

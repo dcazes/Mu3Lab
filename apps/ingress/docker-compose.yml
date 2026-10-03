@@ -1,0 +1,24 @@
+# Caddy: the one loopback entry point. Tailscale Serve forwards each private
+# HTTPS port to a Caddy listener here; Caddy routes it to the app.
+name: mu3lab-ingress
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MU3LAB_INGRESS_TOKEN: ${MU3LAB_INGRESS_TOKEN:?MU3LAB_INGRESS_TOKEN is required}
+    volumes:
+      - ${MU3LAB_CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import psutil
-import yaml
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -26,7 +25,6 @@ from ctl.runtime import RuntimePaths
 from ctl.service_state import container_memory, tailnet_serve_status, tailscale_status
 
 ROOT = Path(__file__).resolve().parents[3]
-CATALOG = ROOT / "catalog.yaml"
 
 health_router = APIRouter(prefix="/api", tags=["health"])
 router = APIRouter(prefix="/api/v1", tags=["system"])
@@ -40,49 +38,30 @@ def health() -> dict[str, Any]:
 
 @router.get("/catalog")
 def catalog(_member: Member) -> dict[str, Any]:
-    """Project bundle definitions and UI copy from the typed service manifest."""
-    empty = {"ok": False, "profiles": [], "services": {}}
-    try:
-        raw = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        return empty | {"error": str(exc)}
-    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
-        return empty | {"error": "catalog schema is invalid"}
+    """App descriptions and the core suite, from the app manifests."""
     try:
         registry = load_registry()
     except RegistryError as exc:
-        return empty | {"error": str(exc)}
+        return {"ok": False, "profiles": [], "services": {}, "error": str(exc)}
+    core = [service.id for service in registry.services if service.stage == "core" or service.manifest.tier == "core"]
     services = {
         service.id: {
             "summary": service.summary or service.setup_action,
             "tagline": service.tagline,
             "category": service.category,
-            "stage_label": f"{service.maturity.title()} · {service.stage}",
+            "stage_label": service.group,
             "resource_guidance": service.resource_guidance,
             "integrations": list(service.dependencies),
         }
         for service in registry.services
     }
-    return {"ok": True, "profiles": raw.get("profiles", []), "services": services}
-
-
-@router.get("/integrations")
-def integrations(_member: Member) -> dict[str, Any]:
-    """Expose reviewed wiring declarations only; no credentials or mutations."""
-    try:
-        registry = load_registry()
-    except RegistryError as exc:
-        return {"ok": False, "error": str(exc), "integrations": []}
-    return {
-        "ok": True,
-        "policy": "free-first",
-        "integrations": [
-            {"source": "ollama", "destination": "litellm", "kind": "model"},
-            {"source": "freellmapi", "destination": "litellm", "kind": "optional_model"},
-            {"source": "litellm", "destination": "lobehub", "kind": "model"},
-        ],
-        "blocked": [service.public() for service in registry.services if service.is_blocked],
+    profile = {
+        "id": "core-suite",
+        "name": "Core suite",
+        "description": "The core AI services for local models and embeddings, external provider connections, chat, and web research.",
+        "services": core,
     }
+    return {"ok": True, "profiles": [profile], "services": services}
 
 
 def _worker_state() -> str:

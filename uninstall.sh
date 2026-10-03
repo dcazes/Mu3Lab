@@ -140,8 +140,8 @@ if have docker; then
   # by name; never `network prune`, which would also delete other projects' networks.
   mapfile -t app_nets < <("${DOCKER[@]}" network ls --format '{{.Name}}' | grep -E '^mu3lab-')
   [[ ${#app_nets[@]} -gt 0 ]] && run "${DOCKER[@]}" network rm "${app_nets[@]}"
-  mapfile -t listed < <(grep -hoE '"[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?"' \
-    "$ROOT/services.yaml" "$ROOT/mcp-catalog.yaml" 2>/dev/null | tr -d '"' | grep -E '[:/]' | sed 's/@sha256:.*//' | sort -u)
+  mapfile -t listed < <(sed -nE 's/^[[:space:]]*image:[[:space:]]*"?([^"[:space:]]+)"?.*/"\1"/p' \
+    $(find "$ROOT/apps" "$ROOT/platform" -name 'docker-compose*.yml' 2>/dev/null) 2>/dev/null | tr -d '"' | grep -E '[:/]' | sed 's/@sha256:.*//' | sort -u)
   mapfile -t images < <("${DOCKER[@]}" images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do
     repo="${ref%:*}"
     if [[ "$repo" == mu3lab* ]] || printf '%s\n' "${listed[@]}" | grep -qxE "(docker\.io/)?(library/)?${ref//./\\.}|(docker\.io/)?(library/)?${repo//./\\.}(:.*)?"; then

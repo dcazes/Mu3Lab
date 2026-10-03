@@ -122,7 +122,7 @@ class PeopleError(ValueError):
 
 def _run(request: dict[str, Any]) -> dict[str, Any]:
     rc, output = actions.docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", _SCRIPT],
+        ["docker", "exec", "-i", "mu3lab-authentik-server-1", "ak", "shell", "-c", _SCRIPT],
         json.dumps(request) + "\n",
         lambda _line: None,
         timeout=90,

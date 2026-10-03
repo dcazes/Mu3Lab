@@ -109,8 +109,6 @@ def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, s
 
 def allowed_actions(service: Service, state: str) -> list[str]:
     """Actions for this state. "uninstall" also admits "uninstall_delete_data"."""
-    if service.is_blocked:
-        return []
     if service.stage == "optional" and state in {"planned", "not_installed"}:
         return ["install"]
     uninstall = ["uninstall"] if service.stage == "optional" else []
@@ -1033,7 +1031,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             f"Unknown curated service: {exc}",
         )
         return
-    if action not in SUPPORTED_ACTIONS or service.is_blocked:
+    if action not in SUPPORTED_ACTIONS:
         _fail(
             store,
             state,
@@ -1103,22 +1101,6 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     project = project_path(service, root)
-    if service.id == "authentik" and action in {"start", "restart"}:
-        from ctl.lifecycle import authentik_storage
-
-        if authentik_storage.status() != "ready":
-            # Starting now would bring Authentik up on an empty data folder.
-            _fail(
-                store,
-                state,
-                job_id,
-                service.id,
-                worker_id,
-                "validate_service",
-                "authentik_storage_pending",
-                "Run ./install.sh once to move Authentik's data into /srv/mu3lab before restarting it.",
-            )
-            return
     if not (project / "docker-compose.yml").is_file():
         _fail(
             store,

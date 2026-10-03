@@ -50,16 +50,8 @@ jobs:
       - name: Build dashboard
         working-directory: dashboard
         run: npm run build
-      - name: Validate checked-in YAML
-        run: |
-          uv run --frozen python - <<'PY'
-          from pathlib import Path
-          import yaml
-          for path in (Path('services.yaml'), Path('catalog.yaml'), Path('mcp-catalog.yaml'),
-                       *Path('core').glob('**/docker-compose.yml'),
-                       *Path('apps').glob('**/docker-compose.yml')):
-              yaml.safe_load(path.read_text(encoding='utf-8'))
-          PY
+      - name: Validate app manifests and chat connectors
+        run: uv run --frozen python -c "from ctl.manifest.catalog import load; print(len(load().apps), 'apps valid')"
       - name: Validate Compose interpolation
         run: |
           while IFS= read -r compose_file; do
@@ -115,7 +107,7 @@ jobs:
             MU3LAB_UID=1000 \
             MU3LAB_GID=1000 \
               docker compose -f "$compose_file" config --quiet
-          done < <(find core apps -name docker-compose.yml -type f | sort)
+          done < <(find apps platform -name docker-compose.yml -type f | sort)
       - name: Scan tracked files for accidental private environment files
         run: |
           ! git ls-files | grep -E '(^|/)\.env$'

@@ -1,0 +1,85 @@
+# Nextcloud — see ctl/manifest/models.py for every field.
+id: nextcloud
+name: Nextcloud
+tier: optional
+group: apps
+category: productivity
+tagline: Files, calendars, and contacts
+summary: A self-hosted workspace for files, calendars, and contacts. Sync and share files across devices, manage
+  events, and connect a Nextcloud calendar to Mu3Lab’s calendar and Home agenda.
+version: v35.0.1
+upstream: nextcloud/server
+service:
+  local_port: 8085
+  health:
+    path: /status.php
+  start_timeout_seconds: 900
+route:
+  https_port: 8453
+  caddy_port: 19470
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-nextcloud
+    redirect_paths:
+    - /apps/user_oidc/code
+    launch_path: /index.php/apps/user_oidc/login/{{NEXTCLOUD_OIDC_PROVIDER_ID}}
+    env:
+      client_id: NEXTCLOUD_OIDC_CLIENT_ID
+      client_secret: NEXTCLOUD_OIDC_CLIENT_SECRET
+  note: Signs in only through Authentik; there is no separate Nextcloud password.
+account:
+  mode: environment_bootstrap
+  user_action: Open Nextcloud; Authentik signs you in as its administrator.
+secrets:
+- env: NEXTCLOUD_DB_PASSWORD
+- env: NEXTCLOUD_REDIS_PASSWORD
+- env: NEXTCLOUD_OIDC_PROVIDER_ID
+  kind: fixed
+  value: '1'
+env:
+  NEXTCLOUD_TRUSTED_DOMAINS: '{{dns_name}} localhost 127.0.0.1'
+  NEXTCLOUD_TRUSTED_PROXIES: 127.0.0.1
+  NEXTCLOUD_OVERWRITEHOST: '{{dns_name}}:{{https_port}}'
+  NEXTCLOUD_OVERWRITECLIURL: '{{public_url}}'
+  NEXTCLOUD_OIDC_DISCOVERY_URL: '{{discovery_url}}'
+rules:
+- rule: staged_first_start
+  with:
+    first:
+    - db
+    - redis
+    - app
+- rule: first_admin_from_env
+  with:
+    override: docker-compose.bootstrap.yml
+    username: verbatim
+chat:
+  assistant:
+    title: Nextcloud
+    description: Work with files and calendars.
+    instructions: Help with Nextcloud files and calendars. Do not claim to have accessed live data unless a reviewed
+      Nextcloud tool is assigned. Ask before changing data.
+  connectors:
+  - nextcloud-context-agent
+mobile:
+  primary: nextcloud-mobile
+  clients:
+  - id: nextcloud-mobile
+    name: Nextcloud
+    kind: native
+    support: official
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/us/app/nextcloud/id1125420102
+      android: https://play.google.com/store/apps/details?id=com.nextcloud.client
+    homepage: https://nextcloud.com/install/
+    setup: server_url
+    summary: The official Nextcloud client syncs files and uploads photos to your private server.
+    steps:
+    - Install Nextcloud and enter the Mu3Lab Nextcloud URL.
+    - Complete the browser-based Authentik login and approve the device.
+resource_guidance: Stores files and calendar data locally; storage use grows with uploaded content.
+setup_action: Install private files and calendar with Authentik sign-in.

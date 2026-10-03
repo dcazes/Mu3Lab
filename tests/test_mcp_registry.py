@@ -7,23 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import yaml
-
 from ctl.control_state import ControlState
-from ctl.mcp_catalog import CATALOG
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl.mcp_registry import snapshot
 from ctl.registry import load
 
 INFRASTRUCTURE = {"vaultwarden", "ingress", "authentik", "ollama", "litellm", "freellmapi", "lobehub"}
-
-
-def _catalog_with(tmp: str, mutate) -> Path:
-    raw = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
-    mutate(raw)
-    path = Path(tmp) / "mcp-catalog.yaml"
-    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    return path
 
 
 class McpRegistryTests(unittest.TestCase):
@@ -39,31 +28,14 @@ class McpRegistryTests(unittest.TestCase):
             ):
                 return snapshot(registry, installed)
 
-    def test_declares_mealie_and_actual_data_tools(self):
+    def test_tools_are_only_what_discovery_reported(self):
         result = self._snapshot({"mealie": "running", "actual-budget": "running"})
         servers = {server["id"]: server for server in result["servers"]}
-        self.assertIn("mealie.add_shopping_item", {tool["id"] for tool in servers["mealie-community"]["tools"]})
-        self.assertIn("actual.create_transaction", {tool["id"] for tool in servers["actual-budget-community"]["tools"]})
+        self.assertEqual(servers["mealie-community"]["tools"], [])
 
     def test_infrastructure_services_never_have_an_mcp_server(self):
         exposed = {server.service_id for server in load_mcp_catalog(load())}
         self.assertFalse(exposed & INFRASTRUCTURE)
-
-    def test_catalog_that_exposes_vaultwarden_is_rejected(self):
-        def add_vaultwarden(raw: dict) -> None:
-            raw["servers"].append(
-                raw["servers"][0] | {"id": "vaultwarden-mcp", "service_id": "vaultwarden", "preferred": False}
-            )
-
-        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
-            load_mcp_catalog(load(), _catalog_with(tmp, add_vaultwarden))
-
-    def test_catalog_that_drops_the_vaultwarden_exclusion_is_rejected(self):
-        def drop_exclusion(raw: dict) -> None:
-            raw["excluded_services"] = [item for item in raw["excluded_services"] if item != "vaultwarden"]
-
-        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
-            load_mcp_catalog(load(), _catalog_with(tmp, drop_exclusion))
 
     def test_uninstalled_application_mcp_cards_are_hidden(self):
         registry = load()

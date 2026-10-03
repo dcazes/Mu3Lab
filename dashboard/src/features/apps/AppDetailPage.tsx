@@ -68,13 +68,6 @@ function NextSteps({ service }: { service: Service }) {
   const identity = service.identity;
   const steps = [];
 
-  if (service.blocked_reason && service.stage === 'blocked')
-    steps.push(
-      <Callout key="blocked" tone="info" title="Not available yet">
-        {service.blocked_reason}
-      </Callout>,
-    );
-
   if (['failed', 'needs_attention', 'degraded'].includes(service.state) && isInstalled(service))
     steps.push(
       <Callout

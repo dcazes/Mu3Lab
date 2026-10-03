@@ -1,0 +1,81 @@
+# Actual Budget — see ctl/manifest/models.py for every field.
+id: actual-budget
+name: Actual Budget
+tier: optional
+group: apps
+category: finance
+tagline: Envelope budgeting and spending
+summary: A personal finance app built around envelope budgeting. Track accounts and transactions, plan spending,
+  and review financial reports, with budget data synced through your own server.
+version: v26.9.0
+upstream: actualbudget/actual
+service:
+  local_port: 5006
+  health:
+    path: /
+route:
+  https_port: 8448
+  caddy_port: 19465
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-actual-budget
+    redirect_paths:
+    - /openid/callback
+    launch_path: /__mu3lab/login
+    launch: json_post
+    json_launch:
+      path: /account/login
+      body:
+        loginMethod: openid
+        returnUrl: '{origin}'
+      url_key:
+      - data
+      - returnUrl
+      launcher: true
+    env:
+      client_id: ACTUAL_OPENID_CLIENT_ID
+      client_secret: ACTUAL_OPENID_CLIENT_SECRET
+      discovery_url: ACTUAL_OPENID_DISCOVERY_URL
+    first_run_checks:
+    - path: /account/needs-bootstrap
+      expect:
+        data.bootstrapped: true
+        data.loginMethod: openid
+      message: Actual Budget is waiting for a first-time password instead of using Authentik.
+    initial_owner_env: MU3LAB_INITIAL_OWNER_USERNAME
+account:
+  mode: oidc_first_login
+  user_action: Open Actual Budget; Authentik signs you in and makes you its owner.
+env:
+  ACTUAL_OPENID_SERVER_HOSTNAME: '{{public_url}}'
+  ACTUAL_OPENID_ENFORCE: 'true'
+  ACTUAL_USER_CREATION_MODE: login
+chat:
+  assistant:
+    title: Actual Budget
+    description: Plan budgets and inspect transactions.
+    instructions: Help with Actual Budget. Explain calculations and ask before changing transactions, categories,
+      or budgets. Use only Actual Budget tools assigned to this agent.
+  connectors:
+  - actual-budget-community
+mobile:
+  primary: actual-pwa
+  clients:
+  - id: actual-pwa
+    name: Actual Budget PWA
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://actualbudget.org/docs/faq/
+    setup: pwa
+    summary: Actual recommends its responsive installable web app instead of the deprecated native clients.
+    steps:
+    - Open the private Actual Budget URL on the phone.
+    - Complete sign-in, then use the browser menu to add Actual to the Home Screen.
+resource_guidance: Lightweight personal finance service.
+setup_action: Install only when you want private budgeting.

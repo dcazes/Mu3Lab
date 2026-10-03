@@ -398,9 +398,7 @@ def status(
         if (service.stage == "optional" or service.id == "lobehub") and runtime_file.is_file()
         else service.compose_path(root) / "docker-compose.yml"
     )
-    if service.is_blocked:
-        lifecycle_state, detail = "blocked", service.blocked_reason
-    elif not compose_file.is_file():
+    if not compose_file.is_file():
         lifecycle_state, detail = "planned", "This curated stack is not installed yet."
     else:
         compose_state = (
@@ -493,7 +491,7 @@ def status(
         "setup_state": setup_state,
         "route_state": route_state,
         "identity_mode": service.auth,
-        "backup_state": "declared" if service.backup else "not_declared",
+        "backup_state": "declared",
         "last_job_id": "",
         "last_error": detail if lifecycle_state == "needs_attention" else "",
         "user_action": (
@@ -515,6 +513,7 @@ def status(
             "state": ui_state,
             "url": url or None,
             "label": "Open securely",
+            "launch_label": str(ui.get("label", "Open")),
             "authentication": str(ui.get("authentication", service.auth)),
             "reason": ui_reason,
         },

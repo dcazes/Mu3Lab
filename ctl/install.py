@@ -160,8 +160,6 @@ DISPATCH = {
     ("browser_extension", "not_needed"): "skip",
     ("browser_extension", "no_address"): "skip",  # a convenience; never block the install on it
     ("browser_extension", "ready"): "skip",
-    ("authentik_storage", "needs_migration"): "move_authentik_data",
-    ("authentik_storage", "ready"): "skip",
     ("authentik", "down"): "authentik_up",
     ("authentik", "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
@@ -968,9 +966,9 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
     log = ctx["log_fn"]("caddy")
-    projdir = ctx["root"] / "core" / "ingress"
+    projdir = ctx["root"] / "apps" / "ingress"
     if not (projdir / "docker-compose.yml").is_file():
-        return {"ok": False, "error": "core/ingress/docker-compose.yml missing from checkout."}
+        return {"ok": False, "error": "apps/ingress/docker-compose.yml missing from checkout."}
     runtime_caddy = RuntimePaths().projects / "ingress" / "Caddyfile"
     source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
     _update_progress(
@@ -1011,7 +1009,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     return {
         "ok": False,
         "error": f"Caddy container started but its health endpoint on "
-        f":{CADDY_PORT} never answered (see `docker logs ingress-caddy-1`).",
+        f":{CADDY_PORT} never answered (see `docker logs mu3lab-ingress-caddy-1`).",
     }
 
 
@@ -1177,7 +1175,7 @@ def _compose_image_outdated(projdir: Path) -> bool:
 
 def _vaultwarden_check(ctx: dict) -> dict:
     health = _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
-    if health["state"] == "ready" and _compose_image_outdated(ctx["root"] / "core" / "vaultwarden"):
+    if health["state"] == "ready" and _compose_image_outdated(ctx["root"] / "apps" / "vaultwarden"):
         # Bitwarden's apps update themselves and stop signing in to an old server.
         return {"status": "missing", "state": "outdated", "detail": "Vaultwarden will be updated."}
     return health
@@ -1204,7 +1202,7 @@ def _vaultwarden_account_exists() -> bool:
 
 def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("vaultwarden")
-    projdir = ctx["root"] / "core" / "vaultwarden"
+    projdir = ctx["root"] / "apps" / "vaultwarden"
     _update_progress(
         ctx,
         "vaultwarden",
@@ -1307,7 +1305,7 @@ def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
     domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
     if not domain:
         return {"ok": False, "error": "Tailscale did not provide a valid MagicDNS name for Vaultwarden."}
-    projdir = ctx["root"] / "core" / "vaultwarden"
+    projdir = ctx["root"] / "apps" / "vaultwarden"
     _update_progress(
         ctx,
         "vaultwarden_serve",
@@ -1411,34 +1409,6 @@ def _authentik_compose_env(blueprints: Path, log) -> dict[str, str]:
     }
 
 
-def _authentik_storage_check(ctx: dict) -> dict:
-    from ctl.lifecycle import authentik_storage
-
-    state = authentik_storage.status()
-    return _row(
-        "authentik_storage",
-        "ok" if state == "ready" else "missing",
-        "Authentik's data is in Mu3Lab's data folder."
-        if state == "ready"
-        else "Authentik's data is still in Docker volumes, outside /srv/mu3lab/data, so a copy of that folder "
-        "would miss your accounts.",
-        state,
-        "" if state == "ready" else "Move it (Authentik stops for about a minute).",
-    )
-
-
-def fix_authentik_storage(check: dict, ctx: dict) -> dict:
-    from ctl.lifecycle import authentik_storage
-
-    log = ctx["log_fn"]("authentik_storage")
-    blueprints = RuntimePaths().projects / "authentik" / "blueprints"
-    ok, detail = authentik_storage.migrate(
-        ctx["root"] / "core" / "authentik", _authentik_compose_env(blueprints, log), log
-    )
-    log(detail)
-    return {"ok": True} if ok else {"ok": False, "error": detail}
-
-
 def fix_authentik(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("authentik")
     from ctl.authentik_blueprints import write_dashboard_blueprint
@@ -1484,7 +1454,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         # signal: it waits for the declared container health checks rather
         # than merely reporting that processes were created.
         result["rc"], result["out"] = actions.compose_up(
-            ctx["root"] / "core" / "authentik",
+            ctx["root"] / "apps" / "authentik",
             log,
             env=values,
             timeout=1200,
@@ -1604,7 +1574,7 @@ def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
     from ctl import routes
 
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
-    source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
+    source = ctx["root"] / "apps" / "ingress" / "Caddyfile.authenticated"
     blueprint = RuntimePaths().projects / "authentik" / "blueprints" / "mu3lab-dashboard.yaml"
     try:
         if not routes.base_matches(source.read_text(encoding="utf-8"), target.read_text(encoding="utf-8")):
@@ -1674,7 +1644,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
 
     from ctl import routes
 
-    source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
+    source = ctx["root"] / "apps" / "ingress" / "Caddyfile.authenticated"
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     # Keep the routes of apps installed from the dashboard across updates.
@@ -1697,7 +1667,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             )
 
     ingress_result["rc"], ingress_result["out"] = actions.compose_up(
-        ctx["root"] / "core" / "ingress",
+        ctx["root"] / "apps" / "ingress",
         log,
         env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
         recreate=True,  # the file path is unchanged on updates, so Caddy must restart to read it
@@ -2177,16 +2147,14 @@ _prefetch_thread: threading.Thread | None = None
 
 
 def core_images(root: Path = ROOT) -> list[tuple[str, str]]:
-    """(service name, image) for the always-on platform, in install order."""
-    from ctl.core_setup import INSTALLER_CORE_APPS
-    from ctl.registry import load
+    """(app name, image) for every foundation and core app, in catalog order."""
+    from ctl.manifest.catalog import compose_images, load
 
-    registry = load(root / "services.yaml")
     return [
-        (service.name, image)
-        for service in registry.services
-        if service.stage in ("foundation", "core") or service.id in INSTALLER_CORE_APPS
-        for image in service.images
+        (app.manifest.name, image)
+        for app in load(root / "apps").apps
+        if app.manifest.tier in ("foundation", "core")
+        for image in compose_images(app.folder / "docker-compose.yml").values()
     ]
 
 
@@ -2462,12 +2430,6 @@ STEPS: list[Step] = [
         "fix": fix_browser_extension,
     },
     {
-        "id": "authentik_storage",
-        "label": "Keep Authentik's data with Mu3Lab's other data",
-        "check": _authentik_storage_check,
-        "fix": fix_authentik_storage,
-    },
-    {
         "id": "authentik",
         "label": "Start Authentik (sign-in)",
         "check": _authentik_check,
@@ -2527,7 +2489,6 @@ PHASES = (
     (
         "Set up sign-in",
         (
-            "authentik_storage",
             "authentik",
             "authentik_serve",
             "lobehub_serve",

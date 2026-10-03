@@ -66,7 +66,7 @@ def control_plane_digest(root: Path) -> str:
     """Everything the long-running dashboard and worker load at start-up."""
     paths = _files(root, "ctl", (".py", ".html"))
     paths.extend(root / name for name in ("pyproject.toml", "uv.lock"))
-    paths.extend(root / name for name in ("services.yaml", "catalog.yaml", "mcp-catalog.yaml"))
+    paths.extend(path for path in (root / "apps").rglob("*") if path.suffix in (".yaml", ".yml") and path.is_file())
     paths.extend(_files(root, "deploy", (".service",)))
     return digest(root, paths)
 

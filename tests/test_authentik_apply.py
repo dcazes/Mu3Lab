@@ -22,7 +22,7 @@ class ApplyBlueprintsTests(unittest.TestCase):
     def run_apply(self, output: str, rc: int = 0):
         with (
             runtime_paths(self.paths),
-            patch.object(authentik_apply, "CONTAINER", "authentik-server-1"),
+            patch.object(authentik_apply, "CONTAINER", "mu3lab-authentik-server-1"),
             patch("ctl.authentik_apply.actions.docker_cmd_with_stdin", return_value=(rc, output)) as docker,
         ):
             return authentik_apply.apply_blueprints(lambda _line: None), docker

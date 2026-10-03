@@ -27,7 +27,7 @@ describe('Home', () => {
   it('launches everyday apps and routes stopped ones to their page', () => {
     stubFetch(() => ({ handoffs: [] }));
     const immich = service('immich', 'Immich', 'optional', {
-      identity: identity({ launch_url: 'https://host.ts.net:8449' }),
+      identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
     });
     const mealie = service('mealie', 'Mealie', 'optional', { state: 'stopped', identity: identity() });
     const ollama = service('ollama', 'Ollama', 'core');
@@ -330,10 +330,8 @@ describe('Apps', () => {
       dashboardData([
         service('mealie', 'Mealie', 'optional', available),
         service('immich', 'Immich', 'optional', available),
-        service('planned', 'Planned', 'blocked', { state: 'blocked', blocked_reason: 'Under review' }),
       ]),
     );
-    expect(screen.getByText('Under review')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select Mealie for installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Select Immich for installation' }));
     expect(await screen.findByText('400.0 MB download · about 1.6 GB on disk')).toBeInTheDocument();
@@ -475,7 +473,7 @@ describe('Settings', () => {
       app_state: 'running',
       enabled: true,
       state: 'live',
-      auth: { type: 'none', scopes: [], configured: true, auto_provision: false },
+      auth: { type: 'none', configured: true, auto_provision: false },
       configuration: [],
       tools: [],
       review: { status: 'accepted', repository: '', revision: '1', preferred: true },
@@ -495,7 +493,7 @@ describe('Settings', () => {
                 service_id: 'actual-budget',
                 state: 'authentication_required',
                 enabled: false,
-                auth: { type: 'service-credential', scopes: [], configured: false, auto_provision: false },
+                auth: { type: 'service-credential', configured: false, auto_provision: false },
               }),
             ],
           }

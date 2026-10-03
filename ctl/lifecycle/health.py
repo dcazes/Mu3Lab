@@ -1,4 +1,4 @@
-"""Application health probes declared in services.yaml."""
+"""Application health probes declared in each app manifest."""
 
 from __future__ import annotations
 

@@ -561,7 +561,13 @@ def _port_owner(port: int) -> dict | None:
         project = project_by_port.get(port)
         if project:
             names_rc, names = _docker_probe(
-                ["ps", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.Names}}\t{{.Ports}}"]
+                [
+                    "ps",
+                    "--filter",
+                    f"label=com.docker.compose.project=mu3lab-{project}",
+                    "--format",
+                    "{{.Names}}\t{{.Ports}}",
+                ]
             )
             candidates: list[str] = []
             fallback: list[str] = []
@@ -579,7 +585,7 @@ def _port_owner(port: int) -> dict | None:
                 label_rc, working_dir = _docker_probe(
                     ["inspect", "--format", '{{index .Config.Labels "com.docker.compose.project.working_dir"}}', name]
                 )
-                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "core" / project).resolve():
+                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "apps" / project).resolve():
                     return {"pid": None, "process": name, "ours": True}
         return {"pid": None, "process": process or "unknown", "ours": False}
     ours = False

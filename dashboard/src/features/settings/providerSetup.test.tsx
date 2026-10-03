@@ -296,7 +296,7 @@ describe('Get started', () => {
     stubFetch(api(true, []));
     const preinstalled = [
       service('vaultwarden', 'Vaultwarden', 'foundation'),
-      service('firecrawl', 'Firecrawl', 'optional'),
+      service('firecrawl', 'Firecrawl', 'optional', { group: 'ai' }),
     ];
     renderWithDashboard(<HomePage />, dashboardData(preinstalled));
     expect(await screen.findByText('0 of 5 complete')).toBeInTheDocument();

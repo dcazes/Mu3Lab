@@ -60,12 +60,7 @@ def data_directories(service: Service, root: Path) -> list[Path]:
     own_dir = service.compose_path(root)
     own = _data_names(sorted(own_dir.glob("docker-compose*.yml")))
     others = _data_names(
-        [
-            path
-            for base in (root / "apps", root / "core")
-            for path in base.rglob("docker-compose*.yml")
-            if path.parent != own_dir
-        ]
+        [path for base in (root / "apps",) for path in base.rglob("docker-compose*.yml") if path.parent != own_dir]
     )
     data = RuntimePaths().data
     return [data / name for name in sorted(own - others)]
@@ -73,7 +68,7 @@ def data_directories(service: Service, root: Path) -> list[Path]:
 
 def _cleanup_image(root: Path) -> str:
     """Borrow the always-present ingress image; its busybox `rm` runs as root."""
-    document = yaml.safe_load((root / "core" / "ingress" / "docker-compose.yml").read_text(encoding="utf-8"))
+    document = yaml.safe_load((root / "apps" / "ingress" / "docker-compose.yml").read_text(encoding="utf-8"))
     return str(next(iter(document["services"].values()))["image"])
 
 

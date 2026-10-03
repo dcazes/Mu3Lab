@@ -151,7 +151,7 @@ class DispatchTests(unittest.TestCase):
 
 class VaultwardenDomainTests(unittest.TestCase):
     def test_local_compose_omits_domain(self):
-        compose = (Path(__file__).resolve().parents[1] / "core" / "vaultwarden" / "docker-compose.yml").read_text(
+        compose = (Path(__file__).resolve().parents[1] / "apps" / "vaultwarden" / "docker-compose.yml").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("DOMAIN:", compose)
@@ -174,7 +174,7 @@ class VaultwardenDomainTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(up.call_args.kwargs["env"]["VAULTWARDEN_DOMAIN"], "https://mu3lab-1.example.ts.net:8443")
         self.assertEqual(
-            up.call_args.kwargs["extra_files"], [Path("/nonexistent/core/vaultwarden/docker-compose.tailnet.yml")]
+            up.call_args.kwargs["extra_files"], [Path("/nonexistent/apps/vaultwarden/docker-compose.tailnet.yml")]
         )
 
 
@@ -303,7 +303,7 @@ class CaddyFixTests(unittest.TestCase):
         }
 
     def _projdir(self, root):
-        projdir = root / "core" / "ingress"
+        projdir = root / "apps" / "ingress"
         projdir.mkdir(parents=True)
         (projdir / "docker-compose.yml").touch()
         (root / ".env").write_text("MU3LAB_INGRESS_TOKEN=test-only-token\n", encoding="utf-8")
@@ -378,8 +378,8 @@ class AuthentikReadinessTests(unittest.TestCase):
         )
         containers = [
             [
-                {"name": "authentik-server-1", "status": "Up 1 minute (health: starting)"},
-                {"name": "authentik-worker-1", "status": "Up 1 minute (healthy)"},
+                {"name": "mu3lab-authentik-server-1", "status": "Up 1 minute (health: starting)"},
+                {"name": "mu3lab-authentik-worker-1", "status": "Up 1 minute (healthy)"},
             ]
         ]
         with (
@@ -394,7 +394,8 @@ class AuthentikReadinessTests(unittest.TestCase):
 
     def test_exited_container_fails_with_actionable_reason(self):
         with patch(
-            "ctl.install._authentik_containers", return_value=[{"name": "authentik-server-1", "status": "Exited (1)"}]
+            "ctl.install._authentik_containers",
+            return_value=[{"name": "mu3lab-authentik-server-1", "status": "Exited (1)"}],
         ):
             result = install._authentik_readiness(_ctx(), {"id": "authentik"})
         self.assertFalse(result["ok"])
@@ -761,7 +762,6 @@ class DockerSessionTests(unittest.TestCase):
             "tailscale_operator": ["missing", "ready"],
             "vaultwarden_serve": ["unshared", "ready"],
             "browser_extension": ["missing", "no_address", "not_needed", "ready"],
-            "authentik_storage": ["needs_migration", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
             "lobehub_serve": ["unshared", "ready"],

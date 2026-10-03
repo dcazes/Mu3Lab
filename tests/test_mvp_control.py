@@ -76,7 +76,6 @@ class RegistryV3Tests(unittest.TestCase):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
                 self.assertIsNotNone(service.private_https_port)
                 self.assertIsNotNone(service.proxy_port)
-                self.assertNotIn("install", service.profiles)
 
     def test_install_is_the_only_initial_optional_action(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "not_installed"), ["install"])
@@ -100,7 +99,7 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertEqual(second.count(":19467 {"), 1)
 
     def test_optional_route_regeneration_preserves_core_ui_routes(self):
-        base = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        base = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
         rendered = render(base, [load().get("mealie")])
         self.assertIn(":19471 {", rendered)
         self.assertIn(":19472 {", rendered)
@@ -117,7 +116,7 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertEqual(rebase(new_base, updated), updated)
 
     def test_dashboard_sign_in_returns_to_the_dashboard_port(self):
-        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        caddy = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
         dashboard = caddy.split(":19460 {", 1)[1].split(":19461 {", 1)[0]
         self.assertIn("header_up Host {http.request.hostport}", dashboard)
         self.assertIn("header_up X-Forwarded-Host {http.request.hostport}", dashboard)
@@ -126,7 +125,7 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertEqual(allowed_actions(load().get("litellm"), "needs_setup"), ["repair", "restart"])
 
     def test_litellm_forward_auth_preserves_its_private_port(self):
-        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        caddy = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
         route = caddy.split(":19471 {", 1)[1]
         self.assertIn("header_up Host {http.request.hostport}", route)
         self.assertIn("header_up X-Forwarded-Host {http.request.hostport}", route)
@@ -155,7 +154,7 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn("reverse_proxy 127.0.0.1:8002", block)
 
     def test_authentik_embedded_oidc_is_limited_to_the_dashboard_origin(self):
-        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        caddy = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
         self.assertIn("@embedded_oidc path /application/o/authorize/* /if/flow/*", caddy)
         self.assertIn("handle @embedded_oidc", caddy)
         self.assertIn("header_down -X-Frame-Options", caddy)

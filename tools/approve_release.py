@@ -5,8 +5,8 @@
 
 ``approve`` looks up the release's images in their registries (metadata
 only, nothing is downloaded), pins each to its digest in
-``apps/<app>/docker-compose.yml``, and records the version as
-``update.approved_version`` in ``services.yaml``. Nothing is committed: test
+``apps/<app>/docker-compose.yml``, and records the version as ``version`` in
+``apps/<app>/app.yaml``. Nothing is committed: test
 the update from your own dashboard (Apps -> the app -> Advanced -> Updates),
 then commit and push. Each install offers the release once it pulls Mu3Lab.
 
@@ -33,7 +33,6 @@ from ctl.lifecycle import app_releases  # noqa: E402
 from ctl.registry import Service, load  # noqa: E402
 
 _RELEASE_TAG = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
-_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}")
 
 
 def _version_pattern(version: str) -> re.Pattern[str]:
@@ -84,14 +83,6 @@ def resolve_digest(reference: str) -> str:
     return f"{repository}@{digest}" if tag == "latest" else f"{reference}@{digest}"
 
 
-def _service_block(text: str, service_id: str) -> tuple[int, int]:
-    start = re.search(rf"^  - id: {re.escape(service_id)}\s*$", text, re.MULTILINE)
-    if not start:
-        raise SystemExit(f"services.yaml has no entry for {service_id}.")
-    following = re.compile(r"^  - id: ", re.MULTILINE).search(text, start.end())
-    return start.start(), following.start() if following else len(text)
-
-
 def rewrite(service: Service, version: str, pinned: dict[str, str]) -> None:
     current = app_releases.approved(service, ROOT)
     compose = service.compose_path(ROOT) / "docker-compose.yml"
@@ -100,23 +91,13 @@ def rewrite(service: Service, version: str, pinned: dict[str, str]) -> None:
         text = re.sub(rf"(^\s*image:\s*){re.escape(current.images[name])}\s*$", rf"\g<1>{image}", text, flags=re.M)
     compose.write_text(text, encoding="utf-8")
 
-    registry = ROOT / "services.yaml"
-    text = registry.read_text(encoding="utf-8")
-    start, end = _service_block(text, service.id)
-    block = text[start:end]
-    block, count = re.subn(r'(update:\s*\{[^}]*approved_version:\s*)"?[^,}"]+"?', rf'\g<1>"{version}"', block, count=1)
+    manifest = service.compose_path(ROOT) / "app.yaml"
+    text, count = re.subn(
+        r"^version:.*$", f'version: "{version}"', manifest.read_text(encoding="utf-8"), count=1, flags=re.M
+    )
     if not count:
-        raise SystemExit(f"services.yaml has no update.approved_version for {service.id}.")
-    # The registry's image list mirrors the Compose file, pinned or not.
-    for name, image in pinned.items():
-        old = current.images[name].split("@", 1)[0]
-        new_reference = image.split("@", 1)[0]
-        block = re.sub(
-            re.escape(old) + r"(" + _DIGEST.pattern + r")?",
-            lambda match, image=image, new=new_reference: image if match.group(1) else new,
-            block,
-        )
-    registry.write_text(text[:start] + block + text[end:], encoding="utf-8")
+        raise SystemExit(f"{manifest.relative_to(ROOT)} has no version line.")
+    manifest.write_text(text, encoding="utf-8")
 
 
 def approve(app: str, version: str, overrides: dict[str, str]) -> None:

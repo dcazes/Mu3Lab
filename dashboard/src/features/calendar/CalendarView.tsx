@@ -44,7 +44,7 @@ function monthRange(): CalendarRange {
 }
 
 function nextcloudInstalled(nextcloud?: Service) {
-  return Boolean(nextcloud && !['planned', 'not_installed', 'blocked'].includes(nextcloud.state));
+  return Boolean(nextcloud && !['planned', 'not_installed'].includes(nextcloud.state));
 }
 
 /**

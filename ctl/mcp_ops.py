@@ -121,13 +121,13 @@ def _materialize(server, root: Path) -> Path:
             shutil.copy2(item, destination)
         elif item.is_dir():
             shutil.copytree(item, destination, dirs_exist_ok=True)
-    if server.id in {"nextcloud-context-agent", "adventurelog"}:
-        shutil.copy2(root / "apps" / "mcp" / "adapters" / "server.py", target / "server.py")
+    for relative in server.include:
+        shutil.copy2(root / relative, target / Path(relative).name)
     env_path = credential_path(server.id)
     values = read_runtime_env(env_path)
     values.setdefault("MU3LAB_DATA_ROOT", str(RuntimePaths().data))
-    if server.id in {"actual-budget-community", "nextcloud-context-agent", "adventurelog"}:
-        values.setdefault("MCP_AUTH_TOKEN", secrets.token_urlsafe(40))
+    for secret in server.secrets:
+        values.setdefault(str(secret["env"]), secrets.token_urlsafe(int(secret["length"])))
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
     return target

@@ -255,7 +255,7 @@ def _chat_connected(service_id: str) -> bool:
     state = ControlState.runtime()
     if state is None:
         return False
-    servers = [server for server in load_catalog(load(ROOT / "services.yaml")) if server.service_id == service_id]
+    servers = [server for server in load_catalog(load()) if server.service_id == service_id]
     return any((state.mcp_server(server.id) or {}).get("state") == "live" for server in servers)
 
 
@@ -270,7 +270,7 @@ def wait_for_installer_core_apps(screen: Screen) -> list[tuple[str, bool, str]]:
         return []
     results = []
     for service_id in INSTALLER_CORE_APPS:
-        name = load(ROOT / "services.yaml").get(service_id).name
+        name = load().get(service_id).name
         screen.start(f"Starting {name} (web research for the AI chat)")
         deadline = time.monotonic() + CORE_TIMEOUT
         outcome: tuple[str, bool, str] = (name, False, f"{name} is taking longer than expected.")
@@ -298,7 +298,7 @@ def save_logins(account: dict[str, str], host: str) -> tuple[bool, str]:
     from ctl.registry import load
 
     items = vault_setup.desired_items(
-        registry=load(ROOT / "services.yaml"),
+        registry=load(),
         host=host,
         owner_uid="",
         username=account["email"],

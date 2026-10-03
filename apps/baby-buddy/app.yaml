@@ -1,0 +1,64 @@
+# Baby Buddy — see ctl/manifest/models.py for every field.
+id: baby-buddy
+name: Baby Buddy
+tier: optional
+group: apps
+category: family
+tagline: Baby feeding, sleep, and diaper tracker
+summary: A shared baby-care tracker for feedings, sleep, diaper changes, pumping, and growth. Caregivers can record
+  daily routines and review trends from a common activity history.
+version: v2.11.0
+upstream: babybuddy/babybuddy
+service:
+  local_port: 8002
+  health:
+    path: /
+route:
+  https_port: 8458
+  caddy_port: 19475
+  access: trusted_header
+  copy_identity_headers:
+  - X-Authentik-Username
+  token_bypass:
+    path: /api/*
+    header_prefix: 'Token '
+sign_in:
+  method: trusted_header
+  note: Authentik protects the private route and supplies Baby Buddy's trusted Remote-User identity. Distinct admitted
+    users receive full caregiver access on first login; direct access is loopback-only and client-supplied identity
+    headers are replaced at the proxy.
+account:
+  mode: trusted_header
+  user_action: Open Baby Buddy through Mu3Lab; Authentik creates your application user on first access.
+secrets:
+- env: BABY_BUDDY_SECRET_KEY
+  length: 48
+env:
+  BABY_BUDDY_PUBLIC_URL: '{{public_url}}'
+mobile:
+  primary: baby-buddy-native
+  clients:
+  - id: baby-buddy-native
+    name: Baby Buddy native clients
+    kind: native
+    support: community
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/us/app/baby-buddy-companion/id6788966667
+      android: https://play.google.com/store/apps/details?id=eu.pkgsoftware.babybuddywidgets
+    homepage: https://babybuddy.app/
+    source: https://github.com/babybuddy/babybuddy-for-android
+    setup: device_qr
+    summary: Use Baby Buddy Companion on iOS or Baby Buddy for Android for fast native tracking.
+    caveat: The iOS client is unofficial, open source, and requires iOS 17 or newer; the Android client is community
+      maintained.
+    steps:
+    - Install the client for your phone.
+    - Open Baby Buddy in a browser and go to User, then Add a Device.
+    - Scan the device QR code in the app, or enter the server URL and API token by hand. The app connects with that
+      token, so it does not need the Authentik sign-in.
+resource_guidance: Lightweight family tracker with durable local data and uploaded media. Authentik creates the
+  Baby Buddy user automatically on first access.
+setup_action: Install Baby Buddy for shared feeding, sleep, diaper, pumping, and growth tracking.

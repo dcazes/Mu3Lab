@@ -1,0 +1,34 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: nextcloud-context-agent
+name: Nextcloud Files MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://docs.nextcloud.com/server/stable/user_manual/en/files/access_webdav.html
+revision: nextcloud-33-webdav
+transport: streamable-http
+endpoint: http://nextcloud-mcp:8080/mcp
+local_health: http://127.0.0.1:8819/health
+credentials:
+- key: username
+  env: NEXTCLOUD_USERNAME
+  type: string
+  label: Nextcloud username
+  required: true
+- key: app_password
+  env: NEXTCLOUD_APP_PASSWORD
+  type: secret
+  label: Nextcloud app password
+  required: true
+provision:
+  service: app
+  script: provision.sh
+  interpreter:
+  - sh
+  - -s
+provision_note: Creates a named Nextcloud app password for the single administrator account.
+review_note: Mu3Lab adapter uses WebDAV for scoped file listing, text reading, and text writing.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py

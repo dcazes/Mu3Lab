@@ -24,7 +24,7 @@ const server = (overrides: Partial<McpServer> = {}): McpServer => ({
   app_state: 'ready',
   enabled: true,
   state: 'live',
-  auth: { type: 'service-credential', scopes: [], configured: true, auto_provision: true },
+  auth: { type: 'service-credential', configured: true, auto_provision: true },
   review: { status: 'accepted', repository: '', revision: '', preferred: true },
   gateway: true,
   categories: [

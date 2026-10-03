@@ -147,9 +147,7 @@ class DownloadManager:
         try:
             registry = load_registry()
             services = {
-                service.id: self.images_for(service.id)
-                for service in registry.services
-                if service.stage == "optional" and not service.is_blocked
+                service.id: self.images_for(service.id) for service in registry.services if service.stage == "optional"
             }
             app_sizes.refresh(services, store, self.cache / "sizes", self.log)
         except Exception as exc:  # sizes are informational; try again later

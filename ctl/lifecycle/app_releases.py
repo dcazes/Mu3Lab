@@ -1,7 +1,7 @@
 """Which release of a catalog app is approved, and which one each machine runs.
 
 The approved release is checked in: ``update.approved_version`` in
-``services.yaml`` names it, and the digest-pinned images in
+``version`` in ``apps/<id>/app.yaml`` names it, and the digest-pinned images in
 ``apps/<id>/docker-compose.yml`` are it. The maintainer raises both together
 (``make approve``) after testing a new upstream release.
 

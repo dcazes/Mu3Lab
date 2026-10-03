@@ -113,8 +113,6 @@ class InstallBatchStore:
                 service = registry.get(service_id)
             except RegistryError as exc:
                 raise ValueError(str(exc)) from exc
-            if service.is_blocked:
-                raise ValueError(f"{service.name} is blocked: {service.blocked_reason}")
             if service.stage not in {"optional", "core", "foundation"}:
                 raise ValueError(f"{service.name} is not installable")
             if service_id in requested_set and service.stage != "optional":

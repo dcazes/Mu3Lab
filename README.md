@@ -215,7 +215,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 </p>
 
 - **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
-- **One source of truth.** [`services.yaml`](services.yaml) declares every app: images, ports, sign-in method, health checks, storage and backups. The dashboard's copy and state come from it, so the UI can't drift from reality.
+- **One folder per app.** `apps/<app>/app.yaml` declares everything about an app: its address, sign-in method, generated settings, chat assistant and connectors, and the shared rules it follows. Image versions live only in that folder's `docker-compose.yml`. The dashboard's copy and state come from it, so the UI can't drift from reality.
 - **Durable jobs.** The FastAPI control plane queues every action as a leased, resumable SQLite job. A background worker runs it, reclaims interrupted work after a reboot and redacts secrets from logs.
 - **Connectors that follow their app.** MCP connectors start after their app is healthy and stop before it stops. A connector counts as live only after its credentials, health check and tool discovery all pass.
 
@@ -302,8 +302,8 @@ make format              # apply ruff and prettier formatting
 | [`ctl/api/`](ctl/api) | FastAPI control plane. `security.py` resolves the caller's Authentik identity; `routes/` has one router per dashboard area under `/api/v1` |
 | [`ctl/service_ops.py`](ctl/service_ops.py), [`ctl/lifecycle/`](ctl/lifecycle) | Lifecycle jobs run by the worker, and the steps they sequence |
 | [`dashboard/src/`](dashboard/src) | React + TypeScript dashboard: `api/`, `components/`, `features/<area>/`, `shell/` |
-| [`services.yaml`](services.yaml), [`catalog.yaml`](catalog.yaml), [`mcp-catalog.yaml`](mcp-catalog.yaml) | App registry, bundles and reviewed chat connectors |
-| [`apps/`](apps), [`core/`](core) | Compose definitions for optional apps and core infrastructure |
+| [`apps/`](apps) | One folder per app: `app.yaml` (validated by `ctl/manifest/`), its Compose file, and reviewed chat connectors under `connectors/` |
+| [`platform/`](platform) | Images Mu3Lab builds itself: the chat tool gateway and the generic connector adapter |
 
 Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier, the dashboard build, YAML and Compose validation, and a secret scan.
 

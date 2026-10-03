@@ -1,0 +1,109 @@
+# Paperless-ngx — see ctl/manifest/models.py for every field.
+id: paperless-ngx
+name: Paperless-ngx
+tier: optional
+group: apps
+category: documents
+tagline: Searchable scanned document archive
+summary: Turns scanned paperwork and digital files into a searchable document archive. Extract text with OCR, organize
+  documents by tags and correspondents, and find records without sorting through folders.
+version: v3.2.1
+upstream: paperless-ngx/paperless-ngx
+data_dir: paperless
+service:
+  local_port: 8000
+  health:
+    path: /api/
+route:
+  https_port: 8452
+  caddy_port: 19469
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-paperless-ngx
+    redirect_paths:
+    - /accounts/oidc/authentik/login/callback/
+    launch_path: /__mu3lab/login
+    launch: csrf_form
+    env:
+      client_id: PAPERLESS_OIDC_CLIENT_ID
+      client_secret: PAPERLESS_OIDC_CLIENT_SECRET
+  note: Signs in only through Authentik; there is no separate Paperless password.
+account:
+  mode: environment_bootstrap
+  user_action: Open the app; Authentik signs you in as its administrator.
+secrets:
+- env: PAPERLESS_DBPASS
+- env: PAPERLESS_SECRET_KEY
+  length: 48
+env:
+  PAPERLESS_URL: '{{public_url}}'
+  PAPERLESS_APPS: allauth.socialaccount.providers.openid_connect
+  PAPERLESS_SOCIALACCOUNT_PROVIDERS:
+    openid_connect:
+      APPS:
+      - provider_id: authentik
+        name: Authentik
+        client_id: '{{PAPERLESS_OIDC_CLIENT_ID}}'
+        secret: '{{PAPERLESS_OIDC_CLIENT_SECRET}}'
+        settings:
+          server_url: '{{discovery_url}}'
+          email_authentication: true
+  PAPERLESS_SOCIAL_AUTO_SIGNUP: 'true'
+  PAPERLESS_DISABLE_REGULAR_LOGIN: 'true'
+  PAPERLESS_REDIRECT_LOGIN_TO_SSO: 'true'
+rules:
+- rule: first_admin_from_env
+  with:
+    override: docker-compose.bootstrap.yml
+    fresh_when_empty: postgres
+    verify:
+      django_superuser:
+        service: webserver
+        username_env: PAPERLESS_ADMIN_USER
+chat:
+  assistant:
+    title: Paperless-ngx
+    description: Find and organize documents.
+    instructions: Help find and organize Paperless documents. Ask before changing metadata, uploading, or deleting
+      documents. Use only Paperless tools assigned to this agent.
+  connectors:
+  - paperless-community
+mobile:
+  primary: papernext
+  clients:
+  - id: papernext
+    name: PaperNext
+    kind: native
+    support: community
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/us/app/papernext/id6754879528
+      android: https://play.google.com/store/apps/details?id=com.rebtsoft.papernext
+    homepage: https://www.papernext.de/
+    setup: api_token
+    summary: An offline-first community client for browsing, searching, and managing Paperless documents.
+    caveat: PaperNext is an unofficial open-beta client and its application source is not published.
+    steps:
+    - Install PaperNext and enter the Mu3Lab Paperless-ngx URL.
+    - In Paperless, create an API token from your user profile, then enter it in PaperNext.
+    - Keep the API token private; Mu3Lab never reads or stores it.
+  - id: paperless-web
+    name: Paperless mobile web
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://docs.paperless-ngx.com/
+    setup: web
+    summary: Open the official Paperless-ngx interface in a mobile browser.
+    fallback: true
+    steps:
+    - Open the private Paperless-ngx URL and complete Authentik sign-in.
+resource_guidance: Storage and OCR usage grow with your document library.
+setup_action: Install only when you want private document management.

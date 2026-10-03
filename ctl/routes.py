@@ -37,7 +37,7 @@ def _write_candidate(registry: Registry, root: Path, exclude: frozenset[str] = f
     """Render from the checked-in base so runtime route files cannot go stale."""
     paths = RuntimePaths()
     target = paths.projects / "ingress" / "Caddyfile"
-    source = root / "core" / "ingress" / "Caddyfile.authenticated"
+    source = root / "apps" / "ingress" / "Caddyfile.authenticated"
     if not source.is_file():
         raise OSError("Authenticated Caddy base configuration is missing.")
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -54,7 +54,7 @@ def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token
     if not ingress_token:
         candidate.unlink(missing_ok=True)
         return False, "Private ingress token is missing."
-    ingress = root / "core" / "ingress"
+    ingress = root / "apps" / "ingress"
     rc, output = actions.compose_up(
         ingress,
         log,

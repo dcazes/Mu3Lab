@@ -62,23 +62,20 @@ class RewriteTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        shutil.copy(ROOT / "services.yaml", self.root / "services.yaml")
-        shutil.copytree(ROOT / "apps" / "surfsense", self.root / "apps" / "surfsense")
+        shutil.copytree(ROOT / "apps", self.root / "apps")
         patcher = patch.object(approve_release, "ROOT", self.root)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(self.temp.cleanup)
 
-    def test_the_compose_file_and_registry_entry_move_together(self):
-        service = load(self.root / "services.yaml").get("surfsense")
+    def test_the_compose_file_and_manifest_version_move_together(self):
+        service = load(self.root / "apps").get("surfsense")
         new_backend = f"ghcr.io/modsetter/surfsense-backend:0.0.41@{DIGEST}"
         new_web = f"ghcr.io/modsetter/surfsense-web:0.0.41@{DIGEST}"
         approve_release.rewrite(service, "v0.0.41", {"backend": new_backend, "frontend": new_web})
-        registry = load(self.root / "services.yaml")
+        registry = load(self.root / "apps")
         updated = registry.get("surfsense")
         self.assertEqual(updated.update["approved_version"], "v0.0.41")
-        self.assertIn(new_backend, updated.images)
-        self.assertIn(new_web, updated.images)
         release = app_releases.approved(updated, self.root)
         self.assertEqual(release.images["backend"], new_backend)
         self.assertEqual(release.images["frontend"], new_web)
