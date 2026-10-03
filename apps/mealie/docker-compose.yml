@@ -8,7 +8,7 @@ services:
     environment:
       BASE_URL: ${MEALIE_BASE_URL:-http://127.0.0.1:9925}
       ALLOW_SIGNUP: ${MEALIE_ALLOW_SIGNUP:-false}
-      TZ: ${TZ:-America/Toronto}
+      TZ: ${TZ:-UTC}
       OIDC_AUTH_ENABLED: ${MEALIE_OIDC_ENABLED:-true}
       OIDC_SIGNUP_ENABLED: ${MEALIE_OIDC_SIGNUP_ENABLED:-true}
       OIDC_CONFIGURATION_URL: ${MEALIE_OIDC_CONFIGURATION_URL:-}

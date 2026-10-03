@@ -171,7 +171,7 @@ step "Deleting Mu3Lab's data (/srv/mu3lab)"
 [[ -e /srv/mu3lab ]] && run sudo -n rm -rf /srv/mu3lab
 
 step "Cleaning this folder (generated files only; your checkout is kept)"
-for path in .venv .env .state dashboard/node_modules dashboard/dist .mypy_cache .ruff_cache; do
+for path in .venv .tools .env .state dashboard/node_modules dashboard/dist .mypy_cache .ruff_cache; do
   [[ -e "$ROOT/$path" ]] && run rm -rf "${ROOT:?}/$path"
 done
 run find "$ROOT" -name __pycache__ -type d -prune -exec rm -rf {} +

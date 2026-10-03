@@ -26,7 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ctl import job_guard
+from ctl import job_guard, toolchain
 from ctl.jobs import JobStore
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 SERVICE_ID = "mu3lab"
 ACTION = "self_update"
 # Installer steps whose fixes need no administrator password.
-UNATTENDED = frozenset({"pip_deps", "dashboard_build", "dashboard_protection", "core_images"})
+UNATTENDED = frozenset({"dashboard_build", "dashboard_protection", "core_images"})
 # Restarting the dashboard and worker happens last, after the job is recorded.
 RESTART_STEP = "service"
 FETCH_TTL_SECONDS = 600
@@ -228,17 +228,11 @@ def _new_code(root: Path, command: str, log: Log) -> dict[str, Any]:
 
 
 def _python_packages(root: Path, log: Log) -> None:
-    """The new code may import a package the old environment lacks."""
-    from ctl.bootstrap import stamps
-
-    if stamps.read(root / stamps.REQUIREMENTS_STAMP) == stamps.requirements_digest(root):
-        return
-    log("Installing updated Python packages…")
-    pip = root / ".venv" / "bin" / "pip"
-    rc, out = _run([str(pip), "install", "--quiet", "--disable-pip-version-check", "-r", "ctl/requirements.txt"], root)
+    """The new code may need packages the old environment lacks; uv.lock is the truth."""
+    log("Matching Python packages to the new release…")
+    rc, out = toolchain.sync_python(root)
     if rc:
-        raise _Failed("python_packages", "pip_failed", f"Python packages could not be installed: {out[-300:]}")
-    stamps.write(root / stamps.REQUIREMENTS_STAMP, stamps.requirements_digest(root))
+        raise _Failed("python_packages", "uv_sync_failed", f"Python packages could not be installed: {out[-300:]}")
 
 
 def _run(argv: list[str], root: Path, timeout: int = 1800) -> tuple[int, str]:

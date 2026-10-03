@@ -24,11 +24,13 @@ class EntryScriptTests(unittest.TestCase):
         self.assertEqual(text.count("sudo -v"), 1)
         self.assertIn("do sudo -n true", text)  # keep-alive never prompts
 
-    def test_install_uses_the_same_requirements_stamp_as_the_engine(self):
-        from ctl.bootstrap import stamps
-
-        text = (ROOT / "install.sh").read_text(encoding="utf-8")
-        self.assertIn(str(stamps.REQUIREMENTS_STAMP), text)
+    def test_install_builds_python_from_the_lock_file_with_a_verified_uv(self):
+        install = (ROOT / "install.sh").read_text(encoding="utf-8")
+        toolchain = (ROOT / "tools" / "toolchain.sh").read_text(encoding="utf-8")
+        self.assertIn('source "$ROOT/tools/toolchain.sh"', install)
+        self.assertIn("sync --frozen --no-dev", toolchain)
+        self.assertIn("sha256sum", toolchain)
+        self.assertRegex(toolchain, r'\[x86_64\]="[0-9a-f]{64}"')
 
     def test_install_runs_the_terminal_installer(self):
         text = (ROOT / "install.sh").read_text(encoding="utf-8")

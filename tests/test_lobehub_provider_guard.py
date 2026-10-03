@@ -16,9 +16,11 @@ from ctl.lobehub_ops import _provider_guard_sql
 @unittest.skipUnless(os.environ.get("MU3LAB_TEST_POSTGRES_CONTAINER"), "requires a PostgreSQL test container")
 class ProviderGuardTests(unittest.TestCase):
     def test_builtin_initialization_and_private_override_protection(self):
-        guard = _provider_guard_sql().replace(
-            "FUNCTION mu3lab_provider_guard()", "FUNCTION pg_temp.mu3lab_provider_guard()"
-        ).replace("ON ai_providers", "ON mu3lab_provider_probe")
+        guard = (
+            _provider_guard_sql()
+            .replace("FUNCTION mu3lab_provider_guard()", "FUNCTION pg_temp.mu3lab_provider_guard()")
+            .replace("ON ai_providers", "ON mu3lab_provider_probe")
+        )
         sql = (
             """
 BEGIN;

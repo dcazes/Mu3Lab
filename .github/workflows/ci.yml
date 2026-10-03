@@ -14,22 +14,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
+      - uses: astral-sh/setup-uv@v6
+        with: {version: '0.12.5'}
       - uses: actions/setup-node@v4
         with: {node-version: '24', cache: 'npm', cache-dependency-path: dashboard/package-lock.json}
       - name: Installer scripts parse
-        run: bash -n install.sh start.sh tools/vm/fresh-vm.sh tools/open_tailscale_login.sh
+        run: bash -n install.sh start.sh uninstall.sh tools/toolchain.sh tools/vm/fresh-vm.sh tools/open_tailscale_login.sh
       - name: Install control-plane and developer dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: uv sync --frozen
       - name: Python lint and format
         run: |
-          ruff check .
-          ruff format --check .
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
       - name: Python type check
-        run: mypy
+        run: uv run --frozen mypy
       - name: Python tests
-        run: python -m unittest discover -s tests -t . -v
+        run: uv run --frozen python -m unittest discover -s tests -t . -v
       - name: Install dashboard dependencies
         working-directory: dashboard
         run: npm ci
@@ -52,7 +52,7 @@ jobs:
         run: npm run build
       - name: Validate checked-in YAML
         run: |
-          python - <<'PY'
+          uv run --frozen python - <<'PY'
           from pathlib import Path
           import yaml
           for path in (Path('services.yaml'), Path('catalog.yaml'), Path('mcp-catalog.yaml'),
@@ -126,8 +126,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate Python SBOM
         run: |
-          python -m pip install cyclonedx-bom
-          cyclonedx-py environment --output-format JSON --output-file mu3lab-python-sbom.json
+          uv export --frozen --no-dev --format requirements.txt --output-file requirements.lock.txt
+          uvx --from cyclonedx-bom==7.5.0 cyclonedx-py requirements requirements.lock.txt --output-format JSON --output-file mu3lab-python-sbom.json
       - uses: actions/upload-artifact@v4
         with:
           name: mu3lab-sbom

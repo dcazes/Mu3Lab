@@ -15,6 +15,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from ctl import hostinfo
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
@@ -355,6 +356,8 @@ def materialize(service: Service, root: Path) -> Path:
     env_path = target / ".env"
     values = read_runtime_env(env_path)
     values.setdefault("MU3LAB_DATA_ROOT", str(RuntimePaths().data))
+    # Assigned, not defaulted: apps follow the computer if its timezone changes.
+    values["TZ"] = hostinfo.timezone()
     if generate := GENERATED_SECRETS.get(service.id):
         generate(values, root)
     try:

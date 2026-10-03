@@ -11,7 +11,7 @@ WHY:  Installing over healthy components is structurally impossible: no fix
       content fingerprints (ctl/bootstrap/stamps.py), so re-running after an
       update rebuilds or restarts only what changed. Steps never accept user
       secrets; Tailscale uses its normal browser approval flow.
-RUN:  Driven by ctl/bootstrap/server.py. Root commands go through
+RUN:  Driven by ctl/bootstrap/terminal.py. Root commands go through
       ctl/privilege.py using the sudo session ./install.sh opened.
 DEBUG: Every fix logs its commands before running (via actions.py). Job dict
       shape: {status, error, steps:[{id,label,phase,status,log,prompt,...}],
@@ -111,11 +111,6 @@ DISPATCH = {
     ("node", "absent"): "nodesource_install",
     ("node", "old"): "nodesource_install",
     ("node", "ready"): "skip",
-    ("venv", "no_venv"): "create_venv",
-    ("venv", "ready"): "skip",
-    ("pip_deps", "missing"): "pip_install",
-    ("pip_deps", "outdated"): "pip_install",
-    ("pip_deps", "ready"): "skip",
     ("dashboard_src", "missing"): "report_incomplete",
     ("dashboard_src", "ready"): "skip",
     ("dashboard_build", "stale"): "npm_build",
@@ -380,28 +375,6 @@ def fix_node(check: dict, ctx: dict) -> dict:
     return _propagate(actions.apt_install(["nodejs"], log))
 
 
-def _venv_check(root: Path) -> dict:
-    """Venv-only readiness (NOT the combined bundle check: dist belongs to
-    the dashboard_build step). States: no_venv | ready."""
-    if (root / ".venv" / "bin" / "python").exists():
-        return {
-            "name": "venv",
-            "status": "ok",
-            "detail": "Project virtualenv present.",
-            "action": "",
-            "state": "ready",
-            "blocking": False,
-        }
-    return {
-        "name": "venv",
-        "status": "missing",
-        "detail": "Project virtualenv (.venv) missing.",
-        "action": "step 3 creates it.",
-        "state": "no_venv",
-        "blocking": False,
-    }
-
-
 def _runtime_layout_check(root: Path) -> dict:
     """Check the approved persistent-data root without creating it."""
     paths = RuntimePaths(root)
@@ -438,27 +411,6 @@ def fix_runtime_layout(check: dict, ctx: dict) -> dict:
     return _propagate(
         actions.ensure_runtime_layout(RuntimePaths().root, getpass.getuser(), ctx["log_fn"]("runtime_layout"))
     )
-
-
-def _pip_check(root: Path) -> dict:
-    """Control-plane packages installed AND matching ctl/requirements.txt?
-
-    States: missing | outdated | ready. The recorded requirements hash makes
-    a changed requirements file (after `git pull`) reinstall packages; the
-    import probe catches a half-finished install.
-    """
-    venv_py = root / ".venv" / "bin" / "python"
-    if not venv_py.exists():
-        return _row("pip_deps", "missing", "The Python environment does not exist yet.", "missing")
-    if stamps.read(root / stamps.REQUIREMENTS_STAMP) != stamps.requirements_digest(root):
-        return _row("pip_deps", "missing", "Python packages need to be installed or updated.", "outdated")
-    try:
-        proc = subprocess.run([str(venv_py), "-c", "import fastapi, yaml, httpx"], capture_output=True, timeout=30)
-    except OSError as exc:
-        return _row("pip_deps", "missing", f"Cannot check the Python environment: {exc}.", "missing")
-    if proc.returncode != 0:
-        return _row("pip_deps", "missing", "Python packages are incomplete and will be reinstalled.", "missing")
-    return _row("pip_deps", "ok", "Python packages are up to date.", "ready")
 
 
 def _src_check(root: Path) -> dict:
@@ -589,38 +541,6 @@ def _service_check(root: Path) -> dict:
     if not _dashboard_healthy():
         return _row("service", "missing", "The dashboard is running but not answering.", "unhealthy")
     return _row("service", "ok", "The dashboard and background worker are running.", "ready")
-
-
-def fix_pip_deps(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("pip_deps")
-    venv_pip = ctx["root"] / ".venv" / "bin" / "pip"
-    if not venv_pip.exists():
-        return {"ok": False, "error": "no venv pip (venv step must run first)"}
-    _update_progress(
-        ctx,
-        "pip_deps",
-        phase="installing_packages",
-        activity="Installing control-plane packages into the project virtualenv.",
-        timeout_seconds=600,
-    )
-    log("$ .venv/bin/pip install -r ctl/requirements.txt")
-    try:
-        proc = subprocess.run(
-            [str(venv_pip), "install", "-r", str(ctx["root"] / "ctl" / "requirements.txt")],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            cwd=str(ctx["root"]),
-        )
-    except OSError as exc:
-        return {"ok": False, "error": f"pip failed: {exc}"}
-    tail = (proc.stdout + proc.stderr).strip().splitlines()[-5:]
-    for line in tail:
-        log(line)
-    if proc.returncode != 0:
-        return {"ok": False, "error": "pip install failed (see log)."}
-    stamps.write(ctx["root"] / stamps.REQUIREMENTS_STAMP, stamps.requirements_digest(ctx["root"]))
-    return {"ok": True}
 
 
 def fix_dashboard_src(check: dict, ctx: dict) -> dict:
@@ -789,35 +709,6 @@ def fix_service(check: dict, ctx: dict) -> dict:
     if not _user_service_active("mu3lab-worker.service"):
         return {"ok": False, "error": "background workflow worker did not stay running"}
     return {"ok": False, "error": "dashboard service started but :8787 never answered"}
-
-
-def fix_venv(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("venv")
-    venv_py = ctx["root"] / ".venv" / "bin" / "python"
-    if venv_py.exists():
-        return {"ok": True, "skipped": True}
-    _update_progress(
-        ctx,
-        "venv",
-        phase="creating_environment",
-        activity="Creating the isolated Python environment.",
-        timeout_seconds=300,
-    )
-    log("$ python3 -m venv .venv")
-    try:
-        proc = subprocess.run(
-            ["python3", "-m", "venv", str(ctx["root"] / ".venv")],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=str(ctx["root"]),
-        )
-    except OSError as exc:
-        return {"ok": False, "error": f"venv creation failed: {exc}"}
-    log((proc.stdout + proc.stderr).strip() or "(created)")
-    if proc.returncode != 0 or not venv_py.exists():
-        return {"ok": False, "error": "venv creation failed (need python3-venv?)"}
-    return {"ok": True}
 
 
 def fix_docker(check: dict, ctx: dict) -> dict:
@@ -2318,89 +2209,57 @@ def _core_images_check(ctx: dict) -> dict:
     return _row("core_images", "ok", "All core app images are downloaded.", "ready")
 
 
+_LAYER_SIZE = re.compile(r"(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)")
+_UNIT_BYTES = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+
+
+class _PullProgress:
+    """Turns ``docker pull`` output lines into a percentage and speed for one image."""
+
+    def __init__(self, report: Callable[[str], None], label: str) -> None:
+        self.report = report
+        self.label = label
+        self.started = self.last_report = time.time()
+        self.layer_bytes: dict[str, float] = {}
+        self.completed: set[str] = set()
+
+    def __call__(self, line: str) -> None:
+        parts = line.strip().split()
+        if len(parts) < 2:
+            return
+        layer_id, status = parts[0], " ".join(parts[1:])
+        if "Download complete" in status:
+            self.completed.add(layer_id)
+        if any(word in status for word in ("Download complete", "Pulling fs layer", "Downloading")):
+            match = _LAYER_SIZE.search(status)
+            if match:
+                self.layer_bytes[layer_id] = float(match.group(1)) * _UNIT_BYTES[match.group(2)]
+        now = time.time()
+        if now - self.last_report < 2:
+            return
+        self.last_report = now
+        elapsed = now - self.started
+        total = sum(self.layer_bytes.values())
+        done = sum(self.layer_bytes[layer] for layer in self.completed if layer in self.layer_bytes)
+        if total > 0 and elapsed > 1:
+            speed = (done / elapsed) / 1024**2
+            self.report(f"Downloading {self.label} — {min(99, int(100 * done / total))}% at {speed:.1f} MB/s")
+
+
 def _pull_missing(ctx: dict) -> list[str]:
     """Pull every missing core image; return the images that failed."""
     log = ctx["log_fn"]("core_images")
     missing = _missing_images(ctx["root"])
     failed: list[str] = []
+
+    def show(activity: str) -> None:
+        _update_progress(ctx, "core_images", phase="downloading", activity=activity, timeout_seconds=1800)
+
     for index, (name, image) in enumerate(missing, start=1):
-        _update_progress(
-            ctx,
-            "core_images",
-            phase="downloading",
-            activity=f"Downloading {name} ({index} of {len(missing)})",
-            timeout_seconds=1800,
-        )
-
-        # Track progress of Docker pull
-        progress_state = {
-            "start_time": time.time(),
-            "last_update": time.time(),
-            "layers": {},
-            "completed_layers": set(),
-        }
-
-        def on_output(line: str) -> None:
-            """Parse Docker pull output and update progress display."""
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                layer_id = parts[0]
-                status = " ".join(parts[1:])
-
-                if "Download complete" in status or "Pulling fs layer" in status:
-                    if "Download complete" in status:
-                        progress_state["completed_layers"].add(layer_id)
-                    match = re.search(r'(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)', status)
-                    if match:
-                        size_str = match.group(1)
-                        unit = match.group(2)
-                        size_bytes = float(size_str)
-                        if unit == "KB":
-                            size_bytes *= 1024
-                        elif unit == "MB":
-                            size_bytes *= 1024**2
-                        elif unit == "GB":
-                            size_bytes *= 1024**3
-                        progress_state["layers"][layer_id] = size_bytes
-
-                elif "Downloading" in status:
-                    match = re.search(r'(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)', status)
-                    if match:
-                        size_str = match.group(1)
-                        unit = match.group(2)
-                        size_bytes = float(size_str)
-                        if unit == "KB":
-                            size_bytes *= 1024
-                        elif unit == "MB":
-                            size_bytes *= 1024**2
-                        elif unit == "GB":
-                            size_bytes *= 1024**3
-                        progress_state["layers"][layer_id] = size_bytes
-
-                now = time.time()
-                if now - progress_state["last_update"] >= 2:
-                    progress_state["last_update"] = now
-                    elapsed = now - progress_state["start_time"]
-
-                    total_bytes = sum(progress_state["layers"].values())
-                    downloaded = sum(
-                        progress_state["layers"][lid]
-                        for lid in progress_state["completed_layers"]
-                        if lid in progress_state["layers"]
-                    )
-
-                    if total_bytes > 0 and elapsed > 1:
-                        speed_mbs = (downloaded / elapsed) / (1024**2)
-                        pct = min(99, int(100 * downloaded / total_bytes))
-                        _update_progress(
-                            ctx,
-                            "core_images",
-                            phase="downloading",
-                            activity=f"Downloading {name} ({index}/{len(missing)}) — {pct}% at {speed_mbs:.1f} MB/s",
-                            timeout_seconds=1800,
-                        )
-
-        rc, out = actions.docker_cmd_stream(["docker", "pull", image], log, timeout=1800, on_output=on_output)
+        label = f"{name} ({index} of {len(missing)})"
+        show(f"Downloading {label}")
+        progress = _PullProgress(show, label)
+        rc, out = actions.docker_cmd_stream(["docker", "pull", image], log, timeout=1800, on_output=progress)
         if rc != 0:
             log(out[-500:] if out else f"(exit {rc})")
             failed.append(image)
@@ -2490,13 +2349,6 @@ STEPS: list[Step] = [
         "label": "Node.js",
         "check": lambda ctx: preflight.check_node(actions.privilege._exec(["node", "--version"])[1]),
         "fix": fix_node,
-    },
-    {"id": "venv", "label": "Python environment", "check": lambda ctx: _venv_check(ctx["root"]), "fix": fix_venv},
-    {
-        "id": "pip_deps",
-        "label": "Python packages",
-        "check": lambda ctx: _pip_check(ctx["root"]),
-        "fix": fix_pip_deps,
     },
     {
         "id": "dashboard_src",
@@ -2664,7 +2516,7 @@ PHASES = (
     ("Install system software", ("host_base", "node")),
     (
         "Set up Mu3Lab",
-        ("venv", "pip_deps", "dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
+        ("dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
     ),
     ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     ("Start your password vault", ("caddy", "vaultwarden", "vaultwarden_setup")),

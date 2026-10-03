@@ -25,7 +25,6 @@ import shlex
 import shutil
 import socket
 import subprocess
-import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -35,7 +34,6 @@ from pathlib import Path
 # Minimum supported distros. Mint is accepted via ID_LIKE=ubuntu + UBUNTU_CODENAME.
 MIN_DEBIAN_MAJOR = 12  # install.sh dies below Debian 12 (docker repo needs it)
 MIN_UBUNTU_MAJOR = 22  # install.sh dies below Ubuntu 22.04 (same reason)
-MIN_PYTHON = (3, 10)  # `match` syntax + new typing used across ctl/
 MIN_NODE_MAJOR = 24  # current Node.js LTS used by the dashboard build.
 MIN_DOCKER_MAJOR = 24  # compose-v2 plugin era; step 3 upgrades older engines
 
@@ -43,11 +41,10 @@ MIN_DOCKER_MAJOR = 24  # compose-v2 plugin era; step 3 upgrades older engines
 # must never report "fail" — only "missing" (not ready, installer provides)
 # or "ok". run_all() stamps each check with blocking True/False from this set;
 # the single gating rule is gate_passed() (no FAIL among BLOCKING).
-BLOCKING = frozenset({"os", "arch", "python", "ports"})
+BLOCKING = frozenset({"os", "arch", "ports"})
 
-# Only these ports are probed. Ports for deferred Step-2 apps (e.g. 4000
-# LiteLLM) are deliberately NOT checked — a missing future port is not a
-# Step-0/1 failure. See BUILD_ORDER Phase 2 gate discussion.
+# Only ports the installer needs before any app runs are probed; app ports
+# are checked by the registry's uniqueness rules instead.
 CHECK_PORTS = (8787, 19460, 9001, 8081)
 
 # Listener inventory for the bootstrap UI. These are all loopback-only
@@ -94,7 +91,7 @@ def _result(name: str, status: str, detail: str, action: str = "", state: str = 
     `state` is the machine-readable dispatch key card ③ switches on
     (e.g. docker "daemon_down" → start it; "absent" → install it).
     Convention: dispatchable checks use specific states; gate-only checks
-    (os/arch/python/ports) use "ready"/"blocked" mirroring status.
+    (os/arch/ports) use "ready"/"blocked" mirroring status.
     """
     return {"name": name, "status": status, "detail": detail, "action": action, "state": state or status}
 
@@ -233,18 +230,6 @@ def check_gpu(nvidia_present: bool, amd_present: bool) -> dict:
             state="amd",
         )
     return _result("gpu", "ok", "No supported GPU detected; apps will use the CPU.", state="cpu")
-
-
-def check_python(version: tuple[int, ...]) -> dict:
-    """Require Python >= 3.10 (takes sys.version_info so tests can inject)."""
-    if tuple(version[:2]) >= MIN_PYTHON:
-        return _result("python", "ok", f"Python {version[0]}.{version[1]} meets >={MIN_PYTHON[0]}.{MIN_PYTHON[1]}.")
-    return _result(
-        "python",
-        "fail",
-        f"Python {version[0]}.{version[1]} too old.",
-        "Install Python 3.10+ (do NOT remove system python3).",
-    )
 
 
 def check_node(node_version_output: str) -> dict:
@@ -687,7 +672,6 @@ def run_host_checks() -> list[dict]:
     checks = [
         check_os(_os_release_text(), kernel_release=platform.release()),
         check_arch(platform.machine()),
-        check_python((sys.version_info.major, sys.version_info.minor, sys.version_info.micro)),
         check_ports(),
     ]
     for check in checks:

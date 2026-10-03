@@ -9,7 +9,7 @@ WHY:  Preflight is the gate for everything downstream. Fixtures pin the
       fixtures carry the detail via subTest.
 RUN:  `.venv/bin/python -m unittest tests.test_preflight -v` (or `make test`).
 DEBUG: A failing test prints the check dict; compare `status`/`blocking`/
-      `action` against BUILD_ORDER Phase 2.
+      `action` against ctl/preflight.py.
 """
 
 import sys
@@ -74,16 +74,13 @@ class GpuTests(unittest.TestCase):
 
 class PythonNodeTests(unittest.TestCase):
     def test_ok(self):
-        self.assertEqual(preflight.check_python((3, 12, 3))["status"], "ok")
         self.assertEqual(preflight.check_node("v24.11.0")["status"], "ok")
 
     def test_newer_ok(self):
         # Witness values only: ANY version above minimum passes, nothing pins.
-        self.assertEqual(preflight.check_python((3, 13, 0))["status"], "ok")
         self.assertEqual(preflight.check_node("v25.3.0")["status"], "ok")
 
     def test_old(self):
-        self.assertEqual(preflight.check_python((3, 9, 18))["status"], "fail")
         # Old node is "missing", not "fail": step ③ upgrades it.
         result = preflight.check_node("v22.19.0")
         self.assertEqual(result["status"], "missing")
@@ -383,7 +380,7 @@ class AggregateTests(unittest.TestCase):
         self.assertIn("install_ready", report)
         self.assertEqual(
             [check["name"] for check in report["checks"]],
-            ["os", "arch", "python", "ports", "gpu", "node", "docker", "tailscale"],
+            ["os", "arch", "ports", "gpu", "node", "docker", "tailscale"],
         )
         for check in report["checks"]:
             self.assertIn(check["status"], ("ok", "missing", "fail"))
@@ -394,7 +391,7 @@ class AggregateTests(unittest.TestCase):
 
     def test_host_checks_are_all_blocking(self):
         checks = preflight.run_host_checks()
-        self.assertEqual([check["name"] for check in checks], ["os", "arch", "python", "ports"])
+        self.assertEqual([check["name"] for check in checks], ["os", "arch", "ports"])
         self.assertTrue(all(check["blocking"] for check in checks))
 
     def test_ready_with_todos(self):

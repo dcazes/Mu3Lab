@@ -30,7 +30,7 @@ vm_ssh() { ssh "${SSH_OPTS[@]}" mu3lab@127.0.0.1 "$@"; }
 
 sync_repo() {
   rsync -a --delete -e "ssh ${SSH_OPTS[*]}" \
-    --exclude .git --exclude .venv --exclude node_modules --exclude dashboard/dist \
+    --exclude .git --exclude .venv --exclude .tools --exclude node_modules --exclude dashboard/dist \
     --exclude __pycache__ --exclude .state --exclude '.env' \
     "$ROOT/" mu3lab@127.0.0.1:Mu3Lab/
 }

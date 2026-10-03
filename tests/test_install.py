@@ -64,7 +64,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(install.fix_for_state("docker", "nope"), "unknown")
 
     def test_ready_always_skips(self):
-        for step in ("host_base", "node", "venv", "docker", "tailscale_pkg", "caddy"):
+        for step in ("host_base", "node", "docker", "tailscale_pkg", "caddy"):
             self.assertEqual(install.fix_for_state(step, "ready"), "skip")
 
     def test_steps_have_check_and_fix(self):
@@ -509,62 +509,6 @@ class WorkspaceStepTests(unittest.TestCase):
             "stopped": lambda: False,
         }
 
-    def test_venv_ready_skips(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "python").touch()
-            check = install._venv_check(root)
-            self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
-            self.assertEqual(install.fix_for_state("venv", "ready"), "skip")
-
-    def test_venv_missing_creates(self):
-        import tempfile
-        from unittest.mock import patch as _patch
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            check = install._venv_check(root)
-            self.assertEqual(check["state"], "no_venv")
-
-            def fake_run(argv, **kwargs):
-                # Simulate a real venv creation (mock must produce the
-                # artifact the fix verifies, like the real command would).
-                (root / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
-                (root / ".venv" / "bin" / "python").touch(exist_ok=True)
-                result = type("R", (), {})()
-                result.returncode = 0
-                result.stdout = ""
-                result.stderr = ""
-                return result
-
-            with _patch("subprocess.run", side_effect=fake_run) as run:
-                result = install.fix_venv(check, self._ctx(root))
-            self.assertTrue(result.get("ok"))
-            run.assert_called_once()
-
-    def test_pip_missing_installs(self):
-        import tempfile
-        from unittest.mock import patch as _patch
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "pip").touch()
-            (root / "ctl").mkdir()
-            (root / "ctl" / "requirements.txt").touch()
-            with _patch("subprocess.run") as run:
-                run.return_value.returncode = 1  # import fastapi fails…
-                run.return_value.stdout = ""
-                run.return_value.stderr = ""
-                check = install._pip_check(root)
-                self.assertEqual(check["state"], "missing")
-                run.return_value.returncode = 0  # …but pip install works
-                result = install.fix_pip_deps(check, self._ctx(root))
-            self.assertTrue(result.get("ok"))
-
     def test_build_stale_rebuilds(self):
         import tempfile
         import time
@@ -786,11 +730,9 @@ class DockerSessionTests(unittest.TestCase):
         states = {
             "host_base": ["missing", "ready"],
             "node": ["absent", "old", "ready"],
-            "venv": ["no_venv", "ready"],
             "host_supported": ["unsupported", "ready"],
             "nvidia_toolkit": ["not_needed", "missing", "ready"],
             "core_images": ["missing", "ready"],
-            "pip_deps": ["missing", "outdated", "ready"],
             "dashboard_src": ["missing", "ready"],
             "dashboard_build": ["stale", "ready"],
             "root_env": ["missing", "ready"],
@@ -956,6 +898,25 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(fixes), 1)
         self.assertEqual(fixes[0]["state"], "unjoined")
         self.assertEqual(step["detail"], "tailnet connected")
+
+
+class PullProgressTests(unittest.TestCase):
+    def test_reports_percent_and_speed_from_docker_pull_lines(self):
+        shown: list[str] = []
+        progress = install._PullProgress(shown.append, "ollama (1 of 2)")
+        progress.started -= 10
+        progress("aaa: Pulling fs layer 100MB")
+        progress("bbb: Downloading 300MB")
+        progress("aaa: Download complete 100MB")
+        progress.last_report = 0
+        progress("bbb: Downloading 300MB")
+        self.assertTrue(shown)
+        self.assertIn("ollama (1 of 2) — 25%", shown[-1])
+
+    def test_ignores_lines_without_a_layer(self):
+        shown: list[str] = []
+        install._PullProgress(shown.append, "x")("Digest:")
+        self.assertEqual(shown, [])
 
 
 if __name__ == "__main__":
