@@ -51,6 +51,15 @@ env:
   ACTUAL_OPENID_SERVER_HOSTNAME: '{{public_url}}'
   ACTUAL_OPENID_ENFORCE: 'true'
   ACTUAL_USER_CREATION_MODE: login
+rules:
+- rule: initial_owner_guard
+  with:
+    owner_signed_in:
+      sqlite: server-files/account.sqlite
+      query: >-
+        SELECT 1 FROM users u JOIN sessions s ON s.user_id = u.id
+        WHERE u.user_name = :username AND u.enabled = 1 AND u.owner = 1 AND u.role = 'ADMIN'
+        AND s.auth_method = 'openid' AND (s.expires_at = -1 OR s.expires_at > :now) LIMIT 1
 chat:
   assistant:
     title: Actual Budget

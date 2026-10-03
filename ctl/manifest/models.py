@@ -86,6 +86,8 @@ class Route(Model):
     token_bypass: TokenBypass | None = None
     blocked_paths: tuple[BlockedPath, ...] = ()
     forwarded_host: Literal["host", "hostport"] = "hostport"
+    # Who Authentik admits through a gate: everyone in the household, or administrators only.
+    audience: Literal["household", "operators"] = "household"
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
     # apps/ingress/Caddyfile; every other route is generated from its manifest.
     generated: bool = True

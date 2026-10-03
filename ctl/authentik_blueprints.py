@@ -1,147 +1,232 @@
-"""Declarative Authentik configuration for Mu3Lab.
+"""Authentik configuration for Mu3Lab, rendered as Blueprint documents.
 
-The bootstrapper must not impersonate an operator in a browser or retain an
-administrator password. Authentik's supported Blueprint mechanism gives us an
-idempotent, atomic configuration boundary instead: the worker discovers this
-file and creates the provider/application/outpost relationship itself.
+Pure functions: no files, no network. ``ctl.identity`` decides what to render
+from the app manifests and applies the result through Authentik's API.
 
-Only non-secret, host-specific routing data is rendered here. OIDC client
-secrets are intentionally not guessed; an app manifest must declare its exact
-callback and secret hand-off before Mu3Lab creates one.
+Three kinds of document exist:
+
+* the gate: the dashboard plus every installed app whose route is guarded by
+  Authentik's outpost (``route.access`` gate or trusted_header), each admitting
+  the household or administrators only (``route.audience``);
+* one OIDC application per installed app that signs people in itself;
+* a removal document that deletes an uninstalled app's objects.
 """
 
 from __future__ import annotations
 
-import os
 import re
-from pathlib import Path
-from urllib.parse import urlsplit
+from dataclasses import dataclass
 
 _TAILNET_NAME = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.ts\.net\Z")
-# Authentik's documented launch URL for "hide from the user's library". Only
-# the Mu3Lab dashboard is listed there; every other app is opened from the
-# dashboard. Blueprints re-apply it, so an app un-hidden by hand is hidden again.
+_PLAIN_ID = re.compile(r"[a-z0-9-]+")
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9 .-]+")
+# Authentik's documented launch URL for "hide from the user's library". Only the
+# dashboard is listed there; apps are opened from the dashboard.
 HIDDEN_FROM_LIBRARY = "blank://blank"
+ADMIN_GROUPS = ("authentik Admins", "mu3lab-operators")
+HOUSEHOLD_GROUP = "mu3lab-household"
+DASHBOARD_BLUEPRINT = "Mu3Lab dashboard access"
 
 
-def _quote(value: str) -> str:
-    """Quote a validated plain value for the generated YAML."""
+@dataclass(frozen=True)
+class GatedApp:
+    id: str
+    name: str
+    port: int
+    audience: str  # household | operators
+
+
+@dataclass(frozen=True)
+class OidcApp:
+    id: str
+    name: str
+    port: int
+    client_id: str
+    client_secret: str
+    redirect_paths: tuple[str, ...]
+    initial_owner: str = ""  # while set, only this username may sign in
+
+
+def quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _validate_host(host: str) -> str:
+def validate_host(host: str) -> str:
     host = host.rstrip(".")
     if not _TAILNET_NAME.fullmatch(host):
-        raise ValueError("Authentik external host must be a MagicDNS ts.net name")
+        raise ValueError("Authentik's external host must be a MagicDNS ts.net name")
     return host
 
 
-def _authentik_host(host: str, authentik_host: str | None) -> str:
-    """Return the public Authentik origin used by the embedded outpost."""
-    host = _validate_host(host)
-    candidate = authentik_host or f"https://{host}"
-    parsed = urlsplit(candidate)
-    try:
-        port = parsed.port
-    except ValueError as exc:
-        raise ValueError("Authentik host must use a valid port") from exc
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != host.lower()
-        or port not in (None, 443)
-        or parsed.path not in ("", "/")
-        or parsed.query
-        or parsed.fragment
-        or parsed.username
-        or parsed.password
-    ):
-        raise ValueError("Authentik host must be the private standard-HTTPS origin")
-    return f"https://{host}"
+def _check_names(app_id: str, name: str) -> None:
+    if not _PLAIN_ID.fullmatch(app_id) or not _PLAIN_NAME.fullmatch(name):
+        raise ValueError("app identifiers in Authentik must be plain names")
 
 
-def _dashboard_host(host: str, dashboard_host: str | None) -> str:
-    """Return the dashboard origin, deliberately separate from Authentik :443."""
-    host = _validate_host(host)
-    candidate = dashboard_host or f"https://{host}:8446"
-    parsed = urlsplit(candidate)
-    try:
-        port = parsed.port
-    except ValueError as exc:
-        raise ValueError("Dashboard host must use a valid port") from exc
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != host.lower()
-        or port != 8446
-        or parsed.path not in ("", "/")
-        or parsed.query
-        or parsed.fragment
-        or parsed.username
-        or parsed.password
-    ):
-        raise ValueError("Dashboard host must be the private HTTPS :8446 origin")
-    return f"https://{host}:8446"
+def oidc_blueprint_name(app_id: str) -> str:
+    return f"Mu3Lab {app_id} sign-in"
 
 
-def _litellm_host(host: str, litellm_host: str | None, port: int) -> str:
-    """Return the exact browser origin protected by a per-port forward-auth app."""
-    host = _validate_host(host)
-    candidate = litellm_host or f"https://{host}:{port}"
-    parsed = urlsplit(candidate)
-    try:
-        parsed_port = parsed.port
-    except ValueError as exc:
-        raise ValueError("LiteLLM host must use a valid port") from exc
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != host.lower()
-        or parsed_port != port
-        or parsed.path not in ("", "/")
-        or parsed.query
-        or parsed.fragment
-        or parsed.username
-        or parsed.password
-    ):
-        raise ValueError("LiteLLM host must be the private HTTPS service origin")
-    return f"https://{host}:{port}"
+def removal_blueprint_name(app_id: str) -> str:
+    return f"Mu3Lab {app_id} removal"
 
 
-def render_dashboard_blueprint(
-    host: str,
-    authentik_host: str | None = None,
-    dashboard_host: str | None = None,
-    litellm_port: int = 8454,
-    litellm_host: str | None = None,
-    freellmapi_port: int = 8455,
-    gated_apps: tuple[tuple[str, str, int], ...] = (),
-) -> str:
-    """Render idempotent Authentik forward-auth apps for Mu3Lab.
+_FLOWS = """      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      # Implicit consent: no "Continue to app?" page. A consent page left open
+      # loses its place when another app starts a sign-in in the same browser.
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+"""
 
-    The provider is deliberately forward-auth rather than proxy mode: Caddy
-    remains responsible for serving the dashboard, while Authentik's embedded
-    outpost handles authentication and returns identity headers to Caddy.
 
-    ``gated_apps`` lists installed apps as ``(service_id, name, port)`` whose
-    Caddy route sends every request through the outpost. Without a provider
-    the outpost does not recognise that host and answers 404.
-    """
-    host = _validate_host(host)
-    launch_url = _dashboard_host(host, dashboard_host)
-    authentik_origin = _authentik_host(host, authentik_host)
-    litellm_origin = _litellm_host(host, litellm_host, litellm_port)
-    freellmapi_origin = _litellm_host(host, None, freellmapi_port)
-    app_entries = "".join(_gated_app_entries(host, *app) for app in gated_apps)
-    app_providers = "".join(
-        f"        - !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab {name} provider]]\n"
-        for _service_id, name, _port in gated_apps
+def _bindings(target: str, groups: tuple[str, ...]) -> str:
+    return "".join(
+        f"""  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      target: !KeyOf {target}
+      order: {order}
+    attrs:
+      group: !Find [authentik_core.group, [name, {group}]]
+"""
+        for order, group in enumerate(groups)
+    )
+
+
+def _gated_entries(host: str, app: GatedApp) -> str:
+    """Forward-auth provider and hidden application; the outpost answers 404 for unknown hosts."""
+    _check_names(app.id, app.name)
+    if not 1024 <= app.port <= 65535:
+        raise ValueError("gated app port must be a private HTTPS port")
+    key = f"mu3lab-{app.id}-application"
+    entries = f"""  - model: authentik_providers_proxy.proxyprovider
+    state: present
+    identifiers:
+      name: Mu3Lab {app.name} provider
+    attrs:
+      name: Mu3Lab {app.name} provider
+      mode: forward_single
+      # The app's own origin, port included, so sign-in returns to it.
+      external_host: {quote(f"https://{host}:{app.port}")}
+      access_token_validity: hours=24
+{_FLOWS}      intercept_header_auth: true
+  - model: authentik_core.application
+    id: {key}
+    state: present
+    identifiers:
+      slug: mu3lab-{app.id}
+    attrs:
+      name: Mu3Lab {app.name}
+      slug: mu3lab-{app.id}
+      meta_launch_url: {quote(HIDDEN_FROM_LIBRARY)}
+      policy_engine_mode: any
+      provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab {app.name} provider]]
+"""
+    # No binding admits everyone Authentik knows, which is the household.
+    if app.audience == "operators":
+        entries += _bindings(key, ADMIN_GROUPS)
+    return entries
+
+
+# The one-time sign-in link a new household member receives (Settings → People):
+# it signs them in once and asks them to choose their own password. Authentik
+# issues such links only through the brand's recovery flow.
+WELCOME_FLOW = """  - model: authentik_stages_prompt.prompt
+    id: mu3lab-welcome-password
+    state: present
+    identifiers:
+      name: mu3lab-welcome-password
+    attrs:
+      field_key: password
+      label: Password
+      type: password
+      required: true
+      placeholder: Choose a password
+      order: 0
+  - model: authentik_stages_prompt.prompt
+    id: mu3lab-welcome-password-repeat
+    state: present
+    identifiers:
+      name: mu3lab-welcome-password-repeat
+    attrs:
+      field_key: password_repeat
+      label: Password (again)
+      type: password
+      required: true
+      placeholder: Type it again
+      order: 1
+  - model: authentik_stages_prompt.promptstage
+    id: mu3lab-welcome-prompt
+    state: present
+    identifiers:
+      name: Mu3Lab choose your password
+    attrs:
+      fields:
+        - !KeyOf mu3lab-welcome-password
+        - !KeyOf mu3lab-welcome-password-repeat
+  - model: authentik_stages_user_write.userwritestage
+    id: mu3lab-welcome-write
+    state: present
+    identifiers:
+      name: mu3lab-welcome-user-write
+    attrs:
+      user_creation_mode: never_create
+  - model: authentik_stages_user_login.userloginstage
+    id: mu3lab-welcome-login
+    state: present
+    identifiers:
+      name: mu3lab-welcome-user-login
+  - model: authentik_flows.flow
+    id: mu3lab-welcome-flow
+    state: present
+    identifiers:
+      slug: mu3lab-welcome
+    attrs:
+      name: Welcome to Mu3Lab
+      title: Choose your Mu3Lab password
+      designation: recovery
+      authentication: require_unauthenticated
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf mu3lab-welcome-flow
+      stage: !KeyOf mu3lab-welcome-prompt
+      order: 10
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf mu3lab-welcome-flow
+      stage: !KeyOf mu3lab-welcome-write
+      order: 20
+  - model: authentik_flows.flowstagebinding
+    state: present
+    identifiers:
+      target: !KeyOf mu3lab-welcome-flow
+      stage: !KeyOf mu3lab-welcome-login
+      order: 30
+  - model: authentik_brands.brand
+    state: present
+    identifiers:
+      domain: authentik-default
+    attrs:
+      flow_recovery: !KeyOf mu3lab-welcome-flow
+"""
+
+
+def render_gate_blueprint(host: str, dashboard_port: int, gated: tuple[GatedApp, ...] = ()) -> str:
+    """The dashboard's gate, Mu3Lab's groups, every gated app and the embedded outpost."""
+    host = validate_host(host)
+    dashboard = f"https://{host}:{dashboard_port}"
+    authentik = f"https://{host}"
+    providers = "".join(
+        f"        - !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab {app.name} provider]]\n"
+        for app in gated
     )
     return f"""# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
-# Generated by Mu3Lab. Do not edit in the checkout; the runtime copy is
-# reconciled by Authentik's worker and contains no credentials.
+# Generated by Mu3Lab from the app manifests; contains no credentials.
 version: 1
 metadata:
-  name: Mu3Lab dashboard access
-  labels:
-    blueprints.goauthentik.io/instantiate: "true"
+  name: {DASHBOARD_BLUEPRINT}
 entries:
   - model: authentik_core.group
     state: present
@@ -153,9 +238,9 @@ entries:
   - model: authentik_core.group
     state: present
     identifiers:
-      name: mu3lab-household
+      name: {HOUSEHOLD_GROUP}
     attrs:
-      name: mu3lab-household
+      name: {HOUSEHOLD_GROUP}
   - model: authentik_providers_proxy.proxyprovider
     state: present
     identifiers:
@@ -163,18 +248,11 @@ entries:
     attrs:
       name: Mu3Lab dashboard provider
       mode: forward_single
-      # The dashboard's own origin, port included, like LiteLLM below. The
-      # outpost sends the owner back here after sign-in; without :8446 it
-      # would land on Authentik's own library page instead of Mu3Lab.
-      external_host: {_quote(launch_url)}
+      # The dashboard's origin, port included: without it the outpost would
+      # send people to Authentik's own library instead of back to Mu3Lab.
+      external_host: {quote(dashboard)}
       access_token_validity: hours=24
-      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      # Implicit consent: no "Continue to app?" page. A consent page left open
-      # loses its place when another app starts a sign-in in the same browser,
-      # and Authentik then drops the person on its own library.
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      intercept_header_auth: true
+{_FLOWS}      intercept_header_auth: true
   - model: authentik_core.application
     id: mu3lab-dashboard-application
     state: present
@@ -183,114 +261,11 @@ entries:
     attrs:
       name: Mu3Lab
       slug: mu3lab
-      meta_launch_url: {_quote(launch_url)}
+      meta_launch_url: {quote(dashboard)}
       meta_description: Private Mu3Lab control plane
       policy_engine_mode: any
       provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab dashboard provider]]
-  - model: authentik_providers_proxy.proxyprovider
-    state: present
-    identifiers:
-      name: Mu3Lab LiteLLM provider
-    attrs:
-      name: Mu3Lab LiteLLM provider
-      mode: forward_single
-      # LiteLLM is published on its own tailnet HTTPS port. Including the
-      # port here makes Authentik send its outpost callback to LiteLLM's route.
-      external_host: {_quote(litellm_origin)}
-      access_token_validity: hours=24
-      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      intercept_header_auth: true
-  - model: authentik_core.application
-    id: mu3lab-litellm-application
-    state: present
-    identifiers:
-      slug: mu3lab-litellm
-    attrs:
-      name: Mu3Lab LiteLLM
-      slug: mu3lab-litellm
-      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
-      meta_description: Private LiteLLM administration UI
-      policy_engine_mode: any
-      provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab LiteLLM provider]]
-  - model: authentik_providers_proxy.proxyprovider
-    state: present
-    identifiers:
-      name: Mu3Lab FreeLLMAPI provider
-    attrs:
-      name: Mu3Lab FreeLLMAPI provider
-      mode: forward_single
-      # FreeLLMAPI has no header-based login; Authentik gates the route and
-      # its generated local login is saved to the owner's vault.
-      external_host: {_quote(freellmapi_origin)}
-      access_token_validity: hours=24
-      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      intercept_header_auth: true
-  - model: authentik_core.application
-    id: mu3lab-freellmapi-application
-    state: present
-    identifiers:
-      slug: mu3lab-freellmapi
-    attrs:
-      name: Mu3Lab FreeLLMAPI
-      slug: mu3lab-freellmapi
-      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
-      meta_description: Private FreeLLMAPI provider dashboard
-      policy_engine_mode: any
-      provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab FreeLLMAPI provider]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-dashboard-application
-      order: 0
-    attrs:
-      group: !Find [authentik_core.group, [name, authentik Admins]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-dashboard-application
-      order: 1
-    attrs:
-      group: !Find [authentik_core.group, [name, mu3lab-operators]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-dashboard-application
-      order: 2
-    attrs:
-      group: !Find [authentik_core.group, [name, mu3lab-household]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-litellm-application
-      order: 0
-    attrs:
-      group: !Find [authentik_core.group, [name, authentik Admins]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-litellm-application
-      order: 1
-    attrs:
-      group: !Find [authentik_core.group, [name, mu3lab-operators]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-freellmapi-application
-      order: 0
-    attrs:
-      group: !Find [authentik_core.group, [name, authentik Admins]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-freellmapi-application
-      order: 1
-    attrs:
-      group: !Find [authentik_core.group, [name, mu3lab-operators]]
-{app_entries}  - model: authentik_outposts.outpost
+{_bindings("mu3lab-dashboard-application", (*ADMIN_GROUPS, HOUSEHOLD_GROUP))}{"".join(_gated_entries(host, app) for app in gated)}{WELCOME_FLOW}  - model: authentik_outposts.outpost
     state: present
     identifiers:
       name: authentik Embedded Outpost
@@ -299,127 +274,39 @@ entries:
       type: proxy
       providers:
         - !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab dashboard provider]]
-        - !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab LiteLLM provider]]
-        - !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab FreeLLMAPI provider]]
-{app_providers}      config:
-        authentik_host: {_quote(authentik_origin)}
-        authentik_host_browser: {_quote(authentik_origin)}
+{providers}      config:
+        authentik_host: {quote(authentik)}
+        authentik_host_browser: {quote(authentik)}
 """
 
 
-def _gated_app_entries(host: str, service_id: str, name: str, port: int) -> str:
-    """Provider and hidden application for one installed forward-auth app.
-
-    No policy binding: every admitted Authentik user may open it, which is
-    what household apps such as Baby Buddy expect.
-    """
-    if not re.fullmatch(r"[a-z0-9-]+", service_id) or not re.fullmatch(r"[A-Za-z0-9 .-]+", name):
-        raise ValueError("Gated app identifiers must be plain names")
-    origin = _litellm_host(host, None, port)
-    return f"""  - model: authentik_providers_proxy.proxyprovider
-    state: present
-    identifiers:
-      name: Mu3Lab {name} provider
-    attrs:
-      name: Mu3Lab {name} provider
-      mode: forward_single
-      external_host: {_quote(origin)}
-      access_token_validity: hours=24
-      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
-      intercept_header_auth: true
-  - model: authentik_core.application
-    state: present
-    identifiers:
-      slug: mu3lab-{service_id}
-    attrs:
-      name: Mu3Lab {name}
-      slug: mu3lab-{service_id}
-      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
-      policy_engine_mode: any
-      provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab {name} provider]]
-"""
-
-
-def write_dashboard_blueprint(
-    runtime_root: Path,
-    host: str,
-    authentik_host: str | None = None,
-    dashboard_host: str | None = None,
-    litellm_port: int = 8454,
-    litellm_host: str | None = None,
-    freellmapi_port: int = 8455,
-    gated_apps: tuple[tuple[str, str, int], ...] = (),
-) -> Path:
-    """Atomically write the runtime Blueprint and return its safe path.
-
-    Authentik's worker watches this directory. Avoid replacing an identical
-    file: duplicate watcher events can enqueue concurrent applies and make a
-    harmless uniqueness race look like a failed Blueprint.
-    """
-    directory = runtime_root / "projects" / "authentik" / "blueprints"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target = directory / "mu3lab-dashboard.yaml"
-    content = render_dashboard_blueprint(
-        host, authentik_host, dashboard_host, litellm_port, litellm_host, freellmapi_port, gated_apps
-    )
-    for service_id, _name, _port in gated_apps:
-        clear_removal_blueprint(runtime_root, service_id)
-    if target.is_file() and target.read_text(encoding="utf-8") == content:
-        os.chmod(target, 0o600)
-        return target
-    temporary = target.with_suffix(".yaml.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, target)
-    os.chmod(target, 0o600)
-    return target
-
-
-def render_oidc_application_blueprint(
-    host: str,
-    *,
-    service_id: str,
-    name: str,
-    private_port: int,
-    client_id: str,
-    client_secret: str,
-    redirect_paths: tuple[str, ...],
-    initial_owner: str = "",
-) -> str:
-    """Render one curated optional application's confidential OIDC client."""
-    host = _validate_host(host)
-    if (
-        not service_id.replace("-", "").isalnum()
-        or not name
-        or not 1024 <= private_port <= 65535
-        or not client_id
-        or not client_secret
-        or any(char in client_id + client_secret for char in "\r\n")
-        or not redirect_paths
-        or any(not path.startswith("/") for path in redirect_paths)
-    ):
-        raise ValueError("optional application OIDC contract is invalid")
-    launch = f"https://{host}:{private_port}"
+def render_oidc_blueprint(host: str, app: OidcApp) -> str:
+    """One app's confidential OIDC client, its claims and who may sign in."""
+    host = validate_host(host)
+    _check_names(app.id, app.name)
+    secrets_ok = app.client_id and app.client_secret and not any(c in app.client_id + app.client_secret for c in "\r\n")
+    if not secrets_ok or not app.redirect_paths or any(not path.startswith("/") for path in app.redirect_paths):
+        raise ValueError(f"{app.id}: OIDC client settings are incomplete")
+    if any(c in app.initial_owner for c in "\r\n'\""):
+        raise ValueError(f"{app.id}: invalid initial owner")
+    origin = f"https://{host}:{app.port}"
     redirects = "\n".join(
-        f"        - matching_mode: strict\n          url: {_quote(launch + path)}" for path in redirect_paths
+        f"        - matching_mode: strict\n          url: {quote(origin + path)}" for path in app.redirect_paths
     )
+    key = f"mu3lab-{app.id}-application"
     content = f"""# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
-# Generated by Mu3Lab into root-excluded runtime storage.
+# Generated by Mu3Lab from apps/{app.id}/app.yaml.
 version: 1
 metadata:
-  name: Mu3Lab {name} OIDC
-  labels:
-    blueprints.goauthentik.io/instantiate: "true"
+  name: {oidc_blueprint_name(app.id)}
 entries:
-  - id: mu3lab-{service_id}-claims
+  - id: mu3lab-{app.id}-claims
     model: authentik_providers_oauth2.scopemapping
     state: present
     identifiers:
-      name: Mu3Lab {name} verified identity claims
+      name: Mu3Lab {app.name} verified identity claims
     attrs:
-      name: Mu3Lab {name} verified identity claims
+      name: Mu3Lab {app.name} verified identity claims
       scope_name: profile
       description: Verified email, groups, and Mu3Lab operator role
       expression: |
@@ -438,21 +325,19 @@ entries:
           "groups": groups,
           "mu3lab_role": "admin" if admin else "user",
         }}
-  - id: mu3lab-{service_id}-provider
+  - id: mu3lab-{app.id}-provider
     model: authentik_providers_oauth2.oauth2provider
     state: present
     identifiers:
-      name: Mu3Lab {name} provider
+      name: Mu3Lab {app.name} provider
     attrs:
-      name: Mu3Lab {name} provider
+      name: Mu3Lab {app.name} provider
       client_type: confidential
       grant_types:
         - authorization_code
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
-      client_id: {_quote(client_id)}
-      client_secret: {_quote(client_secret)}
-      # Implicit consent skips the confirmation stage; the grant remains
-      # authorization_code. This is not the OAuth implicit grant.
+      client_id: {quote(app.client_id)}
+      client_secret: {quote(app.client_secret)}
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       issuer_mode: per_provider
@@ -461,158 +346,96 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
-        - !KeyOf mu3lab-{service_id}-claims
+        - !KeyOf mu3lab-{app.id}-claims
       redirect_uris:
 {redirects}
   - model: authentik_core.application
-    id: mu3lab-{service_id}-application
+    id: {key}
     state: present
     identifiers:
-      slug: mu3lab-{service_id}
+      slug: mu3lab-{app.id}
     attrs:
-      name: {_quote(name)}
-      slug: mu3lab-{service_id}
-      provider: !KeyOf mu3lab-{service_id}-provider
-      meta_launch_url: {_quote(HIDDEN_FROM_LIBRARY)}
+      name: {quote(app.name)}
+      slug: mu3lab-{app.id}
+      provider: !KeyOf mu3lab-{app.id}-provider
+      meta_launch_url: {quote(HIDDEN_FROM_LIBRARY)}
       policy_engine_mode: any
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-{service_id}-application
-      order: 0
-    attrs:
-      group: !Find [authentik_core.group, [name, authentik Admins]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-{service_id}-application
-      order: 1
-    attrs:
-      group: !Find [authentik_core.group, [name, mu3lab-operators]]
-  - model: authentik_policies.policybinding
-    state: present
-    identifiers:
-      target: !KeyOf mu3lab-{service_id}-application
-      order: 2
-    attrs:
-      group: !Find [authentik_core.group, [name, mu3lab-household]]
 """
-    if service_id == "actual-budget":
-        # One expression replaces the two group bindings. The first OIDC user
-        # becomes Actual's immutable server owner, so admit only the installer
-        # until its own database confirms that login. Later retain group gating.
-        if any(c in initial_owner for c in "\r\n"):
-            raise ValueError("invalid initial application owner")
-        content = content.replace(
-            "  - model: authentik_policies.policybinding\n    state: present",
-            "  - model: authentik_policies.policybinding\n    state: absent",
+    if not app.initial_owner:
+        return content + _bindings(key, (*ADMIN_GROUPS, HOUSEHOLD_GROUP)) + _absent_owner_policy(app)
+    # The first person to sign in becomes the app's owner (Actual Budget), so
+    # until the installer has, only they are admitted.
+    expression = (
+        f"return request.user.username == {app.initial_owner!r} and "
+        "request.user.ak_groups.filter(name__in=['authentik Admins', 'mu3lab-operators']).exists()"
+    )
+    return (
+        content
+        + "".join(
+            f"""  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf {key}
+      order: {order}
+"""
+            for order in range(3)
         )
-        expression = (
-            f"return request.user.username == {initial_owner!r} and request.user.ak_groups.filter(name__in=['authentik Admins', 'mu3lab-operators']).exists()"
-            if initial_owner
-            else 'return request.user.ak_groups.filter(name__in=["authentik Admins", "mu3lab-operators", "mu3lab-household"]).exists()'
-        )
-        content += f"""  - model: authentik_policies_expression.expressionpolicy
-    id: mu3lab-actual-owner-policy
+        + f"""  - model: authentik_policies_expression.expressionpolicy
+    id: mu3lab-{app.id}-owner-policy
     state: present
     identifiers:
-      name: Mu3Lab Actual Budget owner admission
+      name: Mu3Lab {app.name} owner admission
     attrs:
       expression: |
         {expression}
   - model: authentik_policies.policybinding
     state: present
     identifiers:
-      target: !KeyOf mu3lab-actual-budget-application
-      order: 2
+      target: !KeyOf {key}
+      order: 10
     attrs:
-      policy: !KeyOf mu3lab-actual-owner-policy
+      policy: !KeyOf mu3lab-{app.id}-owner-policy
 """
-    return content
+    )
 
 
-def write_oidc_application_blueprint(runtime_root: Path, host: str, **contract) -> Path:
-    """Atomically publish one curated optional-application OIDC blueprint."""
-    content = render_oidc_application_blueprint(host, **contract)
-    service_id = str(contract["service_id"])
-    clear_removal_blueprint(runtime_root, service_id)
-    directory = runtime_root / "projects" / "authentik" / "blueprints"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target = directory / f"mu3lab-{service_id}.yaml"
-    if target.is_file() and target.read_text(encoding="utf-8") == content:
-        os.chmod(target, 0o600)
-        return target
-    temporary = target.with_suffix(".yaml.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, target)
-    os.chmod(target, 0o600)
-    return target
+def _absent_owner_policy(app: OidcApp) -> str:
+    """Once the owner guard is lifted, its policy and binding go away."""
+    return f"""  - model: authentik_policies_expression.expressionpolicy
+    state: absent
+    identifiers:
+      name: Mu3Lab {app.name} owner admission
+"""
 
 
-def _removal_path(runtime_root: Path, service_id: str) -> Path:
-    if not re.fullmatch(r"[a-z0-9-]+", service_id):
-        raise ValueError("Removal blueprint identifiers must be plain names")
-    return runtime_root / "projects" / "authentik" / "blueprints" / f"mu3lab-{service_id}-removed.yaml"
-
-
-def render_removal_blueprint(service_id: str, name: str, *, oidc: bool) -> str:
-    """Delete one uninstalled app's Authentik objects.
-
-    Dropping an entry from a Blueprint leaves the object behind, so removal is
-    its own Blueprint with ``state: absent``. The names match what
-    ``render_oidc_application_blueprint`` and ``_gated_app_entries`` create.
-    """
-    if not re.fullmatch(r"[a-z0-9-]+", service_id) or not re.fullmatch(r"[A-Za-z0-9 .-]+", name):
-        raise ValueError("Removal blueprint identifiers must be plain names")
+def render_removal_blueprint(app_id: str, name: str, *, oidc: bool) -> str:
+    """Delete one uninstalled app's Authentik objects (the names match what the renderers create)."""
+    _check_names(app_id, name)
     provider_model = "authentik_providers_oauth2.oauth2provider" if oidc else "authentik_providers_proxy.proxyprovider"
-    claims = (
+    extra = (
         f"""  - model: authentik_providers_oauth2.scopemapping
     state: absent
     identifiers:
       name: Mu3Lab {name} verified identity claims
+  - model: authentik_policies_expression.expressionpolicy
+    state: absent
+    identifiers:
+      name: Mu3Lab {name} owner admission
 """
         if oidc
         else ""
     )
-    if service_id == "actual-budget":
-        claims += """  - model: authentik_policies_expression.expressionpolicy
-    state: absent
-    identifiers:
-      name: Mu3Lab Actual Budget owner admission
-"""
     return f"""# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
-# Generated by Mu3Lab when {name} was uninstalled. Reinstalling deletes it.
 version: 1
 metadata:
-  name: Mu3Lab {name} removal
-  labels:
-    blueprints.goauthentik.io/instantiate: "true"
+  name: {removal_blueprint_name(app_id)}
 entries:
   - model: authentik_core.application
     state: absent
     identifiers:
-      slug: mu3lab-{service_id}
+      slug: mu3lab-{app_id}
   - model: {provider_model}
     state: absent
     identifiers:
       name: Mu3Lab {name} provider
-{claims}"""
-
-
-def write_removal_blueprint(runtime_root: Path, service_id: str, name: str, *, oidc: bool) -> Path:
-    """Publish the removal Blueprint and withdraw the app's present one."""
-    content = render_removal_blueprint(service_id, name, oidc=oidc)
-    target = _removal_path(runtime_root, service_id)
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = target.with_suffix(".yaml.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, target)
-    (target.parent / f"mu3lab-{service_id}.yaml").unlink(missing_ok=True)
-    return target
-
-
-def clear_removal_blueprint(runtime_root: Path, service_id: str) -> None:
-    """A reinstalled app must not be deleted again by its old removal Blueprint."""
-    _removal_path(runtime_root, service_id).unlink(missing_ok=True)
+{extra}"""

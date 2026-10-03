@@ -46,14 +46,29 @@ env:
 rules:
 - rule: staged_first_start
   with:
-    first:
-    - db
-    - redis
-    - app
+    first: [db, redis, app]
+    then:
+      service: app
+      script: scripts/install.sh
+      interpreter: [sh, -s]
+      purpose: Finish Nextcloud's base installation
 - rule: first_admin_from_env
   with:
     override: docker-compose.bootstrap.yml
+    fresh_when_empty: postgres
     username: verbatim
+    verify:
+      script:
+        service: app
+        script: scripts/verify-admin.sh
+        interpreter: [sh, -s, --]
+- rule: container_script
+  with:
+    at: after_healthy
+    service: app
+    script: scripts/configure.sh
+    interpreter: [sh, -s]
+    purpose: Enable Calendar and Authentik sign-in in Nextcloud
 chat:
   assistant:
     title: Nextcloud

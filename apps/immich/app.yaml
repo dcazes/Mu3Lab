@@ -50,8 +50,6 @@ secrets:
 - env: IMMICH_PASSWORD_LOGIN_ENABLED
   kind: fixed
   value: 'true'
-env:
-  IMMICH_OIDC_ISSUER_URL: https://{{dns_name}}/application/o/mu3lab-immich/.well-known/openid-configuration
 rules:
 - rule: password_login_off_after_setup
   with:

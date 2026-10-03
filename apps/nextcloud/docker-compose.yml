@@ -51,6 +51,10 @@ services:
       OVERWRITEHOST: ${NEXTCLOUD_OVERWRITEHOST:?NEXTCLOUD_OVERWRITEHOST is required}
       OVERWRITEPROTOCOL: https
       OVERWRITECLIURL: ${NEXTCLOUD_OVERWRITECLIURL:?NEXTCLOUD_OVERWRITECLIURL is required}
+      # Read only by Mu3Lab's setup script, which registers Authentik with user_oidc.
+      MU3LAB_OIDC_CLIENT_ID: ${NEXTCLOUD_OIDC_CLIENT_ID:-}
+      MU3LAB_OIDC_CLIENT_SECRET: ${NEXTCLOUD_OIDC_CLIENT_SECRET:-}
+      MU3LAB_OIDC_DISCOVERY_URL: ${NEXTCLOUD_OIDC_DISCOVERY_URL:-}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
     networks:

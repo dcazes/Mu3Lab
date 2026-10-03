@@ -19,6 +19,7 @@ route:
   https_port: 8454
   caddy_port: 19471
   access: gate
+  audience: operators
   forwarded_host: host
 sign_in:
   method: gate

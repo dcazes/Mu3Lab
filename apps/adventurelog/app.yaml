@@ -46,7 +46,6 @@ rules:
     verify:
       django_superuser:
         service: app
-        username_env: DJANGO_ADMIN_USERNAME
 - rule: container_script
   with:
     at: after_healthy

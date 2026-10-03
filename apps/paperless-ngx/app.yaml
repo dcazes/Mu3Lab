@@ -60,7 +60,6 @@ rules:
     verify:
       django_superuser:
         service: webserver
-        username_env: PAPERLESS_ADMIN_USER
 chat:
   assistant:
     title: Paperless-ngx

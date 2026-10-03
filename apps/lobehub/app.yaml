@@ -72,8 +72,7 @@ env:
 rules:
 - rule: hide_model_providers
   with:
-    list: blocked-model-providers.txt
-    env: MODEL_PROVIDERS_HIDDEN
+    providers_file: blocked-model-providers.txt
 mobile:
   primary: lobechat-pwa
   clients:
