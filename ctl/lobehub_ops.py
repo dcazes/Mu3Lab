@@ -110,6 +110,7 @@ def _agent_sql(installed: set[str]) -> str:
     agent_json = _quoted(json.dumps(rows, ensure_ascii=False))
     absent = ", ".join(_quoted(f"mu3lab-{slug}") for slug, *_ in AGENTS if slug not in installed) or "NULL"
     return f"""
+{_mobile_sessions_sql()}
 CREATE OR REPLACE FUNCTION mu3lab_seed_default_agents() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -146,6 +147,107 @@ DELETE FROM agents a
 """
 
 
+def _mobile_sessions_sql() -> str:
+    """Bridge managed agents to v2.2.18's mobile session list.
+
+    New users inherit the managed, connected MCP configuration for each app.
+    Credentials remain encrypted in Postgres, as in the existing all-user sync.
+    Only connected assistants get a mobile session; existing chats are untouched.
+    """
+    return """
+CREATE OR REPLACE FUNCTION mu3lab_agent_mobile_session(target_id text) RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO sessions (id, slug, title, description, type, user_id, pinned)
+  SELECT 'ses_' || a.id, a.slug, a.title, a.description, 'agent', a.user_id, true
+  FROM agents a WHERE a.id = target_id AND a.workspace_id IS NULL
+    AND a.slug LIKE 'mu3lab-%'
+    AND EXISTS (SELECT 1 FROM user_connectors c WHERE c.agent_id = a.id
+                AND c.identifier LIKE 'mu3lab-%' AND c.is_enabled AND c.status = 'connected')
+    AND NOT EXISTS (SELECT 1 FROM agents_to_sessions ats WHERE ats.agent_id = a.id)
+  ON CONFLICT (slug, user_id) WHERE workspace_id IS NULL DO NOTHING;
+  INSERT INTO agents_to_sessions (agent_id, session_id, user_id)
+  SELECT a.id, s.id, a.user_id FROM agents a JOIN sessions s
+    ON s.user_id = a.user_id AND s.slug = a.slug AND s.workspace_id IS NULL
+  WHERE a.id = target_id AND a.workspace_id IS NULL AND a.slug LIKE 'mu3lab-%'
+    AND NOT EXISTS (SELECT 1 FROM agents_to_sessions ats WHERE ats.agent_id = a.id)
+  ON CONFLICT DO NOTHING;
+END $$;
+CREATE OR REPLACE FUNCTION mu3lab_inherit_agent_connectors() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE source_agent agents%ROWTYPE; source_connector user_connectors%ROWTYPE; new_connector uuid;
+BEGIN
+  IF NEW.workspace_id IS NOT NULL OR NEW.slug NOT LIKE 'mu3lab-%' THEN RETURN NEW; END IF;
+  SELECT a.* INTO source_agent FROM agents a WHERE a.slug = NEW.slug AND a.id <> NEW.id
+    AND a.workspace_id IS NULL AND EXISTS (SELECT 1 FROM user_connectors c
+      WHERE c.agent_id = a.id AND c.identifier LIKE 'mu3lab-%'
+        AND c.is_enabled AND c.status = 'connected')
+    ORDER BY a.created_at LIMIT 1;
+  IF source_agent.id IS NOT NULL THEN
+    FOR source_connector IN SELECT * FROM user_connectors c
+      WHERE c.agent_id = source_agent.id AND c.identifier LIKE 'mu3lab-%'
+        AND c.is_enabled AND c.status = 'connected'
+    LOOP
+      INSERT INTO user_connectors (user_id, agent_id, identifier, name, source_type,
+        mcp_server_url, mcp_connection_type, status, is_enabled, credentials)
+      VALUES (NEW.user_id, NEW.id, source_connector.identifier, source_connector.name,
+        source_connector.source_type, source_connector.mcp_server_url,
+        source_connector.mcp_connection_type, 'connected', true, source_connector.credentials)
+      RETURNING id INTO new_connector;
+      INSERT INTO user_connector_tools (user_connector_id, user_id, tool_name,
+        display_name, description, input_schema, crud_type, permission)
+      SELECT new_connector, NEW.user_id, tool_name, display_name, description,
+        input_schema, crud_type, permission FROM user_connector_tools
+      WHERE user_connector_id = source_connector.id;
+    END LOOP;
+    UPDATE agents SET plugins = (
+      SELECT COALESCE(jsonb_agg(c.identifier), '[]'::jsonb) FROM user_connectors c
+      WHERE c.agent_id = NEW.id AND c.identifier LIKE 'mu3lab-%' AND c.is_enabled
+    ) WHERE id = NEW.id;
+    IF source_agent.metadata ->> 'mu3lab_system_role_sha'
+       = encode(sha256(convert_to(COALESCE(source_agent.system_role, ''), 'UTF8')), 'hex') THEN
+      UPDATE agents SET system_role = source_agent.system_role,
+        metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+          'mu3lab_system_role_sha', source_agent.metadata ->> 'mu3lab_system_role_sha')
+      WHERE id = NEW.id;
+    END IF;
+  END IF;
+  PERFORM mu3lab_agent_mobile_session(NEW.id);
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS mu3lab_inherit_agent_connectors_trigger ON agents;
+CREATE TRIGGER mu3lab_inherit_agent_connectors_trigger AFTER INSERT ON agents
+FOR EACH ROW EXECUTE FUNCTION mu3lab_inherit_agent_connectors();
+SELECT mu3lab_agent_mobile_session(id) FROM agents WHERE slug LIKE 'mu3lab-%' AND workspace_id IS NULL;
+"""
+
+
+def _provider_guard_sql() -> str:
+    """Allow LobeHub's empty builtin config while rejecting private overrides.
+
+    Chat initializes its provider with config={} using INSERT ON CONFLICT.
+    PostgreSQL runs BEFORE INSERT even when that insert would conflict.
+    """
+    return """
+CREATE OR REPLACE FUNCTION mu3lab_provider_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.id <> 'openai' AND NEW.enabled IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'Mu3Lab allows only the LiteLLM OpenAI-compatible provider';
+  END IF;
+  IF TG_OP = 'INSERT' AND (NEW.key_vaults IS NOT NULL OR COALESCE(NEW.config, '{}'::jsonb) <> '{}'::jsonb) THEN
+    RAISE EXCEPTION 'Mu3Lab manages provider credentials and routes on the server';
+  ELSIF TG_OP = 'UPDATE' AND
+        (NEW.key_vaults IS DISTINCT FROM OLD.key_vaults OR NEW.config IS DISTINCT FROM OLD.config) THEN
+    RAISE EXCEPTION 'Mu3Lab manages provider credentials and routes on the server';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS mu3lab_provider_guard_trigger ON ai_providers;
+CREATE TRIGGER mu3lab_provider_guard_trigger BEFORE INSERT OR UPDATE ON ai_providers
+FOR EACH ROW EXECUTE FUNCTION mu3lab_provider_guard();
+"""
+
+
 def _sql(installed: set[str]) -> str:
     # Pinned upstream completion contract:
     # https://github.com/lobehub/lobehub/blob/v2.2.18/src/store/user/slices/onboarding/selectors.ts
@@ -173,23 +275,7 @@ UPDATE ai_providers SET enabled = false WHERE id <> 'openai' AND enabled IS DIST
 UPDATE ai_providers SET enabled = true WHERE id = 'openai' AND enabled IS DISTINCT FROM true;
 UPDATE ai_models SET enabled = false
  WHERE enabled IS TRUE AND (provider_id <> 'openai' OR id <> 'mu3lab-chat');
-{_agent_sql(installed)}CREATE OR REPLACE FUNCTION mu3lab_provider_guard() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  IF NEW.id <> 'openai' AND NEW.enabled IS DISTINCT FROM false THEN
-    RAISE EXCEPTION 'Mu3Lab allows only the LiteLLM OpenAI-compatible provider';
-  END IF;
-  IF TG_OP = 'INSERT' AND (NEW.key_vaults IS NOT NULL OR NEW.config IS NOT NULL) THEN
-    RAISE EXCEPTION 'Mu3Lab manages provider credentials and routes on the server';
-  ELSIF TG_OP = 'UPDATE' AND
-        (NEW.key_vaults IS DISTINCT FROM OLD.key_vaults OR NEW.config IS DISTINCT FROM OLD.config) THEN
-    RAISE EXCEPTION 'Mu3Lab manages provider credentials and routes on the server';
-  END IF;
-  RETURN NEW;
-END $$;
-DROP TRIGGER IF EXISTS mu3lab_provider_guard_trigger ON ai_providers;
-CREATE TRIGGER mu3lab_provider_guard_trigger BEFORE INSERT OR UPDATE ON ai_providers
-FOR EACH ROW EXECUTE FUNCTION mu3lab_provider_guard();
-CREATE OR REPLACE FUNCTION mu3lab_model_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+{_agent_sql(installed)}{_provider_guard_sql()}CREATE OR REPLACE FUNCTION mu3lab_model_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.enabled IS TRUE AND (NEW.provider_id <> 'openai' OR NEW.id <> 'mu3lab-chat') THEN
     RAISE EXCEPTION 'Mu3Lab exposes only mu3lab-chat';
@@ -492,7 +578,9 @@ ON CONFLICT (user_connector_id, tool_name) DO UPDATE SET
   input_schema = EXCLUDED.input_schema, crud_type = EXCLUDED.crud_type,
   permission = EXCLUDED.permission,
   updated_at = now();
-{_instructions_sql(slug, service_id, instructions) if instructions else ""}COMMIT;
+{_instructions_sql(slug, service_id, instructions) if instructions else ""}
+{_mobile_sessions_sql()}
+COMMIT;
 """
     rc, _output = actions.docker_cmd_stdin(PSQL, sql, log)
     return rc == 0
