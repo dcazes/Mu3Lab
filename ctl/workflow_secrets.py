@@ -1,8 +1,7 @@
-"""Encrypted, short-lived workflow inputs and credential handoffs.
+"""Encrypted, short-lived workflow identity inputs.
 
 The durable job database is intentionally secret-free. This store carries the
-verified Authentik identity into the worker and retains generated application
-credentials for at most 24 hours without reusing the provider-secret key.
+verified Authentik identity into the worker for at most 24 hours without reusing the provider-secret key.
 """
 
 from __future__ import annotations
@@ -122,89 +121,6 @@ def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> JobIdenti
                 display_name=str(item.get("display_name", "")),
             )
     return None
-
-
-@serialized("workflow-secrets.lock")
-def create_handoff(
-    *,
-    service_id: str,
-    job_id: str,
-    owner_uid: str,
-    username: str,
-    email: str,
-    password: str,
-    login_url: str,
-    paths: RuntimePaths = RuntimePaths(),
-) -> dict[str, str]:
-    created, handoff_id = _now(), uuid4().hex
-    records = _read(paths)
-    records.append(
-        {
-            "id": handoff_id,
-            "kind": "credential",
-            "service_id": service_id,
-            "job_id": job_id,
-            "owner_uid": owner_uid,
-            "username": username,
-            "email": email,
-            "password": password,
-            "login_url": login_url,
-            "created_at": created.isoformat(timespec="seconds"),
-            "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds"),
-        }
-    )
-    _write(records, paths)
-    return {
-        "id": handoff_id,
-        "created_at": created.isoformat(timespec="seconds"),
-        "expires_at": (created + timedelta(hours=TTL_HOURS)).isoformat(timespec="seconds"),
-    }
-
-
-@serialized("workflow-secrets.lock")
-def metadata(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
-    cleanup(paths)
-    keys = ("id", "service_id", "job_id", "created_at", "expires_at", "login_url")
-    return [
-        {key: str(item.get(key, "")) for key in keys}
-        for item in _read(paths)
-        if item.get("kind") == "credential" and item.get("owner_uid") == owner_uid
-    ]
-
-
-@serialized("workflow-secrets.lock")
-def reveal(handoff_id: str, owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str] | None:
-    cleanup(paths)
-    for item in _read(paths):
-        if item.get("kind") == "credential" and item.get("id") == handoff_id and item.get("owner_uid") == owner_uid:
-            return {
-                key: str(item.get(key, ""))
-                for key in (
-                    "id",
-                    "service_id",
-                    "username",
-                    "email",
-                    "password",
-                    "login_url",
-                    "created_at",
-                    "expires_at",
-                )
-            }
-    return None
-
-
-@serialized("workflow-secrets.lock")
-def delete(record_id: str, owner_uid: str = "", paths: RuntimePaths = RuntimePaths()) -> bool:
-    records = _read(paths)
-    retained = [
-        item
-        for item in records
-        if not (item.get("id") == record_id and (not owner_uid or item.get("owner_uid") == owner_uid))
-    ]
-    if len(retained) == len(records):
-        return False
-    _write(retained, paths)
-    return True
 
 
 @serialized("workflow-secrets.lock")

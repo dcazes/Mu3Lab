@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,9 +9,9 @@ from unittest.mock import patch
 
 from ctl import workflow_secrets
 from ctl.control_state import ControlState
+from ctl.engine.runtime import render_service as materialize
 from ctl.install_batches import InstallBatchStore
 from ctl.jobs import JobStore
-from ctl.lifecycle.materialize import materialize
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -38,27 +37,6 @@ class WorkflowSecretTests(unittest.TestCase):
         self.assertTrue(any(char in "-_!@#%" for char in password))
         self.assertFalse(set(password).intersection("0O1lI'\"`$\\: \n\r"))
 
-    def test_handoff_is_encrypted_owner_scoped_and_deletable(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            result = workflow_secrets.create_handoff(
-                service_id="paperless-ngx",
-                job_id="job",
-                owner_uid="owner-a",
-                username="operator",
-                email="operator@example.test",
-                password="NeverPlaintext123!",
-                login_url="https://private.example",
-                paths=paths,
-            )
-            encrypted = (paths.runtime / "workflow-secrets.enc").read_bytes()
-            self.assertNotIn(b"NeverPlaintext123!", encrypted)
-            self.assertIsNone(workflow_secrets.reveal(result["id"], "owner-b", paths))
-            self.assertEqual(workflow_secrets.reveal(result["id"], "owner-a", paths)["password"], "NeverPlaintext123!")
-            self.assertTrue(workflow_secrets.delete(result["id"], "owner-a", paths))
-            self.assertIsNone(workflow_secrets.reveal(result["id"], "owner-a", paths))
-            self.assertEqual(stat.S_IMODE((paths.runtime / "workflow-secrets.key").stat().st_mode), 0o600)
-
 
 class RegistryAccountTests(unittest.TestCase):
     def test_managed_account_fields_are_not_browser_visible(self):
@@ -77,7 +55,7 @@ class RegistryAccountTests(unittest.TestCase):
             paths = RuntimePaths(Path(runtime_tmp))
             with (
                 runtime_paths(paths),
-                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+                patch("ctl.engine.runtime.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
             ):
                 target = materialize(load().get("surfsense"), source)
             values = read_runtime_env(target / ".env")

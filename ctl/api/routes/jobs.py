@@ -70,7 +70,7 @@ def retry_job(job_id: str, request: Request, operator: OperatorMutation) -> dict
     # it; the app's recorded owner is kept by the onboarding store regardless.
     needs_identity = bool(
         original
-        and original.get("action") in {"install", "retry_setup", "configure_identity"}
+        and original.get("action") in {"install", "retry_setup"}
         and operator.get("subject_id")
         and operator.get("email")
     )

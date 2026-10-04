@@ -2,7 +2,7 @@
 
 Names are either facts about this computer and app (``public_url``,
 ``dns_name``, ``https_port``, ``discovery_url``, ``data_root``, ``tz``,
-``origin``) or another environment value of the same app (``{{DB_PASSWORD}}``),
+``origin``, ``sign_in_launch``) or another environment value of the same app (``{{DB_PASSWORD}}``),
 or ``{{app:<id>:<ENV>}}`` for a value another app generated. An unknown name
 is an error, so a typo never ships an empty setting.
 """

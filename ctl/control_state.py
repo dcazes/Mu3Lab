@@ -144,23 +144,10 @@ class ControlState:
                         state TEXT NOT NULL,
                         job_id TEXT NOT NULL DEFAULT '',
                         owner_uid TEXT NOT NULL DEFAULT '',
-                        credential_handoff_id TEXT NOT NULL DEFAULT '',
                         last_error_json TEXT NOT NULL DEFAULT '{}',
                         verified_at TEXT NOT NULL DEFAULT '',
                         updated_at TEXT NOT NULL
                     );
-                    CREATE TABLE IF NOT EXISTS credential_handoffs (
-                        id TEXT PRIMARY KEY,
-                        service_id TEXT NOT NULL,
-                        job_id TEXT NOT NULL,
-                        owner_uid TEXT NOT NULL,
-                        state TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        expires_at TEXT NOT NULL,
-                        confirmed_at TEXT NOT NULL DEFAULT ''
-                    );
-                    CREATE INDEX IF NOT EXISTS credential_handoffs_owner
-                        ON credential_handoffs(owner_uid, state, expires_at);
                     CREATE TABLE IF NOT EXISTS calendar_connections (
                         owner_uid TEXT PRIMARY KEY,
                         username_hint TEXT NOT NULL,
@@ -375,15 +362,13 @@ class ControlState:
                 result[key] = {}
         return result
 
-    def reset_service(self, service_id: str, *, keep_handoffs: bool = False) -> None:
+    def reset_service(self, service_id: str) -> None:
         """Forget a failed or uninstalled optional app without touching application data.
 
         Runtime containers/projects are cleaned by the service operation.  The
         control-plane projection is removed here so the next catalog refresh
         derives a fresh planned/not-installed state instead of preserving a
-        stale failed or initialization record.  An app uninstalled with its
-        data kept still has the account a handoff describes, so the caller
-        may keep those until they expire.
+        stale failed or initialization record.
         """
         job_guard.checkpoint()
         if not service_id:
@@ -391,14 +376,7 @@ class ControlState:
         with self._connect() as conn:
             conn.execute("DELETE FROM service_installations WHERE service_id = ?", (service_id,))
             conn.execute("DELETE FROM service_initializations WHERE service_id = ?", (service_id,))
-            if not keep_handoffs:
-                conn.execute("DELETE FROM credential_handoffs WHERE service_id = ?", (service_id,))
             conn.execute("DELETE FROM service_identity_state WHERE service_id = ?", (service_id,))
-
-    def handoff_ids(self, service_id: str) -> list[str]:
-        with self._connect() as conn:
-            rows = conn.execute("SELECT id FROM credential_handoffs WHERE service_id = ?", (service_id,)).fetchall()
-        return [str(row[0]) for row in rows]
 
     def calendar_owner_uids(self) -> list[str]:
         with self._connect() as conn:
@@ -559,7 +537,6 @@ class ControlState:
         *,
         job_id: str = "",
         owner_uid: str = "",
-        handoff_id: str = "",
         error: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         job_guard.checkpoint()
@@ -570,16 +547,13 @@ class ControlState:
             conn.execute(
                 """
                 INSERT INTO service_initializations
-                (service_id, mode, state, job_id, owner_uid, credential_handoff_id,
+                (service_id, mode, state, job_id, owner_uid,
                  last_error_json, verified_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(service_id) DO UPDATE SET mode = excluded.mode,
                     state = excluded.state, job_id = excluded.job_id,
                     owner_uid = CASE WHEN excluded.owner_uid != '' THEN excluded.owner_uid
                         ELSE service_initializations.owner_uid END,
-                    credential_handoff_id = CASE WHEN excluded.credential_handoff_id != ''
-                        THEN excluded.credential_handoff_id
-                        ELSE service_initializations.credential_handoff_id END,
                     last_error_json = excluded.last_error_json,
                     verified_at = CASE WHEN excluded.verified_at != '' THEN excluded.verified_at
                         ELSE service_initializations.verified_at END,
@@ -591,57 +565,12 @@ class ControlState:
                     state,
                     job_id,
                     owner_uid,
-                    handoff_id,
                     json.dumps(error or {}, sort_keys=True),
                     now if state == "ready" else "",
                     now,
                 ),
             )
         return self.initialization(service_id) or {}
-
-    def add_handoff(
-        self, handoff_id: str, service_id: str, job_id: str, owner_uid: str, created_at: str, expires_at: str
-    ) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO credential_handoffs
-                (id, service_id, job_id, owner_uid, state, created_at, expires_at)
-                VALUES (?, ?, ?, ?, 'available', ?, ?)
-            """,
-                (handoff_id, service_id, job_id, owner_uid, created_at, expires_at),
-            )
-
-    def handoffs(self, owner_uid: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM credential_handoffs WHERE owner_uid = ?
-                ORDER BY created_at DESC
-            """,
-                (owner_uid,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def confirm_handoff(self, handoff_id: str, owner_uid: str) -> bool:
-        now = _now()
-        with self._connect() as conn:
-            result = conn.execute(
-                """
-                UPDATE credential_handoffs SET state = 'confirmed', confirmed_at = ?
-                WHERE id = ? AND owner_uid = ? AND state = 'available'
-            """,
-                (now, handoff_id, owner_uid),
-            )
-        return result.rowcount == 1
-
-    def expire_handoffs(self, ids: list[str]) -> None:
-        if not ids:
-            return
-        with self._connect() as conn:
-            conn.executemany(
-                "UPDATE credential_handoffs SET state = 'expired' WHERE id = ?", ((value,) for value in ids if value)
-            )
 
     def bump_config_revision(self, service_id: str) -> int:
         job_guard.checkpoint()

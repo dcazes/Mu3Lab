@@ -30,6 +30,7 @@ from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.lifecycle import app_releases
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
+from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import SUPPORTED_ACTIONS, UNINSTALL_ACTIONS, allowed_actions, project_path
 from ctl.service_state import status as service_status
@@ -90,7 +91,10 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     provisions_account = action in {"install", "retry_setup"}
     if (
         provisions_account
-        and (service.account.get("mode") in {"environment_bootstrap", "api_bootstrap"} or service.id == "actual-budget")
+        and (
+            service.account.get("mode") in {"environment_bootstrap", "api_bootstrap"}
+            or any(rule.needs_owner for rule in rules_for(service.manifest))
+        )
         and (not operator.get("subject_id") or not operator.get("email"))
     ):
         raise ApiError(

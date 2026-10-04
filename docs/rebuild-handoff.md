@@ -8,48 +8,51 @@ after the plan was written.
 
 ---
 
-## Current checkpoint — Task A complete, awaiting owner review
+## Current checkpoint — Task B complete, awaiting owner review
 
-Task A finishes Authentik setup and account management through bootstrap
-settings and REST. The next implementation task is **Task B**, after the owner
-reviews this checkpoint. The overall rebuild is still unfinished; do not
-reinstall from this branch yet.
+Task B replaces optional-app installation with `ctl/engine/install.py`. The
+next implementation task is **Task C**, after the owner reviews this checkpoint.
+The overall rebuild is still unfinished; do not reinstall from this branch yet.
 
-- Sign-in modes, launch paths, gated routes and OIDC registration now come
-  from manifests. Registration and removal use synchronous blueprint imports;
-  there is no watched blueprint folder or private Authentik shell code.
-- The installer writes the owner's email, password hash and a stable API token
-  before the first start, waits for the built-in flows and signing certificate,
-  updates the owner's name through REST, then removes the bootstrap email/hash.
-- People management uses REST and recovery links. Group names come from
-  `groups_obj` (the `groups` field contains IDs). Demotion removes inherited
-  administrator membership, and Mu3Lab serializes role/removal changes and
-  protects the last administrator. The installation administrator (`akadmin`)
-  must also stay active and retain administrator access because the retained
-  bootstrap API token belongs to that account.
-- The pinned fresh image creates **authentik Self-signed Certificate**. The
-  earlier reference to "authentik Internal JWT Certificate" was incorrect.
-  This is Authentik's documented default OAuth/OIDC signing key:
-  https://docs.goauthentik.io/install-config/first-steps/.
-- Materialization only writes runtime files now. Existing app and core
-  installers register sign-in explicitly before starting OIDC apps. The old
-  lifecycle pipeline and owner-guard worker remain until Task B.
-- Old shell/password-reset and watched-folder tests were removed with those
-  implementations; REST request, secret preservation, removal/reinstall,
-  administrator safeguards and failed-update retry tests replace them.
-- The inherited WIP lint/type/format errors were fixed so the full gate can
-  run. No tests were disabled to complete Task A.
+- All optional apps now follow one pipeline: manifest/rule preflight, private
+  runtime rendering, image download/pinning, sign-in registration, staged starts,
+  account setup, health and browser sign-in checks, routes and chat connectors.
+- Rules receive working rerender and sign-in registration callbacks. The worker
+  runs each installed app's periodic rules every 60 seconds. The initial-owner
+  rule restores its restriction if Authentik refuses the household update.
+- Staged starts drop temporary administrator settings before the final health
+  check. Failed account verification also attempts this cleanup. Existing owners
+  and image release records survive retries.
+- Nextcloud's first-admin rule uses an optional `existing_account_check` (an
+  app-provided JSON status command). Database files alone cannot prove its setup
+  committed; an interrupted setup can therefore retry with bootstrap settings.
+- Removed the old materializer, app-specific lifecycle helpers, owner-guard
+  worker, repair/configure-identity actions and expiring credential handoffs
+  (encrypted records API, table creation, vault callers and dashboard reveal UI).
+  Durable onboarding logins for vault saving remain.
+- JSON sign-in launch pages now render from manifests in `ctl/engine/launch.py`.
+  The full route and sign-in probe rewrites remain Task D.
+- Core setup and maintenance use the rule-aware renderer. Core startup remains
+  on its previous executor until Task C; its temporary environment compatibility
+  helper lives in `core_setup`, with no app-ID branches left in `service_ops`.
+- Preserved app account recovery tests against app-owned hooks. Removed tests of
+  deleted handoff/legacy functions alongside those functions, and replaced install
+  and Nextcloud setup assertions with engine and app-script tests. None are disabled.
 
-Validation: Python lint, formatting, mypy and the full unit suite (610 tests,
+Validation: Python lint, formatting, mypy and the full unit suite (622 tests,
 four expected skips); dashboard TypeScript, ESLint, Vitest (93 tests) and
-Prettier; three fresh-container Authentik
-integration tests (bootstrap sign-in, guard/removal, and household invitations
-with production account-management functions). Test resources are removed
-also when integration setup fails. All runtime tests use temporary state and
-`mu3lab-test-authentik`; the owner's live stack is untouched.
+Prettier. Generated optional-app Compose files and JSON launcher JavaScript/CSP
+hashes also validate. Engine tests use a temporary catalog and fake Compose; Nextcloud's
+actual shell scripts run with fixture commands, users and clocks. No running
+app, Docker stack, system service, live data or live checkout was changed.
+
+Task A is committed as `ed2be8c`: Authentik bootstrap and household management
+use REST; its fresh-image integration tests passed. The pinned default signing
+certificate is **authentik Self-signed Certificate**. The bootstrap API token
+belongs to `akadmin`, which must remain active with administrator access.
 
 The WIP inventory and failures below describe the starting checkpoint. Section
-3 is resolved by Task A; Tasks B–J remain.
+3 and Tasks A–B are resolved; Tasks C–J remain.
 
 ## 0. Where the work is
 
@@ -80,6 +83,7 @@ The WIP inventory and failures below describe the starting checkpoint. Section
 
 | Commit | What |
 | --- | --- |
+| `ed2be8c` | Authentik REST bootstrap, sign-in registration and household management (Task A) |
 | `8331653` | `docs/rebuild-plan.md` with the owner's decisions |
 | `ebe48ec` | uv toolchain (`tools/toolchain.sh`, `uv.lock`, `.python-version` 3.12.14), stale docs deleted, host timezone (`ctl/hostinfo.py`), lint/type fixes |
 | `c2bb415` | one folder per app: `apps/<id>/app.yaml` + `ctl/manifest/` (Pydantic models + catalog loader), connectors moved to `apps/<app>/connectors/<id>/`, `platform/` for Mu3Lab's own images, `ctl/registry.py` is now a thin projection of manifests, dashboard uses `group` and backend launch URLs |
@@ -290,7 +294,7 @@ the commit message.
 6. Update tests listed in section 3.1; add unit tests for `sync_sign_in` using an
    `httpx.MockTransport` passed as `Authentik(transport=…)`.
 
-### Task B — The install pipeline (replace `service_ops._install` and `materialize`)
+### Task B — Complete: the install pipeline (replace `service_ops._install` and `materialize`)
 
 Create `ctl/engine/install.py` with `run_install(store, state, job, service, registry, actor, root)`
 that performs these steps in order, using `StepFailed` for every failure

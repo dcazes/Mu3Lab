@@ -62,5 +62,9 @@ class InitialOwnerGuard(Rule):
         if not row:
             return ""
         ctx.set_env({self.params.env: ""})
-        ctx.reregister_sign_in()
+        try:
+            ctx.reregister_sign_in()
+        except Exception:
+            ctx.set_env({self.params.env: username})
+            raise
         return f"{ctx.app.manifest.name} is now open to the whole household."

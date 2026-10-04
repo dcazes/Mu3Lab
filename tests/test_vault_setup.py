@@ -16,7 +16,6 @@ import httpx
 from fastapi.testclient import TestClient
 
 from ctl import vaultwarden_api as vw
-from ctl import workflow_secrets
 from ctl.api import create_app
 from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
 from ctl.identity import mode_for
@@ -275,22 +274,6 @@ class DesiredItemsTests(unittest.TestCase):
         self.assertEqual(len({entry.password for entry in entries}), len(entries))
         self.assertTrue(all(entry.username == EMAIL and not entry.rotate for entry in entries))
 
-    def test_pending_credential_handoffs_are_included(self):
-        with patch("ctl.workflow_secrets.RuntimePaths", return_value=self.paths):
-            workflow_secrets.create_handoff(
-                service_id="surfsense",
-                job_id="job",
-                owner_uid="subject",
-                username="owner",
-                email=EMAIL,
-                password="surf-pass",
-                login_url="https://h.ts.net:8447",
-                paths=self.paths,
-            )
-        entry = next(entry for entry in self.build() if entry.mu3lab_id == "service:surfsense")
-        self.assertEqual((entry.name, entry.password), ("SurfSense", "surf-pass"))
-        self.assertTrue(entry.handoff_id)
-
 
 ROUTE_HEADERS = {
     "x-mu3lab-proxy-token": "real-token",
@@ -320,7 +303,6 @@ class VaultRouteTests(unittest.TestCase):
             ("ctl.api.routes.vault._host", lambda: "h.ts.net"),
             ("ctl.api.routes.vault.JobStore.runtime", lambda: None),
             ("ctl.api.routes.vault.ControlState.runtime", lambda: None),
-            ("ctl.vault_setup.workflow_secrets.metadata", lambda *_a: []),
         ):
             patcher = patch(target, value)
             patcher.start()

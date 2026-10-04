@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ctl import actions
 from ctl.control_state import ControlState
-from ctl.login_launch import caddy_handler
+from ctl.engine.launch import caddy_handler
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -143,7 +143,7 @@ def _block(service: Service) -> str:
     return f"""
 :{service.proxy_port} {{
 \tbind 127.0.0.1
-{caddy_handler(service.id)}\thandle {{
+{caddy_handler(service.manifest)}\thandle {{
 \t\treverse_proxy 127.0.0.1:{service.https_port} {{
 \t\t\theader_up X-Forwarded-Proto https
 \t\t\theader_up X-Forwarded-Host {{http.request.hostport}}

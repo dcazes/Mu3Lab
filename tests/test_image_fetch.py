@@ -313,28 +313,28 @@ class LayerReuseTests(FetchTestCase):
 
 class InstallFallbackTests(unittest.TestCase):
     def test_install_uses_dockers_pull_when_the_fast_path_fails(self):
-        from ctl import service_ops
+        from ctl.engine import install
 
         with (
-            patch("ctl.service_ops.ImageDownloadStore.runtime", return_value=None),
-            patch("ctl.service_ops.actions.compose_image_list", return_value=(0, ["ghcr.io/a/b:1"])),
-            patch("ctl.service_ops.image_fetch.fetch_images", side_effect=FetchError("boom")),
-            patch("ctl.service_ops.actions.compose_pull", return_value=(0, "pulled")) as pull,
+            patch("ctl.engine.install.ImageDownloadStore.runtime", return_value=None),
+            patch("ctl.engine.install.actions.compose_image_list", return_value=(0, ["ghcr.io/a/b:1"])),
+            patch("ctl.engine.install.image_fetch.fetch_images", side_effect=FetchError("boom")),
+            patch("ctl.engine.install.actions.compose_pull", return_value=(0, "pulled")) as pull,
         ):
-            rc, _output = service_ops._download_images(Path("/unused"), "app", "job", lambda _line: None)
+            rc, _output = install.download_images(Path("/unused"), "app", "job", lambda _line: None)
         self.assertEqual(rc, 0)
         pull.assert_called_once()
 
     def test_install_skips_dockers_pull_after_a_fast_download(self):
-        from ctl import service_ops
+        from ctl.engine import install
 
         with (
-            patch("ctl.service_ops.ImageDownloadStore.runtime", return_value=None),
-            patch("ctl.service_ops.actions.compose_image_list", return_value=(0, ["ghcr.io/a/b:1"])),
-            patch("ctl.service_ops.image_fetch.fetch_images") as fetch,
-            patch("ctl.service_ops.actions.compose_pull") as pull,
+            patch("ctl.engine.install.ImageDownloadStore.runtime", return_value=None),
+            patch("ctl.engine.install.actions.compose_image_list", return_value=(0, ["ghcr.io/a/b:1"])),
+            patch("ctl.engine.install.image_fetch.fetch_images") as fetch,
+            patch("ctl.engine.install.actions.compose_pull") as pull,
         ):
-            rc, _output = service_ops._download_images(Path("/unused"), "app", "job", lambda _line: None)
+            rc, _output = install.download_images(Path("/unused"), "app", "job", lambda _line: None)
         self.assertEqual(rc, 0)
         fetch.assert_called_once()
         pull.assert_not_called()

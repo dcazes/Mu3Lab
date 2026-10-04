@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl import docker_config, install, service_ops
+from ctl import docker_config, install
+from ctl.engine import jobs as engine_jobs
 
 GPU = {"runtimes": {"nvidia": {"args": [], "path": "nvidia-container-runtime"}}}
 
@@ -77,9 +78,9 @@ class FailureMessageTests(unittest.TestCase):
 
     def test_pool_exhaustion_is_named_and_explained(self):
         self.assertEqual(
-            service_ops._failure_code("compose_start_failed", self.OUTPUT), "docker_network_space_exhausted"
+            engine_jobs._failure_code("compose_start_failed", self.OUTPUT), "docker_network_space_exhausted"
         )
-        self.assertIn("install.sh", service_ops._start_failure_message(self.OUTPUT))
+        self.assertIn("install.sh", engine_jobs._start_failure_message(self.OUTPUT))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-import { Download, Play, RefreshCw, RotateCcw, Square, Trash2, Wrench, type LucideIcon } from 'lucide-react';
+import { Download, Play, RefreshCw, RotateCcw, Square, Trash2, type LucideIcon } from 'lucide-react';
 import { postJsonApi, type Service } from '../../api';
 import { useConfirm } from '../../components/Dialog';
 import { useAction } from '../../lib/useAction';
@@ -17,11 +17,6 @@ export const ACTIONS: Record<ServiceAction, { label: string; icon: LucideIcon; c
   start: { label: 'Start', icon: Play },
   stop: { label: 'Stop', icon: Square, confirm: 'The app becomes unavailable until you start it again.', danger: true },
   restart: { label: 'Restart', icon: RefreshCw, confirm: 'The app is briefly unavailable while it restarts.' },
-  repair: {
-    label: 'Repair',
-    icon: Wrench,
-    confirm: 'Containers are recreated with the current configuration. Data is kept and nothing is downloaded.',
-  },
   // Both open UninstallDialog, which asks about data; `perform` never runs them.
   uninstall: { label: 'Uninstall…', icon: Trash2, danger: true },
   uninstall_delete_data: { label: 'Uninstall…', icon: Trash2, danger: true },

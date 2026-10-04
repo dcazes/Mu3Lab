@@ -89,7 +89,7 @@ export interface Service {
   // while an already-running control plane is being upgraded: the static
   // dashboard can be refreshed before the Python process is restarted.
   allowed_actions?: Array<
-    'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'repair' | 'uninstall' | 'uninstall_delete_data'
+    'install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'uninstall' | 'uninstall_delete_data'
   >;
   last_job?: Job | null;
   update?: {
@@ -100,7 +100,7 @@ export interface Service {
     supporting_only: boolean;
   };
   configuration?: ServiceConfigField[];
-  account?: { mode: string; handoff: boolean; user_action: string };
+  account?: { mode: string; user_action: string };
   initialization?: {
     mode: string;
     state: string;
@@ -672,22 +672,6 @@ export interface InstallBatchResponse {
   batch: InstallBatch | null;
   current_job?: InstallBatchJob | null;
   reset?: boolean;
-}
-
-export interface CredentialHandoff {
-  id: string;
-  service_id: string;
-  job_id: string;
-  state: string;
-  created_at: string;
-  expires_at: string;
-  login_url: string;
-}
-
-export interface CredentialReveal extends CredentialHandoff {
-  username: string;
-  email: string;
-  password: string;
 }
 
 export interface AppSize {

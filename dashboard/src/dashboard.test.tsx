@@ -25,7 +25,7 @@ afterEach(() => {
 
 describe('Home', () => {
   it('launches everyday apps and routes stopped ones to their page', () => {
-    stubFetch(() => ({ handoffs: [] }));
+    stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
     });
@@ -42,7 +42,7 @@ describe('Home', () => {
   });
 
   it('groups status into Security, AI and System chips that expand with real usage figures', () => {
-    stubFetch(() => ({ handoffs: [] }));
+    stubFetch(() => ({}));
     const GB = 1024 ** 3;
     const data = dashboardData([
       service('ingress', 'Caddy', 'foundation'),
@@ -106,31 +106,13 @@ describe('Home', () => {
     expect(within(strip).getByRole('link', { name: 'Disk: 96%' })).toBeInTheDocument();
   });
 
-  it('surfaces problems and saved-password reminders in one strip', async () => {
-    stubFetch((path) =>
-      path === '/api/v1/credential-handoffs'
-        ? {
-            handoffs: [
-              {
-                id: 'h',
-                service_id: 'nextcloud',
-                job_id: 'j',
-                state: 'available',
-                created_at: '',
-                expires_at: '',
-                login_url: '',
-              },
-            ],
-          }
-        : undefined,
-    );
+  it('surfaces app problems in the attention strip', () => {
     renderWithDashboard(
       <HomePage />,
       dashboardData([service('paperless-ngx', 'Paperless-ngx', 'optional', { state: 'failed' })]),
     );
     const strip = screen.getByRole('region', { name: 'Needs attention' });
     expect(within(strip).getByText('Paperless-ngx: failed')).toBeInTheDocument();
-    expect(await within(strip).findByText('1 new app password to save in Vaultwarden')).toBeInTheDocument();
   });
 });
 
@@ -510,27 +492,11 @@ describe('Settings', () => {
     );
   });
 
-  it('offers recovery credential export on Security', async () => {
-    stubFetch((path) =>
-      path === '/api/v1/credential-handoffs'
-        ? {
-            handoffs: [
-              {
-                id: 'h',
-                service_id: 'nextcloud',
-                job_id: 'j',
-                state: 'available',
-                created_at: '',
-                expires_at: '2030-01-01T00:00:00Z',
-                login_url: '',
-              },
-            ],
-          }
-        : undefined,
-    );
+  it('shows access and backups without temporary credential handoffs', () => {
     renderWithDashboard(<SecuritySettings />, dashboardData([]));
-    expect(await screen.findByRole('button', { name: 'Export credentials' })).toBeInTheDocument();
-    expect(screen.getByText(/Handoff expiry removes access to the saved copy/)).toBeInTheDocument();
+    expect(screen.getByText('Your access')).toBeInTheDocument();
+    expect(screen.getByText('Backup protection is not verified')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export credentials' })).not.toBeInTheDocument();
   });
 
   it('copies exactly the tailnet address', async () => {

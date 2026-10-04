@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ctl import actions
+from ctl.jobs import redact
 
 Log = Callable[[str], None]
 RELEASE_RECORD = "docker-compose.digest.yml"
@@ -124,5 +125,5 @@ class Compose:
         if rc and not error:
             error = "the setup script inside the app did not finish"
         if rc:
-            log(f"Setup script in {service} stopped: {error}")
+            log(f"Setup script in {service} stopped: {redact(error)}")
         return ScriptResult(ok=rc == 0 and not error, outputs=outputs, error=error, raw=output)

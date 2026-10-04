@@ -53,7 +53,7 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn("docker.sock", str(app))
 
     def test_baby_buddy_materialization_preserves_secret_and_public_url(self):
-        from ctl.lifecycle.materialize import materialize
+        from ctl.engine.runtime import render_service as materialize
         from ctl.secrets import read_runtime_env
 
         service = load().get("baby-buddy")
@@ -61,7 +61,7 @@ class RegistryTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             with (
                 runtime_paths(paths),
-                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+                patch("ctl.engine.runtime.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
             ):
                 project = materialize(service, ROOT)
                 first = read_runtime_env(project / ".env")["BABY_BUDDY_SECRET_KEY"]
@@ -135,7 +135,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(mode_for(load().get("firecrawl")), "none")
 
     def test_firecrawl_materialization_generates_all_runtime_secrets(self):
-        from ctl.lifecycle.materialize import materialize
+        from ctl.engine.runtime import render_service as materialize
         from ctl.secrets import read_runtime_env
 
         service = load().get("firecrawl")
@@ -143,7 +143,7 @@ class RegistryTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             with (
                 runtime_paths(paths),
-                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+                patch("ctl.engine.runtime.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
             ):
                 project = materialize(service, ROOT)
             values = read_runtime_env(project / ".env")
@@ -152,8 +152,8 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
 
     def test_lobechat_is_required_persistent_oidc_chat(self):
+        from ctl.engine.runtime import render_service as materialize
         from ctl.identity import mode_for
-        from ctl.lifecycle.materialize import materialize
         from ctl.secrets import read_runtime_env
 
         service = load().get("lobehub")
@@ -174,10 +174,16 @@ class RegistryTests(unittest.TestCase):
             (litellm / ".env").write_text("LITELLM_MASTER_KEY=test-master-key\n", encoding="utf-8")
             with (
                 runtime_paths(paths),
-                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+                patch("ctl.engine.runtime.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
             ):
                 project = materialize(service, ROOT)
             values = read_runtime_env(project / ".env")
+            launcher = (project / "Caddyfile").read_text()
+            self.assertIn("handle /__mu3lab/login", launcher)
+            self.assertIn("/api/auth/sign-in/oauth2", launcher)
+            self.assertIn("/api/auth/get-session", launcher)
+            self.assertIn("Content-Security-Policy", launcher)
+            self.assertNotIn("{{sign_in_launch}}", launcher)
             self.assertEqual(values["AUTH_SSO_PROVIDERS"], "authentik")
             self.assertEqual(values["AUTH_DISABLE_EMAIL_PASSWORD"], "1")
             self.assertEqual(values["LITELLM_MASTER_KEY"], "test-master-key")
@@ -279,14 +285,13 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(proxies), len(set(proxies)))
 
     def test_generated_tokens_never_start_with_an_option_dash(self):
-        from ctl.lifecycle.materialize import _token
+        from ctl.engine.project import token as _token
 
-        with patch("ctl.lifecycle.materialize.secrets.token_urlsafe", side_effect=["-jAbc", "_ok", "kOk"]):
+        with patch("ctl.engine.project.secrets.token_urlsafe", side_effect=["-jAbc", "_ok", "kOk"]):
             self.assertEqual(_token(36), "_ok")
 
     def test_nextcloud_materialization_generates_private_runtime_secrets_and_oidc(self):
-        from ctl.lifecycle.accounts import fresh_account_storage
-        from ctl.lifecycle.materialize import materialize
+        from ctl.engine.runtime import render_service as materialize
         from ctl.secrets import read_runtime_env
 
         root = Path(__file__).resolve().parents[1]
@@ -295,10 +300,9 @@ class RegistryTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             with (
                 runtime_paths(paths),
-                patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+                patch("ctl.engine.runtime.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
             ):
                 project = materialize(service, root)
-                self.assertTrue(fresh_account_storage("nextcloud"))
             values = read_runtime_env(project / ".env")
             self.assertEqual(values["NEXTCLOUD_OIDC_CLIENT_ID"], "mu3lab-nextcloud")
             self.assertTrue(values["NEXTCLOUD_DB_PASSWORD"])
@@ -306,13 +310,6 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
             self.assertIn("/apps/user_oidc/code", service.manifest.sign_in.oidc.redirect_paths)
             self.assertFalse((paths.projects / "authentik" / "blueprints").exists())
-            # A config.php is not proof of installation: Nextcloud writes it
-            # before committing the database. The installer must retry safely.
-            config = paths.data / "nextcloud" / "html" / "config" / "config.php"
-            config.parent.mkdir(parents=True)
-            config.write_text("<?php", encoding="utf-8")
-            with runtime_paths(paths):
-                self.assertTrue(fresh_account_storage("nextcloud"))
 
     def test_multi_container_apps_keep_generic_backing_hostnames_private(self):
         root = Path(__file__).resolve().parents[1]

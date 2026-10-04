@@ -18,6 +18,7 @@ from pathlib import Path
 from ctl import actions
 from ctl.core_wiring import EMBEDDING_MODEL
 from ctl.core_wiring import configure as configure_wiring
+from ctl.engine.runtime import render_service
 from ctl.identity import sync_sign_in
 from ctl.integrations.authentik import Authentik
 from ctl.jobs import JobStore, redact
@@ -237,6 +238,20 @@ def _runtime_envs(env_files: dict[str, Path], wiring: dict) -> dict[str, dict[st
     return envs
 
 
+def lifecycle_environment(service_id: str) -> dict[str, str]:
+    """Compatibility environment until core projects move to the shared engine."""
+    paths = RuntimePaths()
+    env = {"MU3LAB_ENV_FILE": str(paths.projects / service_id / ".env"), "MU3LAB_DATA_ROOT": str(paths.data)}
+    configs = {
+        "litellm": ("MU3LAB_LITELLM_CONFIG", "config.yaml"),
+        "freellmapi": ("MU3LAB_FREELLMAPI_CONFIG", "freellmapi.config.json"),
+    }
+    if service_id in configs:
+        key, filename = configs[service_id]
+        env[key] = str(paths.projects / service_id / filename)
+    return env
+
+
 def _configure_chat_routes(root: Path, log: Callable[[str], None]) -> None:
     """Publish LobeChat and the other core UI routes through private HTTPS."""
     from ctl.routes import reconcile_core
@@ -369,9 +384,7 @@ def _run(
         if owner:
             owner = onboarding_state.remember_owner("lobehub", owner, runtime)
         env_files = ensure_core_envs(runtime.root)
-        from ctl.lifecycle.materialize import materialize
-
-        lobehub_project = materialize(load().get("lobehub"), root)
+        lobehub_project = render_service(load().get("lobehub"), root)
         env_files["lobehub"] = lobehub_project / ".env"
         sync_sign_in(load().catalog, tailnet_dns_name(), Authentik.runtime())
         _configure_chat_routes(root, log)

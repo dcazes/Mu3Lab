@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ctl import hostinfo
 from ctl.engine import template
+from ctl.engine.launch import caddy_handler
 from ctl.manifest.catalog import App, Catalog
 from ctl.manifest.models import ConfigField, Secret
 from ctl.runtime import RuntimePaths
@@ -89,6 +90,7 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
         public = facts.public_url(app)
         known = {
             "public_url": public or None,
+            "sign_in_launch": caddy_handler(app.manifest),
             "origin": public or None,
             "dns_name": facts.dns_name or None,
             "https_port": str(app.manifest.route.https_port) if app.manifest.route else None,

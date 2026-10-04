@@ -10,8 +10,8 @@ from ctl.runtime import RuntimePaths
 
 _RUNTIME_PATH_USERS = (
     "ctl.service_ops",
-    "ctl.lifecycle.materialize",
-    "ctl.lifecycle.accounts",
+    "ctl.engine.install",
+    "ctl.engine.runtime",
     "ctl.lifecycle.uninstall",
     "ctl.lifecycle.app_releases",
     "ctl.identity",

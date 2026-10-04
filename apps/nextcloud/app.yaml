@@ -56,6 +56,10 @@ rules:
   with:
     override: docker-compose.bootstrap.yml
     fresh_when_empty: postgres
+    existing_account_check:
+      service: app
+      command: [runuser, -u, www-data, --, php, occ, status, --output=json]
+      field: installed
     username: verbatim
     verify:
       script:

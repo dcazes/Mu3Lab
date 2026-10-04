@@ -43,10 +43,17 @@ class Verify(Params):
     script: ScriptCheck | None = None
 
 
+class ExistingAccountCheck(Params):
+    service: str
+    command: tuple[str, ...] = Field(min_length=1)
+    field: str  # a true JSON field proves the app completed its installation
+
+
 class FirstAdminParams(Params):
     override: str  # compose override in the app folder that maps MU3LAB_BOOTSTRAP_* to the app's settings
     fresh_when_empty: str  # data sub-folder that is empty until the app's database exists
     username: Literal["sanitized", "verbatim"] = "sanitized"
+    existing_account_check: ExistingAccountCheck | None = None
     verify: Verify | None = None
 
 
@@ -75,6 +82,16 @@ class FirstAdminFromEnv(Rule):
             raise RuleError(f"{app.id}: first_admin_from_env needs {script.script}")
 
     def _fresh(self, ctx: HookContext) -> bool:
+        check = self.params.existing_account_check
+        if check:
+            # Files can exist before a first-run migration commits. Ask the app,
+            # as on the previous installer, rather than assuming its data is ready.
+            rc, output = ctx.compose.exec(check.service, check.command, lambda _: None, timeout=90)
+            try:
+                status = json.loads(output[output.index("{") :]) if rc == 0 else {}
+            except (ValueError, TypeError):
+                status = {}
+            return not (isinstance(status, dict) and status.get(check.field) is True)
         assert ctx.facts is not None
         folder = ctx.facts.paths.data / ctx.app.manifest.data_folder / self.params.fresh_when_empty
         try:

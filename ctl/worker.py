@@ -14,8 +14,9 @@ import threading
 import time
 from pathlib import Path
 
-from ctl import job_guard, self_update
+from ctl import job_guard, self_update, workflow_secrets
 from ctl.core_setup import execute_claimed
+from ctl.engine.install import run_periodic
 from ctl.jobs import JobStore
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
@@ -89,7 +90,7 @@ def run() -> int:
     waiting_for_runtime_reported = False
     next_mcp_reconcile = 0.0
     next_mcp_activity = 0.0
-    next_identity_reconcile = 0.0
+    next_rule_maintenance = 0.0
     next_vault_sync = 0.0
 
     def stop(_signum, _frame) -> None:
@@ -117,12 +118,10 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         waiting_for_runtime_reported = False
-        if time.monotonic() >= next_identity_reconcile:
-            next_identity_reconcile = time.monotonic() + 60
+        if time.monotonic() >= next_rule_maintenance:
+            next_rule_maintenance = time.monotonic() + 60
             try:
-                from ctl.identity_reconcile import lift_owner_guard
-
-                lift_owner_guard(store, ROOT, lambda line: print(line, flush=True))
+                run_periodic(store, ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab sign-in verification deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_vault_sync:
@@ -172,13 +171,7 @@ def run() -> int:
                 batches = InstallBatchStore.runtime()
                 if batches:
                     batches.advance_for_job(str(job["id"]), store)
-                from ctl import workflow_secrets
-                from ctl.control_state import ControlState
-
-                expired = workflow_secrets.cleanup()
-                control = ControlState.runtime()
-                if control:
-                    control.expire_handoffs(expired)
+                workflow_secrets.cleanup()
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
                 print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
     downloads_stopping.set()

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ctl import onboarding_state, workflow_secrets
+from ctl import onboarding_state
 from ctl.identity import authentik_only
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -95,24 +95,6 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                 url=str(record.get("login_url") or ""),
                 notes="Created by Mu3Lab. Bitwarden fills this in when the app asks for its login.",
                 saved=[lambda service_id=service_id: onboarding_state.vault_saved(service_id, uid, paths)],
-            )
-        )
-    for meta in workflow_secrets.metadata(uid, paths):
-        credential = workflow_secrets.reveal(meta["id"], uid, paths)
-        if not credential or any(item.mu3lab_id == f"service:{credential['service_id']}" for item in items):
-            continue
-        if authentik_only(credential["service_id"]):
-            continue
-        handoff_id = credential["id"]
-        items.append(
-            Item(
-                mu3lab_id=f"service:{credential['service_id']}",
-                name=registry.get(credential["service_id"]).name,
-                username=credential["username"] or credential["email"],
-                password=credential["password"],
-                url=credential["login_url"],
-                notes="Created by Mu3Lab when the app was installed.",
-                saved=[lambda handoff_id=handoff_id: workflow_secrets.delete(handoff_id, uid, paths)],
             )
         )
     if person.get("role") == "admin" and host:
@@ -280,9 +262,6 @@ def _retire_authentik_only(session, uid: str, existing: dict[str, Any], paths: R
     for record in onboarding_state.pending_logins(uid, paths):
         if authentik_only(str(record["service_id"])):
             onboarding_state.discard_password(str(record["service_id"]), paths)
-    for meta in workflow_secrets.metadata(uid, paths):
-        if authentik_only(str(meta.get("service_id") or "")):
-            workflow_secrets.delete(meta["id"], uid, paths)
 
 
 def run(log) -> dict[str, Any] | None:

@@ -1,5 +1,5 @@
-import { AlertTriangle, ArrowRight, KeyRound, Loader2, Plus, Rocket } from 'lucide-react';
-import type { CredentialHandoff, Service } from '../../api';
+import { AlertTriangle, ArrowRight, Loader2, Plus, Rocket } from 'lucide-react';
+import type { Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
 import { Link } from '../../lib/router';
@@ -13,7 +13,6 @@ import {
   stateLabel,
   stateTone,
 } from '../../lib/services';
-import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { HomeCalendar } from './HomeCalendar';
 import { GetStarted } from './GetStarted';
@@ -58,12 +57,7 @@ function LauncherTile({ service }: { service: Service }) {
 
 function Attention() {
   const { data } = useDashboard();
-  const operator = data.identity.writes_enabled;
-  const handoffs = useApi<{ handoffs: CredentialHandoff[] }>(operator ? '/api/v1/credential-handoffs' : null, {
-    interval: 60000,
-  });
   const failing = data.services.services.filter(needsAttention);
-  const saved = handoffs.data?.handoffs.length || 0;
   const working = data.services.services.filter(isWorking);
   const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
   const items = [
@@ -74,17 +68,6 @@ function Attention() {
       text: `${service.name}: ${stateLabel[service.state].toLowerCase()}`,
       to: `/apps/${service.id}`,
     })),
-    ...(saved
-      ? [
-          {
-            key: 'handoffs',
-            icon: KeyRound,
-            tone: 'info',
-            text: `${saved} new app password${saved === 1 ? '' : 's'} to save in Vaultwarden`,
-            to: '/settings/security',
-          },
-        ]
-      : []),
     ...(setupIncomplete
       ? [{ key: 'setup', icon: Rocket, tone: 'info', text: 'Finish setting up Mu3Lab', to: '/settings/system' }]
       : []),
