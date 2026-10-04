@@ -9,12 +9,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import httpx
 import jsonschema
 
-from ctl import chat_connections
+from ctl import chat_connections, lobehub_ops
 from ctl.integrations.lobehub import ChatError, LobeHub
 from ctl.runtime import RuntimePaths
 
@@ -115,6 +115,52 @@ class AgentSyncTests(unittest.TestCase):
         self.assertEqual(server.agents[0]["plugins"], [])
         self.assertFalse(server.servers[0]["isEnabled"])
         self.assertNotIn(("GET", "/api/v1/topics"), server.calls)
+
+    def test_assistant_the_person_deleted_is_forgotten_not_retired(self):
+        server = ApiServer()
+        with LobeHub("https://chat.test", "person-key", transport=httpx.MockTransport(server.handle)) as client:
+            managed = client.ensure_assistants(DESIRED, {})
+            server.agents = []
+            result = client.ensure_assistants([], managed, installed={"recipes"})
+        self.assertEqual(result, {})
+        self.assertNotIn(("PATCH", "/api/v1/agents/" + managed["recipes"]["agent_id"]), server.calls)
+
+    def test_one_persons_failure_does_not_stop_others(self):
+        synced = []
+
+        class Client:
+            def __init__(self, _origin, key):
+                self.key = key
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def ensure_assistants(self, desired, managed, *, installed):
+                if self.key == "sk-lh-revoked":
+                    raise ChatError("Chat did not accept this request (HTTP 401).")
+                synced.append(self.key)
+                return {"recipes": {"agent_id": "a", "instructions": "i"}}
+
+        state = Mock()
+        state.installation.return_value = None
+        records = {"first": {"key": "sk-lh-revoked"}, "second": {"key": "sk-lh-working"}}
+        with (
+            patch.object(lobehub_ops.chat_connections, "records", return_value=records),
+            patch.object(lobehub_ops.chat_connections, "save") as save,
+            patch.object(lobehub_ops, "desired_assistants", return_value=[]),
+            patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
+            patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
+            patch.object(lobehub_ops, "LobeHub", Client),
+        ):
+            ok, detail = lobehub_ops.sync_agents(lambda _line: None)
+        self.assertFalse(ok)
+        self.assertIn("HTTP 401", detail)
+        self.assertEqual(synced, ["sk-lh-working"])
+        save.assert_called_once()
+        self.assertEqual(save.call_args.args[0], "second")
 
     def test_persons_instruction_edits_survive_sync(self):
         server = ApiServer()

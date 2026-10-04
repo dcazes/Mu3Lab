@@ -142,10 +142,11 @@ A–J are implemented; final real-device and release acceptance remains.
 
 ## 0. Where the work is
 
-- Branch: `rebuild/architecture`, in the git worktree
-  `/home/dak/Desktop/Mu3Lab/.claude/worktrees/rebuild-architecture`.
-  **Always work there.** The main checkout `/home/dak/Desktop/Mu3Lab` runs the
-  owner's live install; switching branches there changes what runs on restart.
+- Historical: the rebuild was developed on `rebuild/architecture` in a separate
+  git worktree, published as `codex/rebuild-architecture-handoff`, reviewed and
+  merged into `main` on 2026-10-04. New work branches from `main`. The owner's
+  live install runs from its own checkout; switching branches there changes what
+  runs on restart, so never test in it.
 - Run every command from the worktree with absolute paths. Shell `cd` can be
   reset between commands.
 - Python: `.venv/bin/python` (uv-managed Python 3.12.14). Dev tools are in the

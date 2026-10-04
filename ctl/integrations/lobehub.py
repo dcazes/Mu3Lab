@@ -168,6 +168,10 @@ class LobeHub:
             server = next((s for s in servers if s["identifier"] == "mu3lab-" + app_id), None)
             if server:
                 self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json={"isEnabled": False})
+            if not any(agent["id"] == old.get("agent_id") for agent in agents):
+                # The person deleted this assistant themselves; there is nothing left to retire.
+                updated.pop(app_id, None)
+                continue
             agent_id = quote(old["agent_id"], safe="")
             if app_id in installed:
                 self.request("PATCH", "/api/v1/agents/" + agent_id, json={"plugins": []})

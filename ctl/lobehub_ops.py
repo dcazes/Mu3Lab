@@ -80,15 +80,25 @@ def sync_agents(log) -> tuple[bool, str]:
             and record.get("installed_at")
             and record["state"] != "not_installed"
         }
-        for uid, record in records.items():
-            if not record.get("key"):
-                continue
-            with LobeHub(origin(), record["key"]) as client:
-                managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
-            chat_connections.save(uid, {**record, "managed": managed}, paths)
+        address = origin()
     except (ChatError, OSError, ValueError) as exc:
         log(str(exc))
         return False, str(exc)
+    failures = []
+    for uid, record in records.items():
+        if not record.get("key"):
+            continue
+        # One person's revoked key or failed request must not stop everyone else's assistants.
+        try:
+            with LobeHub(address, record["key"]) as client:
+                managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
+            chat_connections.save(uid, {**record, "managed": managed}, paths)
+        except (ChatError, OSError, ValueError) as exc:
+            failures.append(str(exc))
+    if failures:
+        detail = failures[0] if len(failures) == 1 else f"{len(failures)} people's assistants were not updated."
+        log(detail)
+        return False, detail
     return True, "Your assistants are ready."
 
 

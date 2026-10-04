@@ -96,23 +96,55 @@ class StatusTests(_Checkout):
 
 
 class UpdateTests(_Checkout):
-    def run_update(self, plan: dict, finish: dict | None = None):
+    def run_update(self, plan: dict, finish: dict | None = None, packages=None):
         calls: list[str] = []
+        self.package_syncs: list[str] = []
 
         def new_code(_root, command, _log):
             calls.append(command)
             return plan if command == "plan" else (finish or {"ok": True})
 
+        def python_packages(root, _log):
+            self.package_syncs.append(git(root, "rev-parse", "HEAD"))
+            if packages:
+                packages(len(self.package_syncs))
+
         store = JobStore(Path(self.temp.name) / "jobs.sqlite3")
         job = store.create(kind="update", service_id="mu3lab", action="self_update", actor="owner")
         with (
             patch.object(self_update, "_new_code", side_effect=new_code),
-            patch.object(self_update, "_python_packages"),
+            patch.object(self_update, "_python_packages", side_effect=python_packages),
             patch("ctl.platform_releases.assets"),
             patch.object(self_update, "restart") as restart,
         ):
             self_update.execute_claimed(store, store.get(job["id"]), "worker", self.copy)
         return store.get(job["id"]), calls, restart
+
+    def test_declined_update_restores_the_running_versions_packages(self):
+        before = git(self.copy, "rev-parse", "HEAD")
+        self.commit("second")
+        job, _calls, _restart = self.run_update({"ok": True, "unattended": [], "terminal": ["Docker"]})
+        self.assertEqual(job["error_code"], "needs_terminal")
+        # Synced once for the new release, then again for the restored version.
+        self.assertEqual(len(self.package_syncs), 2)
+        self.assertEqual(self.package_syncs[-1], before)
+
+    def test_a_package_failure_returns_to_the_running_version(self):
+        before = git(self.copy, "rev-parse", "HEAD")
+        self.commit("second")
+
+        def fail_first(attempt: int) -> None:
+            if attempt == 1:
+                raise self_update._Failed(
+                    "python_packages", "uv_sync_failed", "Python packages could not be installed."
+                )
+
+        job, calls, restart = self.run_update({"ok": True, "unattended": [], "terminal": []}, packages=fail_first)
+        self.assertEqual(job["error_code"], "uv_sync_failed")
+        self.assertEqual(git(self.copy, "rev-parse", "HEAD"), before)
+        self.assertEqual(self.package_syncs[-1], before)
+        self.assertEqual(calls, [])
+        restart.assert_not_called()
 
     def test_an_update_pulls_installs_then_restarts(self):
         self.commit("second")

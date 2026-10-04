@@ -256,6 +256,27 @@ def _run(argv: list[str], root: Path, timeout: int = 1800) -> tuple[int, str]:
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
+def _restore(root: Path, before: str, packages_changed: bool, log: Log) -> str:
+    """Return the checkout (and, if already changed, its Python packages) to the running version.
+
+    Returns guidance for the person when the previous packages could not be restored.
+    """
+    rc, out = _git(root, "checkout", "--quiet", "--detach", before, timeout=300)
+    if rc:
+        return (
+            f" Mu3Lab could not return to the running version ({out[-200:]})."
+            f" In a terminal, run: cd {root} && ./install.sh"
+        )
+    if not packages_changed:
+        return ""
+    try:
+        _python_packages(root, log)
+    except _Failed as failure:
+        log(failure.message)
+        return f" Its Python packages could not be restored. In a terminal, run: cd {root} && ./install.sh"
+    return ""
+
+
 def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
     current = status(root, refresh=True)
     if current["blocked_reason"]:
@@ -263,32 +284,39 @@ def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
     if not current["available"]:
         return "Mu3Lab is already up to date."
     rc, before = _git(root, "rev-parse", "HEAD")
+    if rc or not before:
+        raise _Failed("check", "update_blocked", "Mu3Lab could not identify the running version.")
     step("download", f"Downloading {current['behind']} change(s) from GitHub.")
     rc, out = _git(root, "checkout", "--quiet", "--detach", current["latest_release"], timeout=300)
     if rc:
         raise _Failed("download", "pull_failed", f"The update could not be applied: {out[-300:]}")
     with job_guard.uncancellable():
+        packages_changed = False
         try:
-            platform_releases.assets(root, current["latest_release"])
-        except (OSError, ValueError, httpx.HTTPError) as exc:
-            _git(root, "checkout", "--quiet", "--detach", before)
-            raise _Failed("download", "release_verification_failed", str(exc)) from None
-        _python_packages(root, log)
-        step("plan", "Checking what this update needs.")
-        needs = _new_code(root, "plan", log)
-        terminal = list(needs.get("terminal") or []) if needs.get("ok") else ["the installer checks"]
-        if terminal:
-            # Leave the running version exactly as it was.
-            _git(root, "checkout", "--quiet", "--detach", before)
-            raise _Failed(
-                "plan",
-                "needs_terminal",
-                "This update needs administrator access for: "
-                + ", ".join(terminal)
-                + ". Nothing changed. In a terminal, run: cd "
-                + str(root)
-                + f" && git checkout {current['latest_release']} && ./install.sh",
-            )
+            try:
+                platform_releases.assets(root, current["latest_release"])
+            except (OSError, ValueError, httpx.HTTPError) as exc:
+                raise _Failed("download", "release_verification_failed", str(exc)) from None
+            # Until "finish" starts, any failure must leave the running version
+            # exactly as it was: checkout and Python packages both.
+            packages_changed = True
+            _python_packages(root, log)
+            step("plan", "Checking what this update needs.")
+            needs = _new_code(root, "plan", log)
+            terminal = list(needs.get("terminal") or []) if needs.get("ok") else ["the installer checks"]
+            if terminal:
+                raise _Failed(
+                    "plan",
+                    "needs_terminal",
+                    "This update needs administrator access for: "
+                    + ", ".join(terminal)
+                    + ". Nothing changed. In a terminal, run: cd "
+                    + str(root)
+                    + f" && git checkout {current['latest_release']} && ./install.sh",
+                )
+        except _Failed as failure:
+            failure.message += _restore(root, before, packages_changed, log)
+            raise
         step("install", "Installing the update.")
         done = _new_code(root, "finish", log)
         if not done.get("ok"):

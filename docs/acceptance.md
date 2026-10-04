@@ -1,6 +1,7 @@
 # Rebuild acceptance
 
-Tasks A–J are implemented on `rebuild/architecture`. Passing unit tests does
+Tasks A–J are implemented on `main` (merged from `codex/rebuild-architecture-handoff`
+after review on 2026-10-04). Passing unit tests does
 not establish that a complete new household installation works. Run this
 checklist in a disposable installation before replacing the working stack.
 Record the commit, platform, browser, results and failures below.

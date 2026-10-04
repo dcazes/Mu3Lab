@@ -505,7 +505,7 @@ def fix_root_env(check: dict, ctx: dict) -> dict:
     _values, added = _secrets.ensure_platform_tokens()
     log = ctx["log_fn"]("root_env")
     if added:
-        log(f"generated keys (names only): {', '.join(added)} → .env (0600)")
+        log(f"generated keys (names only): {', '.join(added)} → encrypted secret store")
     else:
         log("all keys already present — touched nothing")
     return {"ok": True, "skipped": not added}
