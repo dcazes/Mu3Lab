@@ -8,13 +8,41 @@ after the plan was written.
 
 ---
 
-## Current checkpoint — Tasks G–H implemented; Tasks I–J remain
+## Current checkpoint — Tasks A–J implemented; final acceptance pending
 
-The owner authorized the remaining implementation, then asked to review the
-order and limit simpler work to normal releases. Dependency review confirms
-G → H → I → J: I should use H's consolidated state, and final docs follow both.
-The owner clarified that H, I and J should proceed, avoiding unnecessary workarounds.
-**The rebuild is unfinished; do not reinstall from this branch yet.**
+Updated 2026-10-04. The owner authorized H, I and J after confirming the
+G → H → I → J dependency order and normal releases only. All requested code
+and documentation changes are implemented. The working household stack and
+main checkout were not changed. Full installation on a disposable VM, real
+phone/laptop acceptance and published-release/arm64 verification are still
+pending; this branch is not yet accepted for replacing the live installation.
+Use `docs/acceptance.md` for those checks.
+
+- H: `c59b65a` — one database, numbered migrations, scoped encrypted secrets,
+  canonical app owners and atomic job/credential preparation.
+- I: `5219716` — Pydantic API contracts, committed OpenAPI/generated UI types,
+  worker health observations, one dashboard snapshot, personal server checklist,
+  five display states and split feature styles.
+- J: architecture, development and acceptance documentation updated; historical
+  plan sections below are retained for context rather than unfinished tasks.
+
+I validation: 647 Python tests pass with four opt-in integration skips;
+95 UI tests, lint, format, type checks and production build pass in the pinned
+Node container. OpenAPI/type drift checks and 26 rendered Compose projects
+pass. Ten desktop/phone screenshots match exactly, as does compiled CSS.
+Isolated service projection reads measured 3.3 ms median and 7.6 ms maximum.
+These timings do not measure the live household server.
+
+Issues resolved in I: old handwritten UI types disagreed with nullable mobile
+links and provisioning/job response fields; stricter models and tests now catch
+those gaps. Checklist migration preserves all existing manual ticks, including
+chat/hide, without overwriting other-device progress. Status projection reads no longer initialize provisioning records;
+authenticated ingress still records its first successful protection proof. Direct per-page style imports reordered the
+mobile cascade, so feature CSS files use one central ordered import list.
+The canonical OpenAPI file is excluded from Prettier so Python and JavaScript
+formatters cannot alternately rewrite it. J corrects obsolete host-Node and
+branch-update instructions and distinguishes local test evidence from pending
+real-world acceptance.
 
 Task H consolidates runtime state in `state/mu3lab.db`, with numbered SQL
 migrations serialized across processes. A single `state/secrets.key` encrypts
@@ -33,7 +61,7 @@ Ruff, formatting, mypy, the app-ID check and 26 rendered Compose projects pass.
 The main issues were transactions that previously used separate stores and a
 concurrent startup race; both now have regression coverage. The existing
 Nextcloud command fixture also needed a lock for its parallel mocked commands.
-No live data or services were changed. Continue with Task I.
+No live data or services were changed. Task I is now implemented.
 
 Task G uses a pinned Node container for UI preview/check/build commands,
 removes host Node installation and removal, and moves Docker before the UI
@@ -110,7 +138,7 @@ Previous checkpoints:
   expected skips; 93 dashboard tests).
 
 The WIP inventory below describes the original starting checkpoint. Tasks
-A–G are implemented; Tasks H–J remain.
+A–J are implemented; final real-device and release acceptance remains.
 
 ## 0. Where the work is
 
@@ -534,12 +562,12 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
 
 As in `docs/rebuild-plan.md` Phase 5 (unchanged). Do it after Tasks A–G so ported code moves once.
 
-### Task I — Typed API, status snapshot, server-side checklist
+### Task I — Implemented: typed API, status snapshot, server-side checklist
 
 As in `docs/rebuild-plan.md` Phases 2.1, 2.2 and 6. The Get started checklist must be stored
 on the server (phone and laptop must agree).
 
-### Task J — Docs
+### Task J — Implemented: docs
 
 - `docs/architecture.md`: one page explaining apps/, manifests, rules, hooks, engine steps,
   integrations, and how to add an app (copy a similar app folder, list rules, run

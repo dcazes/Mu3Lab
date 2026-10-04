@@ -1,8 +1,19 @@
 # Mu3Lab rebuild plan
 
-Status: in progress, 2026-10-03. Toolchain, app manifests, initial engine/rules
-and Authentik Task A are implemented. See `docs/rebuild-handoff.md` for the
-current checkpoint and remaining tasks. The branch is not ready for reinstall.
+Status: Tasks A–J from `docs/rebuild-handoff.md` implemented, 2026-10-04.
+This original plan is retained as design history. The handoff records the
+accepted scope, substitutions and current checkpoint. Automated checks pass;
+real-device, clean-install and published-release acceptance remains pending in
+`docs/acceptance.md`. The working stack has not been replaced.
+
+Completed within the approved handoff: common manifest/rule install engine
+(A–D), official identity/chat/vault interfaces (A, E, F), container UI tooling
+and normal release preparation (G), shared private state (H), API/status/
+checklist/UI refactor (I), and documentation (J). Phase 9's additional Linux
+distributions, scheduled/off-device backups and other original future scope
+are not part of these tasks and are not claimed complete. Detailed acceptance
+criteria below remain references until the corresponding manual checks pass.
+
 Audience: (1) the owner, who decides; (2) the engineer or AI model that
 implements it, who should be able to follow it task by task without having
 read the review conversation.
@@ -524,7 +535,7 @@ LobeChat. Add a `group` field (`apps`, `ai`, `infrastructure`) to the API
 response computed from the manifest, and use it.
 Acceptance: no app ID literals remain in `dashboard/src/lib/`.
 
-### Phase 2. The same on every device (1–2 weeks)
+### Phase 2. The same on every device — implemented by E/I; manual acceptance pending
 
 **2.1 Store Get started progress on the server.**
 Files: `dashboard/src/features/home/GetStarted.tsx`, new route in
@@ -757,7 +768,7 @@ Replace the five hand-timed blocks in `ctl/worker.py` with a small scheduler
 (status reconcile, vault sync, connector reconcile, batch reconcile).
 Acceptance: worker module under 150 lines; unit test for the scheduler.
 
-### Phase 5. One database, one secret store (1–2 weeks)
+### Phase 5. One database, one secret store — implemented by H
 
 **5.1 Single database with numbered migrations.**
 Files: new `mu3lab/store/db.py`, `mu3lab/store/migrations/0001_initial.sql`.
@@ -787,7 +798,7 @@ Scopes: `platform` (control and ingress tokens), `provider`, `calendar`,
 Acceptance: `grep -rn "Fernet(" mu3lab ctl` finds one place; no secrets file
 in the git checkout; security tests (redaction, 0600 permissions) pass.
 
-### Phase 6. Typed API and generated dashboard types (1–2 weeks)
+### Phase 6. Typed API and generated dashboard types — implemented by I
 
 **6.1 Pydantic models for every route.**
 Files: `mu3lab/api/models.py` (or one per router), every
@@ -817,7 +828,8 @@ Acceptance: dashboard tests updated; acceptance steps 2, 3 and 6 pass.
 
 **6.4 Split the stylesheet.** `dashboard/src/index.css` (3,401 lines)
 becomes `styles/tokens.css`, `styles/base.css` and one CSS file per feature
-folder imported by that feature. No visual change.
+folder, loaded through a central ordered import list to preserve the cascade
+when pages load lazily. No visual change.
 Acceptance: screenshots of Home, Apps, an app page, Chat and Settings match
 before and after (Playwright screenshot test).
 

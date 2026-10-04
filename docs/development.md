@@ -9,6 +9,7 @@ From an isolated development checkout:
 | Command | Purpose |
 | --- | --- |
 | `make dev-setup` | Prepare pinned Python/Bitwarden tools and build the UI |
+| `make api-schema` | Dump Python OpenAPI and generate UI types/aliases; run after API model changes |
 | `make ui-dev` | Preview the UI at `http://127.0.0.1:5173` with automatic refresh |
 | `.venv/bin/python -m tools.dashboard check` | UI lint, formatting, type checks and tests |
 | `.venv/bin/python -m tools.dashboard build` | Build `dashboard/dist` for this checkout |
@@ -37,5 +38,24 @@ of the checked-out release.
 
 First-release acceptance still requires publishing a real tag, checking GHCR
 package access, and exercising installation and update in disposable machines.
-Local tests do not prove GitHub publishing permissions. The architecture
-rebuild remains unfinished until Tasks H, I and J and final acceptance are done.
+Local tests do not prove GitHub publishing permissions. Tasks A–J are
+implemented; full real-device and published-release acceptance remains pending. See [acceptance.md](acceptance.md).
+
+API changes start in `ctl/api/models.py`. Request models forbid unknown fields;
+response models validate public data, including custom JSON responses. Errors
+have `code`, `message` and `recommended_action` without echoing rejected inputs.
+Run `make api-schema` and commit `dashboard/openapi.json`, `schema.ts` and
+`models.ts` together. CI checks Python → OpenAPI and OpenAPI → TypeScript, so a
+model change cannot silently leave stale UI types. Schema generation does not
+start an API server or touch runtime state.
+
+For backend development, set `MU3LAB_RUNTIME_ROOT` to a disposable directory and
+use a separate port/process configuration. The UI proxy in `dashboard/vite.config.ts`
+must target that backend. An empty runtime shows pending status until its worker
+runs; page loads never run Docker to fill it. Do not start another worker against
+the household runtime. Lifecycle testing belongs in the disposable VM.
+
+Feature CSS lives next to its feature, with shared tokens, base, components and
+responsive rules in `styles/`. `src/index.css` imports them in the original order
+so eager and lazy page loading cannot change the cascade. The Playwright visual
+check and its test environment are described in [acceptance.md](acceptance.md).

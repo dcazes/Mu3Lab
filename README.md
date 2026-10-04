@@ -48,13 +48,13 @@ cd Mu3Lab
 
 That's the whole install. Here is what happens:
 
-1. **Enter your computer password once.** Setup installs Docker, Tailscale and Node.js for you.
+1. **Enter your computer password once.** Setup installs Docker and Tailscale. UI builds run in a pinned Node container.
 2. **Choose an email and one password for Mu3Lab.** The same password signs you in to the dashboard and unlocks your password vault.
 3. **Approve this computer in Tailscale.** Your browser opens the page, and the installer carries on by itself once you approve.
 4. **Done.** Your app logins are saved to your vault, the dashboard opens, and its Home page lists what to do next.
 
 > [!TIP]
-> To update, open **Settings → System → Mu3Lab updates** in the dashboard. You can also run `git pull` and then `./install.sh` again at any time: finished steps are skipped, changed code is rebuilt, and the dashboard restarts on the new version. `make check` prints a read-only readiness report.
+> To update, open **Settings → System → Mu3Lab updates** in the dashboard. The updater offers normal release tags and verifies their assets. Development checkouts stay manual: update the checkout and re-run `./install.sh` when you intend to apply it. Finished steps are skipped and changed code is rebuilt. `make check` prints a read-only readiness report.
 
 **You need:** a desktop or laptop running Ubuntu 22.04+, Debian 12+ or a derivative such as Linux Mint (x86-64 or arm64), with at least **8 GB of RAM** and **20 GB of free disk space**, plus a free [Tailscale](https://tailscale.com) account. An NVIDIA or AMD GPU is optional; Mu3Lab detects it and uses it for local AI.
 
@@ -216,7 +216,10 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 
 - **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
 - **One folder per app.** `apps/<app>/app.yaml` declares everything about an app: its address, sign-in method, generated settings, chat assistant and connectors, and the shared rules it follows. Image versions live only in that folder's `docker-compose.yml`. The dashboard's copy and state come from it, so the UI can't drift from reality.
+- **One private state store.** Numbered migrations manage `state/mu3lab.db`; a single private encryption key protects scoped credentials. App ownership, jobs and personal checklist progress share this store. Preserve the database and key together.
+- **Shared status.** The worker observes apps and the host; page loads read its saved snapshot. Phone and laptop see the same app health, and the dashboard warns when observations are old.
 - **Durable jobs.** The FastAPI control plane queues every action as a leased, resumable SQLite job. A background worker runs it, reclaims interrupted work after a reboot and redacts secrets from logs.
+- **Typed interfaces.** Python API models generate the dashboard types, and CI catches mismatches. App setup uses shared rules and supported external interfaces. See [Architecture](docs/architecture.md).
 - **Connectors that follow their app.** MCP connectors start after their app is healthy and stop before it stops. A connector counts as live only after its credentials, health check and tool discovery all pass.
 
 ---
@@ -258,7 +261,7 @@ To add Bitwarden to Chrome, Chromium or Brave, setup writes a browser policy tha
 ```bash
 ./uninstall.sh --dry-run      # show what would be removed
 ./uninstall.sh                # remove Mu3Lab and all of its data
-./uninstall.sh --everything   # also remove Docker, Tailscale, Node.js and NVIDIA container support
+./uninstall.sh --everything   # also remove Docker, Tailscale and NVIDIA container support
 ```
 
 > [!WARNING]
@@ -290,22 +293,32 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 
 ## 🛠️ Development
 
-```bash
-./install.sh             # first run: creates .venv and installs the control plane
-make dev-setup           # linters, type checkers and dashboard dependencies
-make verify              # everything CI runs: lint, type check, tests, build
-make format              # apply ruff and prettier formatting
-```
+Use an isolated checkout for changes. Python and the standalone Bitwarden CLI
+use the pinned toolchain; dashboard preview, checks and builds use Docker.
+
+| Command | Purpose |
+|---|---|
+| `make dev-setup` | Prepare development tools and build the UI |
+| `make ui-dev` | UI preview with automatic refresh on loopback |
+| `make api-schema` | Regenerate OpenAPI and dashboard API types after Python model changes |
+| `make test` | Python and dashboard tests, with UI checks in the Node container |
+| `make verify` | Lint, type checks, tests and production UI build |
+| `make format` | Python and UI formatting |
+
+See [Development](docs/development.md) for isolated backend setup and release
+checks, and [Acceptance](docs/acceptance.md) for the real-device test journey.
 
 | Path | What's there |
 |---|---|
-| [`ctl/api/`](ctl/api) | FastAPI control plane. `security.py` resolves the caller's Authentik identity; `routes/` has one router per dashboard area under `/api/v1` |
+| [`ctl/store/`](ctl/store), [`ctl/status/`](ctl/status) | Shared private state, encrypted credentials and worker health observations |
+| [`ctl/engine/`](ctl/engine), [`ctl/rules/`](ctl/rules), [`ctl/integrations/`](ctl/integrations) | Common installation steps, reusable app behavior and supported external clients |
+| [`ctl/api/`](ctl/api) | Typed FastAPI control plane. `security.py` resolves the caller's Authentik identity; `routes/` has one router per dashboard area under `/api/v1` |
 | [`ctl/service_ops.py`](ctl/service_ops.py), [`ctl/lifecycle/`](ctl/lifecycle) | Lifecycle jobs run by the worker, and the steps they sequence |
 | [`dashboard/src/`](dashboard/src) | React + TypeScript dashboard: `api/`, `components/`, `features/<area>/`, `shell/` |
 | [`apps/`](apps) | One folder per app: `app.yaml` (validated by `ctl/manifest/`), its Compose file, and reviewed chat connectors under `connectors/` |
 | [`platform/`](platform) | Images Mu3Lab builds itself: the chat tool gateway and the generic connector adapter |
 
-Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier, the dashboard build, YAML and Compose validation, and a secret scan.
+Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier, the dashboard build, generated API contract checks, YAML and Compose validation, and a secret scan.
 
 ---
 
