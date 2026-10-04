@@ -9,6 +9,10 @@ still pending rather than claiming a half-configured platform is ready.
 from __future__ import annotations
 
 import json
+import os
+import platform
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -16,34 +20,19 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ctl import actions
-from ctl.core_wiring import EMBEDDING_MODEL
+from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
-from ctl.engine.runtime import render_service
-from ctl.identity import sync_sign_in
-from ctl.integrations.authentik import Authentik
+from ctl.engine.install import run_install
 from ctl.jobs import JobStore, redact
 from ctl.provisioning import ProvisioningStore
-from ctl.registry import RegistryError, load
+from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
-from ctl.secrets import ensure_core_envs, read_runtime_env
-from ctl.service_state import status as service_status
-from ctl.service_state import tailnet_dns_name
-
-CORE_ORDER = ("ollama", "freellmapi", "litellm", "lobehub")
-# Core apps that need the full app installer (private route, image pinning,
-# chat connector). The core job queues them once the AI suite is running.
-INSTALLER_CORE_APPS = ("firecrawl",)
-HEALTH_TIMEOUT_SECONDS = 120
-MODEL_TIMEOUT_SECONDS = 600
+from ctl.secrets import read_runtime_env
+from ctl.service_state import tailnet_dns_name, tailnet_serve_ports
 
 
 def capacity() -> dict:
     """Return a conservative, non-mutating admission result for the core suite."""
-    import os
-    import platform
-    import shutil
-    import subprocess
-
     root = RuntimePaths().root
     target = root if root.exists() else root.parent
     disk = shutil.disk_usage(target)
@@ -76,26 +65,62 @@ def capacity() -> dict:
     }
 
 
+def core_services(registry: Registry | None = None) -> list[Service]:
+    """Core services in dependency order; foundation dependencies are already installed."""
+    registry = registry or load()
+    ordered: list[Service] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(service: Service) -> None:
+        if service.id in visited:
+            return
+        if service.id in visiting:
+            raise RegistryError("Core service dependencies contain a cycle.")
+        visiting.add(service.id)
+        for dependency in service.manifest.depends_on:
+            required = registry.get(dependency)
+            if required.stage == "optional":
+                raise RegistryError(f"{service.name} requires optional app {required.name}.")
+            if required.stage == "core":
+                visit(required)
+        visiting.remove(service.id)
+        visited.add(service.id)
+        ordered.append(service)
+
+    for service in registry.services:
+        if service.stage == "core":
+            visit(service)
+    return ordered
+
+
 def plan(root: Path) -> dict:
     """Return a safe, deterministic plan without mutating the host."""
-    try:
-        registry = load()
-    except RegistryError as exc:
-        return {"ready": False, "error": str(exc), "services": [], "missing": list(CORE_ORDER)}
-    known = {service.id: service for service in registry.services}
-    missing = [
-        service_id
-        for service_id in CORE_ORDER
-        if service_id not in known or not (known[service_id].compose_path(root) / "docker-compose.yml").is_file()
-    ]
     admission = capacity()
-    ready = not missing and admission["ok"]
+    try:
+        services = core_services()
+    except RegistryError as exc:
+        return {"ready": False, "error": str(exc), "services": [], "missing": [], "capacity": admission}
+    missing = [service.id for service in services if not (service.compose_path(root) / "docker-compose.yml").is_file()]
+    ready = bool(services) and not missing and admission["ok"]
     error = (
         ""
         if ready
-        else ("missing app manifests for " + ", ".join(missing) if missing else "; ".join(admission["reasons"]))
+        else (
+            "No core apps are declared."
+            if not services
+            else "Missing app manifests for " + ", ".join(missing)
+            if missing
+            else "; ".join(admission["reasons"])
+        )
     )
-    return {"ready": ready, "error": error, "services": list(CORE_ORDER), "missing": missing, "capacity": admission}
+    return {
+        "ready": ready,
+        "error": error,
+        "services": [service.id for service in services],
+        "missing": missing,
+        "capacity": admission,
+    }
 
 
 def _http_ok(url: str, *, headers: dict[str, str] | None = None) -> bool:
@@ -170,98 +195,6 @@ def _stream_chat_ok(url: str, payload: dict, headers: dict[str, str]) -> bool:
     return False
 
 
-def _provision_freellmapi(runtime: RuntimePaths) -> tuple[bool, str]:
-    """Create/reuse an internal scoped client credential through FreeLLMAPI.
-
-    FreeLLMAPI intentionally has a separate single-user dashboard, published
-    only behind the Authentik gate. This bootstrap account mints the LiteLLM
-    client-profile key and doubles as the dashboard login the owner can save
-    to Vaultwarden; provider keys remain declaratively applied from the
-    root-only Mu3Lab configuration file.
-    """
-    from ctl.secrets import read_runtime_env, runtime_env_text
-
-    env_path = runtime.projects / "freellmapi" / ".env"
-    values = read_runtime_env(env_path)
-    existing = values.get("FREELLMAPI_SERVICE_KEY", "")
-    if existing.startswith("sk-cp-"):
-        return True, "FreeLLMAPI internal client credential already exists."
-    password = values.get("FREELLMAPI_ADMIN_PASSWORD", "")
-    if not password:
-        return False, "FreeLLMAPI internal credential was not initialized"
-    email = "mu3lab-gateway@localhost.test"
-    status, response = _http_json(
-        "http://127.0.0.1:3001/api/auth/setup", "POST", {"email": email, "password": password}
-    )
-    token = str(response.get("token", "")) if status in {200, 201} else ""
-    if not token and status == 403:
-        rc, local = actions.freellmapi_local_setup(email, password, lambda _line: None)
-        body = local.get("body", {}) if isinstance(local, dict) else {}
-        token = str(body.get("token", "")) if rc == 0 and local.get("status") == 201 else ""
-    if not token:
-        status, response = _http_json(
-            "http://127.0.0.1:3001/api/auth/login", "POST", {"email": email, "password": password}
-        )
-        token = str(response.get("token", "")) if status == 200 else ""
-    if not token:
-        return False, "FreeLLMAPI did not accept its internal bootstrap account"
-    headers = {"Authorization": f"Bearer {token}"}
-    status, profiles = _http_json("http://127.0.0.1:3001/api/client-profiles", headers=headers)
-    if status != 200 or not isinstance(profiles, list):
-        return False, "FreeLLMAPI client-profile API did not answer"
-    # Profile keys are intentionally revealed only once by the upstream API.
-    # If a previous partial run created one but lost its secret, fail safely
-    # instead of silently creating unbounded credentials.
-    if any(item.get("name") == "Mu3Lab LiteLLM" for item in profiles if isinstance(item, dict)):
-        return False, "FreeLLMAPI has an incomplete Mu3Lab client credential; use the safe repair action"
-    status, response = _http_json(
-        "http://127.0.0.1:3001/api/client-profiles", "POST", {"name": "Mu3Lab LiteLLM"}, headers=headers
-    )
-    service_key = str(response.get("key", "")) if status == 201 else ""
-    if not service_key.startswith("sk-cp-"):
-        return False, "FreeLLMAPI did not return a scoped internal client credential"
-    values["FREELLMAPI_SERVICE_KEY"] = service_key
-    temporary = env_path.with_suffix(".env.tmp")
-    temporary.write_text(runtime_env_text(values), encoding="utf-8")
-    temporary.chmod(0o600)
-    temporary.replace(env_path)
-    env_path.chmod(0o600)
-    return True, "FreeLLMAPI internal client credential created."
-
-
-def _runtime_envs(env_files: dict[str, Path], wiring: dict) -> dict[str, dict[str, str]]:
-    """Return only service-owned runtime variables; values never enter jobs."""
-    common = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data)}
-    envs = {service_id: {**common, "MU3LAB_ENV_FILE": str(path)} for service_id, path in env_files.items()}
-    envs["litellm"]["MU3LAB_LITELLM_CONFIG"] = str(wiring["litellm_config"])
-    envs["freellmapi"]["MU3LAB_FREELLMAPI_CONFIG"] = str(wiring["freellmapi_config"])
-    return envs
-
-
-def lifecycle_environment(service_id: str) -> dict[str, str]:
-    """Compatibility environment until core projects move to the shared engine."""
-    paths = RuntimePaths()
-    env = {"MU3LAB_ENV_FILE": str(paths.projects / service_id / ".env"), "MU3LAB_DATA_ROOT": str(paths.data)}
-    configs = {
-        "litellm": ("MU3LAB_LITELLM_CONFIG", "config.yaml"),
-        "freellmapi": ("MU3LAB_FREELLMAPI_CONFIG", "freellmapi.config.json"),
-    }
-    if service_id in configs:
-        key, filename = configs[service_id]
-        env[key] = str(paths.projects / service_id / filename)
-    return env
-
-
-def _configure_chat_routes(root: Path, log: Callable[[str], None]) -> None:
-    """Publish LobeChat and the other core UI routes through private HTTPS."""
-    from ctl.routes import reconcile_core
-
-    registry = load()
-    routed, detail = reconcile_core(registry, root, log)
-    if not routed:
-        raise ValueError("Core private UI routes could not be reconciled: " + redact(detail))
-
-
 EMBEDDING_ATTEMPTS = 4
 EMBEDDING_TIMEOUT = 120
 
@@ -326,8 +259,6 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     host = tailnet_dns_name()
     if not host:
         return False, "The private hostname disappeared before LobeChat route verification"
-    from ctl.service_state import tailnet_serve_ports
-
     if 8457 not in tailnet_serve_ports():
         return False, "LobeChat's private Tailscale route is not published"
     return (
@@ -335,27 +266,6 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         "Private LobeChat route, streamed chat and embeddings passed live checks. Authentik sign-in is configured; "
         "it is confirmed the first time you sign in to LobeChat.",
     )
-
-
-def _queue_installer_core_apps(store: JobStore, actor: str, root: Path, log: Callable[[str], None]) -> None:
-    """Queue each installer-managed core app that is not installed yet, chat connector on."""
-    from ctl.control_state import ControlState
-    from ctl.mcp_ops import preenable
-
-    control = ControlState.runtime()
-    for service_id in INSTALLER_CORE_APPS:
-        installation = control.installation(service_id) if control else None
-        if installation and installation.get("state") in {"running", "stopped"}:
-            continue
-        preenable(service_id, root)
-        job = store.create(
-            kind="lifecycle",
-            service_id=service_id,
-            action="install",
-            actor=actor,
-            detail="Queued by core setup: this app is part of the core suite.",
-        )
-        log(f"{service_id}: installation queued (job {job['id']})")
 
 
 def _run(
@@ -366,132 +276,35 @@ def _run(
     logger: Callable[[str], None] | None = None,
     worker_id: str = "",
 ) -> None:
-    """Run the reviewed sequence after a durable worker has claimed the job."""
+    """Install each declared core app under one durable parent job."""
     log = logger or (lambda line: store.append_event(job_id, "log", line))
     provisioning = ProvisioningStore.runtime()
+    current = "prepare"
     try:
         if provisioning:
-            provisioning.update("core", "running", detail="Reconciling the curated core suite.")
+            provisioning.update("core", "running", detail="Installing the curated core suite.")
         store.transition(job_id, "running", actor=actor, detail="Core suite execution started.")
         checked = plan(root)
         if not checked["ready"]:
-            store.transition(job_id, "failed", actor=actor, detail="Core suite blocked: " + checked["error"])
-            return
-        runtime = RuntimePaths()
-        from ctl import onboarding_state, workflow_secrets
-
-        owner = workflow_secrets.job_identity(job_id)
-        if owner:
-            owner = onboarding_state.remember_owner("lobehub", owner, runtime)
-        env_files = ensure_core_envs(runtime.root)
-        lobehub_project = render_service(load().get("lobehub"), root)
-        env_files["lobehub"] = lobehub_project / ".env"
-        sync_sign_in(load().catalog, tailnet_dns_name(), Authentik.runtime())
-        _configure_chat_routes(root, log)
-        wiring = configure_wiring(runtime)
-        envs = _runtime_envs(env_files, wiring)
-        for service_id in CORE_ORDER:
-            if worker_id and not store.heartbeat(job_id, worker_id, step_id=service_id):
+            raise ValueError("Core suite blocked: " + checked["error"])
+        registry = load()
+        control = ControlState.runtime()
+        parent = {"id": job_id}
+        for service in core_services(registry):
+            current = service.id
+            if worker_id and not store.heartbeat(job_id, worker_id, step_id=current):
                 raise RuntimeError("job lease was lost")
-            store.append_event(job_id, "step.started", service_id)
-            service = load().get(service_id)
-            project = lobehub_project if service_id == "lobehub" else service.compose_path(root)
-            from ctl.compute import compose_overrides
-
-            rc, output = actions.compose_up(
-                project,
-                log,
-                env=envs[service_id],
-                extra_files=compose_overrides(service_id, project),
-                recreate=service_id == "lobehub" or (service_id == "freellmapi" and bool(wiring["provider_count"])),
-                timeout=1800,
-                on_output=lambda _line: None,
-            )
-            safe_output = redact(output or f"exit {rc}")
-            if rc != 0:
-                store.transition(job_id, "failed", actor=actor, detail=f"Stopped at {service_id}: {safe_output}")
-                return
-            deadline = time.monotonic() + (900 if service_id == "lobehub" else HEALTH_TIMEOUT_SECONDS)
-            while time.monotonic() < deadline:
-                live = service_status(service, "", root)
-                if live["health_state"] == "healthy":
-                    break
-                time.sleep(2)
-            else:
-                live = service_status(service, "", root)
-                store.transition(
-                    job_id,
-                    "failed",
-                    actor=actor,
-                    detail=f"Stopped at {service_id}: health check did not pass ({redact(live['detail'])}).",
-                )
-                return
-            log(f"{service_id}: compose start completed")
-            store.append_event(job_id, "step.verified", service_id)
-            if service_id == "lobehub":
-                from ctl.lobehub_ops import reconcile
-
-                policy_ready, policy_detail = reconcile(log)
-                if not policy_ready:
-                    store.transition(
-                        job_id,
-                        "failed",
-                        actor=actor,
-                        detail="LobeChat model and agent policy failed: " + redact(policy_detail),
-                        error_code="lobehub_policy_failed",
-                        step_id="lobehub_policy",
+            store.append_event(job_id, "step.started", f"Installing {service.name}.")
+            if not run_install(store, control, parent, service, registry, actor, root, complete_job=False):
+                if provisioning:
+                    provisioning.update(
+                        "core", "failed", error=f"{service.name} installation failed; see the core job for details."
                     )
-                    return
-                from ctl.control_state import ControlState
-
-                control = ControlState.runtime()
-                if control:
-                    control.set_installation("lobehub", "running", job_id=job_id, route_state="ready")
-                    saved = control.service_identity("lobehub") or {}
-                    if saved.get("state") != "ready":
-                        control.set_service_identity(
-                            "lobehub",
-                            "native_oidc",
-                            "migration_required",
-                            owner_uid=owner["owner_uid"] if owner else "",
-                            job_id=job_id,
-                            detail="Open LobeChat; its Authentik account will be verified automatically.",
-                        )
-                onboarding_state.mark_configured("lobehub", runtime)
-            if service_id == "ollama":
-                rc, output = actions.compose_exec(
-                    project,
-                    "ollama",
-                    ["ollama", "pull", EMBEDDING_MODEL],
-                    log,
-                    timeout=MODEL_TIMEOUT_SECONDS,
-                    env=envs[service_id],
-                )
-                if rc != 0:
-                    store.transition(
-                        job_id,
-                        "failed",
-                        actor=actor,
-                        detail="Ollama embedding model preparation failed: " + redact(output),
-                    )
-                    if provisioning:
-                        provisioning.update("core", "failed", error="Embedding model preparation failed.")
-                    return
-            if service_id == "freellmapi":
-                provisioned, detail = _provision_freellmapi(runtime)
-                if not provisioned:
-                    store.transition(job_id, "failed", actor=actor, detail=detail)
-                    if provisioning:
-                        provisioning.update("core", "failed", error=detail)
-                    return
-                log(detail)
-                wiring = configure_wiring(runtime)
-                envs = _runtime_envs(env_files, wiring)
-        try:
-            _queue_installer_core_apps(store, actor, root, log)
-        except (OSError, ValueError) as exc:
-            # The AI suite itself is up; the app shows its own Install/Retry button.
-            log("Could not queue the remaining core apps: " + redact(str(exc)))
+                return
+            log(f"{service.name}: installed and verified")
+            store.append_event(job_id, "step.verified", service.id)
+        runtime = RuntimePaths()
+        wiring = configure_wiring(runtime, registry.catalog)
         verified, detail = _verify_platform(runtime, wiring)
         if not verified:
             state = "waiting_for_confirmation" if not wiring["chat_configured"] else "failed"
@@ -499,7 +312,7 @@ def _run(
             if provisioning:
                 if state == "waiting_for_confirmation":
                     provisioning.update(
-                        "core", "verified", detail="Core containers and the private LobeChat route are healthy."
+                        "core", "verified", detail="Core services and their private routes are healthy."
                     )
                     provisioning.update("configuration", "waiting_for_user", detail=detail)
                 else:
@@ -507,26 +320,21 @@ def _run(
             return
         if provisioning:
             provisioning.update("core", "verified", detail="Core services and private integration checks passed.")
-            provisioning.update(
-                "verification",
-                "verified",
-                detail="Private LobeChat route and OIDC configuration, streamed chat, and embeddings passed.",
-            )
+            provisioning.update("verification", "verified", detail=detail)
         store.transition(
-            job_id, "succeeded", actor=actor, detail="Core suite started, wired, and passed application-level checks."
+            job_id, "succeeded", actor=actor, detail="Core suite installed and passed application-level checks."
         )
-    except Exception as exc:
-        stage = service_id if "service_id" in locals() else "prepare"
+    except (OSError, ValueError, RuntimeError) as exc:
         store.transition(
             job_id,
             "failed",
             actor=actor,
-            detail=f"Core setup failed during {stage}: {redact(str(exc))}",
+            detail=f"Core setup failed during {current}: {redact(str(exc))}",
             error_code="core_executor_failure",
-            step_id=stage,
+            step_id=current,
         )
         if provisioning:
-            provisioning.update("core", "failed", error="Core executor failed safely.")
+            provisioning.update("core", "failed", error="Core installation failed; see the core job for details.")
 
 
 def start(store: JobStore, actor: str, root: Path, idempotency_key: str | None = None) -> dict[str, str]:
@@ -577,7 +385,7 @@ def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
             provisioning.update("core", "verified", detail="Core services remain configured and reachable.")
             provisioning.update("verification", "verified", detail=detail)
         store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         detail = "Platform verification failed safely: " + redact(str(exc))
         if provisioning:
             provisioning.update("verification", "failed", error=detail)

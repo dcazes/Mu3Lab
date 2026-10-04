@@ -279,9 +279,22 @@ class InstallTests(unittest.TestCase):
     def test_configuration_and_core_preflight_rejections_do_not_start(self):
         self.mocks["missing_required"].return_value = ["setting"]
         self.assertEqual(self.run_install()["error_code"], "configuration_required")
-        self.configure(tier="core")
-        self.assertEqual(self.run_install()["error_code"], "install_not_optional")
+        self.configure(tier="foundation")
+        self.assertEqual(self.run_install()["error_code"], "install_not_supported")
         self.assertEqual(self.calls, [])
+
+    def test_core_uses_shared_steps_and_leaves_parent_job_running(self):
+        self.configure(tier="core")
+        job = self.store.create(kind="lifecycle", service_id="core-suite", action="install", actor="owner")
+        claimed = self.store.claim("worker")
+        self.store.transition(job["id"], "running", actor="owner", detail="Core setup")
+        result = install.run_install(
+            self.store, self.state, claimed, self.service, self.registry, "owner", self.root, complete_job=False
+        )
+        self.assertTrue(result)
+        self.assertEqual(self.store.get(job["id"])["state"], "running")
+        self.assertEqual(self.state.installation(self.app.id)["state"], "running")
+        self.assertEqual(self.calls, ["validate", "start"])
 
     def test_script_outputs_are_saved_privately_and_never_logged(self):
         self.configure(

@@ -115,6 +115,10 @@ class AppHooks:
         """Create the owner's account through the app's own API; return a sentence for the job log."""
         return ""
 
+    def after_healthy(self, ctx: HookContext) -> None:
+        """Finish app-specific setup once its health check passes."""
+        return None
+
 
 def load_app_hooks(app: App) -> AppHooks:
     """Import ``apps/<id>/hooks.py`` by path; an app without one gets the empty defaults."""

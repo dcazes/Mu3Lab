@@ -7,9 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ctl import actions, job_guard
-from ctl.compute import compose_overrides
+from ctl.compute import resolved_mode
 from ctl.control_state import ControlState
-from ctl.core_setup import lifecycle_environment
+from ctl.engine.compose import Compose
 from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
 from ctl.jobs import JobStore
@@ -44,7 +44,7 @@ UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})
 def project_path(service: Service, root: Path) -> Path:
     """Use a materialized application project when it owns the running Compose stack."""
     runtime = RuntimePaths().projects / service.id
-    if (runtime / "docker-compose.yml").is_file():
+    if service.stage in {"core", "optional"} or (runtime / "docker-compose.yml").is_file():
         return runtime
     return service.compose_path(root)
 
@@ -87,7 +87,7 @@ def allowed_actions(service: Service, state: str) -> list[str]:
         return ["install"]
     uninstall = ["uninstall"] if service.stage == "optional" else []
     if state in {"failed", "needs_attention", "needs_setup", "degraded"}:
-        return ["restart"] if service.stage == "core" else ["retry_setup", "restart", *uninstall]
+        return ["restart"] if service.stage != "optional" else ["retry_setup", "restart", *uninstall]
     if state == "stopped":
         return ["start", *uninstall]
     if state in {"ready", "running", "starting", "configured", "installed"}:
@@ -248,7 +248,6 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         job_id, "running", actor=actor, detail=f"{action.title()} started for {service.name}.", step_id="compose"
     )
     log = _job_log(store, job_id)
-    runtime_env = lifecycle_environment(service.id) if service.stage == "core" else None
     if action == "stop" and not sync_application(service.id, running=False, root=root, log=log):
         _fail(
             store,
@@ -261,9 +260,8 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "An enabled MCP could not stop safely.",
         )
         return
-    rc, output = actions.compose_action(
-        project, action, log, env=runtime_env, extra_files=compose_overrides(service.id, project)
-    )
+    compose = Compose(project, gpu_mode=resolved_mode() if service.uses_gpu else "cpu")
+    rc, output = compose.action(action, log)
     if rc:
         _fail(
             store,

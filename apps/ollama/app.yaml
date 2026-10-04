@@ -22,3 +22,9 @@ ui:
   unavailable_reason: Ollama is an internal model and embedding API; it does not ship a browser UI.
 resource_guidance: Model downloads determine disk and memory use.
 setup_action: Install and verify the model runner using the host-wide compute setting.
+rules:
+- rule: needs_embedding_model
+  with:
+    model: nomic-embed-text
+    runner: ollama
+    at: after_healthy

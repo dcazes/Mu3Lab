@@ -1,4 +1,4 @@
-"""Install any optional catalog app through its manifest and shared rules."""
+"""Install any core or optional catalog app through its manifest and shared rules."""
 
 from __future__ import annotations
 
@@ -64,8 +64,17 @@ def context(
 
 
 def run_install(
-    store: JobStore, state: ControlState | None, job: dict, service: Service, registry: Registry, actor: str, root: Path
-) -> None:
+    store: JobStore,
+    state: ControlState | None,
+    job: dict,
+    service: Service,
+    registry: Registry,
+    actor: str,
+    root: Path,
+    *,
+    complete_job: bool = True,
+) -> bool:
+    """Install one app; a core-suite caller retains completion of the shared parent job."""
     job_id = str(job["id"])
     stage_name, failure_code = "validate_service", "manifest_invalid"
     log = _job_log(store, job_id)
@@ -77,9 +86,9 @@ def run_install(
         _event(store, job_id, name, detail)
 
     try:
-        if service.stage != "optional":
+        if service.stage not in {"core", "optional"}:
             raise StepFailed(
-                "validate_service", "install_not_optional", "This service is installed by the core-suite workflow."
+                "validate_service", "install_not_supported", "This service is installed by the foundation workflow."
             )
         app = registry.catalog.get(service.id)
         rules = rules_for(app.manifest)
@@ -94,7 +103,8 @@ def run_install(
         owner = workflow_secrets.job_identity(job_id, paths)
         account_mode = app.manifest.account.mode
         if (
-            account_mode in {"environment_bootstrap", "api_bootstrap"} or any(rule.needs_owner for rule in rules)
+            (account_mode in {"environment_bootstrap", "api_bootstrap"} and app.manifest.account.needs_owner)
+            or any(rule.needs_owner for rule in rules)
         ) and not owner:
             raise StepFailed(
                 "account_preflight",
@@ -122,6 +132,7 @@ def run_install(
         project = render_rules(app, facts, rules, owner)
         app_releases.align(service, root, paths)
         ctx = context(app, facts, rules, owner, log, stage)
+        hooks = load_app_hooks(app)
         for rule in rules:
             rule.before_start(ctx)
         failure_code = "compose_invalid"
@@ -194,7 +205,7 @@ def run_install(
         if account_mode == "api_bootstrap":
             failure_code = "account_provisioning_failed"
             stage("account_bootstrap", "Provisioning the application account and first-run defaults.")
-            detail = load_app_hooks(app).bootstrap_account(ctx)
+            detail = hooks.bootstrap_account(ctx)
             stage("account_verified", detail)
             if state:
                 state.set_initialization(app.id, account_mode, "ready", job_id=job_id, owner_uid=owner_uid)
@@ -209,6 +220,7 @@ def run_install(
             )
         for rule in rules:
             rule.after_healthy(ctx)
+        hooks.after_healthy(ctx)
         failure_code = "route_configuration_failed"
         stage("configure_route", "Publishing private HTTPS route.")
         routed, detail = apply_route(registry, service, root, log)
@@ -246,14 +258,17 @@ def run_install(
         if not sync_application(app.id, running=True, root=root, log=log):
             log("One enabled MCP needs attention after application installation.")
         onboarding_state.mark_configured(app.id, paths)
-        store.transition(
-            job_id, "succeeded", actor=actor, detail=f"{service.name} installed and verified.", step_id="finalize"
-        )
+        if complete_job:
+            store.transition(
+                job_id, "succeeded", actor=actor, detail=f"{service.name} installed and verified.", step_id="finalize"
+            )
+        return True
     except (StepFailed, AuthentikError, SignInError, OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
         failure = exc if isinstance(exc, StepFailed) else StepFailed(stage_name, failure_code, str(exc))
         if project is not None and failure.stage in {"start_service", "verify_application", "verify_sign_in"}:
             _append_runtime_diagnostics(store, job_id, project)
         _fail(store, state, job_id, service.id, actor, failure.stage, failure.code, failure.message)
+        return False
 
 
 def run_periodic(store: JobStore, root: Path, log: Callable[[str], None]) -> None:

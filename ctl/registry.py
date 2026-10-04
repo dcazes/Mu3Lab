@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Core apps that use the catalog-app installer rather than the core executor.
 # Goes away when both run through one lifecycle engine.
-APP_INSTALLER_CORE = frozenset({"firecrawl"})
 
 _AUTH = {"oidc": "oidc", "gate": "proxy", "trusted_header": "trusted_header", "local": "local", "none": "excluded"}
 
@@ -126,7 +125,7 @@ def _health(manifest: AppManifest) -> dict[str, Any]:
 
 def service_from(manifest: AppManifest) -> Service:
     route = manifest.route
-    stage = "optional" if manifest.id in APP_INSTALLER_CORE else manifest.tier
+    stage = manifest.tier
     return Service(
         manifest=manifest,
         id=manifest.id,

@@ -393,11 +393,7 @@ def status(
 ) -> dict:
     """Return browser-safe service state without starting, stopping, or logging in."""
     runtime_file = RuntimePaths().projects / service.id / "docker-compose.yml"
-    compose_file = (
-        runtime_file
-        if (service.stage == "optional" or service.id == "lobehub") and runtime_file.is_file()
-        else service.compose_path(root) / "docker-compose.yml"
-    )
+    compose_file = runtime_file if runtime_file.is_file() else service.compose_path(root) / "docker-compose.yml"
     if not compose_file.is_file():
         lifecycle_state, detail = "planned", "This curated stack is not installed yet."
     else:

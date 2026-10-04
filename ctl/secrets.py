@@ -1,11 +1,10 @@
 """Mu3Lab :: ctl/secrets.py
 
 WHAT: Secret generation with preserve-existing semantics for the bootstrap,
-      identity services, and generated core-suite service env files.
+      identity services. App secrets are declared in manifests.
 WHY:  Tokens must be random, mode-0600, and NEVER overwritten once created
-      (rotating a live token orphans running services). One module owns that
-      invariant; callers only learn which keys were ADDED (never values).
-RUN:  Imported by ctl/install.py and the authenticated core-suite executor.
+      (rotating a live token orphans running services). Callers only learn which keys were ADDED (never values).
+RUN:  Imported by ctl/install.py and the runtime project renderer.
 DEBUG: `stat -c %a .env` must print 600. Values are logged as names only —
       grep any log for a token value and file a bug.
 """
@@ -19,13 +18,6 @@ from pathlib import Path
 from ctl.secret_file import locked, write_atomic
 
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
-CORE_ENV_KEYS = {
-    # Ollama has no private values today, but it still participates in the
-    # common runtime-environment contract used by the core executor.
-    "ollama": (),
-    "freellmapi": ("ENCRYPTION_KEY", "FREELLMAPI_SERVICE_KEY", "FREELLMAPI_ADMIN_PASSWORD"),
-    "litellm": ("LITELLM_MASTER_KEY",),
-}
 
 
 def ensure_authentik_env(
@@ -90,34 +82,6 @@ def runtime_env_text(values: dict[str, str]) -> str:
         escaped = value.replace("\\", "\\\\").replace("'", "\\'")
         lines.append(f"{key}='{escaped}'")
     return "\n".join(lines) + "\n"
-
-
-def ensure_core_envs(root: Path, token_factory=None) -> dict[str, Path]:
-    """Create stable internal service env files without provider credentials."""
-    token_factory = token_factory or generate_hex
-    project_root = root / "projects"
-    project_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    shared: dict[str, str] = {}
-    paths: dict[str, Path] = {}
-    for service_id, keys in CORE_ENV_KEYS.items():
-        target = project_root / service_id / ".env"
-        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        values = read_runtime_env(target)
-        for key in keys:
-            if values.get(key):
-                continue
-            if key == "LITELLM_MASTER_KEY" and shared.get(key):
-                values[key] = shared[key]
-            else:
-                values[key] = token_factory()
-            if key == "LITELLM_MASTER_KEY":
-                shared[key] = values[key]
-        target.write_text(runtime_env_text(values), encoding="utf-8")
-        os.chmod(target, 0o600)
-        paths[service_id] = target
-        if values.get("LITELLM_MASTER_KEY"):
-            shared["LITELLM_MASTER_KEY"] = values["LITELLM_MASTER_KEY"]
-    return paths
 
 
 def generate_hex(nbytes: int = 32) -> str:

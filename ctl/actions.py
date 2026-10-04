@@ -257,36 +257,6 @@ def docker_cmd_with_stdin(
     return proc.returncode, output.replace(stdin_data, "[redacted]").strip()
 
 
-def freellmapi_local_setup(email: str, password: str, log: Callable[[str], None]) -> tuple[int, dict]:
-    """Claim a fresh FreeLLMAPI from inside its container's loopback boundary.
-
-    Upstream intentionally requires a setup code when the socket peer is not
-    loopback. Docker port publishing makes a host request appear remote, so the
-    reviewed first-run call runs inside the container. Credentials travel only
-    on stdin and the one-time session token is returned only to the caller.
-    """
-    if not email or not password or "\n" in email or "\n" in password:
-        return 2, {}
-    script = (
-        "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',async()=>{"
-        "try{const r=await fetch('http://127.0.0.1:3001/api/auth/setup',{method:'POST',"
-        "headers:{'content-type':'application/json'},body:d});const b=await r.json();"
-        "process.stdout.write(JSON.stringify({status:r.status,body:b}))}"
-        "catch(e){process.exit(1)}})"
-    )
-    payload = _json.dumps({"email": email, "password": password}, separators=(",", ":")) + "\n"
-    rc, output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "mu3lab-freellmapi-freellmapi-1", "node", "-e", script], payload, log, timeout=30
-    )
-    if rc:
-        return rc, {}
-    try:
-        decoded = _json.loads(output)
-    except (TypeError, ValueError):
-        return 1, {}
-    return 0, decoded if isinstance(decoded, dict) else {}
-
-
 def compose_up(
     projdir: Path,
     log: Callable[[str], None],

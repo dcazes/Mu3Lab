@@ -14,9 +14,9 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from ctl import actions
 from ctl.control_state import ControlState
-from ctl.core_wiring import configure
+from ctl.core_wiring import configure, routing_projects
+from ctl.engine.compose import Compose
 from ctl.freellmapi_admin import GatewayAdmin, GatewayAdminError
 from ctl.jobs import JobStore, redact
 from ctl.provider_catalog import BY_ID, get, key_problem
@@ -114,50 +114,47 @@ def _probe_stream(
         )
 
 
-RENDERED_FILES = {
-    "freellmapi": (".env", "freellmapi.config.json"),
-    "litellm": (".env", "config.yaml"),
-}
-
-
-def _rendered(projects: Path, service_id: str) -> tuple[bytes | None, ...]:
+def _rendered(files: tuple[Path, ...]) -> tuple[bytes | None, ...]:
     def read(path: Path) -> bytes | None:
         try:
             return path.read_bytes()
         except OSError:
             return None
 
-    return tuple(read(projects / service_id / name) for name in RENDERED_FILES[service_id])
+    return tuple(read(path) for path in files)
 
 
 def _reconcile(root: Path, log) -> tuple[bool, str, list[str]]:
     paths = RuntimePaths()
-    before = {service_id: _rendered(paths.projects, service_id) for service_id in RENDERED_FILES}
+    catalog = load().catalog
+    projects = routing_projects(catalog)
+    for item in projects:
+        if not (paths.projects / item.app.id / "docker-compose.yml").is_file():
+            return False, f"{item.app.manifest.name} is not installed; finish core setup first.", []
+    before = {item.app.id: _rendered(item.files(paths)) for item in projects}
     try:
-        wiring = configure(paths)
+        configure(paths, catalog)
     except ValueError as exc:
         return False, str(exc), []
-    for service_id in RENDERED_FILES:
-        service = load().get(service_id)
-        env_path = paths.projects / service_id / ".env"
-        env = {"MU3LAB_DATA_ROOT": str(paths.data), "MU3LAB_ENV_FILE": str(env_path)}
-        if service_id == "freellmapi":
-            env["MU3LAB_FREELLMAPI_CONFIG"] = str(wiring["freellmapi_config"])
-        else:
-            env["MU3LAB_LITELLM_CONFIG"] = str(wiring["litellm_config"])
-        # Both apps read their config only at startup, but Compose cannot see
-        # changes inside a bind-mounted file; recreate only when it changed.
-        changed = _rendered(paths.projects, service_id) != before[service_id]
-        rc, output = actions.compose_up(service.compose_path(root), log, env=env, recreate=changed, wait_timeout=120)
+    for item in projects:
+        # Bind-mounted configs are read at startup; recreate only when their contents changed.
+        changed = _rendered(item.files(paths)) != before[item.app.id]
+        rc, output = Compose(paths.projects / item.app.id).up(log, recreate=changed, wait_seconds=120)
         if rc:
-            return False, f"{service.name} reconciliation failed: {redact(output)}", []
-    service_key = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_SERVICE_KEY", "")
+            return False, f"{item.app.manifest.name} reconciliation failed: {redact(output)}", []
+    gateway = next((item for item in projects if item.params.mode == "gateway"), None)
+    models = next((item for item in projects if item.params.mode == "models"), None)
+    service_key = (
+        read_runtime_env(paths.projects / gateway.app.id / ".env").get(models.params.service_key_env, "")
+        if gateway and models
+        else ""
+    )
     forgotten, forget_detail = _forget_removed_keys(log)
     if not forgotten:
         return False, forget_detail, []
     return (
         bool(service_key),
-        ("Provider gateway reconciled." if service_key else "FreeLLMAPI service key is unavailable."),
+        "Provider gateway reconciled." if service_key else "Provider service key is unavailable.",
         [],
     )
 

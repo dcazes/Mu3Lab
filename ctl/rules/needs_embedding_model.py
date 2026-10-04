@@ -7,6 +7,8 @@ cannot index anything. The model runner is the app named by ``runner``
 
 from __future__ import annotations
 
+from typing import Literal
+
 import httpx
 
 from ctl.engine.compose import Compose
@@ -17,6 +19,7 @@ from ctl.rules import Params, Rule, register
 
 class EmbeddingParams(Params):
     model: str
+    at: Literal["before_start", "after_healthy"] = "before_start"
     runner: str = "ollama"  # the app that serves local models
 
 
@@ -28,6 +31,14 @@ class NeedsEmbeddingModel(Rule):
     params: EmbeddingParams
 
     def before_start(self, ctx: HookContext) -> None:
+        if self.params.at == "before_start":
+            self._check(ctx)
+
+    def after_healthy(self, ctx: HookContext) -> None:
+        if self.params.at == "after_healthy":
+            self._check(ctx)
+
+    def _check(self, ctx: HookContext) -> None:
         assert ctx.facts is not None
         runner = ctx.facts.catalog.get(self.params.runner)
         base = f"http://127.0.0.1:{runner.manifest.service.local_port}"
@@ -44,7 +55,7 @@ class NeedsEmbeddingModel(Rule):
         if model not in present:
             ctx.stage("embedding_model_pull", "Downloading the local embedding model.")
             project = ctx.facts.paths.projects / runner.id
-            folder = project if (project / "docker-compose.yml").is_file() else runner.folder
+            folder = project
             service = next(iter(compose_images(folder / "docker-compose.yml")), runner.id)
             rc, _ = Compose(folder).exec(service, ["ollama", "pull", model], ctx.log, timeout=600)
             if rc:

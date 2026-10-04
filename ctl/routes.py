@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ctl import actions
@@ -17,12 +18,17 @@ START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
 
 
-def _optional_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
-    """Return installed or currently usable optional routes."""
+def _generated_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
+    """Return installed generated routes, including installer-managed core apps."""
     state = ControlState.runtime()
     enabled: list[Service] = []
     for service in registry.services:
-        if service.stage != "optional" or service.proxy_port is None or service.id in exclude:
+        if (
+            service.manifest.route is None
+            or not service.manifest.route.generated
+            or service.proxy_port is None
+            or service.id in exclude
+        ):
             continue
         installed = state.installation(service.id) if state else None
         live = service_status(service, tailnet_dns_name(), root)
@@ -42,9 +48,12 @@ def _write_candidate(registry: Registry, root: Path, exclude: frozenset[str] = f
         raise OSError("Authenticated Caddy base configuration is missing.")
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     candidate = target.with_suffix(".candidate")
-    candidate.write_text(
-        render(source.read_text(encoding="utf-8"), _optional_services(registry, root, exclude)), encoding="utf-8"
-    )
+    base = source.read_text(encoding="utf-8")
+    # Task D moves legacy core blocks out of the base. Until then, avoid
+    # defining the same listener twice while generating all other core routes.
+    base_ports = {int(port) for port in re.findall(r"^:(\d+)\s*\{", base, re.MULTILINE)}
+    services = [item for item in _generated_services(registry, root, exclude) if item.proxy_port not in base_ports]
+    candidate.write_text(render(base, services), encoding="utf-8")
     ingress_token = read_runtime_env(root / ".env").get("MU3LAB_INGRESS_TOKEN", "")
     return target, candidate, ingress_token
 

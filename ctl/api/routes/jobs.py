@@ -10,9 +10,9 @@ from fastapi import APIRouter, Request
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, Operator, OperatorMutation
-from ctl.core_setup import CORE_ORDER, start_verify
 from ctl.core_setup import plan as core_plan
 from ctl.core_setup import start as start_core_setup
+from ctl.core_setup import start_verify
 from ctl.jobs import JobStore
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
@@ -130,7 +130,7 @@ def core_setup(_member: Member) -> dict[str, Any]:
     return {
         "ok": True,
         "ready_to_run": execution["ready"] and not waiting_for_provider,
-        "services": list(CORE_ORDER),
+        "services": execution["services"],
         "missing_manifests": execution["missing"],
         "capacity": execution["capacity"],
         "provisioning": provisioned,

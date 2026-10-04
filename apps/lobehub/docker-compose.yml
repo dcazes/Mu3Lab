@@ -8,7 +8,7 @@ services:
   app:
     image: lobehub/lobehub:2.2.18@sha256:b7c843911259c54c92f03864d9dd2e9099e18525de1d37498b64cc15751d087d
     restart: unless-stopped
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       APP_URL: ${APP_URL:?APP_URL is required}
       INTERNAL_APP_URL: http://app:3210

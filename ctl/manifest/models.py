@@ -167,6 +167,7 @@ class Account(Model):
     """How the app's first owner account comes to exist."""
 
     mode: Literal["none", "oidc_first_login", "trusted_header", "environment_bootstrap", "api_bootstrap"] = "none"
+    needs_owner: bool = True  # False for an internal service account, rather than a person.
     user_action: str = ""
     # A generated login the person never sees, saved to their vault for Bitwarden to fill.
     save_login_to_vault: bool = False
@@ -179,7 +180,7 @@ class Secret(Model):
     """A value generated once and then kept for the life of the app's data."""
 
     env: str
-    kind: Literal["token", "base64", "fixed"] = "token"
+    kind: Literal["token", "base64", "hex", "fixed"] = "token"
     length: int = Field(default=36, ge=8, le=128)
     value: str = ""  # for kind fixed: a non-secret default kept once chosen
 

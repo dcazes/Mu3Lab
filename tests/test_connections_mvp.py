@@ -14,7 +14,7 @@ from ctl.jobs import JobStore
 from ctl.provider_catalog import catalog, get, prefix_warning
 from ctl.provider_secrets import save
 from ctl.runtime import RuntimePaths
-from ctl.secrets import ensure_core_envs
+from tests.support import render_core_projects
 
 
 class ProviderCatalogTests(unittest.TestCase):
@@ -42,7 +42,7 @@ class ProviderCatalogTests(unittest.TestCase):
     def test_only_verified_enabled_connection_reaches_routing(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
+            render_core_projects(paths)
             save("groq", "Groq", "gsk_private", paths)
             state = ControlState(paths.runtime / "control-plane.sqlite3")
             state.set_provider("groq", "Groq", state="degraded")
@@ -53,7 +53,9 @@ class ProviderCatalogTests(unittest.TestCase):
             wiring = configure(paths)
             self.assertEqual(wiring["provider_count"], 0)
             # Listed as off: FreeLLMAPI's import never removes a key that is merely left out.
-            keys = json.loads(Path(wiring["freellmapi_config"]).read_text(encoding="utf-8"))["keys"]
+            keys = json.loads((paths.projects / "freellmapi" / "freellmapi.config.json").read_text(encoding="utf-8"))[
+                "keys"
+            ]
             self.assertEqual([(key["platform"], key["enabled"]) for key in keys], [("groq", False)])
 
     def test_successful_provider_verification_queues_verification_only_job(self):

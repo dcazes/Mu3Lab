@@ -8,51 +8,63 @@ after the plan was written.
 
 ---
 
-## Current checkpoint — Task B complete, awaiting owner review
+## Current checkpoint — Task C complete, awaiting owner review
 
-Task B replaces optional-app installation with `ctl/engine/install.py`. The
-next implementation task is **Task C**, after the owner reviews this checkpoint.
-The overall rebuild is still unfinished; do not reinstall from this branch yet.
+Task C sends every core app through the same generated-project installer used
+by optional apps. The next implementation task is **Task D**, after owner
+review. **The rebuild is unfinished; do not reinstall from this branch yet.**
 
-- All optional apps now follow one pipeline: manifest/rule preflight, private
-  runtime rendering, image download/pinning, sign-in registration, staged starts,
-  account setup, health and browser sign-in checks, routes and chat connectors.
-- Rules receive working rerender and sign-in registration callbacks. The worker
-  runs each installed app's periodic rules every 60 seconds. The initial-owner
-  rule restores its restriction if Authentik refuses the household update.
-- Staged starts drop temporary administrator settings before the final health
-  check. Failed account verification also attempts this cleanup. Existing owners
-  and image release records survive retries.
-- Nextcloud's first-admin rule uses an optional `existing_account_check` (an
-  app-provided JSON status command). Database files alone cannot prove its setup
-  committed; an interrupted setup can therefore retry with bootstrap settings.
-- Removed the old materializer, app-specific lifecycle helpers, owner-guard
-  worker, repair/configure-identity actions and expiring credential handoffs
-  (encrypted records API, table creation, vault callers and dashboard reveal UI).
-  Durable onboarding logins for vault saving remain.
-- JSON sign-in launch pages now render from manifests in `ctl/engine/launch.py`.
-  The full route and sign-in probe rewrites remain Task D.
-- Core setup and maintenance use the rule-aware renderer. Core startup remains
-  on its previous executor until Task C; its temporary environment compatibility
-  helper lives in `core_setup`, with no app-ID branches left in `service_ops`.
-- Preserved app account recovery tests against app-owned hooks. Removed tests of
-  deleted handoff/legacy functions alongside those functions, and replaced install
-  and Nextcloud setup assertions with engine and app-script tests. None are disabled.
+- Core setup discovers `tier: core` apps and orders them by `depends_on`.
+  LiteLLM now declares both model-runner and provider-gateway dependencies.
+  Firecrawl is a true core app and finishes inside the shared core job.
+- Each app receives rendering, private secrets, image pinning, rules, account
+  setup, health, sign-in, routes and connector setup through `run_install`.
+  Successful app installs leave the parent core job running; failure stops
+  the suite at that app. Final platform checks still wait for a provider key.
+- Core Compose files read their project `.env` and project-relative config
+  files. Removed the alternate source-project executor, core lists and
+  environment/config-path compatibility plumbing. Start/restart and provider
+  reconciliation use the same generated projects and Compose wrapper.
+- The new `provider_routing` rule writes private gateway/model settings before
+  Compose validation, when both the runtime paths and catalog are available.
+  Gateway bootstrap completes before the dependent model proxy is rendered.
+  Provider updates recreate only projects whose private configuration changed.
+- FreeLLMAPI's app-owned HTTP hook logs in and mints one scoped client key.
+  Its supported declarative `admin` config creates the first user before HTTP
+  starts, only when no users exist; no container shell or `node -e` setup
+  fallback remains. The first-start admin section is removed after bootstrap.
+  See [the pinned upstream implementation](https://github.com/TashfeenAhmed/FreeLLMAPI/blob/v0.13.3/server/src/services/declarative-config.ts).
+  A lost once-revealed client key fails with recovery instructions instead of
+  minting duplicate profiles. Encryption secrets use the required 32-byte hex
+  encoding; existing values remain stable.
+- The embedding-model rule can run after its own runner is healthy. LobeChat's
+  existing policy setup lives in its app hook pending the official API work in
+  Task E. The dashboard uses provisioning phases, so those phases remain.
+- Core services never offer uninstall. Generated Firecrawl routes are included
+  while legacy core listeners remain in the base Caddyfile pending Task D.
+- Test sources were ported with removed functions: generated secret/wiring and
+  HTTP account assertions replace old env-helper/container-shell assertions;
+  dependency/parent-job checks replace the separate Firecrawl queue assertions.
+  No tests were disabled. **The owner requested all test executions be deferred
+  until the end of the rebuild**, overriding the per-part full-gate instruction
+  below. Run the complete suite and integration checks before reinstalling.
 
-Validation: Python lint, formatting, mypy and the full unit suite (622 tests,
-four expected skips); dashboard TypeScript, ESLint, Vitest (93 tests) and
-Prettier. Generated optional-app Compose files and JSON launcher JavaScript/CSP
-hashes also validate. Engine tests use a temporary catalog and fake Compose; Nextcloud's
-actual shell scripts run with fixture commands, users and clocks. No running
-app, Docker stack, system service, live data or live checkout was changed.
+Validation for C: Python lint, formatting, mypy and static validation of all
+16 manifests and their rules; test suites and Docker checks were not executed. No running app, live data, system service, Docker
+stack or live checkout was changed.
 
-Task A is committed as `ed2be8c`: Authentik bootstrap and household management
-use REST; its fresh-image integration tests passed. The pinned default signing
-certificate is **authentik Self-signed Certificate**. The bootstrap API token
-belongs to `akadmin`, which must remain active with administrator access.
+Previous checkpoints:
+- Task A `ed2be8c`: Authentik REST/bootstrap and household management, with
+  fresh-image integration verification. The default signing certificate is
+  **authentik Self-signed Certificate**; the `akadmin` bootstrap API token must
+  retain administrator access.
+- Task B `545b1d7`: optional-app pipeline, rule callbacks and periodic checks,
+  generic sign-in launch pages, account recovery and credential-handoff removal.
+  Its unit/static/dashboard/Compose checks passed (622 Python tests, four
+  expected skips; 93 dashboard tests).
 
-The WIP inventory and failures below describe the starting checkpoint. Section
-3 and Tasks A–B are resolved; Tasks C–J remain.
+The WIP inventory below describes the original starting checkpoint. Tasks
+A–C are resolved; Tasks D–J remain.
 
 ## 0. Where the work is
 
@@ -355,7 +367,7 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
 `password_login_off_after_setup` rerender + recreate. Port useful assertions from
 `tests/test_service_ops.py`, `tests/test_app_onboarding.py`; delete tests of removed code.
 
-### Task C — Core services through the same engine
+### Task C — Complete: core services through the same engine
 
 - Core apps (ollama, freellmapi, litellm, lobehub, firecrawl) install with `run_install`
   from generated projects, in dependency order (`manifest.depends_on`). Remove

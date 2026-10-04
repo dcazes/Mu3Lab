@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     command: node dist/src/harness.js --start-docker
     ports: ["127.0.0.1:3002:3002"]
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       HOST: 0.0.0.0
       PORT: "3002"

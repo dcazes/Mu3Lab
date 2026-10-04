@@ -276,6 +276,8 @@ def verify_gate(*, host: str, port: int, log: Log, timeout: float = 360, sleep=t
 def verify_sign_in(service_id: str, host: str, log: Log) -> str:
     """Check whichever kind of Authentik sign-in this installed app uses."""
     service = load().get(service_id)
+    if service.manifest.sign_in.method == "none":
+        return "This app does not use Authentik sign-in."
     port = service.private_https_port
     if not host or not port:
         raise SignInError("This server's private address is not known yet.")

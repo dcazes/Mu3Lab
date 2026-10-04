@@ -92,7 +92,10 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     if (
         provisions_account
         and (
-            service.account.get("mode") in {"environment_bootstrap", "api_bootstrap"}
+            (
+                service.account.get("mode") in {"environment_bootstrap", "api_bootstrap"}
+                and service.manifest.account.needs_owner
+            )
             or any(rule.needs_owner for rule in rules_for(service.manifest))
         )
         and (not operator.get("subject_id") or not operator.get("email"))

@@ -116,7 +116,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_firecrawl_has_a_complete_private_login_free_runtime(self):
         service = load().get("firecrawl")
-        self.assertEqual(service.stage, "optional")
+        self.assertEqual(service.stage, "core")
         self.assertEqual(service.auth, "excluded")
         self.assertEqual(service.private_https_port, 8456)
         self.assertEqual(service.proxy_port, 19473)

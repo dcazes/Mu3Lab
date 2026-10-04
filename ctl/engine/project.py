@@ -45,6 +45,8 @@ def token(length: int) -> str:
 def generate(secret: Secret) -> str:
     if secret.kind == "fixed":
         return secret.value
+    if secret.kind == "hex":
+        return secrets.token_hex(secret.length)
     if secret.kind == "base64":
         return base64.b64encode(secrets.token_bytes(secret.length)).decode("ascii")
     return token(secret.length)

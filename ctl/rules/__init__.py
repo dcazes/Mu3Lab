@@ -119,5 +119,6 @@ def _load_all() -> None:
         initial_owner_guard,
         needs_embedding_model,
         password_login_off_after_setup,
+        provider_routing,
         staged_first_start,
     )

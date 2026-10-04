@@ -52,7 +52,6 @@ class RegistryV3Tests(unittest.TestCase):
                 "adventurelog",
                 "paperless-ngx",
                 "nextcloud",
-                "firecrawl",
                 "baby-buddy",
             },
         )

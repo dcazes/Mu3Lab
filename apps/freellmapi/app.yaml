@@ -24,6 +24,25 @@ sign_in:
   note: Authentik protects the private dashboard route. FreeLLMAPI has no header-based login, so its generated local
     account is saved to your Vaultwarden.
 account:
+  mode: api_bootstrap
+  needs_owner: false
   save_login_to_vault: true
 resource_guidance: Optional provider route inside the mandatory core suite.
 setup_action: Mu3Lab manages provider configuration privately; its native dashboard is available for operator recovery.
+secrets:
+- env: ENCRYPTION_KEY
+  kind: hex
+  length: 32
+- env: FREELLMAPI_ADMIN_PASSWORD
+  length: 32
+env:
+  FREEAPI_CONFIG_PATH: /mu3lab/config/freellmapi.config.json
+  FREELLMAPI_ADMIN_EMAIL: mu3lab-gateway@localhost.test
+rules:
+- rule: provider_routing
+  with:
+    mode: gateway
+    config_file: freellmapi.config.json
+    admin_email_env: FREELLMAPI_ADMIN_EMAIL
+    admin_password_env: FREELLMAPI_ADMIN_PASSWORD
+    bootstrap_flag_env: MU3LAB_ADMIN_BOOTSTRAPPED
