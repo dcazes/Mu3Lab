@@ -44,7 +44,7 @@ function monthRange(): CalendarRange {
 }
 
 function nextcloudInstalled(nextcloud?: Service) {
-  return Boolean(nextcloud && !['planned', 'not_installed'].includes(nextcloud.state));
+  return Boolean(nextcloud && nextcloud.installed);
 }
 
 /**
@@ -93,7 +93,7 @@ export function CalendarView({
     }
     setDraft({
       id: event.id,
-      revision: event.revision,
+      revision: event.revision || undefined,
       title: event.title,
       start: inputTime(event.start, event.all_day),
       end: inputTime(event.end, event.all_day),

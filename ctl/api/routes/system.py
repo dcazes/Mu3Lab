@@ -2,47 +2,45 @@
 
 from __future__ import annotations
 
-import subprocess
-import time
 from pathlib import Path
-from typing import Any
 
-import psutil
 from fastapi import APIRouter, Request
+from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
 from ctl import __version__, self_update
-from ctl.actions import docker_argv
-from ctl.api import runtime
+from ctl.api import models, runtime
+from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.backups import readiness as backup_readiness
+from ctl.compute import detect
 from ctl.control_state import COMPUTE_MODES, ControlState
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.service_state import container_memory, tailnet_serve_status, tailscale_status
+from ctl.store import records
 
 ROOT = Path(__file__).resolve().parents[3]
 
-health_router = APIRouter(prefix="/api", tags=["health"])
-router = APIRouter(prefix="/api/v1", tags=["system"])
+health_router = APIRouter(prefix="/api", tags=["health"], route_class=ContractRoute)
+router = APIRouter(prefix="/api/v1", tags=["system"], route_class=ContractRoute)
 
 
-@health_router.get("/health")
-def health() -> dict[str, Any]:
+@health_router.get("/health", response_model=models.Health, response_model_exclude_none=True)
+def health() -> models.Health:
     """Liveness probe used by Caddy, systemd, and the installer."""
-    return {"ok": True, "version": __version__}
+    return models.Health.model_validate({"ok": True, "version": __version__})
 
 
-@router.get("/catalog")
-def catalog(_member: Member) -> dict[str, Any]:
+@router.get("/catalog", response_model=models.CatalogResponse, response_model_exclude_none=True)
+def catalog(_member: Member) -> models.CatalogResponse:
     """App descriptions and the core suite, from the app manifests."""
     try:
         registry = load_registry()
     except RegistryError as exc:
-        return {"ok": False, "profiles": [], "services": {}, "error": str(exc)}
+        return models.CatalogResponse.model_validate({"ok": False, "profiles": [], "services": {}, "error": str(exc)})
     core = [service.id for service in registry.services if service.stage == "core" or service.manifest.tier == "core"]
     services = {
         service.id: {
@@ -61,53 +59,28 @@ def catalog(_member: Member) -> dict[str, Any]:
         "description": "The core AI services for local models and embeddings, external provider connections, chat, and web research.",
         "services": core,
     }
-    return {"ok": True, "profiles": [profile], "services": services}
+    return models.CatalogResponse.model_validate({"ok": True, "profiles": [profile], "services": services})
 
 
-def _worker_state() -> str:
-    """systemd's word for the background worker ("active", "failed", ...), or "unknown"."""
-    try:
-        proc = subprocess.run(
-            ["systemctl", "--user", "is-active", "mu3lab-worker.service"], capture_output=True, text=True, timeout=5
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-    state = proc.stdout.strip()
-    # No user session bus (e.g. a development run) prints nothing useful.
-    return state if state in {"active", "activating", "deactivating", "inactive", "failed"} else "unknown"
+@router.get("/system", response_model=models.SystemResponse, response_model_exclude_none=True)
+def system(_member: Member) -> models.SystemResponse:
+    return models.SystemResponse.model_validate(
+        records.get("status", "system")
+        or {
+            "ok": True,
+            "cpu_percent": 0,
+            "docker_ready": False,
+            "tailnet_dns_name": "",
+            "runtime_root": str(RuntimePaths().root),
+            "memory": {"total": 0, "used": 0, "percent": 0},
+            "disk": {"total": 0, "used": 0, "percent": 0},
+            "backup": {},
+            "observed_at": "",
+        }
+    )
 
 
-@router.get("/system")
-def system(_member: Member) -> dict[str, Any]:
-    """Read-only host capacity and private-network status for the dashboard."""
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage(str(RuntimePaths().root.parent))
-    try:
-        docker = (
-            subprocess.run(docker_argv(["docker", "info"]), capture_output=True, text=True, timeout=5).returncode == 0
-        )
-    except (OSError, subprocess.SubprocessError):
-        docker = False
-    tailscale = tailscale_status()
-    tailscale["serve"] = tailnet_serve_status()
-    return {
-        "ok": True,
-        "cpu_percent": psutil.cpu_percent(interval=None),
-        "uptime_seconds": max(0, int(time.time() - psutil.boot_time())),
-        "memory": {"total": memory.total, "used": memory.used, "percent": memory.percent},
-        "disk": {"total": disk.total, "used": disk.used, "percent": disk.percent},
-        "docker_ready": docker,
-        "container_memory": container_memory() if docker else {},
-        "worker_state": _worker_state(),
-        "tailnet_dns_name": tailscale["dns_name"],
-        "tailscale": tailscale,
-        "runtime_root": str(RuntimePaths().root),
-        "backup": backup_readiness(),
-    }
-
-
-def _system_config_response() -> dict[str, Any]:
-    from ctl.compute import detect
+def _system_config_response() -> dict[str, JsonValue]:
 
     state = ControlState.runtime()
     configured = state.system_config() if state else {"compute_mode": "auto", "updated_at": "", "updated_by": ""}
@@ -124,18 +97,20 @@ def _system_config_response() -> dict[str, Any]:
     }
 
 
-@router.get("/system/config")
-def system_config(_operator: Operator) -> dict[str, Any]:
-    return _system_config_response()
+@router.get("/system/config", response_model=models.SystemConfig, response_model_exclude_none=True)
+def system_config(_operator: Operator) -> models.SystemConfig:
+    return models.SystemConfig.model_validate(_system_config_response())
 
 
-@router.put("/system/config")
-async def update_system_config(request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    mode = str((await runtime.json_body(request)).get("compute_mode", ""))
-    return await run_in_threadpool(_set_compute_mode, mode, operator)
+@router.put("/system/config", response_model=models.SystemConfig, response_model_exclude_none=True)
+async def update_system_config(
+    payload_model: models.ComputeRequest, request: Request, operator: OperatorMutation
+) -> models.SystemConfig:
+    mode = str((payload_model.model_dump()).get("compute_mode", ""))
+    return models.SystemConfig.model_validate(await run_in_threadpool(_set_compute_mode, mode, operator))
 
 
-def _set_compute_mode(mode: str, operator: IdentityData) -> dict[str, Any]:
+def _set_compute_mode(mode: str, operator: IdentityData) -> dict[str, JsonValue]:
     if mode not in COMPUTE_MODES:
         raise ApiError(422, "compute_mode must be auto, cpu, nvidia, or amd")
     state = runtime.control_state()
@@ -149,20 +124,22 @@ def _set_compute_mode(mode: str, operator: IdentityData) -> dict[str, Any]:
     return _system_config_response()
 
 
-@router.get("/system/update")
-async def mu3lab_update(_operator: Operator, refresh: bool = False) -> dict[str, Any]:
+@router.get("/system/update", response_model=models.Mu3LabUpdate, response_model_exclude_none=True)
+async def mu3lab_update(_operator: Operator, refresh: bool = False) -> models.Mu3LabUpdate:
     """Whether GitHub has a newer Mu3Lab this copy can move to; fetches at most every few minutes."""
-    return {"ok": True, **await run_in_threadpool(self_update.status, ROOT, refresh=refresh)}
+    return models.Mu3LabUpdate.model_validate(
+        {"ok": True, **await run_in_threadpool(self_update.status, ROOT, refresh=refresh)}
+    )
 
 
-@router.post("/system/update")
-def start_mu3lab_update(request: Request, operator: OperatorMutation) -> dict[str, Any]:
+@router.post("/system/update", response_model=models.JobResponse, response_model_exclude_none=True)
+def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.JobResponse:
     """Queue the self-update. It restarts the dashboard and worker, so nothing else may be running."""
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
     previous = store.by_idempotency_key(key or "")
     if previous:
-        return {"ok": True, "duplicate": True, "job": previous}
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     current = self_update.status(ROOT)
     if current["blocked_reason"]:
         raise ApiError(409, current["blocked_reason"])
@@ -179,27 +156,28 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> dict[st
         detail="Owner requested a Mu3Lab update.",
         idempotency_key=key,
     )
-    return {"ok": True, "job": job}
+    return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
-@router.get("/backups")
-def backups(_member: Member) -> dict[str, Any]:
+@router.get("/backups", response_model=models.BackupReadiness, response_model_exclude_none=True)
+def backups(_member: Member) -> models.BackupReadiness:
     """Local encrypted-backup readiness; execution needs an authenticated job."""
-    return {"ok": True, **backup_readiness()}
+    return models.BackupReadiness.model_validate({"ok": True, **backup_readiness()})
 
 
-@router.get("/provisioning")
-def provisioning(_member: Member) -> dict[str, Any]:
+@router.get("/provisioning", response_model=models.ProvisioningResponse, response_model_exclude_none=True)
+def provisioning(_member: Member) -> models.ProvisioningResponse:
     """Durable first-run state, never transient browser progress."""
     store = ProvisioningStore.runtime()
     if store is None:
-        return {
-            "ok": True,
-            "available": False,
-            "complete": False,
-            "phases": [],
-            "progress": {"completed": 0, "total": 0},
-            "next_action": {"kind": "bootstrap", "label": "Run ./install"},
-        }
-    store.reconcile_runtime()
-    return {"available": True, **store.summary()}
+        return models.ProvisioningResponse.model_validate(
+            {
+                "ok": True,
+                "available": False,
+                "complete": False,
+                "phases": [],
+                "progress": {"completed": 0, "total": 0},
+                "next_action": {"kind": "bootstrap", "label": "Run ./install"},
+            }
+        )
+    return models.ProvisioningResponse.model_validate({"available": True, **store.summary(initialize=False)})

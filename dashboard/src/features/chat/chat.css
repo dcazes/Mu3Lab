@@ -1,0 +1,37 @@
+/* ---------- Chat ---------- */
+.chat {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+.chat-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px 6px 16px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.chat-popout {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.chat:hover .chat-popout {
+  opacity: 0.9;
+}

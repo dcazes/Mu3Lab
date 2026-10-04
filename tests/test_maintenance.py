@@ -228,7 +228,9 @@ class MaintenanceApiTests(unittest.TestCase):
         ):
             store.return_value.by_idempotency_key.return_value = None
             store.return_value.create.return_value = {"id": "j", "state": "queued"}
-            response = self.post({"action": "update", "target_version": "v99.0.0"})
+            rejected = self.post({"action": "update", "target_version": "v99.0.0"})
+            self.assertEqual(rejected.status_code, 422)
+            response = self.post({"action": "update"})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(store.return_value.create.call_args.kwargs["params"], {"target_version": "v3.23.0"})
 

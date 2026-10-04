@@ -170,29 +170,29 @@ class SystemTailscaleContractTests(unittest.TestCase):
         serve = {"state": "available", "ports": [443, 8443, 8446]}
         with (
             patch(
-                "ctl.api.routes.system.psutil.virtual_memory",
+                "ctl.status.host.psutil.virtual_memory",
                 return_value=SimpleNamespace(total=100, used=40, percent=40),
             ),
-            patch(
-                "ctl.api.routes.system.psutil.disk_usage", return_value=SimpleNamespace(total=500, used=200, percent=40)
-            ),
-            patch("ctl.api.routes.system.psutil.cpu_percent", return_value=2.0),
-            patch("ctl.api.routes.system.psutil.boot_time", return_value=1),
-            patch(
-                "ctl.api.routes.system.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="active\n")
-            ),
-            patch("ctl.api.routes.system.RuntimePaths") as runtime_paths,
-            patch("ctl.api.routes.system.backup_readiness", return_value={}),
-            patch("ctl.api.routes.system.container_memory", return_value={"mu3lab-ollama": 5}),
-            patch("ctl.api.routes.system.tailscale_status", return_value=status) as status_call,
-            patch("ctl.api.routes.system.tailnet_serve_status", return_value=serve) as serve_call,
+            patch("ctl.status.host.psutil.disk_usage", return_value=SimpleNamespace(total=500, used=200, percent=40)),
+            patch("ctl.status.host.psutil.cpu_percent", return_value=2.0),
+            patch("ctl.status.host.psutil.boot_time", return_value=1),
+            patch("ctl.status.host.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="active\n")),
+            patch("ctl.status.host.RuntimePaths") as runtime_paths,
+            patch("ctl.status.host.backup_readiness", return_value={}),
+            patch("ctl.status.host.container_memory", return_value={"mu3lab-ollama": 5}),
+            patch("ctl.status.host.tailscale_status", return_value=status) as status_call,
+            patch("ctl.status.host.tailnet_serve_status", return_value=serve) as serve_call,
         ):
             runtime_paths.return_value.root = __import__("pathlib").Path("/tmp/mu3lab")
+            from ctl.api.routes import system
             from ctl.api.security import require_member
+            from ctl.status.host import observe_system
 
+            observation = observe_system()
             app.dependency_overrides[require_member] = lambda: {"writes_enabled": True, "role": "member"}
             try:
-                response = TestClient(app).get("/api/v1/system")
+                with patch.object(system.records, "get", return_value=observation):
+                    response = TestClient(app).get("/api/v1/system")
             finally:
                 app.dependency_overrides.pop(require_member, None)
 

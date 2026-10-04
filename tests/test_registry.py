@@ -242,7 +242,7 @@ class RegistryTests(unittest.TestCase):
 
         registry = load()
         with patch("ctl.api.routes.system.load_registry", return_value=registry):
-            result = catalog({"writes_enabled": True})
+            result = catalog({"writes_enabled": True}).model_dump()
         self.assertTrue(result["ok"])
         self.assertEqual(set(result["services"]), {service.id for service in registry.services})
         for service in registry.services:
@@ -262,13 +262,13 @@ class RegistryTests(unittest.TestCase):
 
         service = replace(load().get("mealie"), summary="")
         with patch("ctl.api.routes.system.load_registry", return_value=SimpleNamespace(services=[service])):
-            result = catalog({"writes_enabled": True})
+            result = catalog({"writes_enabled": True}).model_dump()
         self.assertEqual(result["services"][service.id]["summary"], service.setup_action)
 
     def test_core_suite_profile_lists_the_core_tier(self):
         from ctl.api.routes.system import catalog
 
-        profile = catalog({})["profiles"][0]
+        profile = catalog({}).model_dump()["profiles"][0]
         self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
 
     def test_nextcloud_is_curated_productivity_with_unique_private_ports(self):

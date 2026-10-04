@@ -1,0 +1,100 @@
+/* ---------- Calendar ---------- */
+.calendar-card {
+  padding: 16px 18px 18px;
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--surface);
+  --fc-neutral-bg-color: var(--surface-2);
+  --fc-today-bg-color: var(--accent-soft);
+  --fc-event-bg-color: var(--accent);
+  --fc-event-border-color: var(--accent);
+  --fc-button-bg-color: var(--surface);
+  --fc-button-border-color: var(--border-strong);
+  --fc-button-text-color: var(--text);
+  --fc-button-hover-bg-color: var(--surface-hover);
+  --fc-button-hover-border-color: var(--border-strong);
+  --fc-button-active-bg-color: var(--surface-hover);
+  --fc-button-active-border-color: var(--border-strong);
+}
+
+.calendar-card .fc .fc-toolbar-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.calendar-card .fc .fc-button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+  text-transform: capitalize;
+}
+
+.calendar-card .fc .fc-button:focus {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.calendar-card .fc-theme-standard .fc-scrollgrid {
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.calendar-card .fc .fc-col-header-cell-cushion {
+  padding: 8px 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.calendar-card .fc .fc-daygrid-day-number {
+  padding: 6px 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.calendar-card .fc .fc-day-today .fc-daygrid-day-number {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.calendar-card .fc .fc-daygrid-day-frame {
+  min-height: 92px;
+  cursor: pointer;
+}
+
+.calendar-card .fc .fc-daygrid-event {
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.calendar-card .fc .fc-daygrid-dot-event {
+  color: var(--text);
+}
+
+.calendar-card .fc .fc-daygrid-dot-event:hover {
+  background: var(--surface-hover);
+}
+
+.calendar-card .fc-event-time {
+  color: var(--text-3);
+}
+
+.calendar-card > .callout {
+  margin-bottom: 16px;
+}
+
+.calendar-compact .fc .fc-daygrid-day-frame {
+  min-height: 64px;
+}
+
+.calendar-note {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.calendar-note a {
+  color: var(--accent-text);
+  font-weight: 500;
+}

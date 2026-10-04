@@ -227,7 +227,7 @@ export function McpPanel({
                 <input
                   type={field.type === 'secret' ? 'password' : 'text'}
                   autoComplete="off"
-                  required={field.required && !field.secret_present}
+                  required={Boolean(field.required) && !field.secret_present}
                   value={values[field.key] || ''}
                   placeholder={field.secret_present ? 'Saved — leave blank to keep' : ''}
                   onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}

@@ -8,11 +8,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from ctl import __version__
-from ctl.api.errors import ApiError, api_error_handler
+from ctl.api.errors import ApiError, api_error_handler, response_error_handler, validation_error_handler
 from ctl.api.routes import (
     calendar,
     chat,
@@ -23,6 +25,7 @@ from ctl.api.routes import (
     people,
     providers,
     services,
+    snapshot,
     system,
     vault,
 )
@@ -78,9 +81,13 @@ def _mount_dashboard(app: FastAPI, dist: Path) -> None:
 def create_app(dist: Path = DIST) -> FastAPI:
     app = FastAPI(title="Mu3Lab control plane", version=__version__, lifespan=_lifespan)
     app.add_exception_handler(ApiError, api_error_handler)
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
+    app.add_exception_handler(ResponseValidationError, response_error_handler)
+    app.add_exception_handler(ValidationError, response_error_handler)
     app.include_router(system.health_router)
     for module in (system, identity, services, install_batches, jobs, providers, vault, calendar, mcp, chat, people):
         app.include_router(module.router)
+    app.include_router(snapshot.router)
     if dist.is_dir():
         _mount_dashboard(app, dist)
     return app

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
 import { ConfirmProvider } from './components/Dialog';
 import { EmptyState } from './components/Layout';
@@ -38,7 +38,14 @@ export function Routes() {
 }
 
 function Shell() {
-  const { connection, failedSources, refresh } = useDashboard();
+  const { data, connection, failedSources, refresh } = useDashboard();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const observed = Date.parse(data.services.observed_at || '');
+  const statusStale = !Number.isFinite(observed) || now - observed > 30000;
   const { preference, setPreference } = useTheme();
   const [searchOpen, setSearchOpen] = useState(false);
   const path = usePath();
@@ -51,9 +58,11 @@ function Shell() {
       <MobileBar openSearch={() => setSearchOpen(true)} />
       <main className={path === '/chat' ? 'main main-full' : 'main'}>
         <div className="main-inner">
-          {Boolean(failedSources?.length) && (
+          {(statusStale || Boolean(failedSources?.length)) && (
             <p className="stale-note" role="status">
-              Some information could not be refreshed and may be out of date.{' '}
+              {statusStale
+                ? 'Status may be out of date.'
+                : 'Some information could not be refreshed and may be out of date.'}{' '}
               <button type="button" className="link-button" onClick={() => void refresh()}>
                 Try again
               </button>

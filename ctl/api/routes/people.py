@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from ctl import people
-from ctl.api import runtime
+from ctl.api import models
+from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OperatorMutation
 from ctl.jobs import JobStore
@@ -17,7 +16,7 @@ from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.service_state import tailnet_dns_name
 
-router = APIRouter(prefix="/api/v1/people", tags=["people"])
+router = APIRouter(prefix="/api/v1/people", tags=["people"], route_class=ContractRoute)
 # Invite links sign someone in; never let a browser or proxy keep a copy.
 _NO_STORE = {"Cache-Control": "no-store"}
 
@@ -36,17 +35,19 @@ def _audit(actor: str, detail: str) -> None:
         store.record_audit(actor=actor, event="people.changed", detail=detail)
 
 
-@router.get("")
-async def list_people(_admin: Operator) -> dict[str, Any]:
+@router.get("", response_model=models.PeopleResponse, response_model_exclude_none=True)
+async def list_people(_admin: Operator) -> models.PeopleResponse:
     try:
-        return {"ok": True, "people": await run_in_threadpool(people.list_people)}
+        return models.PeopleResponse.model_validate({"ok": True, "people": await run_in_threadpool(people.list_people)})
     except people.PeopleError as exc:
         raise ApiError(503, str(exc)) from exc
 
 
-@router.post("")
-async def add_person(request: Request, admin: OperatorMutation) -> JSONResponse:
-    body = await runtime.json_body(request)
+@router.post("", response_model=models.PersonResponse, response_model_exclude_none=True)
+async def add_person(
+    payload_model: models.PersonRequest, request: Request, admin: OperatorMutation
+) -> models.PersonResponse | JSONResponse:
+    body = payload_model.model_dump()
     role = str(body.get("role", "member"))
     try:
         result = await run_in_threadpool(
@@ -55,12 +56,17 @@ async def add_person(request: Request, admin: OperatorMutation) -> JSONResponse:
     except people.PeopleError as exc:
         raise ApiError(422, str(exc), headers=_NO_STORE) from exc
     _audit(str(admin["username"]), f"Added {result['person']['username']} as {role}.")
-    return JSONResponse({"ok": True, **result}, headers=_NO_STORE)
+    return JSONResponse(
+        models.PersonResponse.model_validate({"ok": True, **result}).model_dump(mode="json", exclude_none=True),
+        headers=_NO_STORE,
+    )
 
 
-@router.post("/{username}/{action}")
-async def change_person(username: str, action: str, request: Request, admin: OperatorMutation) -> JSONResponse:
-    body = await runtime.json_body(request)
+@router.post("/{username}/{action}", response_model=models.PersonResponse, response_model_exclude_none=True)
+async def change_person(
+    payload_model: models.PersonChangeRequest, username: str, action: str, request: Request, admin: OperatorMutation
+) -> models.PersonResponse | JSONResponse:
+    body = payload_model.model_dump()
     if action == "deactivate" and username == admin["username"]:
         raise ApiError(409, "You cannot remove yourself.", headers=_NO_STORE)
     try:
@@ -70,4 +76,7 @@ async def change_person(username: str, action: str, request: Request, admin: Ope
     except people.PeopleError as exc:
         raise ApiError(409, str(exc), headers=_NO_STORE) from exc
     _audit(str(admin["username"]), f"{action} for {username}.")
-    return JSONResponse({"ok": True, **result}, headers=_NO_STORE)
+    return JSONResponse(
+        models.PersonResponse.model_validate({"ok": True, **result}).model_dump(mode="json", exclude_none=True),
+        headers=_NO_STORE,
+    )

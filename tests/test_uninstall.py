@@ -152,7 +152,7 @@ class UninstallApiTests(unittest.TestCase):
         }
         jobs = MagicMock()
         jobs.by_idempotency_key.return_value = None
-        jobs.create.return_value = {"id": "delete-job"}
+        jobs.create.return_value = {"id": "delete-job", "state": "queued"}
         with (
             patch("ctl.api.security.ingress_token", return_value="token"),
             patch("ctl.api.security.csrf_token", return_value="bound"),

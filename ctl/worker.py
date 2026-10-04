@@ -22,6 +22,7 @@ from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
 from ctl.service_ops import execute_claimed as execute_service_claimed
+from ctl.status import reconciler, signals
 from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -84,6 +85,7 @@ def run_job(store: JobStore, job: dict, worker_id: str) -> None:
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=2)
+            signals.changed.set()
 
 
 def run() -> int:
@@ -107,6 +109,7 @@ def run() -> int:
     from ctl import download_manager
 
     download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
+    status_thread = reconciler.start(downloads_stopping)
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait
@@ -175,6 +178,8 @@ def run() -> int:
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
                 print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
     downloads_stopping.set()
+    signals.changed.set()
+    status_thread.join(timeout=2)
     return 0
 
 

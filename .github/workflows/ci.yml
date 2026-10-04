@@ -28,6 +28,8 @@ jobs:
           uv run --frozen python tools/check_no_app_ids.py
           uv run --frozen ruff check .
           uv run --frozen ruff format --check .
+      - name: API schema matches Python models
+        run: uv run --frozen python -m tools.api_schema --check
       - name: Python type check
         run: uv run --frozen mypy
       - name: Python tests
@@ -43,6 +45,7 @@ jobs:
       - name: Dashboard lint, format, and type check
         working-directory: dashboard
         run: |
+          npm run check:api
           npm run lint
           npm run format:check
           npm run typecheck

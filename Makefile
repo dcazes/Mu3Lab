@@ -39,6 +39,7 @@ format:
 	$(RUN) python -m tools.dashboard format
 
 typecheck:
+	$(RUN) python -m tools.api_schema --check
 	$(RUN) mypy
 
 # verify: everything CI runs, in one command.
@@ -83,3 +84,8 @@ nuke:
 
 ui-dev:
 	$(RUN) python -m tools.dashboard dev
+
+.PHONY: api-schema
+api-schema:
+	$(RUN) python -m tools.api_schema
+	$(RUN) python -m tools.dashboard api-schema

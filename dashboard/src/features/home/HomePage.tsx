@@ -25,7 +25,7 @@ function greeting() {
 
 function LauncherTile({ service }: { service: Service }) {
   const target = launchTarget(service);
-  const tone = stateTone(service.state);
+  const tone = stateTone(service.display_state);
   const body = (
     <>
       <AppIcon id={service.id} size="lg" />
@@ -33,7 +33,7 @@ function LauncherTile({ service }: { service: Service }) {
       {!isRunning(service) && (
         <span className="tile-state">
           <Dot tone={tone} />
-          {stateLabel[service.state]}
+          {stateLabel[service.display_state]}
         </span>
       )}
     </>
@@ -48,7 +48,7 @@ function LauncherTile({ service }: { service: Service }) {
     <Link
       className="tile tile-muted"
       to={`/apps/${service.id}`}
-      aria-label={`${service.name}: ${stateLabel[service.state]}`}
+      aria-label={`${service.name}: ${stateLabel[service.display_state]}`}
     >
       {body}
     </Link>
@@ -65,7 +65,7 @@ function Attention() {
       key: service.id,
       icon: AlertTriangle,
       tone: 'warning',
-      text: `${service.name}: ${stateLabel[service.state].toLowerCase()}`,
+      text: `${service.name}: ${stateLabel[service.display_state].toLowerCase()}`,
       to: `/apps/${service.id}`,
     })),
     ...(setupIncomplete
@@ -75,7 +75,7 @@ function Attention() {
       key: `working-${service.id}`,
       icon: Loader2,
       tone: 'progress',
-      text: `${service.name} is ${stateLabel[service.state].toLowerCase()}…`,
+      text: `${service.name} is ${stateLabel[service.display_state].toLowerCase()}…`,
       to: `/apps/${service.id}`,
     })),
   ];

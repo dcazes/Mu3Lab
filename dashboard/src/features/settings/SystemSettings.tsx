@@ -329,7 +329,11 @@ export function SystemSettings() {
       <Setup />
       <Card title="Server">
         <div className="meters">
-          <Meter label="CPU" percent={system.cpu_percent} detail={`Up ${duration(system.uptime_seconds)}`} />
+          <Meter
+            label="CPU"
+            percent={system.cpu_percent}
+            detail={`Up ${duration(system.uptime_seconds ?? undefined)}`}
+          />
           <Meter
             label="Memory"
             percent={system.memory.percent}

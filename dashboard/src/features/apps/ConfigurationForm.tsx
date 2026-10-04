@@ -62,7 +62,7 @@ function Form({ service, config }: { service: Service; config: ServiceConfigResp
               </select>
             ) : (
               <input
-                required={field.required && !(field.type === 'secret' && field.secret_present)}
+                required={Boolean(field.required) && !(field.type === 'secret' && field.secret_present)}
                 type={field.type === 'secret' ? 'password' : field.type === 'integer' ? 'number' : 'text'}
                 autoComplete="off"
                 value={String(values[field.key] ?? '')}

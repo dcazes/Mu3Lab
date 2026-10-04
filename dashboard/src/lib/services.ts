@@ -10,37 +10,23 @@ export const groupLabel: Record<Group, string> = {
   infrastructure: 'Infrastructure',
 };
 
-export const stateLabel: Record<Service['state'], string> = {
-  planned: 'Not installed',
-  not_installed: 'Not installed',
-  config_required: 'Needs configuration',
-  queued: 'Queued',
-  installing: 'Installing',
-  installed: 'Installed',
-  needs_setup: 'Needs setup',
-  configured: 'Configured',
-  starting: 'Starting',
-  verifying: 'Verifying',
-  uninstalling: 'Uninstalling',
+export const stateLabel: Record<Service['display_state'], string> = {
   running: 'Running',
-  ready: 'Running',
   stopped: 'Stopped',
-  updating: 'Updating',
-  degraded: 'Degraded',
-  failed: 'Failed',
+  working: 'Working',
+  not_installed: 'Not installed',
   needs_attention: 'Needs attention',
 };
 
-const WORKING = new Set(['queued', 'installing', 'starting', 'verifying', 'uninstalling', 'updating']);
-const PROBLEM = new Set(['failed', 'needs_attention', 'degraded']);
-const SETUP = new Set(['config_required', 'needs_setup']);
-
 export function stateTone(state: string): Tone {
-  if (state === 'ready' || state === 'running') return 'green';
-  if (PROBLEM.has(state)) return 'red';
-  if (SETUP.has(state)) return 'amber';
-  if (WORKING.has(state)) return 'blue';
-  return 'gray';
+  return (
+    (
+      { running: 'green', stopped: 'gray', working: 'blue', not_installed: 'gray', needs_attention: 'red' } as Record<
+        string,
+        Tone
+      >
+    )[state] || 'gray'
+  );
 }
 
 export function categoryLabel(category: string) {
@@ -49,25 +35,14 @@ export function categoryLabel(category: string) {
   return category.charAt(0).toUpperCase() + category.slice(1);
 }
 
-export const isRunning = (service: Service) => ['ready', 'running'].includes(service.state);
-export const isWorking = (service: Service) => WORKING.has(service.state);
-
-export function isInstalled(service: Service) {
-  if (service.installation_state) return service.installation_state !== 'not_installed';
-  return !['planned', 'not_installed'].includes(service.state);
-}
-
-export function needsAttention(service: Service) {
-  return isInstalled(service) && (PROBLEM.has(service.state) || SETUP.has(service.state));
-}
-
-export function canInstall(service: Service) {
-  return (
-    service.stage === 'optional' &&
-    ['planned', 'not_installed', 'degraded', 'needs_attention', 'needs_setup'].includes(service.state) &&
-    service.installation_state !== 'installed'
-  );
-}
+export const isRunning = (service: Service) => service.display_state === 'running';
+export const isWorking = (service: Service) => service.display_state === 'working';
+export const isInstalled = (service: Service) => service.installed;
+export const needsAttention = (service: Service) => service.display_state === 'needs_attention' && service.installed;
+export const canInstall = (service: Service) =>
+  service.stage === 'optional' &&
+  !service.installed &&
+  (service.allowed_actions || []).some((action) => action === 'install' || action === 'retry_setup');
 
 /** Apps people open day to day, as opposed to the AI and infrastructure plumbing. */
 export function isEverydayApp(service: Service) {
@@ -81,7 +56,7 @@ export interface LaunchTarget {
 
 /** Where "Open" should take the user, or null when the app has nothing to open right now. */
 export function launchTarget(service: Service): LaunchTarget | null {
-  if (service.state === 'stopped' || !isInstalled(service)) return null;
+  if (service.display_state === 'stopped' || !isInstalled(service)) return null;
   const identity = service.identity;
   const ui = service.ui;
   const routeUrl = ui?.state === 'ready' && ui.url ? ui.url : '';

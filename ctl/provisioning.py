@@ -159,8 +159,9 @@ class ProvisioningStore:
                 ),
             )
 
-    def summary(self) -> dict[str, Any]:
-        self.initialize()
+    def summary(self, *, initialize: bool = True) -> dict[str, Any]:
+        if initialize:
+            self.initialize()
         labels = {phase_id: (label, default_detail) for phase_id, label, default_detail in PHASES}
         with self._connect() as conn:
             rows = conn.execute(
@@ -171,6 +172,19 @@ class ProvisioningStore:
             """,
                 (WORKFLOW_VERSION,),
             ).fetchall()
+        if not rows:
+            rows = [
+                {
+                    "phase_id": phase_id,
+                    "desired_state": "verified",
+                    "actual_state": "pending",
+                    "attempts": 0,
+                    "detail": detail,
+                    "error": "",
+                    "updated_at": "",
+                }
+                for phase_id, _label, detail in PHASES
+            ]
         phases = []
         for row in rows:
             value = dict(row)

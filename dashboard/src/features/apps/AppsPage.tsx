@@ -65,7 +65,7 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
         {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
         {service.identity && service.identity.mode !== 'none' && <Badge tone="gray">{signIn.label}</Badge>}
       </span>
-      <StatusBadge state={service.state} />
+      <StatusBadge state={service.display_state} />
       <span className="row-actions">
         {target ? (
           <ExternalButton size="sm" href={target.url}>

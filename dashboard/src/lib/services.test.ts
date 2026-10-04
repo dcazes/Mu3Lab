@@ -25,7 +25,7 @@ describe('launchTarget', () => {
   });
 
   it('never offers to open a stopped app', () => {
-    const app = service('nextcloud', 'Nextcloud', 'optional', { state: 'stopped', identity: identity() });
+    const app = service('nextcloud', 'Nextcloud', 'optional', { display_state: 'stopped', identity: identity() });
     expect(launchTarget(app)).toBeNull();
   });
 
@@ -61,19 +61,33 @@ describe('launchTarget', () => {
 
 describe('service state helpers', () => {
   it('flags installed apps with problems but not uninstalled ones', () => {
-    expect(needsAttention(service('a', 'A', 'optional', { state: 'failed' }))).toBe(true);
+    expect(needsAttention(service('a', 'A', 'optional', { display_state: 'needs_attention' }))).toBe(true);
     expect(
-      needsAttention(service('b', 'B', 'optional', { state: 'failed', installation_state: 'not_installed' })),
+      needsAttention(
+        service('b', 'B', 'optional', {
+          display_state: 'needs_attention',
+          installed: false,
+          allowed_actions: ['install'],
+        }),
+      ),
     ).toBe(false);
   });
 
   it('only offers installation for available optional apps', () => {
     expect(
-      canInstall(service('a', 'A', 'optional', { state: 'not_installed', installation_state: 'not_installed' })),
+      canInstall(
+        service('a', 'A', 'optional', {
+          display_state: 'not_installed',
+          installed: false,
+          allowed_actions: ['install'],
+        }),
+      ),
     ).toBe(true);
-    expect(canInstall(service('b', 'B', 'core', { state: 'not_installed', installation_state: 'not_installed' }))).toBe(
-      false,
-    );
+    expect(
+      canInstall(
+        service('b', 'B', 'core', { display_state: 'not_installed', installed: false, allowed_actions: ['install'] }),
+      ),
+    ).toBe(false);
   });
 
   it('marks broken sign-in red and working sign-in green', () => {

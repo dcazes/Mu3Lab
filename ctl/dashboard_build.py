@@ -11,8 +11,9 @@ from ctl.bootstrap import stamps
 NODE_IMAGE = "node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1"
 COMMANDS = {
     "build": "npm ci && npm run build",
-    "check": "npm ci && npm run lint && npm run format:check && npm run typecheck && npm test",
+    "check": "npm ci && npm run check:api && npm run lint && npm run format:check && npm run typecheck && npm test",
     "dev": "npm ci && npm run dev -- --host 127.0.0.1",
+    "api-schema": "npm ci && npm run gen:api",
     "format": "npm ci && npm run format",
 }
 

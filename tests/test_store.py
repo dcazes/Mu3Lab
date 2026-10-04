@@ -37,7 +37,10 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(process.exitcode, 0)
         self.assertEqual(len(self.store.list_names("process")), 4)
         with db.connect(db.database(self.paths)) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0], 1)
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0],
+                len(list(db.MIGRATIONS.glob("*.sql"))),
+            )
             self.assertEqual(connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
         self.assertEqual(list(self.paths.state.glob("*.db")), [db.database(self.paths)])

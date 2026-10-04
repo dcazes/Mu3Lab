@@ -1,7 +1,7 @@
 import { ArrowRight, CheckCircle2, Circle } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import type { ProviderMetadataResponse, VaultStatus } from '../../api';
+import { putJsonApi, type ChecklistResponse, type ProviderMetadataResponse, type VaultStatus } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
@@ -16,21 +16,42 @@ const STORAGE_KEY = 'mu3lab.getStarted';
 
 type Guide = 'extension' | 'devices';
 
-function useManualDone() {
-  const read = () => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Record<string, boolean>;
-    } catch {
-      return {};
-    }
-  };
-  const [done, setDone] = useState<Record<string, boolean>>(read);
+export function useGetStartedChecklist() {
+  const { data: checklist, reload } = useApi<ChecklistResponse>('/api/v1/me/checklist', { interval: 10000 });
+  const migrating = useRef(false);
+  useEffect(() => {
+    if (!checklist || migrating.current) return;
+    migrating.current = true;
+    const migrate = async () => {
+      let saved: Record<string, unknown>;
+      try {
+        saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      if (!saved || typeof saved !== 'object') return;
+      const items = Object.fromEntries(
+        Object.entries(saved).filter(
+          ([key, done]) => ['devices', 'extension', 'chat', 'hidden'].includes(key) && done === true,
+        ),
+      );
+      if (Object.keys(items).length) await putJsonApi('/api/v1/me/checklist', { items });
+      localStorage.removeItem(STORAGE_KEY);
+      if (Object.keys(items).length) await reload();
+    };
+    void migrate()
+      .catch(() => toast.error('Could not save your checklist progress. Mu3Lab will retry.'))
+      .finally(() => {
+        migrating.current = false;
+      });
+  }, [checklist, reload]);
   const mark = (key: string) => {
-    const next = { ...read(), [key]: true };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setDone(next);
+    void putJsonApi('/api/v1/me/checklist', { items: { [key]: true } })
+      .then(() => reload())
+      .catch(() => toast.error('Could not save checklist progress. Try again.'));
   };
-  return [done, mark] as const;
+  return [checklist?.items || {}, mark] as const;
 }
 
 function ExtensionGuide({ browsers, onClose }: { browsers: string[]; onClose: () => void }) {
@@ -128,7 +149,7 @@ export function GetStarted() {
   const operator = data.identity.writes_enabled;
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
   const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
-  const [manual, markDone] = useManualDone();
+  const [manual, markDone] = useGetStartedChecklist();
   const [checking, setChecking] = useState(false);
   const checkExtension = async () => {
     setChecking(true);

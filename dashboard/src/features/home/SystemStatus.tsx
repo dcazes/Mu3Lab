@@ -43,13 +43,13 @@ const RANK: Record<Tone, number> = { green: 0, gray: 0, blue: 1, amber: 2, red: 
 function serviceRow(id: string, services: Service[], memory: Record<string, number>): Row | null {
   const service = services.find((candidate) => candidate.id === id);
   if (!service) return null;
-  const tone = stateTone(service.state);
+  const tone = stateTone(service.display_state);
   const used = (service.containers || []).reduce((sum, container) => sum + (memory[container.name] || 0), 0);
   return {
     key: id,
     label: service.name,
     tone,
-    status: stateLabel[service.state] || service.state,
+    status: stateLabel[service.display_state] || service.display_state,
     value: used ? bytes(used) : undefined,
     figure: used ? bytes(used) : undefined,
     detail: tone === 'green' ? '' : service.detail,
@@ -215,7 +215,7 @@ export function SystemStatus() {
           );
         })}
         {system.uptime_seconds !== undefined && (
-          <span className="status-meta">Up {duration(system.uptime_seconds)}</span>
+          <span className="status-meta">Up {duration(system.uptime_seconds ?? undefined)}</span>
         )}
       </div>
       {expanded && (

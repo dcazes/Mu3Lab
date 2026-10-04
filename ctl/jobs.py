@@ -18,6 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
+from ctl.status.signals import changed
 from ctl.store import db
 
 _SECRET = re.compile(
@@ -303,6 +304,8 @@ class JobStore:
                 "INSERT INTO job_events (job_id, event, created_at, detail) VALUES (?, ?, ?, ?)",
                 (job_id, event, _now(), redact(detail)),
             )
+        if event != "log":
+            changed.set()
 
     def events(self, job_id: str, limit: int = 200) -> list[dict[str, Any]]:
         with self._connect() as conn:
