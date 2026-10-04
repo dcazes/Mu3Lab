@@ -35,7 +35,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ctl import actions, docker_config, preflight, privilege, routes
+import httpx
+
+from ctl import actions, dashboard_build, docker_config, platform_releases, preflight, privilege, routes
 from ctl.bootstrap import stamps
 from ctl.engine.project import Facts, render
 from ctl.identity import gate_blueprint, sync_sign_in
@@ -52,14 +54,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # Constants: versions, package lists, ports. Reasons inline.
 # ---------------------------------------------------------------------------
 BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg", "python3", "python3-pip", "python3-venv", "restic"]
-# Current Node.js LTS channel for the supported v1 host. Keep this explicit so
-# the bootstrap remains reviewable and reproducible; advance it deliberately
-# when the LTS line changes rather than silently tracking a moving target.
-NODE_LTS_MAJOR = 24
-NODESOURCE_KEY_URL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
-NODESOURCE_LIST = (
-    f"deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{NODE_LTS_MAJOR}.x nodistro main"
-)
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"]
 # NVIDIA Container Toolkit repository (ASCII-armored key; apt reads .asc).
@@ -116,9 +110,6 @@ DISPATCH = {
     ("core_images", "ready"): "skip",
     ("host_base", "missing"): "apt_base",
     ("host_base", "ready"): "skip",
-    ("node", "absent"): "nodesource_install",
-    ("node", "old"): "nodesource_install",
-    ("node", "ready"): "skip",
     ("dashboard_src", "missing"): "report_incomplete",
     ("dashboard_src", "ready"): "skip",
     ("dashboard_build", "stale"): "npm_build",
@@ -203,7 +194,7 @@ def _dpkg_present(package: str) -> bool:
 
 
 def _repo_codename() -> str:
-    """Apt codename for Docker/NodeSource repos (noble, bookworm, ...)."""
+    """Apt codename for Docker repositories (noble, bookworm, ...)."""
     info = preflight._parse_os_release(Path("/etc/os-release").read_text(encoding="utf-8", errors="replace"))
     return info.get("UBUNTU_CODENAME") or info.get("VERSION_CODENAME", "")
 
@@ -249,16 +240,11 @@ def _repair_managed_apt_keys(log: Callable[[str], None]) -> dict:
 
     ``apt-get update`` validates all configured sources, not only the source
     needed by the current install step.  A test reset can therefore leave a
-    valid ``docker.list`` or ``nodesource.list`` beside a deleted keyring and
-    make an otherwise unrelated Node/Tailscale step fail.  Repair only the
-    three source files owned by Mu3Lab; unrelated repositories are untouched.
+    valid repository source beside a deleted keyring and
+    make an otherwise unrelated package step fail. Repair only the
+    source files owned by Mu3Lab; unrelated repositories are untouched.
     """
     managed = [
-        (
-            (Path("/etc/apt/sources.list.d/nodesource.list"), Path("/etc/apt/sources.list.d/nodesource.sources")),
-            NODESOURCE_KEY_URL,
-            (Path("/etc/apt/keyrings/nodesource.gpg"), Path("/usr/share/keyrings/nodesource.gpg")),
-        ),
         (
             (Path("/etc/apt/sources.list.d/docker.list"), Path("/etc/apt/sources.list.d/docker.sources")),
             DOCKER_KEY_URL.format(slug=_distro_slug()),
@@ -329,56 +315,6 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
     )
     res = actions.apt_install(missing, ctx["log_fn"]("host_base"))
     return _propagate(res)
-
-
-def fix_node(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("node")
-    _update_progress(
-        ctx,
-        "node",
-        phase="preparing_repository",
-        activity="Preparing the signed Node.js LTS repository.",
-        timeout_seconds=600,
-    )
-    res = _repair_managed_apt_keys(log)
-    if not res["ok"]:
-        return _propagate(res)
-    key_dest = Path("/tmp/mu3lab-nodesource.gpg")
-    _update_progress(
-        ctx,
-        "node",
-        phase="downloading_key",
-        activity="Downloading the Node.js repository signing key.",
-        timeout_seconds=600,
-    )
-    res = actions.fetch_url(NODESOURCE_KEY_URL, key_dest, log)
-    if not res["ok"]:
-        return _propagate(res)
-    # Binary key bytes: write_root_bytes, never a str round-trip.
-    res = actions.write_root_bytes("/etc/apt/keyrings/nodesource.gpg", key_dest.read_bytes(), log)
-    if not res["ok"]:
-        return _propagate(res)
-    res = actions.write_root_file("/etc/apt/sources.list.d/nodesource.list", NODESOURCE_LIST + "\n", log)
-    if not res["ok"]:
-        return _propagate(res)
-    _update_progress(
-        ctx,
-        "node",
-        phase="refreshing_packages",
-        activity="Refreshing package metadata for Node.js.",
-        timeout_seconds=600,
-    )
-    res = actions.apt_update(log)
-    if not res["ok"]:
-        return _propagate(res)
-    _update_progress(
-        ctx,
-        "node",
-        phase="installing_package",
-        activity="Installing the current supported Node.js LTS.",
-        timeout_seconds=600,
-    )
-    return _propagate(actions.apt_install(["nodejs"], log))
 
 
 def _runtime_layout_check(root: Path) -> dict:
@@ -555,93 +491,18 @@ def fix_dashboard_src(check: dict, ctx: dict) -> dict:
 
 
 def fix_dashboard_build(check: dict, ctx: dict) -> dict:
-    """npm ci (only if node_modules absent) + npm run build, as the USER.
-
-    Long step (minutes on first run); output tailed into the log so the UI
-    never looks stuck. No privilege involved at any point.
-    """
     log = ctx["log_fn"]("dashboard_build")
-    dashdir = ctx["root"] / "dashboard"
-    _update_progress(
-        ctx,
-        "dashboard_build",
-        phase="preparing_build",
-        activity="Preparing the dashboard dependency/build step.",
-        timeout_seconds=900,
-    )
-
-    # The 5-line tail once hid the real cause (missing lockfile); on failure
-    # log every "npm error" line plus a wider tail, and always name the npm
-    # debug log so the cause is one copy-paste away.
-    def _log_failure(proc, what: str) -> dict:
-        lines = (proc.stdout + proc.stderr).strip().splitlines()
-        error_lines = [line for line in lines if "npm error" in line.lower()]
-        log(f"$ {what} failed:")
-        for line in (error_lines + lines[-30:])[:40]:
-            log(line)
-        log("Full npm log: ~/.npm/_logs/ (latest debug-*.log)")
-        return {"ok": False, "error": f"{what} failed (see log)."}
-
     root = ctx["root"]
-    if (
-        stamps.read(root / stamps.NODE_MODULES_STAMP) != stamps.lock_digest(root)
-        or not (dashdir / "node_modules").is_dir()
-    ):
-        if (dashdir / "package-lock.json").is_file():
-            _update_progress(
-                ctx,
-                "dashboard_build",
-                phase="downloading_packages",
-                activity="Downloading the locked dashboard packages.",
-                timeout_seconds=900,
-            )
-            log("$ npm ci  (in dashboard/)")
-            try:
-                proc = subprocess.run(["npm", "ci"], capture_output=True, text=True, timeout=900, cwd=str(dashdir))
-            except OSError as exc:
-                return {"ok": False, "error": f"npm ci failed: {exc} (is Node installed?)"}
-            if proc.returncode != 0:
-                return _log_failure(proc, "npm ci")
-            for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
-                log(line)
-            stamps.write(root / stamps.NODE_MODULES_STAMP, stamps.lock_digest(root))
-        else:
-            # No lockfile (shouldn't happen — repo commits one): npm install
-            # resolves fresh instead of failing like `ci` would.
-            log("$ npm install  (no lockfile; resolving fresh)")
-            _update_progress(
-                ctx,
-                "dashboard_build",
-                phase="downloading_packages",
-                activity="Downloading dashboard packages.",
-                timeout_seconds=900,
-            )
-            try:
-                proc = subprocess.run(["npm", "install"], capture_output=True, text=True, timeout=900, cwd=str(dashdir))
-            except OSError as exc:
-                return {"ok": False, "error": f"npm install failed: {exc} (is Node installed?)"}
-            if proc.returncode != 0:
-                return _log_failure(proc, "npm install")
-            for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
-                log(line)
-    _update_progress(
-        ctx,
-        "dashboard_build",
-        phase="building_dashboard",
-        activity="Compiling the dashboard interface.",
-        timeout_seconds=900,
-    )
-    log("$ npm run build  (in dashboard/)")
-    try:
-        proc = subprocess.run(["npm", "run", "build"], capture_output=True, text=True, timeout=900, cwd=str(dashdir))
-    except OSError as exc:
-        return {"ok": False, "error": f"npm run build failed: {exc}"}
-    for line in (proc.stdout + proc.stderr).strip().splitlines()[-10:]:
-        log(line)
-    if proc.returncode != 0:
-        return {"ok": False, "error": "dashboard build failed (see log)."}
-    stamps.write(root / stamps.BUILD_STAMP, stamps.dashboard_digest(root))
-    return {"ok": True}
+    tag = platform_releases.exact_tag(root)
+    if tag:
+        try:
+            log(f"Downloading and verifying dashboard release {tag}.")
+            platform_releases.install_dashboard(root, tag)
+            return {"ok": True}
+        except (OSError, ValueError, httpx.HTTPError) as exc:
+            return {"ok": False, "error": f"The dashboard release could not be installed: {exc}"}
+    ok, detail = dashboard_build.build(root, log)
+    return {"ok": ok, "error": "" if ok else detail}
 
 
 def fix_root_env(check: dict, ctx: dict) -> dict:
@@ -2300,10 +2161,27 @@ STEPS: list[Step] = [
         "fix": fix_host_base,
     },
     {
-        "id": "node",
-        "label": "Node.js",
-        "check": lambda ctx: preflight.check_node(actions.privilege._exec(["node", "--version"])[1]),
-        "fix": fix_node,
+        "id": "docker",
+        "label": "Docker",
+        "check": _docker_check,
+        "fix": fix_docker,
+        # Daemon-level states are owned downstream (networks step); group
+        # authorization never blocks because fixes run via sg when needed.
+        # Verify passes while any of these hold (the step's own work is done).
+        "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access"),
+    },
+    {
+        "id": "docker_address_pools",
+        "label": "Room for app networks",
+        "check": _address_pools_check,
+        "fix": fix_address_pools,
+    },
+    {"id": "docker_networks", "label": "Docker networks", "check": _networks_check, "fix": fix_networks_router},
+    {
+        "id": "nvidia_toolkit",
+        "label": "GPU support for apps",
+        "check": _nvidia_toolkit_check,
+        "fix": fix_nvidia_toolkit,
     },
     {
         "id": "dashboard_src",
@@ -2336,29 +2214,6 @@ STEPS: list[Step] = [
         "label": "Start the dashboard",
         "check": lambda ctx: _service_check(ctx["root"]),
         "fix": fix_service,
-    },
-    {
-        "id": "docker",
-        "label": "Docker",
-        "check": _docker_check,
-        "fix": fix_docker,
-        # Daemon-level states are owned downstream (networks step); group
-        # authorization never blocks because fixes run via sg when needed.
-        # Verify passes while any of these hold (the step's own work is done).
-        "verify_ok_states": ("ready", "no_group", "stale_login", "no_networks", "no_access"),
-    },
-    {
-        "id": "docker_address_pools",
-        "label": "Room for app networks",
-        "check": _address_pools_check,
-        "fix": fix_address_pools,
-    },
-    {"id": "docker_networks", "label": "Docker networks", "check": _networks_check, "fix": fix_networks_router},
-    {
-        "id": "nvidia_toolkit",
-        "label": "GPU support for apps",
-        "check": _nvidia_toolkit_check,
-        "fix": fix_nvidia_toolkit,
     },
     {"id": "caddy", "label": "Private web gateway", "check": _caddy_check, "fix": fix_caddy},
     {
@@ -2462,12 +2317,12 @@ STEPS: list[Step] = [
 # Steps grouped into the phases the bootstrap page shows, in run order.
 PHASES = (
     ("Check this computer", ("host_supported",)),
-    ("Install system software", ("host_base", "node")),
+    ("Install system software", ("host_base",)),
+    ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     (
         "Set up Mu3Lab",
         ("dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
     ),
-    ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     ("Start your password vault", ("caddy", by_capability("password_store").id, "vaultwarden_setup")),
     (
         "Connect your private network",

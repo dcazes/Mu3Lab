@@ -72,26 +72,6 @@ class GpuTests(unittest.TestCase):
         self.assertEqual(preflight.check_gpu(True, True)["state"], "nvidia")
 
 
-class PythonNodeTests(unittest.TestCase):
-    def test_ok(self):
-        self.assertEqual(preflight.check_node("v24.11.0")["status"], "ok")
-
-    def test_newer_ok(self):
-        # Witness values only: ANY version above minimum passes, nothing pins.
-        self.assertEqual(preflight.check_node("v25.3.0")["status"], "ok")
-
-    def test_old(self):
-        # Old node is "missing", not "fail": step ③ upgrades it.
-        result = preflight.check_node("v22.19.0")
-        self.assertEqual(result["status"], "missing")
-        self.assertIn("step 3", result["action"])
-
-    def test_missing(self):
-        result = preflight.check_node("")
-        self.assertEqual(result["status"], "missing")
-        self.assertIn("step 3", result["action"])
-
-
 class DockerTests(unittest.TestCase):
     def _base(self, **over):
         args = {
@@ -380,7 +360,7 @@ class AggregateTests(unittest.TestCase):
         self.assertIn("install_ready", report)
         self.assertEqual(
             [check["name"] for check in report["checks"]],
-            ["os", "arch", "ports", "gpu", "node", "docker", "tailscale"],
+            ["os", "arch", "ports", "gpu", "docker", "tailscale"],
         )
         for check in report["checks"]:
             self.assertIn(check["status"], ("ok", "missing", "fail"))

@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard
+from ctl import actions, job_guard, platform_releases
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
@@ -131,6 +131,7 @@ def _materialize(server, root: Path) -> Path:
         values.setdefault(str(secret["env"]), secrets.token_urlsafe(int(secret["length"])))
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
+    platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
     return target
 
 
@@ -516,6 +517,7 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
                     shutil.copy2(item, destination)
                 elif item.is_dir():
                     shutil.copytree(item, destination, dirs_exist_ok=True)
+            platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
             rc, output = actions.compose_up(target, log, recreate=True, wait_timeout=120)
             if rc:
                 raise ValueError("Updated MCP did not start: " + redact(output))

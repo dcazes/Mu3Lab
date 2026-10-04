@@ -2,15 +2,21 @@ name: mu3lab-mcp-immich-control
 services:
   immich-control:
     build: .
-    restart: "no"
+    restart: 'no'
     environment:
       IMMICH_BASE_URL: http://immich-server:2283/api
       IMMICH_API_KEY: ${IMMICH_API_KEY:?IMMICH_API_KEY is required}
-      # Every tool is registered; Mu3Lab's gateway decides which are switched on.
-      IMMICH_ALLOW_WRITES: "true"
-    ports: ["127.0.0.1:8821:8000"]
-    networks: [mu3lab_backend, mu3lab_mcp_upstream]
-    security_opt: [no-new-privileges:true]
+      IMMICH_ALLOW_WRITES: 'true'
+    ports:
+    - 127.0.0.1:8821:8000
+    networks:
+    - mu3lab_backend
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-immich-control:development
 networks:
-  mu3lab_backend: {external: true}
-  mu3lab_mcp_upstream: {external: true}
+  mu3lab_backend:
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

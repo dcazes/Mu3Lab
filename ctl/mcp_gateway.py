@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard
+from ctl import actions, job_guard, platform_releases
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import Review
@@ -195,6 +195,7 @@ def _materialize() -> Path:
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
     for name in ("Dockerfile", "docker-compose.yml", "gateway.py"):
         shutil.copy2(SOURCE / name, target / name)
+    platform_releases.pin_compose(ROOT, SOURCE / "docker-compose.yml", target / "docker-compose.yml")
     (target / "logs").mkdir(mode=0o750, exist_ok=True)
     env = read_runtime_env(target / ".env")
     env.update({"MU3LAB_UID": str(os.getuid()), "MU3LAB_GID": str(os.getgid())})

@@ -3,7 +3,7 @@
 # WHAT:  Removes Mu3Lab from this computer: its apps, containers, images,
 #        volumes, data (/srv/mu3lab), background services, private addresses
 #        and the browser policy that added the Bitwarden extension. With --everything it also removes the shared tools the
-#        installer added: Docker, Tailscale (after logging out), Node.js and
+#        installer added: Docker, Tailscale (after logging out) and
 #        NVIDIA container support, plus their package sources.
 # NEVER: Touches system Python, GPU drivers, base packages (curl, git, ...),
 #        or runs `apt autoremove`. Only files and packages Mu3Lab adds.
@@ -24,7 +24,7 @@ Removes Mu3Lab and ALL of its data (apps, accounts, files, passwords stored in
 Vaultwarden). This cannot be undone.
 
   --everything  also remove Docker (and everything in it), Tailscale (logs this
-                computer out of your tailnet), Node.js and NVIDIA container
+                computer out of your tailnet) and NVIDIA container
                 support. Your system Python, GPU drivers and other programs
                 are not touched.
   --dry-run     show what would be removed, change nothing
@@ -68,7 +68,6 @@ if $EVERYTHING; then
 It also removes:
   - Docker and EVERYTHING stored in it (including anything not from Mu3Lab)
   - Tailscale (this computer is logged out of your tailnet)
-  - Node.js
   - NVIDIA container support (your GPU driver is kept)
 EOF
 fi
@@ -210,11 +209,6 @@ if $EVERYTHING; then
   purge nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1
   remove_files /etc/apt/sources.list.d/nvidia-container-toolkit.list /etc/apt/keyrings/nvidia-container-toolkit.asc \
     /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /etc/nvidia-container-runtime
-
-  step "Removing Node.js"
-  purge nodejs
-  remove_files /etc/apt/sources.list.d/nodesource.list /etc/apt/sources.list.d/nodesource.sources \
-    /etc/apt/keyrings/nodesource.gpg /usr/share/keyrings/nodesource.gpg
 
   run sudo -n apt-get update -qq
 fi

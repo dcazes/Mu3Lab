@@ -3,22 +3,33 @@ services:
   mcp-gateway:
     build: .
     restart: unless-stopped
-    # Runs as the Mu3Lab user so it can read the owner-only policy file.
-    user: "${MU3LAB_UID:?MU3LAB_UID is required}:${MU3LAB_GID:?MU3LAB_GID is required}"
+    user: ${MU3LAB_UID:?MU3LAB_UID is required}:${MU3LAB_GID:?MU3LAB_GID is required}
     read_only: true
     volumes:
-      - ./policy:/config:ro
-      - ./logs:/logs
-    ports: ["127.0.0.1:8822:8080"]
-    # LobeChat reaches the gateway on mu3lab_mcp; only the gateway shares a network with connectors.
-    networks: [mu3lab_mcp, mu3lab_mcp_upstream]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    - ./policy:/config:ro
+    - ./logs:/logs
+    ports:
+    - 127.0.0.1:8822:8080
+    networks:
+    - mu3lab_mcp
+    - mu3lab_mcp_upstream
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',
+        timeout=3)
       interval: 30s
       timeout: 5s
       retries: 3
+    image: ghcr.io/dcazes/mu3lab-tool-gateway:development
 networks:
-  mu3lab_mcp: {external: true}
-  mu3lab_mcp_upstream: {external: true}
+  mu3lab_mcp:
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

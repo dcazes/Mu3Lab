@@ -8,12 +8,31 @@ after the plan was written.
 
 ---
 
-## Current checkpoint — Tasks D–F complete, stopped for owner review
+## Current checkpoint — Task G implemented; Tasks H–J remain
 
-The owner authorized D, E and F together, with tests and one commit at the end.
-**Task G has not been started. The rebuild is unfinished; do not reinstall from
-this branch yet.** The next implementation task is Task G, only after the owner
-authorizes continuing.
+The owner authorized the remaining implementation, then asked to review the
+order and limit simpler work to normal releases. Dependency review confirms
+G → H → I → J: I should use H's consolidated state, and final docs follow both.
+Clarification is pending on whether to stop after G or continue H–J.
+**The rebuild is unfinished; do not reinstall from this branch yet.**
+
+Task G uses a pinned Node container for UI preview/check/build commands,
+removes host Node installation and removal, and moves Docker before the UI
+build. Normal release tags publish a verified dashboard archive and immutable
+image manifest through CI; automatic updates ignore preview tags and branch
+commits. Release runtime projects replace local builds with published digests.
+See `docs/development.md` for commands and first-release acceptance.
+
+Issues resolved in G: three connector images lacked npm lock files; Firecrawl's
+existing Axios dependency had high-severity advisories, fixed with a pinned
+1.20.0 override while retaining the connector version. All three locked image
+builds and launch checks pass. Python suite: 636 tests, four expected skips;
+93 dashboard tests and its build passed inside the pinned container. Lint,
+formatting, mypy, shell parsing, the app-ID checker and 26 Compose checks pass.
+The actual GitHub publishing/download path and arm64 builds have not run;
+they require the first release. No release, tag or push was created.
+
+The completed D–F checkpoint follows:
 
 - D: All generated app routes, login launchers and sign-in checks use manifest
   settings. Removed duplicate core listeners from the base Caddyfile. Shared
@@ -72,7 +91,7 @@ Previous checkpoints:
   expected skips; 93 dashboard tests).
 
 The WIP inventory below describes the original starting checkpoint. Tasks
-A–F are resolved; Tasks G–J remain.
+A–G are implemented; Tasks H–J remain.
 
 ## 0. Where the work is
 
@@ -473,7 +492,7 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
   `apps/vaultwarden/docker-compose.yml`), register owner, create org, save a login, invite and
   confirm a second member, member sees the item.
 
-### Task G — Node.js off the host and tagged releases (owner decision 4)
+### Task G — Implemented: Node.js off the host and tagged releases (owner decision 4)
 
 1. Installer: delete the `node` step, NodeSource repository, `MIN_NODE_MAJOR` and the node
    preflight check; `uninstall.sh` no longer removes Node.js.

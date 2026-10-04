@@ -14,7 +14,6 @@ import hashlib
 from collections.abc import Iterable
 from pathlib import Path
 
-NODE_MODULES_STAMP = Path("dashboard") / "node_modules" / ".mu3lab-lock.sha256"
 BUILD_STAMP = Path("dashboard") / "dist" / ".mu3lab-build.sha256"
 SERVICES_STAMP_NAME = "control-plane-code.sha256"
 
@@ -47,11 +46,6 @@ def digest(root: Path, paths: Iterable[Path]) -> str:
         value.update(path.read_bytes())
         value.update(b"\0")
     return value.hexdigest()
-
-
-def lock_digest(root: Path) -> str:
-    lock = root / "dashboard" / "package-lock.json"
-    return hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else ""
 
 
 def dashboard_digest(root: Path) -> str:

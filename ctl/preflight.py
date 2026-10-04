@@ -36,7 +36,6 @@ from ctl.platform_apps import by_capability
 # Minimum supported distros. Mint is accepted via ID_LIKE=ubuntu + UBUNTU_CODENAME.
 MIN_DEBIAN_MAJOR = 12  # install.sh dies below Debian 12 (docker repo needs it)
 MIN_UBUNTU_MAJOR = 22  # install.sh dies below Ubuntu 22.04 (same reason)
-MIN_NODE_MAJOR = 24  # current Node.js LTS used by the dashboard build.
 MIN_DOCKER_MAJOR = 24  # compose-v2 plugin era; step 3 upgrades older engines
 
 # Checks the installer CANNOT fix. Anything else is step 3's work list and
@@ -182,7 +181,7 @@ def check_os(release_text: str, kernel_release: str = "") -> dict:
             return _result("os", "ok", f"Ubuntu {version_id} supported." + wsl_note)
         return _result("os", "fail", f"Ubuntu {version_id} too old." + wsl_note, "Upgrade to Ubuntu 22.04+.")
     # Generic derivative path (Mint, Pop!_OS, ...): trust ID_LIKE, need a
-    # codename for the Docker/NodeSource apt repos that step 3 will add.
+    # codename for the Docker apt repository that step 3 will add.
     if "ubuntu" in like or "debian" in like:
         codename = info.get("UBUNTU_CODENAME") or info.get("VERSION_CODENAME", "")
         if major >= MIN_UBUNTU_MAJOR and codename:
@@ -232,35 +231,6 @@ def check_gpu(nvidia_present: bool, amd_present: bool) -> dict:
             state="amd",
         )
     return _result("gpu", "ok", "No supported GPU detected; apps will use the CPU.", state="cpu")
-
-
-def check_node(node_version_output: str) -> dict:
-    """Require the current Node.js LTS line for the dashboard build.
-
-    The installer uses the explicit NodeSource LTS channel. A newer system
-    Node is accepted; an older one is upgraded rather than left ambiguous.
-    Takes the raw text of `node --version` (e.g. "v22.3.0") or "" when the
-    binary is absent, so tests never need Node installed.
-    """
-    match = re.search(r"v?(\d+)\.(\d+)\.(\d+)", node_version_output or "")
-    if not match:
-        return _result(
-            "node",
-            "missing",
-            "Node.js not found.",
-            "step 3 installs the current Node.js LTS via NodeSource.",
-            state="absent",
-        )
-    major = int(match.group(1))
-    if major >= MIN_NODE_MAJOR:
-        return _result("node", "ok", f"Node {match.group(0)} present (>= v{MIN_NODE_MAJOR}).", state="ready")
-    return _result(
-        "node",
-        "missing",
-        f"Node {match.group(0)} below the required Node.js LTS v{MIN_NODE_MAJOR}.",
-        "step 3 upgrades it via the NodeSource repo.",
-        state="old",
-    )
 
 
 def check_docker(
@@ -693,7 +663,6 @@ def run_host_checks() -> list[dict]:
 
 def run_all() -> dict:
     """Every host fact, for `python -m ctl.preflight` diagnostics."""
-    _, node_out = _run(["node", "--version"])
     _, lspci_out = _run(["lspci", "-nn"])
     checks = [
         *run_host_checks(),
@@ -701,7 +670,6 @@ def run_all() -> dict:
             _run(["nvidia-smi", "-L"])[0] == 0,
             "amd" in lspci_out.lower() or "advanced micro devices" in lspci_out.lower(),
         ),
-        check_node(node_out),
         gather_docker(),
         gather_tailscale(),
     ]

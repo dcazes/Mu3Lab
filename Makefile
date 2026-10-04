@@ -9,7 +9,7 @@ export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_CACHE_DIR := $(CURDIR)/.tools/cache
 RUN := $(UV) run --frozen
 
-.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
+.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke ui-dev
 
 install:
 	./install.sh
@@ -22,30 +22,28 @@ dev-setup:
 	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_uv'
 	$(UV) sync --frozen
 	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_bw'
-	cd dashboard && npm ci
+	$(RUN) python -m tools.dashboard build
 
 test:
 	$(RUN) python -m unittest discover -s tests -t . -v
-	cd dashboard && npm test
+	$(RUN) python -m tools.dashboard check
 
 lint:
 	$(RUN) python tools/check_no_app_ids.py
 	$(RUN) ruff check .
 	$(RUN) ruff format --check .
-	cd dashboard && npm run lint && npm run format:check
 
 format:
 	$(RUN) ruff check --fix .
 	$(RUN) ruff format .
-	cd dashboard && npm run format
+	$(RUN) python -m tools.dashboard format
 
 typecheck:
 	$(RUN) mypy
-	cd dashboard && npm run typecheck
 
 # verify: everything CI runs, in one command.
 verify: lint typecheck test
-	cd dashboard && npm run build
+	$(RUN) python -m tools.dashboard build
 
 # check-updates / approve: the maintainer's release review. See tools/approve_release.py.
 check-updates:
@@ -82,3 +80,6 @@ nuke:
 	@echo "This deletes .venv, .tools, dashboard/node_modules and dashboard/dist."
 	@echo "Type NUKE to confirm:"; read ans; [ "$$ans" = "NUKE" ]
 	rm -rf .venv .tools dashboard/node_modules dashboard/dist
+
+ui-dev:
+	$(RUN) python -m tools.dashboard dev

@@ -64,7 +64,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(install.fix_for_state("docker", "nope"), "unknown")
 
     def test_ready_always_skips(self):
-        for step in ("host_base", "node", "docker", "tailscale_pkg", "caddy"):
+        for step in ("host_base", "docker", "tailscale_pkg", "caddy"):
             self.assertEqual(install.fix_for_state(step, "ready"), "skip")
 
     def test_steps_have_check_and_fix(self):
@@ -527,11 +527,7 @@ class WorkspaceStepTests(unittest.TestCase):
             _os.utime(dash / "dist" / "index.html", (now - 100, now - 100))
             check = install._build_check(root)
             self.assertEqual(check["state"], "stale")
-            (dash / "node_modules").mkdir()  # skip npm ci, test build only
-            with _patch("subprocess.run") as run:
-                run.return_value.returncode = 0
-                run.return_value.stdout = "built"
-                run.return_value.stderr = ""
+            with _patch("ctl.dashboard_build.actions.docker_cmd_stream", return_value=(0, "built")) as run:
                 result = install.fix_dashboard_build(check, self._ctx(root))
             self.assertTrue(result.get("ok"))
             run.assert_called_once()  # build only, no npm ci
@@ -551,7 +547,7 @@ class WorkspaceStepTests(unittest.TestCase):
         ids = [m["id"] for m in install.STEPS]
         self.assertLess(ids.index("root_env"), ids.index("runtime_layout"))
         self.assertLess(ids.index("runtime_layout"), ids.index("service"))
-        self.assertLess(ids.index("service"), ids.index("docker"))
+        self.assertLess(ids.index("docker_networks"), ids.index("dashboard_build"))
         self.assertLess(ids.index("docker"), ids.index("docker_address_pools"))
         self.assertLess(ids.index("docker_address_pools"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
@@ -728,7 +724,6 @@ class DockerSessionTests(unittest.TestCase):
     def test_full_dispatch_coverage(self):  # Every state any step check can emit must map to a real fix.
         states = {
             "host_base": ["missing", "ready"],
-            "node": ["absent", "old", "ready"],
             "host_supported": ["unsupported", "ready"],
             "nvidia_toolkit": ["not_needed", "missing", "ready"],
             "core_images": ["missing", "ready"],

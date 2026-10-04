@@ -49,7 +49,9 @@ class _Checkout(unittest.TestCase):
         (self.maintainer / "file.txt").write_text(message, encoding="utf-8")
         git(self.maintainer, "add", "file.txt")
         git(self.maintainer, "commit", "--quiet", "-m", message)
-        git(self.maintainer, "push", "--quiet", "origin", "HEAD:main")
+        tag = "v1.0." + git(self.maintainer, "rev-list", "--count", "HEAD")
+        git(self.maintainer, "tag", tag)
+        git(self.maintainer, "push", "--quiet", "--tags", "origin", "HEAD:main")
 
     def status(self) -> dict:
         return self_update.status(self.copy, refresh=True)
@@ -68,12 +70,20 @@ class StatusTests(_Checkout):
         self.assertEqual(result["changes"], ["Approve Mealie v3.28.0"])
         self.assertEqual(result["blocked_reason"], "")
 
+    def test_preview_tags_and_untagged_changes_are_not_offered(self):
+        (self.maintainer / "file.txt").write_text("preview")
+        git(self.maintainer, "add", "file.txt")
+        git(self.maintainer, "commit", "--quiet", "-m", "Preview UI")
+        git(self.maintainer, "tag", "v9.0.0-rc.1")
+        git(self.maintainer, "push", "--quiet", "--tags", "origin", "HEAD:main")
+        self.assertFalse(self.status()["available"])
+
     def test_a_copy_with_its_own_commits_is_updated_by_hand(self):
         self.commit("upstream")
         (self.copy / "local.txt").write_text("x", encoding="utf-8")
         git(self.copy, "add", "local.txt")
         git(self.copy, "commit", "--quiet", "-m", "local")
-        self.assertIn("its own commits", self.status()["blocked_reason"])
+        self.assertIn("development checkout", self.status()["blocked_reason"])
 
     def test_a_copy_with_edited_files_is_updated_by_hand(self):
         self.commit("upstream")
@@ -81,8 +91,8 @@ class StatusTests(_Checkout):
         self.assertIn("edited files", self.status()["blocked_reason"])
 
     def test_a_copy_without_a_github_branch_cannot_update_itself(self):
-        git(self.copy, "branch", "--unset-upstream")
-        self.assertIn("doesn't follow", self.status()["blocked_reason"])
+        git(self.copy, "remote", "remove", "origin")
+        self.assertIn("no release remote", self.status()["blocked_reason"])
 
 
 class UpdateTests(_Checkout):
@@ -98,6 +108,7 @@ class UpdateTests(_Checkout):
         with (
             patch.object(self_update, "_new_code", side_effect=new_code),
             patch.object(self_update, "_python_packages"),
+            patch("ctl.platform_releases.assets"),
             patch.object(self_update, "restart") as restart,
         ):
             self_update.execute_claimed(store, store.get(job["id"]), "worker", self.copy)
