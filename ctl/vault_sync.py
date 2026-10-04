@@ -14,21 +14,22 @@ create one. Nothing reads or touches anyone's personal vault.
 
 from __future__ import annotations
 
-import json
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ctl import onboarding_state
 from ctl.identity import authentik_only
 from ctl.integrations.vaultwarden import MATCH_HOST, VaultError, register
 from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, OrgSession
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import locked, write_atomic
-from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.secret_file import locked
+from ctl.secrets import read_runtime_env
+from ctl.store import onboarding as onboarding_state
+from ctl.store import records
+from ctl.store.secrets import SecretStore
 from ctl.vault_setup import FREELLMAPI_ACCOUNT, VAULTWARDEN_LOCAL_URL
 
 SERVICE_EMAIL = "mu3lab-service@vault.mu3lab.invalid"
@@ -56,13 +57,14 @@ def _origin(host: str, port: int | None) -> str:
 
 def _service_password(paths: RuntimePaths) -> tuple[str, bool]:
     """Mu3Lab's own vault password, created once; True when it was just created."""
-    path = paths.runtime / "vault-service.env"
-    values = read_runtime_env(path)
-    if values.get("PASSWORD"):
-        return values["PASSWORD"], False
-    password = secrets.token_urlsafe(32)
-    write_atomic(path, runtime_env_text({"EMAIL": SERVICE_EMAIL, "PASSWORD": password}).encode())
-    return password, True
+    with locked(paths.state / "vault-service.lock"):
+        store = SecretStore(paths)
+        password = store.get("platform", "vault-service-password")
+        if password:
+            return password, False
+        password = secrets.token_urlsafe(32)
+        store.put("platform", "vault-service-password", password)
+        return password, True
 
 
 def _session(paths: RuntimePaths) -> OrgSession:
@@ -142,10 +144,7 @@ def _saved_personally(person: dict[str, Any], paths: RuntimePaths) -> bool:
 
 
 def _state(paths: RuntimePaths) -> dict[str, Any]:
-    try:
-        return json.loads((paths.runtime / "vault-org.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    return records.get("vault", "organization", paths)
 
 
 def status(paths: RuntimePaths = RuntimePaths()) -> dict[str, Any]:
@@ -187,7 +186,7 @@ def sync(people: list[dict[str, Any]], host: str, log, paths: RuntimePaths = Run
             "people": report,
             "collections": collections,
         }
-        write_atomic(paths.runtime / "vault-org.json", json.dumps(result).encode())
+        records.put("vault", "organization", result, paths)
         return result
 
 

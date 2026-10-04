@@ -8,13 +8,32 @@ after the plan was written.
 
 ---
 
-## Current checkpoint — Task G implemented; Tasks H–J remain
+## Current checkpoint — Tasks G–H implemented; Tasks I–J remain
 
 The owner authorized the remaining implementation, then asked to review the
 order and limit simpler work to normal releases. Dependency review confirms
 G → H → I → J: I should use H's consolidated state, and final docs follow both.
-Clarification is pending on whether to stop after G or continue H–J.
+The owner clarified that H, I and J should proceed, avoiding unnecessary workarounds.
 **The rebuild is unfinished; do not reinstall from this branch yet.**
+
+Task H consolidates runtime state in `state/mu3lab.db`, with numbered SQL
+migrations serialized across processes. A single `state/secrets.key` encrypts
+scoped credential rows. Job inputs and job creation share one transaction;
+app ownership comes from one table and cannot be replaced by another installer.
+Bootstrap acknowledgements, backup verification, vault organization metadata,
+release history and image metadata now use the database. Private generated
+Compose env files remain the container boundary. No legacy migration is added:
+the approved clean reinstall creates this layout. Missing encryption keys fail
+clearly instead of silently replacing a key. State is operator-owned, mode 0700;
+the database, key and generated env files are mode 0600.
+
+H validation: 642 Python tests pass (four expected integration skips), including
+four-process startup, credential expiry, key loss and atomic job preparation.
+Ruff, formatting, mypy, the app-ID check and 26 rendered Compose projects pass.
+The main issues were transactions that previously used separate stores and a
+concurrent startup race; both now have regression coverage. The existing
+Nextcloud command fixture also needed a lock for its parallel mocked commands.
+No live data or services were changed. Continue with Task I.
 
 Task G uses a pinned Node container for UI preview/check/build commands,
 removes host Node installation and removal, and moves Docker before the UI
@@ -511,7 +530,7 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
    (`git fetch --tags`, newest `v*` tag greater than current, `git checkout <tag>`), not
    branch heads.
 
-### Task H — One database and one secret store
+### Task H — Complete: one database and one secret store
 
 As in `docs/rebuild-plan.md` Phase 5 (unchanged). Do it after Tasks A–G so ported code moves once.
 

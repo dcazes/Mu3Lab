@@ -6,60 +6,38 @@ verified Authentik identity into the worker for at most 24 hours without reusing
 
 from __future__ import annotations
 
-import json
 import secrets
+import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, TypedDict
 from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, serialized, write_atomic
+from ctl.secret_file import serialized
+from ctl.store.secrets import SecretError as WorkflowSecretError
+from ctl.store.secrets import SecretStore
 
 TTL_HOURS = 24
 PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_!@#%"
-
-
-class WorkflowSecretError(ValueError):
-    """Raised when encrypted workflow storage is invalid or unavailable."""
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _paths(paths: RuntimePaths) -> tuple[Path, Path]:
-    return paths.runtime / "workflow-secrets.key", paths.runtime / "workflow-secrets.enc"
-
-
-def _cipher(paths: RuntimePaths):
-    try:
-        from cryptography.fernet import Fernet
-    except ImportError as exc:  # pragma: no cover
-        raise WorkflowSecretError("encrypted workflow storage is unavailable") from exc
-    key_path, _ = _paths(paths)
-    paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    key = read_or_create_key(key_path, Fernet.generate_key)
-    if len(key) != 44:
-        raise WorkflowSecretError("encrypted workflow key is invalid")
-    return Fernet(key)
-
-
 def _read(paths: RuntimePaths) -> list[dict[str, Any]]:
-    _, store_path = _paths(paths)
-    if not store_path.is_file():
-        return []
-    try:
-        raw = _cipher(paths).decrypt(store_path.read_bytes())
-        value = json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise WorkflowSecretError("encrypted workflow store could not be read") from exc
-    return value if isinstance(value, list) else []
+    store = SecretStore(paths)
+    return [record for name in store.list_names("job") if (record := store.get("job", name)) is not None]
 
 
 def _write(records: list[dict[str, Any]], paths: RuntimePaths) -> None:
-    _, store_path = _paths(paths)
-    write_atomic(store_path, _cipher(paths).encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
+    store = SecretStore(paths)
+    names = {str(record.get("job_id") or record["id"]) for record in records}
+    for name in set(store.list_names("job")) - names:
+        store.delete("job", name)
+    for record in records:
+        ttl = max(0, datetime.fromisoformat(record["expires_at"]).timestamp() - time.time())
+        store.put("job", str(record.get("job_id") or record["id"]), record, ttl=ttl)
 
 
 def generate_password() -> str:
@@ -137,7 +115,7 @@ def delete_by_job(job_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
 def cleanup(paths: RuntimePaths = RuntimePaths()) -> list[str]:
     now = _now()
     records = _read(paths)
-    expired: list[str] = []
+    expired: list[str] = SecretStore(paths).cleanup("job")
     retained = []
     for item in records:
         try:

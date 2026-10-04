@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ctl.engine.hooks import HookContext, StartPlan
-from ctl.workflow_secrets import JobIdentity
+from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
     from ctl.manifest.catalog import App, Catalog

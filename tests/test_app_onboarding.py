@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 import yaml
 
-from ctl import onboarding_state
 from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint
 from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
@@ -21,8 +20,9 @@ from ctl.engine.loopback import LoopbackError
 from ctl.engine.project import Facts
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
+from ctl.store import onboarding as onboarding_state
+from ctl.store.workflows import WorkflowSecretError
 from ctl.vault_setup import DesiredItem, seed
-from ctl.workflow_secrets import WorkflowSecretError
 from tests.test_vault_setup import EMAIL, PASSWORD, FakeVaultwarden, session_for
 
 
@@ -70,10 +70,10 @@ class OnboardingTests(unittest.TestCase):
         other = dict(OWNER, owner_uid="other", email="other@example.test")
         self.assertEqual(onboarding_state.remember_owner("immich", other, self.paths), OWNER)
         self.assertEqual(onboarding_state.pending_logins("other", self.paths), [])
-        encrypted = (self.paths.runtime / "onboarding-immich.enc").read_bytes()
+        encrypted = (self.paths.state / "mu3lab.db").read_bytes()
         self.assertNotIn(record["password"].encode(), encrypted)
-        self.assertNotIn(OWNER["email"].encode(), encrypted)
-        self.assertEqual((self.paths.runtime / "onboarding.key").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(record["owner"]["email"], OWNER["email"])
+        self.assertEqual((self.paths.runtime / "secrets.key").stat().st_mode & 0o777, 0o600)
         with self.assertRaises(WorkflowSecretError):
             onboarding_state.vault_saved("immich", "other", self.paths)
         onboarding_state.vault_saved("immich", "owner", self.paths)

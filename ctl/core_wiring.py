@@ -13,11 +13,11 @@ from pydantic import model_validator
 from ctl.control_state import ControlState
 from ctl.manifest.catalog import App, Catalog, cached
 from ctl.provider_catalog import BY_ID
-from ctl.provider_secrets import records
 from ctl.rules import Params
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.providers import records
 
 
 class RoutingParams(Params):

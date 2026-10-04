@@ -10,7 +10,6 @@ from unittest.mock import Mock, patch
 
 import yaml
 
-from ctl import onboarding_state
 from ctl.control_state import ControlState
 from ctl.engine import install
 from ctl.engine.compose import ScriptResult
@@ -21,6 +20,7 @@ from ctl.registry import Registry, load, service_from
 from ctl.rules import Params, Rule, rules_for
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store import onboarding as onboarding_state
 
 OWNER = {"owner_uid": "owner", "username": "owner@test", "email": "owner@test", "display_name": "Owner"}
 

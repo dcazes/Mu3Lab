@@ -6,25 +6,15 @@ credentials, and application data never enter this file.
 
 from __future__ import annotations
 
-import json
 import time
-from pathlib import Path
 
 from ctl.runtime import RuntimePaths
-
-STATE_NAME = "bootstrap-state.json"
-
-
-def path(paths: RuntimePaths = RuntimePaths()) -> Path:
-    return paths.runtime / STATE_NAME
+from ctl.secret_file import locked
+from ctl.store import records
 
 
 def read(paths: RuntimePaths = RuntimePaths()) -> dict[str, object]:
-    try:
-        value = json.loads(path(paths).read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    return records.get("bootstrap", "steps", paths)
 
 
 def is_complete(step: str, paths: RuntimePaths = RuntimePaths(), inputs: dict | None = None) -> bool:
@@ -32,10 +22,7 @@ def is_complete(step: str, paths: RuntimePaths = RuntimePaths(), inputs: dict | 
 
 
 def confirm(step: str, paths: RuntimePaths = RuntimePaths()) -> None:
-    target = path(paths)
-    target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    values = read(paths)
-    values[step] = {"confirmed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(values, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    with locked(paths.state / "bootstrap.lock"):
+        values = read(paths)
+        values[step] = {"confirmed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        records.put("bootstrap", "steps", values, paths)

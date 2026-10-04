@@ -27,7 +27,7 @@ class JobStoreTests(unittest.TestCase):
 
     def test_job_and_audit_are_persisted(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = JobStore(Path(tmp) / "runtime" / "mu3lab.db")
             job = store.create(
                 kind="backup",
                 service_id="vaultwarden",
@@ -131,7 +131,7 @@ class JobStoreTests(unittest.TestCase):
 
 class JobHistoryTests(unittest.TestCase):
     def _store_with_old_job(self, tmp: str, state: str = "succeeded") -> tuple[JobStore, str]:
-        store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+        store = JobStore(Path(tmp) / "runtime" / "mu3lab.db")
         old = store.create(kind="lifecycle", service_id="immich", action="install", actor="owner", detail="old")
         with sqlite3.connect(store.database) as conn:
             conn.execute(
@@ -159,7 +159,7 @@ class JobHistoryTests(unittest.TestCase):
         import os
 
         with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = JobStore(Path(tmp) / "runtime" / "mu3lab.db")
             store.create(kind="lifecycle", service_id="immich", action="install", actor="owner", detail="x")
             gc.disable()
             try:
@@ -179,7 +179,7 @@ class RetryIdentityTests(unittest.TestCase):
         from ctl.api import runtime
 
         with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = JobStore(Path(tmp) / "runtime" / "mu3lab.db")
             failed = store.create(kind="lifecycle", service_id="nextcloud", action="install", actor="owner")
             store.transition(failed["id"], "running", actor="worker")
             store.transition(failed["id"], "failed", actor="worker", detail="boom")
@@ -196,7 +196,7 @@ class RetryIdentityTests(unittest.TestCase):
 
     def test_failed_identity_save_creates_no_job(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = JobStore(Path(tmp) / "runtime" / "mu3lab.db")
 
             def broken(_job_id: str) -> None:
                 raise RuntimeError("storage unavailable")

@@ -13,8 +13,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl import job_guard, sqlite_store
+from ctl import job_guard
 from ctl.runtime import RuntimePaths
+from ctl.store import db, owners
 
 COMPUTE_MODES = frozenset({"auto", "cpu", "nvidia", "amd"})
 INSTALL_STATES = frozenset(
@@ -87,90 +88,10 @@ class ControlState:
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> ControlState | None:
         if not paths.runtime.is_dir():
             return None
-        return cls(paths.runtime / "control-plane.sqlite3")
+        return cls(db.database(paths))
 
     def _connect(self) -> sqlite3.Connection:
-        self.database.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        with sqlite_store.schema_once(conn, self.database, "control_state") as needed:
-            if needed:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS system_config (
-                        key TEXT PRIMARY KEY,
-                        value_json TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        updated_by TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS service_installations (
-                        service_id TEXT PRIMARY KEY,
-                        state TEXT NOT NULL,
-                        manifest_version TEXT NOT NULL DEFAULT '',
-                        image_digests_json TEXT NOT NULL DEFAULT '{}',
-                        config_revision INTEGER NOT NULL DEFAULT 0,
-                        route_state TEXT NOT NULL DEFAULT 'unknown',
-                        last_job_id TEXT NOT NULL DEFAULT '',
-                        last_error_json TEXT NOT NULL DEFAULT '{}',
-                        installed_at TEXT NOT NULL DEFAULT '',
-                        updated_at TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS mcp_servers (
-                        server_id TEXT PRIMARY KEY,
-                        service_id TEXT NOT NULL,
-                        enabled INTEGER NOT NULL DEFAULT 0,
-                        state TEXT NOT NULL DEFAULT 'disabled',
-                        tool_snapshot_json TEXT NOT NULL DEFAULT '[]',
-                        last_verified_at TEXT NOT NULL DEFAULT '',
-                        last_error_json TEXT NOT NULL DEFAULT '{}',
-                        updated_at TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS provider_connections (
-                        provider_id TEXT PRIMARY KEY,
-                        label TEXT NOT NULL,
-                        enabled INTEGER NOT NULL DEFAULT 1,
-                        state TEXT NOT NULL DEFAULT 'saved',
-                        model_samples_json TEXT NOT NULL DEFAULT '[]',
-                        last_attempt_at TEXT NOT NULL DEFAULT '',
-                        last_verified_at TEXT NOT NULL DEFAULT '',
-                        last_error_json TEXT NOT NULL DEFAULT '{}',
-                        active_job_id TEXT NOT NULL DEFAULT '',
-                        config_revision INTEGER NOT NULL DEFAULT 0,
-                        updated_at TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS service_initializations (
-                        service_id TEXT PRIMARY KEY,
-                        mode TEXT NOT NULL,
-                        state TEXT NOT NULL,
-                        job_id TEXT NOT NULL DEFAULT '',
-                        owner_uid TEXT NOT NULL DEFAULT '',
-                        last_error_json TEXT NOT NULL DEFAULT '{}',
-                        verified_at TEXT NOT NULL DEFAULT '',
-                        updated_at TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS calendar_connections (
-                        owner_uid TEXT PRIMARY KEY,
-                        username_hint TEXT NOT NULL,
-                        selected_calendar_id TEXT NOT NULL DEFAULT '',
-                        calendars_json TEXT NOT NULL DEFAULT '[]',
-                        state TEXT NOT NULL DEFAULT 'connected',
-                        last_error TEXT NOT NULL DEFAULT '',
-                        last_success_at TEXT NOT NULL DEFAULT '',
-                        updated_at TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS service_identity_state (
-                        service_id TEXT PRIMARY KEY,
-                        mode TEXT NOT NULL,
-                        state TEXT NOT NULL,
-                        owner_uid TEXT NOT NULL DEFAULT '',
-                        last_job_id TEXT NOT NULL DEFAULT '',
-                        detail TEXT NOT NULL DEFAULT '',
-                        last_error_json TEXT NOT NULL DEFAULT '{}',
-                        last_verified_at TEXT NOT NULL DEFAULT '',
-                        updated_at TEXT NOT NULL
-                    );
-                """)
-        return conn
+        return db.connect(self.database)
 
     def system_config(self) -> dict[str, Any]:
         with self._connect() as conn:
@@ -295,6 +216,7 @@ class ControlState:
         if not row:
             return None
         result = dict(row)
+        result["owner_uid"] = owners.get(service_id, self.database).get("owner_uid", "")
         try:
             result["last_error"] = json.loads(result.pop("last_error_json"))
         except (TypeError, ValueError):
@@ -316,18 +238,17 @@ class ControlState:
         job_guard.checkpoint()
         if not service_id or mode not in IDENTITY_MODES or state not in IDENTITY_STATES:
             raise ValueError("invalid service identity state")
+        owners.remember(service_id, {"owner_uid": owner_uid}, self.database)
         now = _now()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO service_identity_state
-                (service_id, mode, state, owner_uid, last_job_id, detail,
+                (service_id, mode, state, last_job_id, detail,
                  last_error_json, last_verified_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(service_id) DO UPDATE SET
                     mode = excluded.mode, state = excluded.state,
-                    owner_uid = CASE WHEN excluded.owner_uid != '' THEN excluded.owner_uid
-                        ELSE service_identity_state.owner_uid END,
                     last_job_id = excluded.last_job_id, detail = excluded.detail,
                     last_error_json = excluded.last_error_json,
                     last_verified_at = CASE WHEN excluded.last_verified_at != ''
@@ -338,7 +259,6 @@ class ControlState:
                     service_id,
                     mode,
                     state,
-                    owner_uid,
                     job_id,
                     detail,
                     json.dumps(error or {}, sort_keys=True),
@@ -523,6 +443,7 @@ class ControlState:
         if not row:
             return None
         result = dict(row)
+        result["owner_uid"] = owners.get(service_id, self.database).get("owner_uid", "")
         try:
             result["last_error"] = json.loads(result.pop("last_error_json"))
         except (TypeError, ValueError):
@@ -542,18 +463,17 @@ class ControlState:
         job_guard.checkpoint()
         if not service_id or state not in INITIALIZATION_STATES:
             raise ValueError("invalid service initialization state")
+        owners.remember(service_id, {"owner_uid": owner_uid}, self.database)
         now = _now()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO service_initializations
-                (service_id, mode, state, job_id, owner_uid,
+                (service_id, mode, state, job_id,
                  last_error_json, verified_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(service_id) DO UPDATE SET mode = excluded.mode,
                     state = excluded.state, job_id = excluded.job_id,
-                    owner_uid = CASE WHEN excluded.owner_uid != '' THEN excluded.owner_uid
-                        ELSE service_initializations.owner_uid END,
                     last_error_json = excluded.last_error_json,
                     verified_at = CASE WHEN excluded.verified_at != '' THEN excluded.verified_at
                         ELSE service_initializations.verified_at END,
@@ -564,7 +484,6 @@ class ControlState:
                     mode,
                     state,
                     job_id,
-                    owner_uid,
                     json.dumps(error or {}, sort_keys=True),
                     now if state == "ready" else "",
                     now,

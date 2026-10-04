@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import browser_extension, onboarding_state
+from ctl import browser_extension
 from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, MemberMutation, OwnerMutation
@@ -17,6 +17,7 @@ from ctl.integrations.vaultwarden import VaultError, VaultSession
 from ctl.jobs import JobStore
 from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
+from ctl.store import onboarding as onboarding_state
 from ctl.vault_setup import VAULTWARDEN_LOCAL_URL, SeedResult, desired_items, seed
 
 router = APIRouter(prefix="/api/v1/vault", tags=["vault"])

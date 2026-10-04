@@ -155,7 +155,7 @@ def _remove_project(project: Path, *, keep_env: bool) -> None:
         return
     for item in project.iterdir():
         # The release record says which release the kept data was migrated to.
-        if item.name in {".env", app_releases.RECORD, app_releases.HISTORY}:
+        if item.name in {".env", app_releases.RECORD}:
             continue
         if item.is_dir() and not item.is_symlink():
             shutil.rmtree(item)
@@ -231,7 +231,7 @@ def uninstall_application(
     if not ok:
         return False, "delete_data", detail
     _remove_images(images, log)
-    from ctl import onboarding_state
+    from ctl.store import onboarding as onboarding_state
 
     onboarding_state.forget(service.id, paths)
     return True, "", f"{service.name} and all of its data were deleted."

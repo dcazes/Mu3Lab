@@ -9,9 +9,11 @@ import threading
 import unittest
 from pathlib import Path
 
-from ctl import calendar_secrets, provider_secrets, workflow_secrets
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import read_or_create_key
+from ctl.store import calendars as calendar_secrets
+from ctl.store import providers as provider_secrets
+from ctl.store import workflows as workflow_secrets
 
 
 def _save_identity(root: str, index: int) -> None:
@@ -91,7 +93,7 @@ class ConcurrentStoreTests(unittest.TestCase):
                 thread.join()
             self.assertEqual({item["id"] for item in provider_secrets.metadata(paths)}, set(providers))
             self.assertTrue(all(calendar_secrets.get(f"owner-{i}", paths) for i in range(6)))
-            store = paths.runtime / "provider-connections.enc"
+            store = paths.state / "mu3lab.db"
             self.assertEqual(stat.S_IMODE(store.stat().st_mode), 0o600)
             self.assertEqual([p.name for p in paths.runtime.glob("*.tmp")], [])
 

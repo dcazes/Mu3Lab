@@ -24,6 +24,7 @@ from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.secrets import SecretStore
 
 SUPPORTED_ACTIONS = frozenset({"prepare", "enable", "install", "restart", "disable", "verify", "update", "switch"})
 
@@ -125,10 +126,12 @@ def _materialize(server, root: Path) -> Path:
     for relative in server.include:
         shutil.copy2(root / relative, target / Path(relative).name)
     env_path = credential_path(server.id)
-    values = read_runtime_env(env_path)
+    store = SecretStore()
+    values = store.get("connector", server.id) or read_runtime_env(env_path)
     values.setdefault("MU3LAB_DATA_ROOT", str(RuntimePaths().data))
     for secret in server.secrets:
         values.setdefault(str(secret["env"]), secrets.token_urlsafe(int(secret["length"])))
+    store.put("connector", server.id, values)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
     platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")

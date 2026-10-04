@@ -29,6 +29,7 @@ from ctl.manifest.catalog import App, Catalog
 from ctl.manifest.models import ConfigField, Secret
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.secrets import SecretStore
 
 # Files that describe the app to Mu3Lab rather than run it.
 NOT_COPIED = frozenset({"app.yaml", "hooks.py", "connectors", "scripts", "__pycache__"})
@@ -144,14 +145,20 @@ def build_env(app: App, facts: Facts, existing: dict[str, str], hooks: list[EnvH
     env["MU3LAB_DATA_ROOT"] = str(facts.paths.data)
     # Assigned, not defaulted: apps follow the computer if its timezone changes.
     env["TZ"] = hostinfo.timezone()
+    store = SecretStore(facts.paths)
+    scope = "app:" + app.id
     for secret in manifest.secrets:
-        if not env.get(secret.env):
-            env[secret.env] = generate(secret, env)
+        saved = store.get(scope, "env:" + secret.env)
+        env[secret.env] = saved or env.get(secret.env) or generate(secret, env)
+        if saved is None:
+            store.put(scope, "env:" + secret.env, env[secret.env])
     oidc = manifest.sign_in.oidc
     if oidc:
         env[oidc.env.client_id] = oidc.client_id
-        if not env.get(oidc.env.client_secret):
-            env[oidc.env.client_secret] = token(OIDC_SECRET_LENGTH)
+        saved = store.get(scope, "env:" + oidc.env.client_secret)
+        env[oidc.env.client_secret] = saved or env.get(oidc.env.client_secret) or token(OIDC_SECRET_LENGTH)
+        if saved is None:
+            store.put(scope, "env:" + oidc.env.client_secret, env[oidc.env.client_secret])
         if oidc.env.discovery_url and facts.dns_name:
             env[oidc.env.discovery_url] = discovery_url(facts.dns_name, app.id)
     for field in manifest.configuration:

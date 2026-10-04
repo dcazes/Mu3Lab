@@ -6,10 +6,14 @@ import os
 from typing import Any
 
 from ctl.mcp_registry import credential_path
+from ctl.runtime import RuntimePaths
+from ctl.secret_file import serialized
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.secrets import SecretStore
 
 
-def write(server, submitted: dict[str, Any]) -> None:
+@serialized("connector-credentials.lock")
+def write(server, submitted: dict[str, Any], paths: RuntimePaths = RuntimePaths()) -> None:
     if not isinstance(submitted, dict):
         raise ValueError("MCP configuration values must be an object")
     fields = {str(field["key"]): field for field in server.credentials}
@@ -18,7 +22,8 @@ def write(server, submitted: dict[str, Any]) -> None:
         raise ValueError(f"unknown MCP configuration fields: {', '.join(sorted(unknown))}")
     target = credential_path(server.id)
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    values = read_runtime_env(target)
+    store = SecretStore(paths)
+    values = store.get("connector", server.id) or read_runtime_env(target)
     for key, value in submitted.items():
         field = fields[key]
         if field["type"] == "secret" and (value is None or value == ""):
@@ -34,6 +39,7 @@ def write(server, submitted: dict[str, Any]) -> None:
     ]
     if missing:
         raise ValueError("required MCP configuration is missing: " + ", ".join(missing))
+    store.put("connector", server.id, values)
     temporary = target.with_suffix(".tmp")
     temporary.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(temporary, 0o600)

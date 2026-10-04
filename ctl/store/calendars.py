@@ -2,43 +2,23 @@
 
 from __future__ import annotations
 
-import json
-
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, serialized, write_atomic
-
-
-class CalendarSecretError(ValueError):
-    pass
-
-
-def _paths(paths: RuntimePaths):
-    return paths.runtime / "calendar-secrets.key", paths.runtime / "calendar-connections.enc"
-
-
-def _cipher(paths: RuntimePaths):
-    from cryptography.fernet import Fernet
-
-    key_path, _ = _paths(paths)
-    paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    key = read_or_create_key(key_path, Fernet.generate_key)
-    return Fernet(key)
+from ctl.secret_file import serialized
+from ctl.store.secrets import SecretError as CalendarSecretError
+from ctl.store.secrets import SecretStore
 
 
 def _read(paths: RuntimePaths) -> dict[str, dict[str, str]]:
-    _, target = _paths(paths)
-    if not target.is_file():
-        return {}
-    try:
-        value = json.loads(_cipher(paths).decrypt(target.read_bytes()).decode("utf-8"))
-    except Exception as exc:
-        raise CalendarSecretError("encrypted calendar storage could not be read") from exc
-    return value if isinstance(value, dict) else {}
+    store = SecretStore(paths)
+    return {name: store.get("calendar", name) for name in store.list_names("calendar")}
 
 
 def _write(records: dict[str, dict[str, str]], paths: RuntimePaths) -> None:
-    _, target = _paths(paths)
-    write_atomic(target, _cipher(paths).encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
+    store = SecretStore(paths)
+    for name in set(store.list_names("calendar")) - set(records):
+        store.delete("calendar", name)
+    for name, record in records.items():
+        store.put("calendar", name, record)
 
 
 @serialized("calendar-secrets.lock")

@@ -17,6 +17,7 @@ import json
 import re
 import secrets
 import shutil
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,7 +26,9 @@ from typing import Any
 
 from ctl import actions
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, write_atomic
+from ctl.secret_file import locked, write_atomic
+from ctl.store import records
+from ctl.store.secrets import SecretStore
 
 RESTIC_IMAGE = "docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510"
 # Restic records the hostname; a container's is random, which would split
@@ -90,18 +93,18 @@ def readiness(paths: RuntimePaths = RuntimePaths(), retention: Retention = Reten
 
 
 def _verification(paths: RuntimePaths) -> dict:
-    try:
-        loaded = json.loads((paths.runtime / "backup-verification.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+    return records.get("backup", "verification", paths)
 
 
-def _password_file(paths: RuntimePaths) -> Path:
-    """The repository password, created once; losing it makes every snapshot unreadable."""
-    path = paths.runtime / "backup-password"
-    read_or_create_key(path, lambda: secrets.token_urlsafe(48).encode("ascii"))
-    return path
+def _repository_password(paths: RuntimePaths) -> str:
+    """Create the repository password once and keep it in the encrypted store."""
+    with locked(paths.state / "backup-password.lock"):
+        store = SecretStore(paths)
+        password = store.get("platform", "backup-password")
+        if password is None:
+            password = secrets.token_urlsafe(48)
+            store.put("platform", "backup-password", password)
+        return password
 
 
 def _restic(
@@ -113,27 +116,30 @@ def _restic(
     timeout: int = 3600,
 ) -> tuple[int, str]:
     """Run one restic command against the local repository in its pinned container."""
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--network",
-        "none",
-        "--hostname",
-        HOST,
-        "-v",
-        f"{paths.backups}:/repo",
-        "-v",
-        f"{_password_file(paths)}:/run/restic-password:ro",
-        "-e",
-        "RESTIC_REPOSITORY=/repo",
-        "-e",
-        "RESTIC_PASSWORD_FILE=/run/restic-password",
-    ]
-    for source, target, read_only in mounts:
-        command.extend(["-v", f"{source}:{target}{':ro' if read_only else ''}"])
-    command.extend([RESTIC_IMAGE, "--no-cache", "--retry-lock", "10m", *args])
-    return actions.docker_cmd(command, log, timeout=timeout)
+    with tempfile.TemporaryDirectory(prefix="mu3lab-restic-") as temporary:
+        password_file = Path(temporary) / "password"
+        write_atomic(password_file, _repository_password(paths).encode())
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--hostname",
+            HOST,
+            "-v",
+            f"{paths.backups}:/repo",
+            "-v",
+            f"{password_file}:/run/restic-password:ro",
+            "-e",
+            "RESTIC_REPOSITORY=/repo",
+            "-e",
+            "RESTIC_PASSWORD_FILE=/run/restic-password",
+        ]
+        for source, target, read_only in mounts:
+            command.extend(["-v", f"{source}:{target}{':ro' if read_only else ''}"])
+        command.extend([RESTIC_IMAGE, "--no-cache", "--retry-lock", "10m", *args])
+        return actions.docker_cmd(command, log, timeout=timeout)
 
 
 def _json_lines(output: str) -> list[Any]:
@@ -213,15 +219,15 @@ def snapshot(
     rc, output = _restic(["check"], log, paths=paths, timeout=3600)
     if rc:
         raise BackupError(f"The backup was saved but its integrity check failed: {output[-500:]}")
-    write_atomic(
-        paths.runtime / "backup-verification.json",
-        json.dumps(
-            {
-                "snapshot_id": snapshot_id,
-                "service_id": service_id,
-                "integrity_checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            }
-        ).encode("utf-8"),
+    records.put(
+        "backup",
+        "verification",
+        {
+            "snapshot_id": snapshot_id,
+            "service_id": service_id,
+            "integrity_checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        },
+        paths,
     )
     # Retention is housekeeping: a failure leaves an extra snapshot, never a missing one.
     rc, output = _restic(

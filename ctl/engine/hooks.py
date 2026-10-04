@@ -16,8 +16,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ctl.engine.compose import Compose, ScriptResult
+from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
-from ctl.workflow_secrets import JobIdentity
+from ctl.store.secrets import SecretStore
+from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
     from ctl.engine.project import Facts
@@ -78,6 +80,10 @@ class HookContext:
 
     def set_env(self, values: dict[str, str]) -> bool:
         """Merge values into the project's private settings; True when anything changed."""
+        paths = self.facts.paths if self.facts else RuntimePaths(self.project.parent.parent)
+        store = SecretStore(paths)
+        for name, value in values.items():
+            store.put("app:" + self.app.id, "env:" + name, value)
         current = self.env()
         merged = current | values
         if merged == current:

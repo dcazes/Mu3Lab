@@ -7,9 +7,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ctl import onboarding_state, vault_sync
+from ctl import vault_sync
 from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, Member, OrgLogin
 from ctl.runtime import RuntimePaths
+from ctl.store import onboarding as onboarding_state
 
 KEY = None
 
@@ -183,7 +184,7 @@ class VaultSyncTests(unittest.TestCase):
         (self.paths.projects / "freellmapi" / ".env").write_text("FREELLMAPI_ADMIN_PASSWORD=pw\n")
         ids = lambda: [item.mu3lab_id for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)]  # noqa: E731
         self.assertIn("service:freellmapi", ids())
-        ControlState(self.paths.runtime / "control-plane.sqlite3").mark_vault_seeded(OWNER["email"])
+        ControlState(self.paths.runtime / "mu3lab.db").mark_vault_seeded(OWNER["email"])
         self.assertNotIn("service:freellmapi", ids())
 
 

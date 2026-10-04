@@ -23,7 +23,9 @@ from ctl.mcp_registry import credential_path
 from ctl.mcp_review import Review
 from ctl.mcp_review import load as load_review
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import locked
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.secrets import SecretStore
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "platform" / "tool-gateway"
@@ -47,15 +49,14 @@ def review_for(server) -> Review:
 
 def app_token(service_id: str) -> str:
     """The bearer token one app's assistant uses; created once, never logged."""
-    path = project() / "tokens.env"
-    key = "APP_TOKEN_" + service_id.upper().replace("-", "_")
-    values = read_runtime_env(path)
-    if not values.get(key):
-        values[key] = secrets.token_urlsafe(32)
-        path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-        path.write_text(runtime_env_text(values), encoding="utf-8")
-        os.chmod(path, 0o600)
-    return values[key]
+    paths = RuntimePaths()
+    with locked(paths.state / "gateway-tokens.lock"):
+        store = SecretStore(paths)
+        value = store.get("gateway", service_id)
+        if value is None:
+            value = secrets.token_urlsafe(32)
+            store.put("gateway", service_id, value)
+        return value
 
 
 # --------------------------------------------------------------------------- switches

@@ -2,32 +2,26 @@
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
-
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, serialized, write_atomic
-
-
-def _cipher(paths: RuntimePaths) -> Fernet:
-    return Fernet(read_or_create_key(paths.runtime / "chat-connections.key", Fernet.generate_key))
+from ctl.secret_file import serialized
+from ctl.store.secrets import SecretStore
 
 
 def _read(paths: RuntimePaths) -> dict[str, Any]:
-    path = paths.runtime / "chat-connections.enc"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(_cipher(paths).decrypt(path.read_bytes()))
-    except (InvalidToken, ValueError):
-        raise ValueError("The saved chat connections could not be read.") from None
+    store = SecretStore(paths)
+    return {name: store.get("chat", name) for name in store.list_names("chat")}
 
 
 def _write(data: dict[str, Any], paths: RuntimePaths) -> None:
-    write_atomic(paths.runtime / "chat-connections.enc", _cipher(paths).encrypt(json.dumps(data).encode()))
+    store = SecretStore(paths)
+    for name in set(store.list_names("chat")) - set(data):
+        store.delete("chat", name)
+    for name, record in data.items():
+        ttl = max(0, record["expires_at"] - time.time()) if "expires_at" in record else None
+        store.put("chat", name, record, ttl=ttl)
 
 
 @serialized("chat-connections.lock")

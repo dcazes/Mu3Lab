@@ -19,6 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ctl import secrets
+from ctl.runtime import RuntimePaths
+from ctl.store.secrets import SecretStore
 
 
 def _ctx_inputs():
@@ -36,39 +38,37 @@ class RootEnvTests(unittest.TestCase):
 
     def test_creates_with_both_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
-            values, added = secrets.ensure_root_env(Path(tmp), token_factory=lambda: "tok")
+            values, added = secrets.ensure_platform_tokens(RuntimePaths(Path(tmp)), token_factory=lambda: "tok")
             self.assertEqual(set(added), set(secrets.ROOT_ENV_KEYS))
             self.assertEqual(values["MU3LAB_CTL_TOKEN"], "tok")
-            mode = stat.S_IMODE(os.stat(Path(tmp) / ".env").st_mode)
+            mode = stat.S_IMODE(os.stat(Path(tmp) / "state" / "mu3lab.db").st_mode)
             self.assertEqual(mode, 0o600)
 
     def test_preserves_existing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / ".env").write_text("# mine\nMU3LAB_CTL_TOKEN=live-token\nOTHER=1\n", encoding="utf-8")
-            os.chmod(root / ".env", 0o600)
-            values, added = secrets.ensure_root_env(root, token_factory=lambda: "new")
+            SecretStore(RuntimePaths(root)).put("platform", "tokens", {"MU3LAB_CTL_TOKEN": "live-token"})
+            values, added = secrets.ensure_platform_tokens(RuntimePaths(root), token_factory=lambda: "new")
             # Live token untouched; only missing keys added; OTHER kept.
             self.assertEqual(values["MU3LAB_CTL_TOKEN"], "live-token")
             self.assertEqual(added, ["MU3LAB_INGRESS_TOKEN"])
-            text = (root / ".env").read_text(encoding="utf-8")
-            self.assertIn("# mine", text)
-            self.assertIn("OTHER=1", text)
-            self.assertIn("live-token", text)
+            self.assertFalse((root / ".env").exists())
 
     def test_noop_when_complete(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            before = "MU3LAB_CTL_TOKEN=a\nMU3LAB_INGRESS_TOKEN=b\n"
-            (root / ".env").write_text(before, encoding="utf-8")
-            _values, added = secrets.ensure_root_env(root, token_factory=lambda: "new")
+            before = {"MU3LAB_CTL_TOKEN": "a", "MU3LAB_INGRESS_TOKEN": "b"}
+            SecretStore(RuntimePaths(root)).put("platform", "tokens", before)
+            _values, added = secrets.ensure_platform_tokens(RuntimePaths(root), token_factory=lambda: "new")
             self.assertEqual(added, [])
-            self.assertEqual((root / ".env").read_text(encoding="utf-8"), before)
+            self.assertEqual(secrets.platform_values(RuntimePaths(root)), before)
 
     def test_token_factory_used_per_missing_key(self):
         made: list[str] = []
         with tempfile.TemporaryDirectory() as tmp:
-            _values, added = secrets.ensure_root_env(Path(tmp), token_factory=lambda: made.append("x") or "x")
+            _values, added = secrets.ensure_platform_tokens(
+                RuntimePaths(Path(tmp)), token_factory=lambda: made.append("x") or "x"
+            )
             self.assertEqual(len(made), 2)
             self.assertEqual(len(added), 2)
 
@@ -85,14 +85,14 @@ class RootEnvTests(unittest.TestCase):
         "cryptography is installed by the control-plane requirements",
     )
     def test_provider_credentials_are_encrypted_and_write_only(self):
-        from ctl.provider_secrets import metadata, save
         from ctl.runtime import RuntimePaths
+        from ctl.store.providers import metadata, save
 
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             self.assertEqual(save("groq", "Main provider", "gsk_super-secret", paths)["id"], "groq")
             self.assertEqual(metadata(paths)[0]["label"], "Main provider")
-            self.assertNotIn("gsk_super-secret", (paths.runtime / "provider-connections.enc").read_text())
+            self.assertNotIn("gsk_super-secret", (paths.state / "mu3lab.db").read_bytes().decode("latin1"))
 
 
 if __name__ == "__main__":

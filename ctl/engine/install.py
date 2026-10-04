@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from ctl import actions, image_fetch, onboarding_state, workflow_secrets
+from ctl import actions, image_fetch
 from ctl.compute import resolved_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
@@ -31,7 +31,9 @@ from ctl.rules import Rule, rules_for
 from ctl.runtime import RuntimePaths
 from ctl.service_config import missing_required
 from ctl.service_state import tailnet_dns_name
-from ctl.workflow_secrets import JobIdentity
+from ctl.store import onboarding as onboarding_state
+from ctl.store import workflows as workflow_secrets
+from ctl.store.workflows import JobIdentity
 
 
 def context(

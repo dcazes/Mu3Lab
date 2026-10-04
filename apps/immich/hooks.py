@@ -8,9 +8,9 @@ leaving Authentik as the only way in.
 
 from __future__ import annotations
 
-from ctl import onboarding_state
 from ctl.engine.hooks import AppHooks, HookContext
 from ctl.engine.loopback import LoopbackError, request
+from ctl.store import onboarding as onboarding_state
 
 
 class Hooks(AppHooks):

@@ -830,15 +830,17 @@ def _tailscale_serve(
 
 
 def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> dict:
-    """Create the approved /srv layout with root-only secrets and user state.
+    """Create the approved /srv layout with private operator-owned state.
 
     The root itself is group-traversable by the operator. Without that one
     permission, user-owned children such as `data/` remain unreachable.
     """
     lines: list[str] = []
-    paths = [root, root / "data", root / "backups", root / "runtime", root / "projects"]
+    paths = [root, root / "data", root / "backups", root / "state", root / "projects"]
     for path in paths:
-        res = privilege.run_privileged(["install", "-d", "-m", "0750", str(path)], lines.append)
+        res = privilege.run_privileged(
+            ["install", "-d", "-m", "0700" if path == root / "state" else "0750", str(path)], lines.append
+        )
         if res.get("need_terminal"):
             return _fail(lines, terminal_command=res["terminal_command"])
         if not res["ok"]:
@@ -847,11 +849,6 @@ def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> 
     if root_owner.get("need_terminal"):
         return _fail(lines, terminal_command=root_owner["terminal_command"])
     if not root_owner["ok"]:
-        return _fail(lines)
-    secret = privilege.run_privileged(["install", "-d", "-m", "0700", str(root / "secrets")], lines.append)
-    if secret.get("need_terminal"):
-        return _fail(lines, terminal_command=secret["terminal_command"])
-    if not secret["ok"]:
         return _fail(lines)
     owned = [str(path) for path in paths[1:]]
     res = privilege.run_privileged(["chown", "-R", f"{user}:{user}", *owned], lines.append)

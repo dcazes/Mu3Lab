@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ctl.rules import Params, Rule, RuleError, register
-from ctl.workflow_secrets import JobIdentity
+from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
     from ctl.manifest.catalog import App

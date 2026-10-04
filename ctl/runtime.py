@@ -31,12 +31,12 @@ class RuntimePaths:
         return self.root / "backups"
 
     @property
-    def secrets(self) -> Path:
-        return self.root / "secrets"
+    def state(self) -> Path:
+        return self.root / "state"
 
     @property
     def runtime(self) -> Path:
-        return self.root / "runtime"
+        return self.state
 
     @property
     def projects(self) -> Path:

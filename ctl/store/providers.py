@@ -2,62 +2,35 @@
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import UTC, datetime
-from pathlib import Path
 
+from ctl.provider_catalog import get
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, serialized, write_atomic
+from ctl.secret_file import serialized
+from ctl.store.secrets import SecretError as ProviderSecretError
+from ctl.store.secrets import SecretStore
 
 PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{1,31}$")
 
 
-class ProviderSecretError(ValueError):
-    """Raised for invalid provider input or unavailable encrypted storage."""
-
-
-def _paths(paths: RuntimePaths) -> tuple[Path, Path]:
-    return paths.runtime / "provider-secrets.key", paths.runtime / "provider-connections.enc"
-
-
-def _cipher(paths: RuntimePaths):
-    try:
-        from cryptography.fernet import Fernet
-    except ImportError as exc:  # pragma: no cover - install gate covers this
-        raise ProviderSecretError("encrypted provider storage is unavailable") from exc
-    key_path, _ = _paths(paths)
-    paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    key = read_or_create_key(key_path, Fernet.generate_key)
-    if len(key) != 44:
-        raise ProviderSecretError("encrypted provider key is invalid")
-    return Fernet(key)
-
-
 def _read(paths: RuntimePaths) -> list[dict[str, str]]:
-    _, store_path = _paths(paths)
-    if not store_path.is_file():
-        return []
-    _cipher(paths)  # also validates that encrypted storage is available
-    try:
-        raw = _cipher(paths).decrypt(store_path.read_bytes())
-        value = json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise ProviderSecretError("encrypted provider store could not be read") from exc
-    return value if isinstance(value, list) else []
+    store = SecretStore(paths)
+    return [record for name in store.list_names("provider") if (record := store.get("provider", name)) is not None]
 
 
 def _write(records: list[dict[str, str]], paths: RuntimePaths) -> None:
-    # An interrupted update leaves either the old or the complete new ciphertext.
-    _, store_path = _paths(paths)
-    write_atomic(store_path, _cipher(paths).encrypt(json.dumps(records).encode("utf-8")))
+    store = SecretStore(paths)
+    names = {str(record.get("job_id") or record["id"]) for record in records}
+    for name in set(store.list_names("provider")) - names:
+        store.delete("provider", name)
+    for record in records:
+        store.put("provider", str(record.get("job_id") or record["id"]), record)
 
 
 @serialized("provider-secrets.lock")
 def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
     """Upsert one credential and return metadata only."""
-    from ctl.provider_catalog import get
-
     provider = get(provider_id)
     provider_id = provider.id
     label = label.strip() or provider.name

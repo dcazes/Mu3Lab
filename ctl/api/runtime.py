@@ -7,7 +7,6 @@ from typing import Any
 
 from fastapi import Request
 
-from ctl import workflow_secrets
 from ctl.api.errors import ApiError
 from ctl.api.security import IdentityData, job_identity
 from ctl.control_state import ControlState
@@ -16,6 +15,7 @@ from ctl.mcp_catalog import McpServer
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl.registry import Registry, RegistryError, Service
 from ctl.registry import load as load_registry
+from ctl.store import workflows as workflow_secrets
 
 
 def job_store() -> JobStore:

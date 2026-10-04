@@ -14,7 +14,6 @@ backup-first update in ``ctl.lifecycle.maintenance``.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -26,9 +25,9 @@ import yaml
 from ctl import actions
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
+from ctl.store import records
 
 RECORD = "docker-compose.digest.yml"
-HISTORY = "releases.json"
 _EXTENSION = "x-mu3lab-release"
 
 
@@ -154,11 +153,7 @@ def status(service: Service, root: Path, paths: RuntimePaths | None = None) -> d
 
 
 def _history(service_id: str, paths: RuntimePaths | None) -> dict[str, dict[str, str]]:
-    try:
-        data = json.loads((_project(service_id, paths) / HISTORY).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+    return records.get("app-releases", service_id, paths or RuntimePaths())
 
 
 def from_history(service_id: str, version: str, paths: RuntimePaths | None = None) -> Release | None:
@@ -180,7 +175,7 @@ def write(service_id: str, release: Release, paths: RuntimePaths | None = None) 
         document[_EXTENSION] = {"version": release.version}
         history = _history(service_id, paths)
         history[release.version] = dict(release.images)
-        _atomic(project / HISTORY, json.dumps(history, indent=2, sort_keys=True))
+        records.put("app-releases", service_id, history, paths or RuntimePaths())
     _atomic(project / RECORD, yaml.safe_dump(document, sort_keys=True))
 
 

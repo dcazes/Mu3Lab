@@ -325,7 +325,7 @@ def _runtime_layout_check(root: Path) -> dict:
         missing = [path for path in user_paths if not path.is_dir()]
         # Secrets are deliberately root-only. Checking the directory itself
         # must not require the operator to read its contents.
-        secrets_ready = paths.secrets.is_dir()
+        secrets_ready = not paths.state.exists() or paths.state.stat().st_mode & 0o077 == 0
         accessible = [path for path in user_paths if not os.access(path, os.R_OK | os.X_OK)]
     except OSError:
         missing, secrets_ready, accessible = list(user_paths), False, list(user_paths)
@@ -392,13 +392,7 @@ def _env_check(root: Path) -> dict:
     """Root .env holds both MU3LAB_* tokens? States: ready | missing."""
     from ctl import secrets as _secrets
 
-    values: dict[str, str] = {}
-    env_path = root / ".env"
-    if env_path.is_file():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, _, value = line.partition("=")
-                values[key.strip()] = value.strip()
+    values = _secrets.platform_values()
     absent = [key for key in _secrets.ROOT_ENV_KEYS if not values.get(key)]
     if absent:
         return {
@@ -508,7 +502,7 @@ def fix_dashboard_build(check: dict, ctx: dict) -> dict:
 def fix_root_env(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
-    _values, added = _secrets.ensure_root_env(ctx["root"])
+    _values, added = _secrets.ensure_platform_tokens()
     log = ctx["log_fn"]("root_env")
     if added:
         log(f"generated keys (names only): {', '.join(added)} → .env (0600)")
@@ -853,7 +847,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
         if clean:
             _update_progress(ctx, "caddy", phase="starting_ingress", activity=clean[:180], timeout_seconds=300)
 
-    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    ingress_token = _secrets.platform_values().get("MU3LAB_INGRESS_TOKEN", "")
     if not ingress_token:
         return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     rc, out = actions.compose_up(
@@ -1466,7 +1460,7 @@ def _dashboard_access_probe_with_retry(host: str | None = None) -> dict:
 def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
-    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    ingress_token = _secrets.platform_values().get("MU3LAB_INGRESS_TOKEN", "")
     if not ingress_token:
         return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     host = _tailscale_dns_name_for_install()
@@ -2196,6 +2190,12 @@ STEPS: list[Step] = [
         "fix": fix_dashboard_build,
     },
     {
+        "id": "runtime_layout",
+        "label": "Data folders",
+        "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
+        "fix": fix_runtime_layout,
+    },
+    {
         "id": "root_env",
         "label": "Generate private keys",
         "check": lambda ctx: _env_check(ctx["root"]),
@@ -2203,12 +2203,6 @@ STEPS: list[Step] = [
     },
     # The worker service needs this root for its durable SQLite queue.  It is
     # deliberately created before the service is started, not after Docker.
-    {
-        "id": "runtime_layout",
-        "label": "Data folders",
-        "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
-        "fix": fix_runtime_layout,
-    },
     {
         "id": "service",
         "label": "Start the dashboard",
@@ -2321,7 +2315,7 @@ PHASES = (
     ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     (
         "Set up Mu3Lab",
-        ("dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
+        ("dashboard_src", "dashboard_build", "runtime_layout", "root_env", "service"),
     ),
     ("Start your password vault", ("caddy", by_capability("password_store").id, "vaultwarden_setup")),
     (

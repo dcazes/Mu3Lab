@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ctl import workflow_secrets
 from ctl.control_state import ControlState
 from ctl.engine.runtime import render_service as materialize
 from ctl.install_batches import InstallBatchStore
@@ -16,6 +15,7 @@ from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 from ctl.service_ops import reset_failed_application
+from ctl.store import workflows as workflow_secrets
 from tests.support import runtime_paths
 
 
@@ -69,9 +69,9 @@ class BatchPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             paths.runtime.mkdir(parents=True)
-            control = ControlState(paths.runtime / "control-plane.sqlite3")
-            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
-            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            control = ControlState(paths.runtime / "mu3lab.db")
+            jobs = JobStore(paths.runtime / "mu3lab.db")
+            batches = InstallBatchStore(paths.runtime / "mu3lab.db")
             identity = {
                 "owner_uid": "uid",
                 "email": "operator@example.test",
@@ -102,7 +102,7 @@ class BatchPersistenceTests(unittest.TestCase):
                 jobs.transition(first["id"], "succeeded", actor="worker")
                 batches.advance_for_job(first["id"], jobs)
                 batches.advance_for_job(first["id"], jobs)
-                reopened = InstallBatchStore(paths.runtime / "control-plane.sqlite3").get(batch["id"])
+                reopened = InstallBatchStore(paths.runtime / "mu3lab.db").get(batch["id"])
             self.assertEqual([item["state"] for item in reopened["items"]], ["succeeded", "queued"])
             self.assertEqual(reopened["state"], "running")
             self.assertEqual(len([job for job in jobs.jobs() if job["state"] == "queued"]), 1)
@@ -120,9 +120,9 @@ class BatchPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             paths.runtime.mkdir(parents=True)
-            control = ControlState(paths.runtime / "control-plane.sqlite3")
-            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
-            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            control = ControlState(paths.runtime / "mu3lab.db")
+            jobs = JobStore(paths.runtime / "mu3lab.db")
+            batches = InstallBatchStore(paths.runtime / "mu3lab.db")
             identity = {
                 "owner_uid": "uid",
                 "email": "operator@example.test",
@@ -165,9 +165,9 @@ class BatchPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             paths.runtime.mkdir(parents=True)
-            control = ControlState(paths.runtime / "control-plane.sqlite3")
-            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
-            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            control = ControlState(paths.runtime / "mu3lab.db")
+            jobs = JobStore(paths.runtime / "mu3lab.db")
+            batches = InstallBatchStore(paths.runtime / "mu3lab.db")
             identity = {
                 "owner_uid": "uid",
                 "email": "operator@example.test",
@@ -207,9 +207,9 @@ class BatchPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             paths.runtime.mkdir(parents=True)
-            control = ControlState(paths.runtime / "control-plane.sqlite3")
-            jobs = JobStore(paths.runtime / "control-plane.sqlite3")
-            batches = InstallBatchStore(paths.runtime / "control-plane.sqlite3")
+            control = ControlState(paths.runtime / "mu3lab.db")
+            jobs = JobStore(paths.runtime / "mu3lab.db")
+            batches = InstallBatchStore(paths.runtime / "mu3lab.db")
             identity = {
                 "owner_uid": "uid",
                 "email": "operator@example.test",

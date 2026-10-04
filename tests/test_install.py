@@ -306,7 +306,9 @@ class CaddyFixTests(unittest.TestCase):
         projdir = root / "apps" / "ingress"
         projdir.mkdir(parents=True)
         (projdir / "docker-compose.yml").touch()
-        (root / ".env").write_text("MU3LAB_INGRESS_TOKEN=test-only-token\n", encoding="utf-8")
+        from ctl.secrets import ensure_platform_tokens
+
+        ensure_platform_tokens(token_factory=lambda: "test-only-token")
         return projdir
 
     def test_waits_for_port(self):
@@ -545,7 +547,7 @@ class WorkspaceStepTests(unittest.TestCase):
         # Identity-first bootstrap: Vaultwarden is initialized locally before
         # the tailnet and Authentik are introduced.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("root_env"), ids.index("runtime_layout"))
+        self.assertLess(ids.index("runtime_layout"), ids.index("root_env"))
         self.assertLess(ids.index("runtime_layout"), ids.index("service"))
         self.assertLess(ids.index("docker_networks"), ids.index("dashboard_build"))
         self.assertLess(ids.index("docker"), ids.index("docker_address_pools"))

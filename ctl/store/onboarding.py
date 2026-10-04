@@ -7,15 +7,15 @@ Each app has its own record; a lock protects key creation and read/modify/write.
 from __future__ import annotations
 
 import fcntl
-import json
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, write_atomic
-from ctl.workflow_secrets import JobIdentity, WorkflowSecretError, generate_password
+from ctl.store import db, owners
+from ctl.store.secrets import SecretStore
+from ctl.store.workflows import JobIdentity, WorkflowSecretError, generate_password
 
 CONFIG_VERSION = 1
 
@@ -32,30 +32,23 @@ def _locked(paths: RuntimePaths) -> Iterator[None]:
 def _path(service_id: str, paths: RuntimePaths) -> Path:
     if not service_id or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in service_id):
         raise ValueError("invalid onboarding application")
-    return paths.runtime / f"onboarding-{service_id}.enc"
-
-
-def _cipher(paths: RuntimePaths):
-    from cryptography.fernet import Fernet
-
-    return Fernet(read_or_create_key(paths.runtime / "onboarding.key", Fernet.generate_key))
+    return db.database(paths)
 
 
 def _read(service_id: str, paths: RuntimePaths) -> dict:
-    path = _path(service_id, paths)
-    if not path.is_file():
-        return {}
-    try:
-        record = json.loads(_cipher(paths).decrypt(path.read_bytes()))
-        if not isinstance(record, dict):
-            raise ValueError("invalid onboarding record")
-        return record
-    except Exception as exc:
-        raise WorkflowSecretError("Application onboarding storage could not be read.") from exc
+    record = SecretStore(paths).get("app:" + service_id, "onboarding") or {}
+    owner = owners.get(service_id, db.database(paths))
+    if owner:
+        record["owner"] = owner
+    return record
 
 
 def _write(service_id: str, record: dict, paths: RuntimePaths) -> None:
-    write_atomic(_path(service_id, paths), _cipher(paths).encrypt(json.dumps(record).encode()))
+    data = dict(record)
+    owner = data.pop("owner", None)
+    if owner:
+        owners.remember(service_id, owner, db.database(paths))
+    SecretStore(paths).put("app:" + service_id, "onboarding", data)
 
 
 def read(service_id: str, paths: RuntimePaths = RuntimePaths()) -> dict:
@@ -72,7 +65,13 @@ def remember_owner(service_id: str, owner: Mapping[str, object], paths: RuntimeP
         record = _read(service_id, paths)
         if record.get("owner"):
             # Reinstall/repair by a second operator must not replace ownership.
-            return record["owner"]
+            existing = owners.remember(service_id, owner, db.database(paths))
+            return JobIdentity(
+                owner_uid=existing["owner_uid"],
+                username=existing["username"],
+                email=existing["email"],
+                display_name=existing["display_name"],
+            )
         identity: JobIdentity = {
             "owner_uid": str(owner["owner_uid"]),
             "username": str(owner["username"]),
@@ -106,12 +105,15 @@ def complete_login(service_id: str, username: str, login_url: str, paths: Runtim
 
 
 def pending_logins(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict]:
-    if not paths.runtime.is_dir():
+    if not db.database(paths).is_file():
         return []
     with _locked(paths):
         result = []
-        for path in paths.runtime.glob("onboarding-*.enc"):
-            service_id = path.stem.removeprefix("onboarding-")
+        with db.connect(db.database(paths), readonly=True) as connection:
+            service_ids = [
+                row[0] for row in connection.execute("SELECT service_id FROM app_owner WHERE owner_uid=?", (owner_uid,))
+            ]
+        for service_id in service_ids:
             record = _read(service_id, paths)
             if (
                 record.get("owner", {}).get("owner_uid") == owner_uid
@@ -143,7 +145,8 @@ def discard_password(service_id: str, paths: RuntimePaths = RuntimePaths()) -> N
 
 def forget(service_id: str, paths: RuntimePaths = RuntimePaths()) -> None:
     with _locked(paths):
-        _path(service_id, paths).unlink(missing_ok=True)
+        SecretStore(paths).delete("app:" + service_id, "onboarding")
+        owners.forget(service_id, db.database(paths))
 
 
 def mark_configured(service_id: str, paths: RuntimePaths = RuntimePaths()) -> None:

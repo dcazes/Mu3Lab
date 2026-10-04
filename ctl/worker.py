@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from ctl import job_guard, self_update, workflow_secrets
+from ctl import job_guard, self_update
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.jobs import JobStore
@@ -22,6 +22,7 @@ from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
 from ctl.service_ops import execute_claimed as execute_service_claimed
+from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2

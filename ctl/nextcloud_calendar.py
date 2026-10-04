@@ -15,11 +15,11 @@ import httpx
 import recurring_ical_events
 from icalendar import Calendar, Event
 
-from ctl import calendar_secrets
 from ctl.control_state import ControlState
 from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store import calendars as calendar_secrets
 
 BASE = "http://127.0.0.1:8085"
 DAV = "DAV:"

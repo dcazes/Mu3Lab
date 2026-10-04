@@ -21,11 +21,11 @@ from ctl.freellmapi_admin import GatewayAdmin, GatewayAdminError
 from ctl.jobs import JobStore, redact
 from ctl.platform_apps import by_capability
 from ctl.provider_catalog import BY_ID, get, key_problem
-from ctl.provider_secrets import delete as delete_secret
-from ctl.provider_secrets import metadata, records, save
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store.providers import delete as delete_secret
+from ctl.store.providers import metadata, records, save
 
 SUPPORTED_ACTIONS = frozenset({"save", "verify", "enable", "disable", "remove"})
 # How far down FreeLLMAPI's ranking to go: its catalog can briefly list a model

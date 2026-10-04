@@ -13,10 +13,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl import sqlite_store
 from ctl.jobs import redact, redact_data
 from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
+from ctl.store import db
 
 WORKFLOW_VERSION = 3
 PHASES = (
@@ -58,29 +58,10 @@ class ProvisioningStore:
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> ProvisioningStore | None:
         if not paths.runtime.is_dir():
             return None
-        return cls(paths.runtime / "control-plane.sqlite3")
+        return cls(db.database(paths))
 
     def _connect(self) -> sqlite3.Connection:
-        self.database.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        with sqlite_store.schema_once(conn, self.database, "provisioning") as needed:
-            if needed:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS provisioning_steps (
-                        workflow_version INTEGER NOT NULL,
-                        phase_id TEXT NOT NULL,
-                        desired_state TEXT NOT NULL,
-                        actual_state TEXT NOT NULL,
-                        attempts INTEGER NOT NULL DEFAULT 0,
-                        detail TEXT NOT NULL DEFAULT '',
-                        error TEXT NOT NULL DEFAULT '',
-                        inputs_json TEXT NOT NULL DEFAULT '{}',
-                        updated_at TEXT NOT NULL,
-                        PRIMARY KEY (workflow_version, phase_id)
-                    )
-                """)
-        return conn
+        return db.connect(self.database)
 
     def initialize(self) -> None:
         now = _now()

@@ -19,7 +19,8 @@ from urllib.parse import urlsplit
 from fastapi import Depends, Request
 
 from ctl.api.errors import ApiError
-from ctl.workflow_secrets import JobIdentity
+from ctl.secrets import platform_values
+from ctl.store.workflows import JobIdentity
 
 ROOT = Path(__file__).resolve().parents[2]
 OPERATOR_GROUPS = frozenset({"mu3lab-operators", "authentik Admins"})
@@ -32,11 +33,9 @@ IdentityData = dict[str, Any]
 
 
 def _runtime_env() -> dict[str, str]:
-    from ctl.secrets import read_runtime_env
-
     try:
-        return read_runtime_env(ROOT / ".env")
-    except OSError:
+        return platform_values()
+    except (OSError, ValueError):
         return {}
 
 

@@ -153,9 +153,9 @@ class SystemTests(unittest.TestCase):
         with patch.object(actions.privilege, "run_privileged", fake):
             result = actions.ensure_runtime_layout(Path("/srv/mu3lab"), "tester", _silent)
         self.assertTrue(result["ok"])
-        self.assertIn(["install", "-d", "-m", "0700", "/srv/mu3lab/secrets"], seen)
+        self.assertIn(["install", "-d", "-m", "0700", "/srv/mu3lab/state"], seen)
         self.assertIn(["chown", "root:tester", "/srv/mu3lab"], seen)
-        self.assertNotIn("/srv/mu3lab/secrets", seen[-1])
+        self.assertIn("/srv/mu3lab/state", seen[-1])
 
     def test_remove_root_file_uses_exact_path(self):
         seen: list[list[str]] = []

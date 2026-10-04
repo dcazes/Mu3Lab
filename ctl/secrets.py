@@ -5,18 +5,19 @@ WHAT: Secret generation with preserve-existing semantics for the bootstrap,
 WHY:  Tokens must be random, mode-0600, and NEVER overwritten once created
       (rotating a live token orphans running services). Callers only learn which keys were ADDED (never values).
 RUN:  Imported by ctl/install.py and the runtime project renderer.
-DEBUG: `stat -c %a .env` must print 600. Values are logged as names only —
+DEBUG: State/database/key and generated private env files use mode 600. Values are logged as names only —
       grep any log for a token value and file a bug.
 """
 
 from __future__ import annotations
 
-import os
 import secrets
 from pathlib import Path
 
 from ctl.platform_apps import by_capability
+from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, write_atomic
+from ctl.store.secrets import SecretStore
 
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
 
@@ -29,11 +30,18 @@ def ensure_authentik_env(
     target = root / "projects" / by_capability("identity_provider").id / ".env"
     with locked(target.with_suffix(".lock")):
         values = read_runtime_env(target)
+        store = SecretStore(RuntimePaths(root))
+        scope = "app:" + by_capability("identity_provider").id
         added: list[str] = []
         for key in ("AUTHENTIK_SECRET_KEY", "AUTHENTIK_POSTGRESQL__PASSWORD", "AUTHENTIK_BOOTSTRAP_TOKEN"):
-            if not values.get(key):
+            saved = store.get(scope, "env:" + key)
+            if saved:
+                values[key] = saved
+            elif not values.get(key):
                 values[key] = token_factory()
                 added.append(key)
+            if saved is None:
+                store.put(scope, "env:" + key, values[key])
         if email and password_hash:
             for key, value in (
                 ("AUTHENTIK_BOOTSTRAP_EMAIL", email),
@@ -90,36 +98,20 @@ def generate_hex(nbytes: int = 32) -> str:
     return secrets.token_hex(nbytes)
 
 
-def ensure_root_env(root: Path, token_factory=generate_hex) -> tuple[dict[str, str], list[str]]:
-    """Ensure root .env exists (0600) with both MU3LAB_* tokens present.
+def platform_values(paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
+    return SecretStore(paths).get("platform", "tokens") or {}
 
-    Creates the file if missing, ADDS absent keys, preserves everything else
-    byte-for-byte (existing tokens, comments, unrelated keys). Returns the
-    full mapping and the list of ADDED key names. Callers must log names only.
-    """
-    env_path = root / ".env"
-    values: dict[str, str] = {}
-    existing_lines: list[str] = []
-    if env_path.is_file():
-        # Preserve the file EXACTLY (comments, order, unrelated keys): only
-        # append missing keys at the end, never rewrite.
-        existing_lines = env_path.read_text(encoding="utf-8").splitlines()
-        for line in existing_lines:
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, _, value = line.partition("=")
-                values[key.strip()] = value.strip()
-    added: list[str] = []
-    new_lines = [line for line in existing_lines]
-    for key in ROOT_ENV_KEYS:
-        if not values.get(key):
-            values[key] = token_factory()
-            new_lines.append(f"{key}={values[key]}")
-            added.append(key)
-    if added or not env_path.is_file():
-        fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            os.write(fd, ("\n".join(new_lines) + "\n").encode())
-        finally:
-            os.close(fd)
-        os.chmod(env_path, 0o600)  # belt-and-braces (umask-proof)
+
+def ensure_platform_tokens(
+    paths: RuntimePaths = RuntimePaths(), token_factory=generate_hex
+) -> tuple[dict[str, str], list[str]]:
+    with locked(paths.state / "platform.lock"):
+        values = platform_values(paths)
+        added = []
+        for key in ROOT_ENV_KEYS:
+            if not values.get(key):
+                values[key] = token_factory()
+                added.append(key)
+        if added:
+            SecretStore(paths).put("platform", "tokens", values)
     return values, added

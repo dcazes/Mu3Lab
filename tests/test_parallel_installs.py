@@ -30,7 +30,7 @@ class BatchCase(unittest.TestCase):
         self.root = Path(tmp.name)
         paths = RuntimePaths(self.root)
         paths.runtime.mkdir(parents=True)
-        database = paths.runtime / "control-plane.sqlite3"
+        database = paths.runtime / "mu3lab.db"
         self.control = ControlState(database)
         self.jobs = JobStore(database)
         self.batches = InstallBatchStore(database)

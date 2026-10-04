@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from ctl.engine.hooks import HookContext
 from ctl.rules import Params, Rule, register
-from ctl.workflow_secrets import JobIdentity
+from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
     from ctl.manifest.catalog import App

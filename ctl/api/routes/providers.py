@@ -83,7 +83,7 @@ def providers_catalog(_operator: Member) -> dict[str, Any]:
 
 
 def _save_key(provider_id: str, label: str, api_key: str, operator: dict[str, Any], key: str | None) -> dict[str, Any]:
-    from ctl.provider_secrets import save
+    from ctl.store.providers import save
 
     api_key = api_key.strip()
     problem = key_problem(api_key)

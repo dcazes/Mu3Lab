@@ -15,8 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 # Every command available to the script is a fixture. No host users, PHP,
 # filesystem layout, clock or container can affect the results.
 COMMAND = r"""
-import json, os, pathlib, sys
+import fcntl, json, os, pathlib, sys
 root = pathlib.Path(os.environ["FIXTURE_ROOT"])
+name = pathlib.Path(sys.argv[0]).name
+payload = json.loads(sys.stdin.read()) if name == "php" else {}
+lock = (root / "fixture.lock").open("a")
+fcntl.flock(lock, fcntl.LOCK_EX)
 state = json.loads((root / "state.json").read_text())
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -43,7 +47,6 @@ elif name == "runuser":
     elif command[0] == "user_oidc:providers":
         output = json.dumps({"identifier": "mu3lab", "id": 17})
 elif name == "php":
-    payload = json.loads(sys.stdin.read())
     if "installed" in args[-1]:
         rc = 0 if payload.get("installed") else 1
     else:

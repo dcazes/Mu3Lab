@@ -21,19 +21,19 @@ from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
 from ctl.engine.project import Facts
 from ctl.jobs import JobStore
-from ctl.provider_secrets import records, save
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import load
 from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store.providers import records, save
 from tests.support import render_core_projects
 
 
 class ProvisioningStoreTests(unittest.TestCase):
     def test_survives_reopen_and_never_stores_simple_secret_assignments(self):
         with tempfile.TemporaryDirectory() as tmp:
-            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            database = Path(tmp) / "runtime" / "mu3lab.db"
             first = ProvisioningStore(database)
             first.update("core", "running", detail="api_key=must-not-persist")
             second = ProvisioningStore(database)
@@ -45,7 +45,7 @@ class ProvisioningStoreTests(unittest.TestCase):
 
     def test_waiting_phase_is_visible_after_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
-            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            database = Path(tmp) / "runtime" / "mu3lab.db"
             ProvisioningStore(database).update("configuration", "waiting_for_user", detail="Add a provider.")
             summary = ProvisioningStore(database).summary()
         self.assertEqual(summary["waiting"]["phase_id"], "configuration")
@@ -53,7 +53,7 @@ class ProvisioningStoreTests(unittest.TestCase):
 
     def test_structured_inputs_are_redacted_before_sqlite(self):
         with tempfile.TemporaryDirectory() as tmp:
-            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            database = Path(tmp) / "runtime" / "mu3lab.db"
             ProvisioningStore(database).update(
                 "configuration", "running", inputs={"provider": {"api_key": "must-not-persist", "label": "safe"}}
             )
@@ -66,14 +66,14 @@ class ProvisioningStoreTests(unittest.TestCase):
 
     def test_illegal_state_regression_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
             store.update("core", "verified")
             with self.assertRaises(ValueError):
                 store.update("core", "waiting_for_user")
 
     def test_progress_and_next_action_cover_all_eight_phases(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
             for phase in ("foundation", "vaultwarden", "tailscale", "identity", "dashboard_protection", "core"):
                 store.update(phase, "verified")
             summary = store.summary()
@@ -101,7 +101,7 @@ class CoreWiringTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             render_core_projects(paths)
             save("groq", "Groq provider", "user-provider-secret", paths)
-            ControlState(paths.runtime / "control-plane.sqlite3").set_provider(
+            ControlState(paths.runtime / "mu3lab.db").set_provider(
                 "groq", "Groq provider", state="verified", verified=True
             )
             result = configure(paths)

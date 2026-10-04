@@ -1,6 +1,6 @@
 """Durable, secret-free control-plane job and audit storage.
 
-Jobs live only below /srv/mu3lab/runtime.  This module deliberately has no
+Jobs live only below /srv/mu3lab/state.  This module deliberately has no
 Docker, Compose, shell, or HTTP dependency: an authenticated executor will be
 added only after it can use these records for locks, approvals, redacted logs,
 and auditability.
@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from ctl import sqlite_store
 from ctl.runtime import RuntimePaths
+from ctl.store import db
 
 _SECRET = re.compile(
     r"""(?ix)(
@@ -99,54 +99,10 @@ class JobStore:
     @classmethod
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> JobStore | None:
         """Return a store only when bootstrap created the approved runtime dir."""
-        return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
+        return cls(db.database(paths)) if paths.runtime.is_dir() else None
 
     def _connect(self) -> sqlite3.Connection:
-        self.database.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        with sqlite_store.schema_once(conn, self.database, "jobs") as needed:
-            if needed:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS jobs (
-                        id TEXT PRIMARY KEY, kind TEXT NOT NULL, service_id TEXT NOT NULL,
-                        action TEXT NOT NULL, state TEXT NOT NULL, actor TEXT NOT NULL,
-                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, detail TEXT NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS audit (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, actor TEXT NOT NULL,
-                        event TEXT NOT NULL, created_at TEXT NOT NULL, detail TEXT NOT NULL,
-                        FOREIGN KEY(job_id) REFERENCES jobs(id)
-                    );
-                    CREATE TABLE IF NOT EXISTS job_events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
-                        event TEXT NOT NULL, created_at TEXT NOT NULL, detail TEXT NOT NULL,
-                        FOREIGN KEY(job_id) REFERENCES jobs(id)
-                    );
-                """)
-                existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
-                additions = {
-                    "idempotency_key": "TEXT",
-                    "step_id": "TEXT NOT NULL DEFAULT ''",
-                    "lease_owner": "TEXT NOT NULL DEFAULT ''",
-                    "lease_expires_at": "TEXT NOT NULL DEFAULT ''",
-                    "heartbeat_at": "TEXT NOT NULL DEFAULT ''",
-                    "error_code": "TEXT NOT NULL DEFAULT ''",
-                    # Set when someone asks to cancel a running job; the runner
-                    # stops at its next checkpoint and marks it cancelled.
-                    "cancel_requested_at": "TEXT NOT NULL DEFAULT ''",
-                    # Non-secret inputs the worker needs, e.g. which backup to restore.
-                    "params_json": "TEXT NOT NULL DEFAULT '{}'",
-                }
-                for name, declaration in additions.items():
-                    if name not in existing:
-                        conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
-                conn.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_key "
-                    "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"
-                )
-        return conn
+        return db.connect(self.database)
 
     def create(
         self,
@@ -163,7 +119,7 @@ class JobStore:
         """Create a queued job. Callers must authenticate and authorize first.
 
         ``params`` holds small, non-secret worker inputs; secrets belong in
-        ``ctl.workflow_secrets``.
+        ``ctl.store.workflows``.
 
         ``prepare(job_id)`` runs inside the insert's transaction, before the job
         can be claimed, and only when a new job is actually created; if it

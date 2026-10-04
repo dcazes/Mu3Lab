@@ -181,9 +181,7 @@ class ProviderRouteTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         store.return_value.by_idempotency_key.return_value = None
         store.return_value.create.return_value = {"id": "job-1"}
-        self.saved = patch(
-            "ctl.provider_secrets.save", side_effect=lambda pid, label, _key: {"id": pid, "label": label}
-        )
+        self.saved = patch("ctl.store.providers.save", side_effect=lambda pid, label, _key: {"id": pid, "label": label})
         self.save = self.saved.start()
         self.client = TestClient(create_app())
 

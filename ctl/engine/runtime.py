@@ -5,14 +5,14 @@ from __future__ import annotations
 from functools import partial
 from pathlib import Path
 
-from ctl import onboarding_state
 from ctl.engine.project import Facts, render
 from ctl.manifest.catalog import App
 from ctl.registry import Service, load
 from ctl.rules import Rule, rules_for
 from ctl.runtime import RuntimePaths
 from ctl.service_state import tailnet_dns_name
-from ctl.workflow_secrets import JobIdentity
+from ctl.store import onboarding as onboarding_state
+from ctl.store.workflows import JobIdentity
 
 
 def render_rules(app: App, facts: Facts, rules: list[Rule], owner: JobIdentity | None) -> Path:

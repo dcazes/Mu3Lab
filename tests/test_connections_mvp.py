@@ -12,8 +12,8 @@ from ctl.control_state import ControlState
 from ctl.core_wiring import configure
 from ctl.jobs import JobStore
 from ctl.provider_catalog import catalog, get, prefix_warning
-from ctl.provider_secrets import save
 from ctl.runtime import RuntimePaths
+from ctl.store.providers import save
 from tests.support import render_core_projects
 
 
@@ -44,7 +44,7 @@ class ProviderCatalogTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             render_core_projects(paths)
             save("groq", "Groq", "gsk_private", paths)
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             state.set_provider("groq", "Groq", state="degraded")
             self.assertEqual(configure(paths)["provider_count"], 0)
             state.set_provider("groq", "Groq", state="verified", verified=True)

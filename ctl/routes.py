@@ -11,7 +11,7 @@ from ctl.engine.launch import caddy_handler
 from ctl.platform_apps import by_capability
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
-from ctl.secrets import read_runtime_env
+from ctl.secrets import platform_values
 from ctl.service_state import status as service_status
 from ctl.service_state import tailnet_dns_name
 
@@ -52,7 +52,7 @@ def _write_candidate(registry: Registry, root: Path, exclude: frozenset[str] = f
     base = source.read_text(encoding="utf-8")
     services = _generated_services(registry, root, exclude)
     candidate.write_text(render(base, services), encoding="utf-8")
-    ingress_token = read_runtime_env(root / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    ingress_token = platform_values().get("MU3LAB_INGRESS_TOKEN", "")
     return target, candidate, ingress_token
 
 

@@ -149,7 +149,7 @@ class AgentSyncTests(unittest.TestCase):
             chat_connections.poll("person", client, paths)
             client.create_key.assert_called_once()
             self.assertNotIn("oidc-secret", str(chat_connections.records(paths)))
-            self.assertNotIn(b"sk-lh-secret", (paths.runtime / "chat-connections.enc").read_bytes())
+            self.assertNotIn(b"sk-lh-secret", (paths.state / "mu3lab.db").read_bytes())
 
     def test_another_person_cannot_poll_the_device_code(self):
         with tempfile.TemporaryDirectory() as tmp:
