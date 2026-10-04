@@ -24,6 +24,7 @@ from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
 from ctl.jobs import JobStore, redact
+from ctl.platform_apps import by_capability
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
@@ -230,7 +231,7 @@ def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep) -> bool:
 
 def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     """Check application-level contracts after container health has passed."""
-    litellm_env = read_runtime_env(runtime.projects / "litellm" / ".env")
+    litellm_env = read_runtime_env(runtime.projects / by_capability("model_proxy").id / ".env")
     key = litellm_env.get("LITELLM_MASTER_KEY", "")
     if not key or not _http_ok("http://127.0.0.1:4000/v1/models", headers={"Authorization": f"Bearer {key}"}):
         return False, "LiteLLM did not expose its authenticated model registry"
@@ -238,7 +239,7 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "Ollama model registry did not answer"
     if not _http_ok("http://127.0.0.1:3211/__mu3lab_lobehub_health"):
         return False, "LobeChat did not answer its private health endpoint"
-    lobehub = read_runtime_env(runtime.projects / "lobehub" / ".env")
+    lobehub = read_runtime_env(runtime.projects / by_capability("chat").id / ".env")
     if not all(lobehub.get(key) for key in ("AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", "APP_URL")):
         return False, "LobeChat's Authentik sign-in configuration is incomplete"
     if not wiring["chat_configured"]:

@@ -11,6 +11,7 @@ from ctl.api.security import IdentityData
 from ctl.control_state import ControlState
 from ctl.identity import projection as identity_projection
 from ctl.jobs import JobStore
+from ctl.platform_apps import by_capability
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -48,7 +49,7 @@ def service_snapshot(identity: IdentityData | None = None) -> dict[str, Any]:
         live_state = str(item["state"])
         # Traversing the protected dashboard through Authentik is stronger
         # evidence than a static manifest route flag.
-        if service.id == "authentik" and operator and item["health_state"] == "healthy":
+        if service.id == by_capability("identity_provider").id and operator and item["health_state"] == "healthy":
             auth_url = f"https://{dns_name}" if dns_name else ""
             item.update(
                 {

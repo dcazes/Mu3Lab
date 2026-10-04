@@ -20,7 +20,8 @@ from ctl.rules import Params, Rule, register
 class EmbeddingParams(Params):
     model: str
     at: Literal["before_start", "after_healthy"] = "before_start"
-    runner: str = "ollama"  # the app that serves local models
+    runner: str = ""
+    pull_command: tuple[str, ...] = ()
 
 
 @register
@@ -57,7 +58,7 @@ class NeedsEmbeddingModel(Rule):
             project = ctx.facts.paths.projects / runner.id
             folder = project
             service = next(iter(compose_images(folder / "docker-compose.yml")), runner.id)
-            rc, _ = Compose(folder).exec(service, ["ollama", "pull", model], ctx.log, timeout=600)
+            rc, _ = Compose(folder).exec(service, [*self.params.pull_command, model], ctx.log, timeout=600)
             if rc:
                 ctx.fail(
                     "embedding_check", "embedding_probe_failed", "The local embedding model could not be downloaded."

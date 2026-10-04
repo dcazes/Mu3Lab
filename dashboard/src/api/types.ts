@@ -579,6 +579,7 @@ export interface ChatProvider {
 }
 
 export interface ChatStatus {
+  connected?: boolean;
   ok: boolean;
   ready: boolean;
   url: string;

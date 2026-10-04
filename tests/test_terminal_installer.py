@@ -10,8 +10,9 @@ from unittest.mock import patch
 
 import httpx
 
-from ctl import core_setup, vaultwarden_api
+from ctl import core_setup
 from ctl.bootstrap import terminal
+from ctl.integrations.vaultwarden import bootstrap as vaultwarden_api
 
 
 class RegisterTests(unittest.TestCase):

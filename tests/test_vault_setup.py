@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
-from urllib.parse import parse_qs
 
-import httpx
 from fastapi.testclient import TestClient
 
-from ctl import vaultwarden_api as vw
 from ctl.api import create_app
 from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
 from ctl.identity import mode_for
+from ctl.integrations.vaultwarden import bootstrap as vw
+from ctl.integrations.vaultwarden.cli import VaultSession
 from ctl.provider_catalog import PROVIDERS, setup_progress
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -30,85 +27,76 @@ KDF = {"kdf": vw.KDF_PBKDF2, "kdfIterations": 5000}
 
 
 class FakeVaultwarden:
-    """An in-memory server speaking the subset of the protocol Mu3Lab uses."""
+    """A fake official CLI boundary; plaintext is handled only by bw."""
 
     def __init__(self, *, totp: str = "") -> None:
-        master_key = vw.derive_master_key(PASSWORD, EMAIL, KDF)
-        self.password_hash = vw.master_password_hash(master_key, PASSWORD)
-        self.user_key = vw.SymmetricKey.from_bytes(os.urandom(64))
-        self.protected_key = vw.encrypt(self.user_key.enc + self.user_key.mac, vw.stretch(master_key))
         self.totp = totp
-        self.folders: list[dict[str, Any]] = []
-        self.ciphers: list[dict[str, Any]] = []
-        self.requests: list[str] = []
+        self.folders = []
+        self.ciphers = []
 
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self.handle)
+    def run(self, *args, body=None, raw=False):
+        if args[0] == "config":
+            return ""
+        if args[0] == "login":
+            return "session"
+        if args[0] == "sync":
+            return ""
+        if args[:2] == ("list", "folders"):
+            return self.folders
+        if args[:2] == ("list", "items"):
+            return self.ciphers
+        if args[:2] == ("create", "folder"):
+            value = dict(body, id=str(uuid.uuid4()))
+            self.folders.append(value)
+            return value
+        if args[:2] == ("create", "item"):
+            value = dict(body, id=str(uuid.uuid4()))
+            self.ciphers.append(value)
+            return value
+        if args[:2] == ("edit", "item"):
+            index = next(i for i, item in enumerate(self.ciphers) if item["id"] == args[2])
+            self.ciphers[index] = body
+            return body
+        raise AssertionError(args)
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        self.requests.append(f"{request.method} {path}")
-        if path == "/identity/accounts/prelogin":
-            return httpx.Response(200, json=KDF)
-        if path == "/identity/connect/token":
-            form = {key: values[0] for key, values in parse_qs(request.content.decode()).items()}
-            if form.get("username") != EMAIL or form.get("password") != self.password_hash:
-                return httpx.Response(400, json={"error": "invalid_grant"})
-            if self.totp and form.get("twoFactorToken") != self.totp:
-                return httpx.Response(400, json={"TwoFactorProviders": [0]})
-            return httpx.Response(200, json={"access_token": "token", "Key": self.protected_key})
-        if request.headers.get("authorization") != "Bearer token":
-            return httpx.Response(401)
-        body = json.loads(request.content) if request.content else {}
-        if path == "/api/sync":
-            return httpx.Response(200, json={"folders": self.folders, "ciphers": self.ciphers})
-        if path == "/api/folders":
-            folder = {"id": str(uuid.uuid4()), "name": body["name"]}
-            self.folders.append(folder)
-            return httpx.Response(200, json=folder)
-        if path == "/api/ciphers" and request.method == "POST":
-            cipher = {**body, "id": str(uuid.uuid4()), "object": "cipher"}
-            self.ciphers.append(cipher)
-            return httpx.Response(200, json=cipher)
-        if path.startswith("/api/ciphers/") and request.method == "PUT":
-            cipher_id = path.rsplit("/", 1)[-1]
-            index = next(i for i, item in enumerate(self.ciphers) if item["id"] == cipher_id)
-            self.ciphers[index] = {**body, "id": cipher_id}
-            return httpx.Response(200, json=self.ciphers[index])
-        return httpx.Response(404)
-
-    def add_login(self, name: str, uri: str, password: str = "mine", **extra: Any) -> None:
-        key = self.user_key
+    def add_login(self, name: str, uri: str, password: str = "mine", **extra):
         self.ciphers.append(
             {
                 "id": str(uuid.uuid4()),
-                "type": vw.LOGIN_ITEM,
-                "name": vw.encrypt(name, key),
-                "login": {"password": vw.encrypt(password, key), "uris": [{"uri": vw.encrypt(uri, key)}]},
+                "type": 1,
+                "name": name,
+                "login": {"password": password, "uris": [{"uri": uri}]},
                 **extra,
             }
         )
 
-    def decrypted(self) -> dict[str, dict[str, Any]]:
-        key = self.user_key
-        folders = {folder["id"]: vw.decrypt(folder["name"], key) for folder in self.folders}
-        result = {}
-        for cipher in self.ciphers:
-            if cipher.get("organizationId"):
-                continue
-            login = cipher.get("login") or {}
-            result[vw.decrypt(cipher["name"], key)] = {
-                "folder": folders.get(cipher.get("folderId") or ""),
-                "username": vw.decrypt(login.get("username"), key),
-                "password": vw.decrypt(login.get("password"), key),
-                "uris": [(vw.decrypt(uri["uri"], key), uri.get("match")) for uri in login.get("uris") or []],
-                "history": len(cipher.get("passwordHistory") or []),
+    def decrypted(self):
+        folders = {f["id"]: f["name"] for f in self.folders}
+        return {
+            i["name"]: {
+                "folder": folders.get(i.get("folderId")),
+                "username": i.get("login", {}).get("username", ""),
+                "password": i.get("login", {}).get("password", ""),
+                "uris": [(u["uri"], u.get("match")) for u in i.get("login", {}).get("uris", [])],
+                "history": len(i.get("passwordHistory") or []),
             }
-        return result
+            for i in self.ciphers
+            if not i.get("organizationId")
+        }
 
 
-def session_for(server: FakeVaultwarden) -> vw.VaultSession:
-    return vw.VaultSession("http://vault.test", client=httpx.Client(transport=server.transport()))
+def session_for(server):
+    session = VaultSession("http://vault.test")
+    session.run = server.run
+
+    def login(email, password, *, totp=""):
+        if password != PASSWORD:
+            raise vw.VaultError("Vaultwarden did not accept that email and master password.", "invalid_credentials")
+        if server.totp and server.totp != totp:
+            raise vw.VaultError("Enter the current code.", "two_factor_required")
+
+    session.login = login
+    return session
 
 
 class CryptoTests(unittest.TestCase):
@@ -297,9 +285,8 @@ class VaultRouteTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.server = FakeVaultwarden()
-        client = httpx.Client(transport=self.server.transport())
         for target, value in (
-            ("ctl.api.routes.vault.VaultSession", lambda url: vw.VaultSession(url, client=client)),
+            ("ctl.api.routes.vault.VaultSession", lambda url: session_for(self.server)),
             ("ctl.api.routes.vault._host", lambda: "h.ts.net"),
             ("ctl.api.routes.vault.JobStore.runtime", lambda: None),
             ("ctl.api.routes.vault.ControlState.runtime", lambda: None),
@@ -367,7 +354,9 @@ class FreeLlmApiGateTests(unittest.TestCase):
         self.assertIn("target: !KeyOf mu3lab-freellmapi-application", content)
 
     def test_caddy_forward_auths_the_freellmapi_route(self):
-        caddy = (Path(__file__).resolve().parents[1] / "apps" / "ingress" / "Caddyfile.authenticated").read_text()
+        from ctl.routes import render
+
+        caddy = render("", [load_registry().get("freellmapi")])
         block = caddy.split(":19472 {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("forward_auth 127.0.0.1:9001", block)
         self.assertIn("header_up Host {http.request.hostport}", block)

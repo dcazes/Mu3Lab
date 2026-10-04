@@ -1,0 +1,33 @@
+:19475 {
+	bind 127.0.0.1
+	@api_token {
+		path /api/*
+		header Authorization "Token *"
+	}
+	route {
+		handle @api_token {
+			reverse_proxy 127.0.0.1:8002 {
+				header_up -Remote-User
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-Host {http.request.hostport}
+			}
+		}
+		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+		forward_auth 127.0.0.1:9001 {
+			uri /outpost.goauthentik.io/auth/caddy
+			header_up Host {http.request.hostport}
+			header_up X-Forwarded-Host {http.request.hostport}
+			header_up X-Forwarded-Proto https
+			copy_headers X-Authentik-Username
+			trusted_proxies private_ranges
+		}
+		# Set replaces any client-sent Remote-User. Never also delete
+		# Remote-User in this block: Caddy applies deletes after sets, so the
+		# verified identity would be dropped and Baby Buddy shows its login.
+		reverse_proxy 127.0.0.1:8002 {
+			header_up Remote-User {http.request.header.X-Authentik-Username}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {http.request.hostport}
+		}
+	}
+}

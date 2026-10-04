@@ -15,6 +15,7 @@ from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Identity, IdentityData, mutation_allowed
 from ctl.control_state import ControlState
+from ctl.platform_apps import by_capability
 
 router = APIRouter(prefix="/api/v1/calendar", tags=["calendar"])
 
@@ -60,7 +61,7 @@ def _conflict_status(exc: calendar.CalendarError) -> int:
 
 
 def readiness(state: ControlState) -> str:
-    installation = state.installation("nextcloud")
+    installation = state.installation(by_capability("files_calendar").id)
     if not installation:
         return "not_installed"
     installation_state = str(installation.get("state", ""))
@@ -71,14 +72,16 @@ def readiness(state: ControlState) -> str:
             from ctl.registry import load as load_registry
             from ctl.service_state import _healthy
 
-            installation_state = "running" if _healthy(load_registry().get("nextcloud"))[0] else "stopped"
+            installation_state = (
+                "running" if _healthy(load_registry().get(by_capability("files_calendar").id))[0] else "stopped"
+            )
         except Exception:
             installation_state = "stopped"
     if installation_state == "stopped":
         return "service_stopped"
     if installation_state not in {"running", "degraded"}:
         return "not_installed"
-    identity_state = state.service_identity("nextcloud")
+    identity_state = state.service_identity(by_capability("files_calendar").id)
     if not identity_state or identity_state.get("state") in {"unconfigured", "degraded"}:
         return "sso_not_ready"
     return "ready"
@@ -165,7 +168,7 @@ def start_authorization(writer: Writer) -> JSONResponse:
     ready = readiness(state)
     # Login Flow v2 also finishes a staged owner migration, so
     # migration_required is intentionally permitted here.
-    identity_state = state.service_identity("nextcloud") or {}
+    identity_state = state.service_identity(by_capability("files_calendar").id) or {}
     if ready != "ready" and identity_state.get("state") != "migration_required":
         raise _not_ready_error(ready)
     try:

@@ -22,13 +22,14 @@ from typing import Any
 
 from ctl import onboarding_state
 from ctl.identity import authentik_only
+from ctl.integrations.vaultwarden import MATCH_HOST, VaultError, register
+from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, OrgSession
+from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
-from ctl.vault_org import STATUS_ACCEPTED, STATUS_CONFIRMED, OrgSession
 from ctl.vault_setup import FREELLMAPI_ACCOUNT, VAULTWARDEN_LOCAL_URL
-from ctl.vaultwarden_api import MATCH_HOST, VaultError, register
 
 SERVICE_EMAIL = "mu3lab-service@vault.mu3lab.invalid"
 SERVICE_NAME = "Mu3Lab"
@@ -98,7 +99,9 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
             )
         )
     if person.get("role") == "admin" and host:
-        freellmapi = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_ADMIN_PASSWORD", "")
+        freellmapi = read_runtime_env(paths.projects / by_capability("provider_gateway").id / ".env").get(
+            "FREELLMAPI_ADMIN_PASSWORD", ""
+        )
         if freellmapi and not _saved_personally(person, paths):
             items.append(
                 Item(
@@ -106,11 +109,13 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                     "FreeLLMAPI dashboard",
                     FREELLMAPI_ACCOUNT,
                     freellmapi,
-                    _origin(host, registry.get("freellmapi").private_https_port),
+                    _origin(host, registry.get(by_capability("provider_gateway").id).private_https_port),
                     "Created by Mu3Lab. Authentik guards this page; this login unlocks it.",
                 )
             )
-        master_key = read_runtime_env(paths.projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
+        master_key = read_runtime_env(paths.projects / by_capability("model_proxy").id / ".env").get(
+            "LITELLM_MASTER_KEY", ""
+        )
         if master_key:
             items.append(
                 Item(
@@ -118,7 +123,7 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                     "LiteLLM admin",
                     "admin",
                     master_key,
-                    _origin(host, registry.get("litellm").private_https_port),
+                    _origin(host, registry.get(by_capability("model_proxy").id).private_https_port),
                     "Created by Mu3Lab. Authentik guards this page; this login unlocks it.",
                 )
             )
@@ -281,7 +286,4 @@ def run(log) -> dict[str, Any] | None:
 
 
 def session_password(login, org_key) -> str:
-    from ctl.vaultwarden_api import SymmetricKey, decrypt, decrypt_bytes
-
-    key = SymmetricKey.from_bytes(decrypt_bytes(login.raw["key"], org_key)) if login.raw.get("key") else org_key
-    return decrypt((login.raw.get("login") or {}).get("password"), key)
+    return str((login.raw.get("login") or {}).get("password") or "")

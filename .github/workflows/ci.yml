@@ -24,6 +24,7 @@ jobs:
         run: uv sync --frozen
       - name: Python lint and format
         run: |
+          uv run --frozen python tools/check_no_app_ids.py
           uv run --frozen ruff check .
           uv run --frozen ruff format --check .
       - name: Python type check
@@ -53,60 +54,7 @@ jobs:
       - name: Validate app manifests and chat connectors
         run: uv run --frozen python -c "from ctl.manifest.catalog import load; print(len(load().apps), 'apps valid')"
       - name: Validate Compose interpolation
-        run: |
-          while IFS= read -r compose_file; do
-            MU3LAB_ENV_FILE=/dev/null \
-            AUTHENTIK_ENV_FILE=/dev/null \
-            AUTHENTIK_SECRET_KEY=ci-placeholder \
-            AUTHENTIK_POSTGRESQL__PASSWORD=ci-placeholder \
-            MU3LAB_INGRESS_TOKEN=ci-placeholder \
-            MU3LAB_DATA_ROOT=/srv/mu3lab/data \
-            DB_PASSWORD=ci-placeholder \
-            SECRET_KEY=ci-placeholder \
-            ZERO_ADMIN_PASSWORD=ci-placeholder \
-            SEARXNG_SECRET=ci-placeholder \
-            SURFSENSE_PUBLIC_URL=https://example.ts.net:8447 \
-            POSTGRES_PASSWORD=ci-placeholder \
-            DJANGO_ADMIN_USERNAME=ci-operator \
-            DJANGO_ADMIN_EMAIL=operator@example.test \
-            DJANGO_ADMIN_PASSWORD=ci-placeholder \
-            PAPERLESS_ADMIN_USER=ci-operator \
-            PAPERLESS_ADMIN_MAIL=operator@example.test \
-            PAPERLESS_ADMIN_PASSWORD=ci-placeholder \
-            PAPERLESS_DBPASS=ci-placeholder \
-            PAPERLESS_SECRET_KEY=ci-placeholder \
-            ACTUAL_PASSWORD=ci-placeholder \
-            ACTUAL_BUDGET_SYNC_ID=ci-placeholder \
-            MCP_AUTH_TOKEN=ci-placeholder \
-            MEALIE_API_TOKEN=ci-placeholder \
-            IMMICH_API_KEY=ci-placeholder \
-            PAPERLESS_API_KEY=ci-placeholder \
-            BULL_AUTH_KEY=ci-placeholder \
-            RABBITMQ_DEFAULT_PASS=ci-placeholder \
-            NEXTCLOUD_USERNAME=ci-operator \
-            NEXTCLOUD_APP_PASSWORD=ci-placeholder \
-            ADVENTURELOG_API_KEY=ci-placeholder \
-            APP_URL=https://example.ts.net:8448 \
-            AUTH_AUTHENTIK_ID=ci-placeholder \
-            AUTH_AUTHENTIK_ISSUER=https://example.ts.net/application/o/lobehub/ \
-            AUTH_AUTHENTIK_SECRET=ci-placeholder \
-            AUTH_SECRET=ci-placeholder \
-            KEY_VAULTS_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
-            LITELLM_MASTER_KEY=ci-placeholder \
-            RUSTFS_ACCESS_KEY=ci-placeholder \
-            RUSTFS_SECRET_KEY=ci-placeholder \
-            S3_ENDPOINT=http://rustfs:9000 \
-            NEXTCLOUD_TRUSTED_DOMAINS=cloud.example.test \
-            NEXTCLOUD_OVERWRITECLIURL=https://cloud.example.test \
-            NEXTCLOUD_OVERWRITEHOST=cloud.example.test \
-            NEXTCLOUD_DB_PASSWORD=ci-placeholder \
-            NEXTCLOUD_REDIS_PASSWORD=ci-placeholder \
-            BABY_BUDDY_PUBLIC_URL=https://example.ts.net:8458 \
-            BABY_BUDDY_SECRET_KEY=ci-placeholder \
-            MU3LAB_UID=1000 \
-            MU3LAB_GID=1000 \
-              docker compose -f "$compose_file" config --quiet
-          done < <(find apps platform -name docker-compose.yml -type f | sort)
+        run: uv run --frozen python -m tools.validate_compose
       - name: Scan tracked files for accidental private environment files
         run: |
           ! git ls-files | grep -E '(^|/)\.env$'

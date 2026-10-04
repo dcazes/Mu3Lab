@@ -1,5 +1,6 @@
 # Baby Buddy — see ctl/manifest/models.py for every field.
 id: baby-buddy
+capabilities: [care]
 name: Baby Buddy
 tier: optional
 group: apps

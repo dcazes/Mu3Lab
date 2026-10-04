@@ -13,6 +13,7 @@ from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OperatorMutation
 from ctl.jobs import JobStore
+from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.service_state import tailnet_dns_name
 
@@ -23,7 +24,7 @@ _NO_STORE = {"Cache-Control": "no-store"}
 
 def _authentik_origin() -> str:
     host = tailnet_dns_name()
-    port = load_registry().get("authentik").private_https_port
+    port = load_registry().get(by_capability("identity_provider").id).private_https_port
     if not host or not port:
         raise ApiError(503, "Authentik's private address is not ready yet.")
     return f"https://{host}" if port == 443 else f"https://{host}:{port}"

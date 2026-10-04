@@ -1,5 +1,6 @@
 # Nextcloud — see ctl/manifest/models.py for every field.
 id: nextcloud
+capabilities: [files_calendar]
 name: Nextcloud
 tier: optional
 group: apps

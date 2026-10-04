@@ -1,5 +1,6 @@
 # Immich — see ctl/manifest/models.py for every field.
 id: immich
+capabilities: [photos]
 name: Immich
 tier: optional
 group: apps

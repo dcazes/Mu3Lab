@@ -1,5 +1,6 @@
 # Mealie — see ctl/manifest/models.py for every field.
 id: mealie
+capabilities: [recipes]
 name: Mealie
 tier: optional
 group: apps

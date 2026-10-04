@@ -1,5 +1,6 @@
 # SurfSense — see ctl/manifest/models.py for every field.
 id: surfsense
+capabilities: [research]
 name: SurfSense
 tier: optional
 group: apps
@@ -66,6 +67,8 @@ configuration:
 rules:
 - rule: needs_embedding_model
   with:
+    runner: ollama
+    pull_command: [ollama, pull]
     model: nomic-embed-text
 chat:
   assistant:

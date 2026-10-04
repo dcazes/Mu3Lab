@@ -120,54 +120,46 @@ def _authorize_target(url: str) -> dict[str, str]:
     return {key: values[0] for key, values in query.items() if values}
 
 
-# Apps whose login page starts sign-in with a JSON POST that returns
-# Authentik's address: (path, body, where the address is in the reply, name).
-_JSON_LAUNCH: dict[str, tuple[str, dict[str, object], tuple[str, ...], str]] = {
-    "actual-budget": (
-        "/account/login",
-        {"loginMethod": "openid", "returnUrl": "{origin}"},
-        ("data", "returnUrl"),
-        "Actual Budget",
-    ),
-    "immich": ("/api/oauth/authorize", {"redirectUri": "{origin}/auth/login"}, ("url",), "Immich"),
-    "lobehub": (
-        "/api/auth/sign-in/oauth2",
-        {"providerId": "authentik", "callbackURL": "{origin}/", "disableRedirect": True},
-        ("url",),
-        "LobeChat",
-    ),
-}
-
-
 def _json_launch(service_id: str, client: httpx.Client, origin: str) -> httpx.Response:
-    path, template, keys, name = _JSON_LAUNCH[service_id]
-    body = {key: value.format(origin=origin) if isinstance(value, str) else value for key, value in template.items()}
-    response = client.post(origin + path, json=body)
+    manifest = load().get(service_id).manifest
+    oidc = manifest.sign_in.oidc
+    assert oidc is not None and oidc.json_launch is not None
+    launch = oidc.json_launch
+    body = {
+        key: value.replace("{origin}", origin) if isinstance(value, str) else value
+        for key, value in launch.body.items()
+    }
+    response = client.post(origin + launch.path, json=body)
     _check_cookies(response, urlsplit(origin).hostname or "")
     target: object = response.json() if response.content else {}
-    for key in keys:
+    for key in launch.url_key:
         target = target.get(key, "") if isinstance(target, dict) else ""
     if response.status_code not in (200, 201) or not isinstance(target, str) or not target:
-        raise SignInError(f"{name} did not start an Authentik sign-in.")
+        raise SignInError(f"{manifest.name} did not start an Authentik sign-in.")
     return httpx.Response(302, headers={"location": target}, request=response.request)
 
 
 def _entry(service_id: str, client: httpx.Client, origin: str, launch_path: str) -> httpx.Response:
-    """Start sign-in the way the app's own login page does."""
-    if service_id in _JSON_LAUNCH:
+    """Start sign-in using the protocol declared by the app."""
+    manifest = load().get(service_id).manifest
+    oidc = manifest.sign_in.oidc
+    assert oidc is not None
+    if oidc.launch == "json_post":
         return _json_launch(service_id, client, origin)
-    if service_id == "paperless-ngx":
+    if oidc.launch == "csrf_form":
         page = client.get(origin + launch_path)
         _check_cookies(page, urlsplit(origin).hostname or "")
         if page.headers.get("referrer-policy", "").lower() == "no-referrer":
-            # Browsers then send "Origin: null" with the form, which CSRF rejects.
-            raise SignInError("Paperless's sign-in page would be rejected by its own security check.")
+            raise SignInError(f"{manifest.name}'s sign-in page would be rejected by its own security check.")
         token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', page.text)
         action = re.search(r'<form id="login" method="post" action="([^"]+)"', page.text)
         if page.status_code != 200 or not token or not action:
-            raise SignInError("Paperless did not serve its Authentik sign-in page.")
+            raise SignInError(f"{manifest.name} did not serve its Authentik sign-in page.")
+        target = urljoin(origin + launch_path, action.group(1))
+        if urlsplit(target).netloc != urlsplit(origin).netloc:
+            raise SignInError("The sign-in form points outside the app.")
         return client.post(
-            origin + action.group(1),
+            target,
             data={"csrfmiddlewaretoken": token.group(1)},
             headers={"Origin": origin, "Referer": origin + launch_path},
         )
@@ -197,13 +189,20 @@ def _check_secret(client: httpx.Client, token_endpoint: str, client_id: str, sec
 
 
 def _check_first_run(service_id: str, client: httpx.Client, origin: str) -> None:
-    if service_id == "actual-budget":
-        data = client.get(origin + "/account/needs-bootstrap").json().get("data", {})
-        if not data.get("bootstrapped") or data.get("loginMethod") != "openid":
-            raise SignInError("Actual Budget is waiting for a first-time password instead of using Authentik.")
-    elif service_id == "mealie":
-        if client.get(origin + "/api/app/about/startup-info").json().get("isFirstLogin"):
-            raise SignInError("Mealie still shows its first-time login screen.")
+    contract = load().get(service_id).manifest.sign_in.oidc
+    if not contract:
+        return
+    for check in contract.first_run_checks:
+        response = client.get(origin + check.path)
+        if not response.is_success:
+            raise SignInError(check.message)
+        document = response.json()
+        for dotted, expected in check.expect.items():
+            value = document
+            for key in dotted.split("."):
+                value = value.get(key) if isinstance(value, dict) else None
+            if value != expected:
+                raise SignInError(check.message)
 
 
 def verify_oidc(

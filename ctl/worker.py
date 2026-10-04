@@ -18,6 +18,7 @@ from ctl import job_guard, self_update, workflow_secrets
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.jobs import JobStore
+from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
 from ctl.service_ops import execute_claimed as execute_service_claimed
@@ -89,7 +90,7 @@ def run() -> int:
     stopping = False
     waiting_for_runtime_reported = False
     next_mcp_reconcile = 0.0
-    next_mcp_activity = 0.0
+    next_chat_sync = 0.0
     next_rule_maintenance = 0.0
     next_vault_sync = 0.0
 
@@ -140,14 +141,12 @@ def run() -> int:
                 reconcile_lifecycle(ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}", flush=True)
-        if time.monotonic() >= next_mcp_activity:
-            next_mcp_activity = time.monotonic() + 60
+        if time.monotonic() >= next_chat_sync:
+            next_chat_sync = time.monotonic() + 300
             try:
-                from ctl.mcp_chat_activity import ingest
-
-                ingest(lambda line: print(line, flush=True))
+                sync_agents(lambda line: print(line, flush=True))
             except Exception as exc:
-                print(f"Mu3Lab MCP activity import deferred: {exc}", flush=True)
+                print(f"Mu3Lab chat assistant synchronization deferred: {exc}", flush=True)
         try:
             from ctl.install_batches import InstallBatchStore
 

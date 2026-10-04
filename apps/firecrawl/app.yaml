@@ -1,5 +1,6 @@
 # Firecrawl — see ctl/manifest/models.py for every field.
 id: firecrawl
+capabilities: [web_fetch]
 name: Firecrawl
 tier: core
 group: ai

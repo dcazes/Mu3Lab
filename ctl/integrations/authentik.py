@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from ctl.jobs import redact_data
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
@@ -43,7 +44,9 @@ def password_hash(password: str, *, salt: str | None = None, iterations: int = P
 
 
 def api_token(paths: RuntimePaths | None = None) -> str:
-    return read_runtime_env((paths or RuntimePaths()).projects / "authentik" / ".env").get(TOKEN_ENV, "")
+    return read_runtime_env((paths or RuntimePaths()).projects / by_capability("identity_provider").id / ".env").get(
+        TOKEN_ENV, ""
+    )
 
 
 @dataclass

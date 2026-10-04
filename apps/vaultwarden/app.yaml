@@ -1,5 +1,6 @@
 # Vaultwarden — see ctl/manifest/models.py for every field.
 id: vaultwarden
+capabilities: [password_store]
 name: Vaultwarden
 tier: foundation
 group: apps
@@ -18,6 +19,12 @@ route:
   https_port: 8443
   caddy_port: 19462
   generated: false
+secrets:
+- env: MU3LAB_ADMIN_PASSWORD
+  length: 48
+- env: ADMIN_TOKEN
+  kind: argon2
+  source_env: MU3LAB_ADMIN_PASSWORD
 sign_in:
   method: local
   note: Independent Vaultwarden login; never Authentik-gated.

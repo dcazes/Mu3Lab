@@ -49,3 +49,37 @@ mu3lab_ensure_uv() {
 mu3lab_sync_python() {
   (cd "$ROOT" && "$MU3LAB_UV" sync --frozen --no-dev --quiet)
 }
+
+MU3LAB_BW_VERSION="2026.5.0"
+declare -A MU3LAB_BW_SHA256=(
+  [x86_64]="5ddbf5383bec9c71613d7b699ffa5249b5e7b68b2a3d15b4c75738ba8a8f9a19"
+  [aarch64]="5b744b976ab49400c8b4470b1db51c2911e66cdd7a8398ad36a5ab6a85568d27"
+)
+mu3lab_ensure_bw() {
+  local arch expected archive work binary
+  arch="$(uname -m)"
+  binary="$ROOT/.tools/bin/bw"
+  if [[ -x "$binary" ]] && [[ "$("$binary" --version 2>/dev/null)" == "$MU3LAB_BW_VERSION" ]]; then
+    return 0
+  fi
+  expected="${MU3LAB_BW_SHA256[$arch]:-}"
+  [[ -n "$expected" ]] || { echo "Bitwarden does not support this processor." >&2; return 1; }
+  archive="bw-linux-$MU3LAB_BW_VERSION.zip"
+  [[ "$arch" != aarch64 ]] || archive="bw-linux-arm64-$MU3LAB_BW_VERSION.zip"
+  work="$(mktemp -d)"
+  if ! curl -fsSL "https://github.com/bitwarden/clients/releases/download/cli-v$MU3LAB_BW_VERSION/$archive" -o "$work/bw.zip"; then
+    rm -rf "$work"; return 1
+  fi
+  if [[ "$(sha256sum "$work/bw.zip" | cut -d' ' -f1)" != "$expected" ]]; then
+    echo "Bitwarden's checksum did not match; nothing was installed." >&2
+    rm -rf "$work"; return 1
+  fi
+  if ! "$ROOT/.venv/bin/python" -m zipfile -e "$work/bw.zip" "$work"; then
+    rm -rf "$work"; return 1
+  fi
+  mkdir -p "$ROOT/.tools/bin"
+  if ! install -m 0755 "$work/bw" "$binary"; then
+    rm -rf "$work"; return 1
+  fi
+  rm -rf "$work"
+}

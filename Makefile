@@ -21,6 +21,7 @@ start:
 dev-setup:
 	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_uv'
 	$(UV) sync --frozen
+	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_bw'
 	cd dashboard && npm ci
 
 test:
@@ -28,6 +29,7 @@ test:
 	cd dashboard && npm test
 
 lint:
+	$(RUN) python tools/check_no_app_ids.py
 	$(RUN) ruff check .
 	$(RUN) ruff format --check .
 	cd dashboard && npm run lint && npm run format:check

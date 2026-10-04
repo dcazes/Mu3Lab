@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
@@ -50,7 +51,7 @@ class GatewayAdmin:
 
     @classmethod
     def sign_in(cls, paths: RuntimePaths | None = None) -> GatewayAdmin:
-        env = read_runtime_env((paths or RuntimePaths()).projects / "freellmapi" / ".env")
+        env = read_runtime_env((paths or RuntimePaths()).projects / by_capability("provider_gateway").id / ".env")
         password = env.get("FREELLMAPI_ADMIN_PASSWORD", "")
         if not password:
             raise GatewayAdminError("FreeLLMAPI's internal account is not set up.")

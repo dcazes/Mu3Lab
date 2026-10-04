@@ -84,7 +84,7 @@ class RegistryV3Tests(unittest.TestCase):
 
     def test_optional_route_regeneration_preserves_core_ui_routes(self):
         base = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
-        rendered = render(base, [load().get("mealie")])
+        rendered = render(base, [load().get(app_id) for app_id in ("mealie", "litellm", "freellmapi")])
         self.assertIn(":19471 {", rendered)
         self.assertIn(":19472 {", rendered)
         self.assertIn(":19467 {", rendered)
@@ -110,7 +110,7 @@ class RegistryV3Tests(unittest.TestCase):
 
     def test_litellm_forward_auth_preserves_its_private_port(self):
         caddy = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
-        route = caddy.split(":19471 {", 1)[1]
+        route = render(caddy, [load().get("litellm")]).split(":19471 {", 1)[1]
         self.assertIn("header_up Host {http.request.hostport}", route)
         self.assertIn("header_up X-Forwarded-Host {http.request.hostport}", route)
 

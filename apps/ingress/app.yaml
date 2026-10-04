@@ -1,5 +1,6 @@
 # Caddy — see ctl/manifest/models.py for every field.
 id: ingress
+capabilities: [private_proxy]
 name: Caddy
 tier: foundation
 group: infrastructure

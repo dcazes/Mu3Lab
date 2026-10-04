@@ -8,52 +8,60 @@ after the plan was written.
 
 ---
 
-## Current checkpoint — Task C complete, awaiting owner review
+## Current checkpoint — Tasks D–F complete, stopped for owner review
 
-Task C sends every core app through the same generated-project installer used
-by optional apps. The next implementation task is **Task D**, after owner
-review. **The rebuild is unfinished; do not reinstall from this branch yet.**
+The owner authorized D, E and F together, with tests and one commit at the end.
+**Task G has not been started. The rebuild is unfinished; do not reinstall from
+this branch yet.** The next implementation task is Task G, only after the owner
+authorizes continuing.
 
-- Core setup discovers `tier: core` apps and orders them by `depends_on`.
-  LiteLLM now declares both model-runner and provider-gateway dependencies.
-  Firecrawl is a true core app and finishes inside the shared core job.
-- Each app receives rendering, private secrets, image pinning, rules, account
-  setup, health, sign-in, routes and connector setup through `run_install`.
-  Successful app installs leave the parent core job running; failure stops
-  the suite at that app. Final platform checks still wait for a provider key.
-- Core Compose files read their project `.env` and project-relative config
-  files. Removed the alternate source-project executor, core lists and
-  environment/config-path compatibility plumbing. Start/restart and provider
-  reconciliation use the same generated projects and Compose wrapper.
-- The new `provider_routing` rule writes private gateway/model settings before
-  Compose validation, when both the runtime paths and catalog are available.
-  Gateway bootstrap completes before the dependent model proxy is rendered.
-  Provider updates recreate only projects whose private configuration changed.
-- FreeLLMAPI's app-owned HTTP hook logs in and mints one scoped client key.
-  Its supported declarative `admin` config creates the first user before HTTP
-  starts, only when no users exist; no container shell or `node -e` setup
-  fallback remains. The first-start admin section is removed after bootstrap.
-  See [the pinned upstream implementation](https://github.com/TashfeenAhmed/FreeLLMAPI/blob/v0.13.3/server/src/services/declarative-config.ts).
-  A lost once-revealed client key fails with recovery instructions instead of
-  minting duplicate profiles. Encryption secrets use the required 32-byte hex
-  encoding; existing values remain stable.
-- The embedding-model rule can run after its own runner is healthy. LobeChat's
-  existing policy setup lives in its app hook pending the official API work in
-  Task E. The dashboard uses provisioning phases, so those phases remain.
-- Core services never offer uninstall. Generated Firecrawl routes are included
-  while legacy core listeners remain in the base Caddyfile pending Task D.
-- Test sources were ported with removed functions: generated secret/wiring and
-  HTTP account assertions replace old env-helper/container-shell assertions;
-  dependency/parent-job checks replace the separate Firecrawl queue assertions.
-  No tests were disabled. **The owner requested all test executions be deferred
-  until the end of the rebuild**, overriding the per-part full-gate instruction
-  below. Run the complete suite and integration checks before reinstalling.
-
-Validation for C: Python lint, formatting, mypy and static validation of all
-16 manifests and their rules; test suites and Docker checks were not executed. No running app, live data, system service, Docker
-stack or live checkout was changed.
+- D: All generated app routes, login launchers and sign-in checks use manifest
+  settings. Removed duplicate core listeners from the base Caddyfile. Shared
+  control-plane code discovers platform roles through manifest capabilities;
+  an AST check enforces the absence of app-ID literals in `ctl/`.
+  Golden route fixtures retain before/after output and explain the differences.
+  Connector credentials now use their existing app-owned provision scripts.
+- E: Each person approves chat once through the supported device flow. Their
+  API key is encrypted and bound to their Authentik subject. Official LobeHub
+  APIs synchronize assistants and gateway connectors after app changes and
+  every five minutes. Conversations and personal instruction edits survive
+  synchronization; stopped/disconnected installed apps retain their assistants.
+  Removed all chat SQL, triggers and database activity polling. The supported
+  provider/API-key UI flags replace the removed provider guard: upstream has
+  no equivalent server setting forbidding all user-supplied keys. This limitation
+  is recorded in `apps/lobehub/API.md`.
+- F: Pinned standalone Bitwarden CLI 2026.5.0 handles routine vault operations.
+  Every session uses a private disposable cache; secrets stay off command
+  arguments. A temporary loopback HTTPS bridge is trusted only by that CLI
+  process. CLI 2026.9.0 was incompatible with the pinned Vaultwarden 1.37.3
+  user-key migration; 2026.5.0 passed the real integration test.
+  Registration and organization creation retain minimal bootstrap crypto.
+  The admin API sends account invitations. **The owner explicitly approved
+  the organization invitation API** because admin invitations cannot add
+  organization membership. Member confirmation stays in the official CLI.
+  Generated admin credentials use an Argon2 PHC hash.
+- Validation: Python suite: 634 tests, four expected integration skips;
+  93 dashboard tests passed. Ruff, formatting, mypy, dashboard type/lint/format,
+  shell parsing, manifest/rule validation, the app-ID checker, 26 Compose
+  configurations and the complete generated Caddy configuration passed.
+  LobeHub client tests use MockTransport against the saved pinned OpenAPI spec,
+  rather than mutating the live chat. A real disposable Vaultwarden test
+  registered two users, created the organization, invited and confirmed the
+  member, and verified that member could decrypt a shared login through the CLI.
+  Its containers, network and volume were removed afterwards.
+- Tests for the removed SQL provider guard were removed with that implementation;
+  API, encryption, secret handling, retention and device-flow tests replace
+  obsolete tests. Cancellation checks deferred from C now exercise the shared
+  Compose wrapper. No tests were disabled.
+- No running app, live data, system service, live Docker stack or live checkout
+  was changed. The isolated integration runner is
+  `.venv/bin/python -m tools.test_vaultwarden`.
 
 Previous checkpoints:
+- Task C `7ed1f43`: core apps use the shared generated-project install engine,
+  ordered by manifest dependencies, including Firecrawl. Provider routing and
+  first-start HTTP bootstrap are app-owned rules/hooks. Tests were deferred at
+  the owner's request; the D–F validation above includes these changes.
 - Task A `ed2be8c`: Authentik REST/bootstrap and household management, with
   fresh-image integration verification. The default signing certificate is
   **authentik Self-signed Certificate**; the `akadmin` bootstrap API token must
@@ -64,7 +72,7 @@ Previous checkpoints:
   expected skips; 93 dashboard tests).
 
 The WIP inventory below describes the original starting checkpoint. Tasks
-A–C are resolved; Tasks D–J remain.
+A–F are resolved; Tasks G–J remain.
 
 ## 0. Where the work is
 
@@ -387,7 +395,7 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
 - Delete `ctl/provisioning.py` phases that only mirror install steps if nothing in the
   dashboard needs them (check `SystemSettings.tsx` and `HomePage.tsx` first).
 
-### Task D — Routes, sign-in checks and launchers from manifests
+### Task D — Complete: Routes, sign-in checks and launchers from manifests
 
 - `ctl/routes.py`: generate every app route from `manifest.route` (skip `generated: false`):
   `access` open → plain proxy; gate → Authentik forward_auth (+ `copy_identity_headers`);
@@ -409,7 +417,7 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
   (`grep -rnE '"(nextcloud|immich|mealie|actual-budget|adventurelog|paperless-ngx|surfsense|lobehub|baby-buddy|firecrawl|freellmapi|litellm|ollama|vaultwarden|authentik|ingress)"' ctl`).
   Allowed exceptions: none. Add this as `tools/check_no_app_ids.py` and run it in `make lint` and CI.
 
-### Task E — LobeChat through its official API (owner decision 6)
+### Task E — Complete: LobeChat through its official API (owner decision 6)
 
 1. `apps/lobehub/app.yaml`: add secret `JWKS_KEY` (new `Secret.kind: rsa_jwk` — generate an
    RSA-2048 private key with `cryptography` and serialize as a JWK JSON string) so LobeHub's
@@ -450,7 +458,7 @@ app catalog in a temp `apps/` folder covering: step order, `staged_first_start` 
    `/api/v1/openapi.json` (save the spec into `tests/fixtures/lobehub-openapi-2.2.18.json`
    from the running instance: `curl -s http://127.0.0.1:3211/api/v1/openapi.json`).
 
-### Task F — Vaultwarden hybrid (owner decision 8)
+### Task F — Complete: Vaultwarden hybrid (owner decision 8)
 
 - Download a pinned, checksum-verified standalone `bw` binary into `.tools/bin/bw`
   (extend `tools/toolchain.sh`; never `npm install`).

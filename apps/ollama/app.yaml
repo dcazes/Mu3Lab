@@ -1,5 +1,6 @@
 # Ollama — see ctl/manifest/models.py for every field.
 id: ollama
+capabilities: [model_runner]
 name: Ollama
 tier: core
 group: ai
@@ -25,6 +26,7 @@ setup_action: Install and verify the model runner using the host-wide compute se
 rules:
 - rule: needs_embedding_model
   with:
-    model: nomic-embed-text
     runner: ollama
+    pull_command: [ollama, pull]
+    model: nomic-embed-text
     at: after_healthy

@@ -20,11 +20,12 @@ from urllib.parse import urlsplit
 
 from ctl import onboarding_state, workflow_secrets
 from ctl.identity import authentik_only
+from ctl.integrations.vaultwarden import MATCH_HOST, Login, VaultSession
+from ctl.platform_apps import by_capability
 from ctl.provider_catalog import PROVIDERS
 from ctl.registry import Registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
-from ctl.vaultwarden_api import MATCH_HOST, Login, VaultSession
 
 VAULTWARDEN_LOCAL_URL = "http://127.0.0.1:8081"
 # Two separate folders: logins for Mu3Lab's own apps, and sign-up entries for
@@ -82,7 +83,7 @@ def desired_items(
 ) -> list[DesiredItem]:
     items: list[DesiredItem] = []
     if host:
-        authentik = registry.get("authentik")
+        authentik = registry.get(by_capability("identity_provider").id)
         items.append(
             DesiredItem(
                 mu3lab_id="service:authentik",
@@ -97,9 +98,11 @@ def desired_items(
                 "let the browser extension save it the next time you sign in.",
             )
         )
-        password = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_ADMIN_PASSWORD", "")
+        password = read_runtime_env(paths.projects / by_capability("provider_gateway").id / ".env").get(
+            "FREELLMAPI_ADMIN_PASSWORD", ""
+        )
         if password:
-            freellmapi = registry.get("freellmapi")
+            freellmapi = registry.get(by_capability("provider_gateway").id)
             items.append(
                 DesiredItem(
                     mu3lab_id="service:freellmapi",

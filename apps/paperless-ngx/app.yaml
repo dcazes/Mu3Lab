@@ -1,5 +1,6 @@
 # Paperless-ngx — see ctl/manifest/models.py for every field.
 id: paperless-ngx
+capabilities: [documents]
 name: Paperless-ngx
 tier: optional
 group: apps

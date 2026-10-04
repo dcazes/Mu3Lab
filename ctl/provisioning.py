@@ -15,12 +15,17 @@ from typing import Any
 
 from ctl import sqlite_store
 from ctl.jobs import redact, redact_data
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 
 WORKFLOW_VERSION = 3
 PHASES = (
     ("foundation", "Host prerequisites and Docker", "Install the host runtime and private application networks."),
-    ("vaultwarden", "Vaultwarden owner", "Verify the independent private password-vault owner account."),
+    (
+        by_capability("password_store").id,
+        "Vaultwarden owner",
+        "Verify the independent private password-vault owner account.",
+    ),
     ("tailscale", "Tailscale and HTTPS routes", "Verify the tailnet connection and private HTTPS routes."),
     ("identity", "Authentik owner", "Create the Mu3Lab identity owner and operator mapping."),
     ("dashboard_protection", "Protected dashboard", "Prove that Authentik protects the dashboard."),
@@ -93,7 +98,7 @@ class ProvisioningStore:
                 (
                     1,
                     {
-                        "foundation": ("foundation", "vaultwarden", "tailscale"),
+                        "foundation": ("foundation", by_capability("password_store").id, "tailscale"),
                         "identity": ("identity", "dashboard_protection"),
                         "configuration": ("configuration",),
                     },
@@ -104,7 +109,7 @@ class ProvisioningStore:
                         phase: (phase,)
                         for phase in (
                             "foundation",
-                            "vaultwarden",
+                            by_capability("password_store").id,
                             "tailscale",
                             "identity",
                             "dashboard_protection",
@@ -197,7 +202,13 @@ class ProvisioningStore:
         incomplete = next((item for item in phases if item["actual_state"] not in {"verified", "skipped"}), None)
         if incomplete is None:
             next_action = {"kind": "none", "label": "Platform ready"}
-        elif incomplete["phase_id"] in {"foundation", "vaultwarden", "tailscale", "identity", "dashboard_protection"}:
+        elif incomplete["phase_id"] in {
+            "foundation",
+            by_capability("password_store").id,
+            "tailscale",
+            "identity",
+            "dashboard_protection",
+        }:
             next_action = {"kind": "bootstrap", "label": "Resume ./install"}
         elif incomplete["phase_id"] == "core":
             next_action = {

@@ -171,7 +171,7 @@ def ask_new_account(screen: Screen) -> dict[str, str]:
 
 def ask_existing_account(screen: Screen) -> dict[str, str]:
     """Vault exists but Authentik still needs its owner: confirm the same login."""
-    from ctl import vaultwarden_api
+    from ctl.integrations import vaultwarden as vaultwarden_api
 
     screen.pause()
     print("\nSign in with your Mu3Lab account")
@@ -248,8 +248,9 @@ def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
 
 
 def save_logins(account: dict[str, str], host: str) -> tuple[bool, str]:
-    from ctl import vault_setup, vaultwarden_api
+    from ctl import vault_setup
     from ctl.control_state import ControlState
+    from ctl.integrations import vaultwarden as vaultwarden_api
     from ctl.registry import load
 
     items = vault_setup.desired_items(

@@ -15,6 +15,7 @@ import os
 import secrets
 from pathlib import Path
 
+from ctl.platform_apps import by_capability
 from ctl.secret_file import locked, write_atomic
 
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
@@ -25,7 +26,7 @@ def ensure_authentik_env(
 ) -> tuple[Path, list[str]]:
     """Keep stable credentials and supply first-start values before Compose starts."""
     token_factory = token_factory or generate_hex
-    target = root / "projects" / "authentik" / ".env"
+    target = root / "projects" / by_capability("identity_provider").id / ".env"
     with locked(target.with_suffix(".lock")):
         values = read_runtime_env(target)
         added: list[str] = []
@@ -47,7 +48,7 @@ def ensure_authentik_env(
 
 
 def clear_authentik_bootstrap(root: Path) -> None:
-    target = root / "projects" / "authentik" / ".env"
+    target = root / "projects" / by_capability("identity_provider").id / ".env"
     with locked(target.with_suffix(".lock")):
         values = read_runtime_env(target)
         values.pop("AUTHENTIK_BOOTSTRAP_EMAIL", None)

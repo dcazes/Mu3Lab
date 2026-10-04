@@ -37,8 +37,11 @@ from typing import Any, TypedDict
 
 from ctl import actions, docker_config, preflight, privilege, routes
 from ctl.bootstrap import stamps
+from ctl.engine.project import Facts, render
 from ctl.identity import gate_blueprint, sync_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError, password_hash
+from ctl.manifest.catalog import load as load_app_catalog
+from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import clear_authentik_bootstrap, ensure_authentik_env, read_runtime_env
@@ -146,9 +149,9 @@ DISPATCH = {
     ("docker_networks", "ready"): "skip",
     ("caddy", "down"): "caddy_up",
     ("caddy", "ready"): "skip",
-    ("vaultwarden", "down"): "vaultwarden_up",
-    ("vaultwarden", "outdated"): "vaultwarden_up",
-    ("vaultwarden", "ready"): "skip",
+    (by_capability("password_store").id, "down"): "vaultwarden_up",
+    (by_capability("password_store").id, "outdated"): "vaultwarden_up",
+    (by_capability("password_store").id, "ready"): "skip",
     ("vaultwarden_setup", "needs_user"): "create_account",
     ("vaultwarden_setup", "ready"): "skip",
     ("tailscale_pkg", "absent"): "tailscale_install",
@@ -165,8 +168,8 @@ DISPATCH = {
     ("browser_extension", "not_needed"): "skip",
     ("browser_extension", "no_address"): "skip",  # a convenience; never block the install on it
     ("browser_extension", "ready"): "skip",
-    ("authentik", "down"): "authentik_up",
-    ("authentik", "ready"): "skip",
+    (by_capability("identity_provider").id, "down"): "authentik_up",
+    (by_capability("identity_provider").id, "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
     ("lobehub_serve", "unshared"): "share_lobehub",
@@ -971,10 +974,10 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
     log = ctx["log_fn"]("caddy")
-    projdir = ctx["root"] / "apps" / "ingress"
+    projdir = ctx["root"] / "apps" / by_capability("private_proxy").id
     if not (projdir / "docker-compose.yml").is_file():
         return {"ok": False, "error": "apps/ingress/docker-compose.yml missing from checkout."}
-    runtime_caddy = RuntimePaths().projects / "ingress" / "Caddyfile"
+    runtime_caddy = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
     source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
     _update_progress(
         ctx,
@@ -1094,7 +1097,7 @@ def _update_progress(
 
 def _authentik_containers(ctx: dict) -> list[dict]:
     """Read container state from Docker's Compose label without secrets."""
-    rc, output = actions.docker_container_statuses("authentik")
+    rc, output = actions.docker_container_statuses(by_capability("identity_provider").id)
     if rc != 0:
         return []
     containers = []
@@ -1180,7 +1183,9 @@ def _compose_image_outdated(projdir: Path) -> bool:
 
 def _vaultwarden_check(ctx: dict) -> dict:
     health = _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
-    if health["state"] == "ready" and _compose_image_outdated(ctx["root"] / "apps" / "vaultwarden"):
+    if health["state"] == "ready" and _compose_image_outdated(
+        ctx["root"] / "apps" / by_capability("password_store").id
+    ):
         # Bitwarden's apps update themselves and stop signing in to an old server.
         return {"status": "missing", "state": "outdated", "detail": "Vaultwarden will be updated."}
     return health
@@ -1190,7 +1195,7 @@ def _vaultwarden_account_exists() -> bool:
     """Read only whether Vaultwarden has at least one local user account."""
     import sqlite3
 
-    database = RuntimePaths().data / "vaultwarden" / "db.sqlite3"
+    database = RuntimePaths().data / by_capability("password_store").id / "db.sqlite3"
     if not database.is_file():
         return False
     try:
@@ -1206,11 +1211,11 @@ def _vaultwarden_account_exists() -> bool:
 
 
 def fix_vaultwarden(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("vaultwarden")
-    projdir = ctx["root"] / "apps" / "vaultwarden"
+    log = ctx["log_fn"](by_capability("password_store").id)
+    projdir = ctx["root"] / "apps" / by_capability("password_store").id
     _update_progress(
         ctx,
-        "vaultwarden",
+        by_capability("password_store").id,
         phase="pulling_images",
         activity="Pulling the reviewed Vaultwarden image and starting the password manager.",
         timeout_seconds=300,
@@ -1219,9 +1224,20 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     def compose_activity(line: str) -> None:
         clean = re.sub(r"\s+", " ", line).strip()
         if clean:
-            _update_progress(ctx, "vaultwarden", phase="starting_service", activity=clean[:180], timeout_seconds=300)
+            _update_progress(
+                ctx,
+                by_capability("password_store").id,
+                phase="starting_service",
+                activity=clean[:180],
+                timeout_seconds=300,
+            )
 
-    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data)}
+    catalog = load_app_catalog(ctx["root"] / "apps")
+    project = render(
+        catalog.get(by_capability("password_store").id),
+        Facts(_tailscale_dns_name_for_install(), RuntimePaths(), catalog),
+    )
+    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data), "MU3LAB_VAULT_ENV_FILE": str(project / ".env")}
     extra_files: list[Path] = []
     # Once Tailscale is joined, keep the private URL a restart or update would otherwise drop.
     domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
@@ -1248,7 +1264,7 @@ def check_vaultwarden_setup(ctx: dict) -> dict:
 
 
 def fix_vaultwarden_setup(check: dict, ctx: dict) -> dict:
-    from ctl import vaultwarden_api
+    from ctl.integrations import vaultwarden as vaultwarden_api
 
     account = _account(ctx)
     if not account:
@@ -1310,7 +1326,7 @@ def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
     domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
     if not domain:
         return {"ok": False, "error": "Tailscale did not provide a valid MagicDNS name for Vaultwarden."}
-    projdir = ctx["root"] / "apps" / "vaultwarden"
+    projdir = ctx["root"] / "apps" / by_capability("password_store").id
     _update_progress(
         ctx,
         "vaultwarden_serve",
@@ -1412,7 +1428,7 @@ def _authentik_compose_env(account: dict, log) -> dict[str, str]:
 
 
 def fix_authentik(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("authentik")
+    log = ctx["log_fn"](by_capability("identity_provider").id)
     account = _account(ctx)
     if not account:
         return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
@@ -1421,7 +1437,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
     # them in the process environment but never includes env values in logs.
     _update_progress(
         ctx,
-        "authentik",
+        by_capability("identity_provider").id,
         phase="pulling_images",
         activity="Pulling reviewed Authentik images and creating containers.",
         timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1434,7 +1450,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         if clean:
             _update_progress(
                 ctx,
-                "authentik",
+                by_capability("identity_provider").id,
                 phase="pulling_images",
                 activity=clean[:180],
                 timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1447,7 +1463,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         # signal: it waits for the declared container health checks rather
         # than merely reporting that processes were created.
         result["rc"], result["out"] = actions.compose_up(
-            ctx["root"] / "apps" / "authentik",
+            ctx["root"] / "apps" / by_capability("identity_provider").id,
             log,
             env=values,
             timeout=1200,
@@ -1462,7 +1478,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         if containers:
             _update_progress(
                 ctx,
-                "authentik",
+                by_capability("identity_provider").id,
                 phase="waiting_for_health_checks",
                 activity="Docker is waiting for Authentik health checks.",
                 timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1480,7 +1496,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         return {"ok": False, "error": "Authentik could not start (see log)."}
     _update_progress(
         ctx,
-        "authentik",
+        by_capability("identity_provider").id,
         phase="containers_started",
         activity="Containers started; waiting for Authentik readiness.",
         timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1501,7 +1517,7 @@ def check_authentik_setup(ctx: dict) -> dict:
     try:
         client = Authentik.runtime()
         user = client.user("akadmin")
-        values = read_runtime_env(RuntimePaths().projects / "authentik" / ".env")
+        values = read_runtime_env(RuntimePaths().projects / by_capability("identity_provider").id / ".env")
         if user and user.get("email") and not values.get("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH"):
             return {"status": "ok", "state": "ready", "detail": "Your Authentik sign-in account exists."}
     except AuthentikError:
@@ -1551,9 +1567,9 @@ def _gate_digest(host: str) -> str:
 def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
     """A Mu3Lab update changed the sign-in gate or the Authentik apps it relies on."""
 
-    target = RuntimePaths().projects / "ingress" / "Caddyfile"
-    source = ctx["root"] / "apps" / "ingress" / "Caddyfile.authenticated"
-    stamp = RuntimePaths().projects / "ingress" / ".authentik-gate.sha256"
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
+    source = ctx["root"] / "apps" / by_capability("private_proxy").id / "Caddyfile.authenticated"
+    stamp = RuntimePaths().projects / by_capability("private_proxy").id / ".authentik-gate.sha256"
     try:
         if not routes.base_matches(source.read_text(encoding="utf-8"), target.read_text(encoding="utf-8")):
             return True
@@ -1564,7 +1580,7 @@ def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
 
 def check_dashboard_protection(ctx: dict) -> dict:
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
     if target.is_file():
         if host != "127.0.0.1" and _dashboard_protection_outdated(ctx, host):
             return {"status": "missing", "state": "needs_apply", "detail": "The sign-in gate has an update."}
@@ -1614,8 +1630,8 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         timeout_seconds=240,
     )
 
-    source = ctx["root"] / "apps" / "ingress" / "Caddyfile.authenticated"
-    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    source = ctx["root"] / "apps" / by_capability("private_proxy").id / "Caddyfile.authenticated"
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     stamps.write(target.parent / ".authentik-gate.sha256", _gate_digest(host))
     # Keep the routes of apps installed from the dashboard across updates.
@@ -1638,7 +1654,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             )
 
     ingress_result["rc"], ingress_result["out"] = actions.compose_up(
-        ctx["root"] / "apps" / "ingress",
+        ctx["root"] / "apps" / by_capability("private_proxy").id,
         log,
         env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
         recreate=True,  # the file path is unchanged on updates, so Caddy must restart to read it
@@ -2346,7 +2362,7 @@ STEPS: list[Step] = [
     },
     {"id": "caddy", "label": "Private web gateway", "check": _caddy_check, "fix": fix_caddy},
     {
-        "id": "vaultwarden",
+        "id": by_capability("password_store").id,
         "label": "Start Vaultwarden",
         "check": _vaultwarden_check,
         "fix": fix_vaultwarden,
@@ -2401,7 +2417,7 @@ STEPS: list[Step] = [
         "fix": fix_browser_extension,
     },
     {
-        "id": "authentik",
+        "id": by_capability("identity_provider").id,
         "label": "Start Authentik (sign-in)",
         "check": _authentik_check,
         "fix": fix_authentik,
@@ -2452,7 +2468,7 @@ PHASES = (
         ("dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
     ),
     ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
-    ("Start your password vault", ("caddy", "vaultwarden", "vaultwarden_setup")),
+    ("Start your password vault", ("caddy", by_capability("password_store").id, "vaultwarden_setup")),
     (
         "Connect your private network",
         ("tailscale_pkg", "tailscale_operator", "tailscale_join", "vaultwarden_serve", "browser_extension"),
@@ -2460,7 +2476,7 @@ PHASES = (
     (
         "Set up sign-in",
         (
-            "authentik",
+            by_capability("identity_provider").id,
             "authentik_serve",
             "lobehub_serve",
             "authentik_setup",
@@ -2612,9 +2628,11 @@ def run_job(job: dict, ctx: dict) -> None:
             provisioning.update(
                 "foundation", "verified", detail="Host foundation, private ingress, and tailnet route are ready."
             )
-        if current.get("vaultwarden") != "verified":
+        if current.get(by_capability("password_store").id) != "verified":
             provisioning.update(
-                "vaultwarden", "verified", detail="Vaultwarden owner and private route were confirmed during bootstrap."
+                by_capability("password_store").id,
+                "verified",
+                detail="Vaultwarden owner and private route were confirmed during bootstrap.",
             )
         if current.get("tailscale") != "verified":
             provisioning.update(

@@ -1,5 +1,6 @@
 # Actual Budget — see ctl/manifest/models.py for every field.
 id: actual-budget
+capabilities: [budget]
 name: Actual Budget
 tier: optional
 group: apps

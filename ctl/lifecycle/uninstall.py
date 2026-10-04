@@ -23,6 +23,7 @@ from ctl import actions
 from ctl.identity import remove_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.lifecycle import app_releases
+from ctl.platform_apps import by_capability
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
 from ctl.service_state import tailnet_dns_name
@@ -71,7 +72,9 @@ def data_directories(service: Service, root: Path) -> list[Path]:
 
 def _cleanup_image(root: Path) -> str:
     """Borrow the always-present ingress image; its busybox `rm` runs as root."""
-    document = yaml.safe_load((root / "apps" / "ingress" / "docker-compose.yml").read_text(encoding="utf-8"))
+    document = yaml.safe_load(
+        (root / "apps" / by_capability("private_proxy").id / "docker-compose.yml").read_text(encoding="utf-8")
+    )
     return str(next(iter(document["services"].values()))["image"])
 
 
@@ -191,7 +194,7 @@ def uninstall_application(
     stage("disconnect_chat", "Disconnecting the app from chat.")
     if not _release_chat_connectors(service.id, root, log, forget=delete):
         return False, "disconnect_chat", "A chat connector for this app could not be stopped."
-    if service.id == "nextcloud":
+    if service.id == by_capability("files_calendar").id:
         # Even when its data is kept, the dashboard switches to Mu3Lab's own
         # calendar; reinstalling reconnects automatically and sends changes back.
         _disconnect_calendars(log)

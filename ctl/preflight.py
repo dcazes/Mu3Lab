@@ -27,6 +27,8 @@ import socket
 import subprocess
 from pathlib import Path
 
+from ctl.platform_apps import by_capability
+
 # ---------------------------------------------------------------------------
 # Constants: every magic value lives here with its reason.
 # ---------------------------------------------------------------------------
@@ -557,7 +559,11 @@ def _port_owner(port: int) -> dict | None:
         # Host-network Compose containers often hide their PID from an
         # unprivileged `ss` invocation. Confirm ownership through Compose
         # labels, but only when the working directory is this checkout.
-        project_by_port = {19460: "ingress", 9001: "authentik", 8081: "vaultwarden"}
+        project_by_port = {
+            19460: by_capability("private_proxy").id,
+            9001: by_capability("identity_provider").id,
+            8081: by_capability("password_store").id,
+        }
         project = project_by_port.get(port)
         if project:
             names_rc, names = _docker_probe(

@@ -8,11 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ctl import onboarding_state, vault_sync
+from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, Member, OrgLogin
 from ctl.runtime import RuntimePaths
-from ctl.vault_org import STATUS_ACCEPTED, STATUS_CONFIRMED, Member, OrgLogin
-from ctl.vaultwarden_api import SymmetricKey, encrypt
 
-KEY = SymmetricKey(b"e" * 32, b"m" * 32)
+KEY = None
 
 
 class FakeOrg:
@@ -69,7 +68,7 @@ class FakeOrg:
                 uris=[uri for uri, _ in item["uris"]],
                 fields=item["fields"],
                 collection_ids=[collection],
-                raw={"login": {"password": encrypt(item["password"], KEY)}},
+                raw={"login": {"password": item["password"]}},
             )
         )
         return self.items[-1].id
@@ -82,7 +81,7 @@ class FakeOrg:
 
     def update_login(self, existing, _org, _key, **item):
         self.writes += 1
-        existing.raw["login"]["password"] = encrypt(item["password"], KEY)
+        existing.raw["login"]["password"] = item["password"]
 
 
 OWNER = {"uid": "o" * 64, "email": "owner@example.test", "name": "Owner", "role": "admin", "active": True}

@@ -25,7 +25,7 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_vaultwarden_account_is_created_from_the_terminal_answers(self):
         account = {"name": "Alex", "email": "alex@example.com", "password": "correct horse battery"}
         ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None, "account": lambda: account}
-        with patch("ctl.vaultwarden_api.register") as register:
+        with patch("ctl.integrations.vaultwarden.register") as register:
             result = install.fix_vaultwarden_setup({}, ctx)
         self.assertTrue(result["ok"])
         register.assert_called_once_with("http://127.0.0.1:19462", "alex@example.com", "correct horse battery", "Alex")

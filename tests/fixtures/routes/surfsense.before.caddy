@@ -1,0 +1,19 @@
+:19464 {
+	bind 127.0.0.1
+	route {
+		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+		forward_auth 127.0.0.1:9001 {
+			uri /outpost.goauthentik.io/auth/caddy
+			header_up Host {http.request.hostport}
+			header_up X-Forwarded-Host {http.request.hostport}
+			header_up X-Forwarded-Proto https
+			copy_headers X-Authentik-Username X-Authentik-Email X-Authentik-Name X-Authentik-Groups
+			trusted_proxies private_ranges
+		}
+		respond /auth/register* "Accounts are provisioned by Mu3Lab." 403
+		reverse_proxy 127.0.0.1:3929 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {http.request.hostport}
+		}
+	}
+}

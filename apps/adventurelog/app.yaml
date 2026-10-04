@@ -1,5 +1,6 @@
 # AdventureLog — see ctl/manifest/models.py for every field.
 id: adventurelog
+capabilities: [travel]
 name: AdventureLog
 tier: optional
 group: apps

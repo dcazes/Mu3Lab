@@ -1,5 +1,6 @@
 # FreeLLMAPI — see ctl/manifest/models.py for every field.
 id: freellmapi
+capabilities: [provider_gateway]
 name: FreeLLMAPI
 tier: core
 group: ai

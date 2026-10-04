@@ -20,6 +20,7 @@ from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
 from ctl.mcp_credentials import ensure as ensure_credentials
 from ctl.mcp_registry import credential_path, missing_credentials
+from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
@@ -309,7 +310,7 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
         result = check.get("result", {})
         if not isinstance(result, dict) or result.get("isError"):
             raise ValueError("SurfSense rejected the token or workspace API check")
-    if getattr(server, "id", "") in {"nextcloud-context-agent", "adventurelog"}:
+    if getattr(server, "id", "") in {"nextcloud-context-agent", by_capability("travel").id}:
         name = "list_files" if server.id == "nextcloud-context-agent" else "list_collections"
         check, _ = _rpc_request(
             url, "tools/call", 3, token=token, session_id=session_id, params={"name": name, "arguments": {}}

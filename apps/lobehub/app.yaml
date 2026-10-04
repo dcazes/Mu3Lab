@@ -2,6 +2,7 @@
 id: lobehub
 name: LobeChat
 tier: core
+capabilities: [chat]
 group: ai
 category: ai
 tagline: Chat with your AI models
@@ -49,6 +50,8 @@ account:
   mode: oidc_first_login
   user_action: Use the existing Authentik session; local email/password registration is disabled.
 secrets:
+- env: JWKS_KEY
+  kind: rsa_jwk
 - env: POSTGRES_PASSWORD
 - env: AUTH_SECRET
   length: 48
@@ -65,6 +68,7 @@ env:
   S3_ENDPOINT: '{{public_url}}/lobe-assets'
   AUTH_SSO_PROVIDERS: authentik
   AUTH_AUTHENTIK_ISSUER: https://{{dns_name}}/application/o/mu3lab-lobehub/
+  FEATURE_FLAGS: '-provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage'
   AUTH_DISABLE_EMAIL_PASSWORD: '1'
   OPENAI_PROXY_URL: http://litellm:4000/v1
   OPENAI_MODEL_LIST: -all,+mu3lab-chat

@@ -65,6 +65,7 @@ trap 'kill "$KEEPALIVE_PID" 2>/dev/null || true' EXIT
 step "Preparing the installer"
 mu3lab_ensure_uv || fail "Could not download the installer's toolchain." "Check the internet connection and run ./install.sh again."
 mu3lab_sync_python || fail "Python packages could not be installed." "Check the internet connection and run ./install.sh again."
+mu3lab_ensure_bw || fail "Bitwarden could not be installed." "Check the internet connection and run ./install.sh again."
 
 # --- 4. Install ---------------------------------------------------------------------
 cd "$ROOT"

@@ -92,9 +92,12 @@ class LobeChatIdentityTests(unittest.TestCase):
         compose = (ROOT / "apps/lobehub/docker-compose.yml").read_text(encoding="utf-8")
         caddy = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
         self.assertIn("AUTH_SSO_PROVIDERS", compose)
-        self.assertIn(":19474 {", caddy)
+        from ctl.registry import load
+        from ctl.routes import render
+
+        self.assertIn(":19474 {", render(caddy, [load().get("lobehub")]))
         self.assertIn("frame-ancestors", caddy)
-        self.assertIn(":19474 {", caddy)
+        self.assertIn(":19474 {", render(caddy, [load().get("lobehub")]))
 
 
 class ComputeOverrideTests(unittest.TestCase):

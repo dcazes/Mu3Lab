@@ -11,12 +11,16 @@ same values. Nothing here talks to Docker or another app.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import secrets
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from ctl import hostinfo
 from ctl.engine import template
@@ -42,7 +46,34 @@ def token(length: int) -> str:
             return value
 
 
-def generate(secret: Secret) -> str:
+def generate(secret: Secret, env: dict[str, str] | None = None) -> str:
+    if secret.kind == "argon2":
+        password = (env or {}).get(secret.source_env, "")
+        if not password:
+            raise ValueError("A source secret is required for an Argon2 admin token.")
+        return Argon2id(salt=os.urandom(16), length=32, iterations=3, lanes=4, memory_cost=65536).derive_phc_encoded(
+            password.encode()
+        )
+    if secret.kind == "rsa_jwk":
+        private = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_numbers()
+        values = {
+            "n": private.public_numbers.n,
+            "e": private.public_numbers.e,
+            "d": private.d,
+            "p": private.p,
+            "q": private.q,
+            "dp": private.dmp1,
+            "dq": private.dmq1,
+            "qi": private.iqmp,
+        }
+        encoded = {
+            name: base64.urlsafe_b64encode(value.to_bytes((value.bit_length() + 7) // 8, "big")).decode().rstrip("=")
+            for name, value in values.items()
+        }
+        return json.dumps(
+            {"keys": [{"kty": "RSA", "alg": "RS256", "use": "sig", "kid": secrets.token_hex(8), **encoded}]},
+            separators=(",", ":"),
+        )
     if secret.kind == "fixed":
         return secret.value
     if secret.kind == "hex":
@@ -115,7 +146,7 @@ def build_env(app: App, facts: Facts, existing: dict[str, str], hooks: list[EnvH
     env["TZ"] = hostinfo.timezone()
     for secret in manifest.secrets:
         if not env.get(secret.env):
-            env[secret.env] = generate(secret)
+            env[secret.env] = generate(secret, env)
     oidc = manifest.sign_in.oidc
     if oidc:
         env[oidc.env.client_id] = oidc.client_id

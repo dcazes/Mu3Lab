@@ -19,6 +19,7 @@ from ctl.core_wiring import configure, routing_projects
 from ctl.engine.compose import Compose
 from ctl.freellmapi_admin import GatewayAdmin, GatewayAdminError
 from ctl.jobs import JobStore, redact
+from ctl.platform_apps import by_capability
 from ctl.provider_catalog import BY_ID, get, key_problem
 from ctl.provider_secrets import delete as delete_secret
 from ctl.provider_secrets import metadata, records, save
@@ -186,7 +187,9 @@ def _forget_removed_keys(log) -> tuple[bool, str]:
 
 def _chat_route_check(log) -> StreamProbe:
     """Confirm chat's own path (LiteLLM's mu3lab-chat through FreeLLMAPI) streams."""
-    lite_key = read_runtime_env(RuntimePaths().projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
+    lite_key = read_runtime_env(RuntimePaths().projects / by_capability("model_proxy").id / ".env").get(
+        "LITELLM_MASTER_KEY", ""
+    )
     if not lite_key:
         return StreamProbe(
             False, 0, "", "", "litellm_unavailable", "LiteLLM master key is missing after reconciliation."

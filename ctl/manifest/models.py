@@ -180,8 +180,9 @@ class Secret(Model):
     """A value generated once and then kept for the life of the app's data."""
 
     env: str
-    kind: Literal["token", "base64", "hex", "fixed"] = "token"
+    kind: Literal["token", "base64", "hex", "fixed", "rsa_jwk", "argon2"] = "token"
     length: int = Field(default=36, ge=8, le=128)
+    source_env: str = ""  # source secret for argon2, generated earlier
     value: str = ""  # for kind fixed: a non-secret default kept once chosen
 
     @field_validator("env")
@@ -341,6 +342,7 @@ class AppManifest(Model):
     summary: str
     version: str  # the maintainer-approved release; image digests live in docker-compose.yml
     upstream: str  # GitHub owner/repo for release notes
+    capabilities: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
     data_dir: str = ""  # folder under /srv/mu3lab/data; defaults to the app id
     service: ServiceSpec

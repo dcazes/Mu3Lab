@@ -13,10 +13,11 @@ from ctl.api import runtime
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, MemberMutation, OwnerMutation
 from ctl.control_state import ControlState
+from ctl.integrations.vaultwarden import VaultError, VaultSession
 from ctl.jobs import JobStore
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 from ctl.vault_setup import VAULTWARDEN_LOCAL_URL, SeedResult, desired_items, seed
-from ctl.vaultwarden_api import VaultError, VaultSession
 
 router = APIRouter(prefix="/api/v1/vault", tags=["vault"])
 
@@ -82,7 +83,7 @@ def vault_status(_operator: Member) -> dict[str, Any]:
         **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
         "pending_logins": len(onboarding_state.pending_logins(str(_operator.get("subject_id") or ""))),
         "browser_extension": browser_extension.status(
-            vault_database=RuntimePaths().data / "vaultwarden" / "db.sqlite3"
+            vault_database=RuntimePaths().data / by_capability("password_store").id / "db.sqlite3"
         ),
     }
 

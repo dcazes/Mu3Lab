@@ -1,5 +1,6 @@
 # Authentik — see ctl/manifest/models.py for every field.
 id: authentik
+capabilities: [identity_provider]
 name: Authentik
 tier: foundation
 group: infrastructure

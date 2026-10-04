@@ -1,5 +1,6 @@
 # LiteLLM — see ctl/manifest/models.py for every field.
 id: litellm
+capabilities: [model_proxy]
 name: LiteLLM
 tier: core
 group: ai
