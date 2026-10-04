@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from ctl import sqlite_store, workflow_secrets
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
 from ctl.registry import Registry, RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+from ctl.store import db
+from ctl.store import workflows as workflow_secrets
 
 
 def _now() -> str:
@@ -44,57 +45,10 @@ class InstallBatchStore:
 
     @classmethod
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> InstallBatchStore | None:
-        return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
+        return cls(db.database(paths)) if paths.runtime.is_dir() else None
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        with sqlite_store.schema_once(conn, self.database, "install_batches") as needed:
-            if needed:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS install_batches (
-                        id TEXT PRIMARY KEY, actor TEXT NOT NULL, owner_uid TEXT NOT NULL,
-                        state TEXT NOT NULL, current_ordinal INTEGER NOT NULL DEFAULT 0,
-                        idempotency_key TEXT, error_json TEXT NOT NULL DEFAULT '{}',
-                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-                    );
-                    CREATE UNIQUE INDEX IF NOT EXISTS install_batches_idempotency
-                        ON install_batches(idempotency_key) WHERE idempotency_key IS NOT NULL;
-                    CREATE TABLE IF NOT EXISTS install_batch_items (
-                        batch_id TEXT NOT NULL, service_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
-                        explicitly_selected INTEGER NOT NULL, state TEXT NOT NULL,
-                        depends_on_json TEXT NOT NULL DEFAULT '[]',
-                        job_id TEXT NOT NULL DEFAULT '', error_json TEXT NOT NULL DEFAULT '{}',
-                        started_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '',
-                        PRIMARY KEY(batch_id, ordinal),
-                        FOREIGN KEY(batch_id) REFERENCES install_batches(id)
-                    );
-                    CREATE INDEX IF NOT EXISTS install_batch_items_job ON install_batch_items(job_id);
-                """)
-                # Existing control planes already have batch rows.  The dependency
-                # snapshot is additive so old paused batches remain readable.
-                columns = {row[1] for row in conn.execute("PRAGMA table_info(install_batch_items)")}
-                if "depends_on_json" not in columns:
-                    conn.execute(
-                        "ALTER TABLE install_batch_items ADD COLUMN depends_on_json TEXT NOT NULL DEFAULT '[]'"
-                    )
-                if "priority" not in columns:
-                    conn.execute("ALTER TABLE install_batch_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
-                    conn.execute("UPDATE install_batch_items SET priority = ordinal")
-                if "download_state" not in columns:
-                    # Items of batches from before parallel downloads fetch their own images during setup.
-                    conn.execute("ALTER TABLE install_batch_items ADD COLUMN download_state TEXT NOT NULL DEFAULT ''")
-                    conn.execute("UPDATE install_batch_items SET download_state = 'ready'")
-                if "download_error" not in columns:
-                    conn.execute("ALTER TABLE install_batch_items ADD COLUMN download_error TEXT NOT NULL DEFAULT ''")
-                batch_columns = {row[1] for row in conn.execute("PRAGMA table_info(install_batches)")}
-                if "parallel_downloads" not in batch_columns:
-                    conn.execute(
-                        "ALTER TABLE install_batches ADD COLUMN parallel_downloads INTEGER NOT NULL "
-                        f"DEFAULT {DEFAULT_PARALLEL_DOWNLOADS}"
-                    )
-        return conn
+        return db.connect(self.database)
 
     def plan(self, registry: Registry, requested: list[str], control: ControlState) -> list[tuple[str, bool]]:
         if not requested or len(requested) != len(set(requested)):
@@ -113,8 +67,6 @@ class InstallBatchStore:
                 service = registry.get(service_id)
             except RegistryError as exc:
                 raise ValueError(str(exc)) from exc
-            if service.is_blocked:
-                raise ValueError(f"{service.name} is blocked: {service.blocked_reason}")
             if service.stage not in {"optional", "core", "foundation"}:
                 raise ValueError(f"{service.name} is not installable")
             if service_id in requested_set and service.stage != "optional":
@@ -143,7 +95,7 @@ class InstallBatchStore:
             # not inspect a developer's live Docker daemon.  The production
             # runtime store, on the other hand, reconciles stale workflow rows
             # against the actual service before offering installation.
-            if self.database.resolve() == (RuntimePaths().runtime / "control-plane.sqlite3").resolve():
+            if self.database.resolve() == (db.database()).resolve():
                 try:
                     from ctl.registry import ROOT
                     from ctl.service_state import status, tailnet_dns_name

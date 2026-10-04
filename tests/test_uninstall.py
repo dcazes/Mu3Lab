@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from ctl.api import create_app
-from ctl.authentik_blueprints import clear_removal_blueprint, render_removal_blueprint, write_removal_blueprint
+from ctl.authentik_blueprints import render_removal_blueprint
 from ctl.lifecycle.uninstall import data_directories, uninstall_application
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
@@ -36,6 +36,7 @@ class UninstallTests(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(runtime_paths(paths))
             stack.enter_context(patch("ctl.lifecycle.uninstall._release_chat_connectors", return_value=True))
+            self.authentik = stack.enter_context(patch("ctl.lifecycle.uninstall.Authentik.runtime")).return_value
             calendars = stack.enter_context(patch("ctl.lifecycle.uninstall._disconnect_calendars"))
             down = stack.enter_context(patch("ctl.lifecycle.uninstall.actions.compose_down", return_value=(0, "")))
             stack.enter_context(
@@ -73,8 +74,7 @@ class UninstallTests(unittest.TestCase):
             # The release record says which release the kept data was migrated to.
             self.assertEqual(sorted(item.name for item in project.iterdir()), [".env", "docker-compose.digest.yml"])
             self.assertTrue((paths.data / "nextcloud" / "postgres").is_dir())
-            blueprints = paths.projects / "authentik" / "blueprints"
-            self.assertIn("state: absent", (blueprints / "mu3lab-nextcloud-removed.yaml").read_text(encoding="utf-8"))
+            self.assertIn("state: absent", self.authentik.apply_blueprint.call_args.args[1])
 
     def test_deleting_data_removes_project_data_and_images(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -127,7 +127,7 @@ class UninstallTests(unittest.TestCase):
 class RemovalBlueprintTests(unittest.TestCase):
     def test_oidc_removal_deletes_application_provider_and_claims(self):
         content = render_removal_blueprint("nextcloud", "Nextcloud", oidc=True)
-        self.assertEqual(content.count("state: absent"), 3)
+        self.assertEqual(content.count("state: absent"), 4)
         self.assertIn("slug: mu3lab-nextcloud", content)
         self.assertIn("name: Mu3Lab Nextcloud provider", content)
         self.assertNotIn("state: present", content)
@@ -136,17 +136,6 @@ class RemovalBlueprintTests(unittest.TestCase):
         content = render_removal_blueprint("baby-buddy", "Baby Buddy", oidc=False)
         self.assertIn("authentik_providers_proxy.proxyprovider", content)
         self.assertNotIn("scopemapping", content)
-
-    def test_removal_replaces_the_present_blueprint_and_reinstall_clears_it(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            directory = root / "projects" / "authentik" / "blueprints"
-            directory.mkdir(parents=True)
-            (directory / "mu3lab-mealie.yaml").write_text("present\n", encoding="utf-8")
-            removal = write_removal_blueprint(root, "mealie", "Mealie", oidc=True)
-            self.assertFalse((directory / "mu3lab-mealie.yaml").exists())
-            clear_removal_blueprint(root, "mealie")
-            self.assertFalse(removal.exists())
 
 
 class UninstallApiTests(unittest.TestCase):
@@ -163,7 +152,7 @@ class UninstallApiTests(unittest.TestCase):
         }
         jobs = MagicMock()
         jobs.by_idempotency_key.return_value = None
-        jobs.create.return_value = {"id": "delete-job"}
+        jobs.create.return_value = {"id": "delete-job", "state": "queued"}
         with (
             patch("ctl.api.security.ingress_token", return_value="token"),
             patch("ctl.api.security.csrf_token", return_value="bound"),

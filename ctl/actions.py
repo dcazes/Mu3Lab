@@ -257,125 +257,6 @@ def docker_cmd_with_stdin(
     return proc.returncode, output.replace(stdin_data, "[redacted]").strip()
 
 
-def reset_authentik_admin_password(password: str, log: Callable[[str], None]) -> dict:
-    """Set a one-time password for the built-in ``akadmin`` account.
-
-    Authentik documents ``ak changepassword akadmin`` as its recovery path.
-    The generated password is sent twice on stdin for Django's confirmation
-    prompt.  It is intentionally neither logged nor retained here.
-    """
-    if not password or "\n" in password or "\r" in password:
-        return {"ok": False, "error": "invalid temporary password"}
-    rc, _output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "authentik-server-1", "ak", "changepassword", "akadmin"],
-        password + "\n" + password + "\n",
-        log,
-        timeout=90,
-    )
-    if rc != 0:
-        # Django's output can include installation details.  The bootstrap
-        # needs only an actionable, non-sensitive result.
-        return {
-            "ok": False,
-            "error": "Authentik could not reset the akadmin password. "
-            "Confirm its server container is healthy, then retry.",
-        }
-    log("Authentik akadmin password reset; temporary password was not logged.")
-    return {"ok": True}
-
-
-def authentik_set_owner(email: str, name: str, password: str, log: Callable[[str], None]) -> dict:
-    """Give Authentik's built-in administrator the owner's email, name and password.
-
-    Setting a usable password also ends Authentik's first-run setup. The
-    values travel as JSON on stdin to Authentik's own shell; they are never
-    placed on a command line or logged.
-    """
-    if not email or not password:
-        return {"ok": False, "error": "An email and password are required."}
-    script = (
-        "import json, sys\n"
-        "from authentik.core.models import User\n"
-        "data = json.loads(sys.stdin.readline())\n"
-        "user = User.objects.get(username='akadmin')\n"
-        "user.email = data['email']\n"
-        "user.name = data['name']\n"
-        "user.set_password(data['password'])\n"
-        "user.save()\n"
-        # Authentik 2026.x tracks first-run setup with its own flag instead of
-        # inferring it from akadmin's password; finish it the way its setup
-        # flow does, so the root URL stops redirecting to /setup.
-        "try:\n"
-        "    from django.db import transaction\n"
-        "    from authentik.core.apps import Setup\n"
-        "    from authentik.blueprints.models import BlueprintInstance\n"
-        "    from authentik.flows.models import Flow, FlowAuthenticationRequirement\n"
-        "except ImportError:\n"
-        "    Setup = None\n"
-        "if Setup is not None:\n"
-        "    with transaction.atomic():\n"
-        "        Setup.set(True)\n"
-        "        BlueprintInstance.objects.filter(\n"
-        "            **{'metadata__labels__blueprints.goauthentik.io/system-oobe': 'true'}\n"
-        "        ).update(enabled=False)\n"
-        "        Flow.objects.filter(slug='initial-setup').update(\n"
-        "            authentication=FlowAuthenticationRequirement.REQUIRE_SUPERUSER\n"
-        "        )\n"
-        "print('MU3LAB_OWNER_OK')\n"
-    )
-    payload = _json.dumps({"email": email, "name": name or email, "password": password}) + "\n"
-    # Authentik reports healthy slightly before its shell can reliably reach
-    # the database, so a first attempt can fail; retry before giving up.
-    rc, output = 1, ""
-    for attempt in range(1, 6):
-        rc, output = docker_cmd_with_stdin(
-            ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", script], payload, log, timeout=120
-        )
-        if rc == 0 and "MU3LAB_OWNER_OK" in output:
-            break
-        detail = [ln for ln in output.splitlines() if ln.strip() and not ln.startswith('{"')]
-        log(f"Authentik account save attempt {attempt} failed (exit {rc}): " + " | ".join(detail[-6:]))
-        if attempt < 5:
-            _time.sleep(10)
-    if rc != 0 or "MU3LAB_OWNER_OK" not in output:
-        return {
-            "ok": False,
-            "error": "Authentik could not save your account. Check that Authentik is running, then retry.",
-        }
-    log("Authentik owner account saved (password not logged).")
-    return {"ok": True}
-
-
-def freellmapi_local_setup(email: str, password: str, log: Callable[[str], None]) -> tuple[int, dict]:
-    """Claim a fresh FreeLLMAPI from inside its container's loopback boundary.
-
-    Upstream intentionally requires a setup code when the socket peer is not
-    loopback. Docker port publishing makes a host request appear remote, so the
-    reviewed first-run call runs inside the container. Credentials travel only
-    on stdin and the one-time session token is returned only to the caller.
-    """
-    if not email or not password or "\n" in email or "\n" in password:
-        return 2, {}
-    script = (
-        "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',async()=>{"
-        "try{const r=await fetch('http://127.0.0.1:3001/api/auth/setup',{method:'POST',"
-        "headers:{'content-type':'application/json'},body:d});const b=await r.json();"
-        "process.stdout.write(JSON.stringify({status:r.status,body:b}))}"
-        "catch(e){process.exit(1)}})"
-    )
-    payload = _json.dumps({"email": email, "password": password}, separators=(",", ":")) + "\n"
-    rc, output = docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "mu3lab-freellmapi-freellmapi-1", "node", "-e", script], payload, log, timeout=30
-    )
-    if rc:
-        return rc, {}
-    try:
-        decoded = _json.loads(output)
-    except (TypeError, ValueError):
-        return 1, {}
-    return 0, decoded if isinstance(decoded, dict) else {}
-
-
 def compose_up(
     projdir: Path,
     log: Callable[[str], None],
@@ -949,15 +830,17 @@ def _tailscale_serve(
 
 
 def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> dict:
-    """Create the approved /srv layout with root-only secrets and user state.
+    """Create the approved /srv layout with private operator-owned state.
 
     The root itself is group-traversable by the operator. Without that one
     permission, user-owned children such as `data/` remain unreachable.
     """
     lines: list[str] = []
-    paths = [root, root / "data", root / "backups", root / "runtime", root / "projects"]
+    paths = [root, root / "data", root / "backups", root / "state", root / "projects"]
     for path in paths:
-        res = privilege.run_privileged(["install", "-d", "-m", "0750", str(path)], lines.append)
+        res = privilege.run_privileged(
+            ["install", "-d", "-m", "0700" if path == root / "state" else "0750", str(path)], lines.append
+        )
         if res.get("need_terminal"):
             return _fail(lines, terminal_command=res["terminal_command"])
         if not res["ok"]:
@@ -966,11 +849,6 @@ def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> 
     if root_owner.get("need_terminal"):
         return _fail(lines, terminal_command=root_owner["terminal_command"])
     if not root_owner["ok"]:
-        return _fail(lines)
-    secret = privilege.run_privileged(["install", "-d", "-m", "0700", str(root / "secrets")], lines.append)
-    if secret.get("need_terminal"):
-        return _fail(lines, terminal_command=secret["terminal_command"])
-    if not secret["ok"]:
         return _fail(lines)
     owned = [str(path) for path in paths[1:]]
     res = privilege.run_privileged(["chown", "-R", f"{user}:{user}", *owned], lines.append)

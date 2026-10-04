@@ -15,7 +15,7 @@ let autoConnectAttempted = false;
 export function useCalendarEvents(range: CalendarRange | null, nextcloud: Service | undefined, limit = 100) {
   const [result, setResult] = useState<CalendarEvents | null>(null);
   const [loading, setLoading] = useState(true);
-  const nextcloudState = nextcloud?.state;
+  const nextcloudState = nextcloud?.display_state;
   const identityState = nextcloud?.identity?.state;
 
   const start = range?.start;
@@ -44,7 +44,7 @@ export function useCalendarEvents(range: CalendarRange | null, nextcloud: Servic
     setLoading(true);
     try {
       const body = await fetchEvents();
-      if (body.state === 'local' && body.nextcloud_ready && nextcloudState === 'ready' && !autoConnectAttempted) {
+      if (body.state === 'local' && body.nextcloud_ready && nextcloudState === 'running' && !autoConnectAttempted) {
         autoConnectAttempted = true;
         try {
           await postApi('/api/v1/calendar/auto-connect');

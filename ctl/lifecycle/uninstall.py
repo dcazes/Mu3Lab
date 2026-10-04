@@ -20,9 +20,13 @@ from pathlib import Path
 import yaml
 
 from ctl import actions
+from ctl.identity import remove_sign_in
+from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.lifecycle import app_releases
+from ctl.platform_apps import by_capability
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
+from ctl.service_state import tailnet_dns_name
 
 Log = Callable[[str], None]
 Stage = Callable[[str, str], None]
@@ -60,12 +64,7 @@ def data_directories(service: Service, root: Path) -> list[Path]:
     own_dir = service.compose_path(root)
     own = _data_names(sorted(own_dir.glob("docker-compose*.yml")))
     others = _data_names(
-        [
-            path
-            for base in (root / "apps", root / "core")
-            for path in base.rglob("docker-compose*.yml")
-            if path.parent != own_dir
-        ]
+        [path for base in (root / "apps",) for path in base.rglob("docker-compose*.yml") if path.parent != own_dir]
     )
     data = RuntimePaths().data
     return [data / name for name in sorted(own - others)]
@@ -73,7 +72,9 @@ def data_directories(service: Service, root: Path) -> list[Path]:
 
 def _cleanup_image(root: Path) -> str:
     """Borrow the always-present ingress image; its busybox `rm` runs as root."""
-    document = yaml.safe_load((root / "core" / "ingress" / "docker-compose.yml").read_text(encoding="utf-8"))
+    document = yaml.safe_load(
+        (root / "apps" / by_capability("private_proxy").id / "docker-compose.yml").read_text(encoding="utf-8")
+    )
     return str(next(iter(document["services"].values()))["image"])
 
 
@@ -136,21 +137,14 @@ def _release_chat_connectors(service_id: str, root: Path, log: Log, *, forget: b
 
 
 def _remove_sign_in(service: Service, registry: Registry, paths: RuntimePaths) -> None:
-    from ctl.authentik_blueprints import write_removal_blueprint
-    from ctl.identity import GATED_APPS, OIDC_CONTRACTS, reconcile_blueprints
-    from ctl.service_state import tailnet_dns_name
-
-    if service.id in OIDC_CONTRACTS:
-        write_removal_blueprint(paths.root, service.id, OIDC_CONTRACTS[service.id].name, oidc=True)
-    elif service.id in GATED_APPS:
-        # The project is gone, so this rewrite drops the app from the outpost.
-        reconcile_blueprints(registry, tailnet_dns_name(), paths)
-        write_removal_blueprint(paths.root, service.id, service.name, oidc=False)
-    if service.id in OIDC_CONTRACTS or service.id in GATED_APPS:
-        from ctl.authentik_apply import apply_blueprints
-
-        # Apply now, so a quick reinstall cannot be undone by a late removal.
-        apply_blueprints(lambda _line: None)
+    if service.manifest.sign_in.method in {"oidc", "gate", "trusted_header"}:
+        remove_sign_in(
+            registry.catalog.get(service.id),
+            Authentik.runtime(paths),
+            catalog=registry.catalog,
+            host=tailnet_dns_name(),
+            paths=paths,
+        )
 
 
 def _remove_project(project: Path, *, keep_env: bool) -> None:
@@ -161,7 +155,7 @@ def _remove_project(project: Path, *, keep_env: bool) -> None:
         return
     for item in project.iterdir():
         # The release record says which release the kept data was migrated to.
-        if item.name in {".env", app_releases.RECORD, app_releases.HISTORY}:
+        if item.name in {".env", app_releases.RECORD}:
             continue
         if item.is_dir() and not item.is_symlink():
             shutil.rmtree(item)
@@ -200,7 +194,7 @@ def uninstall_application(
     stage("disconnect_chat", "Disconnecting the app from chat.")
     if not _release_chat_connectors(service.id, root, log, forget=delete):
         return False, "disconnect_chat", "A chat connector for this app could not be stopped."
-    if service.id == "nextcloud":
+    if service.id == by_capability("files_calendar").id:
         # Even when its data is kept, the dashboard switches to Mu3Lab's own
         # calendar; reinstalling reconnects automatically and sends changes back.
         _disconnect_calendars(log)
@@ -226,7 +220,7 @@ def uninstall_application(
     try:
         _remove_project(project, keep_env=not delete)
         _remove_sign_in(service, registry, paths)
-    except (OSError, ValueError) as exc:
+    except (AuthentikError, OSError, ValueError) as exc:
         return False, "remove_sign_in", f"Sign-in cleanup failed: {exc}"
 
     if not delete:
@@ -237,7 +231,7 @@ def uninstall_application(
     if not ok:
         return False, "delete_data", detail
     _remove_images(images, log)
-    from ctl import onboarding_state
+    from ctl.store import onboarding as onboarding_state
 
     onboarding_state.forget(service.id, paths)
     return True, "", f"{service.name} and all of its data were deleted."

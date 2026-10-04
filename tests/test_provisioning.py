@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 import stat
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl.core_setup import _provision_freellmapi
+from ctl import mcp_ops
+from ctl.control_state import ControlState
+from ctl.core_setup import core_services, execute_claimed, plan
 from ctl.core_wiring import configure
-from ctl.provider_secrets import records, save
+from ctl.engine.compose import Compose
+from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
+from ctl.engine.project import Facts
+from ctl.jobs import JobStore
 from ctl.provisioning import ProvisioningStore
+from ctl.registry import load
+from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
-from ctl.secrets import ensure_core_envs
+from ctl.secrets import read_runtime_env
+from ctl.store.providers import records, save
+from tests.support import render_core_projects
 
 
 class ProvisioningStoreTests(unittest.TestCase):
     def test_survives_reopen_and_never_stores_simple_secret_assignments(self):
         with tempfile.TemporaryDirectory() as tmp:
-            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            database = Path(tmp) / "runtime" / "mu3lab.db"
             first = ProvisioningStore(database)
             first.update("core", "running", detail="api_key=must-not-persist")
             second = ProvisioningStore(database)
@@ -33,17 +45,15 @@ class ProvisioningStoreTests(unittest.TestCase):
 
     def test_waiting_phase_is_visible_after_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
-            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            database = Path(tmp) / "runtime" / "mu3lab.db"
             ProvisioningStore(database).update("configuration", "waiting_for_user", detail="Add a provider.")
             summary = ProvisioningStore(database).summary()
         self.assertEqual(summary["waiting"]["phase_id"], "configuration")
         self.assertFalse(summary["complete"])
 
     def test_structured_inputs_are_redacted_before_sqlite(self):
-        import sqlite3
-
         with tempfile.TemporaryDirectory() as tmp:
-            database = Path(tmp) / "runtime" / "control-plane.sqlite3"
+            database = Path(tmp) / "runtime" / "mu3lab.db"
             ProvisioningStore(database).update(
                 "configuration", "running", inputs={"provider": {"api_key": "must-not-persist", "label": "safe"}}
             )
@@ -56,14 +66,14 @@ class ProvisioningStoreTests(unittest.TestCase):
 
     def test_illegal_state_regression_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
             store.update("core", "verified")
             with self.assertRaises(ValueError):
                 store.update("core", "waiting_for_user")
 
     def test_progress_and_next_action_cover_all_eight_phases(self):
         with tempfile.TemporaryDirectory() as tmp:
-            store = ProvisioningStore(Path(tmp) / "runtime" / "control-plane.sqlite3")
+            store = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
             for phase in ("foundation", "vaultwarden", "tailscale", "identity", "dashboard_protection", "core"):
                 store.update(phase, "verified")
             summary = store.summary()
@@ -76,27 +86,30 @@ class ProvisioningStoreTests(unittest.TestCase):
     "cryptography is installed by control-plane requirements",
 )
 class CoreWiringTests(unittest.TestCase):
-    def test_core_environment_contract_includes_ollama(self):
+    def test_core_projects_generate_stable_private_secrets(self):
         with tempfile.TemporaryDirectory() as tmp:
-            paths = ensure_core_envs(Path(tmp), token_factory=lambda: "generated")
-        self.assertEqual(set(paths), {"ollama", "freellmapi", "litellm"})
+            paths = RuntimePaths(Path(tmp))
+            render_core_projects(paths)
+            encryption = read_runtime_env(paths.projects / "freellmapi" / ".env")["ENCRYPTION_KEY"]
+            render_core_projects(paths)
+            self.assertEqual(read_runtime_env(paths.projects / "freellmapi" / ".env")["ENCRYPTION_KEY"], encryption)
+            self.assertEqual(len(bytes.fromhex(encryption)), 32)
+            self.assertTrue((paths.projects / "ollama" / "docker-compose.yml").is_file())
 
     def test_provider_key_reaches_only_private_generated_adapter_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
+            render_core_projects(paths)
             save("groq", "Groq provider", "user-provider-secret", paths)
-            from ctl.control_state import ControlState
-
-            ControlState(paths.runtime / "control-plane.sqlite3").set_provider(
+            ControlState(paths.runtime / "mu3lab.db").set_provider(
                 "groq", "Groq provider", state="verified", verified=True
             )
             result = configure(paths)
             self.assertTrue(result["chat_configured"])
             self.assertEqual(result["provider_count"], 1)
             self.assertEqual(records(paths)[0]["api_key"], "user-provider-secret")
-            adapter = Path(result["freellmapi_config"])
-            gateway = Path(result["litellm_config"])
+            adapter = paths.projects / "freellmapi" / "freellmapi.config.json"
+            gateway = paths.projects / "litellm" / "config.yaml"
             self.assertIn("user-provider-secret", adapter.read_text(encoding="utf-8"))
             self.assertNotIn("user-provider-secret", gateway.read_text(encoding="utf-8"))
             self.assertEqual(stat.S_IMODE(adapter.stat().st_mode), 0o600)
@@ -104,103 +117,145 @@ class CoreWiringTests(unittest.TestCase):
             self.assertIn("mu3lab-chat", gateway.read_text(encoding="utf-8"))
             self.assertIn("mu3lab-embed", gateway.read_text(encoding="utf-8"))
 
-    def test_freellmapi_bootstrap_mints_one_scoped_gateway_key(self):
-        from unittest.mock import patch
+    def gateway_context(self, paths):
+        registry = load()
+        app = registry.catalog.get("freellmapi")
+        return HookContext(
+            app,
+            paths.projects / app.id,
+            Compose(paths.projects / app.id),
+            lambda _: None,
+            lambda *_: None,
+            facts=Facts("test.host", paths, registry.catalog),
+        )
 
+    def test_freellmapi_bootstrap_mints_one_scoped_gateway_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
-            responses = iter(
-                [
-                    (201, {"token": "dashboard-session"}),
-                    (200, []),
-                    (201, {"key": "sk-cp-private-gateway-key"}),
-                ]
-            )
-            with patch("ctl.core_setup._http_json", side_effect=lambda *args, **kwargs: next(responses)):
-                ok, _detail = _provision_freellmapi(paths)
-            self.assertTrue(ok)
-            from ctl.secrets import read_runtime_env
-
-            env = read_runtime_env(paths.projects / "freellmapi" / ".env")
-            self.assertEqual(env["FREELLMAPI_SERVICE_KEY"], "sk-cp-private-gateway-key")
+            render_core_projects(paths)
+            ctx = self.gateway_context(paths)
+            ctx.set_env({"FREELLMAPI_SERVICE_KEY": ""})
+            hooks = load_app_hooks(ctx.app)
+            with patch.dict(
+                hooks.bootstrap_account.__globals__,
+                request=Mock(side_effect=[{"token": "dashboard-session"}, [], {"key": "sk-cp-private-gateway-key"}]),
+            ):
+                hooks.bootstrap_account(ctx)
+            self.assertEqual(ctx.env()["FREELLMAPI_SERVICE_KEY"], "sk-cp-private-gateway-key")
+            self.assertEqual(ctx.env()["MU3LAB_ADMIN_BOOTSTRAPPED"], "true")
 
     def test_freellmapi_never_mints_a_second_key_after_resume(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
-            env_path = paths.projects / "freellmapi" / ".env"
-            env_path.write_text(
-                env_path.read_text(encoding="utf-8") + "FREELLMAPI_SERVICE_KEY=sk-cp-existing\n", encoding="utf-8"
-            )
-            ok, detail = _provision_freellmapi(paths)
-            self.assertTrue(ok)
-            self.assertIn("already exists", detail)
+            render_core_projects(paths)
+            ctx = self.gateway_context(paths)
+            hooks = load_app_hooks(ctx.app)
+            api = Mock()
+            with patch.dict(hooks.bootstrap_account.__globals__, request=api):
+                detail = hooks.bootstrap_account(ctx)
+            self.assertIn("already saved", detail)
+            api.assert_not_called()
 
-    def test_freellmapi_uses_container_loopback_for_first_setup(self):
-        from unittest.mock import patch
-
+    def test_freellmapi_missing_profile_key_fails_without_minting_another(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            ensure_core_envs(paths.root, token_factory=lambda: "stable-secret")
-            responses = iter(
-                [
-                    (403, {"error": {"type": "setup_code_required"}}),
-                    (200, []),
-                    (201, {"key": "sk-cp-private-gateway-key"}),
-                ]
+            render_core_projects(paths)
+            ctx = self.gateway_context(paths)
+            ctx.set_env({"FREELLMAPI_SERVICE_KEY": ""})
+            hooks = load_app_hooks(ctx.app)
+            api = Mock(side_effect=[{"token": "session"}, [{"name": "Mu3Lab LiteLLM"}]])
+            with patch.dict(hooks.bootstrap_account.__globals__, request=api), self.assertRaises(StepFailed) as failed:
+                hooks.bootstrap_account(ctx)
+            self.assertEqual(failed.exception.code, "client_credential_incomplete")
+            self.assertEqual(api.call_count, 2)
+
+    def test_first_admin_config_is_removed_after_http_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            render_core_projects(paths)
+            ctx = self.gateway_context(paths)
+            ctx.set_env({"MU3LAB_ADMIN_BOOTSTRAPPED": "false", "FREELLMAPI_SERVICE_KEY": ""})
+            rule = rules_for(ctx.app.manifest)[0]
+            rule.before_start(ctx)
+            config = ctx.project / "freellmapi.config.json"
+            self.assertEqual(
+                json.loads(config.read_text())["admin"]["password"], ctx.env()["FREELLMAPI_ADMIN_PASSWORD"]
             )
-            local = (0, {"status": 201, "body": {"token": "dashboard-session"}})
-            with (
-                patch("ctl.core_setup._http_json", side_effect=lambda *args, **kwargs: next(responses)),
-                patch("ctl.core_setup.actions.freellmapi_local_setup", return_value=local) as setup,
-            ):
-                ok, _detail = _provision_freellmapi(paths)
-            self.assertTrue(ok)
-            setup.assert_called_once()
+            hooks = load_app_hooks(ctx.app)
+            api = Mock(side_effect=[{"token": "session"}, [], {"key": "sk-cp-created"}])
+            with patch.dict(hooks.bootstrap_account.__globals__, request=api):
+                hooks.bootstrap_account(ctx)
+            self.assertEqual(api.call_args_list[0].args[1], "/api/auth/login")
+            rule.after_healthy(ctx)
+            self.assertNotIn("admin", json.loads(config.read_text()))
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
 
     def test_blocked_core_suite_says_why(self):
-        from unittest.mock import patch
-
-        from ctl.core_setup import plan
-
         refused = {"ok": False, "reasons": ["Docker is not ready"]}
         with patch("ctl.core_setup.capacity", return_value=refused):
             checked = plan(Path(__file__).resolve().parents[1])
         self.assertFalse(checked["ready"])
         self.assertEqual(checked["error"], "Docker is not ready")
 
-    def test_core_setup_queues_firecrawl_once_with_its_chat_connector_on(self):
-        from unittest.mock import MagicMock, patch
+    def test_core_order_includes_firecrawl_and_respects_manifest_dependencies(self):
+        ordered = [service.id for service in core_services()]
+        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
+        self.assertLess(ordered.index("ollama"), ordered.index("litellm"))
+        self.assertLess(ordered.index("freellmapi"), ordered.index("litellm"))
+        self.assertLess(ordered.index("litellm"), ordered.index("lobehub"))
 
-        from ctl.core_setup import _queue_installer_core_apps
-        from ctl.jobs import JobStore
+    def test_core_parent_waits_for_all_apps_and_stops_at_an_app_failure(self):
+        ordered = [service.id for service in core_services()]
+        for failed_app in (None, ordered[1]):
+            with self.subTest(failed_app=failed_app), tempfile.TemporaryDirectory() as tmp:
+                store = JobStore(Path(tmp) / "jobs.sqlite3")
+                parent = store.create(kind="lifecycle", service_id="core-suite", action="install", actor="owner")
+                claimed = store.claim("worker")
+                calls = []
 
-        with tempfile.TemporaryDirectory() as tmp:
-            store = JobStore(Path(tmp) / "control.sqlite3")
-            control = MagicMock()
-            control.installation.return_value = None
-            with (
-                patch("ctl.control_state.ControlState.runtime", return_value=control),
-                patch("ctl.mcp_ops.preenable") as preenable,
-            ):
-                _queue_installer_core_apps(store, "bootstrap", Path(tmp), lambda _line: None)
-                preenable.assert_called_once_with("firecrawl", Path(tmp))
-                jobs = store.jobs_for_service("firecrawl")
-                self.assertEqual([(job["action"], job["state"]) for job in jobs], [("install", "queued")])
-                store.transition(jobs[0]["id"], "running", actor="worker", detail="installing")
-                store.transition(jobs[0]["id"], "succeeded", actor="worker", detail="installed")
-                control.installation.return_value = {"state": "running"}
-                _queue_installer_core_apps(store, "bootstrap", Path(tmp), lambda _line: None)
-            self.assertEqual(len(store.jobs_for_service("firecrawl")), 1)
-            preenable.assert_called_once()
+                def install_app(
+                    job_store,
+                    _control,
+                    job,
+                    service,
+                    _registry,
+                    _actor,
+                    _root,
+                    *,
+                    complete_job,
+                    parent=parent,
+                    calls=calls,
+                    failed_app=failed_app,
+                ):
+                    self.assertFalse(complete_job)
+                    self.assertEqual(job["id"], parent["id"])
+                    self.assertEqual(job_store.get(parent["id"])["state"], "running")
+                    calls.append(service.id)
+                    if service.id == failed_app:
+                        job_store.transition(parent["id"], "failed", actor="owner", detail="app failed")
+                        return False
+                    return True
+
+                with (
+                    patch("ctl.core_setup.ProvisioningStore.runtime", return_value=None),
+                    patch("ctl.core_setup.ControlState.runtime", return_value=None),
+                    patch("ctl.core_setup.plan", return_value={"ready": True}),
+                    patch("ctl.core_setup.run_install", side_effect=install_app),
+                    patch("ctl.core_setup.configure_wiring", return_value={"chat_configured": False}),
+                    patch("ctl.core_setup._verify_platform", return_value=(False, "Add a provider")) as verify,
+                ):
+                    execute_claimed(store, claimed, "worker", Path(tmp))
+                if failed_app:
+                    self.assertEqual(calls, ordered[:2])
+                    self.assertEqual(store.get(parent["id"])["state"], "failed")
+                    verify.assert_not_called()
+                else:
+                    self.assertEqual(calls, ordered)
+                    self.assertEqual(store.get(parent["id"])["state"], "waiting_for_confirmation")
+                    verify.assert_called_once()
+                self.assertEqual(len(store.jobs()), 1)
 
     def test_preenable_switches_on_the_preferred_mcp_but_respects_later_choices(self):
-        from unittest.mock import patch
-
-        from ctl import mcp_ops
-        from ctl.control_state import ControlState
-
         with tempfile.TemporaryDirectory() as tmp:
             state = ControlState(Path(tmp) / "control.sqlite3")
             with (
@@ -217,11 +272,6 @@ class CoreWiringTests(unittest.TestCase):
             self.assertFalse(state.mcp_server("firecrawl-official")["enabled"])
 
     def test_verification_only_job_never_pulls_or_recreates_services(self):
-        from unittest.mock import patch
-
-        from ctl.core_setup import execute_claimed
-        from ctl.jobs import JobStore
-
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp) / "control.sqlite3")
             queued = store.create(kind="verification", service_id="core-suite", action="verify", actor="owner")
@@ -231,8 +281,8 @@ class CoreWiringTests(unittest.TestCase):
                 patch("ctl.core_setup.ProvisioningStore.runtime", return_value=None),
                 patch("ctl.core_setup.configure_wiring", return_value={}),
                 patch("ctl.core_setup._verify_platform", return_value=(True, "verified")),
-                patch("ctl.core_setup.actions.compose_pull") as pull,
-                patch("ctl.core_setup.actions.compose_up") as up,
+                patch("ctl.engine.install.download_images") as pull,
+                patch("ctl.engine.install.run_install") as up,
             ):
                 execute_claimed(store, claimed, "worker", Path(tmp))
             self.assertEqual(store.get(queued["id"])["state"], "succeeded")

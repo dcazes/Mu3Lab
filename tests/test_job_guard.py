@@ -29,7 +29,8 @@ class CancellationTests(unittest.TestCase):
 
         with (
             patch("ctl.service_ops.ControlState.runtime", return_value=state),
-            patch("ctl.service_ops.actions.compose_action", side_effect=compose),
+            patch("ctl.service_ops.project_path", return_value=Path(__file__).resolve().parents[1] / "apps/ollama"),
+            patch("ctl.service_ops.Compose.action", side_effect=compose),
             patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
             patch("ctl.mcp_ops.sync_application") as sync,
         ):

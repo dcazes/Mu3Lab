@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
   pull_request:
 
@@ -14,22 +15,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
+      - uses: astral-sh/setup-uv@v6
+        with: {version: '0.12.5'}
       - uses: actions/setup-node@v4
         with: {node-version: '24', cache: 'npm', cache-dependency-path: dashboard/package-lock.json}
       - name: Installer scripts parse
-        run: bash -n install.sh start.sh tools/vm/fresh-vm.sh tools/open_tailscale_login.sh
+        run: bash -n install.sh start.sh uninstall.sh tools/toolchain.sh tools/vm/fresh-vm.sh tools/open_tailscale_login.sh
       - name: Install control-plane and developer dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: uv sync --frozen
       - name: Python lint and format
         run: |
-          ruff check .
-          ruff format --check .
+          uv run --frozen python tools/check_no_app_ids.py
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+      - name: API schema matches Python models
+        run: uv run --frozen python -m tools.api_schema --check
       - name: Python type check
-        run: mypy
+        run: uv run --frozen mypy
       - name: Python tests
-        run: python -m unittest discover -s tests -t . -v
+        run: uv run --frozen python -m unittest discover -s tests -t . -v
       - name: Install dashboard dependencies
         working-directory: dashboard
         run: npm ci
@@ -41,6 +45,7 @@ jobs:
       - name: Dashboard lint, format, and type check
         working-directory: dashboard
         run: |
+          npm run check:api
           npm run lint
           npm run format:check
           npm run typecheck
@@ -50,72 +55,10 @@ jobs:
       - name: Build dashboard
         working-directory: dashboard
         run: npm run build
-      - name: Validate checked-in YAML
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import yaml
-          for path in (Path('services.yaml'), Path('catalog.yaml'), Path('mcp-catalog.yaml'),
-                       *Path('core').glob('**/docker-compose.yml'),
-                       *Path('apps').glob('**/docker-compose.yml')):
-              yaml.safe_load(path.read_text(encoding='utf-8'))
-          PY
+      - name: Validate app manifests and chat connectors
+        run: uv run --frozen python -c "from ctl.manifest.catalog import load; print(len(load().apps), 'apps valid')"
       - name: Validate Compose interpolation
-        run: |
-          while IFS= read -r compose_file; do
-            MU3LAB_ENV_FILE=/dev/null \
-            AUTHENTIK_ENV_FILE=/dev/null \
-            AUTHENTIK_TAG=2026.8.3 \
-            AUTHENTIK_SECRET_KEY=ci-placeholder \
-            AUTHENTIK_POSTGRESQL__PASSWORD=ci-placeholder \
-            MU3LAB_INGRESS_TOKEN=ci-placeholder \
-            MU3LAB_DATA_ROOT=/srv/mu3lab/data \
-            DB_PASSWORD=ci-placeholder \
-            SECRET_KEY=ci-placeholder \
-            ZERO_ADMIN_PASSWORD=ci-placeholder \
-            SEARXNG_SECRET=ci-placeholder \
-            SURFSENSE_PUBLIC_URL=https://example.ts.net:8447 \
-            POSTGRES_PASSWORD=ci-placeholder \
-            DJANGO_ADMIN_USERNAME=ci-operator \
-            DJANGO_ADMIN_EMAIL=operator@example.test \
-            DJANGO_ADMIN_PASSWORD=ci-placeholder \
-            PAPERLESS_ADMIN_USER=ci-operator \
-            PAPERLESS_ADMIN_MAIL=operator@example.test \
-            PAPERLESS_ADMIN_PASSWORD=ci-placeholder \
-            PAPERLESS_DBPASS=ci-placeholder \
-            PAPERLESS_SECRET_KEY=ci-placeholder \
-            ACTUAL_PASSWORD=ci-placeholder \
-            ACTUAL_BUDGET_SYNC_ID=ci-placeholder \
-            MCP_AUTH_TOKEN=ci-placeholder \
-            MEALIE_API_TOKEN=ci-placeholder \
-            IMMICH_API_KEY=ci-placeholder \
-            PAPERLESS_API_KEY=ci-placeholder \
-            BULL_AUTH_KEY=ci-placeholder \
-            RABBITMQ_DEFAULT_PASS=ci-placeholder \
-            NEXTCLOUD_USERNAME=ci-operator \
-            NEXTCLOUD_APP_PASSWORD=ci-placeholder \
-            ADVENTURELOG_API_KEY=ci-placeholder \
-            APP_URL=https://example.ts.net:8448 \
-            AUTH_AUTHENTIK_ID=ci-placeholder \
-            AUTH_AUTHENTIK_ISSUER=https://example.ts.net/application/o/lobehub/ \
-            AUTH_AUTHENTIK_SECRET=ci-placeholder \
-            AUTH_SECRET=ci-placeholder \
-            KEY_VAULTS_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
-            LITELLM_MASTER_KEY=ci-placeholder \
-            RUSTFS_ACCESS_KEY=ci-placeholder \
-            RUSTFS_SECRET_KEY=ci-placeholder \
-            S3_ENDPOINT=http://rustfs:9000 \
-            NEXTCLOUD_TRUSTED_DOMAINS=cloud.example.test \
-            NEXTCLOUD_OVERWRITECLIURL=https://cloud.example.test \
-            NEXTCLOUD_OVERWRITEHOST=cloud.example.test \
-            NEXTCLOUD_DB_PASSWORD=ci-placeholder \
-            NEXTCLOUD_REDIS_PASSWORD=ci-placeholder \
-            BABY_BUDDY_PUBLIC_URL=https://example.ts.net:8458 \
-            BABY_BUDDY_SECRET_KEY=ci-placeholder \
-            MU3LAB_UID=1000 \
-            MU3LAB_GID=1000 \
-              docker compose -f "$compose_file" config --quiet
-          done < <(find core apps -name docker-compose.yml -type f | sort)
+        run: uv run --frozen python -m tools.validate_compose
       - name: Scan tracked files for accidental private environment files
         run: |
           ! git ls-files | grep -E '(^|/)\.env$'
@@ -126,8 +69,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate Python SBOM
         run: |
-          python -m pip install cyclonedx-bom
-          cyclonedx-py environment --output-format JSON --output-file mu3lab-python-sbom.json
+          uv export --frozen --no-dev --format requirements.txt --output-file requirements.lock.txt
+          uvx --from cyclonedx-bom==7.5.0 cyclonedx-py requirements requirements.lock.txt --output-format JSON --output-file mu3lab-python-sbom.json
       - uses: actions/upload-artifact@v4
         with:
           name: mu3lab-sbom

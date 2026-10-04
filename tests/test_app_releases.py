@@ -176,7 +176,7 @@ class RecordTests(_Machine):
         _remove_project(self.project, keep_env=True)
         self.assertEqual(
             sorted(path.name for path in self.project.iterdir()),
-            [".env", app_releases.RECORD, app_releases.HISTORY],
+            [".env", app_releases.RECORD],
         )
 
     def test_an_unpublished_image_stops_the_download(self):

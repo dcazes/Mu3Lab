@@ -64,7 +64,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(install.fix_for_state("docker", "nope"), "unknown")
 
     def test_ready_always_skips(self):
-        for step in ("host_base", "node", "venv", "docker", "tailscale_pkg", "caddy"):
+        for step in ("host_base", "docker", "tailscale_pkg", "caddy"):
             self.assertEqual(install.fix_for_state(step, "ready"), "skip")
 
     def test_steps_have_check_and_fix(self):
@@ -151,7 +151,7 @@ class DispatchTests(unittest.TestCase):
 
 class VaultwardenDomainTests(unittest.TestCase):
     def test_local_compose_omits_domain(self):
-        compose = (Path(__file__).resolve().parents[1] / "core" / "vaultwarden" / "docker-compose.yml").read_text(
+        compose = (Path(__file__).resolve().parents[1] / "apps" / "vaultwarden" / "docker-compose.yml").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("DOMAIN:", compose)
@@ -174,7 +174,7 @@ class VaultwardenDomainTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(up.call_args.kwargs["env"]["VAULTWARDEN_DOMAIN"], "https://mu3lab-1.example.ts.net:8443")
         self.assertEqual(
-            up.call_args.kwargs["extra_files"], [Path("/nonexistent/core/vaultwarden/docker-compose.tailnet.yml")]
+            up.call_args.kwargs["extra_files"], [Path("/nonexistent/apps/vaultwarden/docker-compose.tailnet.yml")]
         )
 
 
@@ -303,10 +303,12 @@ class CaddyFixTests(unittest.TestCase):
         }
 
     def _projdir(self, root):
-        projdir = root / "core" / "ingress"
+        projdir = root / "apps" / "ingress"
         projdir.mkdir(parents=True)
         (projdir / "docker-compose.yml").touch()
-        (root / ".env").write_text("MU3LAB_INGRESS_TOKEN=test-only-token\n", encoding="utf-8")
+        from ctl.secrets import ensure_platform_tokens
+
+        ensure_platform_tokens(token_factory=lambda: "test-only-token")
         return projdir
 
     def test_waits_for_port(self):
@@ -378,8 +380,8 @@ class AuthentikReadinessTests(unittest.TestCase):
         )
         containers = [
             [
-                {"name": "authentik-server-1", "status": "Up 1 minute (health: starting)"},
-                {"name": "authentik-worker-1", "status": "Up 1 minute (healthy)"},
+                {"name": "mu3lab-authentik-server-1", "status": "Up 1 minute (health: starting)"},
+                {"name": "mu3lab-authentik-worker-1", "status": "Up 1 minute (healthy)"},
             ]
         ]
         with (
@@ -394,7 +396,8 @@ class AuthentikReadinessTests(unittest.TestCase):
 
     def test_exited_container_fails_with_actionable_reason(self):
         with patch(
-            "ctl.install._authentik_containers", return_value=[{"name": "authentik-server-1", "status": "Exited (1)"}]
+            "ctl.install._authentik_containers",
+            return_value=[{"name": "mu3lab-authentik-server-1", "status": "Exited (1)"}],
         ):
             result = install._authentik_readiness(_ctx(), {"id": "authentik"})
         self.assertFalse(result["ok"])
@@ -403,19 +406,17 @@ class AuthentikReadinessTests(unittest.TestCase):
     def test_first_start_uses_compose_health_wait(self):
         ctx = _ctx()
         ctx["progress"] = lambda step, update: None
+        ctx["account"] = lambda: {"email": "owner@example.test", "name": "Owner", "password": "test-password"}
         env_file = Path("/tmp/authentik.env")
         with (
             patch("ctl.install._tailscale_dns_name_for_install", return_value="mu3lab.example.ts.net"),
-            patch(
-                "ctl.authentik_blueprints.write_dashboard_blueprint", return_value=Path("/tmp/authentik-dashboard.yaml")
-            ),
             patch("ctl.install._authentik_containers", return_value=[]),
             patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up,
             patch("ctl.install.time.sleep", return_value=None),
             # fix_authentik imports secrets and the blueprint writer locally
             # to avoid bootstrap-time dependency cycles.
-            patch("ctl.secrets.ensure_authentik_env", return_value=(env_file, [])),
-            patch("ctl.secrets.read_runtime_env", return_value={}),
+            patch("ctl.install.ensure_authentik_env", return_value=(env_file, [])),
+            patch("ctl.install.read_runtime_env", return_value={"AUTHENTIK_POSTGRESQL__PASSWORD": "test-db"}),
         ):
             result = install.fix_authentik({"state": "down"}, ctx)
         self.assertTrue(result["ok"])
@@ -509,62 +510,6 @@ class WorkspaceStepTests(unittest.TestCase):
             "stopped": lambda: False,
         }
 
-    def test_venv_ready_skips(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "python").touch()
-            check = install._venv_check(root)
-            self.assertEqual((check["status"], check["state"]), ("ok", "ready"))
-            self.assertEqual(install.fix_for_state("venv", "ready"), "skip")
-
-    def test_venv_missing_creates(self):
-        import tempfile
-        from unittest.mock import patch as _patch
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            check = install._venv_check(root)
-            self.assertEqual(check["state"], "no_venv")
-
-            def fake_run(argv, **kwargs):
-                # Simulate a real venv creation (mock must produce the
-                # artifact the fix verifies, like the real command would).
-                (root / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
-                (root / ".venv" / "bin" / "python").touch(exist_ok=True)
-                result = type("R", (), {})()
-                result.returncode = 0
-                result.stdout = ""
-                result.stderr = ""
-                return result
-
-            with _patch("subprocess.run", side_effect=fake_run) as run:
-                result = install.fix_venv(check, self._ctx(root))
-            self.assertTrue(result.get("ok"))
-            run.assert_called_once()
-
-    def test_pip_missing_installs(self):
-        import tempfile
-        from unittest.mock import patch as _patch
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "pip").touch()
-            (root / "ctl").mkdir()
-            (root / "ctl" / "requirements.txt").touch()
-            with _patch("subprocess.run") as run:
-                run.return_value.returncode = 1  # import fastapi fails…
-                run.return_value.stdout = ""
-                run.return_value.stderr = ""
-                check = install._pip_check(root)
-                self.assertEqual(check["state"], "missing")
-                run.return_value.returncode = 0  # …but pip install works
-                result = install.fix_pip_deps(check, self._ctx(root))
-            self.assertTrue(result.get("ok"))
-
     def test_build_stale_rebuilds(self):
         import tempfile
         import time
@@ -584,11 +529,7 @@ class WorkspaceStepTests(unittest.TestCase):
             _os.utime(dash / "dist" / "index.html", (now - 100, now - 100))
             check = install._build_check(root)
             self.assertEqual(check["state"], "stale")
-            (dash / "node_modules").mkdir()  # skip npm ci, test build only
-            with _patch("subprocess.run") as run:
-                run.return_value.returncode = 0
-                run.return_value.stdout = "built"
-                run.return_value.stderr = ""
+            with _patch("ctl.dashboard_build.actions.docker_cmd_stream", return_value=(0, "built")) as run:
                 result = install.fix_dashboard_build(check, self._ctx(root))
             self.assertTrue(result.get("ok"))
             run.assert_called_once()  # build only, no npm ci
@@ -606,9 +547,9 @@ class WorkspaceStepTests(unittest.TestCase):
         # Identity-first bootstrap: Vaultwarden is initialized locally before
         # the tailnet and Authentik are introduced.
         ids = [m["id"] for m in install.STEPS]
-        self.assertLess(ids.index("root_env"), ids.index("runtime_layout"))
+        self.assertLess(ids.index("runtime_layout"), ids.index("root_env"))
         self.assertLess(ids.index("runtime_layout"), ids.index("service"))
-        self.assertLess(ids.index("service"), ids.index("docker"))
+        self.assertLess(ids.index("docker_networks"), ids.index("dashboard_build"))
         self.assertLess(ids.index("docker"), ids.index("docker_address_pools"))
         self.assertLess(ids.index("docker_address_pools"), ids.index("docker_networks"))
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
@@ -785,12 +726,9 @@ class DockerSessionTests(unittest.TestCase):
     def test_full_dispatch_coverage(self):  # Every state any step check can emit must map to a real fix.
         states = {
             "host_base": ["missing", "ready"],
-            "node": ["absent", "old", "ready"],
-            "venv": ["no_venv", "ready"],
             "host_supported": ["unsupported", "ready"],
             "nvidia_toolkit": ["not_needed", "missing", "ready"],
             "core_images": ["missing", "ready"],
-            "pip_deps": ["missing", "outdated", "ready"],
             "dashboard_src": ["missing", "ready"],
             "dashboard_build": ["stale", "ready"],
             "root_env": ["missing", "ready"],
@@ -819,7 +757,6 @@ class DockerSessionTests(unittest.TestCase):
             "tailscale_operator": ["missing", "ready"],
             "vaultwarden_serve": ["unshared", "ready"],
             "browser_extension": ["missing", "no_address", "not_needed", "ready"],
-            "authentik_storage": ["needs_migration", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
             "lobehub_serve": ["unshared", "ready"],
@@ -956,6 +893,25 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(fixes), 1)
         self.assertEqual(fixes[0]["state"], "unjoined")
         self.assertEqual(step["detail"], "tailnet connected")
+
+
+class PullProgressTests(unittest.TestCase):
+    def test_reports_percent_and_speed_from_docker_pull_lines(self):
+        shown: list[str] = []
+        progress = install._PullProgress(shown.append, "ollama (1 of 2)")
+        progress.started -= 10
+        progress("aaa: Pulling fs layer 100MB")
+        progress("bbb: Downloading 300MB")
+        progress("aaa: Download complete 100MB")
+        progress.last_report = 0
+        progress("bbb: Downloading 300MB")
+        self.assertTrue(shown)
+        self.assertIn("ollama (1 of 2) — 25%", shown[-1])
+
+    def test_ignores_lines_without_a_layer(self):
+        shown: list[str] = []
+        install._PullProgress(shown.append, "x")("Digest:")
+        self.assertEqual(shown, [])
 
 
 if __name__ == "__main__":

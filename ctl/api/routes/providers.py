@@ -2,30 +2,32 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl.api import runtime
+from ctl.api import models, runtime
+from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
-from ctl.api.security import Member, OperatorMutation
+from ctl.api.security import IdentityData, Member, OperatorMutation
 from ctl.control_state import ControlState
 from ctl.provider_catalog import RECOMMENDED_MINIMUM, key_problem, prefix_warning, setup_progress
 from ctl.provider_catalog import catalog as provider_catalog
 from ctl.provider_catalog import detect as detect_provider
 from ctl.provider_catalog import get as get_provider
+from ctl.provider_ops import migrate_legacy
+from ctl.store.providers import save
 
-router = APIRouter(prefix="/api/v1/providers", tags=["providers"])
+router = APIRouter(prefix="/api/v1/providers", tags=["providers"], route_class=ContractRoute)
 
 
-def _provider_view(item: dict[str, Any]) -> dict[str, Any]:
+def _provider_view(item: dict[str, object]) -> dict[str, object]:
     try:
         definition = get_provider(str(item["provider_id"]))
         hint, name, supported = definition.key_hint, definition.name, True
     except ValueError:
         hint, name, supported = "Unknown legacy format", str(item["label"]), False
-    last_error = item["last_error"] or {}
+    raw_error = item["last_error"]
+    last_error = raw_error if isinstance(raw_error, dict) else {}
     return {
         "id": item["provider_id"],
         "name": name,
@@ -49,8 +51,7 @@ def _provider_view(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _connections() -> list[dict[str, Any]]:
-    from ctl.provider_ops import migrate_legacy
+def _connections() -> list[dict[str, object]]:
 
     state = ControlState.runtime()
     if state is None:
@@ -62,28 +63,31 @@ def _connections() -> list[dict[str, Any]]:
     return state.providers()
 
 
-def _providers() -> list[dict[str, Any]]:
+def _providers() -> list[dict[str, object]]:
     return [_provider_view(item) for item in _connections()]
 
 
-@router.get("")
-def list_providers(_operator: Member) -> dict[str, Any]:
+@router.get("", response_model=models.ProviderMetadataResponse, response_model_exclude_none=True)
+def list_providers(_operator: Member) -> models.ProviderMetadataResponse:
     """List safe connection state; encrypted keys never cross this boundary."""
     connections = _connections()
-    return {
-        "ok": True,
-        "providers": [_provider_view(item) for item in connections],
-        "setup": setup_progress(connections),
-    }
+    return models.ProviderMetadataResponse.model_validate(
+        {
+            "ok": True,
+            "providers": [_provider_view(item) for item in connections],
+            "setup": setup_progress(connections),
+        }
+    )
 
 
-@router.get("/catalog")
-def providers_catalog(_operator: Member) -> dict[str, Any]:
-    return {"ok": True, "providers": provider_catalog(), "recommended_minimum": RECOMMENDED_MINIMUM}
+@router.get("/catalog", response_model=models.ProviderCatalogResponse, response_model_exclude_none=True)
+def providers_catalog(_operator: Member) -> models.ProviderCatalogResponse:
+    return models.ProviderCatalogResponse.model_validate(
+        {"ok": True, "providers": provider_catalog(), "recommended_minimum": RECOMMENDED_MINIMUM}
+    )
 
 
-def _save_key(provider_id: str, label: str, api_key: str, operator: dict[str, Any], key: str | None) -> dict[str, Any]:
-    from ctl.provider_secrets import save
+def _save_key(provider_id: str, label: str, api_key: str, operator: IdentityData, key: str | None) -> dict[str, object]:
 
     api_key = api_key.strip()
     problem = key_problem(api_key)
@@ -126,8 +130,10 @@ def _save_key(provider_id: str, label: str, api_key: str, operator: dict[str, An
     }
 
 
-@router.post("")
-async def save_provider(request: Request, operator: OperatorMutation) -> dict[str, Any]:
+@router.post("", response_model=models.JobResponse, response_model_exclude_none=True)
+async def save_provider(
+    payload_model: models.ProviderRequest, request: Request, operator: OperatorMutation
+) -> models.JobResponse:
     """Accept one provider key without ever echoing or logging its value.
 
     ``provider_id`` is optional: without it the provider is detected from the key."""
@@ -135,32 +141,38 @@ async def save_provider(request: Request, operator: OperatorMutation) -> dict[st
     key = runtime.idempotency_key(request)
     previous = store.by_idempotency_key(key or "")
     if previous:
-        return {"ok": True, "duplicate": True, "job": previous}
-    payload = await runtime.json_body(request)
-    return await run_in_threadpool(
-        _save_key,
-        str(payload.get("provider_id", "")),
-        str(payload.get("label", "")),
-        str(payload.get("api_key", "")),
-        operator,
-        key,
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    payload = payload_model.model_dump()
+    return models.JobResponse.model_validate(
+        await run_in_threadpool(
+            _save_key,
+            str(payload.get("provider_id", "")),
+            str(payload.get("label", "")),
+            str(payload.get("api_key", "")),
+            operator,
+            key,
+        )
     )
 
 
-@router.get("/{provider_id}/models")
-def provider_models(provider_id: str, _operator: Member) -> dict[str, Any]:
+@router.get("/{provider_id}/models", response_model=models.ProviderModelsResponse, response_model_exclude_none=True)
+def provider_models(provider_id: str, _operator: Member) -> models.ProviderModelsResponse:
     provider = next((item for item in _providers() if item["id"] == provider_id), None)
     if not provider:
         raise ApiError(404, "provider connection does not exist")
-    return {
-        "ok": True,
-        "provider_id": provider_id,
-        "models": provider["model_samples"],
-        "examples": provider["models_are_examples"],
-    }
+    return models.ProviderModelsResponse.model_validate(
+        {
+            "ok": True,
+            "provider_id": provider_id,
+            "models": provider["model_samples"],
+            "examples": provider["models_are_examples"],
+        }
+    )
 
 
-def _queue_provider_action(provider_id: str, action: str, request: Request, operator: dict[str, Any]) -> dict[str, Any]:
+def _queue_provider_action(
+    provider_id: str, action: str, request: Request, operator: IdentityData
+) -> dict[str, object]:
     state = ControlState.runtime()
     try:
         resolved_id = get_provider(provider_id).id
@@ -187,21 +199,21 @@ def _queue_provider_action(provider_id: str, action: str, request: Request, oper
     return {"ok": True, "job": job}
 
 
-@router.post("/{provider_id}/verify")
-def verify_provider(provider_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    return _queue_provider_action(provider_id, "verify", request, operator)
+@router.post("/{provider_id}/verify", response_model=models.JobResponse, response_model_exclude_none=True)
+def verify_provider(provider_id: str, request: Request, operator: OperatorMutation) -> models.JobResponse:
+    return models.JobResponse.model_validate(_queue_provider_action(provider_id, "verify", request, operator))
 
 
-@router.post("/{provider_id}/enable")
-def enable_provider(provider_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    return _queue_provider_action(provider_id, "enable", request, operator)
+@router.post("/{provider_id}/enable", response_model=models.JobResponse, response_model_exclude_none=True)
+def enable_provider(provider_id: str, request: Request, operator: OperatorMutation) -> models.JobResponse:
+    return models.JobResponse.model_validate(_queue_provider_action(provider_id, "enable", request, operator))
 
 
-@router.post("/{provider_id}/disable")
-def disable_provider(provider_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    return _queue_provider_action(provider_id, "disable", request, operator)
+@router.post("/{provider_id}/disable", response_model=models.JobResponse, response_model_exclude_none=True)
+def disable_provider(provider_id: str, request: Request, operator: OperatorMutation) -> models.JobResponse:
+    return models.JobResponse.model_validate(_queue_provider_action(provider_id, "disable", request, operator))
 
 
-@router.delete("/{provider_id}")
-def remove_provider(provider_id: str, request: Request, operator: OperatorMutation) -> dict[str, Any]:
-    return _queue_provider_action(provider_id, "remove", request, operator)
+@router.delete("/{provider_id}", response_model=models.JobResponse, response_model_exclude_none=True)
+def remove_provider(provider_id: str, request: Request, operator: OperatorMutation) -> models.JobResponse:
+    return models.JobResponse.model_validate(_queue_provider_action(provider_id, "remove", request, operator))

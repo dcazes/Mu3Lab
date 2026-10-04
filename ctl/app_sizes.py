@@ -26,9 +26,10 @@ from typing import Any
 
 import httpx
 
-from ctl import actions, sqlite_store
+from ctl import actions
 from ctl.image_fetch import FetchError, LocalLayers, Registry, parse_ref, plan_image
 from ctl.runtime import RuntimePaths
+from ctl.store import db
 
 Log = Callable[[str], None]
 # A tag can be moved to a new image; a digest never changes.
@@ -54,13 +55,17 @@ def unpacked_size(client: httpx.Client, registry: Registry, digest: str, size: i
     return value
 
 
-def measure_image(client: httpx.Client, image: str, cache: Path) -> dict[str, Any]:
+def measure_image(client: httpx.Client, image: str, path: Path) -> dict[str, Any]:
     """Layers of one image with download and unpacked sizes, cached on disk."""
     ref = parse_ref(image)
-    path = cache / (hashlib.sha256(image.encode()).hexdigest() + ".json")
+    name = hashlib.sha256(image.encode()).hexdigest()
     try:
-        cached = json.loads(path.read_text())
-        if ref.digest or time.time() - float(cached.get("measured", 0)) < TAG_MAX_AGE:
+        with db.connect(path) as connection:
+            row = connection.execute(
+                "SELECT value_json FROM records WHERE scope='image-sizes' AND name=?", (name,)
+            ).fetchone()
+        cached = json.loads(row[0]) if row else {}
+        if cached and (ref.digest or time.time() - float(cached.get("measured", 0)) < TAG_MAX_AGE):
             return cached
     except (OSError, ValueError):
         pass
@@ -80,8 +85,11 @@ def measure_image(client: httpx.Client, image: str, cache: Path) -> dict[str, An
         "diff_ids": json.loads(plan.config).get("rootfs", {}).get("diff_ids", []),
         "measured": time.time(),
     }
-    cache.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result))
+    with db.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO records VALUES (?, ?, ?, ?) ON CONFLICT(scope, name) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+            ("image-sizes", name, json.dumps(result), time.time()),
+        )
     return result
 
 
@@ -91,20 +99,10 @@ class AppSizeStore:
 
     @classmethod
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> AppSizeStore | None:
-        return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
+        return cls(db.database(paths)) if paths.runtime.is_dir() else None
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        with sqlite_store.schema_once(conn, self.database, "app_sizes") as needed:
-            if needed:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS app_sizes (
-                        service_id TEXT PRIMARY KEY, layers_json TEXT NOT NULL DEFAULT '[]',
-                        error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
-                    )
-                """)
-        return conn
+        return db.connect(self.database)
 
     def save(self, service_id: str, layers: list[dict[str, Any]], error: str = "") -> None:
         with self._connect() as conn:
@@ -161,14 +159,14 @@ def refresh(
     """Measure every app's images and record which layers this server already has."""
     http = client or httpx.Client(timeout=httpx.Timeout(30.0, connect=15.0), follow_redirects=False)
     try:
-        local = LocalLayers(http, cache.parent, actions.docker_local_images())
+        local = LocalLayers(http, store.database, actions.docker_local_images())
         present_images: dict[str, bool] = {}
         for service_id, images in services.items():
             layers: list[dict[str, Any]] = []
             error = ""
             for image in images:
                 try:
-                    measured = measure_image(http, image, cache)
+                    measured = measure_image(http, image, store.database)
                 except (FetchError, httpx.HTTPError, ValueError, KeyError) as exc:
                     error = f"{image}: {exc}"
                     continue

@@ -68,14 +68,7 @@ function NextSteps({ service }: { service: Service }) {
   const identity = service.identity;
   const steps = [];
 
-  if (service.blocked_reason && service.stage === 'blocked')
-    steps.push(
-      <Callout key="blocked" tone="info" title="Not available yet">
-        {service.blocked_reason}
-      </Callout>,
-    );
-
-  if (['failed', 'needs_attention', 'degraded'].includes(service.state) && isInstalled(service))
+  if (['failed', 'needs_attention', 'degraded'].includes(service.display_state) && isInstalled(service))
     steps.push(
       <Callout
         key="failed"
@@ -88,7 +81,11 @@ function NextSteps({ service }: { service: Service }) {
       </Callout>,
     );
 
-  if (service.state === 'config_required')
+  if (
+    service.display_state === 'needs_attention' &&
+    !service.installed &&
+    (service.configuration || []).some((field) => field.required && !field.value && !field.secret_present)
+  )
     steps.push(
       <Callout
         key="config"
@@ -141,7 +138,7 @@ function Overview({ service, address, devices }: { service: Service; address: st
         {note && <p className="muted">{note}</p>}
         <Facts
           items={[
-            { label: 'Status', value: <StatusBadge state={service.state} /> },
+            { label: 'Status', value: <StatusBadge state={service.display_state} /> },
             {
               label: 'Sign-in',
               value: (
@@ -227,7 +224,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
             <span>
               {service.name}
               <small>
-                <StatusBadge state={service.state} />
+                <StatusBadge state={service.display_state} />
                 {mcp?.state === 'live' && (
                   <Badge tone="gray">
                     <Plug /> In chat

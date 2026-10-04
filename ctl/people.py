@@ -1,161 +1,109 @@
-"""Household people: Authentik accounts in Mu3Lab's member or admin group.
-
-Mu3Lab never handles these people's passwords. Adding someone creates their
-Authentik account without a password and returns a one-time sign-in link valid
-for a day; opening it signs them in once, and they set their own password in
-Authentik. Removing someone deactivates the account rather than deleting it,
-so what they stored in apps is kept.
-"""
+"""Household accounts through Authentik's REST API; people choose their own passwords."""
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
-from ctl import actions
+from ctl.integrations.authentik import Authentik, AuthentikError
+from ctl.runtime import RuntimePaths
+from ctl.secret_file import locked
 
 ADMIN_GROUP = "mu3lab-operators"
 MEMBER_GROUP = "mu3lab-household"
+SUPERUSER_GROUP = "authentik Admins"
 ROLES = {"admin": ADMIN_GROUP, "member": MEMBER_GROUP}
 INVITE_HOURS = 24
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-_MARK = "MU3LAB_PEOPLE="
-
-# Runs inside Authentik's own shell. Input arrives as one JSON line on stdin.
-_SCRIPT = r"""
-import json, re, sys
-from datetime import timedelta
-from django.db import transaction
-from django.utils.timezone import now
-from authentik.core.models import Group, User
-from authentik.recovery.lib import create_recovery_token
-
-request = json.loads(sys.stdin.readline())
-admins = Group.objects.get_or_create(name="mu3lab-operators")[0]
-members = Group.objects.get_or_create(name="mu3lab-household")[0]
-superusers = Group.objects.filter(name="authentik Admins").first()
-
-
-def role(user):
-    names = set(user.groups.values_list("name", flat=True))
-    if names & {"mu3lab-operators", "authentik Admins"}:
-        return "admin"
-    return "member" if "mu3lab-household" in names else ""
-
-
-def view(user):
-    return {
-        "username": user.username,
-        "uid": user.uid,
-        "name": user.name,
-        "email": user.email,
-        "role": role(user),
-        "active": user.is_active,
-        "last_login": user.last_login.isoformat() if user.last_login else "",
-        "has_password": user.has_usable_password(),
-    }
-
-
-def people():
-    users = User.objects.filter(groups__name__in=["mu3lab-operators", "mu3lab-household", "authentik Admins"])
-    return [view(user) for user in users.distinct().order_by("name", "username") if not user.username.startswith("ak-")]
-
-
-def set_role(user, value):
-    user.groups.remove(admins, members)
-    (admins if value == "admin" else members).users.add(user)
-
-
-def admin_count(exclude=None):
-    users = User.objects.filter(is_active=True, groups__name__in=["mu3lab-operators", "authentik Admins"])
-    return users.exclude(pk=getattr(exclude, "pk", None)).distinct().count()
-
-
-result = {}
-action = request["action"]
-with transaction.atomic():
-    if action == "list":
-        result = {"people": people()}
-    elif action == "add":
-        email = request["email"].lower()
-        if User.objects.filter(email__iexact=email).exists():
-            raise SystemExit("MU3LAB_PEOPLE_ERROR=Someone with that email already has an account.")
-        base = re.sub(r"[^a-z0-9._-]", "", email.split("@")[0]) or "member"
-        username, suffix = base, 1
-        while User.objects.filter(username=username).exists():
-            suffix += 1
-            username = f"{base}{suffix}"
-        user = User.objects.create(username=username, name=request["name"] or username, email=email)
-        user.set_unusable_password()
-        user.save()
-        set_role(user, request["role"])
-        _token, path = create_recovery_token(user, now() + timedelta(hours=request["hours"]), "Mu3Lab")
-        result = {"person": view(user), "invite_path": path}
-    else:
-        user = User.objects.filter(username=request["username"]).first()
-        if user is None or role(user) == "":
-            raise SystemExit("MU3LAB_PEOPLE_ERROR=That person is not part of this Mu3Lab.")
-        if action == "role":
-            if request["role"] != "admin" and role(user) == "admin" and admin_count(exclude=user) == 0:
-                raise SystemExit("MU3LAB_PEOPLE_ERROR=Mu3Lab needs at least one administrator.")
-            set_role(user, request["role"])
-        elif action == "invite":
-            _token, path = create_recovery_token(user, now() + timedelta(hours=request["hours"]), "Mu3Lab")
-            result = {"invite_path": path}
-        elif action == "deactivate":
-            if role(user) == "admin" and admin_count(exclude=user) == 0:
-                raise SystemExit("MU3LAB_PEOPLE_ERROR=Mu3Lab needs at least one administrator.")
-            user.is_active = False
-            user.save()
-        elif action == "reactivate":
-            user.is_active = True
-            user.save()
-        result = result or {"person": view(user)}
-print("MU3LAB_PEOPLE=" + json.dumps(result))
-"""
 
 
 class PeopleError(ValueError):
-    """A request Authentik refused, with a message fit to show the admin."""
+    """An actionable account-management refusal."""
 
 
-def _run(request: dict[str, Any]) -> dict[str, Any]:
-    rc, output = actions.docker_cmd_with_stdin(
-        ["docker", "exec", "-i", "authentik-server-1", "ak", "shell", "-c", _SCRIPT],
-        json.dumps(request) + "\n",
-        lambda _line: None,
-        timeout=90,
+def _group_names(user: dict[str, Any]) -> set[str]:
+    return {str(group["name"]) for group in (user.get("groups_obj") or []) if isinstance(group, dict)}
+
+
+def _role(user: dict[str, Any]) -> str:
+    names = _group_names(user)
+    if names & {ADMIN_GROUP, SUPERUSER_GROUP}:
+        return "admin"
+    return "member" if MEMBER_GROUP in names else ""
+
+
+def _view(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "username": user["username"],
+        "uid": user["uid"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": _role(user),
+        "active": user["is_active"],
+        "last_login": user.get("last_login") or "",
+    }
+
+
+def _people(client: Authentik) -> list[dict[str, Any]]:
+    return sorted(
+        (user for user in client.users() if _role(user) and not user["username"].startswith("ak-")),
+        key=lambda user: (user["name"], user["username"]),
     )
-    refusal = next((line.split("=", 1)[1] for line in output.splitlines() if "MU3LAB_PEOPLE_ERROR=" in line), "")
-    if refusal:
-        raise PeopleError(refusal)
-    line = next((line for line in reversed(output.splitlines()) if line.startswith(_MARK)), "")
-    if rc or not line:
-        raise PeopleError("Authentik did not answer. Check that it is running, then try again.")
-    return json.loads(line.removeprefix(_MARK))
 
 
-def _invite(result: dict[str, Any], authentik_origin: str) -> dict[str, Any]:
-    path = str(result.pop("invite_path", ""))
-    if path:
-        result["invite"] = {"url": authentik_origin.rstrip("/") + path, "valid_hours": INVITE_HOURS}
-    return result
+def _set_role(client: Authentik, user: dict[str, Any], role: str) -> dict[str, Any]:
+    # Add first so an API error cannot remove the person's last membership.
+    client.add_to_group(ROLES[role], user["pk"])
+    removed = {ADMIN_GROUP, MEMBER_GROUP} - {ROLES[role]}
+    if role != "admin":
+        removed.add(SUPERUSER_GROUP)
+    for group in sorted(removed):
+        client.remove_from_group(group, user["pk"])
+    return client.user(user["username"]) or user
+
+
+def _invite(client: Authentik, user: dict[str, Any], origin: str) -> dict[str, Any]:
+    link = urlsplit(client.recovery_link(user["pk"], INVITE_HOURS))
+    # The recovery API is called on loopback; invite recipients need the private HTTPS origin.
+    return {
+        "invite": {
+            "url": origin.rstrip("/") + link.path + ("?" + link.query if link.query else ""),
+            "valid_hours": INVITE_HOURS,
+        }
+    }
 
 
 def list_people() -> list[dict[str, Any]]:
-    return list(_run({"action": "list"})["people"])
+    try:
+        return [_view(user) for user in _people(Authentik.runtime())]
+    except AuthentikError as exc:
+        raise PeopleError(str(exc)) from exc
 
 
 def add_person(name: str, email: str, role: str, authentik_origin: str) -> dict[str, Any]:
-    name, email = name.strip()[:150], email.strip()
+    name, email = name.strip()[:150], email.strip().lower()
     if not _EMAIL.fullmatch(email) or len(email) > 254:
         raise PeopleError("Enter a valid email address.")
     if role not in ROLES:
         raise PeopleError("Choose member or admin.")
-    return _invite(
-        _run({"action": "add", "name": name, "email": email, "role": role, "hours": INVITE_HOURS}), authentik_origin
-    )
+    try:
+        with locked(RuntimePaths().runtime / "people.lock"):
+            client = Authentik.runtime()
+            users = client.users()
+            if any(str(user.get("email", "")).lower() == email for user in users):
+                raise PeopleError("Someone with that email already has an account.")
+            base = re.sub(r"[^a-z0-9._-]", "", email.split("@")[0])[:140] or "member"
+            username, suffix = base, 1
+            usernames = {user["username"] for user in users}
+            while username in usernames:
+                suffix += 1
+                username = f"{base}{suffix}"
+            user = client.create_user(username, name or username, email)
+            user = _set_role(client, user, role)
+            return {"person": _view(user), **_invite(client, user, authentik_origin)}
+    except AuthentikError as exc:
+        raise PeopleError(str(exc)) from exc
 
 
 def change(username: str, action: str, authentik_origin: str, role: str = "") -> dict[str, Any]:
@@ -163,5 +111,35 @@ def change(username: str, action: str, authentik_origin: str, role: str = "") ->
         raise PeopleError("Unsupported change.")
     if action == "role" and role not in ROLES:
         raise PeopleError("Choose member or admin.")
-    request = {"action": action, "username": username, "role": role, "hours": INVITE_HOURS}
-    return _invite(_run(request), authentik_origin)
+    try:
+        with locked(RuntimePaths().runtime / "people.lock"):
+            client = Authentik.runtime()
+            users = _people(client)
+            user = next((person for person in users if person["username"] == username), None)
+            if user is None:
+                raise PeopleError("That person is not part of this Mu3Lab.")
+            removing_admin = action == "deactivate" or (action == "role" and role != "admin")
+            if (
+                removing_admin
+                and user["is_active"]
+                and _role(user) == "admin"
+                and not any(
+                    other["pk"] != user["pk"] and other["is_active"] and _role(other) == "admin" for other in users
+                )
+            ):
+                raise PeopleError("Mu3Lab needs at least one administrator.")
+            if removing_admin and username == "akadmin":
+                # The automated-install API token belongs to this account. Disabling
+                # it or dropping its privileges would also disable account management.
+                raise PeopleError(
+                    "The installation administrator must stay active to keep Mu3Lab's sign-in management working."
+                )
+            if action == "invite":
+                return _invite(client, user, authentik_origin)
+            if action == "role":
+                user = _set_role(client, user, role)
+            else:
+                user = client.update_user(user["pk"], is_active=action == "reactivate")
+            return {"person": _view(user)}
+    except AuthentikError as exc:
+        raise PeopleError(str(exc)) from exc

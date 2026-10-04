@@ -14,7 +14,6 @@ again and forgets the local copy, so the calendar always ends up in one place.
 
 from __future__ import annotations
 
-import json
 import secrets
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -25,41 +24,29 @@ from icalendar import Calendar
 from ctl import nextcloud_calendar as nextcloud
 from ctl.nextcloud_calendar import CalendarError
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import read_or_create_key, serialized, write_atomic
+from ctl.secret_file import serialized
+from ctl.store.secrets import SecretError, SecretStore
 
 ID_PREFIX = "local-"
 _MAX_EVENTS_PER_OWNER = 5000
 _LOCK = "local-calendar.lock"
 
 
-def _paths(paths: RuntimePaths):
-    return paths.runtime / "local-calendar.key", paths.runtime / "local-calendar.enc"
-
-
-def _cipher(paths: RuntimePaths):
-    from cryptography.fernet import Fernet
-
-    key_path, _ = _paths(paths)
-    paths.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
-    return Fernet(read_or_create_key(key_path, Fernet.generate_key))
-
-
 def _read(paths: RuntimePaths) -> dict[str, dict]:
-    """``{owner_uid: {"events": {event_id: record}, "deleted": [href, ...]}}``."""
-    _, target = _paths(paths)
-    if not target.is_file():
-        return {}
+    store = SecretStore(paths)
     try:
-        value = json.loads(_cipher(paths).decrypt(target.read_bytes()).decode("utf-8"))
-    except Exception as exc:
+        return {uid: store.get("local-calendar", uid) for uid in store.list_names("local-calendar")}
+    except SecretError as exc:
         raise CalendarError("unavailable", "The Mu3Lab calendar could not be read.") from exc
-    return value if isinstance(value, dict) else {}
 
 
 def _write(records: dict[str, dict], paths: RuntimePaths) -> None:
-    _, target = _paths(paths)
+    store = SecretStore(paths)
     records = {owner: bucket for owner, bucket in records.items() if bucket.get("events") or bucket.get("deleted")}
-    write_atomic(target, _cipher(paths).encrypt(json.dumps(records, sort_keys=True).encode("utf-8")))
+    for owner in set(store.list_names("local-calendar")) - records.keys():
+        store.delete("local-calendar", owner)
+    for owner, bucket in records.items():
+        store.put("local-calendar", owner, bucket)
 
 
 def _bucket(records: dict, owner_uid: str) -> dict:
@@ -165,8 +152,7 @@ def _rows(event_id: str, record: dict, start: datetime, end: datetime) -> list[d
 @serialized(_LOCK)
 def has_events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     """True while anything still has to be sent to Nextcloud."""
-    _, target = _paths(paths)
-    bucket = _read(paths).get(owner_uid, {}) if target.is_file() else {}
+    bucket = _read(paths).get(owner_uid, {})
     return bool(bucket.get("events") or bucket.get("deleted"))
 
 

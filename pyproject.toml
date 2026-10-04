@@ -1,12 +1,39 @@
 [project]
 name = "mu3lab"
 description = "Private homelab control plane"
-requires-python = ">=3.11"
-dynamic = ["version"]
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+# Exact pins: uv.lock records every indirect dependency too, so two computers
+# installing the same release get identical libraries.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "pyyaml==6.0.3",
+    "psutil==7.2.2",
+    "httpx==0.28.1",
+    "cryptography==50.0.1",
+    "icalendar==7.3.0",
+    "recurring-ical-events==3.8.2",
+    "jsonschema==4.26.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff==0.16.9",
+    "mypy==2.3.1",
+    "types-psutil==7.2.2.20260906",
+    "types-PyYAML==6.0.12.20260906",
+]
+
+[tool.uv]
+package = false
+# Always use uv's own Python build (pinned in .python-version), never the
+# host's, so every computer runs the same interpreter.
+python-preference = "only-managed"
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py312"
 extend-exclude = ["dashboard", ".venv"]
 
 [tool.ruff.lint]
@@ -25,7 +52,7 @@ extend-immutable-calls = ["ctl.runtime.RuntimePaths", "ctl.backups.Retention", "
 known-first-party = ["ctl", "tests", "tools"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = ["ctl"]
 ignore_missing_imports = true
 warn_unused_ignores = true

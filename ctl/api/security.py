@@ -13,13 +13,16 @@ import hashlib
 import hmac
 import re
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Literal, TypedDict
 from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
 
+from ctl import bootstrap_state
 from ctl.api.errors import ApiError
-from ctl.workflow_secrets import JobIdentity
+from ctl.provisioning import ProvisioningStore
+from ctl.secrets import platform_values
+from ctl.store.workflows import JobIdentity
 
 ROOT = Path(__file__).resolve().parents[2]
 OPERATOR_GROUPS = frozenset({"mu3lab-operators", "authentik Admins"})
@@ -28,15 +31,25 @@ HOUSEHOLD_GROUP = "mu3lab-household"
 MEMBER_GROUPS = OPERATOR_GROUPS | {HOUSEHOLD_GROUP}
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
-IdentityData = dict[str, Any]
+
+class IdentityData(TypedDict):
+    ok: bool
+    control_plane_auth: str
+    username: str
+    subject_id: str
+    email: str
+    display_name: str
+    groups: list[str]
+    detail: str
+    role: Literal["admin", "member", ""]
+    is_admin: bool
+    writes_enabled: bool
 
 
 def _runtime_env() -> dict[str, str]:
-    from ctl.secrets import read_runtime_env
-
     try:
-        return read_runtime_env(ROOT / ".env")
-    except OSError:
+        return platform_values()
+    except (OSError, ValueError):
         return {}
 
 
@@ -79,8 +92,6 @@ def mutation_allowed(request: Request) -> bool:
 def _record_operator_traversal() -> None:
     # An operator request is machine evidence that Tailscale, Caddy, and
     # Authentik are all in front of the dashboard.
-    from ctl import bootstrap_state
-    from ctl.provisioning import ProvisioningStore
 
     try:
         bootstrap_state.confirm("dashboard_protection")

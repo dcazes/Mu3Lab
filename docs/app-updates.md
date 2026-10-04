@@ -10,7 +10,7 @@ The update checks first, using the installer's own checks from the new version. 
 
 ## How it works
 
-- **Approved version.** In the repository, `update.approved_version` in `services.yaml` and the digest-pinned images in `apps/<app>/docker-compose.yml` describe the one release Mu3Lab approves for each app. New installs get that release.
+- **Approved version.** In the repository, `version` in `apps/<app>/app.yaml` and the digest-pinned images in `apps/<app>/docker-compose.yml` describe the one release Mu3Lab approves for each app. New installs get that release.
 - **Installed version.** Each server records the release every app actually runs in `/srv/mu3lab/projects/<app>/docker-compose.digest.yml`, which pins each container to an image digest. Every Compose command uses it. Updating Mu3Lab, repairing an app or reinstalling over kept data never changes it.
 - **Updating.** When the approved release is newer, the app shows **Update ready**. The update downloads the new images while the app keeps running, stops it, saves a backup, then starts the new release. If it doesn't come up healthy, the backup and the previous release are put back automatically.
 - **Undoing.** Restoring the backup taken before an update also puts back the release it came from. `releases.json`, next to the digest file, records every release the server has run.

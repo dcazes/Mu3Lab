@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
 
 from fastapi import Request
 
-from ctl import workflow_secrets
 from ctl.api.errors import ApiError
 from ctl.api.security import IdentityData, job_identity
 from ctl.control_state import ControlState
@@ -16,6 +14,7 @@ from ctl.mcp_catalog import McpServer
 from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl.registry import Registry, RegistryError, Service
 from ctl.registry import load as load_registry
+from ctl.store import workflows as workflow_secrets
 
 
 def job_store() -> JobStore:
@@ -57,16 +56,6 @@ def idempotency_key(request: Request) -> str | None:
     return request.headers.get("idempotency-key") or None
 
 
-async def json_body(request: Request) -> dict[str, Any]:
-    try:
-        payload = await request.json()
-    except ValueError as exc:
-        raise ApiError(400, "invalid JSON body") from exc
-    if not isinstance(payload, dict):
-        raise ApiError(400, "JSON body must be an object")
-    return payload
-
-
 def identity_for_job(identity: IdentityData) -> Callable[[str], None]:
     """Save the caller's identity for a new job before the worker can claim it."""
 
@@ -80,7 +69,7 @@ def identity_for_job(identity: IdentityData) -> Callable[[str], None]:
 
 
 def hand_identity_to_job(
-    store: JobStore, job: dict[str, Any], identity: IdentityData, *, detail: str, error_code: str, step_id: str
+    store: JobStore, job: Mapping[str, object], identity: IdentityData, *, detail: str, error_code: str, step_id: str
 ) -> None:
     """Store the caller's identity encrypted for a job that provisions their account."""
     try:

@@ -14,15 +14,17 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard
+from ctl import actions, job_guard, platform_releases
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
 from ctl.mcp_credentials import ensure as ensure_credentials
 from ctl.mcp_registry import credential_path, missing_credentials
+from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.secrets import SecretStore
 
 SUPPORTED_ACTIONS = frozenset({"prepare", "enable", "install", "restart", "disable", "verify", "update", "switch"})
 
@@ -121,15 +123,18 @@ def _materialize(server, root: Path) -> Path:
             shutil.copy2(item, destination)
         elif item.is_dir():
             shutil.copytree(item, destination, dirs_exist_ok=True)
-    if server.id in {"nextcloud-context-agent", "adventurelog"}:
-        shutil.copy2(root / "apps" / "mcp" / "adapters" / "server.py", target / "server.py")
+    for relative in server.include:
+        shutil.copy2(root / relative, target / Path(relative).name)
     env_path = credential_path(server.id)
-    values = read_runtime_env(env_path)
+    store = SecretStore()
+    values = store.get("connector", server.id) or read_runtime_env(env_path)
     values.setdefault("MU3LAB_DATA_ROOT", str(RuntimePaths().data))
-    if server.id in {"actual-budget-community", "nextcloud-context-agent", "adventurelog"}:
-        values.setdefault("MCP_AUTH_TOKEN", secrets.token_urlsafe(40))
+    for secret in server.secrets:
+        values.setdefault(str(secret["env"]), secrets.token_urlsafe(int(secret["length"])))
+    store.put("connector", server.id, values)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
+    platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
     return target
 
 
@@ -309,7 +314,7 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
         result = check.get("result", {})
         if not isinstance(result, dict) or result.get("isError"):
             raise ValueError("SurfSense rejected the token or workspace API check")
-    if getattr(server, "id", "") in {"nextcloud-context-agent", "adventurelog"}:
+    if getattr(server, "id", "") in {"nextcloud-context-agent", by_capability("travel").id}:
         name = "list_files" if server.id == "nextcloud-context-agent" else "list_collections"
         check, _ = _rpc_request(
             url, "tools/call", 3, token=token, session_id=session_id, params={"name": name, "arguments": {}}
@@ -515,6 +520,7 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
                     shutil.copy2(item, destination)
                 elif item.is_dir():
                     shutil.copytree(item, destination, dirs_exist_ok=True)
+            platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
             rc, output = actions.compose_up(target, log, recreate=True, wait_timeout=120)
             if rc:
                 raise ValueError("Updated MCP did not start: " + redact(output))

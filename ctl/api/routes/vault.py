@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import browser_extension, onboarding_state, workflow_secrets
-from ctl.api import runtime
+from ctl import browser_extension, vault_sync
+from ctl.api import models, runtime
+from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
-from ctl.api.security import Member, MemberMutation, OwnerMutation
+from ctl.api.security import IdentityData, Member, MemberMutation, OwnerMutation
 from ctl.control_state import ControlState
+from ctl.integrations.vaultwarden import VaultError, VaultSession
 from ctl.jobs import JobStore
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
+from ctl.service_state import tailnet_dns_name
+from ctl.store import onboarding as onboarding_state
 from ctl.vault_setup import VAULTWARDEN_LOCAL_URL, SeedResult, desired_items, seed
-from ctl.vaultwarden_api import VaultError, VaultSession
 
-router = APIRouter(prefix="/api/v1/vault", tags=["vault"])
+router = APIRouter(prefix="/api/v1/vault", tags=["vault"], route_class=ContractRoute)
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
 _STATUS = {
@@ -31,14 +33,12 @@ _STATUS = {
 
 def _host() -> str:
     try:
-        from ctl.service_state import tailnet_dns_name
-
         return tailnet_dns_name()
     except (OSError, ValueError):
         return ""
 
 
-def _run(owner: dict[str, Any], email: str, password: str, totp: str) -> SeedResult:
+def _run(owner: IdentityData, email: str, password: str, totp: str) -> SeedResult:
     items = desired_items(
         registry=runtime.registry(),
         host=_host(),
@@ -51,46 +51,48 @@ def _run(owner: dict[str, Any], email: str, password: str, totp: str) -> SeedRes
         return seed(session, items)
 
 
-def _visible(status: dict[str, Any], identity: dict[str, Any]) -> dict[str, Any]:
+def _visible(status: object, identity: IdentityData) -> models.VaultAutomatic:
     """Administrators see everyone; a household member sees only themselves."""
-    if identity.get("is_admin"):
-        return status
-    mine = [person for person in status.get("people") or [] if person.get("uid") == identity.get("subject_id")]
-    return {**status, "people": mine}
+    result = models.VaultAutomatic.model_validate(status)
+    if not identity["is_admin"]:
+        result.people = [person for person in result.people or [] if person.uid == identity["subject_id"]]
+    return result
 
 
-@router.post("/sync")
-async def sync_now(_member: MemberMutation) -> dict[str, Any]:
+@router.post("/sync", response_model=models.VaultSyncResponse, response_model_exclude_none=True)
+async def sync_now(_member: MemberMutation) -> models.VaultSyncResponse:
     """Save waiting logins to everyone's vault now instead of at the next automatic run."""
-    from ctl import vault_sync
 
     result = await run_in_threadpool(vault_sync.run, lambda _line: None)
     if result is None:
         raise ApiError(503, "Authentik or Vaultwarden is not ready yet; Mu3Lab retries automatically.")
-    return {"ok": True, "automatic": _visible(vault_sync.status(), _member)}
+    return models.VaultSyncResponse.model_validate({"ok": True, "automatic": _visible(vault_sync.status(), _member)})
 
 
-@router.get("/status")
-def vault_status(_operator: Member) -> dict[str, Any]:
-    from ctl import vault_sync
+@router.get("/status", response_model=models.VaultStatus, response_model_exclude_none=True)
+def vault_status(_operator: Member) -> models.VaultStatus:
 
     state = ControlState.runtime()
-    return {
-        "ok": True,
-        # Logins are saved for everyone automatically; this is the last run.
-        "automatic": _visible(vault_sync.status(), _operator),
-        **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
-        "pending_logins": len(onboarding_state.pending_logins(str(_operator.get("subject_id") or ""))),
-        "browser_extension": browser_extension.status(
-            vault_database=RuntimePaths().data / "vaultwarden" / "db.sqlite3"
-        ),
-    }
+    return models.VaultStatus.model_validate(
+        {
+            "ok": True,
+            # Logins are saved for everyone automatically; this is the last run.
+            "automatic": _visible(vault_sync.status(), _operator),
+            **(state.vault_seeded() if state else {"seeded": False, "seeded_at": ""}),
+            "pending_logins": len(onboarding_state.pending_logins(str(_operator.get("subject_id") or ""))),
+            "browser_extension": browser_extension.status(
+                vault_database=RuntimePaths().data / by_capability("password_store").id / "db.sqlite3"
+            ),
+        }
+    )
 
 
-@router.post("/setup")
-async def setup_vault(request: Request, owner: OwnerMutation) -> JSONResponse:
+@router.post("/setup", response_model=models.VaultSetupResult, response_model_exclude_none=True)
+async def setup_vault(
+    payload_model: models.VaultSetupRequest, request: Request, owner: OwnerMutation
+) -> models.VaultSetupResult | JSONResponse:
     """Use the master password for this one request only; it is never stored or logged."""
-    payload = await runtime.json_body(request)
+    payload = payload_model.model_dump()
     email = str(payload.get("email", "")).strip()
     password = str(payload.get("master_password", ""))
     totp = str(payload.get("totp", "")).strip()
@@ -101,19 +103,9 @@ async def setup_vault(request: Request, owner: OwnerMutation) -> JSONResponse:
     owner_uid = str(owner["subject_id"])
     for service_id in result.saved_onboarding:
         onboarding_state.vault_saved(service_id, owner_uid)
-        # Remove legacy handoffs only after the same managed login is saved.
-        for meta in workflow_secrets.metadata(owner_uid):
-            if meta["service_id"] == service_id:
-                if state := ControlState.runtime():
-                    state.confirm_handoff(meta["id"], owner_uid)
-                workflow_secrets.delete(meta["id"], owner_uid)
     state = ControlState.runtime()
     if state:
         state.mark_vault_seeded(str(owner["username"]))
-    for handoff_id in result.saved_handoffs:
-        if state:
-            state.confirm_handoff(handoff_id, owner_uid)
-        workflow_secrets.delete(handoff_id, owner_uid)
     store = JobStore.runtime()
     if store:
         store.record_audit(
@@ -121,4 +113,9 @@ async def setup_vault(request: Request, owner: OwnerMutation) -> JSONResponse:
             event="vault.seeded",
             detail=f"Saved {len(result.created)} new and {len(result.updated)} updated logins to Vaultwarden.",
         )
-    return JSONResponse({"ok": True, **result.public()}, headers=_NO_STORE)
+    return JSONResponse(
+        models.VaultSetupResult.model_validate({"ok": True, **result.public()}).model_dump(
+            mode="json", exclude_none=True
+        ),
+        headers=_NO_STORE,
+    )

@@ -1,0 +1,27 @@
+# Caddy — see ctl/manifest/models.py for every field.
+id: ingress
+capabilities: [private_proxy]
+name: Caddy
+tier: foundation
+group: infrastructure
+category: infrastructure
+tagline: Private HTTPS web server
+summary: Routes requests to Mu3Lab apps over HTTPS. Caddy provides the internal web server and reverse proxy used
+  to publish private app addresses.
+version: v2.11.4
+upstream: caddyserver/caddy
+service:
+  local_port: 19460
+  health:
+    path: /__mu3lab_caddy_health
+  stoppable: false
+route:
+  https_port: 8446
+  caddy_port: 19460
+  generated: false
+sign_in:
+  method: none
+ui:
+  available: false
+  unavailable_reason: Caddy is Mu3Lab's internal reverse proxy and has no end-user dashboard.
+setup_action: Private ingress is installed and checked by the bootstrapper.

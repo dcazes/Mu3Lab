@@ -37,6 +37,7 @@ from typing import IO, Any
 import httpx
 
 from ctl import actions
+from ctl.store import db
 
 Log = Callable[[str], None]
 
@@ -302,9 +303,9 @@ class LocalLayers:
     once per image and cached, since digests never change).
     """
 
-    def __init__(self, client: httpx.Client, cache: Path, local_images: list[dict[str, Any]]) -> None:
+    def __init__(self, client: httpx.Client, database: Path, local_images: list[dict[str, Any]]) -> None:
         self.client = client
-        self.cache = cache
+        self.database = database
         self.images = local_images
         self._compressed: dict[str, set[str]] = {}
 
@@ -314,15 +315,22 @@ class LocalLayers:
         layers: set[str] = set()
         try:
             ref = parse_ref(repo_digest)
-            path = self.cache / "manifests" / (ref.digest.split(":")[1] + ".json")
-            if path.is_file():
-                layers = set(json.loads(path.read_text()))
+            with db.connect(self.database) as connection:
+                row = connection.execute(
+                    "SELECT value_json FROM records WHERE scope='image-manifests' AND name=?", (repo_digest,)
+                ).fetchone()
+            if row:
+                layers = set(json.loads(row[0]))
             else:
                 registry = Registry(self.client, ref)
                 plan = plan_image(registry, ref)
                 layers = {layer["digest"] for layer in plan.layers}
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps(sorted(layers)))
+                with db.connect(self.database) as connection:
+                    connection.execute(
+                        "INSERT INTO records VALUES (?, ?, ?, ?) ON CONFLICT(scope, name) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at",
+                        ("image-manifests", repo_digest, json.dumps(sorted(layers)), time.time()),
+                    )
+
         except (FetchError, httpx.HTTPError, ValueError, KeyError, OSError):
             layers = set()
         self._compressed[repo_digest] = layers
@@ -699,7 +707,7 @@ def fetch_images(
             return FetchResult(0, 0, 0, time.monotonic() - began)
         registries = {(ref.registry, ref.repository): Registry(http, ref) for ref in refs}
         plans = [plan_image(registries[(ref.registry, ref.repository)], ref) for ref in refs]
-        local = LocalLayers(http, cache, actions.docker_local_images())
+        local = LocalLayers(http, cache.parent / "mu3lab.db", actions.docker_local_images())
         for plan in plans:
             plan.reused = local.reused(plan)
         blobs: dict[str, Blob] = {}

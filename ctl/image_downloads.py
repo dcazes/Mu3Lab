@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl import sqlite_store
 from ctl.runtime import RuntimePaths
+from ctl.store import db
 
 FIELDS = ("total_bytes", "done_bytes", "rate_bps", "images_total", "images_done", "connections")
 
@@ -23,23 +23,10 @@ class ImageDownloadStore:
 
     @classmethod
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> ImageDownloadStore | None:
-        return cls(paths.runtime / "control-plane.sqlite3") if paths.runtime.is_dir() else None
+        return cls(db.database(paths)) if paths.runtime.is_dir() else None
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        with sqlite_store.schema_once(conn, self.database, "image_downloads") as needed:
-            if needed:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS image_downloads (
-                        service_id TEXT PRIMARY KEY, job_id TEXT NOT NULL DEFAULT '',
-                        state TEXT NOT NULL, total_bytes INTEGER NOT NULL DEFAULT 0,
-                        done_bytes INTEGER NOT NULL DEFAULT 0, rate_bps INTEGER NOT NULL DEFAULT 0,
-                        images_total INTEGER NOT NULL DEFAULT 0, images_done INTEGER NOT NULL DEFAULT 0,
-                        connections INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
-                    )
-                """)
-        return conn
+        return db.connect(self.database)
 
     def update(self, service_id: str, job_id: str, snapshot: dict[str, Any]) -> None:
         values = [int(snapshot.get(name, 0) or 0) for name in FIELDS]

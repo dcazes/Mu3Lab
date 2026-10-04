@@ -1,0 +1,100 @@
+# LobeChat — see ctl/manifest/models.py for every field.
+id: lobehub
+name: LobeChat
+tier: core
+capabilities: [chat]
+group: ai
+category: ai
+tagline: Chat with your AI models
+summary: An AI chat workspace for conversations, assistants, and connected tools. Mu3Lab connects LobeChat to configured
+  models through LiteLLM and stores conversation history on your server.
+version: v2.2.18
+upstream: lobehub/lobehub
+depends_on:
+- litellm
+- authentik
+service:
+  local_port: 3211
+  health:
+    path: /__mu3lab_lobehub_health
+  start_timeout_seconds: 900
+route:
+  https_port: 8457
+  caddy_port: 19474
+  access: open
+  forwarded_host: host
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-lobehub
+    redirect_paths:
+    - /api/auth/callback/authentik
+    launch_path: /__mu3lab/login
+    launch: json_post
+    json_launch:
+      path: /api/auth/sign-in/oauth2
+      body:
+        providerId: authentik
+        callbackURL: '{origin}/'
+        newUserCallbackURL: '{origin}/'
+        disableRedirect: true
+      url_key:
+      - url
+      session_check_path: /api/auth/get-session
+      launcher: true
+    env:
+      client_id: AUTH_AUTHENTIK_ID
+      client_secret: AUTH_AUTHENTIK_SECRET
+  note: LobeChat uses its own Authentik OIDC session and persists conversations in its private database.
+account:
+  mode: oidc_first_login
+  user_action: Use the existing Authentik session; local email/password registration is disabled.
+secrets:
+- env: JWKS_KEY
+  kind: rsa_jwk
+- env: POSTGRES_PASSWORD
+- env: AUTH_SECRET
+  length: 48
+- env: KEY_VAULTS_SECRET
+  kind: base64
+  length: 32
+- env: RUSTFS_ACCESS_KEY
+  kind: fixed
+  value: mu3lab-lobehub
+- env: RUSTFS_SECRET_KEY
+  length: 48
+env:
+  APP_URL: '{{public_url}}'
+  S3_ENDPOINT: '{{public_url}}/lobe-assets'
+  AUTH_SSO_PROVIDERS: authentik
+  AUTH_AUTHENTIK_ISSUER: https://{{dns_name}}/application/o/mu3lab-lobehub/
+  FEATURE_FLAGS: '-provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage'
+  AUTH_DISABLE_EMAIL_PASSWORD: '1'
+  OPENAI_PROXY_URL: http://litellm:4000/v1
+  OPENAI_MODEL_LIST: -all,+mu3lab-chat
+  LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
+rules:
+- rule: hide_model_providers
+  with:
+    providers_file: blocked-model-providers.txt
+mobile:
+  primary: lobechat-pwa
+  clients:
+  - id: lobechat-pwa
+    name: LobeChat PWA
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://lobehub.com/
+    setup: pwa
+    summary: Use the self-hosted LobeChat web app directly and add it to the Home Screen.
+    steps:
+    - Open the private LobeChat URL on the phone and sign in with Authentik.
+    - Use the browser menu to add LobeChat to the Home Screen or install the web app.
+resource_guidance: Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk
+  use.
+setup_action: Connect LobeChat to LiteLLM and sign in with Authentik.

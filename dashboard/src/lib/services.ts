@@ -1,50 +1,32 @@
 import type { Service } from '../api';
 
 export type Stage = Service['stage'];
+export type Group = Service['group'];
 export type Tone = 'green' | 'amber' | 'red' | 'gray' | 'blue';
 
-export const stageLabel: Record<Stage, string> = {
-  optional: 'Personal apps',
-  core: 'AI',
-  foundation: 'Infrastructure',
-  blocked: 'Unavailable',
+export const groupLabel: Record<Group, string> = {
+  apps: 'Personal apps',
+  ai: 'AI',
+  infrastructure: 'Infrastructure',
 };
 
-export const displayStage = (service: Service): Stage =>
-  ['firecrawl', 'lobehub'].includes(service.id) ? 'core' : service.stage;
-
-export const stateLabel: Record<Service['state'], string> = {
-  planned: 'Not installed',
-  not_installed: 'Not installed',
-  config_required: 'Needs configuration',
-  queued: 'Queued',
-  installing: 'Installing',
-  installed: 'Installed',
-  needs_setup: 'Needs setup',
-  configured: 'Configured',
-  starting: 'Starting',
-  verifying: 'Verifying',
-  uninstalling: 'Uninstalling',
+export const stateLabel: Record<Service['display_state'], string> = {
   running: 'Running',
-  ready: 'Running',
   stopped: 'Stopped',
-  updating: 'Updating',
-  degraded: 'Degraded',
-  failed: 'Failed',
+  working: 'Working',
+  not_installed: 'Not installed',
   needs_attention: 'Needs attention',
-  blocked: 'Unavailable',
 };
-
-const WORKING = new Set(['queued', 'installing', 'starting', 'verifying', 'uninstalling', 'updating']);
-const PROBLEM = new Set(['failed', 'needs_attention', 'degraded']);
-const SETUP = new Set(['config_required', 'needs_setup']);
 
 export function stateTone(state: string): Tone {
-  if (state === 'ready' || state === 'running') return 'green';
-  if (PROBLEM.has(state)) return 'red';
-  if (SETUP.has(state)) return 'amber';
-  if (WORKING.has(state)) return 'blue';
-  return 'gray';
+  return (
+    (
+      { running: 'green', stopped: 'gray', working: 'blue', not_installed: 'gray', needs_attention: 'red' } as Record<
+        string,
+        Tone
+      >
+    )[state] || 'gray'
+  );
 }
 
 export function categoryLabel(category: string) {
@@ -53,60 +35,18 @@ export function categoryLabel(category: string) {
   return category.charAt(0).toUpperCase() + category.slice(1);
 }
 
-export const isRunning = (service: Service) => ['ready', 'running'].includes(service.state);
-export const isWorking = (service: Service) => WORKING.has(service.state);
-
-export function isInstalled(service: Service) {
-  if (service.stage === 'blocked') return false;
-  if (service.installation_state) return service.installation_state !== 'not_installed';
-  return !['planned', 'not_installed', 'blocked'].includes(service.state);
-}
-
-export function needsAttention(service: Service) {
-  return isInstalled(service) && (PROBLEM.has(service.state) || SETUP.has(service.state));
-}
-
-export function canInstall(service: Service) {
-  return (
-    service.stage === 'optional' &&
-    service.availability === 'available' &&
-    ['planned', 'not_installed', 'degraded', 'needs_attention', 'needs_setup'].includes(service.state) &&
-    service.installation_state !== 'installed'
-  );
-}
+export const isRunning = (service: Service) => service.display_state === 'running';
+export const isWorking = (service: Service) => service.display_state === 'working';
+export const isInstalled = (service: Service) => service.installed;
+export const needsAttention = (service: Service) => service.display_state === 'needs_attention' && service.installed;
+export const canInstall = (service: Service) =>
+  service.stage === 'optional' &&
+  !service.installed &&
+  (service.allowed_actions || []).some((action) => action === 'install' || action === 'retry_setup');
 
 /** Apps people open day to day, as opposed to the AI and infrastructure plumbing. */
 export function isEverydayApp(service: Service) {
-  return displayStage(service) === 'optional' || service.id === 'vaultwarden';
-}
-
-// Entering through the app's own SSO button skips its local login form.
-const SSO_ENTRY_PATHS: Record<string, string> = {
-  mealie: '/api/auth/oauth',
-  immich: '/auth/login?autoLaunch=1',
-  'paperless-ngx': '/__mu3lab/login',
-  nextcloud: '/index.php/apps/user_oidc/login/1',
-  adventurelog: '/accounts/oidc/mu3lab-adventurelog/login/',
-  'actual-budget': '/__mu3lab/login',
-  lobehub: '/__mu3lab/login',
-};
-
-function ssoEntry(service: Service, url: string) {
-  try {
-    const parsed = new URL(url);
-    if (service.id === 'nextcloud' && /^\/index.php\/apps\/user_oidc\/login\/\d+$/.test(parsed.pathname)) return url;
-    const path = SSO_ENTRY_PATHS[service.id];
-    if (path) return new URL(path, parsed.origin).toString();
-    if (service.id !== 'litellm') return url;
-    // LiteLLM's login can keep a stale HTTP origin; start at its HTTPS UI.
-    parsed.protocol = 'https:';
-    parsed.pathname = '/ui/';
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return url;
-  }
+  return service.group === 'apps';
 }
 
 export interface LaunchTarget {
@@ -116,20 +56,16 @@ export interface LaunchTarget {
 
 /** Where "Open" should take the user, or null when the app has nothing to open right now. */
 export function launchTarget(service: Service): LaunchTarget | null {
-  if (service.state === 'stopped' || !isInstalled(service)) return null;
+  if (service.display_state === 'stopped' || !isInstalled(service)) return null;
   const identity = service.identity;
   const ui = service.ui;
-  // Older control planes lack the identity projection; a verified UI route is still safe.
   const routeUrl = ui?.state === 'ready' && ui.url ? ui.url : '';
-  const baseUrl = identity?.launch_url || routeUrl;
-  if (!baseUrl) return null;
-  if (!identity) return { url: ssoEntry(service, baseUrl), label: 'Open' };
-  if (identity.mode === 'none') {
-    if (!routeUrl) return null;
-    return { url: ssoEntry(service, baseUrl), label: service.id === 'firecrawl' ? 'Open API' : 'Open' };
-  }
-  if (identity.mode === 'local') return routeUrl ? { url: routeUrl, label: 'Log in' } : null;
-  return { url: ssoEntry(service, baseUrl), label: 'Open' };
+  // The control plane builds the full address, sign-in entry path included.
+  const url = identity?.launch_url || routeUrl;
+  if (!url) return null;
+  if (identity?.mode === 'local') return routeUrl ? { url: routeUrl, label: 'Log in' } : null;
+  if (identity?.mode === 'none' && !routeUrl) return null;
+  return { url, label: ui?.launch_label || 'Open' };
 }
 
 export const signInLabel: Record<string, string> = {

@@ -1,58 +1,85 @@
-"""Generate the private AI integration contract from one secret store.
-
-Mu3Lab owns the interface between user credentials, FreeLLMAPI, LiteLLM and
-the applications.  Generated files live under /srv, are mode 0600, and are
-never served by the dashboard or committed to Git.
-"""
+"""Generate private provider routing files from each app's declared routing rule."""
 
 from __future__ import annotations
 
 import json
-import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
+from pydantic import model_validator
 
-from ctl.provider_secrets import records
+from ctl.control_state import ControlState
+from ctl.manifest.catalog import App, Catalog, cached
+from ctl.provider_catalog import BY_ID
+from ctl.rules import Params
 from ctl.runtime import RuntimePaths
-from ctl.secrets import read_runtime_env
-
-EMBEDDING_MODEL = "nomic-embed-text"
-
-
-def _write_private(path: Path, content: str) -> Path:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, path)
-    os.chmod(path, 0o600)
-    return path
+from ctl.secret_file import write_atomic
+from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.providers import records
 
 
-def _env_text(values: dict[str, str]) -> str:
-    return "\n".join(f"{key}={value}" for key, value in values.items()) + "\n"
+class RoutingParams(Params):
+    mode: Literal["gateway", "models"]
+    config_file: str
+    gateway: str = ""
+    runner: str = ""
+    service_key_env: str = ""
+    master_key_env: str = ""
+    api_base_env: str = ""
+    runner_api_base_env: str = ""
+    embedding_model: str = ""
+    embedding_provider: str = ""
+    admin_email_env: str = ""
+    admin_password_env: str = ""
+    bootstrap_flag_env: str = ""
+
+    @model_validator(mode="after")
+    def _complete(self) -> RoutingParams:
+        if Path(self.config_file).name != self.config_file or self.config_file in {"", ".", "..", ".env"}:
+            raise ValueError("routing config_file must be a project-local filename")
+        required = (
+            ("admin_email_env", "admin_password_env", "bootstrap_flag_env")
+            if self.mode == "gateway"
+            else (
+                "gateway",
+                "runner",
+                "service_key_env",
+                "master_key_env",
+                "api_base_env",
+                "runner_api_base_env",
+                "embedding_model",
+                "embedding_provider",
+            )
+        )
+        if any(not getattr(self, key) for key in required):
+            raise ValueError(f"{self.mode} routing requires: {', '.join(required)}")
+        return self
 
 
-def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | int]:
-    """Create deterministic LiteLLM wiring and private provider hand-off.
+@dataclass(frozen=True)
+class RoutingProject:
+    app: App
+    params: RoutingParams
 
-    Provider credentials intentionally remain in FreeLLMAPI's private config
-    boundary. LiteLLM gets one generated internal service credential, never a
-    user provider key.
-    """
-    project_root = paths.projects
-    litellm_env_path = project_root / "litellm" / ".env"
-    free_env_path = project_root / "freellmapi" / ".env"
-    litellm_env = read_runtime_env(litellm_env_path)
-    free_env = read_runtime_env(free_env_path)
-    service_key = free_env.get("FREELLMAPI_SERVICE_KEY")
-    if not service_key or not litellm_env.get("LITELLM_MASTER_KEY"):
-        raise ValueError("core service credentials have not been initialized")
+    def files(self, paths: RuntimePaths) -> tuple[Path, Path]:
+        project = paths.projects / self.app.id
+        return project / ".env", project / self.params.config_file
 
-    from ctl.control_state import ControlState
-    from ctl.provider_catalog import BY_ID
 
+def routing_projects(catalog: Catalog | None = None) -> list[RoutingProject]:
+    projects = [
+        RoutingProject(app, RoutingParams.model_validate(ref.with_))
+        for app in (catalog or cached()).apps
+        for ref in app.manifest.rules
+        if ref.rule == "provider_routing"
+    ]
+    # Gateway settings and its client credential precede the model proxy's settings.
+    return sorted(projects, key=lambda item: (item.params.mode != "gateway", item.app.id))
+
+
+def _provider_keys(paths: RuntimePaths) -> list[dict]:
     state = ControlState.runtime(paths)
 
     def routable(provider_id: str) -> bool:
@@ -61,62 +88,73 @@ def configure(paths: RuntimePaths = RuntimePaths()) -> dict[str, Path | bool | i
         connection = state.provider(provider_id)
         return bool(connection and connection["enabled"] and connection["state"] in {"verifying", "verified"})
 
-    # This is the Mu3Lab-owned, supported declarative hand-off. Every saved key
-    # is listed with its on/off state: FreeLLMAPI's import only adds and
-    # updates, so leaving a disabled key out would keep it routing.
-    keys = [
+    # Import adds and updates keys; include disabled keys so they cannot keep routing.
+    return [
         {"platform": item["id"], "key": item["api_key"], "label": item["label"], "enabled": routable(item["id"])}
         for item in records(paths)
         if item["id"] in BY_ID
     ]
-    free_config = {
-        "keys": keys,
-        "routing": {"strategy": "smartest"},
-    }
-    free_config_path = _write_private(
-        project_root / "freellmapi" / "freellmapi.config.json",
-        json.dumps(free_config, sort_keys=True, separators=(",", ":")) + "\n",
-    )
-    free_env["FREEAPI_CONFIG_PATH"] = "/mu3lab/config/freellmapi.config.json"
-    free_env.setdefault("FREELLMAPI_SERVICE_KEY", service_key)
-    _write_private(free_env_path, _env_text(free_env))
 
-    litellm_env["FREELLMAPI_API_BASE"] = "http://freellmapi:3001/v1"
-    litellm_env["FREELLMAPI_SERVICE_KEY"] = service_key
-    litellm_config = {
-        "model_list": [
+
+def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog: Catalog) -> dict[str, bool | int]:
+    env_path, config_path = RoutingProject(app, params).files(paths)
+    env = read_runtime_env(env_path)
+    if not env:
+        raise ValueError(f"{app.manifest.name}'s private project has not been prepared.")
+    keys = _provider_keys(paths)
+    if params.mode == "gateway":
+        config: dict = {"keys": keys, "routing": {"strategy": "smartest"}}
+        if env.get(params.bootstrap_flag_env) != "true":
+            email, password = env.get(params.admin_email_env), env.get(params.admin_password_env)
+            if not email or not password:
+                raise ValueError("The provider gateway's first administrator settings are missing.")
+            config["admin"] = {"email": email, "password": password}
+        write_atomic(config_path, (json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n").encode())
+    else:
+        gateway = catalog.get(params.gateway)
+        runner = catalog.get(params.runner)
+        gateway_env = read_runtime_env(paths.projects / gateway.id / ".env")
+        service_key = gateway_env.get(params.service_key_env, "")
+        if not service_key or not env.get(params.master_key_env):
+            raise ValueError("The provider gateway's internal service credential is not ready.")
+        env[params.service_key_env] = service_key
+        env[params.api_base_env] = f"http://{gateway.id}:{gateway.manifest.service.local_port}/v1"
+        env[params.runner_api_base_env] = f"http://{runner.id}:{runner.manifest.service.local_port}"
+        models = [
             {
-                "model_name": "mu3lab-chat",
+                "model_name": name,
                 "litellm_params": {
-                    "model": "openai/auto:smartest",
-                    "api_base": "os.environ/FREELLMAPI_API_BASE",
-                    "api_key": "os.environ/FREELLMAPI_SERVICE_KEY",
+                    "model": model,
+                    "api_base": f"os.environ/{params.api_base_env}",
+                    "api_key": f"os.environ/{params.service_key_env}",
                 },
-            },
-            {
-                "model_name": "mu3lab-fast",
-                "litellm_params": {
-                    "model": "openai/auto:fastest",
-                    "api_base": "os.environ/FREELLMAPI_API_BASE",
-                    "api_key": "os.environ/FREELLMAPI_SERVICE_KEY",
-                },
-            },
+            }
+            for name, model in (("mu3lab-chat", "openai/auto:smartest"), ("mu3lab-fast", "openai/auto:fastest"))
+        ]
+        models.append(
             {
                 "model_name": "mu3lab-embed",
-                "litellm_params": {"model": f"ollama/{EMBEDDING_MODEL}", "api_base": "os.environ/OLLAMA_API_BASE"},
-            },
-        ],
-        "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
-        "litellm_settings": {"drop_params": True},
-    }
-    litellm_config_path = _write_private(
-        project_root / "litellm" / "config.yaml",
-        yaml.safe_dump(litellm_config, sort_keys=False),
-    )
-    _write_private(litellm_env_path, _env_text(litellm_env))
-    return {
-        "litellm_config": litellm_config_path,
-        "freellmapi_config": free_config_path,
-        "provider_count": sum(1 for item in keys if item["enabled"]),
-        "chat_configured": any(item["enabled"] for item in keys),
-    }
+                "litellm_params": {
+                    "model": f"{params.embedding_provider}/{params.embedding_model}",
+                    "api_base": f"os.environ/{params.runner_api_base_env}",
+                },
+            }
+        )
+        config = {
+            "model_list": models,
+            "general_settings": {"master_key": f"os.environ/{params.master_key_env}"},
+            "litellm_settings": {"drop_params": True},
+        }
+        write_atomic(config_path, yaml.safe_dump(config, sort_keys=False).encode())
+        write_atomic(env_path, runtime_env_text(env).encode())
+    count = sum(1 for item in keys if item["enabled"])
+    return {"provider_count": count, "chat_configured": bool(count)}
+
+
+def configure(paths: RuntimePaths = RuntimePaths(), catalog: Catalog | None = None) -> dict[str, bool | int]:
+    """Refresh already prepared projects after provider settings change."""
+    catalog = catalog or cached()
+    result: dict[str, bool | int] = {"provider_count": 0, "chat_configured": False}
+    for project in routing_projects(catalog):
+        result = write_routing(project.app, project.params, paths, catalog)
+    return result

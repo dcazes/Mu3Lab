@@ -1,0 +1,51 @@
+# Vaultwarden — see ctl/manifest/models.py for every field.
+id: vaultwarden
+capabilities: [password_store]
+name: Vaultwarden
+tier: foundation
+group: apps
+category: infrastructure
+tagline: Password manager for Bitwarden apps
+summary: Stores passwords, secure notes, and other vault items on your server. Vaultwarden works with Bitwarden
+  clients to sync your vault and fill saved logins across devices.
+version: 1.37.3
+upstream: dani-garcia/vaultwarden
+service:
+  local_port: 8081
+  health:
+    path: /alive
+  stoppable: false
+route:
+  https_port: 8443
+  caddy_port: 19462
+  generated: false
+secrets:
+- env: MU3LAB_ADMIN_PASSWORD
+  length: 48
+- env: ADMIN_TOKEN
+  kind: argon2
+  source_env: MU3LAB_ADMIN_PASSWORD
+sign_in:
+  method: local
+  note: Independent Vaultwarden login; never Authentik-gated.
+mobile:
+  primary: bitwarden
+  clients:
+  - id: bitwarden
+    name: Bitwarden
+    kind: native
+    support: official
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/us/app/bitwarden-password-manager/id1137397744
+      android: https://play.google.com/store/apps/details?id=com.x8bit.bitwarden
+    homepage: https://bitwarden.com/download/
+    setup: server_url
+    summary: The official Bitwarden client connects directly to your private Vaultwarden server.
+    steps:
+    - Install Bitwarden for your phone.
+    - Before signing in, choose the self-hosted environment and paste the Mu3Lab server URL.
+    - Sign in with your Mu3Lab email and password.
+setup_action: Create the first Vaultwarden account locally, then use its private tailnet URL.

@@ -9,7 +9,7 @@ WHY:  Preflight is the gate for everything downstream. Fixtures pin the
       fixtures carry the detail via subTest.
 RUN:  `.venv/bin/python -m unittest tests.test_preflight -v` (or `make test`).
 DEBUG: A failing test prints the check dict; compare `status`/`blocking`/
-      `action` against BUILD_ORDER Phase 2.
+      `action` against ctl/preflight.py.
 """
 
 import sys
@@ -70,29 +70,6 @@ class GpuTests(unittest.TestCase):
         self.assertEqual(preflight.check_gpu(False, False)["state"], "cpu")
         self.assertEqual(preflight.check_gpu(False, True)["state"], "amd")
         self.assertEqual(preflight.check_gpu(True, True)["state"], "nvidia")
-
-
-class PythonNodeTests(unittest.TestCase):
-    def test_ok(self):
-        self.assertEqual(preflight.check_python((3, 12, 3))["status"], "ok")
-        self.assertEqual(preflight.check_node("v24.11.0")["status"], "ok")
-
-    def test_newer_ok(self):
-        # Witness values only: ANY version above minimum passes, nothing pins.
-        self.assertEqual(preflight.check_python((3, 13, 0))["status"], "ok")
-        self.assertEqual(preflight.check_node("v25.3.0")["status"], "ok")
-
-    def test_old(self):
-        self.assertEqual(preflight.check_python((3, 9, 18))["status"], "fail")
-        # Old node is "missing", not "fail": step ③ upgrades it.
-        result = preflight.check_node("v22.19.0")
-        self.assertEqual(result["status"], "missing")
-        self.assertIn("step 3", result["action"])
-
-    def test_missing(self):
-        result = preflight.check_node("")
-        self.assertEqual(result["status"], "missing")
-        self.assertIn("step 3", result["action"])
 
 
 class DockerTests(unittest.TestCase):
@@ -314,11 +291,11 @@ class PortTests(unittest.TestCase):
             if argv[:2] == ["docker", "ps"]:
                 return 1, "permission denied"
             if argv[:3] == ["sg", "docker", "-c"] and "docker ps" in argv[3]:
-                return 0, "vaultwarden-vaultwarden-1"
+                return 0, "mu3lab-vaultwarden-vaultwarden-1"
             if argv[:2] == ["docker", "inspect"]:
                 return 1, "permission denied"
             if argv[:3] == ["sg", "docker", "-c"] and "docker inspect" in argv[3]:
-                return 0, str(root / "core" / "vaultwarden")
+                return 0, str(root / "apps" / "vaultwarden")
             return 1, "unexpected command"
 
         from unittest.mock import patch as _patch
@@ -333,7 +310,7 @@ class PortTests(unittest.TestCase):
             result = preflight.check_ports(connect_fn=lambda port: port == 8081)
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["owners"]["8081"]["ours"])
-        self.assertEqual(result["owners"]["8081"]["process"], "vaultwarden-vaultwarden-1")
+        self.assertEqual(result["owners"]["8081"]["process"], "mu3lab-vaultwarden-vaultwarden-1")
         self.assertIn("private HTTPS URL on port 8443", result["owners"]["8081"]["port_info"]["access"])
 
     def test_compose_owner_matches_the_container_publishing_that_port(self):
@@ -345,18 +322,18 @@ class PortTests(unittest.TestCase):
             if argv[:2] == ["ss", "-tlnp"]:
                 return 0, ss_out
             if argv[:2] == ["docker", "ps"]:
-                return 0, ("authentik-worker-1\t\nauthentik-server-1\t127.0.0.1:9001->9000/tcp")
+                return 0, ("mu3lab-authentik-worker-1\t\nmu3lab-authentik-server-1\t127.0.0.1:9001->9000/tcp")
             if argv[:2] == ["docker", "inspect"]:
                 inspected.append(argv[-1])
-                return 0, str(root / "core" / "authentik")
+                return 0, str(root / "apps" / "authentik")
             return 1, "unexpected command"
 
         from unittest.mock import patch as _patch
 
         with _patch("ctl.preflight._run", side_effect=fake_run), _patch("ctl.preflight.ROOT", root):
             result = preflight.check_ports(connect_fn=lambda port: port == 9001)
-        self.assertEqual(result["owners"]["9001"]["process"], "authentik-server-1")
-        self.assertEqual(inspected, ["authentik-server-1"])
+        self.assertEqual(result["owners"]["9001"]["process"], "mu3lab-authentik-server-1")
+        self.assertEqual(inspected, ["mu3lab-authentik-server-1"])
 
     def test_ss_missing_still_reports(self):
         from unittest.mock import patch as _patch
@@ -383,7 +360,7 @@ class AggregateTests(unittest.TestCase):
         self.assertIn("install_ready", report)
         self.assertEqual(
             [check["name"] for check in report["checks"]],
-            ["os", "arch", "python", "ports", "gpu", "node", "docker", "tailscale"],
+            ["os", "arch", "ports", "gpu", "docker", "tailscale"],
         )
         for check in report["checks"]:
             self.assertIn(check["status"], ("ok", "missing", "fail"))
@@ -394,7 +371,7 @@ class AggregateTests(unittest.TestCase):
 
     def test_host_checks_are_all_blocking(self):
         checks = preflight.run_host_checks()
-        self.assertEqual([check["name"] for check in checks], ["os", "arch", "python", "ports"])
+        self.assertEqual([check["name"] for check in checks], ["os", "arch", "ports"])
         self.assertTrue(all(check["blocking"] for check in checks))
 
     def test_ready_with_todos(self):

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ctl import actions
 from ctl.control_state import ControlState
-from ctl.login_launch import caddy_handler
+from ctl.engine.launch import caddy_handler
+from ctl.platform_apps import by_capability
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
-from ctl.secrets import read_runtime_env
+from ctl.secrets import platform_values
 from ctl.service_state import status as service_status
 from ctl.service_state import tailnet_dns_name
 
@@ -17,12 +19,17 @@ START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
 
 
-def _optional_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
-    """Return installed or currently usable optional routes."""
+def _generated_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
+    """Return installed generated routes, including installer-managed core apps."""
     state = ControlState.runtime()
     enabled: list[Service] = []
     for service in registry.services:
-        if service.stage != "optional" or service.proxy_port is None or service.id in exclude:
+        if (
+            service.manifest.route is None
+            or not service.manifest.route.generated
+            or service.proxy_port is None
+            or service.id in exclude
+        ):
             continue
         installed = state.installation(service.id) if state else None
         live = service_status(service, tailnet_dns_name(), root)
@@ -36,16 +43,16 @@ def _optional_services(registry: Registry, root: Path, exclude: frozenset[str] =
 def _write_candidate(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> tuple[Path, Path, str]:
     """Render from the checked-in base so runtime route files cannot go stale."""
     paths = RuntimePaths()
-    target = paths.projects / "ingress" / "Caddyfile"
-    source = root / "core" / "ingress" / "Caddyfile.authenticated"
+    target = paths.projects / by_capability("private_proxy").id / "Caddyfile"
+    source = root / "apps" / by_capability("private_proxy").id / "Caddyfile.authenticated"
     if not source.is_file():
         raise OSError("Authenticated Caddy base configuration is missing.")
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     candidate = target.with_suffix(".candidate")
-    candidate.write_text(
-        render(source.read_text(encoding="utf-8"), _optional_services(registry, root, exclude)), encoding="utf-8"
-    )
-    ingress_token = read_runtime_env(root / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    base = source.read_text(encoding="utf-8")
+    services = _generated_services(registry, root, exclude)
+    candidate.write_text(render(base, services), encoding="utf-8")
+    ingress_token = platform_values().get("MU3LAB_INGRESS_TOKEN", "")
     return target, candidate, ingress_token
 
 
@@ -54,7 +61,7 @@ def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token
     if not ingress_token:
         candidate.unlink(missing_ok=True)
         return False, "Private ingress token is missing."
-    ingress = root / "core" / "ingress"
+    ingress = root / "apps" / by_capability("private_proxy").id
     rc, output = actions.compose_up(
         ingress,
         log,
@@ -77,80 +84,76 @@ def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token
 
 
 def _block(service: Service) -> str:
-    assert service.proxy_port is not None
-    if service.id == "surfsense":
-        return f"""
-:{service.proxy_port} {{
-\tbind 127.0.0.1
-\troute {{
-\t\treverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
-\t\tforward_auth 127.0.0.1:9001 {{
-\t\t\turi /outpost.goauthentik.io/auth/caddy
-\t\t\theader_up Host {{http.request.hostport}}
-\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
-\t\t\theader_up X-Forwarded-Proto https
-\t\t\tcopy_headers X-Authentik-Username X-Authentik-Email X-Authentik-Name X-Authentik-Groups
-\t\t\ttrusted_proxies private_ranges
-\t\t}}
-\t\trespond /auth/register* "Accounts are provisioned by Mu3Lab." 403
-\t\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\t\theader_up X-Forwarded-Proto https
-\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
-\t\t}}
-\t}}
-}}
-""".strip()
-    if service.id == "baby-buddy":
-        # The phone apps call Baby Buddy's API with a per-person API token and
-        # cannot complete a browser sign-in. Requests that carry one skip the
-        # Authentik gate and Baby Buddy checks the token itself; Remote-User is
-        # always stripped there, so the bypass can never claim someone's identity.
-        return f"""
-:{service.proxy_port} {{
-\tbind 127.0.0.1
-\t@api_token {{
-\t\tpath /api/*
-\t\theader Authorization "Token *"
-\t}}
-\troute {{
-\t\thandle @api_token {{
-\t\t\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\t\t\theader_up -Remote-User
-\t\t\t\theader_up X-Forwarded-Proto https
-\t\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
-\t\t\t}}
-\t\t}}
-\t\treverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
-\t\tforward_auth 127.0.0.1:9001 {{
-\t\t\turi /outpost.goauthentik.io/auth/caddy
-\t\t\theader_up Host {{http.request.hostport}}
-\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
-\t\t\theader_up X-Forwarded-Proto https
-\t\t\tcopy_headers X-Authentik-Username
-\t\t\ttrusted_proxies private_ranges
-\t\t}}
-\t\t# Set replaces any client-sent Remote-User. Never also delete
-\t\t# Remote-User in this block: Caddy applies deletes after sets, so the
-\t\t# verified identity would be dropped and Baby Buddy shows its login.
-\t\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\t\theader_up Remote-User {{http.request.header.X-Authentik-Username}}
-\t\t\theader_up X-Forwarded-Proto https
-\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
-\t\t}}
-\t}}
-}}
-""".strip()
-    return f"""
-:{service.proxy_port} {{
-\tbind 127.0.0.1
-{caddy_handler(service.id)}\thandle {{
-\t\treverse_proxy 127.0.0.1:{service.https_port} {{
-\t\t\theader_up X-Forwarded-Proto https
-\t\t\theader_up X-Forwarded-Host {{http.request.hostport}}
-\t\t}}
-\t}}
-}}
-""".strip()
+    route = service.manifest.route
+    assert route is not None and service.proxy_port is not None
+    host = "{http.request." + route.forwarded_host + "}"
+    lines = [f":{service.proxy_port} {{", "\tbind 127.0.0.1", "\troute {"]
+
+    def proxy(indent: str, trusted: bool = False, strip: bool = False) -> None:
+        lines.append(f"{indent}reverse_proxy 127.0.0.1:{service.https_port} {{")
+        if strip:
+            lines.append(f"{indent}\theader_up -{route.trusted_header}")
+        if trusted:
+            # Caddy applies deletes after sets: deleting this header here would
+            # discard the verified identity along with any client-sent value.
+            lines.extend(
+                [
+                    f"{indent}\t# Set replaces the client header; deletes run after sets.",
+                    f"{indent}\theader_up {route.trusted_header} {{http.request.header.X-Authentik-Username}}",
+                ]
+            )
+        lines.extend(
+            [
+                f"{indent}\theader_up X-Forwarded-Proto https",
+                f"{indent}\theader_up X-Forwarded-Host {host}",
+                f"{indent}}}",
+            ]
+        )
+
+    if route.token_bypass:
+        bypass = route.token_bypass
+        lines[2:2] = [
+            "\t@api_token {",
+            f"\t\tpath {bypass.path}",
+            f"\t\theader Authorization {json.dumps(bypass.header_prefix + '*')}",
+            "\t}",
+        ]
+        lines.append("\t\thandle @api_token {")
+        proxy("\t\t\t", strip=True)
+        lines.append("\t\t}")
+        lines.append("\t\thandle {")
+    indent = "\t\t\t" if route.token_bypass else "\t\t"
+    if route.access in {"gate", "trusted_header"}:
+        lines.extend(
+            [
+                f"{indent}reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001",
+                f"{indent}forward_auth 127.0.0.1:9001 {{",
+                f"{indent}\turi /outpost.goauthentik.io/auth/caddy",
+                f"{indent}\theader_up Host {{http.request.hostport}}",
+                f"{indent}\theader_up X-Forwarded-Host {{http.request.hostport}}",
+                f"{indent}\theader_up X-Forwarded-Proto https",
+            ]
+        )
+        headers = route.copy_identity_headers
+        if route.access == "trusted_header" and "X-Authentik-Username" not in headers:
+            headers = (*headers, "X-Authentik-Username")
+        if headers:
+            lines.append(f"{indent}\tcopy_headers {' '.join(headers)}")
+        lines.extend([f"{indent}\ttrusted_proxies private_ranges", f"{indent}}}"])
+    for blocked in route.blocked_paths:
+        lines.append(f"{indent}respond {blocked.path} {json.dumps(blocked.message)} {blocked.status}")
+    launcher = caddy_handler(service.manifest)
+    if launcher:
+        lines.extend(launcher.strip("\n").splitlines())
+        lines.append(f"{indent}handle {{")
+        proxy(indent + "\t", trusted=route.access == "trusted_header")
+        lines.append(f"{indent}}}")
+    else:
+        proxy(indent, trusted=route.access == "trusted_header")
+    if route.token_bypass:
+        lines.append("\t\t}")
+    lines.extend(["\t}", "}"])
+    return "\n".join(lines)
 
 
 def render(base: str, services: list[Service]) -> str:
@@ -238,8 +241,7 @@ def reconcile_core(registry: Registry, root: Path, log) -> tuple[bool, str]:
     activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
     if not activated:
         return False, detail
-    for service_id in ("lobehub", "litellm", "freellmapi"):
-        service = registry.get(service_id)
+    for service in _generated_services(registry, root):
         if service.private_https_port is None or service.proxy_port is None:
             continue
         published = actions.tailscale_serve(service.private_https_port, service.proxy_port, log)

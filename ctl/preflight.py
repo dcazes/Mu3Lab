@@ -25,8 +25,9 @@ import shlex
 import shutil
 import socket
 import subprocess
-import sys
 from pathlib import Path
+
+from ctl.platform_apps import by_capability
 
 # ---------------------------------------------------------------------------
 # Constants: every magic value lives here with its reason.
@@ -35,19 +36,16 @@ from pathlib import Path
 # Minimum supported distros. Mint is accepted via ID_LIKE=ubuntu + UBUNTU_CODENAME.
 MIN_DEBIAN_MAJOR = 12  # install.sh dies below Debian 12 (docker repo needs it)
 MIN_UBUNTU_MAJOR = 22  # install.sh dies below Ubuntu 22.04 (same reason)
-MIN_PYTHON = (3, 10)  # `match` syntax + new typing used across ctl/
-MIN_NODE_MAJOR = 24  # current Node.js LTS used by the dashboard build.
 MIN_DOCKER_MAJOR = 24  # compose-v2 plugin era; step 3 upgrades older engines
 
 # Checks the installer CANNOT fix. Anything else is step 3's work list and
 # must never report "fail" — only "missing" (not ready, installer provides)
 # or "ok". run_all() stamps each check with blocking True/False from this set;
 # the single gating rule is gate_passed() (no FAIL among BLOCKING).
-BLOCKING = frozenset({"os", "arch", "python", "ports"})
+BLOCKING = frozenset({"os", "arch", "ports"})
 
-# Only these ports are probed. Ports for deferred Step-2 apps (e.g. 4000
-# LiteLLM) are deliberately NOT checked — a missing future port is not a
-# Step-0/1 failure. See BUILD_ORDER Phase 2 gate discussion.
+# Only ports the installer needs before any app runs are probed; app ports
+# are checked by the registry's uniqueness rules instead.
 CHECK_PORTS = (8787, 19460, 9001, 8081)
 
 # Listener inventory for the bootstrap UI. These are all loopback-only
@@ -94,7 +92,7 @@ def _result(name: str, status: str, detail: str, action: str = "", state: str = 
     `state` is the machine-readable dispatch key card ③ switches on
     (e.g. docker "daemon_down" → start it; "absent" → install it).
     Convention: dispatchable checks use specific states; gate-only checks
-    (os/arch/python/ports) use "ready"/"blocked" mirroring status.
+    (os/arch/ports) use "ready"/"blocked" mirroring status.
     """
     return {"name": name, "status": status, "detail": detail, "action": action, "state": state or status}
 
@@ -183,7 +181,7 @@ def check_os(release_text: str, kernel_release: str = "") -> dict:
             return _result("os", "ok", f"Ubuntu {version_id} supported." + wsl_note)
         return _result("os", "fail", f"Ubuntu {version_id} too old." + wsl_note, "Upgrade to Ubuntu 22.04+.")
     # Generic derivative path (Mint, Pop!_OS, ...): trust ID_LIKE, need a
-    # codename for the Docker/NodeSource apt repos that step 3 will add.
+    # codename for the Docker apt repository that step 3 will add.
     if "ubuntu" in like or "debian" in like:
         codename = info.get("UBUNTU_CODENAME") or info.get("VERSION_CODENAME", "")
         if major >= MIN_UBUNTU_MAJOR and codename:
@@ -233,47 +231,6 @@ def check_gpu(nvidia_present: bool, amd_present: bool) -> dict:
             state="amd",
         )
     return _result("gpu", "ok", "No supported GPU detected; apps will use the CPU.", state="cpu")
-
-
-def check_python(version: tuple[int, ...]) -> dict:
-    """Require Python >= 3.10 (takes sys.version_info so tests can inject)."""
-    if tuple(version[:2]) >= MIN_PYTHON:
-        return _result("python", "ok", f"Python {version[0]}.{version[1]} meets >={MIN_PYTHON[0]}.{MIN_PYTHON[1]}.")
-    return _result(
-        "python",
-        "fail",
-        f"Python {version[0]}.{version[1]} too old.",
-        "Install Python 3.10+ (do NOT remove system python3).",
-    )
-
-
-def check_node(node_version_output: str) -> dict:
-    """Require the current Node.js LTS line for the dashboard build.
-
-    The installer uses the explicit NodeSource LTS channel. A newer system
-    Node is accepted; an older one is upgraded rather than left ambiguous.
-    Takes the raw text of `node --version` (e.g. "v22.3.0") or "" when the
-    binary is absent, so tests never need Node installed.
-    """
-    match = re.search(r"v?(\d+)\.(\d+)\.(\d+)", node_version_output or "")
-    if not match:
-        return _result(
-            "node",
-            "missing",
-            "Node.js not found.",
-            "step 3 installs the current Node.js LTS via NodeSource.",
-            state="absent",
-        )
-    major = int(match.group(1))
-    if major >= MIN_NODE_MAJOR:
-        return _result("node", "ok", f"Node {match.group(0)} present (>= v{MIN_NODE_MAJOR}).", state="ready")
-    return _result(
-        "node",
-        "missing",
-        f"Node {match.group(0)} below the required Node.js LTS v{MIN_NODE_MAJOR}.",
-        "step 3 upgrades it via the NodeSource repo.",
-        state="old",
-    )
 
 
 def check_docker(
@@ -572,11 +529,21 @@ def _port_owner(port: int) -> dict | None:
         # Host-network Compose containers often hide their PID from an
         # unprivileged `ss` invocation. Confirm ownership through Compose
         # labels, but only when the working directory is this checkout.
-        project_by_port = {19460: "ingress", 9001: "authentik", 8081: "vaultwarden"}
+        project_by_port = {
+            19460: by_capability("private_proxy").id,
+            9001: by_capability("identity_provider").id,
+            8081: by_capability("password_store").id,
+        }
         project = project_by_port.get(port)
         if project:
             names_rc, names = _docker_probe(
-                ["ps", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.Names}}\t{{.Ports}}"]
+                [
+                    "ps",
+                    "--filter",
+                    f"label=com.docker.compose.project=mu3lab-{project}",
+                    "--format",
+                    "{{.Names}}\t{{.Ports}}",
+                ]
             )
             candidates: list[str] = []
             fallback: list[str] = []
@@ -594,7 +561,7 @@ def _port_owner(port: int) -> dict | None:
                 label_rc, working_dir = _docker_probe(
                     ["inspect", "--format", '{{index .Config.Labels "com.docker.compose.project.working_dir"}}', name]
                 )
-                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "core" / project).resolve():
+                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "apps" / project).resolve():
                     return {"pid": None, "process": name, "ours": True}
         return {"pid": None, "process": process or "unknown", "ours": False}
     ours = False
@@ -687,7 +654,6 @@ def run_host_checks() -> list[dict]:
     checks = [
         check_os(_os_release_text(), kernel_release=platform.release()),
         check_arch(platform.machine()),
-        check_python((sys.version_info.major, sys.version_info.minor, sys.version_info.micro)),
         check_ports(),
     ]
     for check in checks:
@@ -697,7 +663,6 @@ def run_host_checks() -> list[dict]:
 
 def run_all() -> dict:
     """Every host fact, for `python -m ctl.preflight` diagnostics."""
-    _, node_out = _run(["node", "--version"])
     _, lspci_out = _run(["lspci", "-nn"])
     checks = [
         *run_host_checks(),
@@ -705,7 +670,6 @@ def run_all() -> dict:
             _run(["nvidia-smi", "-L"])[0] == 0,
             "amd" in lspci_out.lower() or "advanced micro devices" in lspci_out.lower(),
         ),
-        check_node(node_out),
         gather_docker(),
         gather_tailscale(),
     ]

@@ -1,0 +1,62 @@
+# Generated runtime variant used only after the operator creates the Mu3Lab
+# Authentik proxy application and verifies anonymous access is denied.
+{
+	auto_https off
+	admin off
+}
+
+:19460 {
+	bind 127.0.0.1
+	handle /__mu3lab_caddy_health {
+		respond 204
+	}
+	handle {
+			route {
+			reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+			forward_auth 127.0.0.1:9001 {
+				uri /outpost.goauthentik.io/auth/caddy
+				# Host with :8446 so sign-in returns to the dashboard, not Authentik.
+				header_up Host {http.request.hostport}
+				header_up X-Forwarded-Host {http.request.hostport}
+				header_up X-Forwarded-Proto https
+				copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid X-Authentik-Jwt X-Authentik-Meta-Jwks X-Authentik-Meta-Outpost X-Authentik-Meta-Provider X-Authentik-Meta-App X-Authentik-Meta-Version
+				trusted_proxies private_ranges
+			}
+			reverse_proxy 127.0.0.1:8787 {
+				header_up X-Mu3Lab-Proxy-Token {env.MU3LAB_INGRESS_TOKEN}
+			}
+		}
+	}
+}
+
+:19461 {
+	bind 127.0.0.1
+	# LobeChat completes its native OIDC flow inside the dashboard iframe. Permit
+	# only Authentik's OAuth authorization and authentication-flow documents to
+	# be framed by the dashboard on this same private tailnet hostname. All other
+	# Authentik routes, including its administration UI, retain X-Frame-Options.
+	@embedded_oidc path /application/o/authorize/* /if/flow/*
+	handle @embedded_oidc {
+		reverse_proxy 127.0.0.1:9001 {
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_down -X-Frame-Options
+			header_down Content-Security-Policy "frame-ancestors 'self' https://{http.request.host}:8446"
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:9001 {
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+		}
+	}
+}
+
+:19462 {
+	bind 127.0.0.1
+	reverse_proxy 127.0.0.1:8081 {
+		header_up X-Forwarded-Proto https
+	}
+}

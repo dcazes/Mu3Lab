@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,14 +25,6 @@ def _checkout(tmp: str) -> Path:
 
 
 class StampTests(unittest.TestCase):
-    def test_requirements_digest_matches_sha256sum_used_by_install_sh(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _checkout(tmp)
-            expected = subprocess.run(
-                ["sha256sum", str(root / "ctl" / "requirements.txt")], capture_output=True, text=True, check=True
-            ).stdout.split()[0]
-            self.assertEqual(stamps.requirements_digest(root), expected)
-
     def test_digests_change_only_with_their_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _checkout(tmp)
@@ -62,16 +52,6 @@ class StampTests(unittest.TestCase):
 
 
 class ChangeDetectionTests(unittest.TestCase):
-    def test_changed_requirements_reinstall_packages(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = _checkout(tmp)
-            (root / ".venv" / "bin").mkdir(parents=True)
-            (root / ".venv" / "bin" / "python").touch()
-            stamps.write(root / stamps.REQUIREMENTS_STAMP, hashlib.sha256(b"old").hexdigest())
-            check = install._pip_check(root)
-            self.assertEqual(check["state"], "outdated")
-            self.assertEqual(install.fix_for_state("pip_deps", "outdated"), "pip_install")
-
     def test_changed_dashboard_sources_rebuild(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = _checkout(tmp)

@@ -1,0 +1,50 @@
+# LiteLLM — see ctl/manifest/models.py for every field.
+id: litellm
+capabilities: [model_proxy]
+name: LiteLLM
+tier: core
+group: ai
+category: ai
+tagline: One gateway for all AI models
+summary: Provides a unified API for local and external AI models. Mu3Lab uses LiteLLM to route chat and embedding
+  requests through one gateway for connected apps.
+version: v1.103.2
+upstream: BerriAI/litellm
+depends_on:
+- ollama
+- freellmapi
+service:
+  local_port: 4000
+  health:
+    path: /health/liveliness
+route:
+  https_port: 8454
+  caddy_port: 19471
+  access: gate
+  audience: operators
+  forwarded_host: host
+sign_in:
+  method: gate
+  note: Authentik protects the private dashboard route. LiteLLM Community does not receive a native per-user OIDC
+    session.
+ui:
+  path: /ui/
+resource_guidance: Low host overhead; provider and model choice determines usage.
+setup_action: Connect Ollama and optional provider routes, then run a test request.
+secrets:
+- env: LITELLM_MASTER_KEY
+  kind: hex
+  length: 32
+rules:
+- rule: provider_routing
+  with:
+    mode: models
+    config_file: config.yaml
+    gateway: freellmapi
+    runner: ollama
+    service_key_env: FREELLMAPI_SERVICE_KEY
+    master_key_env: LITELLM_MASTER_KEY
+    api_base_env: FREELLMAPI_API_BASE
+    runner_api_base_env: OLLAMA_API_BASE
+    embedding_model: nomic-embed-text
+    embedding_provider: ollama

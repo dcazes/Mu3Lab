@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ctl.runtime import RuntimePaths
+from ctl.store import db as database_store
 
 
 def _now() -> str:
@@ -20,51 +19,12 @@ def _now() -> str:
 
 class McpActivity:
     def __init__(self, path: Path | None = None):
-        self.path = path or RuntimePaths().runtime / "mcp-activity.sqlite3"
+        self.path = path or database_store.database()
 
     @contextmanager
     def _db(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(self.path, timeout=15)
-        os.chmod(self.path, 0o600)
-        db.row_factory = sqlite3.Row
-        db.executescript("""
-          CREATE TABLE IF NOT EXISTS calls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, server_id TEXT NOT NULL,
-            tool_name TEXT NOT NULL, source TEXT NOT NULL, actor TEXT NOT NULL,
-            outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL,
-            created_at TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
-            source_ref TEXT
-          );
-          CREATE INDEX IF NOT EXISTS calls_server_id_id ON calls(server_id,id DESC);
-          CREATE TABLE IF NOT EXISTS tool_permissions (
-            server_id TEXT NOT NULL, tool_name TEXT NOT NULL,
-            permission TEXT NOT NULL, updated_at TEXT NOT NULL,
-            PRIMARY KEY(server_id,tool_name)
-          );
-          CREATE TABLE IF NOT EXISTS write_confirmations (
-            nonce TEXT PRIMARY KEY, server_id TEXT NOT NULL, tool_name TEXT NOT NULL,
-            actor TEXT NOT NULL, input_hash TEXT NOT NULL, expires_at TEXT NOT NULL
-          );
-          CREATE TABLE IF NOT EXISTS call_keys (
-            idempotency_key TEXT PRIMARY KEY, created_at TEXT NOT NULL
-          );
-          CREATE TABLE IF NOT EXISTS category_switches (
-            server_id TEXT NOT NULL, category_id TEXT NOT NULL,
-            enabled INTEGER NOT NULL, updated_at TEXT NOT NULL,
-            PRIMARY KEY(server_id,category_id)
-          );
-        """)
-        if "source_ref" not in {row[1] for row in db.execute("PRAGMA table_info(calls)")}:
-            db.execute("ALTER TABLE calls ADD COLUMN source_ref TEXT")
-        db.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS calls_source_ref ON calls(source_ref) WHERE source_ref IS NOT NULL"
-        )
-        try:
-            with db:
-                yield db
-        finally:
-            db.close()
+        with database_store.connect(self.path) as connection:
+            yield connection
 
     def history(self, server_id: str, *, before: int = 0, limit: int = 50) -> list[dict]:
         with self._db() as db:
@@ -104,7 +64,7 @@ class McpActivity:
         if not self.path.is_file():
             return default
         try:
-            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
+            db = database_store.connect(self.path, readonly=True, timeout=5)
             try:
                 row = db.execute(
                     "SELECT permission FROM tool_permissions WHERE server_id=? AND tool_name=?", (server_id, tool_name)
@@ -120,7 +80,7 @@ class McpActivity:
         if not self.path.is_file():
             return []
         try:
-            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
+            db = database_store.connect(self.path, readonly=True, timeout=5)
             db.row_factory = sqlite3.Row
             try:
                 return db.execute(sql, params).fetchall()

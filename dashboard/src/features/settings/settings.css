@@ -1,0 +1,213 @@
+/* ---------- Settings ---------- */
+.settings {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 0 8px 8px;
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.stat-row {
+  display: flex;
+  gap: 24px;
+  color: var(--text-2);
+}
+
+.stat-row b {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.provider {
+  border-bottom: 1px solid var(--border);
+}
+
+.provider:last-child {
+  border-bottom: 0;
+}
+
+.provider .row {
+  border-bottom: 0;
+}
+
+.provider-error {
+  padding: 0 20px 12px;
+  font-size: 13px;
+}
+
+.provider .collapsible {
+  margin: 0 20px 12px;
+}
+
+.route {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  counter-reset: route;
+}
+
+.route-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.route-step:hover {
+  border-color: var(--border-strong);
+}
+
+.route-step > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.route-step small {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.route-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.route-state .dot {
+  box-shadow: none;
+}
+
+.credential {
+  border-bottom: 1px solid var(--border);
+}
+
+.credential:last-child {
+  border-bottom: 0;
+}
+
+.credential .row {
+  border-bottom: 0;
+}
+
+.credential-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 20px 16px;
+}
+
+.meters {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meter-label {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-2);
+}
+
+.meter-label b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.meter-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-hover);
+  overflow: hidden;
+}
+
+.meter-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.meter-green span {
+  background: var(--green);
+}
+
+.meter-amber span {
+  background: var(--amber);
+}
+
+.meter-red span {
+  background: var(--red);
+}
+
+.meter small {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.checklist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 24px;
+}
+
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checklist li > span:not(.dot) {
+  flex: 1;
+}
+
+.checklist li.done > span:not(.dot) {
+  color: var(--text-2);
+}
+
+.checklist small {
+  color: var(--text-3);
+}
+
+.checklist .dot {
+  box-shadow: none;
+}

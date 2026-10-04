@@ -1,0 +1,26 @@
+# Authentik — see ctl/manifest/models.py for every field.
+id: authentik
+capabilities: [identity_provider]
+name: Authentik
+tier: foundation
+group: infrastructure
+category: infrastructure
+tagline: Single sign-on for your apps
+summary: Manages user accounts and access to Mu3Lab. Authentik provides a shared sign-in for compatible apps and
+  an additional sign-in gate for selected services.
+version: 2026.8.3
+upstream: goauthentik/authentik
+service:
+  local_port: 9001
+  health:
+    path: /-/health/ready/
+  stoppable: false
+  start_timeout_seconds: 600
+route:
+  https_port: 443
+  caddy_port: 19461
+  generated: false
+sign_in:
+  method: local
+  session_provider: true
+setup_action: Create the Authentik administrator and Mu3Lab application.

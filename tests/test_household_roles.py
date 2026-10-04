@@ -69,8 +69,10 @@ class RoleTests(unittest.TestCase):
                 response = self.client.post(
                     "/api/v1/services/immich/actions", headers=MEMBER | MUTATION, json={"action": action}
                 )
-                self.assertEqual(response.status_code, 403, response.text)
-                self.assertEqual(response.json().get("code"), "admin_required")
+                self.assertEqual(response.status_code, 422 if action == "repair" else 403, response.text)
+                self.assertEqual(
+                    response.json().get("code"), "invalid_request" if action == "repair" else "admin_required"
+                )
 
     def test_a_member_may_ask_to_install_an_app(self):
         response = self.client.post(

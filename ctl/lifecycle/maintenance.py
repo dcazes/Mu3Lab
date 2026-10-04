@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ctl import actions, backups, job_guard
 from ctl.control_state import ControlState
+from ctl.engine.runtime import render_service
 from ctl.jobs import JobStore, job_params, redact
 from ctl.lifecycle import app_releases
 from ctl.lifecycle.app_releases import Release
@@ -106,10 +107,9 @@ def _backup(service: Service, project: Path, root: Path, step: Callable[[str, st
 
 def _refresh_definition(service: Service, root: Path, log: Log) -> None:
     """Copy the approved Compose definition, which may differ between releases."""
-    from ctl.lifecycle.materialize import materialize
-
     try:
-        materialize(service, root)
+        render_service(service, root)
+        app_releases.align(service, root)
     except OSError as exc:
         log(f"The approved configuration could not be copied ({exc}); keeping the current one.")
 

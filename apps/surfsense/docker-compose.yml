@@ -4,7 +4,7 @@ services:
   db:
     image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
     restart: unless-stopped
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       POSTGRES_USER: ${DB_USER:-surfsense}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
@@ -21,7 +21,7 @@ services:
   migrations:
     image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: "no"
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
       PYTHONPATH: /app
@@ -62,7 +62,7 @@ services:
   backend:
     image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: unless-stopped
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -97,7 +97,7 @@ services:
   celery_worker:
     image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: unless-stopped
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -120,7 +120,7 @@ services:
   celery_beat:
     image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
     restart: unless-stopped
-    env_file: ["${MU3LAB_ENV_FILE:-.env}"]
+    env_file: [".env"]
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
       CELERY_BROKER_URL: redis://redis:6379/0

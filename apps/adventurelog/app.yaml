@@ -1,0 +1,88 @@
+# AdventureLog — see ctl/manifest/models.py for every field.
+id: adventurelog
+capabilities: [travel]
+name: AdventureLog
+tier: optional
+group: apps
+category: travel
+tagline: Travel journal and trip planner
+summary: A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations
+  into collections, plan upcoming trips, and explore your travels on a map.
+version: v0.13.0
+upstream: seanmorley15/AdventureLog
+service:
+  local_port: 8015
+  health:
+    path: /
+route:
+  https_port: 8451
+  caddy_port: 19468
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-adventurelog
+    redirect_paths:
+    - /accounts/oidc/mu3lab-adventurelog/login/callback/
+    launch_path: /accounts/oidc/mu3lab-adventurelog/login/
+    env:
+      client_id: ADVENTURELOG_OIDC_CLIENT_ID
+      client_secret: ADVENTURELOG_OIDC_CLIENT_SECRET
+      discovery_url: ADVENTURELOG_OIDC_DISCOVERY_URL
+  note: Signs in only through Authentik; there is no separate AdventureLog password.
+account:
+  mode: environment_bootstrap
+  user_action: Open the app; Authentik signs you in as its administrator.
+secrets:
+- env: POSTGRES_PASSWORD
+- env: SECRET_KEY
+  length: 48
+env:
+  SITE_URL: '{{public_url}}'
+  ADVENTURELOG_FORCE_SOCIAL_LOGIN: 'true'
+rules:
+- rule: first_admin_from_env
+  with:
+    override: docker-compose.bootstrap.yml
+    fresh_when_empty: postgres
+    verify:
+      django_superuser:
+        service: app
+- rule: container_script
+  with:
+    at: after_healthy
+    service: app
+    script: scripts/oidc-social-app.py
+    interpreter:
+    - python
+    - manage.py
+    - shell
+    expect: MU3LAB_OIDC_APP_OK
+    purpose: Register Authentik as AdventureLog's sign-in provider
+chat:
+  assistant:
+    title: AdventureLog
+    description: Plan and review travel records.
+    instructions: Help plan and review AdventureLog trips. Do not claim to have accessed live data unless a reviewed
+      AdventureLog tool is assigned. Ask before changing data.
+  connectors:
+  - adventurelog
+mobile:
+  primary: adventurelog-pwa
+  clients:
+  - id: adventurelog-pwa
+    name: AdventureLog PWA
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://adventurelog.app/
+    setup: pwa
+    summary: AdventureLog's responsive PWA keeps trip planning close at hand.
+    steps:
+    - Open the private AdventureLog URL and complete Authentik sign-in.
+    - Use the browser menu to add AdventureLog to the Home Screen.
+resource_guidance: Lightweight service with persistent trip data.
+setup_action: Install only when you want private travel planning.

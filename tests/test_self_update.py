@@ -49,7 +49,9 @@ class _Checkout(unittest.TestCase):
         (self.maintainer / "file.txt").write_text(message, encoding="utf-8")
         git(self.maintainer, "add", "file.txt")
         git(self.maintainer, "commit", "--quiet", "-m", message)
-        git(self.maintainer, "push", "--quiet", "origin", "HEAD:main")
+        tag = "v1.0." + git(self.maintainer, "rev-list", "--count", "HEAD")
+        git(self.maintainer, "tag", tag)
+        git(self.maintainer, "push", "--quiet", "--tags", "origin", "HEAD:main")
 
     def status(self) -> dict:
         return self_update.status(self.copy, refresh=True)
@@ -68,12 +70,20 @@ class StatusTests(_Checkout):
         self.assertEqual(result["changes"], ["Approve Mealie v3.28.0"])
         self.assertEqual(result["blocked_reason"], "")
 
+    def test_preview_tags_and_untagged_changes_are_not_offered(self):
+        (self.maintainer / "file.txt").write_text("preview")
+        git(self.maintainer, "add", "file.txt")
+        git(self.maintainer, "commit", "--quiet", "-m", "Preview UI")
+        git(self.maintainer, "tag", "v9.0.0-rc.1")
+        git(self.maintainer, "push", "--quiet", "--tags", "origin", "HEAD:main")
+        self.assertFalse(self.status()["available"])
+
     def test_a_copy_with_its_own_commits_is_updated_by_hand(self):
         self.commit("upstream")
         (self.copy / "local.txt").write_text("x", encoding="utf-8")
         git(self.copy, "add", "local.txt")
         git(self.copy, "commit", "--quiet", "-m", "local")
-        self.assertIn("its own commits", self.status()["blocked_reason"])
+        self.assertIn("development checkout", self.status()["blocked_reason"])
 
     def test_a_copy_with_edited_files_is_updated_by_hand(self):
         self.commit("upstream")
@@ -81,27 +91,60 @@ class StatusTests(_Checkout):
         self.assertIn("edited files", self.status()["blocked_reason"])
 
     def test_a_copy_without_a_github_branch_cannot_update_itself(self):
-        git(self.copy, "branch", "--unset-upstream")
-        self.assertIn("doesn't follow", self.status()["blocked_reason"])
+        git(self.copy, "remote", "remove", "origin")
+        self.assertIn("no release remote", self.status()["blocked_reason"])
 
 
 class UpdateTests(_Checkout):
-    def run_update(self, plan: dict, finish: dict | None = None):
+    def run_update(self, plan: dict, finish: dict | None = None, packages=None):
         calls: list[str] = []
+        self.package_syncs: list[str] = []
 
         def new_code(_root, command, _log):
             calls.append(command)
             return plan if command == "plan" else (finish or {"ok": True})
 
+        def python_packages(root, _log):
+            self.package_syncs.append(git(root, "rev-parse", "HEAD"))
+            if packages:
+                packages(len(self.package_syncs))
+
         store = JobStore(Path(self.temp.name) / "jobs.sqlite3")
         job = store.create(kind="update", service_id="mu3lab", action="self_update", actor="owner")
         with (
             patch.object(self_update, "_new_code", side_effect=new_code),
-            patch.object(self_update, "_python_packages"),
+            patch.object(self_update, "_python_packages", side_effect=python_packages),
+            patch("ctl.platform_releases.assets"),
             patch.object(self_update, "restart") as restart,
         ):
             self_update.execute_claimed(store, store.get(job["id"]), "worker", self.copy)
         return store.get(job["id"]), calls, restart
+
+    def test_declined_update_restores_the_running_versions_packages(self):
+        before = git(self.copy, "rev-parse", "HEAD")
+        self.commit("second")
+        job, _calls, _restart = self.run_update({"ok": True, "unattended": [], "terminal": ["Docker"]})
+        self.assertEqual(job["error_code"], "needs_terminal")
+        # Synced once for the new release, then again for the restored version.
+        self.assertEqual(len(self.package_syncs), 2)
+        self.assertEqual(self.package_syncs[-1], before)
+
+    def test_a_package_failure_returns_to_the_running_version(self):
+        before = git(self.copy, "rev-parse", "HEAD")
+        self.commit("second")
+
+        def fail_first(attempt: int) -> None:
+            if attempt == 1:
+                raise self_update._Failed(
+                    "python_packages", "uv_sync_failed", "Python packages could not be installed."
+                )
+
+        job, calls, restart = self.run_update({"ok": True, "unattended": [], "terminal": []}, packages=fail_first)
+        self.assertEqual(job["error_code"], "uv_sync_failed")
+        self.assertEqual(git(self.copy, "rev-parse", "HEAD"), before)
+        self.assertEqual(self.package_syncs[-1], before)
+        self.assertEqual(calls, [])
+        restart.assert_not_called()
 
     def test_an_update_pulls_installs_then_restarts(self):
         self.commit("second")

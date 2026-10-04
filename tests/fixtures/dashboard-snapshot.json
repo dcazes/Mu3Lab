@@ -1,0 +1,836 @@
+{
+  "services": {
+    "observed_at": "2099-01-01T00:00:00+00:00",
+    "ok": true,
+    "tailnet_dns_name": "fixture.ts.net",
+    "services": [
+      {
+        "mobile": {
+          "primary": "bitwarden",
+          "clients": [
+            {
+              "id": "bitwarden",
+              "name": "Bitwarden",
+              "kind": "native",
+              "support": "official",
+              "platforms": [
+                "ios",
+                "android"
+              ],
+              "install": {
+                "ios": "https://apps.apple.com/us/app/bitwarden-password-manager/id1137397744",
+                "android": "https://play.google.com/store/apps/details?id=com.x8bit.bitwarden"
+              },
+              "setup": "server_url",
+              "summary": "The official Bitwarden client connects directly to your private Vaultwarden server.",
+              "steps": [
+                "Install Bitwarden for your phone.",
+                "Before signing in, choose the self-hosted environment and paste the Mu3Lab server URL.",
+                "Sign in with your Mu3Lab email and password."
+              ],
+              "homepage": "https://bitwarden.com/download/",
+              "caveat": "",
+              "fallback": false
+            }
+          ]
+        },
+        "id": "vaultwarden",
+        "name": "Vaultwarden",
+        "category": "infrastructure",
+        "lifecycle": "always_on",
+        "https_port": 8081.0,
+        "private_https_port": 8443.0,
+        "auth": "local",
+        "dependencies": [],
+        "stage": "foundation",
+        "group": "apps",
+        "routable": true,
+        "required": true,
+        "identity_note": "Independent Vaultwarden login; never Authentik-gated.",
+        "resource_guidance": "",
+        "setup_action": "Create the first Vaultwarden account locally, then use its private tailnet URL.",
+        "health_state": "healthy",
+        "recommended_action": "none",
+        "last_job_id": "",
+        "last_error": "",
+        "detail": "Waiting for the worker to check this app.",
+        "url": "https://fixture.ts.net:8081.0",
+        "route_ready": true,
+        "compose_present": false,
+        "ui": {
+          "state": "route_pending",
+          "label": "Open",
+          "authentication": "local",
+          "reason": "Waiting for the worker to check this app."
+        },
+        "allowed_actions": [],
+        "configuration": [],
+        "account": {
+          "mode": "none",
+          "user_action": ""
+        },
+        "initialization": {
+          "mode": "none",
+          "state": "not_required"
+        },
+        "identity": {
+          "mode": "local",
+          "state": "unsupported",
+          "launch_url": "",
+          "detail": "Independent Vaultwarden login; never Authentik-gated.",
+          "last_verified_at": "",
+          "job_id": "",
+          "error": {}
+        },
+        "containers": [],
+        "display_state": "running",
+        "reason": "Waiting for the worker to check this app.",
+        "installed": true,
+        "observed_at": "2026-10-04T16:00:00+00:00"
+      },
+      {
+        "mobile": {
+          "primary": "lobechat-pwa",
+          "clients": [
+            {
+              "id": "lobechat-pwa",
+              "name": "LobeChat PWA",
+              "kind": "pwa",
+              "support": "official",
+              "platforms": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "install": {},
+              "setup": "pwa",
+              "summary": "Use the self-hosted LobeChat web app directly and add it to the Home Screen.",
+              "steps": [
+                "Open the private LobeChat URL on the phone and sign in with Authentik.",
+                "Use the browser menu to add LobeChat to the Home Screen or install the web app."
+              ],
+              "homepage": "https://lobehub.com/",
+              "caveat": "",
+              "fallback": false
+            }
+          ]
+        },
+        "id": "lobehub",
+        "name": "LobeChat",
+        "category": "ai",
+        "lifecycle": "shared",
+        "https_port": 3211.0,
+        "private_https_port": 8457.0,
+        "auth": "oidc",
+        "dependencies": [
+          "litellm",
+          "authentik"
+        ],
+        "stage": "core",
+        "group": "ai",
+        "routable": true,
+        "required": true,
+        "identity_note": "LobeChat uses its own Authentik OIDC session and persists conversations in its private database.",
+        "resource_guidance": "Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk use.",
+        "setup_action": "Connect LobeChat to LiteLLM and sign in with Authentik.",
+        "health_state": "healthy",
+        "recommended_action": "none",
+        "last_job_id": "",
+        "last_error": "",
+        "detail": "Waiting for the worker to check this app.",
+        "url": "https://fixture.ts.net:3211.0",
+        "route_ready": true,
+        "compose_present": false,
+        "ui": {
+          "state": "route_pending",
+          "label": "Open",
+          "authentication": "oidc",
+          "reason": "Waiting for the worker to check this app."
+        },
+        "allowed_actions": [],
+        "configuration": [],
+        "account": {
+          "mode": "oidc_first_login",
+          "user_action": "Use the existing Authentik session; local email/password registration is disabled."
+        },
+        "initialization": {
+          "mode": "oidc_first_login",
+          "state": "pending"
+        },
+        "identity": {
+          "mode": "native_oidc",
+          "state": "unconfigured",
+          "launch_url": "",
+          "detail": "Authentik sign-in is checked when the app is installed.",
+          "last_verified_at": "",
+          "job_id": "",
+          "error": {}
+        },
+        "containers": [],
+        "display_state": "running",
+        "reason": "Waiting for the worker to check this app.",
+        "installed": true,
+        "observed_at": "2026-10-04T16:00:00+00:00"
+      },
+      {
+        "id": "ollama",
+        "name": "Ollama",
+        "category": "ai",
+        "lifecycle": "shared",
+        "https_port": 11434.0,
+        "auth": "excluded",
+        "dependencies": [],
+        "stage": "core",
+        "group": "ai",
+        "routable": false,
+        "required": true,
+        "identity_note": "Internal-only embedding and tiny-model runner; no browser or MCP route.",
+        "resource_guidance": "Model downloads determine disk and memory use.",
+        "setup_action": "Install and verify the model runner using the host-wide compute setting.",
+        "health_state": "healthy",
+        "recommended_action": "none",
+        "last_job_id": "",
+        "last_error": "",
+        "detail": "Waiting for the worker to check this app.",
+        "url": "https://fixture.ts.net:11434.0",
+        "route_ready": true,
+        "compose_present": false,
+        "ui": {
+          "state": "unavailable",
+          "label": "Open",
+          "authentication": "excluded",
+          "reason": "Waiting for the worker to check this app."
+        },
+        "allowed_actions": [],
+        "configuration": [],
+        "account": {
+          "mode": "none",
+          "user_action": ""
+        },
+        "initialization": {
+          "mode": "none",
+          "state": "not_required"
+        },
+        "identity": {
+          "mode": "none",
+          "state": "unsupported",
+          "launch_url": "",
+          "detail": "Internal-only embedding and tiny-model runner; no browser or MCP route.",
+          "last_verified_at": "",
+          "job_id": "",
+          "error": {}
+        },
+        "containers": [],
+        "display_state": "running",
+        "reason": "Waiting for the worker to check this app.",
+        "installed": true,
+        "observed_at": "2026-10-04T16:00:00+00:00"
+      },
+      {
+        "mobile": {
+          "primary": "ghee",
+          "clients": [
+            {
+              "id": "ghee",
+              "name": "Ghee for Mealie",
+              "kind": "native",
+              "support": "community",
+              "platforms": [
+                "ios",
+                "android"
+              ],
+              "install": {
+                "ios": "https://apps.apple.com/us/app/ghee-for-mealie-recipes/id6758328014",
+                "android": "https://play.google.com/store/apps/details?id=casa.dsen.ghee"
+              },
+              "setup": "server_url",
+              "summary": "A polished community client for recipes, meal plans, shopping lists, and cooking.",
+              "steps": [
+                "Install Ghee and enter the Mu3Lab Mealie URL.",
+                "Choose OIDC and complete the Authentik sign-in."
+              ],
+              "caveat": "Core features are free; expanded offline features are an optional purchase.",
+              "fallback": false
+            },
+            {
+              "id": "mealie-pwa",
+              "name": "Mealie PWA",
+              "kind": "pwa",
+              "support": "official",
+              "platforms": [
+                "ios",
+                "android",
+                "web"
+              ],
+              "install": {},
+              "setup": "pwa",
+              "summary": "Use Mealie's responsive web app when you prefer the upstream interface.",
+              "steps": [
+                "Open the private Mealie URL and sign in with Authentik.",
+                "Use the browser menu to add Mealie to the Home Screen."
+              ],
+              "homepage": "https://mealie.io/",
+              "caveat": "",
+              "fallback": true
+            }
+          ]
+        },
+        "id": "mealie",
+        "name": "Mealie",
+        "category": "home",
+        "lifecycle": "optional",
+        "https_port": 9925.0,
+        "private_https_port": 8450.0,
+        "auth": "oidc",
+        "dependencies": [],
+        "stage": "optional",
+        "group": "apps",
+        "routable": true,
+        "required": false,
+        "identity_note": "",
+        "resource_guidance": "Lightweight service.",
+        "setup_action": "Install only when you want private recipe and meal planning.",
+        "health_state": "healthy",
+        "recommended_action": "none",
+        "last_job_id": "",
+        "last_error": "",
+        "detail": "Waiting for the worker to check this app.",
+        "url": "https://fixture.ts.net:9925.0",
+        "route_ready": true,
+        "compose_present": false,
+        "ui": {
+          "state": "route_pending",
+          "label": "Open",
+          "authentication": "oidc",
+          "reason": "Waiting for the worker to check this app."
+        },
+        "allowed_actions": [],
+        "configuration": [],
+        "account": {
+          "mode": "oidc_first_login",
+          "user_action": "Open Mealie; Authentik signs you in as its administrator."
+        },
+        "initialization": {
+          "mode": "oidc_first_login",
+          "state": "pending"
+        },
+        "identity": {
+          "mode": "native_oidc",
+          "state": "unconfigured",
+          "launch_url": "",
+          "detail": "Authentik sign-in is checked when the app is installed.",
+          "last_verified_at": "",
+          "job_id": "",
+          "error": {}
+        },
+        "containers": [],
+        "display_state": "running",
+        "reason": "Waiting for the worker to check this app.",
+        "installed": true,
+        "observed_at": "2026-10-04T16:00:00+00:00"
+      },
+      {
+        "mobile": {
+          "primary": "nextcloud-mobile",
+          "clients": [
+            {
+              "id": "nextcloud-mobile",
+              "name": "Nextcloud",
+              "kind": "native",
+              "support": "official",
+              "platforms": [
+                "ios",
+                "android"
+              ],
+              "install": {
+                "ios": "https://apps.apple.com/us/app/nextcloud/id1125420102",
+                "android": "https://play.google.com/store/apps/details?id=com.nextcloud.client"
+              },
+              "setup": "server_url",
+              "summary": "The official Nextcloud client syncs files and uploads photos to your private server.",
+              "steps": [
+                "Install Nextcloud and enter the Mu3Lab Nextcloud URL.",
+                "Complete the browser-based Authentik login and approve the device."
+              ],
+              "homepage": "https://nextcloud.com/install/",
+              "caveat": "",
+              "fallback": false
+            }
+          ]
+        },
+        "id": "nextcloud",
+        "name": "Nextcloud",
+        "category": "productivity",
+        "lifecycle": "optional",
+        "https_port": 8085.0,
+        "private_https_port": 8453.0,
+        "auth": "oidc",
+        "dependencies": [],
+        "stage": "optional",
+        "group": "apps",
+        "routable": true,
+        "required": false,
+        "identity_note": "Signs in only through Authentik; there is no separate Nextcloud password.",
+        "resource_guidance": "Stores files and calendar data locally; storage use grows with uploaded content.",
+        "setup_action": "Install private files and calendar with Authentik sign-in.",
+        "health_state": "healthy",
+        "recommended_action": "none",
+        "last_job_id": "",
+        "last_error": "",
+        "detail": "Waiting for the worker to check this app.",
+        "url": "https://fixture.ts.net:8085.0",
+        "route_ready": true,
+        "compose_present": false,
+        "ui": {
+          "state": "route_pending",
+          "label": "Open",
+          "authentication": "oidc",
+          "reason": "Waiting for the worker to check this app."
+        },
+        "allowed_actions": [],
+        "configuration": [],
+        "account": {
+          "mode": "environment_bootstrap",
+          "user_action": "Open Nextcloud; Authentik signs you in as its administrator."
+        },
+        "initialization": {
+          "mode": "environment_bootstrap",
+          "state": "pending"
+        },
+        "identity": {
+          "mode": "native_oidc",
+          "state": "unconfigured",
+          "launch_url": "",
+          "detail": "Authentik sign-in is checked when the app is installed.",
+          "last_verified_at": "",
+          "job_id": "",
+          "error": {}
+        },
+        "containers": [],
+        "display_state": "running",
+        "reason": "Waiting for the worker to check this app.",
+        "installed": true,
+        "observed_at": "2026-10-04T16:00:00+00:00"
+      }
+    ]
+  },
+  "system": {
+    "observed_at": "",
+    "ok": true,
+    "cpu_percent": 0.0,
+    "docker_ready": false,
+    "tailnet_dns_name": "",
+    "runtime_root": "/srv/mu3lab",
+    "memory": {
+      "total": 0.0,
+      "used": 0.0,
+      "percent": 0.0
+    },
+    "disk": {
+      "total": 0.0,
+      "used": 0.0,
+      "percent": 0.0
+    },
+    "backup": {
+      "ok": true,
+      "engine": "restic",
+      "available": false,
+      "repository_path": "",
+      "retention": {}
+    }
+  },
+  "jobs": {
+    "ok": true,
+    "available": true,
+    "jobs": []
+  },
+  "identity": {
+    "ok": true,
+    "control_plane_auth": "authentik_forward_auth",
+    "username": "owner",
+    "subject_id": "subject",
+    "email": "owner@example.test",
+    "display_name": "",
+    "groups": [
+      "household",
+      "mu3lab-operators"
+    ],
+    "detail": "Authenticated through Authentik.",
+    "role": "admin",
+    "is_admin": true,
+    "writes_enabled": true
+  },
+  "chat": {
+    "connected": false,
+    "ok": true,
+    "ready": false,
+    "url": "",
+    "authentication": "native_oidc",
+    "mcp_enabled_count": 0.0,
+    "detail": "LobeChat is not ready; check core setup and its private route.",
+    "providers": [
+      {
+        "id": "lobehub",
+        "name": "LobeChat",
+        "ready": false,
+        "url": "",
+        "authentication": "native_oidc",
+        "detail": "LobeChat is not ready; check core setup and its private route."
+      }
+    ]
+  },
+  "catalog": {
+    "ok": true,
+    "profiles": [
+      {
+        "id": "core-suite",
+        "name": "Core suite",
+        "description": "The core AI services for local models and embeddings, external provider connections, chat, and web research.",
+        "services": [
+          "firecrawl",
+          "freellmapi",
+          "litellm",
+          "lobehub",
+          "ollama"
+        ]
+      }
+    ],
+    "services": {
+      "authentik": {
+        "summary": "Manages user accounts and access to Mu3Lab. Authentik provides a shared sign-in for compatible apps and an additional sign-in gate for selected services.",
+        "tagline": "Single sign-on for your apps",
+        "category": "infrastructure",
+        "stage_label": "infrastructure",
+        "resource_guidance": "",
+        "integrations": []
+      },
+      "ingress": {
+        "summary": "Routes requests to Mu3Lab apps over HTTPS. Caddy provides the internal web server and reverse proxy used to publish private app addresses.",
+        "tagline": "Private HTTPS web server",
+        "category": "infrastructure",
+        "stage_label": "infrastructure",
+        "resource_guidance": "",
+        "integrations": []
+      },
+      "vaultwarden": {
+        "summary": "Stores passwords, secure notes, and other vault items on your server. Vaultwarden works with Bitwarden clients to sync your vault and fill saved logins across devices.",
+        "tagline": "Password manager for Bitwarden apps",
+        "category": "infrastructure",
+        "stage_label": "apps",
+        "resource_guidance": "",
+        "integrations": []
+      },
+      "firecrawl": {
+        "summary": "Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping and crawling API and connects it to chat for web research.",
+        "tagline": "Turns web pages into AI-ready text",
+        "category": "research",
+        "stage_label": "ai",
+        "resource_guidance": "Runs Firecrawl workers, Playwright, RabbitMQ, PostgreSQL, and Redis. Browser crawls can use substantial memory; concurrency defaults are intentionally conservative.",
+        "integrations": []
+      },
+      "freellmapi": {
+        "summary": "Connects multiple AI providers through an OpenAI-compatible API, with model routing and automatic failover. Mu3Lab manages provider keys in AI providers settings; availability depends on each provider\u2019s limits.",
+        "tagline": "Pools free AI providers with failover",
+        "category": "ai",
+        "stage_label": "ai",
+        "resource_guidance": "Optional provider route inside the mandatory core suite.",
+        "integrations": []
+      },
+      "litellm": {
+        "summary": "Provides a unified API for local and external AI models. Mu3Lab uses LiteLLM to route chat and embedding requests through one gateway for connected apps.",
+        "tagline": "One gateway for all AI models",
+        "category": "ai",
+        "stage_label": "ai",
+        "resource_guidance": "Low host overhead; provider and model choice determines usage.",
+        "integrations": [
+          "ollama",
+          "freellmapi"
+        ]
+      },
+      "lobehub": {
+        "summary": "An AI chat workspace for conversations, assistants, and connected tools. Mu3Lab connects LobeChat to configured models through LiteLLM and stores conversation history on your server.",
+        "tagline": "Chat with your AI models",
+        "category": "ai",
+        "stage_label": "ai",
+        "resource_guidance": "Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk use.",
+        "integrations": [
+          "litellm",
+          "authentik"
+        ]
+      },
+      "ollama": {
+        "summary": "Runs AI models and generates text embeddings on your server. Mu3Lab uses Ollama as an internal API for local inference and document search; it has no browser interface.",
+        "tagline": "Runs AI models on your server",
+        "category": "ai",
+        "stage_label": "ai",
+        "resource_guidance": "Model downloads determine disk and memory use.",
+        "integrations": []
+      },
+      "actual-budget": {
+        "summary": "A personal finance app built around envelope budgeting. Track accounts and transactions, plan spending, and review financial reports, with budget data synced through your own server.",
+        "tagline": "Envelope budgeting and spending",
+        "category": "finance",
+        "stage_label": "apps",
+        "resource_guidance": "Lightweight personal finance service.",
+        "integrations": []
+      },
+      "adventurelog": {
+        "summary": "A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations into collections, plan upcoming trips, and explore your travels on a map.",
+        "tagline": "Travel journal and trip planner",
+        "category": "travel",
+        "stage_label": "apps",
+        "resource_guidance": "Lightweight service with persistent trip data.",
+        "integrations": []
+      },
+      "baby-buddy": {
+        "summary": "A shared baby-care tracker for feedings, sleep, diaper changes, pumping, and growth. Caregivers can record daily routines and review trends from a common activity history.",
+        "tagline": "Baby feeding, sleep, and diaper tracker",
+        "category": "family",
+        "stage_label": "apps",
+        "resource_guidance": "Lightweight family tracker with durable local data and uploaded media. Authentik creates the Baby Buddy user automatically on first access.",
+        "integrations": []
+      },
+      "immich": {
+        "summary": "Manages your photo and video library on your server. Upload media from your phone, organize shared albums, and find images using metadata, facial recognition, and visual search.",
+        "tagline": "Photo and video backup",
+        "category": "media",
+        "stage_label": "apps",
+        "resource_guidance": "Media storage and machine-learning jobs can be resource intensive.",
+        "integrations": []
+      },
+      "mealie": {
+        "summary": "Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own, schedule meals, and turn recipe ingredients into shopping lists.",
+        "tagline": "Recipes, meal plans, and shopping lists",
+        "category": "home",
+        "stage_label": "apps",
+        "resource_guidance": "Lightweight service.",
+        "integrations": []
+      },
+      "nextcloud": {
+        "summary": "A self-hosted workspace for files, calendars, and contacts. Sync and share files across devices, manage events, and connect a Nextcloud calendar to Mu3Lab\u2019s calendar and Home agenda.",
+        "tagline": "Files, calendars, and contacts",
+        "category": "productivity",
+        "stage_label": "apps",
+        "resource_guidance": "Stores files and calendar data locally; storage use grows with uploaded content.",
+        "integrations": []
+      },
+      "paperless-ngx": {
+        "summary": "Turns scanned paperwork and digital files into a searchable document archive. Extract text with OCR, organize documents by tags and correspondents, and find records without sorting through folders.",
+        "tagline": "Searchable scanned document archive",
+        "category": "documents",
+        "stage_label": "apps",
+        "resource_guidance": "Storage and OCR usage grow with your document library.",
+        "integrations": []
+      },
+      "surfsense": {
+        "summary": "An AI research workspace for searching documents and web sources, organizing knowledge, and asking questions with source citations. Mu3Lab connects this self-hosted web app to its AI gateway and local embedding service.",
+        "tagline": "AI research with cited sources",
+        "category": "research",
+        "stage_label": "apps",
+        "resource_guidance": "Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is disabled.",
+        "integrations": [
+          "litellm",
+          "ollama"
+        ]
+      }
+    }
+  },
+  "core": {
+    "ok": true,
+    "ready_to_run": false,
+    "services": [
+      "firecrawl",
+      "freellmapi",
+      "litellm",
+      "lobehub",
+      "ollama"
+    ],
+    "missing_manifests": [],
+    "next_action": "Core service manifests are still being prepared",
+    "capacity": {
+      "ok": false,
+      "reasons": [
+        "Waiting for the worker to check this server."
+      ]
+    },
+    "provisioning": {
+      "ok": true,
+      "available": true,
+      "complete": false,
+      "phases": [
+        {
+          "phase_id": "foundation",
+          "label": "Host prerequisites and Docker",
+          "actual_state": "pending",
+          "detail": "Install the host runtime and private application networks.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "vaultwarden",
+          "label": "Vaultwarden owner",
+          "actual_state": "pending",
+          "detail": "Verify the independent private password-vault owner account.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "tailscale",
+          "label": "Tailscale and HTTPS routes",
+          "actual_state": "pending",
+          "detail": "Verify the tailnet connection and private HTTPS routes.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "identity",
+          "label": "Authentik owner",
+          "actual_state": "pending",
+          "detail": "Create the Mu3Lab identity owner and operator mapping.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "dashboard_protection",
+          "label": "Protected dashboard",
+          "actual_state": "verified",
+          "detail": "Authenticated operator session verified through Authentik.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "core",
+          "label": "Core platform",
+          "actual_state": "pending",
+          "detail": "Start and configure the curated core services.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "configuration",
+          "label": "Provider configuration",
+          "actual_state": "pending",
+          "detail": "Validate external inference access.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        },
+        {
+          "phase_id": "verification",
+          "label": "Verified handoff",
+          "actual_state": "pending",
+          "detail": "Prove that the user-facing platform works.",
+          "error": "",
+          "updated_at": "2026-10-04T16:42:10+00:00",
+          "attempts": 0.0
+        }
+      ],
+      "progress": {
+        "completed": 1.0,
+        "total": 8.0
+      },
+      "next_action": {
+        "kind": "bootstrap",
+        "label": "Resume ./install"
+      }
+    }
+  },
+  "provisioning": {
+    "ok": true,
+    "available": true,
+    "complete": false,
+    "phases": [
+      {
+        "phase_id": "foundation",
+        "label": "Host prerequisites and Docker",
+        "actual_state": "pending",
+        "detail": "Install the host runtime and private application networks.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "vaultwarden",
+        "label": "Vaultwarden owner",
+        "actual_state": "pending",
+        "detail": "Verify the independent private password-vault owner account.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "tailscale",
+        "label": "Tailscale and HTTPS routes",
+        "actual_state": "pending",
+        "detail": "Verify the tailnet connection and private HTTPS routes.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "identity",
+        "label": "Authentik owner",
+        "actual_state": "pending",
+        "detail": "Create the Mu3Lab identity owner and operator mapping.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "dashboard_protection",
+        "label": "Protected dashboard",
+        "actual_state": "verified",
+        "detail": "Authenticated operator session verified through Authentik.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "core",
+        "label": "Core platform",
+        "actual_state": "pending",
+        "detail": "Start and configure the curated core services.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "configuration",
+        "label": "Provider configuration",
+        "actual_state": "pending",
+        "detail": "Validate external inference access.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      },
+      {
+        "phase_id": "verification",
+        "label": "Verified handoff",
+        "actual_state": "pending",
+        "detail": "Prove that the user-facing platform works.",
+        "error": "",
+        "updated_at": "2026-10-04T16:42:10+00:00",
+        "attempts": 0.0
+      }
+    ],
+    "progress": {
+      "completed": 1.0,
+      "total": 8.0
+    },
+    "next_action": {
+      "kind": "bootstrap",
+      "label": "Resume ./install"
+    }
+  },
+  "audit": {
+    "ok": true,
+    "available": true,
+    "events": []
+  }
+}

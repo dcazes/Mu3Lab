@@ -1,0 +1,39 @@
+/* ---------- Status screens ---------- */
+.status-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.status-screen-card {
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.status-screen-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.status-screen h1 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.status-screen p {
+  color: var(--text-2);
+  margin-bottom: 8px;
+}

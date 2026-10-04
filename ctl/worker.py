@@ -16,10 +16,14 @@ from pathlib import Path
 
 from ctl import job_guard, self_update
 from ctl.core_setup import execute_claimed
+from ctl.engine.install import run_periodic
 from ctl.jobs import JobStore
+from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
 from ctl.service_ops import execute_claimed as execute_service_claimed
+from ctl.status import reconciler, signals
+from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
@@ -81,6 +85,7 @@ def run_job(store: JobStore, job: dict, worker_id: str) -> None:
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=2)
+            signals.changed.set()
 
 
 def run() -> int:
@@ -88,8 +93,8 @@ def run() -> int:
     stopping = False
     waiting_for_runtime_reported = False
     next_mcp_reconcile = 0.0
-    next_mcp_activity = 0.0
-    next_identity_reconcile = 0.0
+    next_chat_sync = 0.0
+    next_rule_maintenance = 0.0
     next_vault_sync = 0.0
 
     def stop(_signum, _frame) -> None:
@@ -104,6 +109,7 @@ def run() -> int:
     from ctl import download_manager
 
     download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
+    status_thread = reconciler.start(downloads_stopping)
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait
@@ -117,12 +123,10 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         waiting_for_runtime_reported = False
-        if time.monotonic() >= next_identity_reconcile:
-            next_identity_reconcile = time.monotonic() + 60
+        if time.monotonic() >= next_rule_maintenance:
+            next_rule_maintenance = time.monotonic() + 60
             try:
-                from ctl.identity_reconcile import lift_owner_guard
-
-                lift_owner_guard(store, ROOT, lambda line: print(line, flush=True))
+                run_periodic(store, ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab sign-in verification deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_vault_sync:
@@ -141,14 +145,12 @@ def run() -> int:
                 reconcile_lifecycle(ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}", flush=True)
-        if time.monotonic() >= next_mcp_activity:
-            next_mcp_activity = time.monotonic() + 60
+        if time.monotonic() >= next_chat_sync:
+            next_chat_sync = time.monotonic() + 300
             try:
-                from ctl.mcp_chat_activity import ingest
-
-                ingest(lambda line: print(line, flush=True))
+                sync_agents(lambda line: print(line, flush=True))
             except Exception as exc:
-                print(f"Mu3Lab MCP activity import deferred: {exc}", flush=True)
+                print(f"Mu3Lab chat assistant synchronization deferred: {exc}", flush=True)
         try:
             from ctl.install_batches import InstallBatchStore
 
@@ -172,16 +174,12 @@ def run() -> int:
                 batches = InstallBatchStore.runtime()
                 if batches:
                     batches.advance_for_job(str(job["id"]), store)
-                from ctl import workflow_secrets
-                from ctl.control_state import ControlState
-
-                expired = workflow_secrets.cleanup()
-                control = ControlState.runtime()
-                if control:
-                    control.expire_handoffs(expired)
+                workflow_secrets.cleanup()
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
                 print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
     downloads_stopping.set()
+    signals.changed.set()
+    status_thread.join(timeout=2)
     return 0
 
 

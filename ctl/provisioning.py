@@ -13,14 +13,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl import sqlite_store
 from ctl.jobs import redact, redact_data
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
+from ctl.store import db
 
 WORKFLOW_VERSION = 3
 PHASES = (
     ("foundation", "Host prerequisites and Docker", "Install the host runtime and private application networks."),
-    ("vaultwarden", "Vaultwarden owner", "Verify the independent private password-vault owner account."),
+    (
+        by_capability("password_store").id,
+        "Vaultwarden owner",
+        "Verify the independent private password-vault owner account.",
+    ),
     ("tailscale", "Tailscale and HTTPS routes", "Verify the tailnet connection and private HTTPS routes."),
     ("identity", "Authentik owner", "Create the Mu3Lab identity owner and operator mapping."),
     ("dashboard_protection", "Protected dashboard", "Prove that Authentik protects the dashboard."),
@@ -53,29 +58,10 @@ class ProvisioningStore:
     def runtime(cls, paths: RuntimePaths = RuntimePaths()) -> ProvisioningStore | None:
         if not paths.runtime.is_dir():
             return None
-        return cls(paths.runtime / "control-plane.sqlite3")
+        return cls(db.database(paths))
 
     def _connect(self) -> sqlite3.Connection:
-        self.database.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        conn = sqlite_store.connect(self.database)
-        conn.execute("PRAGMA journal_mode=WAL")
-        with sqlite_store.schema_once(conn, self.database, "provisioning") as needed:
-            if needed:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS provisioning_steps (
-                        workflow_version INTEGER NOT NULL,
-                        phase_id TEXT NOT NULL,
-                        desired_state TEXT NOT NULL,
-                        actual_state TEXT NOT NULL,
-                        attempts INTEGER NOT NULL DEFAULT 0,
-                        detail TEXT NOT NULL DEFAULT '',
-                        error TEXT NOT NULL DEFAULT '',
-                        inputs_json TEXT NOT NULL DEFAULT '{}',
-                        updated_at TEXT NOT NULL,
-                        PRIMARY KEY (workflow_version, phase_id)
-                    )
-                """)
-        return conn
+        return db.connect(self.database)
 
     def initialize(self) -> None:
         now = _now()
@@ -93,7 +79,7 @@ class ProvisioningStore:
                 (
                     1,
                     {
-                        "foundation": ("foundation", "vaultwarden", "tailscale"),
+                        "foundation": ("foundation", by_capability("password_store").id, "tailscale"),
                         "identity": ("identity", "dashboard_protection"),
                         "configuration": ("configuration",),
                     },
@@ -104,7 +90,7 @@ class ProvisioningStore:
                         phase: (phase,)
                         for phase in (
                             "foundation",
-                            "vaultwarden",
+                            by_capability("password_store").id,
                             "tailscale",
                             "identity",
                             "dashboard_protection",
@@ -173,8 +159,9 @@ class ProvisioningStore:
                 ),
             )
 
-    def summary(self) -> dict[str, Any]:
-        self.initialize()
+    def summary(self, *, initialize: bool = True) -> dict[str, Any]:
+        if initialize:
+            self.initialize()
         labels = {phase_id: (label, default_detail) for phase_id, label, default_detail in PHASES}
         with self._connect() as conn:
             rows = conn.execute(
@@ -185,6 +172,19 @@ class ProvisioningStore:
             """,
                 (WORKFLOW_VERSION,),
             ).fetchall()
+        if not rows:
+            rows = [
+                {
+                    "phase_id": phase_id,
+                    "desired_state": "verified",
+                    "actual_state": "pending",
+                    "attempts": 0,
+                    "detail": detail,
+                    "error": "",
+                    "updated_at": "",
+                }
+                for phase_id, _label, detail in PHASES
+            ]
         phases = []
         for row in rows:
             value = dict(row)
@@ -197,7 +197,13 @@ class ProvisioningStore:
         incomplete = next((item for item in phases if item["actual_state"] not in {"verified", "skipped"}), None)
         if incomplete is None:
             next_action = {"kind": "none", "label": "Platform ready"}
-        elif incomplete["phase_id"] in {"foundation", "vaultwarden", "tailscale", "identity", "dashboard_protection"}:
+        elif incomplete["phase_id"] in {
+            "foundation",
+            by_capability("password_store").id,
+            "tailscale",
+            "identity",
+            "dashboard_protection",
+        }:
             next_action = {"kind": "bootstrap", "label": "Resume ./install"}
         elif incomplete["phase_id"] == "core":
             next_action = {

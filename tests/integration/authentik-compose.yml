@@ -1,0 +1,27 @@
+# Throwaway Authentik for integration tests: same pinned image as apps/authentik,
+# its own project name and loopback port, no volumes kept.
+name: mu3lab-test-authentik
+services:
+  postgresql:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment: {POSTGRES_DB: authentik, POSTGRES_USER: authentik, POSTGRES_PASSWORD: test-only-db}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"], interval: 5s, retries: 30}
+  server:
+    image: ghcr.io/goauthentik/server:2026.8.3@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849
+    command: server
+    environment: &env
+      AUTHENTIK_SECRET_KEY: test-only-secret-key-test-only-secret-key
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: test-only-db
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${TEST_AUTHENTIK_EMAIL}
+      AUTHENTIK_BOOTSTRAP_PASSWORD_HASH: ${TEST_AUTHENTIK_PASSWORD_HASH}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${TEST_AUTHENTIK_TOKEN}
+    ports: ["127.0.0.1:${TEST_AUTHENTIK_PORT:-19901}:9000"]
+    depends_on: {postgresql: {condition: service_healthy}}
+  worker:
+    image: ghcr.io/goauthentik/server:2026.8.3@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849
+    command: worker
+    environment: *env
+    depends_on: {postgresql: {condition: service_healthy}}

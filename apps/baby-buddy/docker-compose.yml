@@ -8,7 +8,7 @@ services:
     environment:
       PUID: "1000"
       PGID: "1000"
-      TZ: ${TZ:-America/Toronto}
+      TZ: ${TZ:-UTC}
       SECRET_KEY: ${BABY_BUDDY_SECRET_KEY:?BABY_BUDDY_SECRET_KEY is required}
       ALLOWED_HOSTS: "*"
       CSRF_TRUSTED_ORIGINS: ${BABY_BUDDY_PUBLIC_URL:?BABY_BUDDY_PUBLIC_URL is required}

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from ctl.freellmapi_admin import GatewayAdminError
 from ctl.provider_ops import StreamProbe, _forget_removed_keys, _reconcile, _verify
+from ctl.registry import load
 
 CHAT_OK = StreamProbe(True, 200, "", "mu3lab-chat", "", "Stream completed.")
 
@@ -112,26 +113,23 @@ class ReconcileRestartTests(unittest.TestCase):
     """Only a gateway whose rendered files changed is recreated."""
 
     def _reconcile(self, projects: Path, new_key: str) -> dict[str, bool]:
-        def fake_configure(_paths):
+        def fake_configure(_paths, _catalog):
             (projects / "freellmapi" / "freellmapi.config.json").write_text(new_key)
             return {"freellmapi_config": "f", "litellm_config": "l"}
 
         recreated: dict[str, bool] = {}
 
-        def fake_compose_up(path, _log, *, env, recreate, wait_timeout):
-            recreated[path.name] = recreate
+        def fake_compose_up(compose, _log, *, recreate, wait_seconds):
+            recreated[compose.directory.name] = recreate
             return 0, ""
 
-        registry = {
-            sid: type("S", (), {"name": sid, "compose_path": lambda self, _r, s=sid: Path(s)})()
-            for sid in ("freellmapi", "litellm")
-        }
+        registry = load()
         paths = type("P", (), {"projects": projects, "data": projects})()
         with (
             patch("ctl.provider_ops.RuntimePaths", return_value=paths),
             patch("ctl.provider_ops.configure", side_effect=fake_configure),
             patch("ctl.provider_ops.load", return_value=registry),
-            patch("ctl.provider_ops.actions.compose_up", side_effect=fake_compose_up),
+            patch("ctl.provider_ops.Compose.up", autospec=True, side_effect=fake_compose_up),
             patch("ctl.provider_ops.read_runtime_env", return_value={}),
             patch("ctl.provider_ops._forget_removed_keys", return_value=(True, "")),
         ):
@@ -145,6 +143,7 @@ class ReconcileRestartTests(unittest.TestCase):
             projects = Path(tmp)
             for sid in ("freellmapi", "litellm"):
                 (projects / sid).mkdir()
+                (projects / sid / "docker-compose.yml").write_text("services: {}")
             self.assertEqual(self._reconcile(projects, "key-1"), {"freellmapi": True, "litellm": False})
             # Rendering the same key again (e.g. after a pass) restarts nothing.
             self.assertEqual(self._reconcile(projects, "key-1"), {"freellmapi": False, "litellm": False})

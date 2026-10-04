@@ -24,7 +24,7 @@ LobeChat app assistant ──► Mu3Lab tool gateway ──► active connector 
                              policy.json ◄── control plane (switches, reviews)
 ```
 
-### Tool gateway (`apps/mcp/gateway`)
+### Tool gateway (`platform/tool-gateway`)
 
 One small MCP server in front of every connector. Each app has its own path and its own bearer
 token, so an assistant's credential reaches only its app. For each app the assistant sees:
@@ -49,7 +49,7 @@ does not follow `tools/list_changed`, so on-demand loading has to happen through
 Connectors sit on a network that only the gateway shares with them (`mu3lab_mcp_upstream`);
 LobeChat reaches the gateway only.
 
-### Reviews (`mcp-reviews/<connector>.yaml`)
+### Reviews (`apps/<app>/connectors/<connector>/review.yaml`)
 
 One checked-in file per connector lists its categories, and for each tool its category, whether
 it reads or changes data, and whether it is an everyday tool. Tools that must never be offered

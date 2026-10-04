@@ -54,7 +54,7 @@ function ChatRoute() {
                 </span>
                 <span className="route-state">
                   <Dot tone={ready ? 'green' : 'gray'} />
-                  {service ? stateLabel[service.state] : 'Unavailable'}
+                  {service ? stateLabel[service.display_state] : 'Unavailable'}
                 </span>
               </Link>
             </li>
@@ -543,7 +543,7 @@ export function AiSettings() {
         <ProviderChecklist
           catalog={catalog.data?.providers || []}
           providers={list}
-          setup={providers.data?.setup}
+          setup={providers.data?.setup || undefined}
           saved={() => void reload()}
         />
       )}

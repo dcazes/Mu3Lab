@@ -7,12 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ctl import onboarding_state, vault_sync
+from ctl import vault_sync
+from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, Member, OrgLogin
 from ctl.runtime import RuntimePaths
-from ctl.vault_org import STATUS_ACCEPTED, STATUS_CONFIRMED, Member, OrgLogin
-from ctl.vaultwarden_api import SymmetricKey, encrypt
+from ctl.store import onboarding as onboarding_state
 
-KEY = SymmetricKey(b"e" * 32, b"m" * 32)
+KEY = None
 
 
 class FakeOrg:
@@ -69,7 +69,7 @@ class FakeOrg:
                 uris=[uri for uri, _ in item["uris"]],
                 fields=item["fields"],
                 collection_ids=[collection],
-                raw={"login": {"password": encrypt(item["password"], KEY)}},
+                raw={"login": {"password": item["password"]}},
             )
         )
         return self.items[-1].id
@@ -82,7 +82,7 @@ class FakeOrg:
 
     def update_login(self, existing, _org, _key, **item):
         self.writes += 1
-        existing.raw["login"]["password"] = encrypt(item["password"], KEY)
+        existing.raw["login"]["password"] = item["password"]
 
 
 OWNER = {"uid": "o" * 64, "email": "owner@example.test", "name": "Owner", "role": "admin", "active": True}
@@ -184,7 +184,7 @@ class VaultSyncTests(unittest.TestCase):
         (self.paths.projects / "freellmapi" / ".env").write_text("FREELLMAPI_ADMIN_PASSWORD=pw\n")
         ids = lambda: [item.mu3lab_id for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)]  # noqa: E731
         self.assertIn("service:freellmapi", ids())
-        ControlState(self.paths.runtime / "control-plane.sqlite3").mark_vault_seeded(OWNER["email"])
+        ControlState(self.paths.runtime / "mu3lab.db").mark_vault_seeded(OWNER["email"])
         self.assertNotIn("service:freellmapi", ids())
 
 

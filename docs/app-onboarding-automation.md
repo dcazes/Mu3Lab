@@ -1,6 +1,6 @@
 # Automatic app onboarding
 
-Implemented September 30, 2026 for the versions pinned in `services.yaml`. Changes are in the repository; the running installation has not been upgraded. The target is **Install → Open → use the app**. The first Open establishes a real application session using the user's existing Authentik session. No user cookies are exported to the worker.
+Implemented September 30, 2026 for the versions pinned in each app's `docker-compose.yml`. Changes are in the repository; the running installation has not been upgraded. The target is **Install → Open → use the app**. The first Open establishes a real application session using the user's existing Authentik session. No user cookies are exported to the worker.
 
 SSO and application setup are separate tasks. Authentik handles authentication; per-app adapters create the first administrator, establish ownership, and configure useful defaults. This implementation uses supported configuration, APIs, and management commands rather than browser clicks.
 

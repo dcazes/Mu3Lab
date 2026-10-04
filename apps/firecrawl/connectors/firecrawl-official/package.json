@@ -1,0 +1,11 @@
+{
+  "name": "mu3lab-firecrawl-official",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "firecrawl-mcp": "3.25.3"
+  },
+  "overrides": {
+    "axios": "1.20.0"
+  }
+}

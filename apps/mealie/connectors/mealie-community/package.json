@@ -1,0 +1,9 @@
+{
+  "name": "mu3lab-mealie-community",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "mealie-mcp": "0.2.105",
+    "supergateway": "3.4.3"
+  }
+}

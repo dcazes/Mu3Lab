@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
 
-from ctl.registry import RegistryError, load
+from ctl.manifest.models import Mobile
+from ctl.registry import load
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,23 +37,21 @@ class MobileClientTests(unittest.TestCase):
         self.assertEqual(mobile["paperless-ngx"]["primary"], "papernext")
 
     def test_unsafe_or_ambiguous_metadata_is_rejected(self):
-        original = yaml.safe_load((ROOT / "services.yaml").read_text(encoding="utf-8"))
-        index = next(i for i, item in enumerate(original["services"]) if item["id"] == "vaultwarden")
+        original = yaml.safe_load((ROOT / "apps" / "vaultwarden" / "app.yaml").read_text(encoding="utf-8"))["mobile"]
         mutations = {
             "kind": lambda mobile: mobile["clients"][0].__setitem__("kind", "wrapper"),
             "platforms": lambda mobile: mobile["clients"][0].__setitem__("platforms", ["windows-phone"]),
-            "HTTPS URL": lambda mobile: mobile["clients"][0]["install"].__setitem__("ios", "http://unsafe.example/app"),
-            "duplicate": lambda mobile: mobile["clients"].append(deepcopy(mobile["clients"][0])),
+            "HTTPS": lambda mobile: mobile["clients"][0]["install"].__setitem__("ios", "http://unsafe.example/app"),
+            "unique": lambda mobile: mobile["clients"].append(deepcopy(mobile["clients"][0])),
             "primary": lambda mobile: mobile.__setitem__("primary", "missing-client"),
         }
+        Mobile.model_validate(original)
         for expected, mutate in mutations.items():
-            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+            with self.subTest(expected=expected):
                 raw = deepcopy(original)
-                mutate(raw["services"][index]["mobile"])
-                path = Path(tmp) / "services.yaml"
-                path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-                with self.assertRaisesRegex(RegistryError, expected):
-                    load(path)
+                mutate(raw)
+                with self.assertRaisesRegex(ValidationError, expected):
+                    Mobile.model_validate(raw)
 
     def test_the_browser_view_carries_no_secrets(self):
         def keys(value):

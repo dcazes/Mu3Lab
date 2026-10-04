@@ -1,0 +1,24 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: mealie-community
+name: Mealie MCP
+preferred: true
+provenance: community
+repository: https://github.com/2fst4u/mealie-mcp
+revision: 4728c5c68810105fa54f6ff2482a0414430f6f65
+package: mealie-mcp@0.2.105
+transport: streamable-http
+endpoint: http://mealie-mcp:8000/mcp
+local_health: http://127.0.0.1:8814/healthz
+credentials:
+- key: api_token
+  env: MEALIE_API_TOKEN
+  type: secret
+  label: Mealie API token
+  required: true
+provision:
+  service: mealie
+  script: provision.py
+  interpreter:
+  - /opt/mealie/bin/python
+  - '-'
+provision_note: Creates a five-year Mu3Lab MCP token for the single Mealie administrator.

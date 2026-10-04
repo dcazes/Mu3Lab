@@ -6,8 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ctl import bootstrap_state, install
-from ctl.authentik_blueprints import render_dashboard_blueprint, write_dashboard_blueprint
+from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
+from ctl.integrations.authentik import AuthentikError
 from ctl.runtime import RuntimePaths
+from ctl.secrets import read_runtime_env
+from tests.support import runtime_paths
 
 
 class BootstrapIdentityTests(unittest.TestCase):
@@ -22,7 +25,7 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_vaultwarden_account_is_created_from_the_terminal_answers(self):
         account = {"name": "Alex", "email": "alex@example.com", "password": "correct horse battery"}
         ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None, "account": lambda: account}
-        with patch("ctl.vaultwarden_api.register") as register:
+        with patch("ctl.integrations.vaultwarden.register") as register:
             result = install.fix_vaultwarden_setup({}, ctx)
         self.assertTrue(result["ok"])
         register.assert_called_once_with("http://127.0.0.1:19462", "alex@example.com", "correct horse battery", "Alex")
@@ -38,16 +41,46 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_authentik_owner_gets_the_same_login(self):
         account = {"name": "Alex", "email": "alex@example.com", "password": "correct horse battery"}
         ctx = {"inputs": {}, "root": Path("/tmp"), "log_fn": lambda _: lambda _: None, "account": lambda: account}
-        with patch("ctl.install.actions.authentik_set_owner", return_value={"ok": True}) as set_owner:
-            result = install.fix_authentik_setup({}, ctx)
-        self.assertTrue(result["ok"])
-        self.assertEqual(set_owner.call_args.args[:3], ("alex@example.com", "Alex", "correct horse battery"))
+        with tempfile.TemporaryDirectory() as tmp, runtime_paths(RuntimePaths(Path(tmp))):
+            values = install._authentik_compose_env(account, lambda _: None)
+            saved = read_runtime_env(Path(values["AUTHENTIK_ENV_FILE"]))
+            self.assertEqual(saved["AUTHENTIK_BOOTSTRAP_EMAIL"], account["email"])
+            self.assertTrue(saved["AUTHENTIK_BOOTSTRAP_PASSWORD_HASH"].startswith("pbkdf2_sha256$"))
+            self.assertNotIn(account["password"], Path(values["AUTHENTIK_ENV_FILE"]).read_text())
+            self.assertGreaterEqual(len(saved["AUTHENTIK_BOOTSTRAP_TOKEN"]), 48)
+            with patch("ctl.install.Authentik.runtime") as runtime:
+                client = runtime.return_value
+                client.user.return_value = {"pk": 1, "email": account["email"]}
+                result = install.fix_authentik_setup({}, ctx)
+            self.assertTrue(result["ok"])
+            client.wait_for_defaults.assert_called_once()
+            client.update_user.assert_called_once_with(1, name="Alex")
+            final = read_runtime_env(Path(values["AUTHENTIK_ENV_FILE"]))
+            self.assertNotIn("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH", final)
+            self.assertNotIn("AUTHENTIK_BOOTSTRAP_EMAIL", final)
+            self.assertEqual(final["AUTHENTIK_BOOTSTRAP_TOKEN"], saved["AUTHENTIK_BOOTSTRAP_TOKEN"])
 
-    def test_authentik_account_is_done_once_first_run_setup_is_over(self):
+    def test_failed_owner_update_keeps_first_start_settings_for_a_retry(self):
+        account = {"name": "Owner", "email": "owner@example.test", "password": "private password"}
+        ctx = {"account": lambda: account, "log_fn": lambda _: lambda _: None}
+        with tempfile.TemporaryDirectory() as tmp, runtime_paths(RuntimePaths(Path(tmp))):
+            values = install._authentik_compose_env(account, lambda _: None)
+            path = Path(values["AUTHENTIK_ENV_FILE"])
+            original = path.read_text()
+            with patch("ctl.install.Authentik.runtime") as runtime:
+                client = runtime.return_value
+                client.user.return_value = {"pk": 1, "email": account["email"]}
+                client.update_user.side_effect = AuthentikError("Update refused.")
+                self.assertFalse(install.fix_authentik_setup({}, ctx)["ok"])
+            self.assertEqual(path.read_text(), original)
+
+    def test_authentik_account_is_done_once_bootstrap_settings_are_removed(self):
         with (
             patch("ctl.install._authentik_check", return_value={"status": "ok"}),
-            patch("ctl.install._authentik_initial_setup_pending", return_value=False),
+            patch("ctl.install.Authentik.runtime") as runtime,
+            patch("ctl.install.read_runtime_env", return_value={}),
         ):
+            runtime.return_value.user.return_value = {"pk": 1, "email": "owner@example.test"}
             self.assertEqual(install.check_authentik_setup({})["state"], "ready")
 
     def test_identity_steps_are_before_final_dashboard_route(self):
@@ -58,9 +91,14 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertLess(ids.index("serve"), ids.index("dashboard_protection"))
 
     def test_dashboard_authentik_blueprint_is_declarative_and_secret_free(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            target = write_dashboard_blueprint(Path(tmp), "mu3lab-4.taile2cc7a.ts.net")
-            content = target.read_text(encoding="utf-8")
+        content = render_gate_blueprint(
+            "mu3lab-4.taile2cc7a.ts.net",
+            8446,
+            (
+                GatedApp("litellm", "LiteLLM", 8454, "operators"),
+                GatedApp("freellmapi", "FreeLLMAPI", 8455, "operators"),
+            ),
+        )
         self.assertIn("authentik_providers_proxy.proxyprovider", content)
         self.assertIn("mode: forward_single", content)
         self.assertIn("authentik Embedded Outpost", content)
@@ -77,21 +115,17 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertIn("authentik_policies.policybinding", content)
         self.assertIn('authentik_host: "https://mu3lab-4.taile2cc7a.ts.net"', content)
         self.assertIn('authentik_host_browser: "https://mu3lab-4.taile2cc7a.ts.net"', content)
-        self.assertNotIn("password", content.lower())
+        self.assertNotIn("AUTHENTIK_BOOTSTRAP_PASSWORD", content)
         self.assertNotIn("client_secret", content.lower())
 
-    def test_authentik_host_must_be_the_private_https_origin(self):
+    def test_gated_app_rejects_invalid_private_port(self):
         with self.assertRaises(ValueError):
-            render_dashboard_blueprint("mu3lab-4.taile2cc7a.ts.net", "http://localhost:9001")
-
-    def test_litellm_authentik_external_host_must_include_its_private_port(self):
-        with self.assertRaises(ValueError):
-            render_dashboard_blueprint("mu3lab-4.taile2cc7a.ts.net", litellm_host="https://mu3lab-4.taile2cc7a.ts.net")
+            render_gate_blueprint("mu3lab-4.taile2cc7a.ts.net", 8446, (GatedApp("llm", "LLM", 80, "operators"),))
 
     def test_caddy_preserves_public_authentik_origin_headers(self):
         root = Path(__file__).resolve().parents[1]
         for name in ("Caddyfile", "Caddyfile.authenticated"):
-            content = (root / "core" / "ingress" / name).read_text(encoding="utf-8")
+            content = (root / "apps" / "ingress" / name).read_text(encoding="utf-8")
             with self.subTest(name=name):
                 self.assertIn("header_up Host {http.request.host}", content)
                 self.assertIn("header_up X-Forwarded-Host {http.request.host}", content)
@@ -99,4 +133,4 @@ class BootstrapIdentityTests(unittest.TestCase):
 
     def test_dashboard_blueprint_rejects_non_tailnet_hosts(self):
         with self.assertRaises(ValueError):
-            render_dashboard_blueprint("127.0.0.1")
+            render_gate_blueprint("127.0.0.1", 8446)

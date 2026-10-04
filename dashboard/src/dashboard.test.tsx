@@ -25,11 +25,11 @@ afterEach(() => {
 
 describe('Home', () => {
   it('launches everyday apps and routes stopped ones to their page', () => {
-    stubFetch(() => ({ handoffs: [] }));
+    stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
-      identity: identity({ launch_url: 'https://host.ts.net:8449' }),
+      identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
     });
-    const mealie = service('mealie', 'Mealie', 'optional', { state: 'stopped', identity: identity() });
+    const mealie = service('mealie', 'Mealie', 'optional', { display_state: 'stopped', identity: identity() });
     const ollama = service('ollama', 'Ollama', 'core');
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
     expect(screen.getByRole('link', { name: 'Open Immich' })).toHaveAttribute(
@@ -42,19 +42,23 @@ describe('Home', () => {
   });
 
   it('groups status into Security, AI and System chips that expand with real usage figures', () => {
-    stubFetch(() => ({ handoffs: [] }));
+    stubFetch(() => ({}));
     const GB = 1024 ** 3;
     const data = dashboardData([
       service('ingress', 'Caddy', 'foundation'),
       service('authentik', 'Authentik', 'foundation'),
       service('ollama', 'Ollama', 'core', {
-        state: 'failed',
+        display_state: 'needs_attention',
         detail: 'Container exited.',
         containers: [
           { service: 'ollama', name: 'mu3lab-ollama', state: 'running', status: 'Up', health: 'unknown', image: 'x' },
         ],
       }),
-      service('firecrawl', 'Firecrawl', 'optional', { state: 'not_installed' }),
+      service('firecrawl', 'Firecrawl', 'optional', {
+        display_state: 'not_installed',
+        installed: false,
+        allowed_actions: ['install'],
+      }),
     ]);
     data.system = {
       ...data.system,
@@ -92,9 +96,9 @@ describe('Home', () => {
 
     fireEvent.click(chips[1]);
     expect(chips[0]).toHaveAttribute('aria-expanded', 'false');
-    const ollama = within(strip).getByRole('link', { name: 'Ollama: Failed' });
+    const ollama = within(strip).getByRole('link', { name: 'Ollama: Needs attention' });
     expect(ollama).toHaveAttribute('title', '3.5 GB — Container exited.');
-    expect(ollama).toHaveTextContent('Failed');
+    expect(ollama).toHaveTextContent('Needs attention');
     expect(within(strip).getByRole('link', { name: 'Firecrawl: Not installed' })).toBeInTheDocument();
 
     fireEvent.click(chips[2]);
@@ -106,31 +110,13 @@ describe('Home', () => {
     expect(within(strip).getByRole('link', { name: 'Disk: 96%' })).toBeInTheDocument();
   });
 
-  it('surfaces problems and saved-password reminders in one strip', async () => {
-    stubFetch((path) =>
-      path === '/api/v1/credential-handoffs'
-        ? {
-            handoffs: [
-              {
-                id: 'h',
-                service_id: 'nextcloud',
-                job_id: 'j',
-                state: 'available',
-                created_at: '',
-                expires_at: '',
-                login_url: '',
-              },
-            ],
-          }
-        : undefined,
-    );
+  it('surfaces app problems in the attention strip', () => {
     renderWithDashboard(
       <HomePage />,
-      dashboardData([service('paperless-ngx', 'Paperless-ngx', 'optional', { state: 'failed' })]),
+      dashboardData([service('paperless-ngx', 'Paperless-ngx', 'optional', { display_state: 'needs_attention' })]),
     );
     const strip = screen.getByRole('region', { name: 'Needs attention' });
-    expect(within(strip).getByText('Paperless-ngx: failed')).toBeInTheDocument();
-    expect(await within(strip).findByText('1 new app password to save in Vaultwarden')).toBeInTheDocument();
+    expect(within(strip).getByText('Paperless-ngx: needs attention')).toBeInTheDocument();
   });
 });
 
@@ -138,7 +124,7 @@ describe('App page', () => {
   it('makes Start the primary action for a stopped app without open or restart', () => {
     stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '' }));
     const nextcloud = service('nextcloud', 'Nextcloud', 'optional', {
-      state: 'stopped',
+      display_state: 'stopped',
       allowed_actions: ['start'],
       identity: identity(),
     });
@@ -324,16 +310,18 @@ describe('Apps', () => {
             }
           : { ok: true, batch: null },
     );
-    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    const available = {
+      display_state: 'not_installed' as const,
+      installed: false,
+      allowed_actions: ['install'] as Array<'install'>,
+    };
     renderWithDashboard(
       <AppsPage discover />,
       dashboardData([
         service('mealie', 'Mealie', 'optional', available),
         service('immich', 'Immich', 'optional', available),
-        service('planned', 'Planned', 'blocked', { state: 'blocked', blocked_reason: 'Under review' }),
       ]),
     );
-    expect(screen.getByText('Under review')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select Mealie for installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Select Immich for installation' }));
     expect(await screen.findByText('400.0 MB download · about 1.6 GB on disk')).toBeInTheDocument();
@@ -383,7 +371,11 @@ describe('Apps', () => {
           }
         : { ok: true, batch },
     );
-    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    const available = {
+      display_state: 'not_installed' as const,
+      installed: false,
+      allowed_actions: ['install'] as Array<'install'>,
+    };
     renderWithDashboard(
       <AppsPage discover />,
       dashboardData([
@@ -410,7 +402,11 @@ describe('Apps', () => {
   it('selects an app by clicking anywhere on its card except its name', () => {
     vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
     stubFetch(() => ({ ok: true, batch: null }));
-    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    const available = {
+      display_state: 'not_installed' as const,
+      installed: false,
+      allowed_actions: ['install'] as Array<'install'>,
+    };
     renderWithDashboard(<AppsPage discover />, dashboardData([service('mealie', 'Mealie', 'optional', available)]));
     const card = screen.getByRole('article');
     fireEvent.click(card);
@@ -428,7 +424,11 @@ describe('Apps', () => {
 
   it('keeps the selection after visiting an app page and coming back', () => {
     stubFetch(() => ({ ok: true, batch: null }));
-    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    const available = {
+      display_state: 'not_installed' as const,
+      installed: false,
+      allowed_actions: ['install'] as Array<'install'>,
+    };
     const data = dashboardData([
       service('mealie', 'Mealie', 'optional', available),
       service('immich', 'Immich', 'optional', available),
@@ -454,7 +454,11 @@ describe('Apps', () => {
           }
         : { ok: true, batch: null },
     );
-    const available = { state: 'not_installed' as const, installation_state: 'not_installed' as const };
+    const available = {
+      display_state: 'not_installed' as const,
+      installed: false,
+      allowed_actions: ['install'] as Array<'install'>,
+    };
     renderWithDashboard(<AppsPage discover />, dashboardData([service('mealie', 'Mealie', 'optional', available)]));
     fireEvent.click(screen.getByRole('button', { name: 'Select Mealie for installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Install Mealie' }));
@@ -475,7 +479,7 @@ describe('Settings', () => {
       app_state: 'running',
       enabled: true,
       state: 'live',
-      auth: { type: 'none', scopes: [], configured: true, auto_provision: false },
+      auth: { type: 'none', configured: true, auto_provision: false },
       configuration: [],
       tools: [],
       review: { status: 'accepted', repository: '', revision: '1', preferred: true },
@@ -495,7 +499,7 @@ describe('Settings', () => {
                 service_id: 'actual-budget',
                 state: 'authentication_required',
                 enabled: false,
-                auth: { type: 'service-credential', scopes: [], configured: false, auto_provision: false },
+                auth: { type: 'service-credential', configured: false, auto_provision: false },
               }),
             ],
           }
@@ -512,27 +516,11 @@ describe('Settings', () => {
     );
   });
 
-  it('offers recovery credential export on Security', async () => {
-    stubFetch((path) =>
-      path === '/api/v1/credential-handoffs'
-        ? {
-            handoffs: [
-              {
-                id: 'h',
-                service_id: 'nextcloud',
-                job_id: 'j',
-                state: 'available',
-                created_at: '',
-                expires_at: '2030-01-01T00:00:00Z',
-                login_url: '',
-              },
-            ],
-          }
-        : undefined,
-    );
+  it('shows access and backups without temporary credential handoffs', () => {
     renderWithDashboard(<SecuritySettings />, dashboardData([]));
-    expect(await screen.findByRole('button', { name: 'Export credentials' })).toBeInTheDocument();
-    expect(screen.getByText(/Handoff expiry removes access to the saved copy/)).toBeInTheDocument();
+    expect(screen.getByText('Your access')).toBeInTheDocument();
+    expect(screen.getByText('Backup protection is not verified')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export credentials' })).not.toBeInTheDocument();
   });
 
   it('copies exactly the tailnet address', async () => {
@@ -640,12 +628,8 @@ describe('Shell', () => {
     stubFetch((path) =>
       path === '/api/health'
         ? { ok: true }
-        : path === '/api/v1/services'
-          ? {
-              ok: true,
-              tailnet_dns_name: '',
-              services: [service('immich', 'Immich', 'optional', { identity: identity() })],
-            }
+        : path === '/api/v1/snapshot'
+          ? dashboardData([service('immich', 'Immich', 'optional', { identity: identity() })])
           : {},
     );
     render(<App />);

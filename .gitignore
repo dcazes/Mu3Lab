@@ -11,8 +11,9 @@ core/*/.env
 # Runtime state (SQLite job database)
 .state/
 
-# Python virtualenv (recreated by install.sh)
+# Python environment and pinned toolchain (recreated by install.sh)
 .venv/
+.tools/
 
 # Node modules + built dashboard bundle (recreated by npm ci/build)
 node_modules/

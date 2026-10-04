@@ -17,16 +17,18 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard
+from ctl import actions, job_guard, platform_releases
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import Review
 from ctl.mcp_review import load as load_review
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import locked
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.store.secrets import SecretStore
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "apps" / "mcp" / "gateway"
+SOURCE = ROOT / "platform" / "tool-gateway"
 PORT = 8822
 ENDPOINT = "http://mcp-gateway:8080/apps/{service_id}/mcp"
 LOCAL_ENDPOINT = f"http://127.0.0.1:{PORT}" + "/apps/{service_id}/mcp"
@@ -47,15 +49,14 @@ def review_for(server) -> Review:
 
 def app_token(service_id: str) -> str:
     """The bearer token one app's assistant uses; created once, never logged."""
-    path = project() / "tokens.env"
-    key = "APP_TOKEN_" + service_id.upper().replace("-", "_")
-    values = read_runtime_env(path)
-    if not values.get(key):
-        values[key] = secrets.token_urlsafe(32)
-        path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-        path.write_text(runtime_env_text(values), encoding="utf-8")
-        os.chmod(path, 0o600)
-    return values[key]
+    paths = RuntimePaths()
+    with locked(paths.state / "gateway-tokens.lock"):
+        store = SecretStore(paths)
+        value = store.get("gateway", service_id)
+        if value is None:
+            value = secrets.token_urlsafe(32)
+            store.put("gateway", service_id, value)
+        return value
 
 
 # --------------------------------------------------------------------------- switches
@@ -195,6 +196,7 @@ def _materialize() -> Path:
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
     for name in ("Dockerfile", "docker-compose.yml", "gateway.py"):
         shutil.copy2(SOURCE / name, target / name)
+    platform_releases.pin_compose(ROOT, SOURCE / "docker-compose.yml", target / "docker-compose.yml")
     (target / "logs").mkdir(mode=0o750, exist_ok=True)
     env = read_runtime_env(target / ".env")
     env.update({"MU3LAB_UID": str(os.getuid()), "MU3LAB_GID": str(os.getgid())})

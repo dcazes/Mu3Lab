@@ -199,12 +199,18 @@ describe('One key field for every provider', () => {
 });
 
 describe('Get started', () => {
-  const api =
-    (seeded: boolean, connected: ProviderMetadata[], browsers: string[] = [], signedIn = false) =>
-    (path: string) =>
-      path === '/api/v1/vault/status'
+  const api = (seeded: boolean, connected: ProviderMetadata[], browsers: string[] = [], signedIn = false) => {
+    let items: Record<string, boolean> = {};
+    return (path: string, init?: RequestInit) => {
+      if (path === '/api/v1/me/checklist') {
+        if (init?.method === 'PUT') items = { ...items, ...JSON.parse(String(init.body)).items };
+        return { ok: true, items };
+      }
+      return path === '/api/v1/vault/status'
         ? { ok: true, seeded, seeded_at: '', browser_extension: { browsers, server_url: '', signed_in: signedIn } }
         : (providersApi(connected, [])(path) ?? { handoffs: [] });
+    };
+  };
 
   beforeEach(() => localStorage.clear());
 
@@ -296,7 +302,7 @@ describe('Get started', () => {
     stubFetch(api(true, []));
     const preinstalled = [
       service('vaultwarden', 'Vaultwarden', 'foundation'),
-      service('firecrawl', 'Firecrawl', 'optional'),
+      service('firecrawl', 'Firecrawl', 'optional', { group: 'ai' }),
     ];
     renderWithDashboard(<HomePage />, dashboardData(preinstalled));
     expect(await screen.findByText('0 of 5 complete')).toBeInTheDocument();

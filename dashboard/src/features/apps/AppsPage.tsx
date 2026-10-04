@@ -10,12 +10,11 @@ import { Link } from '../../lib/router';
 import {
   canInstall,
   categoryLabel,
-  displayStage,
+  type Group,
+  groupLabel,
   isInstalled,
   launchTarget,
   signInSummary,
-  type Stage,
-  stageLabel,
 } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
@@ -23,7 +22,7 @@ import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
 import { useInstallBatch } from './useInstallBatch';
 
-const STAGE_ORDER: Stage[] = ['optional', 'core', 'foundation'];
+const GROUP_ORDER: Group[] = ['apps', 'ai', 'infrastructure'];
 const SELECTION_KEY = 'mu3lab.discoverSelection';
 
 /** Discover picks survive a visit to an app's detail page and back. */
@@ -66,7 +65,7 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
         {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
         {service.identity && service.identity.mode !== 'none' && <Badge tone="gray">{signIn.label}</Badge>}
       </span>
-      <StatusBadge state={service.state} />
+      <StatusBadge state={service.display_state} />
       <span className="row-actions">
         {target ? (
           <ExternalButton size="sm" href={target.url}>
@@ -120,7 +119,7 @@ function DiscoverCard({
           </span>
         </Link>
       </header>
-      <p>{installable ? summary : service.blocked_reason || summary}</p>
+      <p>{summary}</p>
       {installable && <small className="discover-size">{sizeLabel(size)}</small>}
       <footer>
         {installable ? (
@@ -161,7 +160,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
 
   const installed = useMemo(() => services.filter(isInstalled), [services]);
   const available = useMemo(
-    () => services.filter((service) => !isInstalled(service) && ['optional', 'blocked'].includes(service.stage)),
+    () => services.filter((service) => !isInstalled(service) && service.stage === 'optional'),
     [services],
   );
   const queued = new Map(
@@ -247,37 +246,29 @@ export function AppsPage({ discover }: { discover: boolean }) {
               : 'Open Discover to choose apps to install.'}
         </EmptyState>
       ) : discover ? (
-        <>
-          {(['optional', 'blocked'] as Stage[]).map((stage) => {
-            const group = shown.filter((service) => (stage === 'blocked') === (service.stage === 'blocked'));
-            if (!group.length) return null;
-            return (
-              <section key={stage} className="group">
-                <h2 className="group-title">{stage === 'blocked' ? 'Unavailable' : 'Available to install'}</h2>
-                <div className="discover-grid">
-                  {group.map((service) => (
-                    <DiscoverCard
-                      key={service.id}
-                      service={service}
-                      summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
-                      size={sizes?.apps?.[service.id]}
-                      selected={selected.includes(service.id)}
-                      installing={queued.get(service.id)}
-                      toggle={() => toggle(service.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </>
+        <section className="group">
+          <h2 className="group-title">Available to install</h2>
+          <div className="discover-grid">
+            {shown.map((service) => (
+              <DiscoverCard
+                key={service.id}
+                service={service}
+                summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
+                size={sizes?.apps?.[service.id]}
+                selected={selected.includes(service.id)}
+                installing={queued.get(service.id)}
+                toggle={() => toggle(service.id)}
+              />
+            ))}
+          </div>
+        </section>
       ) : (
-        STAGE_ORDER.map((stage) => {
-          const group = shown.filter((service) => displayStage(service) === stage);
+        GROUP_ORDER.map((name) => {
+          const group = shown.filter((service) => service.group === name);
           if (!group.length) return null;
           return (
-            <section key={stage} className="group">
-              <h2 className="group-title">{stageLabel[stage]}</h2>
+            <section key={name} className="group">
+              <h2 className="group-title">{groupLabel[name]}</h2>
               <div className="card card-flush rows">
                 {group.map((service) => (
                   <InstalledRow

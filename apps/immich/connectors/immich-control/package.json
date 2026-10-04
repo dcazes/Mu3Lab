@@ -1,0 +1,9 @@
+{
+  "name": "mu3lab-immich-control",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "immich-mcp": "0.5.2",
+    "supergateway": "3.4.3"
+  }
+}

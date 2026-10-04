@@ -3,7 +3,7 @@
 Each installer step that builds something from checked-in inputs records a
 SHA-256 of those inputs next to its output. Re-running ./install.sh after a
 `git pull` compares the recorded value with the current inputs, so changed
-requirements, dashboard sources or control-plane code are rebuilt or
+dashboard sources or control-plane code are rebuilt or
 restarted, and everything else is skipped. Content hashes are used instead of
 modification times because git does not preserve mtimes.
 """
@@ -14,8 +14,6 @@ import hashlib
 from collections.abc import Iterable
 from pathlib import Path
 
-REQUIREMENTS_STAMP = Path(".venv") / ".mu3lab-requirements.sha256"
-NODE_MODULES_STAMP = Path("dashboard") / "node_modules" / ".mu3lab-lock.sha256"
 BUILD_STAMP = Path("dashboard") / "dist" / ".mu3lab-build.sha256"
 SERVICES_STAMP_NAME = "control-plane-code.sha256"
 
@@ -50,16 +48,6 @@ def digest(root: Path, paths: Iterable[Path]) -> str:
     return value.hexdigest()
 
 
-def requirements_digest(root: Path) -> str:
-    # Plain file hash so ./install.sh can compute the same value with sha256sum.
-    return hashlib.sha256((root / "ctl" / "requirements.txt").read_bytes()).hexdigest()
-
-
-def lock_digest(root: Path) -> str:
-    lock = root / "dashboard" / "package-lock.json"
-    return hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else ""
-
-
 def dashboard_digest(root: Path) -> str:
     dashboard = root / "dashboard"
     paths = [dashboard / name for name in _DASHBOARD_FILES]
@@ -70,8 +58,9 @@ def dashboard_digest(root: Path) -> str:
 
 def control_plane_digest(root: Path) -> str:
     """Everything the long-running dashboard and worker load at start-up."""
-    paths = _files(root, "ctl", (".py", ".txt", ".html"))
-    paths.extend(root / name for name in ("services.yaml", "catalog.yaml", "mcp-catalog.yaml"))
+    paths = _files(root, "ctl", (".py", ".html"))
+    paths.extend(root / name for name in ("pyproject.toml", "uv.lock"))
+    paths.extend(path for path in (root / "apps").rglob("*") if path.suffix in (".yaml", ".yml") and path.is_file())
     paths.extend(_files(root, "deploy", (".service",)))
     return digest(root, paths)
 

@@ -1,0 +1,24 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: immich-photo-manager
+name: Immich Photo Manager
+preferred: true
+provenance: community
+repository: https://github.com/drolosoft/immich-photo-manager
+revision: 2.0.11
+transport: streamable-http
+endpoint: http://immich-photo-manager:8626/mcp
+local_health: http://127.0.0.1:8815/health
+credentials:
+- key: api_key
+  env: IMMICH_API_KEY
+  type: secret
+  label: Immich API key
+  required: true
+provision:
+  service: database
+  script: provision.sh
+  interpreter:
+  - sh
+  - -s
+provision_note: Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator.
+reviewed: true

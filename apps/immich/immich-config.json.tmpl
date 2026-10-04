@@ -1,0 +1,19 @@
+{
+  "oauth": {
+    "enabled": true,
+    "issuerUrl": "{{discovery_url}}",
+    "clientId": "{{IMMICH_OIDC_CLIENT_ID}}",
+    "clientSecret": "{{IMMICH_OIDC_CLIENT_SECRET}}",
+    "scope": "openid email profile",
+    "signingAlgorithm": "RS256",
+    "autoRegister": true,
+    "autoLaunch": true,
+    "buttonText": "Login with Authentik",
+    "roleClaim": "mu3lab_role",
+    "mobileOverrideEnabled": false,
+    "mobileRedirectUri": ""
+  },
+  "passwordLogin": {
+    "enabled": {{IMMICH_PASSWORD_LOGIN_ENABLED}}
+  }
+}

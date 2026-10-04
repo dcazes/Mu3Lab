@@ -11,7 +11,7 @@ WHY:  Installing over healthy components is structurally impossible: no fix
       content fingerprints (ctl/bootstrap/stamps.py), so re-running after an
       update rebuilds or restarts only what changed. Steps never accept user
       secrets; Tailscale uses its normal browser approval flow.
-RUN:  Driven by ctl/bootstrap/server.py. Root commands go through
+RUN:  Driven by ctl/bootstrap/terminal.py. Root commands go through
       ctl/privilege.py using the sudo session ./install.sh opened.
 DEBUG: Every fix logs its commands before running (via actions.py). Job dict
       shape: {status, error, steps:[{id,label,phase,status,log,prompt,...}],
@@ -21,6 +21,7 @@ DEBUG: Every fix logs its commands before running (via actions.py). Job dict
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import platform
@@ -34,9 +35,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ctl import actions, docker_config, preflight, privilege
+import httpx
+
+from ctl import actions, dashboard_build, docker_config, platform_releases, preflight, privilege, routes
 from ctl.bootstrap import stamps
+from ctl.engine.project import Facts, render
+from ctl.identity import gate_blueprint, sync_sign_in
+from ctl.integrations.authentik import Authentik, AuthentikError, password_hash
+from ctl.manifest.catalog import load as load_app_catalog
+from ctl.platform_apps import by_capability
+from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+from ctl.secrets import clear_authentik_bootstrap, ensure_authentik_env, read_runtime_env
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,14 +54,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # Constants: versions, package lists, ports. Reasons inline.
 # ---------------------------------------------------------------------------
 BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg", "python3", "python3-pip", "python3-venv", "restic"]
-# Current Node.js LTS channel for the supported v1 host. Keep this explicit so
-# the bootstrap remains reviewable and reproducible; advance it deliberately
-# when the LTS line changes rather than silently tracking a moving target.
-NODE_LTS_MAJOR = 24
-NODESOURCE_KEY_URL = "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
-NODESOURCE_LIST = (
-    f"deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{NODE_LTS_MAJOR}.x nodistro main"
-)
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"]
 # NVIDIA Container Toolkit repository (ASCII-armored key; apt reads .asc).
@@ -108,14 +110,6 @@ DISPATCH = {
     ("core_images", "ready"): "skip",
     ("host_base", "missing"): "apt_base",
     ("host_base", "ready"): "skip",
-    ("node", "absent"): "nodesource_install",
-    ("node", "old"): "nodesource_install",
-    ("node", "ready"): "skip",
-    ("venv", "no_venv"): "create_venv",
-    ("venv", "ready"): "skip",
-    ("pip_deps", "missing"): "pip_install",
-    ("pip_deps", "outdated"): "pip_install",
-    ("pip_deps", "ready"): "skip",
     ("dashboard_src", "missing"): "report_incomplete",
     ("dashboard_src", "ready"): "skip",
     ("dashboard_build", "stale"): "npm_build",
@@ -146,9 +140,9 @@ DISPATCH = {
     ("docker_networks", "ready"): "skip",
     ("caddy", "down"): "caddy_up",
     ("caddy", "ready"): "skip",
-    ("vaultwarden", "down"): "vaultwarden_up",
-    ("vaultwarden", "outdated"): "vaultwarden_up",
-    ("vaultwarden", "ready"): "skip",
+    (by_capability("password_store").id, "down"): "vaultwarden_up",
+    (by_capability("password_store").id, "outdated"): "vaultwarden_up",
+    (by_capability("password_store").id, "ready"): "skip",
     ("vaultwarden_setup", "needs_user"): "create_account",
     ("vaultwarden_setup", "ready"): "skip",
     ("tailscale_pkg", "absent"): "tailscale_install",
@@ -165,10 +159,8 @@ DISPATCH = {
     ("browser_extension", "not_needed"): "skip",
     ("browser_extension", "no_address"): "skip",  # a convenience; never block the install on it
     ("browser_extension", "ready"): "skip",
-    ("authentik_storage", "needs_migration"): "move_authentik_data",
-    ("authentik_storage", "ready"): "skip",
-    ("authentik", "down"): "authentik_up",
-    ("authentik", "ready"): "skip",
+    (by_capability("identity_provider").id, "down"): "authentik_up",
+    (by_capability("identity_provider").id, "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
     ("lobehub_serve", "unshared"): "share_lobehub",
@@ -202,7 +194,7 @@ def _dpkg_present(package: str) -> bool:
 
 
 def _repo_codename() -> str:
-    """Apt codename for Docker/NodeSource repos (noble, bookworm, ...)."""
+    """Apt codename for Docker repositories (noble, bookworm, ...)."""
     info = preflight._parse_os_release(Path("/etc/os-release").read_text(encoding="utf-8", errors="replace"))
     return info.get("UBUNTU_CODENAME") or info.get("VERSION_CODENAME", "")
 
@@ -248,16 +240,11 @@ def _repair_managed_apt_keys(log: Callable[[str], None]) -> dict:
 
     ``apt-get update`` validates all configured sources, not only the source
     needed by the current install step.  A test reset can therefore leave a
-    valid ``docker.list`` or ``nodesource.list`` beside a deleted keyring and
-    make an otherwise unrelated Node/Tailscale step fail.  Repair only the
-    three source files owned by Mu3Lab; unrelated repositories are untouched.
+    valid repository source beside a deleted keyring and
+    make an otherwise unrelated package step fail. Repair only the
+    source files owned by Mu3Lab; unrelated repositories are untouched.
     """
     managed = [
-        (
-            (Path("/etc/apt/sources.list.d/nodesource.list"), Path("/etc/apt/sources.list.d/nodesource.sources")),
-            NODESOURCE_KEY_URL,
-            (Path("/etc/apt/keyrings/nodesource.gpg"), Path("/usr/share/keyrings/nodesource.gpg")),
-        ),
         (
             (Path("/etc/apt/sources.list.d/docker.list"), Path("/etc/apt/sources.list.d/docker.sources")),
             DOCKER_KEY_URL.format(slug=_distro_slug()),
@@ -330,78 +317,6 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
     return _propagate(res)
 
 
-def fix_node(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("node")
-    _update_progress(
-        ctx,
-        "node",
-        phase="preparing_repository",
-        activity="Preparing the signed Node.js LTS repository.",
-        timeout_seconds=600,
-    )
-    res = _repair_managed_apt_keys(log)
-    if not res["ok"]:
-        return _propagate(res)
-    key_dest = Path("/tmp/mu3lab-nodesource.gpg")
-    _update_progress(
-        ctx,
-        "node",
-        phase="downloading_key",
-        activity="Downloading the Node.js repository signing key.",
-        timeout_seconds=600,
-    )
-    res = actions.fetch_url(NODESOURCE_KEY_URL, key_dest, log)
-    if not res["ok"]:
-        return _propagate(res)
-    # Binary key bytes: write_root_bytes, never a str round-trip.
-    res = actions.write_root_bytes("/etc/apt/keyrings/nodesource.gpg", key_dest.read_bytes(), log)
-    if not res["ok"]:
-        return _propagate(res)
-    res = actions.write_root_file("/etc/apt/sources.list.d/nodesource.list", NODESOURCE_LIST + "\n", log)
-    if not res["ok"]:
-        return _propagate(res)
-    _update_progress(
-        ctx,
-        "node",
-        phase="refreshing_packages",
-        activity="Refreshing package metadata for Node.js.",
-        timeout_seconds=600,
-    )
-    res = actions.apt_update(log)
-    if not res["ok"]:
-        return _propagate(res)
-    _update_progress(
-        ctx,
-        "node",
-        phase="installing_package",
-        activity="Installing the current supported Node.js LTS.",
-        timeout_seconds=600,
-    )
-    return _propagate(actions.apt_install(["nodejs"], log))
-
-
-def _venv_check(root: Path) -> dict:
-    """Venv-only readiness (NOT the combined bundle check: dist belongs to
-    the dashboard_build step). States: no_venv | ready."""
-    if (root / ".venv" / "bin" / "python").exists():
-        return {
-            "name": "venv",
-            "status": "ok",
-            "detail": "Project virtualenv present.",
-            "action": "",
-            "state": "ready",
-            "blocking": False,
-        }
-    return {
-        "name": "venv",
-        "status": "missing",
-        "detail": "Project virtualenv (.venv) missing.",
-        "action": "step 3 creates it.",
-        "state": "no_venv",
-        "blocking": False,
-    }
-
-
 def _runtime_layout_check(root: Path) -> dict:
     """Check the approved persistent-data root without creating it."""
     paths = RuntimePaths(root)
@@ -410,7 +325,7 @@ def _runtime_layout_check(root: Path) -> dict:
         missing = [path for path in user_paths if not path.is_dir()]
         # Secrets are deliberately root-only. Checking the directory itself
         # must not require the operator to read its contents.
-        secrets_ready = paths.secrets.is_dir()
+        secrets_ready = not paths.state.exists() or paths.state.stat().st_mode & 0o077 == 0
         accessible = [path for path in user_paths if not os.access(path, os.R_OK | os.X_OK)]
     except OSError:
         missing, secrets_ready, accessible = list(user_paths), False, list(user_paths)
@@ -438,27 +353,6 @@ def fix_runtime_layout(check: dict, ctx: dict) -> dict:
     return _propagate(
         actions.ensure_runtime_layout(RuntimePaths().root, getpass.getuser(), ctx["log_fn"]("runtime_layout"))
     )
-
-
-def _pip_check(root: Path) -> dict:
-    """Control-plane packages installed AND matching ctl/requirements.txt?
-
-    States: missing | outdated | ready. The recorded requirements hash makes
-    a changed requirements file (after `git pull`) reinstall packages; the
-    import probe catches a half-finished install.
-    """
-    venv_py = root / ".venv" / "bin" / "python"
-    if not venv_py.exists():
-        return _row("pip_deps", "missing", "The Python environment does not exist yet.", "missing")
-    if stamps.read(root / stamps.REQUIREMENTS_STAMP) != stamps.requirements_digest(root):
-        return _row("pip_deps", "missing", "Python packages need to be installed or updated.", "outdated")
-    try:
-        proc = subprocess.run([str(venv_py), "-c", "import fastapi, yaml, httpx"], capture_output=True, timeout=30)
-    except OSError as exc:
-        return _row("pip_deps", "missing", f"Cannot check the Python environment: {exc}.", "missing")
-    if proc.returncode != 0:
-        return _row("pip_deps", "missing", "Python packages are incomplete and will be reinstalled.", "missing")
-    return _row("pip_deps", "ok", "Python packages are up to date.", "ready")
 
 
 def _src_check(root: Path) -> dict:
@@ -498,13 +392,7 @@ def _env_check(root: Path) -> dict:
     """Root .env holds both MU3LAB_* tokens? States: ready | missing."""
     from ctl import secrets as _secrets
 
-    values: dict[str, str] = {}
-    env_path = root / ".env"
-    if env_path.is_file():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, _, value = line.partition("=")
-                values[key.strip()] = value.strip()
+    values = _secrets.platform_values()
     absent = [key for key in _secrets.ROOT_ENV_KEYS if not values.get(key)]
     if absent:
         return {
@@ -591,140 +479,33 @@ def _service_check(root: Path) -> dict:
     return _row("service", "ok", "The dashboard and background worker are running.", "ready")
 
 
-def fix_pip_deps(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("pip_deps")
-    venv_pip = ctx["root"] / ".venv" / "bin" / "pip"
-    if not venv_pip.exists():
-        return {"ok": False, "error": "no venv pip (venv step must run first)"}
-    _update_progress(
-        ctx,
-        "pip_deps",
-        phase="installing_packages",
-        activity="Installing control-plane packages into the project virtualenv.",
-        timeout_seconds=600,
-    )
-    log("$ .venv/bin/pip install -r ctl/requirements.txt")
-    try:
-        proc = subprocess.run(
-            [str(venv_pip), "install", "-r", str(ctx["root"] / "ctl" / "requirements.txt")],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            cwd=str(ctx["root"]),
-        )
-    except OSError as exc:
-        return {"ok": False, "error": f"pip failed: {exc}"}
-    tail = (proc.stdout + proc.stderr).strip().splitlines()[-5:]
-    for line in tail:
-        log(line)
-    if proc.returncode != 0:
-        return {"ok": False, "error": "pip install failed (see log)."}
-    stamps.write(ctx["root"] / stamps.REQUIREMENTS_STAMP, stamps.requirements_digest(ctx["root"]))
-    return {"ok": True}
-
-
 def fix_dashboard_src(check: dict, ctx: dict) -> dict:
     # Unfixable by design: reached only when the checkout itself lacks files.
     return {"ok": False, "error": check.get("detail", "dashboard source missing")}
 
 
 def fix_dashboard_build(check: dict, ctx: dict) -> dict:
-    """npm ci (only if node_modules absent) + npm run build, as the USER.
-
-    Long step (minutes on first run); output tailed into the log so the UI
-    never looks stuck. No privilege involved at any point.
-    """
     log = ctx["log_fn"]("dashboard_build")
-    dashdir = ctx["root"] / "dashboard"
-    _update_progress(
-        ctx,
-        "dashboard_build",
-        phase="preparing_build",
-        activity="Preparing the dashboard dependency/build step.",
-        timeout_seconds=900,
-    )
-
-    # The 5-line tail once hid the real cause (missing lockfile); on failure
-    # log every "npm error" line plus a wider tail, and always name the npm
-    # debug log so the cause is one copy-paste away.
-    def _log_failure(proc, what: str) -> dict:
-        lines = (proc.stdout + proc.stderr).strip().splitlines()
-        error_lines = [line for line in lines if "npm error" in line.lower()]
-        log(f"$ {what} failed:")
-        for line in (error_lines + lines[-30:])[:40]:
-            log(line)
-        log("Full npm log: ~/.npm/_logs/ (latest debug-*.log)")
-        return {"ok": False, "error": f"{what} failed (see log)."}
-
     root = ctx["root"]
-    if (
-        stamps.read(root / stamps.NODE_MODULES_STAMP) != stamps.lock_digest(root)
-        or not (dashdir / "node_modules").is_dir()
-    ):
-        if (dashdir / "package-lock.json").is_file():
-            _update_progress(
-                ctx,
-                "dashboard_build",
-                phase="downloading_packages",
-                activity="Downloading the locked dashboard packages.",
-                timeout_seconds=900,
-            )
-            log("$ npm ci  (in dashboard/)")
-            try:
-                proc = subprocess.run(["npm", "ci"], capture_output=True, text=True, timeout=900, cwd=str(dashdir))
-            except OSError as exc:
-                return {"ok": False, "error": f"npm ci failed: {exc} (is Node installed?)"}
-            if proc.returncode != 0:
-                return _log_failure(proc, "npm ci")
-            for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
-                log(line)
-            stamps.write(root / stamps.NODE_MODULES_STAMP, stamps.lock_digest(root))
-        else:
-            # No lockfile (shouldn't happen — repo commits one): npm install
-            # resolves fresh instead of failing like `ci` would.
-            log("$ npm install  (no lockfile; resolving fresh)")
-            _update_progress(
-                ctx,
-                "dashboard_build",
-                phase="downloading_packages",
-                activity="Downloading dashboard packages.",
-                timeout_seconds=900,
-            )
-            try:
-                proc = subprocess.run(["npm", "install"], capture_output=True, text=True, timeout=900, cwd=str(dashdir))
-            except OSError as exc:
-                return {"ok": False, "error": f"npm install failed: {exc} (is Node installed?)"}
-            if proc.returncode != 0:
-                return _log_failure(proc, "npm install")
-            for line in (proc.stdout + proc.stderr).strip().splitlines()[-5:]:
-                log(line)
-    _update_progress(
-        ctx,
-        "dashboard_build",
-        phase="building_dashboard",
-        activity="Compiling the dashboard interface.",
-        timeout_seconds=900,
-    )
-    log("$ npm run build  (in dashboard/)")
-    try:
-        proc = subprocess.run(["npm", "run", "build"], capture_output=True, text=True, timeout=900, cwd=str(dashdir))
-    except OSError as exc:
-        return {"ok": False, "error": f"npm run build failed: {exc}"}
-    for line in (proc.stdout + proc.stderr).strip().splitlines()[-10:]:
-        log(line)
-    if proc.returncode != 0:
-        return {"ok": False, "error": "dashboard build failed (see log)."}
-    stamps.write(root / stamps.BUILD_STAMP, stamps.dashboard_digest(root))
-    return {"ok": True}
+    tag = platform_releases.exact_tag(root)
+    if tag:
+        try:
+            log(f"Downloading and verifying dashboard release {tag}.")
+            platform_releases.install_dashboard(root, tag)
+            return {"ok": True}
+        except (OSError, ValueError, httpx.HTTPError) as exc:
+            return {"ok": False, "error": f"The dashboard release could not be installed: {exc}"}
+    ok, detail = dashboard_build.build(root, log)
+    return {"ok": ok, "error": "" if ok else detail}
 
 
 def fix_root_env(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
-    _values, added = _secrets.ensure_root_env(ctx["root"])
+    _values, added = _secrets.ensure_platform_tokens()
     log = ctx["log_fn"]("root_env")
     if added:
-        log(f"generated keys (names only): {', '.join(added)} → .env (0600)")
+        log(f"generated keys (names only): {', '.join(added)} → encrypted secret store")
     else:
         log("all keys already present — touched nothing")
     return {"ok": True, "skipped": not added}
@@ -789,35 +570,6 @@ def fix_service(check: dict, ctx: dict) -> dict:
     if not _user_service_active("mu3lab-worker.service"):
         return {"ok": False, "error": "background workflow worker did not stay running"}
     return {"ok": False, "error": "dashboard service started but :8787 never answered"}
-
-
-def fix_venv(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("venv")
-    venv_py = ctx["root"] / ".venv" / "bin" / "python"
-    if venv_py.exists():
-        return {"ok": True, "skipped": True}
-    _update_progress(
-        ctx,
-        "venv",
-        phase="creating_environment",
-        activity="Creating the isolated Python environment.",
-        timeout_seconds=300,
-    )
-    log("$ python3 -m venv .venv")
-    try:
-        proc = subprocess.run(
-            ["python3", "-m", "venv", str(ctx["root"] / ".venv")],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=str(ctx["root"]),
-        )
-    except OSError as exc:
-        return {"ok": False, "error": f"venv creation failed: {exc}"}
-    log((proc.stdout + proc.stderr).strip() or "(created)")
-    if proc.returncode != 0 or not venv_py.exists():
-        return {"ok": False, "error": "venv creation failed (need python3-venv?)"}
-    return {"ok": True}
 
 
 def fix_docker(check: dict, ctx: dict) -> dict:
@@ -1077,10 +829,10 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
     log = ctx["log_fn"]("caddy")
-    projdir = ctx["root"] / "core" / "ingress"
+    projdir = ctx["root"] / "apps" / by_capability("private_proxy").id
     if not (projdir / "docker-compose.yml").is_file():
-        return {"ok": False, "error": "core/ingress/docker-compose.yml missing from checkout."}
-    runtime_caddy = RuntimePaths().projects / "ingress" / "Caddyfile"
+        return {"ok": False, "error": "apps/ingress/docker-compose.yml missing from checkout."}
+    runtime_caddy = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
     source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
     _update_progress(
         ctx,
@@ -1095,7 +847,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
         if clean:
             _update_progress(ctx, "caddy", phase="starting_ingress", activity=clean[:180], timeout_seconds=300)
 
-    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    ingress_token = _secrets.platform_values().get("MU3LAB_INGRESS_TOKEN", "")
     if not ingress_token:
         return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     rc, out = actions.compose_up(
@@ -1120,7 +872,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     return {
         "ok": False,
         "error": f"Caddy container started but its health endpoint on "
-        f":{CADDY_PORT} never answered (see `docker logs ingress-caddy-1`).",
+        f":{CADDY_PORT} never answered (see `docker logs mu3lab-ingress-caddy-1`).",
     }
 
 
@@ -1200,7 +952,7 @@ def _update_progress(
 
 def _authentik_containers(ctx: dict) -> list[dict]:
     """Read container state from Docker's Compose label without secrets."""
-    rc, output = actions.docker_container_statuses("authentik")
+    rc, output = actions.docker_container_statuses(by_capability("identity_provider").id)
     if rc != 0:
         return []
     containers = []
@@ -1286,7 +1038,9 @@ def _compose_image_outdated(projdir: Path) -> bool:
 
 def _vaultwarden_check(ctx: dict) -> dict:
     health = _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
-    if health["state"] == "ready" and _compose_image_outdated(ctx["root"] / "core" / "vaultwarden"):
+    if health["state"] == "ready" and _compose_image_outdated(
+        ctx["root"] / "apps" / by_capability("password_store").id
+    ):
         # Bitwarden's apps update themselves and stop signing in to an old server.
         return {"status": "missing", "state": "outdated", "detail": "Vaultwarden will be updated."}
     return health
@@ -1296,7 +1050,7 @@ def _vaultwarden_account_exists() -> bool:
     """Read only whether Vaultwarden has at least one local user account."""
     import sqlite3
 
-    database = RuntimePaths().data / "vaultwarden" / "db.sqlite3"
+    database = RuntimePaths().data / by_capability("password_store").id / "db.sqlite3"
     if not database.is_file():
         return False
     try:
@@ -1312,11 +1066,11 @@ def _vaultwarden_account_exists() -> bool:
 
 
 def fix_vaultwarden(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("vaultwarden")
-    projdir = ctx["root"] / "core" / "vaultwarden"
+    log = ctx["log_fn"](by_capability("password_store").id)
+    projdir = ctx["root"] / "apps" / by_capability("password_store").id
     _update_progress(
         ctx,
-        "vaultwarden",
+        by_capability("password_store").id,
         phase="pulling_images",
         activity="Pulling the reviewed Vaultwarden image and starting the password manager.",
         timeout_seconds=300,
@@ -1325,9 +1079,20 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     def compose_activity(line: str) -> None:
         clean = re.sub(r"\s+", " ", line).strip()
         if clean:
-            _update_progress(ctx, "vaultwarden", phase="starting_service", activity=clean[:180], timeout_seconds=300)
+            _update_progress(
+                ctx,
+                by_capability("password_store").id,
+                phase="starting_service",
+                activity=clean[:180],
+                timeout_seconds=300,
+            )
 
-    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data)}
+    catalog = load_app_catalog(ctx["root"] / "apps")
+    project = render(
+        catalog.get(by_capability("password_store").id),
+        Facts(_tailscale_dns_name_for_install(), RuntimePaths(), catalog),
+    )
+    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data), "MU3LAB_VAULT_ENV_FILE": str(project / ".env")}
     extra_files: list[Path] = []
     # Once Tailscale is joined, keep the private URL a restart or update would otherwise drop.
     domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
@@ -1354,7 +1119,7 @@ def check_vaultwarden_setup(ctx: dict) -> dict:
 
 
 def fix_vaultwarden_setup(check: dict, ctx: dict) -> dict:
-    from ctl import vaultwarden_api
+    from ctl.integrations import vaultwarden as vaultwarden_api
 
     account = _account(ctx)
     if not account:
@@ -1416,7 +1181,7 @@ def fix_vaultwarden_serve(check: dict, ctx: dict) -> dict:
     domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
     if not domain:
         return {"ok": False, "error": "Tailscale did not provide a valid MagicDNS name for Vaultwarden."}
-    projdir = ctx["root"] / "core" / "vaultwarden"
+    projdir = ctx["root"] / "apps" / by_capability("password_store").id
     _update_progress(
         ctx,
         "vaultwarden_serve",
@@ -1502,72 +1267,32 @@ def _authentik_check(ctx: dict) -> dict:
     return _compose_health(9001, "http://127.0.0.1:9001/-/health/ready/")
 
 
-def _authentik_compose_env(blueprints: Path, log) -> dict[str, str]:
-    """Values Authentik's Compose file interpolates; never logged."""
-    from ctl import secrets as _secrets
-
-    env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
+def _authentik_compose_env(account: dict, log) -> dict[str, str]:
+    """Generate first-start settings before starting Authentik; never log values."""
+    env_file, added = ensure_authentik_env(
+        RuntimePaths().root, email=account["email"], password_hash=password_hash(account["password"])
+    )
     if added:
         log("generated Authentik runtime configuration: " + ", ".join(added))
-    generated = _secrets.read_runtime_env(env_file)
+    generated = read_runtime_env(env_file)
     return {
         "AUTHENTIK_ENV_FILE": str(env_file),
-        "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.8.3"),
-        "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
-        "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", ""),
-        "AUTHENTIK_BLUEPRINTS_DIR": str(blueprints),
+        "AUTHENTIK_POSTGRESQL__PASSWORD": generated["AUTHENTIK_POSTGRESQL__PASSWORD"],
         "MU3LAB_DATA_ROOT": str(RuntimePaths().data),
     }
 
 
-def _authentik_storage_check(ctx: dict) -> dict:
-    from ctl.lifecycle import authentik_storage
-
-    state = authentik_storage.status()
-    return _row(
-        "authentik_storage",
-        "ok" if state == "ready" else "missing",
-        "Authentik's data is in Mu3Lab's data folder."
-        if state == "ready"
-        else "Authentik's data is still in Docker volumes, outside /srv/mu3lab/data, so a copy of that folder "
-        "would miss your accounts.",
-        state,
-        "" if state == "ready" else "Move it (Authentik stops for about a minute).",
-    )
-
-
-def fix_authentik_storage(check: dict, ctx: dict) -> dict:
-    from ctl.lifecycle import authentik_storage
-
-    log = ctx["log_fn"]("authentik_storage")
-    blueprints = RuntimePaths().projects / "authentik" / "blueprints"
-    ok, detail = authentik_storage.migrate(
-        ctx["root"] / "core" / "authentik", _authentik_compose_env(blueprints, log), log
-    )
-    log(detail)
-    return {"ok": True} if ok else {"ok": False, "error": detail}
-
-
 def fix_authentik(check: dict, ctx: dict) -> dict:
-    log = ctx["log_fn"]("authentik")
-    from ctl.authentik_blueprints import write_dashboard_blueprint
-
-    dns_name = _tailscale_dns_name_for_install()
-    if not dns_name:
-        return {"ok": False, "error": "Tailscale did not provide a valid MagicDNS name for Authentik configuration."}
-    blueprint = write_dashboard_blueprint(
-        RuntimePaths().root,
-        dns_name,
-        tailnet_https_origin(dns_name, AUTHENTIK_SERVE_PORT).rstrip("/"),
-        tailnet_https_origin(dns_name, DASHBOARD_SERVE_PORT).rstrip("/"),
-    )
-    log("rendered the Authentik dashboard Blueprint (no credentials)")
-    values = _authentik_compose_env(blueprint.parent, log)
+    log = ctx["log_fn"](by_capability("identity_provider").id)
+    account = _account(ctx)
+    if not account:
+        return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
+    values = _authentik_compose_env(account, log)
     # Compose needs these values for interpolation. actions.compose_up passes
     # them in the process environment but never includes env values in logs.
     _update_progress(
         ctx,
-        "authentik",
+        by_capability("identity_provider").id,
         phase="pulling_images",
         activity="Pulling reviewed Authentik images and creating containers.",
         timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1580,7 +1305,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         if clean:
             _update_progress(
                 ctx,
-                "authentik",
+                by_capability("identity_provider").id,
                 phase="pulling_images",
                 activity=clean[:180],
                 timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1593,7 +1318,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         # signal: it waits for the declared container health checks rather
         # than merely reporting that processes were created.
         result["rc"], result["out"] = actions.compose_up(
-            ctx["root"] / "core" / "authentik",
+            ctx["root"] / "apps" / by_capability("identity_provider").id,
             log,
             env=values,
             timeout=1200,
@@ -1608,7 +1333,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         if containers:
             _update_progress(
                 ctx,
-                "authentik",
+                by_capability("identity_provider").id,
                 phase="waiting_for_health_checks",
                 activity="Docker is waiting for Authentik health checks.",
                 timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1626,7 +1351,7 @@ def fix_authentik(check: dict, ctx: dict) -> dict:
         return {"ok": False, "error": "Authentik could not start (see log)."}
     _update_progress(
         ctx,
-        "authentik",
+        by_capability("identity_provider").id,
         phase="containers_started",
         activity="Containers started; waiting for Authentik readiness.",
         timeout_seconds=AUTHENTIK_READINESS_TIMEOUT,
@@ -1644,31 +1369,15 @@ def tailnet_https_origin(host: str, port: str) -> str:
 def check_authentik_setup(ctx: dict) -> dict:
     if _authentik_check(ctx).get("status") != "ok":
         return {"status": "missing", "state": "needs_user", "detail": "Authentik is not running yet."}
-    if not _authentik_initial_setup_pending():
-        return {"status": "ok", "state": "ready", "detail": "Your Authentik sign-in account exists."}
-    return {"status": "missing", "state": "needs_user", "detail": "Your Authentik sign-in account will be created."}
-
-
-def _authentik_initial_setup_pending() -> bool:
-    """Whether Authentik's unauthenticated root still redirects to setup.
-
-    This is a read-only, version-tolerant clue for the human-facing prompt.
-    It is not used as proof of an authenticated login; that proof belongs to
-    the later protected-dashboard check.
-    """
-    import http.client
-
     try:
-        connection = http.client.HTTPConnection("127.0.0.1", AUTHENTIK_PROXY_PORT, timeout=5)
-        connection.request("GET", "/")
-        response = connection.getresponse()
-        location = response.getheader("Location", "")
-        connection.close()
-        return response.status in {301, 302, 303, 307, 308} and location.startswith("/setup")
-    except (OSError, http.client.HTTPException):
-        # The setup row already follows a healthy-service row.  If a transient
-        # local probe fails, preserve the safe first-run instructions.
-        return True
+        client = Authentik.runtime()
+        user = client.user("akadmin")
+        values = read_runtime_env(RuntimePaths().projects / by_capability("identity_provider").id / ".env")
+        if user and user.get("email") and not values.get("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH"):
+            return {"status": "ok", "state": "ready", "detail": "Your Authentik sign-in account exists."}
+    except AuthentikError:
+        return {"status": "missing", "state": "needs_user", "detail": "Authentik account setup is not ready yet."}
+    return {"status": "missing", "state": "needs_user", "detail": "Your Authentik sign-in account will be completed."}
 
 
 def _tailscale_dns_name_for_install() -> str:
@@ -1692,40 +1401,41 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
     account = _account(ctx)
     if not account:
         return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
-    result = actions.authentik_set_owner(
-        account["email"], account["name"], account["password"], ctx["log_fn"]("authentik_setup")
-    )
-    return result if not result.get("ok") else {"ok": True}
+    try:
+        client = Authentik.runtime()
+        client.wait_for_defaults()
+        user = client.user("akadmin")
+        if user is None or user.get("email") != account["email"]:
+            raise AuthentikError("Authentik did not create your first-start account. Retry the Authentik start step.")
+        client.update_user(user["pk"], name=account["name"])
+        clear_authentik_bootstrap(RuntimePaths().root)
+    except (AuthentikError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    ctx["log_fn"]("authentik_setup")("Authentik owner account ready; first-start email and password hash removed.")
+    return {"ok": True}
 
 
-def _dashboard_blueprint(host: str) -> str:
-    from ctl.authentik_blueprints import render_dashboard_blueprint
-
-    return render_dashboard_blueprint(
-        host,
-        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT).rstrip("/"),
-        tailnet_https_origin(host, DASHBOARD_SERVE_PORT).rstrip("/"),
-    )
+def _gate_digest(host: str) -> str:
+    return hashlib.sha256(gate_blueprint(load_registry().catalog, host, RuntimePaths()).encode()).hexdigest()
 
 
 def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
     """A Mu3Lab update changed the sign-in gate or the Authentik apps it relies on."""
-    from ctl import routes
 
-    target = RuntimePaths().projects / "ingress" / "Caddyfile"
-    source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
-    blueprint = RuntimePaths().projects / "authentik" / "blueprints" / "mu3lab-dashboard.yaml"
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
+    source = ctx["root"] / "apps" / by_capability("private_proxy").id / "Caddyfile.authenticated"
+    stamp = RuntimePaths().projects / by_capability("private_proxy").id / ".authentik-gate.sha256"
     try:
         if not routes.base_matches(source.read_text(encoding="utf-8"), target.read_text(encoding="utf-8")):
             return True
-        return blueprint.read_text(encoding="utf-8") != _dashboard_blueprint(host)
+        return stamps.read(stamp) != _gate_digest(host)
     except (OSError, ValueError):
         return True
 
 
 def check_dashboard_protection(ctx: dict) -> dict:
     host = _tailscale_dns_name_for_install() or "127.0.0.1"
-    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
     if target.is_file():
         if host != "127.0.0.1" and _dashboard_protection_outdated(ctx, host):
             return {"status": "missing", "state": "needs_apply", "detail": "The sign-in gate has an update."}
@@ -1750,7 +1460,7 @@ def _dashboard_access_probe_with_retry(host: str | None = None) -> dict:
 def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
-    ingress_token = _secrets.read_runtime_env(ctx["root"] / ".env").get("MU3LAB_INGRESS_TOKEN", "")
+    ingress_token = _secrets.platform_values().get("MU3LAB_INGRESS_TOKEN", "")
     if not ingress_token:
         return {"ok": False, "error": "The private ingress token is missing; repair the Secret keys file step."}
     host = _tailscale_dns_name_for_install()
@@ -1760,18 +1470,12 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             "error": "Tailscale MagicDNS name is unavailable; cannot create a private Authentik application.",
         }
 
-    # Authentik already watches /blueprints/custom. The authentik step mounts
-    # this directory before starting the worker, so do not restart Compose
-    # here: a restart would generate another discovery event and can race two
-    # otherwise-idempotent Blueprint applies.
-    from ctl.authentik_blueprints import write_dashboard_blueprint
-
-    write_dashboard_blueprint(
-        RuntimePaths().root,
-        host,
-        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT).rstrip("/"),
-        tailnet_https_origin(host, DASHBOARD_SERVE_PORT).rstrip("/"),
-    )
+    try:
+        client = Authentik.runtime()
+        client.wait_for_defaults()
+        sync_sign_in(load_registry().catalog, host, client)
+    except (AuthentikError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
     log = ctx["log_fn"]("dashboard_protection")
     _update_progress(
         ctx,
@@ -1781,11 +1485,10 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         timeout_seconds=240,
     )
 
-    from ctl import routes
-
-    source = ctx["root"] / "core" / "ingress" / "Caddyfile.authenticated"
-    target = RuntimePaths().projects / "ingress" / "Caddyfile"
+    source = ctx["root"] / "apps" / by_capability("private_proxy").id / "Caddyfile.authenticated"
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    stamps.write(target.parent / ".authentik-gate.sha256", _gate_digest(host))
     # Keep the routes of apps installed from the dashboard across updates.
     deployed = target.read_text(encoding="utf-8") if target.is_file() else ""
     target.write_text(routes.rebase(source.read_text(encoding="utf-8"), deployed), encoding="utf-8")
@@ -1806,7 +1509,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             )
 
     ingress_result["rc"], ingress_result["out"] = actions.compose_up(
-        ctx["root"] / "core" / "ingress",
+        ctx["root"] / "apps" / by_capability("private_proxy").id,
         log,
         env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
         recreate=True,  # the file path is unchanged on updates, so Caddy must restart to read it
@@ -2286,16 +1989,14 @@ _prefetch_thread: threading.Thread | None = None
 
 
 def core_images(root: Path = ROOT) -> list[tuple[str, str]]:
-    """(service name, image) for the always-on platform, in install order."""
-    from ctl.core_setup import INSTALLER_CORE_APPS
-    from ctl.registry import load
+    """(app name, image) for every foundation and core app, in catalog order."""
+    from ctl.manifest.catalog import compose_images, load
 
-    registry = load(root / "services.yaml")
     return [
-        (service.name, image)
-        for service in registry.services
-        if service.stage in ("foundation", "core") or service.id in INSTALLER_CORE_APPS
-        for image in service.images
+        (app.manifest.name, image)
+        for app in load(root / "apps").apps
+        if app.manifest.tier in ("foundation", "core")
+        for image in compose_images(app.folder / "docker-compose.yml").values()
     ]
 
 
@@ -2318,89 +2019,57 @@ def _core_images_check(ctx: dict) -> dict:
     return _row("core_images", "ok", "All core app images are downloaded.", "ready")
 
 
+_LAYER_SIZE = re.compile(r"(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)")
+_UNIT_BYTES = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+
+
+class _PullProgress:
+    """Turns ``docker pull`` output lines into a percentage and speed for one image."""
+
+    def __init__(self, report: Callable[[str], None], label: str) -> None:
+        self.report = report
+        self.label = label
+        self.started = self.last_report = time.time()
+        self.layer_bytes: dict[str, float] = {}
+        self.completed: set[str] = set()
+
+    def __call__(self, line: str) -> None:
+        parts = line.strip().split()
+        if len(parts) < 2:
+            return
+        layer_id, status = parts[0], " ".join(parts[1:])
+        if "Download complete" in status:
+            self.completed.add(layer_id)
+        if any(word in status for word in ("Download complete", "Pulling fs layer", "Downloading")):
+            match = _LAYER_SIZE.search(status)
+            if match:
+                self.layer_bytes[layer_id] = float(match.group(1)) * _UNIT_BYTES[match.group(2)]
+        now = time.time()
+        if now - self.last_report < 2:
+            return
+        self.last_report = now
+        elapsed = now - self.started
+        total = sum(self.layer_bytes.values())
+        done = sum(self.layer_bytes[layer] for layer in self.completed if layer in self.layer_bytes)
+        if total > 0 and elapsed > 1:
+            speed = (done / elapsed) / 1024**2
+            self.report(f"Downloading {self.label} — {min(99, int(100 * done / total))}% at {speed:.1f} MB/s")
+
+
 def _pull_missing(ctx: dict) -> list[str]:
     """Pull every missing core image; return the images that failed."""
     log = ctx["log_fn"]("core_images")
     missing = _missing_images(ctx["root"])
     failed: list[str] = []
+
+    def show(activity: str) -> None:
+        _update_progress(ctx, "core_images", phase="downloading", activity=activity, timeout_seconds=1800)
+
     for index, (name, image) in enumerate(missing, start=1):
-        _update_progress(
-            ctx,
-            "core_images",
-            phase="downloading",
-            activity=f"Downloading {name} ({index} of {len(missing)})",
-            timeout_seconds=1800,
-        )
-
-        # Track progress of Docker pull
-        progress_state = {
-            "start_time": time.time(),
-            "last_update": time.time(),
-            "layers": {},
-            "completed_layers": set(),
-        }
-
-        def on_output(line: str) -> None:
-            """Parse Docker pull output and update progress display."""
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                layer_id = parts[0]
-                status = " ".join(parts[1:])
-
-                if "Download complete" in status or "Pulling fs layer" in status:
-                    if "Download complete" in status:
-                        progress_state["completed_layers"].add(layer_id)
-                    match = re.search(r'(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)', status)
-                    if match:
-                        size_str = match.group(1)
-                        unit = match.group(2)
-                        size_bytes = float(size_str)
-                        if unit == "KB":
-                            size_bytes *= 1024
-                        elif unit == "MB":
-                            size_bytes *= 1024**2
-                        elif unit == "GB":
-                            size_bytes *= 1024**3
-                        progress_state["layers"][layer_id] = size_bytes
-
-                elif "Downloading" in status:
-                    match = re.search(r'(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)', status)
-                    if match:
-                        size_str = match.group(1)
-                        unit = match.group(2)
-                        size_bytes = float(size_str)
-                        if unit == "KB":
-                            size_bytes *= 1024
-                        elif unit == "MB":
-                            size_bytes *= 1024**2
-                        elif unit == "GB":
-                            size_bytes *= 1024**3
-                        progress_state["layers"][layer_id] = size_bytes
-
-                now = time.time()
-                if now - progress_state["last_update"] >= 2:
-                    progress_state["last_update"] = now
-                    elapsed = now - progress_state["start_time"]
-
-                    total_bytes = sum(progress_state["layers"].values())
-                    downloaded = sum(
-                        progress_state["layers"][lid]
-                        for lid in progress_state["completed_layers"]
-                        if lid in progress_state["layers"]
-                    )
-
-                    if total_bytes > 0 and elapsed > 1:
-                        speed_mbs = (downloaded / elapsed) / (1024**2)
-                        pct = min(99, int(100 * downloaded / total_bytes))
-                        _update_progress(
-                            ctx,
-                            "core_images",
-                            phase="downloading",
-                            activity=f"Downloading {name} ({index}/{len(missing)}) — {pct}% at {speed_mbs:.1f} MB/s",
-                            timeout_seconds=1800,
-                        )
-
-        rc, out = actions.docker_cmd_stream(["docker", "pull", image], log, timeout=1800, on_output=on_output)
+        label = f"{name} ({index} of {len(missing)})"
+        show(f"Downloading {label}")
+        progress = _PullProgress(show, label)
+        rc, out = actions.docker_cmd_stream(["docker", "pull", image], log, timeout=1800, on_output=progress)
         if rc != 0:
             log(out[-500:] if out else f"(exit {rc})")
             failed.append(image)
@@ -2486,51 +2155,6 @@ STEPS: list[Step] = [
         "fix": fix_host_base,
     },
     {
-        "id": "node",
-        "label": "Node.js",
-        "check": lambda ctx: preflight.check_node(actions.privilege._exec(["node", "--version"])[1]),
-        "fix": fix_node,
-    },
-    {"id": "venv", "label": "Python environment", "check": lambda ctx: _venv_check(ctx["root"]), "fix": fix_venv},
-    {
-        "id": "pip_deps",
-        "label": "Python packages",
-        "check": lambda ctx: _pip_check(ctx["root"]),
-        "fix": fix_pip_deps,
-    },
-    {
-        "id": "dashboard_src",
-        "label": "Dashboard files",
-        "check": lambda ctx: _src_check(ctx["root"]),
-        "fix": fix_dashboard_src,
-    },
-    {
-        "id": "dashboard_build",
-        "label": "Build the dashboard",
-        "check": lambda ctx: _build_check(ctx["root"]),
-        "fix": fix_dashboard_build,
-    },
-    {
-        "id": "root_env",
-        "label": "Generate private keys",
-        "check": lambda ctx: _env_check(ctx["root"]),
-        "fix": fix_root_env,
-    },
-    # The worker service needs this root for its durable SQLite queue.  It is
-    # deliberately created before the service is started, not after Docker.
-    {
-        "id": "runtime_layout",
-        "label": "Data folders",
-        "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
-        "fix": fix_runtime_layout,
-    },
-    {
-        "id": "service",
-        "label": "Start the dashboard",
-        "check": lambda ctx: _service_check(ctx["root"]),
-        "fix": fix_service,
-    },
-    {
         "id": "docker",
         "label": "Docker",
         "check": _docker_check,
@@ -2553,9 +2177,41 @@ STEPS: list[Step] = [
         "check": _nvidia_toolkit_check,
         "fix": fix_nvidia_toolkit,
     },
+    {
+        "id": "dashboard_src",
+        "label": "Dashboard files",
+        "check": lambda ctx: _src_check(ctx["root"]),
+        "fix": fix_dashboard_src,
+    },
+    {
+        "id": "dashboard_build",
+        "label": "Build the dashboard",
+        "check": lambda ctx: _build_check(ctx["root"]),
+        "fix": fix_dashboard_build,
+    },
+    {
+        "id": "runtime_layout",
+        "label": "Data folders",
+        "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
+        "fix": fix_runtime_layout,
+    },
+    {
+        "id": "root_env",
+        "label": "Generate private keys",
+        "check": lambda ctx: _env_check(ctx["root"]),
+        "fix": fix_root_env,
+    },
+    # The worker service needs this root for its durable SQLite queue.  It is
+    # deliberately created before the service is started, not after Docker.
+    {
+        "id": "service",
+        "label": "Start the dashboard",
+        "check": lambda ctx: _service_check(ctx["root"]),
+        "fix": fix_service,
+    },
     {"id": "caddy", "label": "Private web gateway", "check": _caddy_check, "fix": fix_caddy},
     {
-        "id": "vaultwarden",
+        "id": by_capability("password_store").id,
         "label": "Start Vaultwarden",
         "check": _vaultwarden_check,
         "fix": fix_vaultwarden,
@@ -2610,13 +2266,7 @@ STEPS: list[Step] = [
         "fix": fix_browser_extension,
     },
     {
-        "id": "authentik_storage",
-        "label": "Keep Authentik's data with Mu3Lab's other data",
-        "check": _authentik_storage_check,
-        "fix": fix_authentik_storage,
-    },
-    {
-        "id": "authentik",
+        "id": by_capability("identity_provider").id,
         "label": "Start Authentik (sign-in)",
         "check": _authentik_check,
         "fix": fix_authentik,
@@ -2661,13 +2311,13 @@ STEPS: list[Step] = [
 # Steps grouped into the phases the bootstrap page shows, in run order.
 PHASES = (
     ("Check this computer", ("host_supported",)),
-    ("Install system software", ("host_base", "node")),
+    ("Install system software", ("host_base",)),
+    ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     (
         "Set up Mu3Lab",
-        ("venv", "pip_deps", "dashboard_src", "dashboard_build", "root_env", "runtime_layout", "service"),
+        ("dashboard_src", "dashboard_build", "runtime_layout", "root_env", "service"),
     ),
-    ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
-    ("Start your password vault", ("caddy", "vaultwarden", "vaultwarden_setup")),
+    ("Start your password vault", ("caddy", by_capability("password_store").id, "vaultwarden_setup")),
     (
         "Connect your private network",
         ("tailscale_pkg", "tailscale_operator", "tailscale_join", "vaultwarden_serve", "browser_extension"),
@@ -2675,8 +2325,7 @@ PHASES = (
     (
         "Set up sign-in",
         (
-            "authentik_storage",
-            "authentik",
+            by_capability("identity_provider").id,
             "authentik_serve",
             "lobehub_serve",
             "authentik_setup",
@@ -2828,9 +2477,11 @@ def run_job(job: dict, ctx: dict) -> None:
             provisioning.update(
                 "foundation", "verified", detail="Host foundation, private ingress, and tailnet route are ready."
             )
-        if current.get("vaultwarden") != "verified":
+        if current.get(by_capability("password_store").id) != "verified":
             provisioning.update(
-                "vaultwarden", "verified", detail="Vaultwarden owner and private route were confirmed during bootstrap."
+                by_capability("password_store").id,
+                "verified",
+                detail="Vaultwarden owner and private route were confirmed during bootstrap.",
             )
         if current.get("tailscale") != "verified":
             provisioning.update(

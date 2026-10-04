@@ -1,0 +1,27 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: immich-control
+name: Immich Control
+preferred: false
+provenance: community
+repository: https://github.com/lidless-labs/immichctrl
+revision: 0.5.2
+package: immich-mcp@0.5.2
+transport: streamable-http
+endpoint: http://immich-control:8000/mcp
+local_health: http://127.0.0.1:8821/healthz
+credentials:
+- key: api_key
+  env: IMMICH_API_KEY
+  type: secret
+  label: Immich API key
+  required: true
+provision:
+  service: database
+  script: provision.sh
+  interpreter:
+  - sh
+  - -s
+provision_note: Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator.
+review_note: 'Writes are enabled in the connector so Mu3Lab''s switches decide; destructive tools still need confirm:
+  true.'
+reviewed: true

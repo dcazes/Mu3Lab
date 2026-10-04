@@ -4,7 +4,12 @@
 # WHY:   One canonical spelling per task so docs and muscle memory agree.
 # DEBUG: `make -n <target>` prints the commands without running them.
 
-.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke
+UV := .tools/bin/uv
+export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
+export UV_CACHE_DIR := $(CURDIR)/.tools/cache
+RUN := $(UV) run --frozen
+
+.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke ui-dev
 
 install:
 	./install.sh
@@ -12,39 +17,42 @@ install:
 start:
 	./start.sh
 
+# dev-setup: the pinned toolchain, developer tools and dashboard dependencies.
 dev-setup:
-	.venv/bin/pip install -r requirements-dev.txt
-	cd dashboard && npm ci
+	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_uv'
+	$(UV) sync --frozen
+	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_bw'
+	$(RUN) python -m tools.dashboard build
 
 test:
-	.venv/bin/python -m unittest discover -s tests -t . -v
-	cd dashboard && npm test
+	$(RUN) python -m unittest discover -s tests -t . -v
+	$(RUN) python -m tools.dashboard check
 
 lint:
-	.venv/bin/ruff check .
-	.venv/bin/ruff format --check .
-	cd dashboard && npm run lint && npm run format:check
+	$(RUN) python tools/check_no_app_ids.py
+	$(RUN) ruff check .
+	$(RUN) ruff format --check .
 
 format:
-	.venv/bin/ruff check --fix .
-	.venv/bin/ruff format .
-	cd dashboard && npm run format
+	$(RUN) ruff check --fix .
+	$(RUN) ruff format .
+	$(RUN) python -m tools.dashboard format
 
 typecheck:
-	.venv/bin/mypy
-	cd dashboard && npm run typecheck
+	$(RUN) python -m tools.api_schema --check
+	$(RUN) mypy
 
-# verify: everything CI checks, in one command.
+# verify: everything CI runs, in one command.
 verify: lint typecheck test
-	cd dashboard && npm run build
+	$(RUN) python -m tools.dashboard build
 
 # check-updates / approve: the maintainer's release review. See tools/approve_release.py.
 check-updates:
-	.venv/bin/python -m tools.approve_release check
+	$(RUN) python -m tools.approve_release check
 
 approve:
 	@[ -n "$(APP)" ] && [ -n "$(VERSION)" ] || { echo 'usage: make approve APP=mealie VERSION=v3.23.0 [IMAGES="service=registry/name:tag"]'; exit 2; }
-	.venv/bin/python -m tools.approve_release approve "$(APP)" "$(VERSION)" $(foreach image,$(IMAGES),--image "$(image)")
+	$(RUN) python -m tools.approve_release approve "$(APP)" "$(VERSION)" $(foreach image,$(IMAGES),--image "$(image)")
 
 # check: read-only report of this computer's readiness (changes nothing).
 check:
@@ -64,18 +72,20 @@ pause:
 resume:
 	@ids="$$(tools/mu3lab-containers.sh --all)"; [ -z "$$ids" ] || docker start $$ids >/dev/null; echo "Mu3Lab resumed."
 
-# clean: stop containers, drop runtime state. Keeps volumes, venv, images.
-clean:
-	for d in core/*/; do \
-		[ -f "$$d/docker-compose.yml" ] && (cd "$$d" && docker compose down || true); \
-	done
-	rm -rf .state
+# clean: stop Mu3Lab's containers. Keeps data, volumes, images and the toolchain.
+clean: pause
 
-# nuke: full reset to a fresh checkout. Type NUKE to confirm.
+# nuke: remove this checkout's build output and toolchain. App data is only
+# removed by ./uninstall.sh. Type NUKE to confirm.
 nuke:
-	@echo "This deletes containers AND volumes, .venv, node_modules, .state."
+	@echo "This deletes .venv, .tools, dashboard/node_modules and dashboard/dist."
 	@echo "Type NUKE to confirm:"; read ans; [ "$$ans" = "NUKE" ]
-	for d in core/*/; do \
-		[ -f "$$d/docker-compose.yml" ] && (cd "$$d" && docker compose down -v || true); \
-	done
-	rm -rf .state .venv dashboard/node_modules dashboard/dist
+	rm -rf .venv .tools dashboard/node_modules dashboard/dist
+
+ui-dev:
+	$(RUN) python -m tools.dashboard dev
+
+.PHONY: api-schema
+api-schema:
+	$(RUN) python -m tools.api_schema
+	$(RUN) python -m tools.dashboard api-schema

@@ -22,7 +22,6 @@ interface Person {
   role: Role;
   active: boolean;
   last_login: string;
-  has_password: boolean;
 }
 
 interface Invite {
@@ -205,11 +204,9 @@ export function PeopleSettings() {
                       {' · '}
                       {!person.active
                         ? 'removed'
-                        : !person.has_password
-                          ? 'invited, has not set a password yet'
-                          : person.last_login
-                            ? `last signed in ${relativeTime(person.last_login)}`
-                            : 'has not signed in yet'}
+                        : person.last_login
+                          ? `last signed in ${relativeTime(person.last_login)}`
+                          : 'has not signed in yet'}
                     </small>
                   </span>
                   <Badge tone={person.role === 'admin' ? 'blue' : 'gray'}>{ROLE_TEXT[person.role].label}</Badge>

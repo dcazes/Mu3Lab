@@ -1,6 +1,0 @@
-# Developer and CI tooling; the control plane itself only needs ctl/requirements.txt.
--r ctl/requirements.txt
-ruff==0.16.9
-mypy==2.3.1
-types-psutil==7.2.2.20260906
-types-PyYAML==6.0.12.20260906

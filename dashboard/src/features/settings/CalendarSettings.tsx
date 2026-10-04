@@ -18,7 +18,7 @@ export function CalendarSettings() {
   const [authorization, setAuthorization] = useState<CalendarAuthorization | null>(null);
   const { pending, run } = useAction();
   const confirm = useConfirm();
-  const installed = nextcloud && !['planned', 'not_installed', 'blocked'].includes(nextcloud.state);
+  const installed = nextcloud && nextcloud.installed;
   const state = connection.data?.state;
   const openUrl = nextcloud?.ui?.state === 'ready' && nextcloud.ui.url ? `${nextcloud.ui.url}/apps/calendar/` : '';
 

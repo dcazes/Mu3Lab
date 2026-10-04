@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from ctl import mcp_ops, service_config
 from ctl.compute import compose_overrides
-from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
@@ -20,7 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ServiceConfigurationTests(unittest.TestCase):
     def test_secret_is_write_only_and_blank_update_preserves_it(self):
-        service = load().get("paperless-ngx")
+        service = SimpleNamespace(
+            id="example",
+            configuration=(
+                {"key": "admin_username", "env": "EXAMPLE_ADMIN_USER", "type": "string"},
+                {"key": "admin_password", "env": "EXAMPLE_ADMIN_PASSWORD", "type": "secret"},
+            ),
+        )
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp) / "runtime-root")
             with (
@@ -28,12 +33,7 @@ class ServiceConfigurationTests(unittest.TestCase):
                 patch("ctl.service_config.ControlState.runtime", return_value=None),
             ):
                 result = service_config.write(
-                    service,
-                    {
-                        "admin_username": "operator",
-                        "admin_email": "operator@example.test",
-                        "admin_password": "private-value",
-                    },
+                    service, {"admin_username": "operator", "admin_password": "private-value"}
                 )
                 service_config.write(service, {"admin_password": ""})
                 reread = service_config.read(service)
@@ -41,8 +41,8 @@ class ServiceConfigurationTests(unittest.TestCase):
             self.assertIsNone(password["value"])
             self.assertTrue(password["secret_present"])
             self.assertNotIn("private-value", repr(reread))
-            env_path = paths.projects / "paperless-ngx" / ".env"
-            self.assertEqual(read_runtime_env(env_path)["PAPERLESS_ADMIN_PASSWORD"], "private-value")
+            env_path = paths.projects / "example" / ".env"
+            self.assertEqual(read_runtime_env(env_path)["EXAMPLE_ADMIN_PASSWORD"], "private-value")
             self.assertEqual(stat.S_IMODE(env_path.stat().st_mode), 0o600)
 
 
@@ -90,16 +90,19 @@ class McpVerificationTests(unittest.TestCase):
 class LobeChatIdentityTests(unittest.TestCase):
     def test_chat_uses_authentik_oidc_and_can_be_embedded(self):
         compose = (ROOT / "apps/lobehub/docker-compose.yml").read_text(encoding="utf-8")
-        caddy = (ROOT / "core/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
+        caddy = (ROOT / "apps/ingress/Caddyfile.authenticated").read_text(encoding="utf-8")
         self.assertIn("AUTH_SSO_PROVIDERS", compose)
-        self.assertIn(":19474 {", caddy)
+        from ctl.registry import load
+        from ctl.routes import render
+
+        self.assertIn(":19474 {", render(caddy, [load().get("lobehub")]))
         self.assertIn("frame-ancestors", caddy)
-        self.assertIn(":19474 {", caddy)
+        self.assertIn(":19474 {", render(caddy, [load().get("lobehub")]))
 
 
 class ComputeOverrideTests(unittest.TestCase):
     def test_one_system_mode_selects_only_a_curated_override(self):
-        project = ROOT / "core/ollama"
+        project = ROOT / "apps/ollama"
         with patch("ctl.compute.resolved_mode", return_value="nvidia"):
             self.assertEqual(compose_overrides("ollama", project), [project / "docker-compose.nvidia.yml"])
         with patch("ctl.compute.resolved_mode", return_value="cpu"):

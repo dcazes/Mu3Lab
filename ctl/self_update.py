@@ -1,7 +1,7 @@
 """Update Mu3Lab itself from the dashboard.
 
 The dashboard and worker run from a git checkout. Updating is what
-``git pull && ./install.sh`` does, limited to the steps that need no
+``selecting a tagged release and running ./install.sh`` does, limited to the steps that need no
 administrator password: Python packages, the dashboard build, the sign-in
 gate, core images and a restart. The checks come from the installer itself,
 run by the newly pulled code, so a release that needs more (a new system
@@ -26,7 +26,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ctl import job_guard
+import httpx
+
+from ctl import job_guard, platform_releases, toolchain
 from ctl.jobs import JobStore
 
 if TYPE_CHECKING:
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 SERVICE_ID = "mu3lab"
 ACTION = "self_update"
 # Installer steps whose fixes need no administrator password.
-UNATTENDED = frozenset({"pip_deps", "dashboard_build", "dashboard_protection", "core_images"})
+UNATTENDED = frozenset({"dashboard_build", "dashboard_protection", "core_images"})
 # Restarting the dashboard and worker happens last, after the job is recorded.
 RESTART_STEP = "service"
 FETCH_TTL_SECONDS = 600
@@ -74,37 +76,48 @@ def status(root: Path, *, refresh: bool = False) -> dict[str, Any]:
         "blocked_reason": "",
         "checked_at": 0,
     }
-    rc, upstream = _git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if rc != 0 or not upstream:
-        result["blocked_reason"] = "This copy of Mu3Lab doesn't follow a GitHub branch, so it can't update itself."
+    current_tag = platform_releases.exact_tag(root)
+    if not current_tag:
+        result["blocked_reason"] = (
+            "This is a development checkout. Build and update it by hand; automatic updates require a versioned release."
+        )
+        return result
+    rc, remote = _git(root, "remote", "get-url", "origin")
+    if rc or not remote:
+        result["blocked_reason"] = "This copy has no release remote. Update it from a terminal."
+        return result
+    _rc, edited = _git(root, "status", "--porcelain", "--untracked-files=no")
+    if edited:
+        result["blocked_reason"] = "This copy has edited files. Commit or undo them before updating."
         return result
     cached = _cache.get(str(root))
     now = time.time()
     if refresh or not cached or now - cached > FETCH_TTL_SECONDS:
-        remote = upstream.split("/", 1)[0]
-        rc, _out = _git(root, "fetch", "--quiet", remote, timeout=60)
-        if rc != 0:
-            result["blocked_reason"] = "Mu3Lab couldn't reach GitHub to check for updates. Try again later."
+        rc, _out = _git(root, "fetch", "--quiet", "--tags", "origin", timeout=60)
+        if rc:
+            result["blocked_reason"] = "Mu3Lab couldn't reach its release remote. Try again later."
             return result
         _cache[str(root)] = cached = now
     result["checked_at"] = int(cached)
-    _rc, behind = _git(root, "rev-list", "--count", "HEAD..@{u}")
-    _rc, ahead = _git(root, "rev-list", "--count", "@{u}..HEAD")
-    _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", "30", "HEAD..@{u}")
-    result["behind"] = int(behind) if behind.isdigit() else 0
-    result["changes"] = [line for line in changes.splitlines() if line.strip()]
-    result["available"] = result["behind"] > 0
-    _rc, edited = _git(root, "status", "--porcelain", "--untracked-files=no")
-    if ahead.isdigit() and int(ahead) > 0:
+    _rc, values = _git(root, "tag", "--list", "v*")
+    versions = [
+        (tuple(int(n) for n in match.groups()), tag)
+        for tag in values.splitlines()
+        if (match := platform_releases.TAG.fullmatch(tag))
+    ]
+    latest = max(versions)[1] if versions else current_tag
+    result.update({"version": current_tag.removeprefix("v"), "current_release": current_tag, "latest_release": latest})
+    if latest == current_tag:
+        return result
+    rc, _out = _git(root, "merge-base", "--is-ancestor", "HEAD", latest)
+    if rc:
         result["blocked_reason"] = (
-            "This copy has its own commits that aren't on GitHub, so update it from a terminal: "
-            "git pull, then ./install.sh."
+            "The next release does not follow this installed version. Review it before updating manually."
         )
-    elif edited:
-        result["blocked_reason"] = (
-            "This copy has edited files, so update it from a terminal: commit or undo them, "
-            "then git pull and ./install.sh."
-        )
+        return result
+    _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", "30", f"HEAD..{latest}")
+    _rc, behind = _git(root, "rev-list", "--count", f"HEAD..{latest}")
+    result.update({"available": True, "behind": int(behind), "changes": changes.splitlines()})
     return result
 
 
@@ -228,17 +241,11 @@ def _new_code(root: Path, command: str, log: Log) -> dict[str, Any]:
 
 
 def _python_packages(root: Path, log: Log) -> None:
-    """The new code may import a package the old environment lacks."""
-    from ctl.bootstrap import stamps
-
-    if stamps.read(root / stamps.REQUIREMENTS_STAMP) == stamps.requirements_digest(root):
-        return
-    log("Installing updated Python packages…")
-    pip = root / ".venv" / "bin" / "pip"
-    rc, out = _run([str(pip), "install", "--quiet", "--disable-pip-version-check", "-r", "ctl/requirements.txt"], root)
+    """The new code may need packages the old environment lacks; uv.lock is the truth."""
+    log("Matching Python packages to the new release…")
+    rc, out = toolchain.sync_python(root)
     if rc:
-        raise _Failed("python_packages", "pip_failed", f"Python packages could not be installed: {out[-300:]}")
-    stamps.write(root / stamps.REQUIREMENTS_STAMP, stamps.requirements_digest(root))
+        raise _Failed("python_packages", "uv_sync_failed", f"Python packages could not be installed: {out[-300:]}")
 
 
 def _run(argv: list[str], root: Path, timeout: int = 1800) -> tuple[int, str]:
@@ -249,6 +256,27 @@ def _run(argv: list[str], root: Path, timeout: int = 1800) -> tuple[int, str]:
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
+def _restore(root: Path, before: str, packages_changed: bool, log: Log) -> str:
+    """Return the checkout (and, if already changed, its Python packages) to the running version.
+
+    Returns guidance for the person when the previous packages could not be restored.
+    """
+    rc, out = _git(root, "checkout", "--quiet", "--detach", before, timeout=300)
+    if rc:
+        return (
+            f" Mu3Lab could not return to the running version ({out[-200:]})."
+            f" In a terminal, run: cd {root} && ./install.sh"
+        )
+    if not packages_changed:
+        return ""
+    try:
+        _python_packages(root, log)
+    except _Failed as failure:
+        log(failure.message)
+        return f" Its Python packages could not be restored. In a terminal, run: cd {root} && ./install.sh"
+    return ""
+
+
 def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
     current = status(root, refresh=True)
     if current["blocked_reason"]:
@@ -256,27 +284,39 @@ def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
     if not current["available"]:
         return "Mu3Lab is already up to date."
     rc, before = _git(root, "rev-parse", "HEAD")
+    if rc or not before:
+        raise _Failed("check", "update_blocked", "Mu3Lab could not identify the running version.")
     step("download", f"Downloading {current['behind']} change(s) from GitHub.")
-    rc, out = _git(root, "merge", "--ff-only", "--quiet", "@{u}", timeout=300)
+    rc, out = _git(root, "checkout", "--quiet", "--detach", current["latest_release"], timeout=300)
     if rc:
         raise _Failed("download", "pull_failed", f"The update could not be applied: {out[-300:]}")
     with job_guard.uncancellable():
-        _python_packages(root, log)
-        step("plan", "Checking what this update needs.")
-        needs = _new_code(root, "plan", log)
-        terminal = list(needs.get("terminal") or []) if needs.get("ok") else ["the installer checks"]
-        if terminal:
-            # Leave the running version exactly as it was.
-            _git(root, "reset", "--keep", before)
-            raise _Failed(
-                "plan",
-                "needs_terminal",
-                "This update needs administrator access for: "
-                + ", ".join(terminal)
-                + ". Nothing changed. In a terminal, run: cd "
-                + str(root)
-                + " && git pull && ./install.sh",
-            )
+        packages_changed = False
+        try:
+            try:
+                platform_releases.assets(root, current["latest_release"])
+            except (OSError, ValueError, httpx.HTTPError) as exc:
+                raise _Failed("download", "release_verification_failed", str(exc)) from None
+            # Until "finish" starts, any failure must leave the running version
+            # exactly as it was: checkout and Python packages both.
+            packages_changed = True
+            _python_packages(root, log)
+            step("plan", "Checking what this update needs.")
+            needs = _new_code(root, "plan", log)
+            terminal = list(needs.get("terminal") or []) if needs.get("ok") else ["the installer checks"]
+            if terminal:
+                raise _Failed(
+                    "plan",
+                    "needs_terminal",
+                    "This update needs administrator access for: "
+                    + ", ".join(terminal)
+                    + ". Nothing changed. In a terminal, run: cd "
+                    + str(root)
+                    + f" && git checkout {current['latest_release']} && ./install.sh",
+                )
+        except _Failed as failure:
+            failure.message += _restore(root, before, packages_changed, log)
+            raise
         step("install", "Installing the update.")
         done = _new_code(root, "finish", log)
         if not done.get("ok"):

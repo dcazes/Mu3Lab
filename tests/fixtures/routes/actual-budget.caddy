@@ -1,0 +1,37 @@
+:19465 {
+	bind 127.0.0.1
+	route {
+	handle /__mu3lab/login {
+		header Content-Type "text/html; charset=utf-8"
+		header Cache-Control "no-store"
+		header Referrer-Policy "no-referrer"
+		header Content-Security-Policy "default-src 'none'; script-src 'sha256-7zGApJZj3+MFxL0RnZAdBS+dhO3WovPO0lmH5v96Lm0='; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+		respond `<!doctype html><html><head><meta charset="utf-8"><title>Opening app</title></head><body><p id="status">Signing in…</p><a href="/">Open Actual Budget</a><script>(async function () {
+  const cfg = {"path": "/account/login", "body": {"loginMethod": "openid", "returnUrl": "{origin}"}, "keys": ["data", "returnUrl"], "session": ""};
+  try {
+    if (cfg.session) {
+      const session = await fetch(cfg.session, {credentials: 'same-origin'});
+      if (session.ok && (await session.json())?.user) { location.replace('/'); return; }
+    }
+    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}', location.origin));
+    const r = await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    let target = await r.json();
+    for (const key of cfg.keys) target = target?.[key];
+    if (!r.ok || typeof target !== 'string' || !target) throw new Error();
+    const url = new URL(target);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error();
+    location.replace(url.href);
+  } catch (_) {
+    document.getElementById('status').textContent = 'Sign-in needs attention. Open the app to continue.';
+  }
+}());</script></body></html>` 200
+	}
+		handle {
+			reverse_proxy 127.0.0.1:5006 {
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-Host {http.request.hostport}
+			}
+		}
+	}
+}

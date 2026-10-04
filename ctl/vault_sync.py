@@ -14,21 +14,23 @@ create one. Nothing reads or touches anyone's personal vault.
 
 from __future__ import annotations
 
-import json
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ctl import onboarding_state, workflow_secrets
 from ctl.identity import authentik_only
+from ctl.integrations.vaultwarden import MATCH_HOST, VaultError, register
+from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, OrgSession
+from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import locked, write_atomic
-from ctl.secrets import read_runtime_env, runtime_env_text
-from ctl.vault_org import STATUS_ACCEPTED, STATUS_CONFIRMED, OrgSession
+from ctl.secret_file import locked
+from ctl.secrets import read_runtime_env
+from ctl.store import onboarding as onboarding_state
+from ctl.store import records
+from ctl.store.secrets import SecretStore
 from ctl.vault_setup import FREELLMAPI_ACCOUNT, VAULTWARDEN_LOCAL_URL
-from ctl.vaultwarden_api import MATCH_HOST, VaultError, register
 
 SERVICE_EMAIL = "mu3lab-service@vault.mu3lab.invalid"
 SERVICE_NAME = "Mu3Lab"
@@ -55,13 +57,14 @@ def _origin(host: str, port: int | None) -> str:
 
 def _service_password(paths: RuntimePaths) -> tuple[str, bool]:
     """Mu3Lab's own vault password, created once; True when it was just created."""
-    path = paths.runtime / "vault-service.env"
-    values = read_runtime_env(path)
-    if values.get("PASSWORD"):
-        return values["PASSWORD"], False
-    password = secrets.token_urlsafe(32)
-    write_atomic(path, runtime_env_text({"EMAIL": SERVICE_EMAIL, "PASSWORD": password}).encode())
-    return password, True
+    with locked(paths.state / "vault-service.lock"):
+        store = SecretStore(paths)
+        password = store.get("platform", "vault-service-password")
+        if password:
+            return password, False
+        password = secrets.token_urlsafe(32)
+        store.put("platform", "vault-service-password", password)
+        return password, True
 
 
 def _session(paths: RuntimePaths) -> OrgSession:
@@ -97,26 +100,10 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                 saved=[lambda service_id=service_id: onboarding_state.vault_saved(service_id, uid, paths)],
             )
         )
-    for meta in workflow_secrets.metadata(uid, paths):
-        credential = workflow_secrets.reveal(meta["id"], uid, paths)
-        if not credential or any(item.mu3lab_id == f"service:{credential['service_id']}" for item in items):
-            continue
-        if authentik_only(credential["service_id"]):
-            continue
-        handoff_id = credential["id"]
-        items.append(
-            Item(
-                mu3lab_id=f"service:{credential['service_id']}",
-                name=registry.get(credential["service_id"]).name,
-                username=credential["username"] or credential["email"],
-                password=credential["password"],
-                url=credential["login_url"],
-                notes="Created by Mu3Lab when the app was installed.",
-                saved=[lambda handoff_id=handoff_id: workflow_secrets.delete(handoff_id, uid, paths)],
-            )
-        )
     if person.get("role") == "admin" and host:
-        freellmapi = read_runtime_env(paths.projects / "freellmapi" / ".env").get("FREELLMAPI_ADMIN_PASSWORD", "")
+        freellmapi = read_runtime_env(paths.projects / by_capability("provider_gateway").id / ".env").get(
+            "FREELLMAPI_ADMIN_PASSWORD", ""
+        )
         if freellmapi and not _saved_personally(person, paths):
             items.append(
                 Item(
@@ -124,11 +111,13 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                     "FreeLLMAPI dashboard",
                     FREELLMAPI_ACCOUNT,
                     freellmapi,
-                    _origin(host, registry.get("freellmapi").private_https_port),
+                    _origin(host, registry.get(by_capability("provider_gateway").id).private_https_port),
                     "Created by Mu3Lab. Authentik guards this page; this login unlocks it.",
                 )
             )
-        master_key = read_runtime_env(paths.projects / "litellm" / ".env").get("LITELLM_MASTER_KEY", "")
+        master_key = read_runtime_env(paths.projects / by_capability("model_proxy").id / ".env").get(
+            "LITELLM_MASTER_KEY", ""
+        )
         if master_key:
             items.append(
                 Item(
@@ -136,7 +125,7 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                     "LiteLLM admin",
                     "admin",
                     master_key,
-                    _origin(host, registry.get("litellm").private_https_port),
+                    _origin(host, registry.get(by_capability("model_proxy").id).private_https_port),
                     "Created by Mu3Lab. Authentik guards this page; this login unlocks it.",
                 )
             )
@@ -155,10 +144,7 @@ def _saved_personally(person: dict[str, Any], paths: RuntimePaths) -> bool:
 
 
 def _state(paths: RuntimePaths) -> dict[str, Any]:
-    try:
-        return json.loads((paths.runtime / "vault-org.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    return records.get("vault", "organization", paths)
 
 
 def status(paths: RuntimePaths = RuntimePaths()) -> dict[str, Any]:
@@ -200,7 +186,7 @@ def sync(people: list[dict[str, Any]], host: str, log, paths: RuntimePaths = Run
             "people": report,
             "collections": collections,
         }
-        write_atomic(paths.runtime / "vault-org.json", json.dumps(result).encode())
+        records.put("vault", "organization", result, paths)
         return result
 
 
@@ -280,9 +266,6 @@ def _retire_authentik_only(session, uid: str, existing: dict[str, Any], paths: R
     for record in onboarding_state.pending_logins(uid, paths):
         if authentik_only(str(record["service_id"])):
             onboarding_state.discard_password(str(record["service_id"]), paths)
-    for meta in workflow_secrets.metadata(uid, paths):
-        if authentik_only(str(meta.get("service_id") or "")):
-            workflow_secrets.delete(meta["id"], uid, paths)
 
 
 def run(log) -> dict[str, Any] | None:
@@ -302,7 +285,4 @@ def run(log) -> dict[str, Any] | None:
 
 
 def session_password(login, org_key) -> str:
-    from ctl.vaultwarden_api import SymmetricKey, decrypt, decrypt_bytes
-
-    key = SymmetricKey.from_bytes(decrypt_bytes(login.raw["key"], org_key)) if login.raw.get("key") else org_key
-    return decrypt((login.raw.get("login") or {}).get("password"), key)
+    return str((login.raw.get("login") or {}).get("password") or "")

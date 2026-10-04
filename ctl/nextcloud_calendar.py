@@ -15,10 +15,11 @@ import httpx
 import recurring_ical_events
 from icalendar import Calendar, Event
 
-from ctl import calendar_secrets
 from ctl.control_state import ControlState
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store import calendars as calendar_secrets
 
 BASE = "http://127.0.0.1:8085"
 DAV = "DAV:"
@@ -67,7 +68,7 @@ def _safe_href(username: str, href: str) -> str:
 
 
 def _expected_origin(paths: RuntimePaths = RuntimePaths()) -> str:
-    values = read_runtime_env(paths.projects / "nextcloud" / ".env")
+    values = read_runtime_env(paths.projects / by_capability("files_calendar").id / ".env")
     origin = str(values.get("NEXTCLOUD_OVERWRITECLIURL", "")).rstrip("/")
     parsed = urlsplit(origin)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
@@ -125,7 +126,7 @@ def _enforce_sso_only(paths: RuntimePaths) -> bool:
     """Disable browser password login only after owner/admin evidence exists."""
     from ctl import actions
 
-    project = paths.projects / "nextcloud"
+    project = paths.projects / by_capability("files_calendar").id
     if not (project / "docker-compose.yml").is_file():
         return False
     command = [
@@ -238,7 +239,7 @@ def poll_authorization(owner_uid: str, authorization_id: str, paths: RuntimePath
     try:
         result = connect(owner_uid, canonical, app_password, paths)
         state = ControlState.runtime(paths)
-        initialization = state.initialization("nextcloud") if state else None
+        initialization = state.initialization(by_capability("files_calendar").id) if state else None
         with _AUTH_LOCK:
             groups = _VERIFIED_GROUPS.pop(canonical, [])
         if (
@@ -249,7 +250,7 @@ def poll_authorization(owner_uid: str, authorization_id: str, paths: RuntimePath
             and _enforce_sso_only(paths)
         ):
             state.set_service_identity(
-                "nextcloud",
+                by_capability("files_calendar").id,
                 "native_oidc",
                 "ready",
                 owner_uid=owner_uid,
@@ -424,7 +425,7 @@ def auto_connect(owner_uid: str, username: str, paths: RuntimePaths = RuntimePat
     """
     if not owner_uid or not _USERNAME.fullmatch(username):
         raise CalendarError("not_connected", "The authenticated Nextcloud owner is not available.")
-    project = paths.projects / "nextcloud"
+    project = paths.projects / by_capability("files_calendar").id
     if not (project / "docker-compose.yml").is_file():
         raise CalendarError("not_installed", "Nextcloud is not installed yet.")
     from ctl import actions

@@ -3,7 +3,7 @@
 # WHAT:  Removes Mu3Lab from this computer: its apps, containers, images,
 #        volumes, data (/srv/mu3lab), background services, private addresses
 #        and the browser policy that added the Bitwarden extension. With --everything it also removes the shared tools the
-#        installer added: Docker, Tailscale (after logging out), Node.js and
+#        installer added: Docker, Tailscale (after logging out) and
 #        NVIDIA container support, plus their package sources.
 # NEVER: Touches system Python, GPU drivers, base packages (curl, git, ...),
 #        or runs `apt autoremove`. Only files and packages Mu3Lab adds.
@@ -24,7 +24,7 @@ Removes Mu3Lab and ALL of its data (apps, accounts, files, passwords stored in
 Vaultwarden). This cannot be undone.
 
   --everything  also remove Docker (and everything in it), Tailscale (logs this
-                computer out of your tailnet), Node.js and NVIDIA container
+                computer out of your tailnet) and NVIDIA container
                 support. Your system Python, GPU drivers and other programs
                 are not touched.
   --dry-run     show what would be removed, change nothing
@@ -68,7 +68,6 @@ if $EVERYTHING; then
 It also removes:
   - Docker and EVERYTHING stored in it (including anything not from Mu3Lab)
   - Tailscale (this computer is logged out of your tailnet)
-  - Node.js
   - NVIDIA container support (your GPU driver is kept)
 EOF
 fi
@@ -140,8 +139,8 @@ if have docker; then
   # by name; never `network prune`, which would also delete other projects' networks.
   mapfile -t app_nets < <("${DOCKER[@]}" network ls --format '{{.Name}}' | grep -E '^mu3lab-')
   [[ ${#app_nets[@]} -gt 0 ]] && run "${DOCKER[@]}" network rm "${app_nets[@]}"
-  mapfile -t listed < <(grep -hoE '"[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?"' \
-    "$ROOT/services.yaml" "$ROOT/mcp-catalog.yaml" 2>/dev/null | tr -d '"' | grep -E '[:/]' | sed 's/@sha256:.*//' | sort -u)
+  mapfile -t listed < <(sed -nE 's/^[[:space:]]*image:[[:space:]]*"?([^"[:space:]]+)"?.*/"\1"/p' \
+    $(find "$ROOT/apps" "$ROOT/platform" -name 'docker-compose*.yml' 2>/dev/null) 2>/dev/null | tr -d '"' | grep -E '[:/]' | sed 's/@sha256:.*//' | sort -u)
   mapfile -t images < <("${DOCKER[@]}" images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | while read -r ref id; do
     repo="${ref%:*}"
     if [[ "$repo" == mu3lab* ]] || printf '%s\n' "${listed[@]}" | grep -qxE "(docker\.io/)?(library/)?${ref//./\\.}|(docker\.io/)?(library/)?${repo//./\\.}(:.*)?"; then
@@ -171,7 +170,7 @@ step "Deleting Mu3Lab's data (/srv/mu3lab)"
 [[ -e /srv/mu3lab ]] && run sudo -n rm -rf /srv/mu3lab
 
 step "Cleaning this folder (generated files only; your checkout is kept)"
-for path in .venv .env .state dashboard/node_modules dashboard/dist .mypy_cache .ruff_cache; do
+for path in .venv .tools .env .state dashboard/node_modules dashboard/dist .mypy_cache .ruff_cache; do
   [[ -e "$ROOT/$path" ]] && run rm -rf "${ROOT:?}/$path"
 done
 run find "$ROOT" -name __pycache__ -type d -prune -exec rm -rf {} +
@@ -210,11 +209,6 @@ if $EVERYTHING; then
   purge nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1
   remove_files /etc/apt/sources.list.d/nvidia-container-toolkit.list /etc/apt/keyrings/nvidia-container-toolkit.asc \
     /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /etc/nvidia-container-runtime
-
-  step "Removing Node.js"
-  purge nodejs
-  remove_files /etc/apt/sources.list.d/nodesource.list /etc/apt/sources.list.d/nodesource.sources \
-    /etc/apt/keyrings/nodesource.gpg /usr/share/keyrings/nodesource.gpg
 
   run sudo -n apt-get update -qq
 fi

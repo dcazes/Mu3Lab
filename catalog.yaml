@@ -1,8 +1,0 @@
-# Mu3Lab bundle definitions. Per-service copy and deployment facts are generated
-# from the typed services.yaml manifest so the UI cannot drift from reality.
-schema_version: 1
-profiles:
-  - id: core-suite
-    name: Core suite
-    description: "The core AI services for local models and embeddings, external provider connections, chat, and web research."
-    services: [ollama, freellmapi, litellm, lobehub, firecrawl]

@@ -1,0 +1,102 @@
+# SurfSense — see ctl/manifest/models.py for every field.
+id: surfsense
+capabilities: [research]
+name: SurfSense
+tier: optional
+group: apps
+category: research
+tagline: AI research with cited sources
+summary: An AI research workspace for searching documents and web sources, organizing knowledge, and asking questions
+  with source citations. Mu3Lab connects this self-hosted web app to its AI gateway and local embedding service.
+version: v2.0.3
+upstream: MODSetter/SurfSense
+depends_on:
+- litellm
+- ollama
+service:
+  local_port: 3929
+  health:
+    path: /__mu3lab_surfsense_health
+  start_timeout_seconds: 900
+route:
+  https_port: 8447
+  caddy_port: 19464
+  access: gate
+  copy_identity_headers:
+  - X-Authentik-Username
+  - X-Authentik-Email
+  - X-Authentik-Name
+  - X-Authentik-Groups
+  blocked_paths:
+  - path: /auth/register*
+    message: Accounts are provisioned by Mu3Lab.
+    status: 403
+sign_in:
+  method: gate
+  note: Authentik guards the private address. SurfSense has no single sign-on, so Mu3Lab creates its login at install
+    and saves it to your vault; Bitwarden fills it in.
+account:
+  mode: api_bootstrap
+  save_login_to_vault: true
+  user_action: Open SurfSense; Bitwarden fills in the login Mu3Lab saved to your vault.
+secrets:
+- env: DB_USER
+  kind: fixed
+  value: surfsense
+- env: DB_NAME
+  kind: fixed
+  value: surfsense
+- env: DB_PASSWORD
+- env: SECRET_KEY
+  length: 48
+- env: ZERO_ADMIN_PASSWORD
+- env: SEARXNG_SECRET
+env:
+  AUTH_TYPE: LOCAL
+  SANDBOX_ENABLED: 'FALSE'
+  EMBEDDING_MODEL: litellm://ollama/nomic-embed-text
+  EMBEDDING_BASE_URL: http://ollama:11434
+  EMBEDDING_API_BASE_URL: http://ollama:11434
+  SURFSENSE_PUBLIC_URL: '{{public_url}}'
+configuration:
+- key: registration_enabled
+  env: REGISTRATION_ENABLED
+  type: boolean
+  label: Enable local sign-in
+  default: true
+rules:
+- rule: needs_embedding_model
+  with:
+    runner: ollama
+    pull_command: [ollama, pull]
+    model: nomic-embed-text
+chat:
+  assistant:
+    title: SurfSense
+    description: Search and organize research sources.
+    instructions: Help search and organize SurfSense research. Use only SurfSense tools assigned to this agent.
+      Ask before changing sources or workspaces.
+  connectors:
+  - surfsense-official
+mobile:
+  primary: surfsense-web
+  clients:
+  - id: surfsense-web
+    name: SurfSense mobile web
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://github.com/MODSetter/SurfSense
+    setup: web
+    summary: SurfSense has a responsive web interface but no confirmed native app or installable PWA.
+    steps:
+    - Connect the phone to your Mu3Lab tailnet.
+    - Open the private SurfSense URL in the phone browser.
+    - Complete Authentik, then let Bitwarden fill in your SurfSense login.
+resource_guidance: Runs PostgreSQL, Redis, SearXNG, workers, and zero-cache. The privileged SurfSense sandbox is
+  disabled.
+setup_action: Install SurfSense; its login is saved to your vault for Bitwarden to fill in.

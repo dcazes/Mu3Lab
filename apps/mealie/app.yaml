@@ -1,0 +1,106 @@
+# Mealie — see ctl/manifest/models.py for every field.
+id: mealie
+capabilities: [recipes]
+name: Mealie
+tier: optional
+group: apps
+category: home
+tagline: Recipes, meal plans, and shopping lists
+summary: Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own,
+  schedule meals, and turn recipe ingredients into shopping lists.
+version: v3.28.0
+upstream: mealie-recipes/mealie
+service:
+  local_port: 9925
+  health:
+    path: /api/app/about
+route:
+  https_port: 8450
+  caddy_port: 19467
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-mealie
+    redirect_paths:
+    - /login
+    - /login?direct=1
+    launch_path: /api/auth/oauth
+    env:
+      client_id: MEALIE_OIDC_CLIENT_ID
+      client_secret: MEALIE_OIDC_CLIENT_SECRET
+      discovery_url: MEALIE_OIDC_CONFIGURATION_URL
+    first_run_checks:
+    - path: /api/app/about/startup-info
+      expect:
+        isFirstLogin: false
+      message: Mealie still shows its first-time login screen.
+account:
+  mode: oidc_first_login
+  user_action: Open Mealie; Authentik signs you in as its administrator.
+env:
+  MEALIE_BASE_URL: '{{public_url}}'
+  MEALIE_OIDC_SIGNUP_ENABLED: 'true'
+  MEALIE_OIDC_REMEMBER_ME: 'true'
+  MEALIE_OIDC_ENABLED: 'true'
+  MEALIE_OIDC_AUTO_REDIRECT: 'true'
+  MEALIE_ALLOW_SIGNUP: 'false'
+  MEALIE_ALLOW_PASSWORD_LOGIN: 'false'
+rules:
+- rule: container_script
+  with:
+    at: after_healthy
+    service: mealie
+    script: scripts/adopt-owner.py
+    interpreter:
+    - /opt/mealie/bin/python
+    - '-'
+    args:
+    - '{{owner_json}}'
+    expect: MU3LAB_MEALIE_OWNER_OK
+    needs_owner: true
+    purpose: Make Mealie's built-in administrator the owner's Authentik account
+chat:
+  assistant:
+    title: Mealie
+    description: Plan meals, recipes, and shopping lists.
+    instructions: Help with Mealie recipes, meal plans, and shopping lists. Ask before changing recipes or lists.
+      Use only Mealie tools assigned to this agent.
+  connectors:
+  - mealie-community
+mobile:
+  primary: ghee
+  clients:
+  - id: ghee
+    name: Ghee for Mealie
+    kind: native
+    support: community
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/us/app/ghee-for-mealie-recipes/id6758328014
+      android: https://play.google.com/store/apps/details?id=casa.dsen.ghee
+    setup: server_url
+    summary: A polished community client for recipes, meal plans, shopping lists, and cooking.
+    caveat: Core features are free; expanded offline features are an optional purchase.
+    steps:
+    - Install Ghee and enter the Mu3Lab Mealie URL.
+    - Choose OIDC and complete the Authentik sign-in.
+  - id: mealie-pwa
+    name: Mealie PWA
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://mealie.io/
+    setup: pwa
+    summary: Use Mealie's responsive web app when you prefer the upstream interface.
+    fallback: true
+    steps:
+    - Open the private Mealie URL and sign in with Authentik.
+    - Use the browser menu to add Mealie to the Home Screen.
+resource_guidance: Lightweight service.
+setup_action: Install only when you want private recipe and meal planning.

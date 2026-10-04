@@ -10,7 +10,7 @@ export function Badge({ tone = 'gray', children }: { tone?: Tone; children: Reac
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-export function StatusBadge({ state }: { state: Service['state'] }) {
+export function StatusBadge({ state }: { state: Service['display_state'] }) {
   const tone = stateTone(state);
   return (
     <Badge tone={tone}>

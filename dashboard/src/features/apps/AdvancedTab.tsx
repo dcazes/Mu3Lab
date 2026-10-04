@@ -191,7 +191,7 @@ export function AdvancedTab({ service }: { service: Service }) {
         <Facts
           items={[
             { label: 'Health', value: humanize(service.health_state) },
-            { label: 'Private route', value: humanize(service.route_state) },
+            { label: 'Private route', value: humanize(service.route_ready ? 'ready' : 'not_ready') },
             { label: 'Sign-in method', value: signInSummary(service).label },
             { label: 'Lifecycle', value: humanize(service.lifecycle) },
             ...(service.containers?.length

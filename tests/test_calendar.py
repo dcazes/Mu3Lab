@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import httpx
 
-from ctl import calendar_secrets, local_calendar
+from ctl import local_calendar
 from ctl.control_state import ControlState
 from ctl.nextcloud_calendar import (
     CalendarError,
@@ -24,6 +24,7 @@ from ctl.nextcloud_calendar import (
     update_event,
 )
 from ctl.runtime import RuntimePaths
+from ctl.store import calendars as calendar_secrets
 
 
 class CalendarSecretTests(unittest.TestCase):
@@ -33,7 +34,7 @@ class CalendarSecretTests(unittest.TestCase):
             calendar_secrets.save("owner-a", "alice", "private-password", paths)
             self.assertEqual(calendar_secrets.get("owner-a", paths)["username"], "alice")
             self.assertIsNone(calendar_secrets.get("owner-b", paths))
-            ciphertext = (paths.runtime / "calendar-connections.enc").read_bytes()
+            ciphertext = (paths.state / "mu3lab.db").read_bytes()
             self.assertNotIn(b"private-password", ciphertext)
             calendar_secrets.delete("owner-a", paths)
             self.assertIsNone(calendar_secrets.get("owner-a", paths))
@@ -57,7 +58,7 @@ class CalDavTests(unittest.TestCase):
     def test_event_projection_omits_sensitive_fields_and_limits_results(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             href = "/remote.php/dav/calendars/alice/personal/"
             calendars = [{"id": "calendar-a", "name": "Personal", "href": href}]
             state.set_calendar_connection("owner", "al•••e", calendars, "calendar-a")
@@ -92,7 +93,7 @@ class CalDavTests(unittest.TestCase):
     def test_event_projection_uses_the_requested_calendar_view_range(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             href = "/remote.php/dav/calendars/alice/personal/"
             state.set_calendar_connection(
                 "range-owner", "al•••e", [{"id": "calendar-range", "name": "Personal", "href": href}], "calendar-range"
@@ -127,7 +128,7 @@ class CalDavTests(unittest.TestCase):
     def test_every_event_resource_is_expanded_with_the_requested_range(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             href = "/remote.php/dav/calendars/alice/personal/"
             state.set_calendar_connection(
                 "multi-owner", "al•••e", [{"id": "calendar-multi", "name": "Personal", "href": href}], "calendar-multi"
@@ -165,7 +166,7 @@ class CalDavTests(unittest.TestCase):
     def test_event_mutations_use_the_selected_owner_calendar(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             href = "/remote.php/dav/calendars/alice/personal/"
             state.set_calendar_connection(
                 "owner-write", "al•••e", [{"id": "calendar-write", "name": "Personal", "href": href}], "calendar-write"
@@ -185,7 +186,7 @@ class CalDavTests(unittest.TestCase):
     def test_event_update_and_delete_reject_stale_revisions(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             href = "/remote.php/dav/calendars/alice/personal/"
             state.set_calendar_connection(
                 "owner-revision",
@@ -227,7 +228,7 @@ class CalDavTests(unittest.TestCase):
     def test_all_day_recurrence_preserves_dates_and_applies_exclusions(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            state = ControlState(paths.runtime / "control-plane.sqlite3")
+            state = ControlState(paths.runtime / "mu3lab.db")
             href = "/remote.php/dav/calendars/alice/personal/"
             calendars = [{"id": "calendar-b", "name": "Personal", "href": href}]
             state.set_calendar_connection("recurring-owner", "al•••e", calendars, "calendar-b")
@@ -350,7 +351,7 @@ class CalDavTests(unittest.TestCase):
 
 def _connected(tmp: str, owner: str) -> tuple[RuntimePaths, str]:
     paths = RuntimePaths(Path(tmp))
-    state = ControlState(paths.runtime / "control-plane.sqlite3")
+    state = ControlState(paths.runtime / "mu3lab.db")
     href = "/remote.php/dav/calendars/alice/personal/"
     state.set_calendar_connection(owner, "al•••e", [{"id": "cal", "name": "Personal", "href": href}], "cal")
     calendar_secrets.save(owner, "alice", "secret", paths)
@@ -538,7 +539,7 @@ HREF = "/remote.php/dav/calendars/alice/personal/"
 
 
 def _connect_owner(owner: str, paths: RuntimePaths) -> None:
-    state = ControlState(paths.runtime / "control-plane.sqlite3")
+    state = ControlState(paths.runtime / "mu3lab.db")
     state.set_calendar_connection(owner, "al•••e", [{"id": "c", "name": "Personal", "href": HREF}], "c")
     calendar_secrets.save(owner, "alice", "secret", paths)
 
@@ -591,7 +592,7 @@ class LocalCalendarTests(unittest.TestCase):
             self.assertTrue(created["id"].startswith(local_calendar.ID_PREFIX))
             holiday = {"title": "Holiday", "start": "2026-12-24", "end": "2026-12-26", "all_day": True}
             local_calendar.create_event("owner-a", holiday, paths)
-            self.assertNotIn(b"Dentist", (paths.runtime / "local-calendar.enc").read_bytes())
+            self.assertNotIn(b"Dentist", (paths.state / "mu3lab.db").read_bytes())
             rows = local_calendar.list_events("owner-a", *self.RANGE, 100, paths)
             self.assertEqual([row["title"] for row in rows], ["Dentist"])
             self.assertTrue(rows[0]["editable"])
@@ -652,7 +653,7 @@ class LocalCalendarTests(unittest.TestCase):
                 result = disconnect("owner", paths)
             self.assertEqual(result["warning"], "")
             self.assertEqual(report.call_args.args[0], "REPORT")
-            self.assertIsNone(ControlState(paths.runtime / "control-plane.sqlite3").calendar_connection("owner"))
+            self.assertIsNone(ControlState(paths.runtime / "mu3lab.db").calendar_connection("owner"))
             rows = local_calendar.list_events("owner", *self.RANGE, 100, paths)
             self.assertEqual([row["title"] for row in rows if row["title"] == "Bins out"], ["Bins out"] * 5)
             piano = next(row for row in rows if row["title"] == "Piano lesson")
@@ -669,7 +670,7 @@ class LocalCalendarTests(unittest.TestCase):
             ):
                 result = disconnect("owner", paths)
             self.assertIn("could not be copied", result["warning"])
-            self.assertIsNone(ControlState(paths.runtime / "control-plane.sqlite3").calendar_connection("owner"))
+            self.assertIsNone(ControlState(paths.runtime / "mu3lab.db").calendar_connection("owner"))
 
     def test_copied_events_go_back_unchanged_and_local_edits_and_deletes_follow(self):
         with tempfile.TemporaryDirectory() as tmp:

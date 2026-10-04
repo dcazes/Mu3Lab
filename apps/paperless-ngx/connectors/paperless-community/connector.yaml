@@ -1,0 +1,25 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: paperless-community
+name: Paperless-ngx MCP
+preferred: true
+provenance: community
+repository: https://github.com/cubinet-code/paperless-ngx-mcp
+revision: b83d992e000df5456b21e35b5c61bfa3283ac959
+package: paperless-ngx-mcp@3.1.1
+transport: streamable-http
+endpoint: http://paperless-mcp:3000/mcp
+local_health: http://127.0.0.1:8816/mcp
+credentials:
+- key: api_key
+  env: PAPERLESS_API_KEY
+  type: secret
+  label: Paperless API token
+  required: true
+provision:
+  service: webserver
+  script: provision.py
+  interpreter:
+  - python
+  - manage.py
+  - shell
+provision_note: Creates or reuses a Paperless API token for the single active superuser.

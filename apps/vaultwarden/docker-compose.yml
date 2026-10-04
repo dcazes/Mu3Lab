@@ -1,0 +1,22 @@
+# Vaultwarden is deliberately not exposed through MCP or generic SSO automation.
+name: mu3lab-vaultwarden
+
+services:
+  vaultwarden:
+    image: vaultwarden/server:1.37.3-alpine@sha256:9a905c5cf5df61bb827da3805e160170741c0b53b0c63bb07e1afd3d2e21b1c8
+    env_file: ["${MU3LAB_VAULT_ENV_FILE:-/srv/mu3lab/projects/vaultwarden/.env}"]
+    environment:
+      ROCKET_PORT: "80"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/vaultwarden:/data
+    ports: ["127.0.0.1:8081:80"]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp, /run]
+    networks: [mu3lab_frontend, mu3lab_backend]
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}
