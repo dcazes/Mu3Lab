@@ -16,6 +16,8 @@ import os
 import secrets
 from pathlib import Path
 
+from ctl.secret_file import locked, write_atomic
+
 ROOT_ENV_KEYS = ("MU3LAB_CTL_TOKEN", "MU3LAB_INGRESS_TOKEN")
 CORE_ENV_KEYS = {
     # Ollama has no private values today, but it still participates in the
@@ -26,33 +28,39 @@ CORE_ENV_KEYS = {
 }
 
 
-def ensure_authentik_env(root: Path, token_factory=None) -> tuple[Path, list[str]]:
-    """Create the Authentik runtime env without returning secret values.
-
-    The control plane needs a stable database password and secret key across
-    restarts, but neither belongs in Git, browser responses, or job logs.
-    Runtime project files are operator-readable (0600) so Compose can consume
-    them through the normal unprivileged Docker group path.
-    """
+def ensure_authentik_env(
+    root: Path, token_factory=None, *, email: str = "", password_hash: str = ""
+) -> tuple[Path, list[str]]:
+    """Keep stable credentials and supply first-start values before Compose starts."""
     token_factory = token_factory or generate_hex
     target = root / "projects" / "authentik" / ".env"
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    existing: dict[str, str] = {}
-    if target.is_file():
-        for line in target.read_text(encoding="utf-8").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, _, value = line.partition("=")
-                existing[key.strip()] = value.strip()
-    values = {
-        "AUTHENTIK_TAG": existing.get("AUTHENTIK_TAG", "2026.8.3"),
-        "AUTHENTIK_SECRET_KEY": existing.get("AUTHENTIK_SECRET_KEY") or token_factory(),
-        "AUTHENTIK_POSTGRESQL__PASSWORD": existing.get("AUTHENTIK_POSTGRESQL__PASSWORD") or token_factory(),
-    }
-    added = [key for key in values if key not in existing]
-    if added or not target.is_file():
-        target.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
-    os.chmod(target, 0o600)
+    with locked(target.with_suffix(".lock")):
+        values = read_runtime_env(target)
+        added: list[str] = []
+        for key in ("AUTHENTIK_SECRET_KEY", "AUTHENTIK_POSTGRESQL__PASSWORD", "AUTHENTIK_BOOTSTRAP_TOKEN"):
+            if not values.get(key):
+                values[key] = token_factory()
+                added.append(key)
+        if email and password_hash:
+            for key, value in (
+                ("AUTHENTIK_BOOTSTRAP_EMAIL", email),
+                ("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH", password_hash),
+            ):
+                if not values.get(key):
+                    values[key] = value
+                    added.append(key)
+        values.pop("AUTHENTIK_TAG", None)
+        write_atomic(target, runtime_env_text(values).encode())
     return target, added
+
+
+def clear_authentik_bootstrap(root: Path) -> None:
+    target = root / "projects" / "authentik" / ".env"
+    with locked(target.with_suffix(".lock")):
+        values = read_runtime_env(target)
+        values.pop("AUTHENTIK_BOOTSTRAP_EMAIL", None)
+        values.pop("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH", None)
+        write_atomic(target, runtime_env_text(values).encode())
 
 
 def read_runtime_env(path: Path) -> dict[str, str]:

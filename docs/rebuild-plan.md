@@ -1,6 +1,8 @@
 # Mu3Lab rebuild plan
 
-Status: proposed, 2026-10-03. Nothing in this plan has been implemented yet.
+Status: in progress, 2026-10-03. Toolchain, app manifests, initial engine/rules
+and Authentik Task A are implemented. See `docs/rebuild-handoff.md` for the
+current checkpoint and remaining tasks. The branch is not ready for reinstall.
 Audience: (1) the owner, who decides; (2) the engineer or AI model that
 implements it, who should be able to follow it task by task without having
 read the review conversation.

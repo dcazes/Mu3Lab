@@ -13,11 +13,14 @@ import os
 from pathlib import Path
 
 from ctl import onboarding_state
+from ctl.identity import sync_sign_in
+from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.jobs import JobStore, redact
 from ctl.lifecycle.accounts import actual_owner_linked
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.service_state import tailnet_dns_name
 
 GUARD = "MU3LAB_INITIAL_OWNER_USERNAME"
 
@@ -33,16 +36,15 @@ def lift_owner_guard(_store: JobStore, _root: Path, log, paths: RuntimePaths = R
         if not owner or not actual_owner_linked(owner, paths):
             return False
         values[GUARD] = ""
+        previous = env_path.read_text(encoding="utf-8")
         env_path.write_text(runtime_env_text(values), encoding="utf-8")
         os.chmod(env_path, 0o600)
-        from ctl.identity import reconcile_blueprints
-        from ctl.service_state import tailnet_dns_name
-
-        reconcile_blueprints(load(), tailnet_dns_name(), paths)
-        from ctl.authentik_apply import apply_blueprints
-
-        apply_blueprints(log)
-    except (OSError, ValueError) as exc:
+        try:
+            sync_sign_in(load().catalog, tailnet_dns_name(), Authentik.runtime(paths), paths)
+        except (AuthentikError, OSError, ValueError):
+            env_path.write_text(previous, encoding="utf-8")
+            raise
+    except (AuthentikError, OSError, ValueError) as exc:
         log(f"Actual Budget household access deferred: {redact(str(exc))}")
         return False
     log("Actual Budget is now open to the whole household.")

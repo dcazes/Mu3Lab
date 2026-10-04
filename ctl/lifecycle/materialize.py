@@ -137,30 +137,6 @@ def _discovery_url(dns_name: str, service_id: str) -> str:
     return f"https://{dns_name}/application/o/mu3lab-{service_id}/.well-known/openid-configuration"
 
 
-def _register_oidc_client(
-    service: Service,
-    dns_name: str,
-    name: str,
-    client_id: str,
-    client_secret: str,
-    redirect_paths: tuple[str, ...],
-    initial_owner: str = "",
-) -> None:
-    from ctl.authentik_blueprints import write_oidc_application_blueprint
-
-    write_oidc_application_blueprint(
-        RuntimePaths().root,
-        dns_name,
-        service_id=service.id,
-        name=name,
-        private_port=service.private_https_port,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_paths=redirect_paths,
-        initial_owner=initial_owner,
-    )
-
-
 def _mealie_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
     values.setdefault("MEALIE_BASE_URL", public_url)
     values.setdefault("MEALIE_OIDC_SIGNUP_ENABLED", "true")
@@ -169,14 +145,6 @@ def _mealie_urls(service: Service, values: Values, dns_name: str, public_url: st
     values.setdefault("MEALIE_OIDC_CONFIGURATION_URL", _discovery_url(dns_name, "mealie"))
     values.setdefault("MEALIE_OIDC_REMEMBER_ME", "true")
     values.update(SSO_ONLY["mealie"])
-    _register_oidc_client(
-        service,
-        dns_name,
-        "Mealie",
-        values["MEALIE_OIDC_CLIENT_ID"],
-        values["MEALIE_OIDC_CLIENT_SECRET"],
-        ("/login", "/login?direct=1"),
-    )
 
 
 def _actual_budget_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
@@ -185,29 +153,12 @@ def _actual_budget_urls(service: Service, values: Values, dns_name: str, public_
     values.setdefault("ACTUAL_OPENID_DISCOVERY_URL", _discovery_url(dns_name, "actual-budget"))
     values.setdefault("ACTUAL_OPENID_SERVER_HOSTNAME", public_url)
     values.update(SSO_ONLY["actual-budget"])
-    _register_oidc_client(
-        service,
-        dns_name,
-        "Actual Budget",
-        values["ACTUAL_OPENID_CLIENT_ID"],
-        values["ACTUAL_OPENID_CLIENT_SECRET"],
-        ("/openid/callback",),
-        initial_owner=values.get("MU3LAB_INITIAL_OWNER_USERNAME", ""),
-    )
 
 
 def _adventurelog_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
     values.setdefault("SITE_URL", public_url)
     values.setdefault("ADVENTURELOG_OIDC_DISCOVERY_URL", _discovery_url(dns_name, "adventurelog"))
     values.update(SSO_ONLY["adventurelog"])
-    _register_oidc_client(
-        service,
-        dns_name,
-        "AdventureLog",
-        values["ADVENTURELOG_OIDC_CLIENT_ID"],
-        values["ADVENTURELOG_OIDC_CLIENT_SECRET"],
-        ("/accounts/oidc/mu3lab-adventurelog/login/callback/",),
-    )
 
 
 def _paperless_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
@@ -239,14 +190,6 @@ def _paperless_urls(service: Service, values: Values, dns_name: str, public_url:
             app.setdefault("settings", {}).update(email_authentication=True)
     values["PAPERLESS_SOCIALACCOUNT_PROVIDERS"] = json.dumps(providers, separators=(",", ":"))
     values.setdefault("PAPERLESS_SOCIAL_AUTO_SIGNUP", "true")
-    _register_oidc_client(
-        service,
-        dns_name,
-        "Paperless-ngx",
-        values["PAPERLESS_OIDC_CLIENT_ID"],
-        values["PAPERLESS_OIDC_CLIENT_SECRET"],
-        ("/accounts/oidc/authentik/login/callback/",),
-    )
 
 
 def _immich_urls(service: Service, values: Values, dns_name: str, _public_url: str, target: Path) -> None:
@@ -269,14 +212,6 @@ def _immich_urls(service: Service, values: Values, dns_name: str, _public_url: s
     config["passwordLogin"] = {"enabled": values.get("IMMICH_PASSWORD_LOGIN_ENABLED", "true") == "true"}
     (target / "immich-config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     os.chmod(target / "immich-config.json", 0o600)
-    _register_oidc_client(
-        service,
-        dns_name,
-        "Immich",
-        values["IMMICH_OIDC_CLIENT_ID"],
-        values["IMMICH_OIDC_CLIENT_SECRET"],
-        ("/auth/login", "/user-settings", "/api/oauth/mobile-redirect"),
-    )
 
 
 def _nextcloud_urls(service: Service, values: Values, dns_name: str, public_url: str, _target: Path) -> None:
@@ -284,14 +219,6 @@ def _nextcloud_urls(service: Service, values: Values, dns_name: str, public_url:
     values.setdefault("NEXTCLOUD_TRUSTED_PROXIES", "127.0.0.1")
     values.setdefault("NEXTCLOUD_OVERWRITEHOST", f"{dns_name}:{service.private_https_port}")
     values.setdefault("NEXTCLOUD_OVERWRITECLIURL", public_url)
-    _register_oidc_client(
-        service,
-        dns_name,
-        "Nextcloud",
-        values["NEXTCLOUD_OIDC_CLIENT_ID"],
-        values["NEXTCLOUD_OIDC_CLIENT_SECRET"],
-        ("/apps/user_oidc/code",),
-    )
 
 
 def _surfsense_urls(_service: Service, values: Values, _dns_name: str, public_url: str, _target: Path) -> None:
@@ -306,14 +233,6 @@ def _lobehub_urls(service: Service, values: Values, dns_name: str, public_url: s
     values.setdefault("AUTH_DISABLE_EMAIL_PASSWORD", "1")
     values.setdefault("OPENAI_PROXY_URL", "http://litellm:4000/v1")
     values["OPENAI_MODEL_LIST"] = "-all,+mu3lab-chat"
-    _register_oidc_client(
-        service,
-        dns_name,
-        "LobeChat",
-        values["AUTH_AUTHENTIK_ID"],
-        values["AUTH_AUTHENTIK_SECRET"],
-        ("/api/auth/callback/authentik",),
-    )
 
 
 def _baby_buddy_urls(_service: Service, values: Values, _dns_name: str, public_url: str, _target: Path) -> None:

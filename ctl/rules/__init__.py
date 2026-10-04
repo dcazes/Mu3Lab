@@ -34,12 +34,15 @@ class Params(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+RuleParams = Params
+
+
 class Rule:
     name: ClassVar[str]
     Params: ClassVar[type[Params]] = Params
     summary: ClassVar[str] = ""
 
-    def __init__(self, params: Params) -> None:
+    def __init__(self, params: RuleParams) -> None:
         self.params = params
 
     @property

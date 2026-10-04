@@ -52,7 +52,9 @@ class ContainerScript(Rule):
         params = self.params
         owner = json.dumps(dict(ctx.owner)) if ctx.owner else ""
         if params.needs_owner and not owner:
-            ctx.fail("configure_application", "identity_email_missing", f"{params.purpose} needs your Authentik identity.")
+            ctx.fail(
+                "configure_application", "identity_email_missing", f"{params.purpose} needs your Authentik identity."
+            )
         args = [owner if arg == "{{owner_json}}" else arg for arg in params.args]
         ctx.stage("configure_application", params.purpose + ".")
         result = ctx.run_script(

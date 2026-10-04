@@ -14,7 +14,8 @@ from unittest.mock import patch
 import yaml
 
 from ctl import identity_reconcile, onboarding_state
-from ctl.authentik_blueprints import render_oidc_application_blueprint
+from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint
+from ctl.integrations.authentik import AuthentikError
 from ctl.jobs import JobStore
 from ctl.lifecycle.accounts import actual_owner_linked
 from ctl.lifecycle.onboarding import OnboardingError, provision_immich, provision_surfsense
@@ -185,7 +186,8 @@ class OnboardingTests(unittest.TestCase):
         store = JobStore(self.paths.runtime / "control.sqlite3")
         with (
             patch("ctl.identity_reconcile.actual_owner_linked", return_value=False) as linked,
-            patch("ctl.identity.reconcile_blueprints") as reconcile,
+            patch("ctl.identity_reconcile.sync_sign_in") as reconcile,
+            patch("ctl.identity_reconcile.Authentik.runtime"),
             patch("ctl.service_state.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
         ):
             self.assertFalse(
@@ -201,16 +203,28 @@ class OnboardingTests(unittest.TestCase):
         reconcile.assert_called_once()
         self.assertEqual(store.jobs(), [])
 
+    def test_owner_guard_retries_after_authentik_refuses_the_update(self):
+        project = self.paths.projects / "actual-budget"
+        project.mkdir(parents=True)
+        env_path = project / ".env"
+        env_path.write_text(runtime_env_text({"MU3LAB_INITIAL_OWNER_USERNAME": "owner"}))
+        original = env_path.read_text()
+        onboarding_state.remember_owner("actual-budget", OWNER, self.paths)
+        store = JobStore(self.paths.runtime / "control.sqlite3")
+        with (
+            patch("ctl.identity_reconcile.actual_owner_linked", return_value=True),
+            patch("ctl.identity_reconcile.Authentik.runtime"),
+            patch("ctl.identity_reconcile.sync_sign_in", side_effect=AuthentikError("Not ready")),
+        ):
+            self.assertFalse(
+                identity_reconcile.lift_owner_guard(store, Path(self.tmp.name), lambda _: None, self.paths)
+            )
+        self.assertEqual(env_path.read_text(), original)
+
     def test_actual_admission_guard_cannot_be_bypassed_by_group_binding(self):
-        content = render_oidc_application_blueprint(
+        content = render_oidc_blueprint(
             "host.example.ts.net",
-            service_id="actual-budget",
-            name="Actual Budget",
-            private_port=8451,
-            client_id="client",
-            client_secret="test-secret",
-            redirect_paths=("/openid/callback",),
-            initial_owner="owner",
+            OidcApp("actual-budget", "Actual Budget", 8451, "client", "test-secret", ("/openid/callback",), "owner"),
         )
         entries = yaml.load(content, Loader=yaml.BaseLoader)["entries"]
         bindings = [e for e in entries if e["model"] == "authentik_policies.policybinding"]

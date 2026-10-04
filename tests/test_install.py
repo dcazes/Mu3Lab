@@ -404,19 +404,17 @@ class AuthentikReadinessTests(unittest.TestCase):
     def test_first_start_uses_compose_health_wait(self):
         ctx = _ctx()
         ctx["progress"] = lambda step, update: None
+        ctx["account"] = lambda: {"email": "owner@example.test", "name": "Owner", "password": "test-password"}
         env_file = Path("/tmp/authentik.env")
         with (
             patch("ctl.install._tailscale_dns_name_for_install", return_value="mu3lab.example.ts.net"),
-            patch(
-                "ctl.authentik_blueprints.write_dashboard_blueprint", return_value=Path("/tmp/authentik-dashboard.yaml")
-            ),
             patch("ctl.install._authentik_containers", return_value=[]),
             patch("ctl.install.actions.compose_up", return_value=(0, "started")) as up,
             patch("ctl.install.time.sleep", return_value=None),
             # fix_authentik imports secrets and the blueprint writer locally
             # to avoid bootstrap-time dependency cycles.
-            patch("ctl.secrets.ensure_authentik_env", return_value=(env_file, [])),
-            patch("ctl.secrets.read_runtime_env", return_value={}),
+            patch("ctl.install.ensure_authentik_env", return_value=(env_file, [])),
+            patch("ctl.install.read_runtime_env", return_value={"AUTHENTIK_POSTGRESQL__PASSWORD": "test-db"}),
         ):
             result = install.fix_authentik({"state": "down"}, ctx)
         self.assertTrue(result["ok"])

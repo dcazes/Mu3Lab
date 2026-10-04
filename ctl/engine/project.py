@@ -82,7 +82,7 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
 
     def lookup(name: str) -> str | None:
         if name.startswith("app:"):
-            _, other, key = (name.split(":", 2) + ["", ""])[:3]
+            _, other, key = ([*name.split(":", 2), "", ""])[:3]
             if other not in facts.catalog:
                 return None
             return read_runtime_env(facts.paths.projects / other / ".env").get(key) or None

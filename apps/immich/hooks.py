@@ -33,7 +33,9 @@ class Hooks(AppHooks):
             auth = request(port, "/api/auth/login", method="POST", data={"email": email, "password": login["password"]})
             token = auth.get("accessToken", "")
             if not token or not auth.get("isAdmin"):
-                ctx.fail("account_bootstrap", "account_provisioning_failed", "Immich did not confirm its administrator.")
+                ctx.fail(
+                    "account_bootstrap", "account_provisioning_failed", "Immich did not confirm its administrator."
+                )
             try:
                 request(port, "/api/users/me/onboarding", method="PUT", data={"isOnboarded": True}, token=token)
                 url = ctx.facts.public_url(ctx.app) + "/auth/login?autoLaunch=0"

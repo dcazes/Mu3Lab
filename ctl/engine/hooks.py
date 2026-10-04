@@ -56,13 +56,13 @@ class StartPlan:
 
 @dataclass
 class HookContext:
-    app: "App"
+    app: App
     project: Path
     compose: Compose
     log: Log
     stage: Callable[[str, str], None]
     owner: JobIdentity | None = None
-    facts: "Facts | None" = None
+    facts: Facts | None = None
     # Rewrite the project's settings and template files from the manifest.
     rerender: Callable[[], None] = lambda: None
     # Re-register this app's sign-in with Authentik after its settings change.
@@ -116,7 +116,7 @@ class AppHooks:
         return ""
 
 
-def load_app_hooks(app: "App") -> AppHooks:
+def load_app_hooks(app: App) -> AppHooks:
     """Import ``apps/<id>/hooks.py`` by path; an app without one gets the empty defaults."""
     path = app.folder / "hooks.py"
     if not path.is_file():

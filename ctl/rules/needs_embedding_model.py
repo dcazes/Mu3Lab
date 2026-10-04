@@ -38,7 +38,9 @@ class NeedsEmbeddingModel(Rule):
         except (httpx.HTTPError, ValueError) as exc:
             ctx.fail("embedding_check", "embedding_probe_failed", f"{runner.manifest.name} is not available: {exc}")
             return
-        present = {str(item.get("name", "")).split(":", 1)[0] for item in tags.get("models", []) if isinstance(item, dict)}
+        present = {
+            str(item.get("name", "")).split(":", 1)[0] for item in tags.get("models", []) if isinstance(item, dict)
+        }
         if model not in present:
             ctx.stage("embedding_model_pull", "Downloading the local embedding model.")
             project = ctx.facts.paths.projects / runner.id
@@ -46,7 +48,9 @@ class NeedsEmbeddingModel(Rule):
             service = next(iter(compose_images(folder / "docker-compose.yml")), runner.id)
             rc, _ = Compose(folder).exec(service, ["ollama", "pull", model], ctx.log, timeout=600)
             if rc:
-                ctx.fail("embedding_check", "embedding_probe_failed", "The local embedding model could not be downloaded.")
+                ctx.fail(
+                    "embedding_check", "embedding_probe_failed", "The local embedding model could not be downloaded."
+                )
         try:
             vector = (
                 httpx.post(f"{base}/api/embeddings", json={"model": model, "prompt": "Mu3Lab readiness"}, timeout=120)
@@ -58,4 +62,3 @@ class NeedsEmbeddingModel(Rule):
             return
         if not isinstance(vector, list) or not vector:
             ctx.fail("embedding_check", "embedding_probe_failed", "The local model returned no embedding.")
-

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,30 +26,27 @@ from ctl.api.routes import (
     system,
     vault,
 )
+from ctl.identity import sync_sign_in
+from ctl.integrations.authentik import Authentik, AuthentikError
+from ctl.jobs import redact
+from ctl.provisioning import ProvisioningStore
+from ctl.registry import RegistryError
+from ctl.registry import load as load_registry
+from ctl.service_state import tailnet_dns_name
 
 ROOT = Path(__file__).resolve().parents[2]
 DIST = ROOT / "dashboard" / "dist"
 
 
 def _reconcile_runtime_state() -> None:
-    """Refresh durable milestones and recover missing OIDC blueprints at startup.
-
-    File-only reconciliation: no image pull, Compose recreation, account
-    creation, or credential rotation happens here.
-    """
-    from ctl.identity import reconcile_blueprints
-    from ctl.provisioning import ProvisioningStore
-    from ctl.registry import RegistryError
-    from ctl.registry import load as load_registry
-    from ctl.service_state import tailnet_dns_name
-
+    """Recover durable milestones and sign-in settings through Authentik on startup."""
     store = ProvisioningStore.runtime()
     if store:
         store.reconcile_runtime()
     try:
-        reconcile_blueprints(load_registry(), tailnet_dns_name())
-    except (OSError, RegistryError, ValueError):
-        pass
+        sync_sign_in(load_registry().catalog, tailnet_dns_name(), Authentik.runtime())
+    except (AuthentikError, OSError, RegistryError, ValueError) as exc:
+        logging.getLogger(__name__).warning("Sign-in reconciliation deferred: %s", redact(str(exc)))
 
 
 @asynccontextmanager

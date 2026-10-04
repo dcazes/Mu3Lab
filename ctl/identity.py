@@ -1,121 +1,52 @@
-"""Durable, honest identity projection and idempotent OIDC blueprint recovery."""
+"""Manifest-driven sign-in projection and synchronous Authentik configuration."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from ctl.authentik_blueprints import write_dashboard_blueprint, write_oidc_application_blueprint
+from ctl.authentik_blueprints import (
+    DASHBOARD_BLUEPRINT,
+    GatedApp,
+    OidcApp,
+    oidc_blueprint_name,
+    removal_blueprint_name,
+    render_gate_blueprint,
+    render_oidc_blueprint,
+    render_removal_blueprint,
+)
 from ctl.control_state import ControlState
+from ctl.engine.template import render
+from ctl.integrations.authentik import Authentik
 from ctl.jobs import JobStore
-from ctl.registry import Registry, RegistryError, Service
+from ctl.manifest.catalog import App, Catalog
+from ctl.manifest.models import AppManifest
+from ctl.registry import RegistryError, Service, load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
 
-@dataclass(frozen=True)
-class OidcContract:
-    name: str
-    client_id_key: str
-    client_secret_key: str
-    redirects: tuple[str, ...]
+def launch_path(app: AppManifest, paths: RuntimePaths | None = None) -> str:
+    oidc = app.sign_in.oidc
+    if oidc is None:
+        return app.ui.path
+    values = {secret.env: secret.value for secret in app.secrets if secret.kind == "fixed"}
+    values.update(read_runtime_env((paths or RuntimePaths()).projects / app.id / ".env"))
+    return render(oidc.launch_path, values.get)
 
 
-OIDC_CONTRACTS: dict[str, OidcContract] = {
-    "actual-budget": OidcContract(
-        "Actual Budget", "ACTUAL_OPENID_CLIENT_ID", "ACTUAL_OPENID_CLIENT_SECRET", ("/openid/callback",)
-    ),
-    "mealie": OidcContract(
-        "Mealie", "MEALIE_OIDC_CLIENT_ID", "MEALIE_OIDC_CLIENT_SECRET", ("/login", "/login?direct=1")
-    ),
-    "nextcloud": OidcContract(
-        "Nextcloud", "NEXTCLOUD_OIDC_CLIENT_ID", "NEXTCLOUD_OIDC_CLIENT_SECRET", ("/apps/user_oidc/code",)
-    ),
-    "immich": OidcContract(
-        "Immich",
-        "IMMICH_OIDC_CLIENT_ID",
-        "IMMICH_OIDC_CLIENT_SECRET",
-        (
-            "/auth/login",
-            "/user-settings",
-            "/api/oauth/mobile-redirect",
-        ),
-    ),
-    "paperless-ngx": OidcContract(
-        "Paperless-ngx",
-        "PAPERLESS_OIDC_CLIENT_ID",
-        "PAPERLESS_OIDC_CLIENT_SECRET",
-        ("/accounts/oidc/authentik/login/callback/",),
-    ),
-    "adventurelog": OidcContract(
-        "AdventureLog",
-        "ADVENTURELOG_OIDC_CLIENT_ID",
-        "ADVENTURELOG_OIDC_CLIENT_SECRET",
-        ("/accounts/oidc/mu3lab-adventurelog/login/callback/",),
-    ),
-    "lobehub": OidcContract(
-        "LobeChat", "AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", ("/api/auth/callback/authentik",)
-    ),
-}
-
-TRUSTED_HEADER = {"baby-buddy"}
-PROXY_GATE = {"litellm", "freellmapi", "surfsense"}
-# LiteLLM and FreeLLMAPI are already declared by the dashboard blueprint.
-# Other gated apps need an installed-project provider and outpost membership.
-GATED_APPS = TRUSTED_HEADER | (PROXY_GATE - {"litellm", "freellmapi"})
-LOCAL = {"authentik", "vaultwarden"}
-NO_UI = {"ingress", "ollama"}
-# Start the native OIDC flow from Home so an existing Authentik session can
-# sign into the app without stopping at its local login chooser. Applications
-# requiring POST use a same-origin launcher with the app's CSRF/session rules.
-OIDC_LAUNCH_PATHS = {
-    "nextcloud": "/index.php/apps/user_oidc/login/1",
-    "mealie": "/api/auth/oauth",
-    "immich": "/auth/login?autoLaunch=1",
-    "paperless-ngx": "/__mu3lab/login",
-    "adventurelog": "/accounts/oidc/mu3lab-adventurelog/login/",
-    "actual-budget": "/__mu3lab/login",
-    "lobehub": "/__mu3lab/login",
-}
-
-
-def launch_path(service_id: str) -> str:
-    """Where Home opens an OIDC app so it goes straight into Authentik sign-in."""
-    path = OIDC_LAUNCH_PATHS[service_id]
-    if service_id == "nextcloud":
-        values = read_runtime_env(RuntimePaths().projects / service_id / ".env")
-        provider_id = values.get("NEXTCLOUD_OIDC_PROVIDER_ID", "1")
-        if provider_id.isdigit() and int(provider_id) > 0:
-            path = f"/index.php/apps/user_oidc/login/{provider_id}"
-    return path
-
-
-def authentik_only(service_id: str) -> bool:
-    """Apps people only ever open through Authentik; they have no login to save."""
-    from ctl.registry import load
-
+def authentik_only(app_id: str) -> bool:
     try:
-        return mode_for(load().get(service_id)) in {"native_oidc", "trusted_header"}
+        return load().get(app_id).manifest.sign_in.method in {"oidc", "trusted_header"}
     except (KeyError, ValueError, RegistryError):
         return False
 
 
 def mode_for(service: Service) -> str:
-    if service.id in OIDC_CONTRACTS:
-        return "native_oidc"
-    if service.id in TRUSTED_HEADER:
-        return "trusted_header"
-    if service.id in PROXY_GATE:
-        return "proxy_gate"
-    if service.id in LOCAL:
-        return "local"
-    # An excluded-auth service has a private route but no user identity or
-    # login flow (for example Firecrawl's API).  Keep it distinct from a
-    # local-login application so launch controls never incorrectly say Login.
-    if service.auth == "excluded":
-        return "none"
-    if service.id in NO_UI or not service.ui.get("available", False):
-        return "none"
-    return "local"
+    return {
+        "oidc": "native_oidc",
+        "trusted_header": "trusted_header",
+        "gate": "proxy_gate",
+        "local": "local",
+        "none": "none",
+    }[service.manifest.sign_in.method]
 
 
 def projection(service: Service, item: dict, state: ControlState | None) -> dict:
@@ -128,8 +59,8 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     # service responses.  The route URL is the authoritative browser target;
     # the legacy ui.url is only a fallback for mixed-version rollouts.
     launch_url = str(item.get("url") or (item.get("ui") or {}).get("url") or "")
-    if service.id in OIDC_LAUNCH_PATHS and launch_url:
-        launch_url = launch_url.rstrip("/") + launch_path(service.id)
+    if service.manifest.sign_in.oidc and launch_url:
+        launch_url = launch_url.rstrip("/") + launch_path(service.manifest)
     if saved:
         current = str(saved["state"])
         detail = str(saved.get("detail") or "")
@@ -154,9 +85,9 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
                 or "This service has no end-user interface."
             ),
         )
-    elif service.id == "authentik":
+    elif service.manifest.sign_in.session_provider:
         current = "ready" if route_ready and healthy else "degraded"
-        detail = "This is the identity provider; the current Authentik session opens its administration UI directly."
+        detail = "This is the identity provider; the current sign-in session opens its administration UI directly."
     elif mode == "local":
         current, detail = "unsupported", service.identity_note or "This application requires its own local sign-in."
     elif mode == "proxy_gate":
@@ -175,7 +106,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     return {
         "mode": mode,
         "state": current,
-        "launch_url": launch_url if service.id not in NO_UI else "",
+        "launch_url": launch_url if service.ui.get("available", False) else "",
         "detail": detail,
         "last_verified_at": str((saved or {}).get("last_verified_at", "")),
         "job_id": str((saved or {}).get("last_job_id", "")),
@@ -183,54 +114,76 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     }
 
 
-def reconcile_blueprints(registry: Registry, host: str, paths: RuntimePaths = RuntimePaths()) -> list[str]:
-    """Reconcile managed Authentik routes and OIDC apps from saved configuration."""
+def installed(app: App, paths: RuntimePaths) -> bool:
+    return app.manifest.tier != "optional" or (paths.projects / app.id / "docker-compose.yml").is_file()
+
+
+def gate_blueprint(catalog: Catalog, host: str, paths: RuntimePaths) -> str:
+    # The foundation proxy's route is the dashboard address; its manifest has no end-user sign-in.
+    dashboard = next(
+        (
+            app
+            for app in catalog.apps
+            if app.manifest.tier == "foundation"
+            and app.manifest.sign_in.method == "none"
+            and app.manifest.route is not None
+        ),
+        None,
+    )
+    if dashboard is None:
+        raise ValueError("The app catalog has no foundation dashboard route.")
+    assert dashboard.manifest.route is not None
+    gated = tuple(
+        GatedApp(app.id, app.manifest.name, app.manifest.route.https_port, app.manifest.route.audience)
+        for app in catalog.apps
+        if app.manifest.route is not None
+        and app.manifest.route.access in {"gate", "trusted_header"}
+        and installed(app, paths)
+    )
+    return render_gate_blueprint(host, dashboard.manifest.route.https_port, gated)
+
+
+def sync_sign_in(catalog: Catalog, host: str, authentik: Authentik, paths: RuntimePaths | None = None) -> list[str]:
+    paths = paths or RuntimePaths()
     if not host:
-        return []
-    authentik = registry.get("authentik")
-    dashboard = registry.get("ingress")
-    litellm = registry.get("litellm")
-    freellmapi = registry.get("freellmapi")
-    gated_apps = tuple(
-        (service.id, service.name, service.private_https_port)
-        for service in (registry.get(service_id) for service_id in sorted(GATED_APPS))
-        if service.private_https_port and (paths.projects / service.id / "docker-compose.yml").is_file()
-    )
-    write_dashboard_blueprint(
-        paths.root,
-        host,
-        authentik_host=f"https://{host}"
-        if authentik.private_https_port in (None, 443)
-        else f"https://{host}:{authentik.private_https_port}",
-        dashboard_host=f"https://{host}:{dashboard.private_https_port or 8446}",
-        litellm_port=litellm.private_https_port or 8454,
-        freellmapi_port=freellmapi.private_https_port or 8455,
-        gated_apps=gated_apps,
-    )
-    written: list[str] = []
-    for service_id, contract in OIDC_CONTRACTS.items():
-        service = registry.get(service_id)
-        project = paths.projects / service_id
-        env_path = project / ".env"
-        # An app uninstalled with its data kept still has its .env; only a
-        # Compose project means it is installed and should be registered.
-        if not env_path.is_file() or not (project / "docker-compose.yml").is_file() or not service.private_https_port:
+        raise ValueError("This server's private address is not known yet.")
+    authentik.apply_blueprint(DASHBOARD_BLUEPRINT, gate_blueprint(catalog, host, paths))
+    applied: list[str] = []
+    for app in catalog.apps:
+        manifest = app.manifest
+        oidc = manifest.sign_in.oidc
+        if not installed(app, paths) or oidc is None or manifest.route is None:
             continue
-        values = read_runtime_env(env_path)
-        client_id = values.get(contract.client_id_key, "")
-        secret = values.get(contract.client_secret_key, "")
+        values = read_runtime_env(paths.projects / app.id / ".env")
+        client_id, secret = values.get(oidc.env.client_id, ""), values.get(oidc.env.client_secret, "")
         if not client_id or not secret:
-            continue
-        write_oidc_application_blueprint(
-            paths.root,
-            host,
-            service_id=service_id,
-            name=contract.name,
-            private_port=service.private_https_port,
-            client_id=client_id,
-            client_secret=secret,
-            redirect_paths=contract.redirects,
-            initial_owner=values.get("MU3LAB_INITIAL_OWNER_USERNAME", ""),
+            continue  # Core projects are materialized later; kept credentials alone don't install an optional app.
+        settings = OidcApp(
+            app.id,
+            manifest.name,
+            manifest.route.https_port,
+            client_id,
+            secret,
+            oidc.redirect_paths,
+            values.get(oidc.initial_owner_env, ""),
         )
-        written.append(service_id)
-    return written
+        authentik.apply_blueprint(oidc_blueprint_name(app.id), render_oidc_blueprint(host, settings))
+        applied.append(app.id)
+    return applied
+
+
+def remove_sign_in(
+    app: App, authentik: Authentik, *, catalog: Catalog | None = None, host: str = "", paths: RuntimePaths | None = None
+) -> None:
+    method = app.manifest.sign_in.method
+    if method not in {"oidc", "gate", "trusted_header"}:
+        return
+    if method in {"gate", "trusted_header"}:
+        if catalog is None:
+            raise ValueError("Removing a gated app needs the remaining app catalog.")
+        # Exclude explicitly too: a caller may be retrying cleanup before removing the project.
+        remaining = Catalog(tuple(item for item in catalog.apps if item.id != app.id))
+        sync_sign_in(remaining, host, authentik, paths)
+    authentik.apply_blueprint(
+        removal_blueprint_name(app.id), render_removal_blueprint(app.id, app.manifest.name, oidc=method == "oidc")
+    )

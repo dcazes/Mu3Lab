@@ -27,6 +27,11 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 
 import httpx
 
+from ctl.identity import launch_path
+from ctl.registry import load
+from ctl.runtime import RuntimePaths
+from ctl.secrets import read_runtime_env
+
 Log = Callable[[str], None]
 AUTHORIZE_PATH = "/application/o/authorize/"
 TIMEOUT = httpx.Timeout(20.0)
@@ -270,21 +275,16 @@ def verify_gate(*, host: str, port: int, log: Log, timeout: float = 360, sleep=t
 
 def verify_sign_in(service_id: str, host: str, log: Log) -> str:
     """Check whichever kind of Authentik sign-in this installed app uses."""
-    from ctl.identity import GATED_APPS, OIDC_CONTRACTS, launch_path
-    from ctl.registry import load
-    from ctl.runtime import RuntimePaths
-    from ctl.secrets import read_runtime_env
-
     service = load().get(service_id)
     port = service.private_https_port
     if not host or not port:
         raise SignInError("This server's private address is not known yet.")
-    if service_id in GATED_APPS:
+    if service.manifest.sign_in.method in {"gate", "trusted_header"}:
         # The outpost can keep serving an app Authentik has already deleted;
         # ask Authentik itself first.
         wait_for_provider(host, service_id)
         return verify_gate(host=host, port=port, log=log)
-    contract = OIDC_CONTRACTS.get(service_id)
+    contract = service.manifest.sign_in.oidc
     if contract is None:
         return "This app does not use Authentik sign-in."
     values = read_runtime_env(RuntimePaths().projects / service_id / ".env")
@@ -292,9 +292,9 @@ def verify_sign_in(service_id: str, host: str, log: Log) -> str:
         service_id,
         host=host,
         port=port,
-        launch_path=launch_path(service_id),
-        client_id=values.get(contract.client_id_key, ""),
-        client_secret=values.get(contract.client_secret_key, ""),
-        redirect_paths=contract.redirects,
+        launch_path=launch_path(service.manifest),
+        client_id=values.get(contract.env.client_id, ""),
+        client_secret=values.get(contract.env.client_secret, ""),
+        redirect_paths=contract.redirect_paths,
         log=log,
     )

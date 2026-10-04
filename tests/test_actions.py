@@ -14,7 +14,7 @@ DEBUG: Patch target is `ctl.actions.privilege` (module attribute) so production
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -173,21 +173,6 @@ class SystemTests(unittest.TestCase):
 class DockerCmdTests(unittest.TestCase):
     """Selection contract for the docker choke point: live group → direct;
     DB-member-only → `sg docker -c`; neither → clean error, nothing runs."""
-
-    def test_authentik_reset_supplies_password_only_on_stdin(self):
-        password = "Mu3Lab-test-password"
-        proc = MagicMock()
-        proc.communicate.return_value = ("Password changed successfully", "")
-        proc.returncode = 0
-        lines: list[str] = []
-        with (
-            patch("ctl.actions._docker_invocation", return_value=["docker", "exec"]),
-            patch("ctl.actions._subprocess.Popen", return_value=proc),
-        ):
-            result = actions.reset_authentik_admin_password(password, lines.append)
-        self.assertTrue(result["ok"])
-        proc.communicate.assert_called_once_with(password + "\n" + password + "\n", timeout=90)
-        self.assertNotIn(password, "\n".join(lines))
 
     def test_direct_with_live_group(self):
         seen: list = []

@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from ctl import vaultwarden_api as vw
 from ctl import workflow_secrets
 from ctl.api import create_app
-from ctl.authentik_blueprints import render_dashboard_blueprint
+from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
 from ctl.identity import mode_for
 from ctl.provider_catalog import PROVIDERS, setup_progress
 from ctl.registry import load as load_registry
@@ -377,7 +377,9 @@ class FreeLlmApiGateTests(unittest.TestCase):
         self.assertEqual(mode_for(load_registry().get("freellmapi")), "proxy_gate")
 
     def test_blueprint_protects_the_freellmapi_origin(self):
-        content = render_dashboard_blueprint("mu3lab-4.taile2cc7a.ts.net")
+        content = render_gate_blueprint(
+            "mu3lab-4.taile2cc7a.ts.net", 8446, (GatedApp("freellmapi", "FreeLLMAPI", 8455, "operators"),)
+        )
         self.assertIn('external_host: "https://mu3lab-4.taile2cc7a.ts.net:8455"', content)
         self.assertIn("- !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab FreeLLMAPI provider]]", content)
         self.assertIn("target: !KeyOf mu3lab-freellmapi-application", content)

@@ -91,7 +91,9 @@ class FirstAdminFromEnv(Rule):
             return
         owner = ctx.owner
         username = (
-            owner["username"] if self.params.username == "verbatim" else account_username(owner["username"], owner["email"])
+            owner["username"]
+            if self.params.username == "verbatim"
+            else account_username(owner["username"], owner["email"])
         )
         plan.extra_files.append(ctx.project / self.params.override)
         plan.env.update(
@@ -116,7 +118,9 @@ class FirstAdminFromEnv(Rule):
             )
         else:
             assert verify.script is not None
-            result = ctx.run_script(verify.script.service, verify.script.script, verify.script.interpreter, args=[username])
+            result = ctx.run_script(
+                verify.script.service, verify.script.script, verify.script.interpreter, args=[username]
+            )
         if not result.ok:
             ctx.fail(
                 "account_verification",

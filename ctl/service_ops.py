@@ -9,9 +9,10 @@ from pathlib import Path
 import yaml
 
 from ctl import actions, image_fetch, job_guard, onboarding_state, workflow_secrets
-from ctl.authentik_apply import apply_blueprints
 from ctl.control_state import ControlState
+from ctl.identity import mode_for, sync_sign_in
 from ctl.image_downloads import ImageDownloadStore
+from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.jobs import JobStore, redact
 from ctl.lifecycle import app_releases, maintenance
 from ctl.lifecycle.accounts import (
@@ -30,6 +31,7 @@ from ctl.registry import Registry, RegistryError, Service, load
 from ctl.routes import apply as apply_route
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.service_state import tailnet_dns_name
 
 SUPPORTED_ACTIONS = frozenset(
     {
@@ -82,15 +84,6 @@ def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, s
             (project / name).unlink(missing_ok=True)
         except OSError as exc:
             return False, f"Temporary setup file could not be removed: {exc}"
-    # These blueprints are generated for the first installation attempt.  A
-    # failed app must not leave a stale Authentik application to be reused by
-    # a later selection; successful installs regenerate the same idempotent
-    # blueprint during materialization.
-    blueprint = RuntimePaths().projects / "authentik" / "blueprints" / f"mu3lab-{service.id}.yaml"
-    try:
-        blueprint.unlink(missing_ok=True)
-    except OSError as exc:
-        return False, f"Temporary identity setup file could not be removed: {exc}"
     env_path = project / ".env"
     if env_path.is_file():
         values = read_runtime_env(env_path)
@@ -341,18 +334,14 @@ def _install(
         state.set_installation(
             service.id, "starting", job_id=job_id, manifest_version="3", image_digests=image_snapshot
         )
-    from ctl.identity import OIDC_CONTRACTS, mode_for
-
-    if service.id in OIDC_CONTRACTS:
-        # Authentik applies the new client in the background; an app that
-        # starts first gets a 404 and some (Actual Budget) never retry.
+    if service.manifest.sign_in.method == "oidc":
+        # Publish the client synchronously before starting the app; some apps
+        # never retry discovery after seeing a missing provider on first boot.
         _event(store, job_id, "authentik_ready", "Waiting for Authentik to publish this app's sign-in.")
-        apply_blueprints(log)
         try:
-            from ctl.service_state import tailnet_dns_name
-
+            sync_sign_in(registry.catalog, tailnet_dns_name(), Authentik.runtime())
             wait_for_provider(tailnet_dns_name(), service.id)
-        except (SignInError, OSError, ValueError) as exc:
+        except (AuthentikError, SignInError, OSError, ValueError) as exc:
             _fail(store, state, job_id, service.id, actor, "authentik_ready", "sign_in_unavailable", str(exc))
             return
     _event(store, job_id, "start_service", "Starting application containers.")
@@ -583,8 +572,6 @@ def _install(
             if not confirmed:
                 confirmed, _ = verify_bootstrap_account(service.id, project, log, username)
             if confirmed:
-                from ctl.service_state import tailnet_dns_name
-
                 host = tailnet_dns_name()
                 login_url = f"https://{host}:{service.private_https_port}" if host else ""
                 onboarding_state.complete_login(service.id, username, login_url, RuntimePaths())
@@ -593,23 +580,21 @@ def _install(
     if not routed:
         _fail(store, state, job_id, service.id, actor, "configure_route", "route_configuration_failed", detail)
         return
-    from ctl.identity import GATED_APPS, reconcile_blueprints
-    from ctl.service_state import tailnet_dns_name
 
-    if service.id in GATED_APPS:
+    if service.manifest.sign_in.method in {"gate", "trusted_header"}:
         # Caddy sends this app through the Authentik outpost, which answers 404
         # until the app is registered there (and a past uninstall is withdrawn).
         try:
-            reconcile_blueprints(registry, tailnet_dns_name())
-            apply_blueprints(log)
-        except (OSError, ValueError) as exc:
-            log(f"Authentik sign-in was not registered yet: {exc}")
+            sync_sign_in(registry.catalog, tailnet_dns_name(), Authentik.runtime())
+        except (AuthentikError, OSError, ValueError) as exc:
+            _fail(store, state, job_id, service.id, actor, "authentik_ready", "sign_in_unavailable", str(exc))
+            return
     # Healthy is not enough: walk the browser's sign-in path to Authentik so a
     # broken hand-off fails the install instead of the person's first click.
     _event(store, job_id, "verify_sign_in", "Checking that Authentik sign-in works.")
     try:
         sign_in_detail = verify_sign_in(service.id, tailnet_dns_name(), log)
-    except (SignInError, OSError, ValueError) as exc:
+    except (AuthentikError, SignInError, OSError, ValueError) as exc:
         _append_runtime_diagnostics(store, job_id, project)
         _fail(store, state, job_id, service.id, actor, "verify_sign_in", "sign_in_failed", str(exc))
         return
@@ -693,7 +678,7 @@ def _install(
     # is switched on, given a credential and attached to its assistant.
     try:
         preenable(service.id, root)
-    except (OSError, ValueError) as exc:
+    except (AuthentikError, OSError, ValueError) as exc:
         log(f"The chat connector could not be prepared: {redact(str(exc))}")
     if not sync_application(service.id, running=True, root=root, log=log):
         log("One enabled MCP needs attention after application installation.")
@@ -831,7 +816,6 @@ def _configure_identity(
     store: JobStore, state: ControlState | None, job: dict, service: Service, registry: Registry, actor: str, root: Path
 ) -> None:
     """Materialize identity configuration without silently claiming migration success."""
-    from ctl.identity import mode_for, reconcile_blueprints
 
     job_id = str(job["id"])
     mode = mode_for(service)
@@ -853,10 +837,8 @@ def _configure_identity(
             project = project_path(service, root)
             if service.stage == "optional" or service.id == "lobehub":
                 project = materialize(service, root)
-            from ctl.service_state import tailnet_dns_name
 
-            written = reconcile_blueprints(registry, tailnet_dns_name())
-            apply_blueprints(_job_log(store, job_id))
+            written = sync_sign_in(registry.catalog, tailnet_dns_name(), Authentik.runtime())
             if service.id not in written:
                 raise ValueError("The persisted OIDC client configuration is incomplete.")
             installation = state.installation(service.id) if state else None
@@ -899,17 +881,13 @@ def _configure_identity(
                 detail = "Sign-in is configured and is checked when the app is installed."
                 target = "unconfigured"
         elif mode == "trusted_header":
-            from ctl.service_state import tailnet_dns_name
-
             # Caddy already routes this app through the outpost; register its
             # host there too, or every request is answered with a 404.
-            reconcile_blueprints(registry, tailnet_dns_name())
+            sync_sign_in(registry.catalog, tailnet_dns_name(), Authentik.runtime())
             detail = "Authentik trusted-header access is configured; live route health remains authoritative."
             target = "ready"
         elif mode == "proxy_gate":
-            from ctl.service_state import tailnet_dns_name
-
-            reconcile_blueprints(registry, tailnet_dns_name())
+            sync_sign_in(registry.catalog, tailnet_dns_name(), Authentik.runtime())
             detail = "Authentik protects this route, but the application has no native per-user OIDC session."
             target = "ready"
         else:
@@ -917,7 +895,7 @@ def _configure_identity(
                 service.identity_note or "This application does not support Mu3Lab-managed native Authentik sign-in."
             )
             target = "unsupported"
-    except (OSError, ValueError, RegistryError, SignInError) as exc:
+    except (AuthentikError, OSError, ValueError, RegistryError, SignInError) as exc:
         detail = redact(str(exc))
         if state:
             state.set_service_identity(

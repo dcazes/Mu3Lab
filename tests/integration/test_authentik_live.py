@@ -14,9 +14,11 @@ import time
 import unittest
 import urllib.parse
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 
+from ctl import people
 from ctl.authentik_blueprints import (
     DASHBOARD_BLUEPRINT,
     GatedApp,
@@ -53,7 +55,9 @@ def _sign_in(username: str, password: str) -> str:
     with httpx.Client(base_url=BASE, follow_redirects=True, timeout=30) as client:
         client.get(executor)
         client.post(executor, json={"component": "ak-stage-identification", "uid_field": username})
-        return str(client.post(executor, json={"component": "ak-stage-password", "password": password}).json()["component"])
+        return str(
+            client.post(executor, json={"component": "ak-stage-password", "password": password}).json()["component"]
+        )
 
 
 @unittest.skipUnless(os.environ.get("MU3LAB_INTEGRATION") == "1", "set MU3LAB_INTEGRATION=1 to run against Docker")
@@ -61,6 +65,7 @@ class AuthentikLiveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
         cls.env_file = Path(cls.tmp.name) / "authentik.env"
         values = {
             "TEST_AUTHENTIK_EMAIL": "owner@example.test",
@@ -69,6 +74,7 @@ class AuthentikLiveTests(unittest.TestCase):
             "TEST_AUTHENTIK_PORT": str(PORT),
         }
         cls.env_file.write_text(runtime_env_text(values), encoding="utf-8")
+        cls.addClassCleanup(_compose, "down", "-v", env_file=cls.env_file)
         _compose("down", "-v", env_file=cls.env_file)
         _compose("up", "-d", env_file=cls.env_file)
         deadline = time.monotonic() + 300
@@ -78,10 +84,7 @@ class AuthentikLiveTests(unittest.TestCase):
                 raise RuntimeError("Authentik did not start")
             time.sleep(5)
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        _compose("down", "-v", env_file=cls.env_file)
-        cls.tmp.cleanup()
+        cls.authentik.wait_for_defaults()
 
     def test_1_bootstrap_hash_gives_the_owner_their_own_password(self) -> None:
         self.assertEqual(self.authentik.user("akadmin")["email"], "owner@example.test")
@@ -89,7 +92,10 @@ class AuthentikLiveTests(unittest.TestCase):
         self.assertNotEqual(_sign_in("akadmin", "wrong password"), "xak-flow-redirect")
 
     def test_2_gate_owner_guard_and_removal(self) -> None:
-        gated = (GatedApp("litellm", "LiteLLM", 8454, "operators"), GatedApp("baby-buddy", "Baby Buddy", 8458, "household"))
+        gated = (
+            GatedApp("litellm", "LiteLLM", 8454, "operators"),
+            GatedApp("baby-buddy", "Baby Buddy", 8458, "household"),
+        )
         self.authentik.apply_blueprint(DASHBOARD_BLUEPRINT, render_gate_blueprint(HOST, 8446, gated))
         app = OidcApp("actual-budget", "Actual Budget", 8448, "mu3lab-actual-budget", "s3cret", ("/openid/callback",))
         guarded = OidcApp(**{**app.__dict__, "initial_owner": "akadmin"})
@@ -107,14 +113,27 @@ class AuthentikLiveTests(unittest.TestCase):
 
     def test_3_household_member_invite_link(self) -> None:
         self.authentik.apply_blueprint(DASHBOARD_BLUEPRINT, render_gate_blueprint(HOST, 8446))
-        person = self.authentik.create_user("member1", "Member One", "m1@example.test")
-        self.authentik.add_to_group("mu3lab-household", person["pk"])
-        link = urllib.parse.urlsplit(self.authentik.recovery_link(person["pk"], 24))
+        with patch("ctl.people.Authentik.runtime", return_value=self.authentik):
+            added = people.add_person("Member One", "member1@example.test", "member", f"https://{HOST}")
+            self.assertEqual(added["person"]["role"], "member")
+            self.assertTrue(added["invite"]["url"].startswith(f"https://{HOST}/"))
+            self.assertEqual({person["username"] for person in people.list_people()}, {"akadmin", "member1"})
+            with self.assertRaisesRegex(people.PeopleError, "at least one administrator"):
+                people.change("akadmin", "deactivate", f"https://{HOST}")
+            self.assertEqual(people.change("member1", "role", f"https://{HOST}", "admin")["person"]["role"], "admin")
+            self.assertEqual(people.change("member1", "role", f"https://{HOST}", "member")["person"]["role"], "member")
+            self.assertFalse(people.change("member1", "deactivate", f"https://{HOST}")["person"]["active"])
+            self.assertTrue(people.change("member1", "reactivate", f"https://{HOST}")["person"]["active"])
+        link = urllib.parse.urlsplit(added["invite"]["url"])
         executor = f"/api/v3/flows/executor/mu3lab-welcome/?query={urllib.parse.quote(link.query)}"
         with httpx.Client(base_url=BASE, follow_redirects=True, timeout=30) as client:
             client.get(f"{link.path}?{link.query}")
             self.assertEqual(client.get(executor).json()["component"], "ak-stage-prompt")
-            answer = {"component": "ak-stage-prompt", "password": "Member-pass-9183!", "password_repeat": "Member-pass-9183!"}
+            answer = {
+                "component": "ak-stage-prompt",
+                "password": "Member-pass-9183!",
+                "password_repeat": "Member-pass-9183!",
+            }
             self.assertEqual(client.post(executor, json=answer).json()["component"], "xak-flow-redirect")
         self.assertEqual(_sign_in("member1", "Member-pass-9183!"), "xak-flow-redirect")
 

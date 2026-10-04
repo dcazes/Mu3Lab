@@ -8,6 +8,49 @@ after the plan was written.
 
 ---
 
+## Current checkpoint — Task A complete, awaiting owner review
+
+Task A finishes Authentik setup and account management through bootstrap
+settings and REST. The next implementation task is **Task B**, after the owner
+reviews this checkpoint. The overall rebuild is still unfinished; do not
+reinstall from this branch yet.
+
+- Sign-in modes, launch paths, gated routes and OIDC registration now come
+  from manifests. Registration and removal use synchronous blueprint imports;
+  there is no watched blueprint folder or private Authentik shell code.
+- The installer writes the owner's email, password hash and a stable API token
+  before the first start, waits for the built-in flows and signing certificate,
+  updates the owner's name through REST, then removes the bootstrap email/hash.
+- People management uses REST and recovery links. Group names come from
+  `groups_obj` (the `groups` field contains IDs). Demotion removes inherited
+  administrator membership, and Mu3Lab serializes role/removal changes and
+  protects the last administrator. The installation administrator (`akadmin`)
+  must also stay active and retain administrator access because the retained
+  bootstrap API token belongs to that account.
+- The pinned fresh image creates **authentik Self-signed Certificate**. The
+  earlier reference to "authentik Internal JWT Certificate" was incorrect.
+  This is Authentik's documented default OAuth/OIDC signing key:
+  https://docs.goauthentik.io/install-config/first-steps/.
+- Materialization only writes runtime files now. Existing app and core
+  installers register sign-in explicitly before starting OIDC apps. The old
+  lifecycle pipeline and owner-guard worker remain until Task B.
+- Old shell/password-reset and watched-folder tests were removed with those
+  implementations; REST request, secret preservation, removal/reinstall,
+  administrator safeguards and failed-update retry tests replace them.
+- The inherited WIP lint/type/format errors were fixed so the full gate can
+  run. No tests were disabled to complete Task A.
+
+Validation: Python lint, formatting, mypy and the full unit suite (610 tests,
+four expected skips); dashboard TypeScript, ESLint, Vitest (93 tests) and
+Prettier; three fresh-container Authentik
+integration tests (bootstrap sign-in, guard/removal, and household invitations
+with production account-management functions). Test resources are removed
+also when integration setup fails. All runtime tests use temporary state and
+`mu3lab-test-authentik`; the owner's live stack is untouched.
+
+The WIP inventory and failures below describe the starting checkpoint. Section
+3 is resolved by Task A; Tasks B–J remain.
+
 ## 0. Where the work is
 
 - Branch: `rebuild/architecture`, in the git worktree
@@ -166,7 +209,7 @@ The WIP commit message starts with `WIP:`. Tests are **not** fully green in it
 
 ---
 
-## 3. Known breakage in the WIP commit (fix first)
+## 3. Known breakage in the WIP commit (resolved by Task A)
 
 Run the full gate. Expected failures and their causes:
 
@@ -188,7 +231,7 @@ Run the full gate. Expected failures and their causes:
    container that had been up for a few minutes.
    **Fix:** add `Authentik.wait_for_defaults(timeout=300)` that polls
    `GET /flows/instances/?slug=<slug>` for those three slugs (and
-   `GET /crypto/certificatekeypairs/?name=authentik Internal JWT Certificate`) until all
+   `GET /crypto/certificatekeypairs/?name=authentik Self-signed Certificate`) until all
    exist; call it before the first `apply_blueprint` in the installer and in `setUpClass`.
    Also print `result["logs"]` fully in the error (filter `log_level` warning/error) so the
    next failure is diagnosable. Then run
@@ -203,7 +246,7 @@ Each task: do it, run the full gate, commit. Keep commits focused. Never skip or
 disable a test; delete a test only together with the behavior it covered, and say so in
 the commit message.
 
-### Task A — Finish Authentik on official interfaces
+### Task A — Finish Authentik on official interfaces (complete)
 
 1. Add `wait_for_defaults` (section 3.2) and make the integration test green.
 2. Rewrite `ctl/identity.py` to be manifest-driven, no app ids:

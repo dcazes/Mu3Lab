@@ -335,7 +335,7 @@ entries:
       client_type: confidential
       grant_types:
         - authorization_code
-      signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Internal JWT Certificate]]
+      signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
       client_id: {quote(app.client_id)}
       client_secret: {quote(app.client_secret)}
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]

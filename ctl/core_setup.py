@@ -18,6 +18,8 @@ from pathlib import Path
 from ctl import actions
 from ctl.core_wiring import EMBEDDING_MODEL
 from ctl.core_wiring import configure as configure_wiring
+from ctl.identity import sync_sign_in
+from ctl.integrations.authentik import Authentik
 from ctl.jobs import JobStore, redact
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError, load
@@ -371,6 +373,7 @@ def _run(
 
         lobehub_project = materialize(load().get("lobehub"), root)
         env_files["lobehub"] = lobehub_project / ".env"
+        sync_sign_in(load().catalog, tailnet_dns_name(), Authentik.runtime())
         _configure_chat_routes(root, log)
         wiring = configure_wiring(runtime)
         envs = _runtime_envs(env_files, wiring)

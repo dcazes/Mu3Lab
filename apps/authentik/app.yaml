@@ -21,4 +21,5 @@ route:
   generated: false
 sign_in:
   method: local
+  session_provider: true
 setup_action: Create the Authentik administrator and Mu3Lab application.

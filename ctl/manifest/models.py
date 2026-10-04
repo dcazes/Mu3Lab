@@ -149,11 +149,15 @@ class SignIn(Model):
     # local: the app's own login, never Authentik-gated (Authentik, Vaultwarden).
     # none: nobody signs in (an API or an internal service).
     method: Literal["oidc", "gate", "trusted_header", "local", "none"]
+    # The identity provider itself opens using the current shared sign-in session.
+    session_provider: bool = False
     oidc: Oidc | None = None
     note: str = ""
 
     @model_validator(mode="after")
     def _oidc_details(self) -> SignIn:
+        if self.session_provider and self.method != "local":
+            raise ValueError("a session provider must use local sign-in")
         if (self.method == "oidc") != (self.oidc is not None):
             raise ValueError("sign_in.oidc is required for method oidc and forbidden otherwise")
         return self

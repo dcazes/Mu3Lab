@@ -29,7 +29,9 @@ class PasswordLoginOffAfterSetup(Rule):
         ctx.stage("configure_application", f"Switching {ctx.app.manifest.name} to Authentik-only sign-in.")
         ctx.set_env({self.params.env: "false"})
         ctx.rerender()
-        rc, output = ctx.compose.up(ctx.log, wait_seconds=ctx.app.manifest.service.start_timeout_seconds, recreate=True)
+        rc, _output = ctx.compose.up(
+            ctx.log, wait_seconds=ctx.app.manifest.service.start_timeout_seconds, recreate=True
+        )
         if rc:
             ctx.fail(
                 "configure_application",

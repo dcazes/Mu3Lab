@@ -14,7 +14,9 @@ _RUNTIME_PATH_USERS = (
     "ctl.lifecycle.accounts",
     "ctl.lifecycle.uninstall",
     "ctl.lifecycle.app_releases",
-    "ctl.authentik_apply",
+    "ctl.identity",
+    "ctl.install",
+    "ctl.people",
 )
 
 

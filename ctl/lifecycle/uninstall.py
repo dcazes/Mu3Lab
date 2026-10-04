@@ -20,9 +20,12 @@ from pathlib import Path
 import yaml
 
 from ctl import actions
+from ctl.identity import remove_sign_in
+from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.lifecycle import app_releases
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
+from ctl.service_state import tailnet_dns_name
 
 Log = Callable[[str], None]
 Stage = Callable[[str, str], None]
@@ -131,21 +134,14 @@ def _release_chat_connectors(service_id: str, root: Path, log: Log, *, forget: b
 
 
 def _remove_sign_in(service: Service, registry: Registry, paths: RuntimePaths) -> None:
-    from ctl.authentik_blueprints import write_removal_blueprint
-    from ctl.identity import GATED_APPS, OIDC_CONTRACTS, reconcile_blueprints
-    from ctl.service_state import tailnet_dns_name
-
-    if service.id in OIDC_CONTRACTS:
-        write_removal_blueprint(paths.root, service.id, OIDC_CONTRACTS[service.id].name, oidc=True)
-    elif service.id in GATED_APPS:
-        # The project is gone, so this rewrite drops the app from the outpost.
-        reconcile_blueprints(registry, tailnet_dns_name(), paths)
-        write_removal_blueprint(paths.root, service.id, service.name, oidc=False)
-    if service.id in OIDC_CONTRACTS or service.id in GATED_APPS:
-        from ctl.authentik_apply import apply_blueprints
-
-        # Apply now, so a quick reinstall cannot be undone by a late removal.
-        apply_blueprints(lambda _line: None)
+    if service.manifest.sign_in.method in {"oidc", "gate", "trusted_header"}:
+        remove_sign_in(
+            registry.catalog.get(service.id),
+            Authentik.runtime(paths),
+            catalog=registry.catalog,
+            host=tailnet_dns_name(),
+            paths=paths,
+        )
 
 
 def _remove_project(project: Path, *, keep_env: bool) -> None:
@@ -221,7 +217,7 @@ def uninstall_application(
     try:
         _remove_project(project, keep_env=not delete)
         _remove_sign_in(service, registry, paths)
-    except (OSError, ValueError) as exc:
+    except (AuthentikError, OSError, ValueError) as exc:
         return False, "remove_sign_in", f"Sign-in cleanup failed: {exc}"
 
     if not delete:

@@ -182,8 +182,8 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(values["AUTH_DISABLE_EMAIL_PASSWORD"], "1")
             self.assertEqual(values["LITELLM_MASTER_KEY"], "test-master-key")
             self.assertEqual(values["APP_URL"], "https://mu3lab.example.ts.net:8457")
-            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-lobehub.yaml"
-            self.assertIn("/api/auth/callback/authentik", blueprint.read_text(encoding="utf-8"))
+            self.assertIn("/api/auth/callback/authentik", service.manifest.sign_in.oidc.redirect_paths)
+            self.assertFalse((paths.projects / "authentik" / "blueprints").exists())
 
     def test_foundation_images_are_pinned_and_planned_services_are_not_routable(self):
         registry = load()
@@ -304,8 +304,8 @@ class RegistryTests(unittest.TestCase):
             self.assertTrue(values["NEXTCLOUD_DB_PASSWORD"])
             self.assertTrue(values["NEXTCLOUD_REDIS_PASSWORD"])
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
-            blueprint = paths.projects / "authentik" / "blueprints" / "mu3lab-nextcloud.yaml"
-            self.assertIn("/apps/user_oidc/code", blueprint.read_text(encoding="utf-8"))
+            self.assertIn("/apps/user_oidc/code", service.manifest.sign_in.oidc.redirect_paths)
+            self.assertFalse((paths.projects / "authentik" / "blueprints").exists())
             # A config.php is not proof of installation: Nextcloud writes it
             # before committing the database. The installer must retry safely.
             config = paths.data / "nextcloud" / "html" / "config" / "config.php"

@@ -34,7 +34,9 @@ class Hooks(AppHooks):
             pass  # an earlier attempt may have registered it; the login below decides
         token = _login(port, email, login["password"])
         if not token:
-            ctx.fail("account_bootstrap", "account_provisioning_failed", "SurfSense did not accept the generated login.")
+            ctx.fail(
+                "account_bootstrap", "account_provisioning_failed", "SurfSense did not accept the generated login."
+            )
         try:
             profile = request(port, "/users/me", token=token)
             if str(profile.get("email", "")).lower() != email.lower() or not profile.get("is_active"):
@@ -54,7 +56,9 @@ def _login(port: int, email: str, password: str) -> str:
     """SurfSense 0.0.40 returns its token in a session cookie; it still accepts it as a bearer token."""
     body = urllib.parse.urlencode({"username": email, "password": password}).encode()
     req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/auth/jwt/login", data=body, headers={"Content-Type": "application/x-www-form-urlencoded"}
+        f"http://127.0.0.1:{port}/auth/jwt/login",
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:

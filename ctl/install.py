@@ -21,6 +21,7 @@ DEBUG: Every fix logs its commands before running (via actions.py). Job dict
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import platform
@@ -34,9 +35,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ctl import actions, docker_config, preflight, privilege
+from ctl import actions, docker_config, preflight, privilege, routes
 from ctl.bootstrap import stamps
+from ctl.identity import gate_blueprint, sync_sign_in
+from ctl.integrations.authentik import Authentik, AuthentikError, password_hash
+from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+from ctl.secrets import clear_authentik_bootstrap, ensure_authentik_env, read_runtime_env
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -1391,39 +1396,27 @@ def _authentik_check(ctx: dict) -> dict:
     return _compose_health(9001, "http://127.0.0.1:9001/-/health/ready/")
 
 
-def _authentik_compose_env(blueprints: Path, log) -> dict[str, str]:
-    """Values Authentik's Compose file interpolates; never logged."""
-    from ctl import secrets as _secrets
-
-    env_file, added = _secrets.ensure_authentik_env(RuntimePaths().root)
+def _authentik_compose_env(account: dict, log) -> dict[str, str]:
+    """Generate first-start settings before starting Authentik; never log values."""
+    env_file, added = ensure_authentik_env(
+        RuntimePaths().root, email=account["email"], password_hash=password_hash(account["password"])
+    )
     if added:
         log("generated Authentik runtime configuration: " + ", ".join(added))
-    generated = _secrets.read_runtime_env(env_file)
+    generated = read_runtime_env(env_file)
     return {
         "AUTHENTIK_ENV_FILE": str(env_file),
-        "AUTHENTIK_TAG": generated.get("AUTHENTIK_TAG", "2026.8.3"),
-        "AUTHENTIK_SECRET_KEY": generated.get("AUTHENTIK_SECRET_KEY", ""),
-        "AUTHENTIK_POSTGRESQL__PASSWORD": generated.get("AUTHENTIK_POSTGRESQL__PASSWORD", ""),
-        "AUTHENTIK_BLUEPRINTS_DIR": str(blueprints),
+        "AUTHENTIK_POSTGRESQL__PASSWORD": generated["AUTHENTIK_POSTGRESQL__PASSWORD"],
         "MU3LAB_DATA_ROOT": str(RuntimePaths().data),
     }
 
 
 def fix_authentik(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"]("authentik")
-    from ctl.authentik_blueprints import write_dashboard_blueprint
-
-    dns_name = _tailscale_dns_name_for_install()
-    if not dns_name:
-        return {"ok": False, "error": "Tailscale did not provide a valid MagicDNS name for Authentik configuration."}
-    blueprint = write_dashboard_blueprint(
-        RuntimePaths().root,
-        dns_name,
-        tailnet_https_origin(dns_name, AUTHENTIK_SERVE_PORT).rstrip("/"),
-        tailnet_https_origin(dns_name, DASHBOARD_SERVE_PORT).rstrip("/"),
-    )
-    log("rendered the Authentik dashboard Blueprint (no credentials)")
-    values = _authentik_compose_env(blueprint.parent, log)
+    account = _account(ctx)
+    if not account:
+        return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
+    values = _authentik_compose_env(account, log)
     # Compose needs these values for interpolation. actions.compose_up passes
     # them in the process environment but never includes env values in logs.
     _update_progress(
@@ -1505,31 +1498,15 @@ def tailnet_https_origin(host: str, port: str) -> str:
 def check_authentik_setup(ctx: dict) -> dict:
     if _authentik_check(ctx).get("status") != "ok":
         return {"status": "missing", "state": "needs_user", "detail": "Authentik is not running yet."}
-    if not _authentik_initial_setup_pending():
-        return {"status": "ok", "state": "ready", "detail": "Your Authentik sign-in account exists."}
-    return {"status": "missing", "state": "needs_user", "detail": "Your Authentik sign-in account will be created."}
-
-
-def _authentik_initial_setup_pending() -> bool:
-    """Whether Authentik's unauthenticated root still redirects to setup.
-
-    This is a read-only, version-tolerant clue for the human-facing prompt.
-    It is not used as proof of an authenticated login; that proof belongs to
-    the later protected-dashboard check.
-    """
-    import http.client
-
     try:
-        connection = http.client.HTTPConnection("127.0.0.1", AUTHENTIK_PROXY_PORT, timeout=5)
-        connection.request("GET", "/")
-        response = connection.getresponse()
-        location = response.getheader("Location", "")
-        connection.close()
-        return response.status in {301, 302, 303, 307, 308} and location.startswith("/setup")
-    except (OSError, http.client.HTTPException):
-        # The setup row already follows a healthy-service row.  If a transient
-        # local probe fails, preserve the safe first-run instructions.
-        return True
+        client = Authentik.runtime()
+        user = client.user("akadmin")
+        values = read_runtime_env(RuntimePaths().projects / "authentik" / ".env")
+        if user and user.get("email") and not values.get("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH"):
+            return {"status": "ok", "state": "ready", "detail": "Your Authentik sign-in account exists."}
+    except AuthentikError:
+        return {"status": "missing", "state": "needs_user", "detail": "Authentik account setup is not ready yet."}
+    return {"status": "missing", "state": "needs_user", "detail": "Your Authentik sign-in account will be completed."}
 
 
 def _tailscale_dns_name_for_install() -> str:
@@ -1553,33 +1530,34 @@ def fix_authentik_setup(check: dict, ctx: dict) -> dict:
     account = _account(ctx)
     if not account:
         return {"ok": False, "error": "Your account details are needed. Run ./install.sh in a terminal."}
-    result = actions.authentik_set_owner(
-        account["email"], account["name"], account["password"], ctx["log_fn"]("authentik_setup")
-    )
-    return result if not result.get("ok") else {"ok": True}
+    try:
+        client = Authentik.runtime()
+        client.wait_for_defaults()
+        user = client.user("akadmin")
+        if user is None or user.get("email") != account["email"]:
+            raise AuthentikError("Authentik did not create your first-start account. Retry the Authentik start step.")
+        client.update_user(user["pk"], name=account["name"])
+        clear_authentik_bootstrap(RuntimePaths().root)
+    except (AuthentikError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    ctx["log_fn"]("authentik_setup")("Authentik owner account ready; first-start email and password hash removed.")
+    return {"ok": True}
 
 
-def _dashboard_blueprint(host: str) -> str:
-    from ctl.authentik_blueprints import render_dashboard_blueprint
-
-    return render_dashboard_blueprint(
-        host,
-        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT).rstrip("/"),
-        tailnet_https_origin(host, DASHBOARD_SERVE_PORT).rstrip("/"),
-    )
+def _gate_digest(host: str) -> str:
+    return hashlib.sha256(gate_blueprint(load_registry().catalog, host, RuntimePaths()).encode()).hexdigest()
 
 
 def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
     """A Mu3Lab update changed the sign-in gate or the Authentik apps it relies on."""
-    from ctl import routes
 
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     source = ctx["root"] / "apps" / "ingress" / "Caddyfile.authenticated"
-    blueprint = RuntimePaths().projects / "authentik" / "blueprints" / "mu3lab-dashboard.yaml"
+    stamp = RuntimePaths().projects / "ingress" / ".authentik-gate.sha256"
     try:
         if not routes.base_matches(source.read_text(encoding="utf-8"), target.read_text(encoding="utf-8")):
             return True
-        return blueprint.read_text(encoding="utf-8") != _dashboard_blueprint(host)
+        return stamps.read(stamp) != _gate_digest(host)
     except (OSError, ValueError):
         return True
 
@@ -1621,18 +1599,12 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
             "error": "Tailscale MagicDNS name is unavailable; cannot create a private Authentik application.",
         }
 
-    # Authentik already watches /blueprints/custom. The authentik step mounts
-    # this directory before starting the worker, so do not restart Compose
-    # here: a restart would generate another discovery event and can race two
-    # otherwise-idempotent Blueprint applies.
-    from ctl.authentik_blueprints import write_dashboard_blueprint
-
-    write_dashboard_blueprint(
-        RuntimePaths().root,
-        host,
-        tailnet_https_origin(host, AUTHENTIK_SERVE_PORT).rstrip("/"),
-        tailnet_https_origin(host, DASHBOARD_SERVE_PORT).rstrip("/"),
-    )
+    try:
+        client = Authentik.runtime()
+        client.wait_for_defaults()
+        sync_sign_in(load_registry().catalog, host, client)
+    except (AuthentikError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
     log = ctx["log_fn"]("dashboard_protection")
     _update_progress(
         ctx,
@@ -1642,11 +1614,10 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
         timeout_seconds=240,
     )
 
-    from ctl import routes
-
     source = ctx["root"] / "apps" / "ingress" / "Caddyfile.authenticated"
     target = RuntimePaths().projects / "ingress" / "Caddyfile"
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    stamps.write(target.parent / ".authentik-gate.sha256", _gate_digest(host))
     # Keep the routes of apps installed from the dashboard across updates.
     deployed = target.read_text(encoding="utf-8") if target.is_file() else ""
     target.write_text(routes.rebase(source.read_text(encoding="utf-8"), deployed), encoding="utf-8")

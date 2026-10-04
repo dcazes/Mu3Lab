@@ -29,4 +29,8 @@ with session_context() as session:
             seeded.admin = False
             seeded.email = "retired-" + secrets.token_hex(6) + "@mu3lab.invalid"
     session.commit()
-    print("MU3LAB_MEALIE_OWNER_OK" if current is not None and current.admin else "MU3LAB_ERROR Mealie has no administrator")
+    print(
+        "MU3LAB_MEALIE_OWNER_OK"
+        if current is not None and current.admin
+        else "MU3LAB_ERROR Mealie has no administrator"
+    )

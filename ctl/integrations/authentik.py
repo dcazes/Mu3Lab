@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import secrets
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+from ctl.jobs import redact_data
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
@@ -74,7 +77,19 @@ class Authentik:
         except httpx.HTTPError as exc:
             raise AuthentikError(f"Authentik could not be reached ({type(exc).__name__}).") from None
         if response.status_code >= 400:
-            raise AuthentikError(f"Authentik refused {method} {path} (HTTP {response.status_code}).")
+            detail = ""
+            if response.headers.get("content-type", "").startswith("application/json"):
+                try:
+                    errors = response.json()
+                except ValueError:
+                    errors = {}
+                if isinstance(errors, dict):
+                    reasons = {key: errors[key] for key in ("detail", "non_field_errors") if key in errors}
+                    if reasons:
+                        detail = " " + json.dumps(redact_data(reasons), ensure_ascii=False).replace(
+                            self.token, "[redacted]"
+                        )
+            raise AuthentikError(f"Authentik refused {method} {path} (HTTP {response.status_code}).{detail}")
         return response.json() if response.content else None
 
     def _all(self, path: str, params: dict[str, Any]) -> Iterator[dict[str, Any]]:
@@ -112,8 +127,43 @@ class Authentik:
             raise AuthentikError(f"Authentik could not be reached ({type(exc).__name__}).") from None
         result = response.json() if response.content else {}
         if response.status_code >= 400 or not result.get("success"):
-            reasons = [str(log.get("event", "")) for log in result.get("logs", []) if isinstance(log, dict)]
-            raise AuthentikError(f"Authentik rejected {name}: " + ("; ".join(reasons[:3]) or f"HTTP {response.status_code}"))
+            logs = [
+                log
+                for log in result.get("logs", [])
+                if isinstance(log, dict)
+                and str(log.get("log_level", "")).lower() in {"warning", "error", "warn", "critical"}
+            ]
+            detail = json.dumps(redact_data(logs), ensure_ascii=False) if logs else f"HTTP {response.status_code}"
+            raise AuthentikError(f"Authentik rejected {name}: {detail}")
+
+    def wait_for_defaults(self, timeout: float = 300) -> None:
+        """A healthy fresh server may still be waiting for the worker's built-in blueprints."""
+        defaults = (
+            ("/flows/instances/", "slug", "default-authentication-flow"),
+            ("/flows/instances/", "slug", "default-provider-authorization-implicit-consent"),
+            ("/flows/instances/", "slug", "default-provider-invalidation-flow"),
+            ("/crypto/certificatekeypairs/", "name", "authentik Self-signed Certificate"),
+        )
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                ready = all(
+                    any(
+                        item.get(key) == value
+                        for item in self.request("GET", path, params={key: value}).get("results", [])
+                    )
+                    for path, key, value in defaults
+                )
+            except AuthentikError:
+                ready = False
+            if ready:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AuthentikError(
+                    "Authentik's default sign-in flows and signing certificate are not ready yet. Try setup again."
+                )
+            time.sleep(min(2, remaining))
 
     # --- People ----------------------------------------------------------------
 
