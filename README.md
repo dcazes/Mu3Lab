@@ -51,7 +51,8 @@ That's the whole install. Here is what happens:
 1. **Enter your computer password once.** Setup installs Docker and Tailscale. UI builds run in a pinned Node container.
 2. **Choose an email and one password for Mu3Lab.** The same password signs you in to the dashboard and unlocks your password vault.
 3. **Approve this computer in Tailscale.** Your browser opens the page, and the installer carries on by itself once you approve.
-4. **Done.** Your app logins are saved to your vault, the dashboard opens, and its Home page lists what to do next.
+4. **Walk away.** That's every question, all in the first few minutes. The large downloads run unattended afterwards.
+5. **Sign in.** When setup is done, the dashboard opens in your browser. Sign in to finish. Your app logins are already in your vault, and the dashboard's Home page lists what to do next.
 
 > [!TIP]
 > To update, open **Settings → System → Mu3Lab updates** in the dashboard. The updater offers normal release tags and verifies their assets. Development checkouts stay manual: update the checkout and re-run `./install.sh` when you intend to apply it. Finished steps are skipped and changed code is rebuilt. `make check` prints a read-only readiness report.

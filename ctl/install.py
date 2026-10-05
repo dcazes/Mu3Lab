@@ -1,8 +1,8 @@
 """Mu3Lab :: ctl/install.py
 
 WHAT: The installer engine behind ./install.sh's setup page. An ordered list
-      of steps (this computer → system software → Mu3Lab → Docker → password
-      vault → Tailscale → sign-in → core app images), each check-first: a
+      of steps (this computer → system software → Tailscale → Docker →
+      Mu3Lab → password vault → sign-in → core app images), each check-first: a
       `ready` state is skipped, every other state maps to exactly one fix.
       Steps that need the user (creating accounts, approving Tailscale)
       pause as `waiting` prompts; running again resumes from them.
@@ -1036,8 +1036,12 @@ def _compose_image_outdated(projdir: Path) -> bool:
     return running is not None and running != wanted
 
 
+def vaultwarden_health() -> dict:
+    return _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
+
+
 def _vaultwarden_check(ctx: dict) -> dict:
-    health = _compose_health(VAULTWARDEN_PROXY_PORT, "http://127.0.0.1:8081/alive")
+    health = vaultwarden_health()
     if health["state"] == "ready" and _compose_image_outdated(
         ctx["root"] / "apps" / by_capability("password_store").id
     ):
@@ -2158,6 +2162,39 @@ STEPS: list[Step] = [
         ),
         "fix": fix_host_base,
     },
+    # Tailscale comes straight after the system packages so its one human step
+    # (approving this computer) happens in the first minutes, together with the
+    # account questions; everything after it runs unattended. Joining early
+    # exposes nothing: Vaultwarden and Authentik bind to loopback, and the
+    # *_serve steps publish them only after their owner accounts exist.
+    {
+        "id": "tailscale_pkg",
+        "label": "Install Tailscale",
+        "check": _tailscale_pkg_check,
+        "fix": fix_tailscale_pkg,
+        "verify_ok_states": ("ready", "unjoined"),
+    },
+    {
+        "id": "tailscale_operator",
+        "label": "Let Mu3Lab manage Tailscale",
+        "check": _tailscale_operator_check,
+        "fix": fix_tailscale_operator,
+    },
+    {
+        "id": "tailscale_join",
+        "label": "Connect to your Tailscale network",
+        "check": lambda ctx: (
+            lambda r: {
+                "name": "tailscale_join",
+                "status": "ok" if r["state"] == "ready" else "missing",
+                "detail": r["detail"],
+                "action": r["action"],
+                "state": ("ready" if r["state"] == "ready" else "unjoined"),
+                "blocking": False,
+            }
+        )(_tailscale_pkg_check(ctx)),
+        "fix": fix_tailscale_join,
+    },
     {
         "id": "docker",
         "label": "Docker",
@@ -2230,34 +2267,6 @@ STEPS: list[Step] = [
         "fix": fix_vaultwarden_setup,
     },
     {
-        "id": "tailscale_pkg",
-        "label": "Install Tailscale",
-        "check": _tailscale_pkg_check,
-        "fix": fix_tailscale_pkg,
-        "verify_ok_states": ("ready", "unjoined"),
-    },
-    {
-        "id": "tailscale_operator",
-        "label": "Let Mu3Lab manage Tailscale",
-        "check": _tailscale_operator_check,
-        "fix": fix_tailscale_operator,
-    },
-    {
-        "id": "tailscale_join",
-        "label": "Connect to your Tailscale network",
-        "check": lambda ctx: (
-            lambda r: {
-                "name": "tailscale_join",
-                "status": "ok" if r["state"] == "ready" else "missing",
-                "detail": r["detail"],
-                "action": r["action"],
-                "state": ("ready" if r["state"] == "ready" else "unjoined"),
-                "blocking": False,
-            }
-        )(_tailscale_pkg_check(ctx)),
-        "fix": fix_tailscale_join,
-    },
-    {
         "id": "vaultwarden_serve",
         "label": "Private address for Vaultwarden",
         "check": lambda ctx: _serve_port_check(VAULTWARDEN_SERVE_PORT),
@@ -2316,15 +2325,15 @@ STEPS: list[Step] = [
 PHASES = (
     ("Check this computer", ("host_supported",)),
     ("Install system software", ("host_base",)),
+    ("Connect your private network", ("tailscale_pkg", "tailscale_operator", "tailscale_join")),
     ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     (
         "Set up Mu3Lab",
         ("dashboard_src", "dashboard_build", "runtime_layout", "root_env", "service"),
     ),
-    ("Start your password vault", ("caddy", by_capability("password_store").id, "vaultwarden_setup")),
     (
-        "Connect your private network",
-        ("tailscale_pkg", "tailscale_operator", "tailscale_join", "vaultwarden_serve", "browser_extension"),
+        "Start your password vault",
+        ("caddy", by_capability("password_store").id, "vaultwarden_setup", "vaultwarden_serve", "browser_extension"),
     ),
     (
         "Set up sign-in",

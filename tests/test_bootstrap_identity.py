@@ -85,7 +85,7 @@ class BootstrapIdentityTests(unittest.TestCase):
 
     def test_identity_steps_are_before_final_dashboard_route(self):
         ids = [step["id"] for step in install.STEPS]
-        self.assertLess(ids.index("vaultwarden_setup"), ids.index("tailscale_join"))
+        self.assertLess(ids.index("vaultwarden_setup"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("tailscale_join"), ids.index("authentik_setup"))
         self.assertLess(ids.index("authentik_setup"), ids.index("dashboard_protection"))
         self.assertLess(ids.index("serve"), ids.index("dashboard_protection"))

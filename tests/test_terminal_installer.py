@@ -83,6 +83,8 @@ class DashboardReadinessTests(unittest.TestCase):
             patch.object(terminal.sys.stdin, "isatty", return_value=True),
             patch.object(terminal, "Screen"),
             patch.object(terminal.install, "_vaultwarden_account_exists", return_value=True),
+            patch.object(terminal, "sign_in_needs_owner", return_value=False),
+            patch.object(terminal, "print_intro"),
             patch.object(terminal.install, "new_job", return_value={"steps": [], "inputs": {}}),
             patch.object(terminal.install, "run_job", side_effect=finish_job),
             patch.object(terminal, "wait_for_core_apps", return_value=(True, "")),
@@ -92,6 +94,90 @@ class DashboardReadinessTests(unittest.TestCase):
         ):
             self.assertEqual(terminal.run(), 1)
         success.assert_not_called()
+
+    def test_waits_past_the_reminder_for_an_owner_who_walked_away(self):
+        clock = iter([0, *range(0, 3600, 60)])
+        screen = Mock()
+        with (
+            patch.object(terminal, "warm_up", return_value=True),
+            patch.object(terminal.bootstrap_state, "dashboard_ready_since", side_effect=[False] * 30 + [True]),
+            patch.object(terminal.time, "monotonic", side_effect=lambda: next(clock)),
+            patch.object(terminal.time, "sleep"),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            self.assertEqual(terminal.verify_dashboard(screen, "host.ts.net", lambda: False), (True, ""))
+        said = " ".join(str(call.args[0]) for call in screen.say.call_args_list)
+        self.assertEqual(said.count("Still waiting for you to sign in"), 1)
+
+
+class UpFrontQuestionTests(unittest.TestCase):
+    """Every question comes before the first install step, so the owner can walk away."""
+
+    def run_installer(self, *, fresh: bool, needs_owner: bool, vault_up: bool, login_errors: list[str]):
+        # A step that needs the login asks for it only when sign-in is not set up yet.
+        order: list[str] = []
+        seen: dict = {}
+
+        def fake_run_job(job, ctx):
+            order.append("run_job")
+            if needs_owner:
+                seen["account"] = dict(ctx["account"]())
+            job["status"] = "failed"
+
+        def ask_existing(_screen, verify=True):
+            order.append(f"ask_existing(verify={verify})")
+            return {"name": "alex", "email": "alex@example.com", "password": "correct horse battery"}
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(terminal, "ROOT", Path(tmp)),
+            patch.object(terminal.sys.stdin, "isatty", return_value=True),
+            patch.object(terminal, "Screen"),
+            patch.object(terminal.install, "_vaultwarden_account_exists", return_value=not fresh),
+            patch.object(terminal, "sign_in_needs_owner", return_value=needs_owner),
+            patch.object(
+                terminal.install, "vaultwarden_health", return_value={"state": "ready" if vault_up else "down"}
+            ),
+            patch.object(terminal, "vault_login_error", side_effect=login_errors),
+            patch.object(
+                terminal, "ask_new_account", side_effect=lambda _s: order.append("ask_new") or {"email": "a@b.co"}
+            ),
+            patch.object(terminal, "ask_existing_account", side_effect=ask_existing),
+            patch.object(terminal.install, "new_job", return_value={"steps": [], "inputs": {}}),
+            patch.object(terminal.install, "run_job", side_effect=fake_run_job),
+            patch.object(terminal, "report_failure", return_value=1),
+            patch("sys.stdout", io.StringIO()),
+        ):
+            terminal.run()
+        return order, seen.get("account")
+
+    def test_new_owner_is_asked_before_any_step_runs(self):
+        order, _ = self.run_installer(fresh=True, needs_owner=True, vault_up=False, login_errors=[])
+        self.assertEqual(order, ["ask_new", "run_job"])
+
+    def test_returning_owner_is_asked_up_front_when_sign_in_needs_them(self):
+        order, account = self.run_installer(fresh=False, needs_owner=True, vault_up=True, login_errors=[])
+        self.assertEqual(order, ["ask_existing(verify=True)", "run_job"])
+        self.assertEqual(account["email"], "alex@example.com")
+
+    def test_nothing_is_asked_when_sign_in_is_already_set_up(self):
+        order, _ = self.run_installer(fresh=False, needs_owner=False, vault_up=True, login_errors=[])
+        self.assertEqual(order, ["run_job"])
+
+    def test_login_given_while_the_vault_was_down_is_checked_once_it_is_up(self):
+        order, account = self.run_installer(fresh=False, needs_owner=True, vault_up=False, login_errors=[""])
+        self.assertEqual(order, ["ask_existing(verify=False)", "run_job"])
+        self.assertEqual(account["email"], "alex@example.com")
+
+    def test_a_login_the_vault_later_rejects_is_asked_again(self):
+        order, _ = self.run_installer(fresh=False, needs_owner=True, vault_up=False, login_errors=["Wrong password."])
+        self.assertEqual(order, ["ask_existing(verify=False)", "run_job", "ask_existing(verify=True)"])
+
+    def test_tailscale_is_the_last_step_that_needs_the_owner(self):
+        ids = [step["id"] for step in terminal.install.STEPS]
+        self.assertEqual(terminal.LAST_QUESTION_STEP, "tailscale_join")
+        for later in ("docker", "dashboard_build", "core_images"):
+            self.assertLess(ids.index(terminal.LAST_QUESTION_STEP), ids.index(later))
 
 
 class RegisterTests(unittest.TestCase):

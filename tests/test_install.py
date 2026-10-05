@@ -544,9 +544,12 @@ class WorkspaceStepTests(unittest.TestCase):
             self.assertFalse(result.get("ok"))
 
     def test_step_order(self):
-        # Identity-first bootstrap: Vaultwarden is initialized locally before
-        # the tailnet and Authentik are introduced.
+        # Questions first: the Tailscale approval happens before the long
+        # downloads; Vaultwarden is published only after its owner exists.
         ids = [m["id"] for m in install.STEPS]
+        self.assertLess(ids.index("host_base"), ids.index("tailscale_pkg"))
+        self.assertLess(ids.index("tailscale_join"), ids.index("docker"))
+        self.assertLess(ids.index("tailscale_join"), ids.index("dashboard_build"))
         self.assertLess(ids.index("runtime_layout"), ids.index("root_env"))
         self.assertLess(ids.index("runtime_layout"), ids.index("service"))
         self.assertLess(ids.index("docker_networks"), ids.index("dashboard_build"))
@@ -555,7 +558,7 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertLess(ids.index("docker_networks"), ids.index("caddy"))
         self.assertLess(ids.index("caddy"), ids.index("vaultwarden"))
         self.assertLess(ids.index("vaultwarden"), ids.index("vaultwarden_setup"))
-        self.assertLess(ids.index("vaultwarden_setup"), ids.index("tailscale_join"))
+        self.assertLess(ids.index("vaultwarden_setup"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("tailscale_operator"), ids.index("tailscale_join"))
         self.assertLess(ids.index("tailscale_join"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("vaultwarden_serve"), ids.index("authentik"))

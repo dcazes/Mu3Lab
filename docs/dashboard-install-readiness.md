@@ -28,9 +28,11 @@ Setup then opens the dashboard and asks the operator to sign in. A fully
 validated snapshot records a readiness timestamp only after its shared database
 transaction finishes. Setup requires a timestamp newer than the current
 verification attempt, so an earlier install cannot satisfy the check. Household
-sessions and failed snapshots cannot mark setup ready. Setup returns a failure
-and preserves diagnostics if no successful operator snapshot arrives within
-five minutes. A headless install prints the address for another tailnet device.
+sessions and failed snapshots cannot mark setup ready. The owner may have
+walked away during the downloads, so setup waits for that sign-in without a
+deadline. After five minutes it reminds them of the address and of the
+journal command for dashboard errors, and Ctrl+C stops it safely. A headless
+install prints the address for another tailnet device.
 
 The dashboard distinguishes HTTP/data errors from network errors and expired
 sessions. HTTP 500 responses no longer show Tailscale connection advice.

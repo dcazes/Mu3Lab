@@ -1,14 +1,17 @@
 """Mu3Lab :: ctl/bootstrap/terminal.py
 
 WHAT: The installer the user sees. Runs every step of ctl/install.py in the
-      terminal with one plain-language line per step, and stops only for the
-      two things a person must do: choose their Mu3Lab email and password, and
-      approve this computer in Tailscale (the browser opens by itself and the
-      installer continues on its own once approved). It then waits for the core
-      apps, saves the generated logins to the owner's vault, checks that every
-      private address really loads, and opens the dashboard.
+      terminal with one plain-language line per step. Everything a person must
+      do happens in the first few minutes: choose their Mu3Lab name, email and
+      password (or confirm them on a re-run), then approve this computer in
+      Tailscale (the browser opens by itself and the installer continues on its
+      own once approved). The long downloads run afterwards, unattended. It
+      then waits for the core apps, saves the generated logins to the owner's
+      vault, checks that every private address really loads, and opens the
+      dashboard for the owner to sign in.
 WHY:  Anything that needs no decision should just happen; anything that does
-      needs step-by-step instructions written for someone new to all of this.
+      needs step-by-step instructions written for someone new to all of this,
+      and must come first so the owner can walk away during the downloads.
 RUN:  ./install.sh (which runs `python -m ctl.bootstrap.terminal`).
 SECURITY: The password is read without echo, kept only in this process's
       memory, sent only to the local Vaultwarden and Authentik containers, and
@@ -38,8 +41,12 @@ from ctl.service_state import tailscale_status
 ROOT = Path(__file__).resolve().parents[2]
 MIN_PASSWORD = 12
 CORE_TIMEOUT = 45 * 60
+# How long to wait for the owner's first dashboard sign-in before reminding them.
+SIGN_IN_REMINDER = 5 * 60
 # Checks that pass without anything ever being installed; "already set up" would mislead.
 NO_SKIP_NOTE = frozenset({"host_supported", "dashboard_src", "nvidia_toolkit", "browser_extension"})
+# After this step finishes, nothing needs the owner until the final sign-in.
+LAST_QUESTION_STEP = "tailscale_join"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 BOLD, DIM, GREEN, RED, BLUE, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[34m", "\033[0m"
@@ -168,24 +175,45 @@ def ask_new_account(screen: Screen) -> dict[str, str]:
     return {"name": name, "email": email, "password": password}
 
 
-def ask_existing_account(screen: Screen) -> dict[str, str]:
-    """Vault exists but Authentik still needs its owner: confirm the same login."""
+def vault_login_error(email: str, password: str) -> str:
+    """Why the vault refused this login, or "" when it was accepted."""
     from ctl.integrations import vaultwarden as vaultwarden_api
 
+    try:
+        with vaultwarden_api.VaultSession(f"http://127.0.0.1:{install.VAULTWARDEN_PROXY_PORT}") as session:
+            session.login(email, password)
+    except vaultwarden_api.VaultError as exc:
+        return str(exc)
+    return ""
+
+
+def ask_existing_account(screen: Screen, verify: bool = True) -> dict[str, str]:
+    """Vault exists but Authentik still needs its owner: confirm the same login.
+
+    With verify=False (the vault is not running yet) the answers are checked
+    later, when the vault is up, by the caller.
+    """
     screen.pause()
     print("\nSign in with your Mu3Lab account")
     print("  Enter the email and password you chose when you first installed Mu3Lab.\n")
     for _attempt in range(5):
         email = _ask("  Your email address: ").lower()
         password = _ask("  Your password (nothing is shown as you type): ", True)
-        try:
-            with vaultwarden_api.VaultSession(f"http://127.0.0.1:{install.VAULTWARDEN_PROXY_PORT}") as session:
-                session.login(email, password)
-        except vaultwarden_api.VaultError as exc:
-            print(f"  {exc} Please try again.\n")
+        error = vault_login_error(email, password) if verify else ""
+        if error:
+            print(f"  {error} Please try again.\n")
             continue
+        print()
         return {"name": email.split("@")[0], "email": email, "password": password}
     raise SystemExit("Too many attempts. Run ./install.sh again when you have your password.")
+
+
+def sign_in_needs_owner(ctx: dict) -> bool:
+    """True when a later step (starting or finishing Authentik) needs the owner's login."""
+    try:
+        return install.check_authentik_setup(ctx).get("status") != "ok"
+    except Exception:  # any doubt means asking now, not mid-install
+        return True
 
 
 # --- Tailscale ------------------------------------------------------------------------
@@ -311,8 +339,13 @@ def tailnet_name() -> str:
     return name if re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name) else ""
 
 
-def verify_dashboard(screen: Screen, host: str, stopped, timeout: float = 300) -> tuple[bool, str]:
-    """Check routes, then wait for a fresh snapshot from a signed-in operator."""
+def verify_dashboard(screen: Screen, host: str, stopped, timeout: float | None = None) -> tuple[bool, str]:
+    """Check routes, then wait for a fresh snapshot from a signed-in operator.
+
+    The owner may have walked away during the downloads, so by default this
+    waits for them however long it takes (Ctrl+C stops it safely) and only
+    reminds them what to do after a few minutes.
+    """
     if not host:
         return False, "Tailscale is not online with a private DNS name. Run ./install.sh again to reconnect."
     screen.start("Checking your private HTTPS addresses")
@@ -330,17 +363,26 @@ def verify_dashboard(screen: Screen, host: str, stopped, timeout: float = 300) -
             webbrowser.open(dashboard)
         except (OSError, webbrowser.Error):
             screen.say("  The browser could not open automatically; use the address above.")
-    screen.start("Waiting for your signed-in dashboard to load")
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    screen.start("Waiting for you to sign in to your dashboard")
+    begun = time.monotonic()
+    reminded = False
+    while True:
+        waited = time.monotonic() - begun
+        if timeout is not None and waited >= timeout:
+            break
         if stopped():
             return False, "Dashboard verification was stopped."
         if bootstrap_state.dashboard_ready_since(started):
             screen.finish(screen.color(GREEN, "✓"), "Signed-in dashboard data loaded successfully")
             return True, ""
+        if not reminded and waited >= SIGN_IN_REMINDER:
+            reminded = True
+            screen.say(f"\n  Still waiting for you to sign in at {dashboard}")
+            screen.say("  If the dashboard shows an error, check journalctl --user -u mu3lab-ctl.")
+            screen.say("  You can also press Ctrl+C and run ./install.sh later to finish this step.")
         time.sleep(2)
     return False, (
-        "No successful signed-in dashboard load was received within 5 minutes. "
+        "No successful signed-in dashboard load was received in time. "
         "If the dashboard shows an error, check journalctl --user -u mu3lab-ctl. "
         "Run ./install.sh again to retry verification."
     )
@@ -359,11 +401,29 @@ def run() -> int:
     screen = Screen(log_path)
     stop = threading.Event()
     account: dict[str, str] = {}
+    verified = True
     fresh = not install._vaultwarden_account_exists()
+    # Every question is asked here, before anything is downloaded, so the
+    # owner can walk away once Tailscale (the first step that needs them) is
+    # connected.
+    print_intro(screen, fresh)
     if fresh:
         account.update(ask_new_account(screen))
+    elif sign_in_needs_owner({"root": ROOT}):
+        verify = install.vaultwarden_health().get("state") == "ready"
+        account.update(ask_existing_account(screen, verify=verify))
+        verified = verify
 
     def get_account() -> dict[str, str]:
+        nonlocal verified
+        if account and not verified:
+            # Asked up front while the vault was not running; it is now.
+            verified = True
+            error = vault_login_error(account["email"], account["password"])
+            if error:
+                account.clear()
+                screen.pause()
+                print(f"\n  Your vault did not accept the email and password you entered: {error}")
         if not account:
             account.update(ask_existing_account(screen))
         return account
@@ -387,6 +447,8 @@ def run() -> int:
                 note = screen.color(DIM, " (already set up)") if event.get("skipped") and not quiet else ""
                 label = bitwarden_line() if step_id == "browser_extension" else ""
                 screen.finish(screen.color(GREEN, "✓"), (label or labels[step_id]) + note)
+                if step_id == LAST_QUESTION_STEP:
+                    print_walk_away(screen)
             elif status == "failed":
                 screen.finish(screen.color(RED, "✗"), labels[step_id])
         elif event.get("type") == "log":
@@ -442,6 +504,23 @@ def run() -> int:
         screen.say(f"  Installer log: {log_path}")
         return 1
     return report_success(screen, dashboard, needs_provider)
+
+
+def print_intro(screen: Screen, fresh: bool) -> None:
+    screen.pause()
+    if fresh:
+        print("\n  Setup asks you a few things first: your first name, email and a password,")
+        print("  then you connect this computer to Tailscale in your browser.")
+        print("  After that it runs by itself, so you can walk away while it downloads.")
+    else:
+        print("\n  Anything setup needs from you comes first; after that it runs by itself.")
+
+
+def print_walk_away(screen: Screen) -> None:
+    screen.say("")
+    screen.say(screen.color(BOLD, "  That's everything setup needs from you for now."))
+    screen.say("  The rest runs by itself and can take a while: feel free to walk away.")
+    screen.say("  When it is done, your dashboard opens in the browser; sign in there to finish.")
 
 
 def bitwarden_line() -> str:
