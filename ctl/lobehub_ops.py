@@ -7,7 +7,7 @@ from typing import Any
 
 from ctl import chat_connections, mcp_gateway
 from ctl.control_state import ControlState
-from ctl.integrations.lobehub import ChatError, LobeHub
+from ctl.integrations.lobehub import AssistantSyncError, ChatError, LobeHub
 from ctl.manifest.catalog import load
 from ctl.mcp_catalog import load as load_connectors
 from ctl.platform_apps import by_capability
@@ -93,6 +93,9 @@ def sync_agents(log) -> tuple[bool, str]:
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
             chat_connections.save(uid, {**record, "managed": managed}, paths)
+        except AssistantSyncError as exc:
+            chat_connections.save(uid, {**record, "managed": exc.managed}, paths)
+            failures.append(str(exc))
         except (ChatError, OSError, ValueError) as exc:
             failures.append(str(exc))
     if failures:

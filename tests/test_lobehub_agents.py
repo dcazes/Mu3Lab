@@ -15,7 +15,7 @@ import httpx
 import jsonschema
 
 from ctl import chat_connections, lobehub_ops
-from ctl.integrations.lobehub import ChatError, LobeHub
+from ctl.integrations.lobehub import AssistantSyncError, ChatError, LobeHub
 from ctl.runtime import RuntimePaths
 
 SPEC = json.loads((Path(__file__).parent / "fixtures/lobehub-openapi-2.2.18.json").read_text())
@@ -124,6 +124,61 @@ class AgentSyncTests(unittest.TestCase):
             result = client.ensure_assistants([], managed, installed={"recipes"})
         self.assertEqual(result, {})
         self.assertNotIn(("PATCH", "/api/v1/agents/" + managed["recipes"]["agent_id"]), server.calls)
+
+    def test_one_apps_failing_connector_does_not_stop_the_other_assistants(self):
+        server = ApiServer()
+        handle = server.handle
+        broken = {"fail": False}
+
+        def flaky(request):
+            # The recipes connector's tool sync fails; pantry's must still be set up.
+            if broken["fail"] and request.url.path.endswith("/sync"):
+                row = next(s for s in server.servers if request.url.path.endswith(s["id"] + "/sync"))
+                if row["identifier"] == "mu3lab-recipes":
+                    return httpx.Response(502, json={"success": False})
+            return handle(request)
+
+        pantry = {**DESIRED[0], "id": "pantry", "title": "Pantry", "url": "http://gateway:8810/pantry/mcp"}
+        with LobeHub("https://chat.test", "person-key", transport=httpx.MockTransport(flaky)) as client:
+            managed = client.ensure_assistants(DESIRED, {})
+            broken["fail"] = True
+            with self.assertRaises(AssistantSyncError) as caught:
+                client.ensure_assistants([*DESIRED, pantry], managed)
+        self.assertIn("Recipes", str(caught.exception))
+        self.assertIn("HTTP 502", str(caught.exception))
+        self.assertEqual(set(caught.exception.managed), {"recipes", "pantry"})
+        self.assertEqual(caught.exception.managed["recipes"], managed["recipes"])
+        self.assertIn("Pantry", [agent["title"] for agent in server.agents])
+
+    def test_partial_sync_saves_the_assistants_that_worked(self):
+        class Client:
+            def __init__(self, _origin, key):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def ensure_assistants(self, desired, managed, *, installed):
+                raise AssistantSyncError("Recipes: failed", {"pantry": {"agent_id": "p", "instructions": "i"}})
+
+        state = Mock()
+        state.installation.return_value = None
+        with (
+            patch.object(lobehub_ops.chat_connections, "records", return_value={"owner": {"key": "sk-lh-working"}}),
+            patch.object(lobehub_ops.chat_connections, "save") as save,
+            patch.object(lobehub_ops, "desired_assistants", return_value=[]),
+            patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
+            patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
+            patch.object(lobehub_ops, "LobeHub", Client),
+        ):
+            ok, detail = lobehub_ops.sync_agents(lambda _line: None)
+        self.assertFalse(ok)
+        self.assertIn("Recipes", detail)
+        save.assert_called_once()
+        self.assertEqual(save.call_args.args[1]["managed"], {"pantry": {"agent_id": "p", "instructions": "i"}})
 
     def test_one_persons_failure_does_not_stop_others(self):
         synced = []

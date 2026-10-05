@@ -18,6 +18,14 @@ class ChatError(RuntimeError):
     """A safe message for the dashboard or worker."""
 
 
+class AssistantSyncError(ChatError):
+    """Some assistants failed; ``managed`` still records the ones that synced."""
+
+    def __init__(self, message: str, managed: dict[str, dict[str, str]]) -> None:
+        super().__init__(message)
+        self.managed = managed
+
+
 class LobeHub:
     def __init__(self, origin: str, key: str = "", *, transport: httpx.BaseTransport | None = None) -> None:
         self.origin = origin.rstrip("/")
@@ -129,57 +137,85 @@ class LobeHub:
         updated = dict(managed)
         wanted = {item["id"] for item in desired}
         installed = installed if installed is not None else wanted
+        failures: list[str] = []
         for item in desired:
-            slug = "mu3lab-" + item["id"]
-            old = managed.get(item["id"], {})
-            agent = next((a for a in agents if a["id"] == old.get("agent_id")), None)
-            if not agent:
-                agent = next((a for a in agents if a.get("title") == item["title"]), None)
-            server = next((s for s in servers if s["identifier"] == slug), None)
-            server_body = {
-                "name": item["title"],
-                "serverUrl": item["url"],
-                "isEnabled": True,
-                "credentials": {"type": "bearer", "token": item["token"]},
-            }
-            if server:
-                server = self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json=server_body)
-            else:
-                server = self.request("POST", "/api/v1/mcp-servers", json={"identifier": slug, **server_body})
-            self.request("POST", "/api/v1/mcp-servers/" + quote(server["id"], safe="") + "/sync")
-            body = {
-                "title": item["title"],
-                "description": item["description"],
-                "model": "mu3lab-chat",
-                "provider": "openai",
-                "plugins": [{"identifier": slug, "mode": "pinned"}],
-            }
-            instructions = item["instructions"]
-            if not agent or agent.get("systemRole") in {old.get("instructions"), instructions}:
-                body["systemRole"] = instructions
-            if agent:
-                agent = self.request("PATCH", "/api/v1/agents/" + quote(agent["id"], safe=""), json=body)
-            else:
-                agent = self.request("POST", "/api/v1/agents", json={**body, "systemRole": instructions})
-            updated[item["id"]] = {"agent_id": agent["id"], "instructions": instructions}
+            # One app's failing connector must not keep the person's other assistants away.
+            try:
+                updated[item["id"]] = self._upsert_assistant(item, managed.get(item["id"], {}), agents, servers)
+            except ChatError as exc:
+                failures.append(f"{item['title']}: {exc}")
         for app_id, old in managed.items():
             if app_id in wanted:
                 continue
-            server = next((s for s in servers if s["identifier"] == "mu3lab-" + app_id), None)
-            if server:
-                self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json={"isEnabled": False})
-            if not any(agent["id"] == old.get("agent_id") for agent in agents):
-                # The person deleted this assistant themselves; there is nothing left to retire.
-                updated.pop(app_id, None)
-                continue
-            agent_id = quote(old["agent_id"], safe="")
-            if app_id in installed:
-                self.request("PATCH", "/api/v1/agents/" + agent_id, json={"plugins": []})
-                continue
-            topics = self.request("GET", "/api/v1/topics", params={"agentId": old["agent_id"], "pageSize": 1})
-            if not topics.get("topics") and not topics.get("total", 0):
-                self.request("DELETE", "/api/v1/agents/" + agent_id)
-                updated.pop(app_id, None)
-            else:
-                self.request("PATCH", "/api/v1/agents/" + agent_id, json={"plugins": []})
+            try:
+                if self._retire_assistant(app_id, old, agents, servers, app_id in installed):
+                    updated.pop(app_id, None)
+            except ChatError as exc:
+                failures.append(f"{app_id}: {exc}")
+        if failures:
+            detail = (
+                failures[0] if len(failures) == 1 else f"{len(failures)} assistants were not updated. {failures[0]}"
+            )
+            raise AssistantSyncError(detail, updated)
         return updated
+
+    def _upsert_assistant(
+        self, item: dict[str, Any], old: dict[str, str], agents: list[dict[str, Any]], servers: list[dict[str, Any]]
+    ) -> dict[str, str]:
+        slug = "mu3lab-" + item["id"]
+        agent = next((a for a in agents if a["id"] == old.get("agent_id")), None)
+        if not agent:
+            agent = next((a for a in agents if a.get("title") == item["title"]), None)
+        server = next((s for s in servers if s["identifier"] == slug), None)
+        server_body = {
+            "name": item["title"],
+            "serverUrl": item["url"],
+            "isEnabled": True,
+            "credentials": {"type": "bearer", "token": item["token"]},
+        }
+        if server:
+            server = self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json=server_body)
+        else:
+            server = self.request("POST", "/api/v1/mcp-servers", json={"identifier": slug, **server_body})
+        self.request("POST", "/api/v1/mcp-servers/" + quote(server["id"], safe="") + "/sync")
+        body = {
+            "title": item["title"],
+            "description": item["description"],
+            "model": "mu3lab-chat",
+            "provider": "openai",
+            "plugins": [{"identifier": slug, "mode": "pinned"}],
+        }
+        instructions = item["instructions"]
+        if not agent or agent.get("systemRole") in {old.get("instructions"), instructions}:
+            body["systemRole"] = instructions
+        if agent:
+            agent = self.request("PATCH", "/api/v1/agents/" + quote(agent["id"], safe=""), json=body)
+        else:
+            agent = self.request("POST", "/api/v1/agents", json={**body, "systemRole": instructions})
+        return {"agent_id": agent["id"], "instructions": instructions}
+
+    def _retire_assistant(
+        self,
+        app_id: str,
+        old: dict[str, str],
+        agents: list[dict[str, Any]],
+        servers: list[dict[str, Any]],
+        still_installed: bool,
+    ) -> bool:
+        """Detach or remove an assistant no longer wanted; True when it should be forgotten."""
+        server = next((s for s in servers if s["identifier"] == "mu3lab-" + app_id), None)
+        if server:
+            self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json={"isEnabled": False})
+        if not any(agent["id"] == old.get("agent_id") for agent in agents):
+            # The person deleted this assistant themselves; there is nothing left to retire.
+            return True
+        agent_id = quote(old["agent_id"], safe="")
+        if still_installed:
+            self.request("PATCH", "/api/v1/agents/" + agent_id, json={"plugins": []})
+            return False
+        topics = self.request("GET", "/api/v1/topics", params={"agentId": old["agent_id"], "pageSize": 1})
+        if not topics.get("topics") and not topics.get("total", 0):
+            self.request("DELETE", "/api/v1/agents/" + agent_id)
+            return True
+        self.request("PATCH", "/api/v1/agents/" + agent_id, json={"plugins": []})
+        return False
