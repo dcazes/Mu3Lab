@@ -1,0 +1,8 @@
+{
+  "name": "mu3lab-grocy-community",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "mcp-grocy": "2.8.0"
+  }
+}

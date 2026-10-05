@@ -31,6 +31,7 @@ class MobileClientTests(unittest.TestCase):
                 "paperless-ngx",
                 "nextcloud",
                 "baby-buddy",
+                "grocy",
             },
         )
         self.assertEqual(mobile["lobehub"]["primary"], "lobechat-pwa")

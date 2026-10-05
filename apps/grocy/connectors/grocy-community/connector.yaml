@@ -1,0 +1,30 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: grocy-community
+name: Grocy MCP
+preferred: true
+provenance: community
+repository: https://github.com/miguelangel-nubla/mcp-grocy
+revision: 2.8.0
+package: mcp-grocy@2.8.0
+transport: streamable-http
+endpoint: http://grocy-mcp:8080/mcp
+local_health: http://127.0.0.1:8823/
+credentials:
+- key: api_key
+  env: GROCY_API_KEY
+  type: secret
+  label: Grocy API key
+  required: true
+provision:
+  service: grocy
+  script: provision.php
+  interpreter:
+  - s6-setuidgid
+  - abc
+  - php
+  - --
+provision_note: Creates a dedicated Mu3Lab MCP API key for exactly one prepared Grocy administrator; connect chat
+  before adding other household members.
+review_note: MIT-licensed mcp-grocy 2.8.0 uses the Grocy 4.7.1 API. Raw API tools, user listing, and printer actions
+  are blocked.
+reviewed: true

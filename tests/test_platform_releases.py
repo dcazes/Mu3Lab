@@ -93,5 +93,5 @@ class ReleaseAssetsTests(unittest.TestCase):
 
     def test_every_local_image_is_in_the_release_inventory(self):
         entries = inventory()
-        self.assertEqual(len(entries), 7)
-        self.assertEqual(len({item["name"] for item in entries}), 7)
+        self.assertEqual(len(entries), 8)
+        self.assertEqual(len({item["name"] for item in entries}), 8)

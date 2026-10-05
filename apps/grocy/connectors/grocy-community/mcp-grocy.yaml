@@ -1,0 +1,113 @@
+tools:
+  household_chores_get:
+    enabled: true
+  household_chores_execute:
+    enabled: true
+  household_tasks_get:
+    enabled: true
+  household_tasks_complete:
+    enabled: true
+  household_batteries_get:
+    enabled: true
+  household_batteries_charge:
+    enabled: true
+  household_batteries_print_label:
+    enabled: false
+  household_chores_print_label:
+    enabled: false
+  household_equipment_get:
+    enabled: true
+  household_actions_undo:
+    enabled: true
+  inventory_products_get:
+    enabled: true
+  inventory_products_get_groups:
+    enabled: true
+  inventory_products_get_price_history:
+    enabled: true
+  inventory_stock_get_all:
+    enabled: true
+  inventory_stock_get_by_product:
+    enabled: true
+  inventory_stock_get_volatile:
+    enabled: true
+  inventory_stock_get_by_location:
+    enabled: true
+  inventory_transactions_purchase:
+    enabled: true
+  inventory_transactions_consume:
+    enabled: true
+  inventory_transactions_transfer:
+    enabled: true
+  inventory_transactions_adjust:
+    enabled: true
+  inventory_transactions_open:
+    enabled: true
+  inventory_products_lookup:
+    enabled: true
+  inventory_products_print_label:
+    enabled: false
+  inventory_stock_entry_print_label:
+    enabled: false
+  inventory_stock_entry_consume:
+    enabled: true
+  inventory_stock_entry_transfer:
+    enabled: true
+  inventory_stock_entry_open:
+    enabled: true
+  recipes_management_get:
+    enabled: true
+  recipes_management_get_by_id:
+    enabled: true
+  recipes_management_create:
+    enabled: true
+  recipes_management_print_label:
+    enabled: false
+  recipes_fulfillment_get:
+    enabled: true
+  recipes_fulfillment_get_all:
+    enabled: true
+  recipes_mealplan_get:
+    enabled: true
+  recipes_mealplan_get_sections:
+    enabled: true
+  recipes_mealplan_add_recipe:
+    enabled: true
+  recipes_mealplan_add_note:
+    enabled: true
+  recipes_mealplan_delete_entry:
+    enabled: true
+  recipes_cooking_consume:
+    enabled: true
+  recipes_shopping_add_all_products:
+    enabled: true
+  recipes_shopping_add_missing_products:
+    enabled: true
+  recipes_cooking_complete:
+    enabled: true
+  shopping_lists_get:
+    enabled: true
+  shopping_list_get:
+    enabled: true
+  shopping_list_update:
+    enabled: true
+  shopping_list_add_item:
+    enabled: true
+  shopping_list_remove_item:
+    enabled: true
+  shopping_list_update_item:
+    enabled: true
+  shopping_list_print_thermal:
+    enabled: false
+  shopping_locations_get:
+    enabled: true
+  system_locations_get:
+    enabled: true
+  system_units_get:
+    enabled: true
+  system_users_get:
+    enabled: false
+  system_dev_call_api:
+    enabled: false
+  system_dev_test_request:
+    enabled: false

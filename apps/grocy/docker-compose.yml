@@ -1,0 +1,39 @@
+name: mu3lab-grocy
+
+services:
+  grocy:
+    image: lscr.io/linuxserver/grocy:version-v4.7.1@sha256:c0d0d9d22d3a54fe3f779a743baa2d7bab96b73fad5597ff1a631e2be4b863c8
+    restart: unless-stopped
+    ports: ["127.0.0.1:8003:80"]
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-America/Toronto}
+      GROCY_CULTURE: ${GROCY_CULTURE:-en}
+      GROCY_CURRENCY: ${GROCY_CURRENCY:-CAD}
+      GROCY_BASE_URL: ${GROCY_PUBLIC_URL:?GROCY_PUBLIC_URL is required}
+      GROCY_AUTH_CLASS: Grocy\Middleware\Auth\Mu3labReverseProxyAuthMiddleware
+      GROCY_REVERSE_PROXY_AUTH_HEADER: X-Mu3lab-User
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/grocy:/config
+      - ./Mu3labReverseProxyAuthMiddleware.php:/app/www/middleware/Auth/Mu3labReverseProxyAuthMiddleware.php:ro
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [grocy-app]
+    healthcheck:
+      # After install or an update, Grocy answers its first PHP request with a
+      # cache-reset redirect; the unauthenticated API call absorbs it here so
+      # no person or chat tool receives it. Any HTTP answer is fine for that call.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/img/logo.svg >/dev/null && curl -sS -o /dev/null http://127.0.0.1:80/api/system/info || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

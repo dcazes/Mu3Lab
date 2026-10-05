@@ -22,7 +22,7 @@ FIXTURES = Path(__file__).parent / "fixtures/routes"
 
 class ManifestRoutesTests(unittest.TestCase):
     def test_reviewed_routes_match_golden_files(self):
-        for app_id in ("mealie", "surfsense", "baby-buddy", "actual-budget", "litellm"):
+        for app_id in ("mealie", "surfsense", "baby-buddy", "actual-budget", "litellm", "grocy"):
             with self.subTest(app=app_id):
                 self.assertEqual(_block(load().get(app_id)) + "\n", (FIXTURES / (app_id + ".caddy")).read_text())
 

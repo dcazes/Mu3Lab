@@ -1,0 +1,181 @@
+schema_version: 1
+server: grocy-community
+revision: 2.8.0
+reviewed_at: '2026-10-04'
+guidance: Use returned product, stock, list, and recipe IDs; never guess IDs or units. Check expiry dates and low
+  stock before recommending purchases. Ask before stock transactions, list edits, cooking, or completing chores
+  and tasks. Storage locations are distinct from retail shops. Raw API and printing tools are blocked.
+categories:
+- id: inventory
+  title: Stock and products
+  summary: Read stock, expiry dates, prices, and product details; record stock transactions.
+- id: shopping
+  title: Shopping lists
+  summary: Read and edit household shopping lists and find retail shops.
+- id: recipes
+  title: Recipes and meals
+  summary: Read recipes and ingredient coverage; plan meals and record cooking.
+- id: household
+  title: Chores and tasks
+  summary: Read chores, tasks, equipment, and batteries; record completed household work.
+- id: system
+  title: Units and storage
+  summary: Read stock storage locations and quantity units.
+tools:
+  household_chores_get:
+    category: household
+    access: read
+    core: true
+  household_chores_execute:
+    category: household
+    access: write
+  household_tasks_get:
+    category: household
+    access: read
+  household_tasks_complete:
+    category: household
+    access: write
+  household_batteries_get:
+    category: household
+    access: read
+  household_batteries_charge:
+    category: household
+    access: write
+  household_equipment_get:
+    category: household
+    access: read
+  household_actions_undo:
+    category: household
+    access: write
+  inventory_products_get:
+    category: inventory
+    access: read
+  inventory_products_get_groups:
+    category: inventory
+    access: read
+  inventory_products_get_price_history:
+    category: inventory
+    access: read
+  inventory_stock_get_all:
+    category: inventory
+    access: read
+    core: true
+  inventory_stock_get_by_product:
+    category: inventory
+    access: read
+  inventory_stock_get_volatile:
+    category: inventory
+    access: read
+    core: true
+  inventory_stock_get_by_location:
+    category: inventory
+    access: read
+  inventory_transactions_purchase:
+    category: inventory
+    access: write
+  inventory_transactions_consume:
+    category: inventory
+    access: write
+  inventory_transactions_transfer:
+    category: inventory
+    access: write
+  inventory_transactions_adjust:
+    category: inventory
+    access: write
+  inventory_transactions_open:
+    category: inventory
+    access: write
+  inventory_products_lookup:
+    category: inventory
+    access: read
+    core: true
+  inventory_stock_entry_consume:
+    category: inventory
+    access: write
+  inventory_stock_entry_transfer:
+    category: inventory
+    access: write
+  inventory_stock_entry_open:
+    category: inventory
+    access: write
+  recipes_management_get:
+    category: recipes
+    access: read
+  recipes_management_get_by_id:
+    category: recipes
+    access: read
+  recipes_management_create:
+    category: recipes
+    access: write
+  recipes_fulfillment_get:
+    category: recipes
+    access: read
+    core: true
+  recipes_fulfillment_get_all:
+    category: recipes
+    access: read
+  recipes_mealplan_get:
+    category: recipes
+    access: read
+  recipes_mealplan_get_sections:
+    category: recipes
+    access: read
+  recipes_mealplan_add_recipe:
+    category: recipes
+    access: write
+  recipes_mealplan_add_note:
+    category: recipes
+    access: write
+  recipes_mealplan_delete_entry:
+    category: recipes
+    access: write
+  recipes_cooking_consume:
+    category: recipes
+    access: write
+  recipes_shopping_add_all_products:
+    category: recipes
+    access: write
+  recipes_shopping_add_missing_products:
+    category: recipes
+    access: write
+  recipes_cooking_complete:
+    category: recipes
+    access: write
+  shopping_lists_get:
+    category: shopping
+    access: read
+  shopping_list_get:
+    category: shopping
+    access: read
+    core: true
+  shopping_list_update:
+    category: shopping
+    access: write
+  shopping_list_add_item:
+    category: shopping
+    access: write
+  shopping_list_remove_item:
+    category: shopping
+    access: write
+  shopping_list_update_item:
+    category: shopping
+    access: write
+  shopping_locations_get:
+    category: shopping
+    access: read
+  system_locations_get:
+    category: system
+    access: read
+  system_units_get:
+    category: system
+    access: read
+blocked:
+  household_batteries_print_label: Printer actions require external hardware and are outside this integration.
+  household_chores_print_label: Printer actions require external hardware and are outside this integration.
+  inventory_products_print_label: Printer actions require external hardware and are outside this integration.
+  inventory_stock_entry_print_label: Printer actions require external hardware and are outside this integration.
+  recipes_management_print_label: Printer actions require external hardware and are outside this integration.
+  shopping_list_print_thermal: Printer actions require external hardware and are outside this integration.
+  system_users_get: Household identities are not needed for grocery assistance.
+  system_dev_call_api: Raw API access bypasses the tool review.
+  system_dev_test_request: Raw API access bypasses the tool review.

@@ -72,6 +72,15 @@ class TokenBypass(Model):
 
     path: str
     header_prefix: str
+    header: str = "Authorization"
+
+
+class Redirect(Model):
+    """Send a path elsewhere on the same address, e.g. away from an app's own password form."""
+
+    path: str
+    to: str
+    status: Literal[301, 302, 307, 308] = 302
 
 
 class Route(Model):
@@ -85,6 +94,7 @@ class Route(Model):
     trusted_header: str = "Remote-User"
     token_bypass: TokenBypass | None = None
     blocked_paths: tuple[BlockedPath, ...] = ()
+    redirects: tuple[Redirect, ...] = ()
     forwarded_host: Literal["host", "hostport"] = "hostport"
     # Who Authentik admits through a gate: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"

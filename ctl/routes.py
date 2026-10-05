@@ -115,7 +115,7 @@ def _block(service: Service) -> str:
         lines[2:2] = [
             "\t@api_token {",
             f"\t\tpath {bypass.path}",
-            f"\t\theader Authorization {json.dumps(bypass.header_prefix + '*')}",
+            f"\t\theader {bypass.header} {json.dumps(bypass.header_prefix + '*')}",
             "\t}",
         ]
         lines.append("\t\thandle @api_token {")
@@ -142,6 +142,8 @@ def _block(service: Service) -> str:
         lines.extend([f"{indent}\ttrusted_proxies private_ranges", f"{indent}}}"])
     for blocked in route.blocked_paths:
         lines.append(f"{indent}respond {blocked.path} {json.dumps(blocked.message)} {blocked.status}")
+    for redirect in route.redirects:
+        lines.append(f"{indent}redir {redirect.path} {redirect.to} {redirect.status}")
     launcher = caddy_handler(service.manifest)
     if launcher:
         lines.extend(launcher.strip("\n").splitlines())

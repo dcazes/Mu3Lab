@@ -1,0 +1,124 @@
+# Grocy — see ctl/manifest/models.py for every field.
+id: grocy
+capabilities: [inventory]
+name: Grocy
+tier: optional
+group: apps
+category: home
+tagline: Pantry stock, shopping lists, and chores
+summary: Track pantry stock, expiry dates, purchases, and shopping lists in a shared household inventory. Organize
+  recipes, recurring chores, tasks, and batteries alongside your groceries.
+version: v4.7.1
+upstream: grocy/grocy
+service:
+  local_port: 8003
+  health:
+    path: /img/logo.svg
+route:
+  https_port: 8459
+  caddy_port: 19476
+  access: trusted_header
+  trusted_header: X-Mu3lab-User
+  copy_identity_headers:
+  - X-Authentik-Username
+  # Phone apps send their own per-person Grocy API key and cannot complete a
+  # browser sign-in; Grocy checks the key and the identity header is stripped.
+  token_bypass:
+    path: /api/*
+    header: GROCY-API-KEY
+    header_prefix: ''
+  redirects:
+  - path: /login*
+    to: /
+sign_in:
+  method: trusted_header
+  note: Authentik protects the private route and supplies Grocy's trusted X-Mu3lab-User identity. Each admitted
+    household member gets their own Grocy user with full access on first visit; client-supplied identity headers
+    are replaced at the proxy.
+account:
+  mode: trusted_header
+  user_action: Open Grocy; Authentik signs you in, then add your first products and locations.
+env:
+  GROCY_PUBLIC_URL: '{{public_url}}'
+rules:
+- rule: container_script
+  with:
+    at: after_healthy
+    service: grocy
+    script: scripts/adopt-owner.php
+    interpreter:
+    - s6-setuidgid
+    - abc
+    - php
+    - --
+    args:
+    - '{{owner_json}}'
+    expect: MU3LAB_GROCY_OWNER_OK
+    needs_owner: true
+    timeout_seconds: 90
+    purpose: Make Grocy's administrator your Authentik account and retire its default login
+chat:
+  assistant:
+    title: Grocy
+    description: Check stock, expiry dates, shopping lists, and chores.
+    instructions: Help with Grocy stock, expiry dates, shopping lists, recipes, and chores. Ask before consuming,
+      purchasing, or changing products or lists. Use only Grocy tools assigned to this agent.
+  connectors:
+  - grocy-community
+mobile:
+  primary: grocy-android
+  clients:
+  - id: grocy-android
+    name: Grocy Android
+    kind: native
+    support: community
+    platforms:
+    - android
+    install:
+      android: https://play.google.com/store/apps/details?id=xyz.zedler.patrick.grocy
+    homepage: https://github.com/patzly/grocy-android
+    source: https://github.com/patzly/grocy-android
+    setup: api_token
+    summary: Scan barcodes and manage groceries with batch processing on Android.
+    caveat: Community maintained; your phone must be connected to the Mu3Lab tailnet.
+    steps:
+    - Install Grocy Android and connect your phone to the Mu3Lab tailnet.
+    - Open Grocy in a browser, open the user menu, and choose Manage API keys to create a key.
+    - Enter the private Mu3Lab Grocy URL and paste that key into the phone app. Keep the key private; Mu3Lab never
+      reads or stores your phone's key.
+  - id: grocy-ios
+    name: Grocy Mobile
+    kind: native
+    support: community
+    platforms:
+    - ios
+    install:
+      ios: https://apps.apple.com/us/app/grocy-mobile/id1567803209
+    homepage: https://github.com/supergeorg/Grocy-SwiftUI
+    source: https://github.com/supergeorg/Grocy-SwiftUI
+    setup: api_token
+    summary: Manage stock, shopping lists, recipes, and chores on Apple devices.
+    caveat: Community maintained; the current Grocy Mobile 3 release requires iOS 26. Use mobile web on older devices.
+    steps:
+    - Install Grocy Mobile and connect your phone to the Mu3Lab tailnet.
+    - Open Grocy in a browser, open the user menu, and choose Manage API keys to create a key.
+    - Enter the private Mu3Lab Grocy URL and paste your personal API key into Grocy Mobile. Keep the key private;
+      Mu3Lab never reads or stores your phone's key.
+  - id: grocy-web
+    name: Grocy mobile web
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://grocy.info/
+    setup: web
+    summary: Manage groceries and chores in Grocy's responsive phone interface.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Grocy URL and complete Authentik sign-in.
+resource_guidance: A lightweight household app; allow space for the inventory database and uploaded product pictures.
+setup_action: Install Grocy to track pantry stock, shopping lists, and household chores.

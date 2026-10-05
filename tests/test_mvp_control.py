@@ -53,6 +53,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "paperless-ngx",
                 "nextcloud",
                 "baby-buddy",
+                "grocy",
             },
         )
         for service in optional:
