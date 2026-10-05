@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import getpass
 import grp
+import json
 import os
 import platform
 import re
@@ -457,7 +458,21 @@ def gather_tailscale(exec_fn=None, which_fn=None) -> dict:
     which_fn = which_fn or _sh.which
     binary = which_fn("tailscale") is not None
     active = exec_fn(["systemctl", "is-active", "tailscaled"])[0] == 0
-    joined = exec_fn(["tailscale", "status"])[0] == 0 if binary else False
+    joined = False
+    if binary:
+        rc, output = exec_fn(["tailscale", "status", "--json"])
+        try:
+            status = json.loads(output)
+            node = status.get("Self") or {}
+            name = str(node.get("DNSName") or "").rstrip(".")
+            joined = (
+                rc == 0
+                and status.get("BackendState") == "Running"
+                and node.get("Online") is True
+                and re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name) is not None
+            )
+        except (ValueError, TypeError, AttributeError):
+            pass
     return check_tailscale(binary, active, joined)
 
 

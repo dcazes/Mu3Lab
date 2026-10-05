@@ -26,3 +26,13 @@ def confirm(step: str, paths: RuntimePaths = RuntimePaths()) -> None:
         values = read(paths)
         values[step] = {"confirmed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
         records.put("bootstrap", "steps", values, paths)
+
+
+def confirm_dashboard_ready(paths: RuntimePaths = RuntimePaths()) -> None:
+    """Record only a validated operator snapshot, after its transaction closes."""
+    records.put("bootstrap", "dashboard_ready", {"verified_at": time.time()}, paths)
+
+
+def dashboard_ready_since(started: float, paths: RuntimePaths = RuntimePaths()) -> bool:
+    verified = records.get("bootstrap", "dashboard_ready", paths).get("verified_at")
+    return isinstance(verified, (int, float)) and verified >= started

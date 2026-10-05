@@ -64,13 +64,10 @@ class McpActivity:
         if not self.path.is_file():
             return default
         try:
-            db = database_store.connect(self.path, readonly=True, timeout=5)
-            try:
+            with database_store.connect(self.path, readonly=True, timeout=5) as db:
                 row = db.execute(
                     "SELECT permission FROM tool_permissions WHERE server_id=? AND tool_name=?", (server_id, tool_name)
                 ).fetchone()
-            finally:
-                db.close()
         except (OSError, sqlite3.Error):
             return default
         return str(row[0]) if row else default
@@ -80,12 +77,8 @@ class McpActivity:
         if not self.path.is_file():
             return []
         try:
-            db = database_store.connect(self.path, readonly=True, timeout=5)
-            db.row_factory = sqlite3.Row
-            try:
+            with database_store.connect(self.path, readonly=True, timeout=5) as db:
                 return db.execute(sql, params).fetchall()
-            finally:
-                db.close()
         except (OSError, sqlite3.Error):
             return []
 

@@ -11,7 +11,7 @@ import { usePath } from './lib/router';
 import { useTheme } from './lib/theme';
 import { CommandPalette } from './shell/CommandPalette';
 import { MobileBar, Sidebar } from './shell/Sidebar';
-import { LoadingScreen, OfflineScreen, SignedOutScreen } from './shell/StatusScreens';
+import { LoadingScreen, OfflineScreen, ServerErrorScreen, SignedOutScreen } from './shell/StatusScreens';
 import { DashboardProvider, useDashboard, useDashboardLoader } from './state/dashboard';
 
 // Heavier pages load on first visit so Home opens quickly.
@@ -38,7 +38,7 @@ export function Routes() {
 }
 
 function Shell() {
-  const { data, connection, failedSources, refresh } = useDashboard();
+  const { data, connection, errorStatus, failedSources, refresh } = useDashboard();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5000);
@@ -51,6 +51,7 @@ function Shell() {
   const path = usePath();
   if (connection === 'connecting') return <LoadingScreen />;
   if (connection === 'offline') return <OfflineScreen retry={() => void refresh()} />;
+  if (connection === 'server_error') return <ServerErrorScreen status={errorStatus} retry={() => void refresh()} />;
   if (connection === 'signed_out') return <SignedOutScreen />;
   return (
     <div className="shell">

@@ -12,6 +12,7 @@ DEBUG: A failing test prints the check dict; compare `status`/`blocking`/
       `action` against ctl/preflight.py.
 """
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -19,6 +20,32 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ctl import preflight
+
+
+class TailscaleConnectionProbeTests(unittest.TestCase):
+    def probe(self, payload, code=0):
+        def execute(command):
+            if command == ["systemctl", "is-active", "tailscaled"]:
+                return 0, "active"
+            self.assertEqual(command, ["tailscale", "status", "--json"])
+            return code, json.dumps(payload)
+
+        return preflight.gather_tailscale(exec_fn=execute, which_fn=lambda _: "/usr/bin/tailscale")
+
+    def test_requires_running_online_and_private_dns_even_when_command_succeeds(self):
+        connected = {"BackendState": "Running", "Self": {"Online": True, "DNSName": "node.ts.net."}}
+        self.assertEqual(self.probe(connected)["state"], "ready")
+        for payload in (
+            connected | {"BackendState": "NeedsLogin"},
+            connected | {"Self": {"Online": False, "DNSName": "node.ts.net"}},
+            connected | {"Self": {"Online": True}},
+            connected | {"Self": {"Online": True, "DNSName": "invalid"}},
+            [],
+            None,
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.probe(payload)["state"], "unjoined")
+        self.assertEqual(self.probe(connected, code=1)["state"], "unjoined")
 
 
 class OsTests(unittest.TestCase):

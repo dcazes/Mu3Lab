@@ -8,7 +8,9 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from ctl import bootstrap_state
 from ctl.api import create_app
+from ctl.control_state import ControlState
 from ctl.status import snapshots
 from ctl.status.display import projection
 from ctl.store import checklist, db
@@ -34,6 +36,31 @@ class SnapshotTests(unittest.TestCase):
         with db.connect(db.database()):
             pass
         self.client = TestClient(create_app(), base_url="https://host.ts.net")
+
+    def test_installed_gateway_does_not_close_snapshot_and_success_verifies_dashboard(self):
+        state = ControlState(db.database())
+        for service in ("firecrawl", "mealie"):
+            state.set_installation(service, "running")
+        # The gateway reads tool permissions before the next installation read.
+        response = self.client.get("/api/v1/snapshot", headers=OPERATOR)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["identity"]["is_admin"])
+        self.assertTrue(bootstrap_state.dashboard_ready_since(0))
+
+    def test_failed_snapshot_and_household_snapshot_do_not_verify_installer(self):
+        response = self.client.get("/api/v1/snapshot", headers=MEMBER)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(bootstrap_state.dashboard_ready_since(0))
+        with patch("ctl.api.routes.snapshot.chat.chat_status", side_effect=RuntimeError("snapshot failed")):
+            client = TestClient(create_app(), raise_server_exceptions=False)
+            self.assertEqual(client.get("/api/v1/snapshot", headers=OPERATOR).status_code, 500)
+        self.assertFalse(bootstrap_state.dashboard_ready_since(0))
+
+    def test_readiness_from_a_previous_install_does_not_complete_a_new_attempt(self):
+        with patch("ctl.bootstrap_state.time.time", return_value=100):
+            bootstrap_state.confirm_dashboard_ready()
+        self.assertTrue(bootstrap_state.dashboard_ready_since(99))
+        self.assertFalse(bootstrap_state.dashboard_ready_since(101))
 
     def test_services_and_snapshot_never_run_host_commands(self):
         with patch("subprocess.Popen", side_effect=AssertionError("page load ran a host command")):

@@ -4,15 +4,94 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
 
 from ctl import core_setup
 from ctl.bootstrap import terminal
 from ctl.integrations.vaultwarden import bootstrap as vaultwarden_api
+
+
+class DashboardReadinessTests(unittest.TestCase):
+    def test_http_errors_and_unexpected_redirects_are_not_ready(self):
+        for code in (401, 403, 404, 500, 302):
+            with (
+                self.subTest(code=code),
+                patch("ctl.bootstrap.terminal.urllib.request.build_opener") as opener,
+                patch("ctl.bootstrap.terminal.time.monotonic", side_effect=[0, 0, 2]),
+                patch("ctl.bootstrap.terminal.time.sleep"),
+            ):
+                opener.return_value.open.side_effect = urllib.error.HTTPError(
+                    "https://host.ts.net:8446", code, "failure", {"Location": "https://wrong.ts.net/login"}, None
+                )
+                self.assertFalse(terminal.warm_up("https://host.ts.net:8446", timeout=1, redirect_host="host.ts.net"))
+
+    def test_expected_authentik_redirect_only_verifies_route(self):
+        with patch("ctl.bootstrap.terminal.urllib.request.build_opener") as opener:
+            opener.return_value.open.side_effect = urllib.error.HTTPError(
+                "https://host.ts.net:8446", 302, "login", {"Location": "https://host.ts.net/if/flow/login/"}, None
+            )
+            self.assertTrue(terminal.warm_up("https://host.ts.net:8446", redirect_host="host.ts.net"))
+
+    def test_route_failure_stops_before_opening_dashboard(self):
+        with (
+            patch.object(terminal, "warm_up", return_value=False),
+            patch.object(terminal.webbrowser, "open") as browser,
+        ):
+            ok, message = terminal.verify_dashboard(Mock(), "host.ts.net", lambda: False)
+        self.assertFalse(ok)
+        self.assertIn("did not become ready", message)
+        browser.assert_not_called()
+
+    def test_sign_in_redirect_does_not_finish_without_a_fresh_snapshot(self):
+        with (
+            patch.object(terminal, "warm_up", return_value=True),
+            patch.object(terminal.bootstrap_state, "dashboard_ready_since", return_value=False),
+            patch.object(terminal.time, "monotonic", side_effect=[0, 0, 2]),
+            patch.object(terminal.time, "sleep"),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            ok, message = terminal.verify_dashboard(Mock(), "host.ts.net", lambda: False, timeout=1)
+        self.assertFalse(ok)
+        self.assertIn("No successful signed-in dashboard load", message)
+
+    def test_finishes_only_after_a_new_signed_in_snapshot(self):
+        with (
+            patch.object(terminal, "warm_up", return_value=True),
+            patch.object(terminal.bootstrap_state, "dashboard_ready_since", side_effect=[False, True]) as ready,
+            patch.object(terminal.time, "time", return_value=123),
+            patch.object(terminal.time, "sleep"),
+            patch.dict("os.environ", {"DISPLAY": ":0"}),
+            patch.object(terminal.webbrowser, "open") as browser,
+        ):
+            self.assertEqual(terminal.verify_dashboard(Mock(), "host.ts.net", lambda: False), (True, ""))
+        ready.assert_called_with(123)
+        browser.assert_called_once_with("https://host.ts.net:8446/")
+
+    def test_failed_final_verification_exits_without_reporting_success(self):
+        def finish_job(job, _ctx):
+            job["status"] = "ready"
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(terminal, "ROOT", Path(tmp)),
+            patch.object(terminal.sys.stdin, "isatty", return_value=True),
+            patch.object(terminal, "Screen"),
+            patch.object(terminal.install, "_vaultwarden_account_exists", return_value=True),
+            patch.object(terminal.install, "new_job", return_value={"steps": [], "inputs": {}}),
+            patch.object(terminal.install, "run_job", side_effect=finish_job),
+            patch.object(terminal, "wait_for_core_apps", return_value=(True, "")),
+            patch.object(terminal, "tailnet_name", return_value="host.ts.net"),
+            patch.object(terminal, "verify_dashboard", return_value=(False, "snapshot unavailable")),
+            patch.object(terminal, "report_success") as success,
+        ):
+            self.assertEqual(terminal.run(), 1)
+        success.assert_not_called()
 
 
 class RegisterTests(unittest.TestCase):

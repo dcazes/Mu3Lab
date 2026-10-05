@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from ctl import bootstrap_state
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.routes import chat, jobs, system
@@ -35,4 +36,7 @@ def snapshot(person: Member) -> models.SnapshotResponse:
     # All stores reuse this connection: a refresh sees one database snapshot.
     with db.connect(path) as connection:
         connection.execute("BEGIN")
-        return models.SnapshotResponse.model_validate(read())
+        result = models.SnapshotResponse.model_validate(read())
+    if person.get("is_admin"):
+        bootstrap_state.confirm_dashboard_ready()
+    return result

@@ -1760,7 +1760,11 @@ def fix_tailscale_join(check: dict, ctx: dict) -> dict:
     if result.get("need_terminal"):
         return {"waiting": True, "prompt": _join_prompt("")}
     if result.get("ok"):
-        return {"ok": True}
+        if _tailscale_pkg_check(ctx).get("state") == "ready":
+            return {"ok": True}
+        # A successful `up` can precede online status and MagicDNS. Keep the
+        # terminal's connection wait active instead of failing verification.
+        return {"waiting": True, "prompt": _join_prompt("") | {"connection_pending": True}}
     return {"waiting": True, "prompt": _join_prompt("")}
 
 

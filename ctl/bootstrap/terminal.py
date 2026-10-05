@@ -20,11 +20,9 @@ DEBUG: Full command output goes to .state/install-<time>.log; the path is
 from __future__ import annotations
 
 import getpass
-import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -34,7 +32,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from ctl import browser_extension, install
+from ctl import bootstrap_state, browser_extension, install
+from ctl.service_state import tailscale_status
 
 ROOT = Path(__file__).resolve().parents[2]
 MIN_PASSWORD = 12
@@ -197,21 +196,25 @@ def wait_for_tailscale(screen: Screen, job: dict, ctx: dict) -> None:
     link = str((step.get("prompt") or {}).get("login_url") or "")
     meta = next(item for item in install.STEPS if item["id"] == "tailscale_join")
     screen.pause()
-    print("\nConnect this computer to Tailscale")
-    print("  Tailscale is the free, private network that lets only your own devices")
-    print("  reach Mu3Lab, from home or anywhere else.\n")
-    print("  Your web browser is opening the Tailscale page. There:")
-    print('    1. Sign in. No account yet? Choose "Sign up"; it is free.')
-    print('    2. When Tailscale asks about this computer, click "Connect".')
-    print("  You don't need to come back and press anything: this window continues")
-    print("  by itself as soon as the computer is connected.\n")
-    if link:
-        print("  If the browser did not open, copy this link into it:")
-        print(f"    {link}\n")
+    if (step.get("prompt") or {}).get("connection_pending"):
+        print("\nTailscale has started. Waiting for this device to be online with its private DNS name.")
+        screen.start("Waiting for your private network connection")
     else:
-        print("  If no browser page opened, open a second terminal in this folder and run:")
-        print("    ./tools/open_tailscale_login.sh\n")
-    screen.start("Waiting for you to approve this computer in Tailscale")
+        print("\nConnect this computer to Tailscale")
+        print("  Tailscale is the free, private network that lets only your own devices")
+        print("  reach Mu3Lab, from home or anywhere else.\n")
+        print("  Your web browser is opening the Tailscale page. There:")
+        print('    1. Sign in. No account yet? Choose "Sign up"; it is free.')
+        print('    2. When Tailscale asks about this computer, click "Connect".')
+        print("  You don't need to come back and press anything: this window continues")
+        print("  by itself as soon as the computer is connected.\n")
+        if link:
+            print("  If the browser did not open, copy this link into it:")
+            print(f"    {link}\n")
+        else:
+            print("  If no browser page opened, open a second terminal in this folder and run:")
+            print("    ./tools/open_tailscale_login.sh\n")
+        screen.start("Waiting for you to approve this computer in Tailscale")
     while not ctx["stopped"]():
         check = meta["check"](ctx)
         if check.get("status") == "ok":
@@ -273,8 +276,8 @@ def save_logins(account: dict[str, str], host: str) -> tuple[bool, str]:
     return True, f"{len(result.created) + len(result.updated)} logins saved"
 
 
-def warm_up(url: str, timeout: float = 120) -> bool:
-    """Wait until an HTTPS address answers; the first visit also fetches its certificate."""
+def warm_up(url: str, timeout: float = 120, *, redirect_host: str = "") -> bool:
+    """Require HTTPS success or an expected private Authentik redirect."""
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
@@ -284,10 +287,15 @@ def warm_up(url: str, timeout: float = 120) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with opener.open(url, timeout=20):
-                return True
+            with opener.open(url, timeout=20) as response:
+                if response.status == 200:
+                    return True
         except urllib.error.HTTPError as exc:
-            if exc.code < 500:
+            if (
+                exc.code in (302, 303, 307, 308)
+                and redirect_host
+                and install._authentik_redirect_is_expected(exc.headers.get("Location"), redirect_host)
+            ):
                 return True
         except OSError:
             pass
@@ -296,12 +304,46 @@ def warm_up(url: str, timeout: float = 120) -> bool:
 
 
 def tailnet_name() -> str:
-    try:
-        proc = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5)
-        name = str(json.loads(proc.stdout).get("Self", {}).get("DNSName", "")).rstrip(".")
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+    status = tailscale_status()
+    if status["state"] != "connected":
         return ""
+    name = str(status["dns_name"])
     return name if re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name) else ""
+
+
+def verify_dashboard(screen: Screen, host: str, stopped, timeout: float = 300) -> tuple[bool, str]:
+    """Check routes, then wait for a fresh snapshot from a signed-in operator."""
+    if not host:
+        return False, "Tailscale is not online with a private DNS name. Run ./install.sh again to reconnect."
+    screen.start("Checking your private HTTPS addresses")
+    for port in (install.AUTHENTIK_SERVE_PORT, install.VAULTWARDEN_SERVE_PORT, install.DASHBOARD_SERVE_PORT):
+        url = install.tailnet_https_origin(host, port)
+        if not warm_up(url, redirect_host=host):
+            return False, f"The private address {url} did not become ready."
+    screen.finish(screen.color(GREEN, "✓"), "Private HTTPS routes are answering")
+    dashboard = install.tailnet_https_origin(host, install.DASHBOARD_SERVE_PORT)
+    started = time.time()
+    screen.say(f"\n  Open {dashboard} and sign in with your Mu3Lab account.")
+    screen.say("  Setup finishes after your dashboard data loads successfully.")
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+        try:
+            webbrowser.open(dashboard)
+        except (OSError, webbrowser.Error):
+            screen.say("  The browser could not open automatically; use the address above.")
+    screen.start("Waiting for your signed-in dashboard to load")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if stopped():
+            return False, "Dashboard verification was stopped."
+        if bootstrap_state.dashboard_ready_since(started):
+            screen.finish(screen.color(GREEN, "✓"), "Signed-in dashboard data loaded successfully")
+            return True, ""
+        time.sleep(2)
+    return False, (
+        "No successful signed-in dashboard load was received within 5 minutes. "
+        "If the dashboard shows an error, check journalctl --user -u mu3lab-ctl. "
+        "Run ./install.sh again to retry verification."
+    )
 
 
 # --- Main --------------------------------------------------------------------------------
@@ -392,11 +434,13 @@ def run() -> int:
     account.clear()
 
     dashboard = f"https://{host}:{install.DASHBOARD_SERVE_PORT}/" if host else ""
-    if host:
-        screen.start("Checking that your private addresses load")
-        for port in (install.AUTHENTIK_SERVE_PORT, install.VAULTWARDEN_SERVE_PORT, install.DASHBOARD_SERVE_PORT):
-            warm_up(install.tailnet_https_origin(host, port))
-        screen.finish(screen.color(GREEN, "✓"), "Private addresses are ready")
+    verified, error = verify_dashboard(screen, host, stop.is_set)
+    if not verified:
+        screen.finish(screen.color(RED, "✗"), "Dashboard verification did not finish")
+        screen.say(f"  {error}")
+        screen.log("dashboard_readiness", error)
+        screen.say(f"  Installer log: {log_path}")
+        return 1
     return report_success(screen, dashboard, needs_provider)
 
 
@@ -449,8 +493,6 @@ def report_success(screen: Screen, dashboard: str, needs_provider: bool) -> int:
         if needs_provider:
             print("  First thing to do there: connect a free AI provider so the AI chat works.")
         print("  The dashboard's Home page lists every next step in order.")
-        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-            webbrowser.open(dashboard)
     else:
         print("  Tailscale is not connected, so the dashboard address is unknown.")
         print("  Run ./install.sh again to finish connecting.")

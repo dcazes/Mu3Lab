@@ -161,6 +161,7 @@ class TailscaleRerunTests(unittest.TestCase):
             patch.object(install.privilege, "run_privileged", side_effect=privileged),
             patch.object(install.getpass, "getuser", return_value="me"),
             patch.object(install, "_tailscale_auth_url", return_value=""),
+            patch.object(install, "_tailscale_pkg_check", return_value={"state": "ready"}),
         ):
             result = install.fix_tailscale_join({}, ctx)
             ctx["_tailscale_join_state"]["thread"].join(2)
@@ -168,6 +169,17 @@ class TailscaleRerunTests(unittest.TestCase):
         self.assertIn("--operator=me", calls[0])
         self.assertIn("--exit-node=100.64.0.1", calls[1])
         self.assertTrue(result["ok"])
+
+    def test_successful_up_keeps_waiting_for_online_status_and_dns(self):
+        ctx = {"log_fn": lambda _s: lambda _l: None, "stopped": lambda: False}
+        with (
+            patch.object(install.privilege, "run_privileged", return_value={"ok": True, "output": ""}),
+            patch.object(install, "_tailscale_auth_url", return_value=""),
+            patch.object(install, "_tailscale_pkg_check", return_value={"state": "unjoined"}),
+        ):
+            result = install.fix_tailscale_join({}, ctx)
+        self.assertTrue(result["waiting"])
+        self.assertTrue(result["prompt"]["connection_pending"])
 
 
 class AuthentikSetupScanTests(unittest.TestCase):

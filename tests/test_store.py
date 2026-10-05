@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
+from ctl.mcp_activity import McpActivity
 from ctl.runtime import RuntimePaths
 from ctl.store import db, owners
 from ctl.store.secrets import SecretError, SecretStore
@@ -26,6 +27,23 @@ class StoreTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.paths = RuntimePaths(Path(self.temporary.name))
         self.store = SecretStore(self.paths)
+
+    def test_mcp_readers_preserve_the_snapshot_connection_and_its_transaction(self):
+        path = db.database(self.paths)
+        activity = McpActivity(path)
+        activity.set_permission("connector", "tool", "disabled")
+        activity.set_category("connector", "search", False)
+        with db.connect(path) as connection:
+            connection.execute("BEGIN")
+            self.assertEqual(activity.permission("connector", "tool", "read"), "disabled")
+            self.assertEqual(activity.explicit_permissions("connector"), {"tool": "disabled"})
+            self.assertEqual(activity.category_switches("connector"), {"search": False})
+            self.assertTrue(connection.in_transaction)
+            self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)
+        # The same readers also own and close their connection when called alone.
+        self.assertEqual(activity.permission("connector", "missing", "read"), "auto")
+        self.assertEqual(activity.explicit_permissions("connector"), {"tool": "disabled"})
+        self.assertEqual(getattr(db._local, "connections", {}), {})
 
     def test_parallel_process_startup_applies_schema_once_and_keeps_all_writes(self):
         context = multiprocessing.get_context("spawn")

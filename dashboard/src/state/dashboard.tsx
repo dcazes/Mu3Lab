@@ -27,11 +27,12 @@ export interface DashboardData {
   chat: ChatStatus;
 }
 
-export type Connection = 'connecting' | 'online' | 'offline' | 'signed_out';
+export type Connection = 'connecting' | 'online' | 'offline' | 'signed_out' | 'server_error';
 
 export interface DashboardValue {
   data: DashboardData;
   connection: Connection;
+  errorStatus?: number;
   /** Data sources whose latest refresh failed, so what is shown may be older. */
   failedSources?: string[];
   refresh: () => Promise<void>;
@@ -78,11 +79,18 @@ export function useIsAdmin(): boolean {
 }
 
 const isSignedOut = (error: unknown) => error instanceof ApiError && error.kind === 'signed_out';
+const failedConnection = (error: unknown): Connection =>
+  isSignedOut(error)
+    ? 'signed_out'
+    : error instanceof ApiError && error.kind === 'offline'
+      ? 'offline'
+      : 'server_error';
 
 /** Polls the control plane and reports whether it is reachable and signed in. */
 export function useDashboardLoader(): DashboardValue {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [connection, setConnection] = useState<Connection>('connecting');
+  const [errorStatus, setErrorStatus] = useState<number>();
   // Sources whose last refresh failed; their data on screen is from an earlier refresh.
   const [failedSources, setFailedSources] = useState<string[]>([]);
   const inFlight = useRef<Promise<void> | null>(null);
@@ -94,7 +102,8 @@ export function useDashboardLoader(): DashboardValue {
         await api('/api/health');
       } catch (error) {
         if (isSignedOut(error)) setData((previous) => ({ ...previous, identity: emptyData.identity }));
-        setConnection(isSignedOut(error) ? 'signed_out' : 'offline');
+        setErrorStatus(error instanceof ApiError ? error.status : undefined);
+        setConnection(failedConnection(error));
         return;
       }
       try {
@@ -102,16 +111,18 @@ export function useDashboardLoader(): DashboardValue {
         setData(snapshot);
         setFailedSources([]);
       } catch (error) {
+        setErrorStatus(error instanceof ApiError ? error.status : undefined);
         if (isSignedOut(error)) {
           setData((previous) => ({ ...previous, identity: emptyData.identity }));
           setConnection('signed_out');
           return;
         }
         setFailedSources(['snapshot']);
-        setConnection('offline');
+        setConnection(failedConnection(error));
         return;
       }
       setConnection('online');
+      setErrorStatus(undefined);
     })().finally(() => {
       inFlight.current = null;
     });
@@ -136,5 +147,5 @@ export function useDashboardLoader(): DashboardValue {
     };
   }, [load]);
 
-  return { data, connection, failedSources, refresh: load };
+  return { data, connection, errorStatus, failedSources, refresh: load };
 }
