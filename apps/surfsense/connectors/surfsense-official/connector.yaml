@@ -24,3 +24,4 @@ provision:
   - '-'
 provision_note: Creates a Mu3Lab MCP personal token for the single active SurfSense user and enables API access
   on that user's workspaces.
+reviewed: true

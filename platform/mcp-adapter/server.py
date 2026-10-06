@@ -61,7 +61,8 @@ def _auth() -> str:
     token = os.environ.get("ADVENTURELOG_API_KEY", "")
     if not token:
         raise ValueError("AdventureLog API key is not configured")
-    return "Bearer " + token
+    # AdventureLog reads "Api-Key"; it treats a Bearer header as an anonymous request.
+    return "Api-Key " + token
 
 
 def _path(value: str) -> str:

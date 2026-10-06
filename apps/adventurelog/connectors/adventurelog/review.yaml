@@ -1,0 +1,17 @@
+schema_version: 1
+server: adventurelog
+revision: v0.13.0-api
+reviewed_at: '2026-10-06'
+guidance: |
+  Collections group trips; locations are the places in them. List them before answering questions
+  about trips, and use the names they return rather than guessing.
+
+categories:
+  - id: trips
+    title: Trips and places
+    summary: List trip collections and saved locations; create a new collection.
+
+tools:
+  list_collections: {category: trips, access: read, core: true}
+  list_locations: {category: trips, access: read, core: true}
+  create_collection: {category: trips, access: write}

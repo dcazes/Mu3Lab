@@ -199,6 +199,21 @@ class InstallTests(unittest.TestCase):
             },
         ]
 
+    def test_adventurelog_keeps_naming_its_owner_so_no_default_admin_appears(self):
+        # AdventureLog creates admin/admin whenever its admin settings are missing after first start.
+        app = load().catalog.get("adventurelog")
+        rule = next(rule for rule in rules_for(app.manifest) if rule.name == "first_admin_from_env")
+        owner = {"owner_uid": "u1", "email": "owner@example.test", "username": "owner", "display_name": "Owner"}
+        env: dict[str, str] = {}
+        rule.prepare_env(app, env, owner)
+        self.assertEqual(env, {"MU3LAB_OWNER_USERNAME": "owner", "MU3LAB_OWNER_EMAIL": "owner@example.test"})
+        rule.prepare_env(app, env, {**owner, "username": "someone-else"})
+        self.assertEqual(env["MU3LAB_OWNER_USERNAME"], "owner")
+        compose = yaml.safe_load((app.folder / "docker-compose.yml").read_text())
+        settings = compose["services"]["app"]["environment"]
+        self.assertIn("MU3LAB_OWNER_USERNAME", settings["DJANGO_ADMIN_USERNAME"])
+        self.assertIn("MU3LAB_OWNER_FALLBACK_PASSWORD", settings["DJANGO_ADMIN_PASSWORD"])
+
     def test_staged_bootstrap_final_start_drops_secrets_overrides_and_service_filter(self):
         self.configure(rules=self.first_admin_rules(), account="environment_bootstrap")
         job = self.run_install()

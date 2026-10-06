@@ -10,3 +10,4 @@ transport: streamable-http
 endpoint: http://firecrawl-mcp:3000/mcp
 local_health: http://127.0.0.1:8818/mcp
 review_note: Uses the private self-hosted Firecrawl API; tools may fetch external web pages.
+reviewed: true

@@ -11,7 +11,9 @@ services:
       POSTGRES_DB: ${DB_NAME:-surfsense}
     command: postgres -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10
     volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/postgres:/var/lib/postgresql/data"]
-    networks: [surfsense_internal]
+    networks:
+      surfsense_internal:
+        aliases: [surfsense-db]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-surfsense} -d ${DB_NAME:-surfsense}"]
       interval: 10s
@@ -36,7 +38,9 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/redis:/data"]
-    networks: [surfsense_internal]
+    networks:
+      surfsense_internal:
+        aliases: [surfsense-redis]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -52,7 +56,9 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
       - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
-    networks: [surfsense_internal]
+    networks:
+      surfsense_internal:
+        aliases: [surfsense-searxng]
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
       interval: 10s
@@ -64,10 +70,10 @@ services:
     restart: unless-stopped
     env_file: [".env"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      REDIS_APP_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@surfsense-db:5432/${DB_NAME:-surfsense}
+      CELERY_BROKER_URL: redis://surfsense-redis:6379/0
+      CELERY_RESULT_BACKEND: redis://surfsense-redis:6379/0
+      REDIS_APP_URL: redis://surfsense-redis:6379/0
       CELERY_TASK_DEFAULT_QUEUE: surfsense
       PYTHONPATH: /app
       UVICORN_LOOP: asyncio
@@ -76,13 +82,15 @@ services:
       NEXT_FRONTEND_URL: ${SURFSENSE_PUBLIC_URL}
       BACKEND_URL: ${SURFSENSE_PUBLIC_URL}
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-TRUE}
-      SEARXNG_URL: http://searxng:8080
+      SEARXNG_URL: http://surfsense-searxng:8080
       SANDBOX_ENABLED: "FALSE"
       SERVICE_ROLE: api
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
-    networks: [surfsense_internal]
+    # Also on the shared networks: Ollama embeddings and web research need them. Its own
+    # database, Redis and SearXNG use unique names so they cannot resolve to another app's.
+    networks: [surfsense_internal, mu3lab_backend, mu3lab_frontend]
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -99,20 +107,22 @@ services:
     restart: unless-stopped
     env_file: [".env"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      REDIS_APP_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@surfsense-db:5432/${DB_NAME:-surfsense}
+      CELERY_BROKER_URL: redis://surfsense-redis:6379/0
+      CELERY_RESULT_BACKEND: redis://surfsense-redis:6379/0
+      REDIS_APP_URL: redis://surfsense-redis:6379/0
       CELERY_TASK_DEFAULT_QUEUE: surfsense
       PYTHONPATH: /app
       FILE_STORAGE_LOCAL_PATH: /app/.local_object_store
-      SEARXNG_URL: http://searxng:8080
+      SEARXNG_URL: http://surfsense-searxng:8080
       SANDBOX_ENABLED: "FALSE"
       SERVICE_ROLE: worker
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
-    networks: [surfsense_internal]
+    # Also on the shared networks: Ollama embeddings and web research need them. Its own
+    # database, Redis and SearXNG use unique names so they cannot resolve to another app's.
+    networks: [surfsense_internal, mu3lab_backend, mu3lab_frontend]
     depends_on:
       migrations: {condition: service_completed_successfully}
       backend: {condition: service_healthy}
@@ -199,5 +209,6 @@ services:
 
 networks:
   mu3lab_backend: {external: true}
+  mu3lab_frontend: {external: true}
   surfsense_internal: {internal: true}
   surfsense_edge: {}

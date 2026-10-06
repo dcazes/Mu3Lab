@@ -23,3 +23,4 @@ provision:
   - manage.py
   - shell
 provision_note: Creates or reuses a Paperless API token for the single active superuser.
+reviewed: true

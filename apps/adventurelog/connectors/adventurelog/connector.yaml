@@ -29,3 +29,4 @@ secrets:
   length: 40
 include:
 - platform/mcp-adapter/server.py
+reviewed: true

@@ -36,6 +36,8 @@ secrets:
 - env: POSTGRES_PASSWORD
 - env: SECRET_KEY
   length: 48
+- env: MU3LAB_OWNER_FALLBACK_PASSWORD
+  length: 48
 env:
   SITE_URL: '{{public_url}}'
   ADVENTURELOG_FORCE_SOCIAL_LOGIN: 'true'
@@ -44,6 +46,7 @@ rules:
   with:
     override: docker-compose.bootstrap.yml
     fresh_when_empty: postgres
+    keep_owner: true
     verify:
       django_superuser:
         service: app

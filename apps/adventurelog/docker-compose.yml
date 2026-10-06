@@ -7,6 +7,11 @@ services:
     environment:
       SITE_URL: ${SITE_URL:-http://127.0.0.1:8015}
       DJANGO_SETTINGS_MODULE: main.mu3lab_settings
+      # Without these, AdventureLog's startup creates a default admin/admin superuser on every
+      # restart. Naming the owner's existing account makes it create nothing.
+      DJANGO_ADMIN_USERNAME: ${MU3LAB_OWNER_USERNAME:?the owner's username is required}
+      DJANGO_ADMIN_EMAIL: ${MU3LAB_OWNER_EMAIL:?the owner's email is required}
+      DJANGO_ADMIN_PASSWORD: ${MU3LAB_OWNER_FALLBACK_PASSWORD:?a fallback password is required}
       DEBUG: "false"
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       PGHOST: db

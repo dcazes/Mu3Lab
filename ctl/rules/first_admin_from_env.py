@@ -7,6 +7,11 @@ app's own names) with the owner's Authentik username and a random password,
 checks the account exists, and the engine then restarts the app without those
 settings. The password is never stored: these apps sign in only through
 Authentik.
+
+``keep_owner`` is for apps (AdventureLog) whose startup falls back to a default
+``admin``/``admin`` account when those settings are missing. The owner's
+username and email stay in ``MU3LAB_OWNER_*`` so the app's normal settings can
+keep naming the existing administrator, and it creates nothing.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from ctl.rules import Params, Rule, RuleError, register
 
 if TYPE_CHECKING:
     from ctl.manifest.catalog import App
+    from ctl.store.workflows import JobIdentity
 
 DJANGO_CHECK = Path(__file__).with_name("scripts") / "django_superuser.py"
 
@@ -55,6 +61,7 @@ class FirstAdminParams(Params):
     username: Literal["sanitized", "verbatim"] = "sanitized"
     existing_account_check: ExistingAccountCheck | None = None
     verify: Verify | None = None
+    keep_owner: bool = False
 
 
 def account_username(owner_username: str, email: str) -> str:
@@ -99,6 +106,17 @@ class FirstAdminFromEnv(Rule):
         except OSError:
             return False
 
+    def _username(self, owner: JobIdentity) -> str:
+        if self.params.username == "verbatim":
+            return owner["username"]
+        return account_username(owner["username"], owner["email"])
+
+    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
+        # Saved once, so later restarts name the same administrator the first start created.
+        if self.params.keep_owner and owner and "MU3LAB_OWNER_USERNAME" not in env:
+            env["MU3LAB_OWNER_USERNAME"] = self._username(owner)
+            env["MU3LAB_OWNER_EMAIL"] = owner["email"]
+
     def plan_start(self, ctx: HookContext, plan: StartPlan) -> None:
         if not self._fresh(ctx):
             ctx.stage("account_bootstrap", "Existing administrator kept; its data is reused.")
@@ -107,11 +125,7 @@ class FirstAdminFromEnv(Rule):
             ctx.fail("account_preflight", "identity_email_missing", "A verified Authentik email is required.")
             return
         owner = ctx.owner
-        username = (
-            owner["username"]
-            if self.params.username == "verbatim"
-            else account_username(owner["username"], owner["email"])
-        )
+        username = self._username(owner)
         plan.extra_files.append(ctx.project / self.params.override)
         plan.env.update(
             {

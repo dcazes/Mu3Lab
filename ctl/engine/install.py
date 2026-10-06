@@ -250,15 +250,16 @@ def run_install(
                 )
                 state.set_initialization(app.id, account_mode, "ready", job_id=job_id, owner_uid=owner_uid)
         stage("finalize", "Application and private route verified.")
-        ok, detail = sync_agents(log)
-        if not ok:
-            log(f"Chat assistants were not updated: {redact(detail)}")
         try:
             preenable(app.id, root)
         except (AuthentikError, OSError, ValueError) as exc:
             log(f"The chat connector could not be prepared: {redact(str(exc))}")
         if not sync_application(app.id, running=True, root=root, log=log):
             log("One enabled MCP needs attention after application installation.")
+        # Only a live connector earns an assistant, so sync after the connector starts.
+        ok, detail = sync_agents(log)
+        if not ok:
+            log(f"Chat assistants were not updated: {redact(detail)}")
         onboarding_state.mark_configured(app.id, paths)
         if complete_job:
             store.transition(

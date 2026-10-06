@@ -56,6 +56,18 @@ class ReviewTests(unittest.TestCase):
                 self.assertLessEqual(sum(tool.core for tool in review.tools.values()), 6, server.id)
                 self.assertFalse(set(review.blocked) & set(review.tools), server.id)
 
+    def test_reviews_account_for_every_tool_the_connector_offers(self):
+        # Fixtures are tools/list from the running connector at its pinned revision. A tool upstream adds
+        # later is unreviewed (and hidden) until this fixture and the review are updated together.
+        fixtures = ROOT / "tests" / "fixtures" / "connector-tools"
+        for server in load_catalog(load_registry()):
+            fixture = fixtures / f"{server.id}.json"
+            if not server.review or not fixture.is_file():
+                continue
+            review = load_review(server.id, server.review)
+            self.assertEqual(review.revision, server.revision, server.id)
+            self.assertEqual(set(review.tools) | set(review.blocked), set(json.loads(fixture.read_text())), server.id)
+
     def test_credential_tools_are_never_offered(self):
         review = load_review("immich-photo-manager", "apps/immich/connectors/immich-photo-manager/review.yaml")
         self.assertIn("update_credentials", review.blocked)
