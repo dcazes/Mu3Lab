@@ -54,22 +54,16 @@ class LobeHub:
             )
         return data.get("data")
 
-    def _discovery(self) -> dict[str, Any]:
-        try:
-            response = self.client.get("/.well-known/openid-configuration")
-            response.raise_for_status()
-            document = response.json()
-            for field in ("device_authorization_endpoint", "token_endpoint"):
-                if urlsplit(document[field])[:2] != urlsplit(self.origin)[:2]:
-                    raise ValueError("unexpected provider")
-            return document
-        except (httpx.HTTPError, ValueError, KeyError):
-            raise ChatError("Chat's one-time connection is unavailable. Check core setup.") from None
+    # Fixed routes of LobeHub's built-in OIDC provider (src/libs/oidc-provider/provider.ts).
+    # Its discovery document needs a signed-in session; these two endpoints are public,
+    # which is how LobeHub's own CLI uses them.
+    DEVICE_AUTHORIZATION_PATH = "/oidc/device/auth"
+    TOKEN_PATH = "/oidc/token"
 
     def start_device_login(self) -> dict[str, Any]:
         try:
             response = self.client.post(
-                self._discovery()["device_authorization_endpoint"],
+                self.DEVICE_AUTHORIZATION_PATH,
                 data={"client_id": "lobehub-cli", "scope": "openid profile email offline_access"},
             )
             response.raise_for_status()
@@ -85,7 +79,7 @@ class LobeHub:
     def poll_device_login(self, device_code: str) -> dict[str, Any]:
         try:
             response = self.client.post(
-                self._discovery()["token_endpoint"],
+                self.TOKEN_PATH,
                 data={
                     "client_id": "lobehub-cli",
                     "device_code": device_code,

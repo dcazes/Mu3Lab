@@ -20,12 +20,16 @@ def caddy_handler(manifest: AppManifest) -> str:
     ).replace("<", "\\u003c")
     script = """(async function () {
   const cfg = SETTINGS;
+  // ?next= continues to one of this app's own pages; anything else opens the app's home.
+  const asked = new URLSearchParams(location.search).get('next') || '/';
+  const next = /^\\/(?!\\/)[\\w\\-.\\/?=&%]*$/.test(asked) ? asked : '/';
   try {
     if (cfg.session) {
       const session = await fetch(cfg.session, {credentials: 'same-origin'});
-      if (session.ok && (await session.json())?.user) { location.replace('/'); return; }
+      if (session.ok && (await session.json())?.user) { location.replace(next); return; }
     }
-    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}', location.origin));
+    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}/', location.origin + next)
+      .replaceAll('{origin}', location.origin));
     const r = await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     let target = await r.json();
@@ -44,12 +48,13 @@ def caddy_handler(manifest: AppManifest) -> str:
         f'<body><p id="status">Signing in…</p><a href="/">Open {html.escape(manifest.name)}</a>'
         f"<script>{script}</script></body></html>"
     )
+    # Only the dashboard may frame this page, so its embedded chat signs in without a click.
     return f"""
 \thandle {oidc.launch_path} {{
 \t\theader Content-Type "text/html; charset=utf-8"
 \t\theader Cache-Control "no-store"
 \t\theader Referrer-Policy "no-referrer"
-\t\theader Content-Security-Policy "default-src 'none'; script-src 'sha256-{digest}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+\t\theader Content-Security-Policy "default-src 'none'; script-src 'sha256-{digest}'; connect-src 'self'; base-uri 'none'; frame-ancestors https://{{http.request.host}}:8446"
 \t\trespond `{page}` 200
 \t}}
 """

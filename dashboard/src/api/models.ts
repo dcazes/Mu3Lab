@@ -23,6 +23,7 @@ export type CalendarSelectRequest = components['schemas']['CalendarSelectRequest
 export type CatalogProfile = components['schemas']['CatalogProfile'];
 export type CatalogResponse = components['schemas']['CatalogResponse'];
 export type CatalogService = components['schemas']['CatalogService'];
+export type ChatAssistant = components['schemas']['ChatAssistant'];
 export type ChatConnectResponse = components['schemas']['ChatConnectResponse'];
 export type ChatPollResponse = components['schemas']['ChatPollResponse'];
 export type ChatProvider = components['schemas']['ChatProvider'];

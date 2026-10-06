@@ -63,6 +63,38 @@ def desired_assistants() -> list[dict[str, Any]]:
     return result
 
 
+def assistant_report(uid: str) -> list[dict[str, str]]:
+    """Why each installed app does or does not have an assistant in this person's chat."""
+    state = ControlState.runtime()
+    if state is None:
+        return []
+    record = chat_connections.records().get(uid, {})
+    connectors = load_connectors(load_registry())
+    report = []
+    for app in load().apps:
+        installation = state.installation(app.id)
+        if not app.manifest.chat.assistant or not installation or installation["state"] == "not_installed":
+            continue
+        reviewed = [connector for connector in connectors if connector.service_id == app.id and connector.gateway]
+        runtimes = [state.mcp_server(connector.id) for connector in reviewed]
+        live = any(runtime and runtime["enabled"] and runtime["state"] == "live" for runtime in runtimes)
+        if not reviewed:
+            status, detail = "needs_review", "Its connector's tools have not been reviewed for chat yet."
+        elif not live:
+            current = next((runtime["state"] for runtime in runtimes if runtime), "not started")
+            status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
+        elif not record.get("key"):
+            status, detail = "not_connected", "Waiting for your one-time approval on the Chat page."
+        elif app.id in record.get("managed", {}):
+            status, detail = "ready", "Available in chat."
+        elif record.get("error"):
+            status, detail = "failed", record["error"]
+        else:
+            status, detail = "pending", "Adding to chat within five minutes."
+        report.append({"id": app.id, "name": app.manifest.name, "status": status, "detail": detail})
+    return report
+
+
 def sync_agents(log) -> tuple[bool, str]:
     paths = RuntimePaths()
     records = chat_connections.records(paths)
@@ -92,11 +124,13 @@ def sync_agents(log) -> tuple[bool, str]:
         try:
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
-            chat_connections.save(uid, {**record, "managed": managed}, paths)
+            chat_connections.save(uid, {**record, "managed": managed, "error": ""}, paths)
         except AssistantSyncError as exc:
-            chat_connections.save(uid, {**record, "managed": exc.managed}, paths)
+            chat_connections.save(uid, {**record, "managed": exc.managed, "error": str(exc)}, paths)
             failures.append(str(exc))
         except (ChatError, OSError, ValueError) as exc:
+            # Keep the reason with the person so the dashboard can show it, not just the worker log.
+            chat_connections.save(uid, {**record, "error": str(exc)}, paths)
             failures.append(str(exc))
     if failures:
         detail = failures[0] if len(failures) == 1 else f"{len(failures)} people's assistants were not updated."

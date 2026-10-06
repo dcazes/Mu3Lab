@@ -998,6 +998,42 @@
         "title": "CatalogService",
         "type": "object"
       },
+      "ChatAssistant": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "pending",
+              "failed",
+              "not_connected",
+              "connector_down",
+              "needs_review"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "detail"
+        ],
+        "title": "ChatAssistant",
+        "type": "object"
+      },
       "ChatConnectResponse": {
         "properties": {
           "interval": {
@@ -1117,6 +1153,20 @@
       },
       "ChatStatus": {
         "properties": {
+          "assistants": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChatAssistant"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistants"
+          },
           "authentication": {
             "title": "Authentication",
             "type": "string"

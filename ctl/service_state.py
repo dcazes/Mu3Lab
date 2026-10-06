@@ -402,6 +402,14 @@ def status(
             if project_states is not None
             else _compose_state(compose_file)
         )
+        source_file = service.compose_path(root) / "docker-compose.yml"
+        if compose_state == "absent" and source_file != compose_file and source_file.is_file():
+            # Older installers started some foundation stacks from the checkout, not the rendered project.
+            compose_state = (
+                (project_states or {}).get(str(source_file.parent.resolve()), "absent")
+                if project_states is not None
+                else _compose_state(source_file)
+            )
         ok, detail = _healthy(service)
         if ok and compose_state == "running":
             lifecycle_state = "ready"

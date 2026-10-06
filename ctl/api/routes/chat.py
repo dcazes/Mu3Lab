@@ -13,9 +13,9 @@ from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, OwnerMutation
 from ctl.api.service_view import service_snapshot, service_states
-from ctl.identity import mode_for
+from ctl.identity import launch_path, mode_for
 from ctl.integrations.lobehub import ChatError, LobeHub
-from ctl.lobehub_ops import origin, sync_agents
+from ctl.lobehub_ops import assistant_report, origin, sync_agents
 from ctl.mcp_registry import snapshot as mcp_snapshot
 from ctl.platform_apps import by_capability
 
@@ -32,18 +32,22 @@ def chat_status(operator: Member) -> models.ChatStatus:
     service = registry.get(by_capability("chat").id)
     state = next((item for item in view.services if item.id == service.id), None)
     ready = bool(state and state.health_state == "healthy" and dns_name and state.route_ready)
+    # The launcher reuses the dashboard's Authentik session instead of showing LobeChat's sign-in button.
+    url = state.url.rstrip("/") + launch_path(service.manifest) if state and state.url else ""
     provider = {
         "id": service.id,
         "name": service.name,
         "ready": ready,
-        "url": state.url if state else "",
+        "url": url,
         "authentication": mode_for(service),
         "detail": "LobeChat is ready." if ready else "LobeChat is not ready; check core setup and its private route.",
     }
     mcp = mcp_snapshot(registry, service_states(operator))
+    uid = str(operator.get("subject_id") or "")
     return models.ChatStatus.model_validate(
         {
-            "connected": bool(chat_connections.records().get(str(operator.get("subject_id") or ""), {}).get("key")),
+            "assistants": assistant_report(uid),
+            "connected": bool(chat_connections.records().get(uid, {}).get("key")),
             "ok": True,
             "ready": ready,
             "url": provider["url"],

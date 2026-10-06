@@ -1636,6 +1636,20 @@ export interface components {
       /** Tagline */
       tagline?: string | null;
     };
+    /** ChatAssistant */
+    ChatAssistant: {
+      /** Detail */
+      detail: string;
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'ready' | 'pending' | 'failed' | 'not_connected' | 'connector_down' | 'needs_review';
+    };
     /** ChatConnectResponse */
     ChatConnectResponse: {
       /** Interval */
@@ -1677,6 +1691,8 @@ export interface components {
     };
     /** ChatStatus */
     ChatStatus: {
+      /** Assistants */
+      assistants?: components['schemas']['ChatAssistant'][] | null;
       /** Authentication */
       authentication: string;
       /** Connected */

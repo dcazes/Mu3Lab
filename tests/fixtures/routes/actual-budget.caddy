@@ -5,15 +5,19 @@
 		header Content-Type "text/html; charset=utf-8"
 		header Cache-Control "no-store"
 		header Referrer-Policy "no-referrer"
-		header Content-Security-Policy "default-src 'none'; script-src 'sha256-7zGApJZj3+MFxL0RnZAdBS+dhO3WovPO0lmH5v96Lm0='; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+		header Content-Security-Policy "default-src 'none'; script-src 'sha256-LCmP7CZcsHYlLQAuCih7mkalBMgjUZtS3X639WLLGW4='; connect-src 'self'; base-uri 'none'; frame-ancestors https://{http.request.host}:8446"
 		respond `<!doctype html><html><head><meta charset="utf-8"><title>Opening app</title></head><body><p id="status">Signing in…</p><a href="/">Open Actual Budget</a><script>(async function () {
   const cfg = {"path": "/account/login", "body": {"loginMethod": "openid", "returnUrl": "{origin}"}, "keys": ["data", "returnUrl"], "session": ""};
+  // ?next= continues to one of this app's own pages; anything else opens the app's home.
+  const asked = new URLSearchParams(location.search).get('next') || '/';
+  const next = /^\/(?!\/)[\w\-.\/?=&%]*$/.test(asked) ? asked : '/';
   try {
     if (cfg.session) {
       const session = await fetch(cfg.session, {credentials: 'same-origin'});
-      if (session.ok && (await session.json())?.user) { location.replace('/'); return; }
+      if (session.ok && (await session.json())?.user) { location.replace(next); return; }
     }
-    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}', location.origin));
+    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}/', location.origin + next)
+      .replaceAll('{origin}', location.origin));
     const r = await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     let target = await r.json();

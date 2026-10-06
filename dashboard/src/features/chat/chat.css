@@ -24,6 +24,24 @@
   font-size: 13px;
 }
 
+.chat-assistants {
+  display: block;
+}
+
+.chat-assistants summary {
+  cursor: pointer;
+}
+
+.chat-assistants ul {
+  margin: 6px 0 2px;
+  padding-left: 18px;
+  color: var(--text-2);
+}
+
+.chat-assistants li[data-status='ready'] {
+  color: var(--text);
+}
+
 .chat-popout {
   position: absolute;
   right: 16px;

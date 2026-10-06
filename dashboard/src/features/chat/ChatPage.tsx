@@ -1,8 +1,9 @@
 import { MessageSquare, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { postApi } from '../../api/client';
 import { ExternalButton, LinkButton } from '../../components/Button';
 import { EmptyState } from '../../components/Layout';
+import type { ChatAssistant } from '../../api/models';
 import { useDashboard } from '../../state/dashboard';
 
 function expectedMcp(): { name: string; serviceId: string } | null {
@@ -14,14 +15,34 @@ function expectedMcp(): { name: string; serviceId: string } | null {
   }
 }
 
+function AssistantList({ assistants }: { assistants: ChatAssistant[] }) {
+  const ready = assistants.filter((item) => item.status === 'ready');
+  if (!assistants.length || ready.length === assistants.length) return null;
+  return (
+    <details className="chat-banner chat-assistants">
+      <summary>
+        Assistants in chat: {ready.length} of {assistants.length} apps
+      </summary>
+      <ul>
+        {assistants.map((item) => (
+          <li key={item.id} data-status={item.status}>
+            <b>{item.name}</b> — {item.detail}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function ChatPage() {
   const { data } = useDashboard();
   const status = data.chat;
   const [expected, setExpected] = useState(expectedMcp);
-  const [connection, setConnection] = useState<{ url: string; code: string; interval: number } | null>(null);
+  const [connection, setConnection] = useState<{ url: string; interval: number } | null>(null);
   const [connected, setConnected] = useState(false);
   const [message, setMessage] = useState('');
-  const [connecting, setConnecting] = useState(false);
+  const started = useRef(false);
+  const needsConnection = status.ready && !!status.url && !(status.connected || connected);
   useEffect(() => {
     if (!connection) return;
     let stopped = false;
@@ -39,7 +60,7 @@ export function ChatPage() {
         } else timer = setTimeout(poll, (result.interval || connection!.interval) * 1000);
       } catch (error) {
         if (!stopped) {
-          setMessage(error instanceof Error ? error.message : 'Chat could not connect. Try again.');
+          setMessage(error instanceof Error ? error.message : 'Chat could not connect. Reload to try again.');
           setConnection(null);
         }
       }
@@ -50,27 +71,21 @@ export function ChatPage() {
       clearTimeout(timer);
     };
   }, [connection]);
-  async function connect() {
-    setConnecting(true);
-    setMessage('');
-    // Open during the click so browsers permit the approval tab.
-    const approval = window.open('about:blank', '_blank');
-    try {
-      const result = await postApi<{ verification_uri_complete: string; user_code: string; interval: number }>(
-        '/api/v1/chat/connect',
+  // Start the one-time approval by itself; the person only confirms it inside the chat below.
+  useEffect(() => {
+    if (!needsConnection || started.current) return;
+    started.current = true;
+    postApi<{ verification_uri_complete: string; interval: number }>('/api/v1/chat/connect')
+      .then((result) => setConnection({ url: result.verification_uri_complete, interval: result.interval }))
+      .catch((error) =>
+        setMessage(error instanceof Error ? error.message : 'Chat could not connect. Reload to try again.'),
       );
-      if (approval) {
-        approval.opener = null;
-        approval.location.href = result.verification_uri_complete;
-      }
-      setConnection({ url: result.verification_uri_complete, code: result.user_code, interval: result.interval });
-    } catch (error) {
-      approval?.close();
-      setMessage(error instanceof Error ? error.message : 'Chat could not connect. Try again.');
-    } finally {
-      setConnecting(false);
-    }
-  }
+  }, [needsConnection]);
+  // The approval page needs a chat session, so it goes through the same silent sign-in as the chat itself.
+  const approval = connection ? new URL(connection.url) : null;
+  const frameUrl = approval
+    ? `${status.url}?next=${encodeURIComponent(approval.pathname + approval.search)}`
+    : status.url;
   if (!status.ready || !status.url)
     return (
       <div className="page">
@@ -85,20 +100,9 @@ export function ChatPage() {
     );
   return (
     <div className="chat">
-      {!(status.connected || connected) && (
+      {connection && (
         <div className="chat-banner" role="status">
-          {connection ? (
-            <span>
-              Approve code <b>{connection.code}</b> in chat.{' '}
-              <a href={connection.url} target="_blank" rel="noreferrer">
-                Open approval
-              </a>
-            </span>
-          ) : (
-            <button className="btn btn-primary" disabled={connecting} onClick={connect}>
-              Connect chat (one time)
-            </button>
-          )}
+          One-time step: choose <b>Authorize</b> below so Mu3Lab can add your app assistants to chat.
         </div>
       )}
       {message && (
@@ -106,10 +110,16 @@ export function ChatPage() {
           {message}
         </div>
       )}
+      <AssistantList assistants={status.assistants || []} />
       {expected && (
         <div className="chat-banner" role="status">
           <span>
-            <b>{expected.name}</b> is now available in chat.
+            {/* Say "available" only when the assistant really is; otherwise say why not. */}
+            <b>{expected.name}</b>{' '}
+            {(() => {
+              const item = status.assistants?.find((entry) => entry.id === expected.serviceId);
+              return !item || item.status === 'ready' ? 'is now available in chat.' : `: ${item.detail}`;
+            })()}
           </span>
           <button
             type="button"
@@ -124,7 +134,7 @@ export function ChatPage() {
           </button>
         </div>
       )}
-      <iframe title="Mu3Lab chat" src={status.url} allow="clipboard-read; clipboard-write; microphone" />
+      <iframe title="Mu3Lab chat" src={frameUrl} allow="clipboard-read; clipboard-write; microphone" />
       <ExternalButton size="sm" className="chat-popout" href={status.url}>
         Open in new window
       </ExternalButton>

@@ -12,6 +12,10 @@
 		reverse_proxy rustfs:9000
 	}
 	handle {
-		reverse_proxy app:3210
+		# Only reachable through the private HTTPS route; without this LobeChat
+		# advertises http:// sign-in links that browsers and Mu3Lab reject.
+		reverse_proxy app:3210 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 }

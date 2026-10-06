@@ -684,7 +684,15 @@ class ChatProvider(ApiModel):
     detail: str
 
 
+class ChatAssistant(ApiModel):
+    id: str
+    name: str
+    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review"]
+    detail: str
+
+
 class ChatStatus(ApiModel):
+    assistants: list[ChatAssistant] | None = None
     connected: bool | None = None
     ok: bool
     ready: bool

@@ -1043,7 +1043,7 @@ def vaultwarden_health() -> dict:
 def _vaultwarden_check(ctx: dict) -> dict:
     health = vaultwarden_health()
     if health["state"] == "ready" and _compose_image_outdated(
-        ctx["root"] / "apps" / by_capability("password_store").id
+        RuntimePaths().projects / by_capability("password_store").id
     ):
         # Bitwarden's apps update themselves and stop signing in to an old server.
         return {"status": "missing", "state": "outdated", "detail": "Vaultwarden will be updated."}
@@ -1071,7 +1071,6 @@ def _vaultwarden_account_exists() -> bool:
 
 def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     log = ctx["log_fn"](by_capability("password_store").id)
-    projdir = ctx["root"] / "apps" / by_capability("password_store").id
     _update_progress(
         ctx,
         by_capability("password_store").id,
@@ -1096,6 +1095,8 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
         catalog.get(by_capability("password_store").id),
         Facts(_tailscale_dns_name_for_install(), RuntimePaths(), catalog),
     )
+    # Start from the rendered project, the folder the dashboard watches and controls.
+    projdir = project
     env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data), "MU3LAB_VAULT_ENV_FILE": str(project / ".env")}
     extra_files: list[Path] = []
     # Once Tailscale is joined, keep the private URL a restart or update would otherwise drop.

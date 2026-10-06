@@ -214,8 +214,51 @@ class AgentSyncTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("HTTP 401", detail)
         self.assertEqual(synced, ["sk-lh-working"])
-        save.assert_called_once()
-        self.assertEqual(save.call_args.args[0], "second")
+        saved = {call.args[0]: call.args[1] for call in save.call_args_list}
+        # The failing person keeps the reason for the dashboard; the other is synced and cleared.
+        self.assertIn("HTTP 401", saved["first"]["error"])
+        self.assertNotIn("managed", saved["first"])
+        self.assertEqual(saved["second"]["error"], "")
+        self.assertIn("recipes", saved["second"]["managed"])
+
+    def test_report_says_why_each_app_has_no_assistant(self):
+        def app(app_id):
+            manifest = Mock(id=app_id)
+            manifest.name = app_id.title()
+            return Mock(id=app_id, manifest=manifest)
+
+        def connector(app_id, reviewed):
+            return Mock(id=app_id + "-mcp", service_id=app_id, gateway=reviewed)
+
+        apps = [app(name) for name in ("unreviewed", "down", "ready", "waiting")]
+        servers = {
+            "down-mcp": {"enabled": True, "state": "authentication_required"},
+            "ready-mcp": {"enabled": True, "state": "live"},
+            "waiting-mcp": {"enabled": True, "state": "live"},
+        }
+        state = Mock()
+        state.installation.return_value = {"state": "running"}
+        state.mcp_server.side_effect = servers.get
+        connectors = [
+            connector("unreviewed", False),
+            connector("down", True),
+            connector("ready", True),
+            connector("waiting", True),
+        ]
+        records = {"me": {"key": "sk-lh-key", "managed": {"ready": {"agent_id": "a"}}}}
+        with (
+            patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
+            patch.object(lobehub_ops.chat_connections, "records", return_value=records),
+            patch.object(lobehub_ops, "load_connectors", return_value=connectors),
+            patch.object(lobehub_ops, "load_registry"),
+            patch.object(lobehub_ops, "load", return_value=Mock(apps=apps)),
+        ):
+            report = {item["id"]: item["status"] for item in lobehub_ops.assistant_report("me")}
+            stranger = {item["id"]: item["status"] for item in lobehub_ops.assistant_report("someone-else")}
+        self.assertEqual(
+            report, {"unreviewed": "needs_review", "down": "connector_down", "ready": "ready", "waiting": "pending"}
+        )
+        self.assertEqual(stranger["ready"], "not_connected")
 
     def test_persons_instruction_edits_survive_sync(self):
         server = ApiServer()
@@ -267,19 +310,13 @@ class AgentSyncTests(unittest.TestCase):
                 chat_connections.begin("person", {"device_code": "new"}, paths)
             self.assertEqual(chat_connections.records(paths)["person"]["key"], "sk-lh-existing")
 
-    def test_device_flow_uses_discovery_and_supported_endpoints(self):
+    def test_device_flow_uses_the_public_cli_endpoints(self):
+        # Real LobeHub redirects anonymous discovery requests to its sign-in page.
         states = iter(["authorization_pending", "slow_down", "approved"])
 
         def handle(request):
-            if request.url.path == "/.well-known/openid-configuration":
-                return httpx.Response(
-                    200,
-                    json={
-                        "device_authorization_endpoint": "https://chat.test/oidc/device",
-                        "token_endpoint": "https://chat.test/oidc/token",
-                    },
-                )
-            if request.url.path == "/oidc/device":
+            self.assertNotIn("well-known", request.url.path)
+            if request.url.path == "/oidc/device/auth":
                 self.assertIn(b"client_id=lobehub-cli", request.content)
                 return httpx.Response(
                     200,

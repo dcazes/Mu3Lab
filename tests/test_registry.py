@@ -363,6 +363,22 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(state["state"], "ready")
         self.assertEqual(state["url"], "https://mu3lab.example.ts.net:8457")
 
+    def test_stack_started_from_the_checkout_is_not_reported_missing(self):
+        # Older installers started Vaultwarden from apps/ even though a rendered project also exists.
+        service = load().get("vaultwarden")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            project = paths.projects / "vaultwarden"
+            project.mkdir(parents=True)
+            (project / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+            source = str((ROOT / service.compose_dir).resolve())
+            with (
+                patch("ctl.service_state.RuntimePaths", return_value=paths),
+                patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+            ):
+                state = service_status(service, "mu3lab.example.ts.net", ROOT, {8443}, {source: "running"})
+        self.assertEqual(state["lifecycle_state"], "ready")
+
     def test_healthy_litellm_dashboard_requires_its_private_route(self):
         service = load().get("litellm")
         root = Path(__file__).resolve().parents[1]
