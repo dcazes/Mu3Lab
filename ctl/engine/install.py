@@ -50,7 +50,7 @@ def context(
         render_rules(app, facts, rules, owner)
 
     def reregister() -> None:
-        sync_sign_in(facts.catalog, facts.dns_name, Authentik.runtime(), facts.paths)
+        sync_sign_in(facts.catalog, facts.dns_name, Authentik.runtime(), facts.paths, app_id=app.id)
 
     return HookContext(
         app,

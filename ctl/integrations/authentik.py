@@ -27,6 +27,11 @@ from ctl.secrets import read_runtime_env
 
 TOKEN_ENV = "AUTHENTIK_BOOTSTRAP_TOKEN"
 DEFAULT_URL = "http://127.0.0.1:9001"
+# An import is one synchronous transaction that took up to ~45s on a loaded
+# server. Abandoning it does not cancel it: it keeps its locks and the next
+# import queues behind it, so waiting is the only way to get a true answer.
+# A stopped Authentik still fails fast on connect.
+BLUEPRINT_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 # Django's PBKDF2 format; Authentik validates and stores it as given, so the
 # owner's password never has to be written down in plain text.
 PBKDF2_ITERATIONS = 1_000_000
@@ -125,6 +130,7 @@ class Authentik:
                 response = client.post(
                     "/managed/blueprints/import/",
                     files={"file": (f"{name}.yaml", content.encode(), "application/yaml")},
+                    timeout=BLUEPRINT_TIMEOUT,
                 )
         except httpx.HTTPError as exc:
             raise AuthentikError(f"Authentik could not be reached ({type(exc).__name__}).") from None

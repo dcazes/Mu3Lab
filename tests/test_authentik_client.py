@@ -44,6 +44,22 @@ class AuthentikClientTests(unittest.TestCase):
                     client.wait_for_defaults(timeout=0)
                 sleep.assert_not_called()
 
+    def test_blueprint_import_waits_for_authentik_but_connects_fast(self):
+        # An abandoned import keeps running and blocks the next one, so the
+        # client waits it out instead of using the 30s API default.
+        timeouts = {}
+
+        def send(request):
+            timeouts[request.url.path] = request.extensions["timeout"]
+            return httpx.Response(200, json={"success": True, "results": []})
+
+        client = Authentik("token", transport=httpx.MockTransport(send))
+        client.apply_blueprint("test", "version: 1")
+        client.request("GET", "/core/users/me/")
+        self.assertEqual(timeouts["/api/v3/managed/blueprints/import/"]["read"], 300.0)
+        self.assertEqual(timeouts["/api/v3/managed/blueprints/import/"]["connect"], 10.0)
+        self.assertEqual(timeouts["/api/v3/core/users/me/"]["read"], 30.0)
+
     def test_blueprint_failure_keeps_all_warning_error_logs_and_redacts_credentials(self):
         def send(request):
             self.assertEqual(request.url.path, "/api/v3/managed/blueprints/import/")

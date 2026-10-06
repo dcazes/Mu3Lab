@@ -135,6 +135,35 @@ class IdentityContractTests(unittest.TestCase):
             sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths)
             self.assertIn("Mu3Lab SurfSense provider", bodies[-1])
 
+    def test_one_app_install_imports_only_that_apps_sign_in(self):
+        # Each import takes tens of seconds; re-importing every installed app
+        # on every install is what pushed a batch past Authentik's timeout.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            catalog = load().catalog
+            for app_id, env in (
+                ("actual-budget", "ACTUAL_OPENID_CLIENT_ID=x\nACTUAL_OPENID_CLIENT_SECRET=y\n"),
+                ("nextcloud", "NEXTCLOUD_OIDC_CLIENT_ID=x\nNEXTCLOUD_OIDC_CLIENT_SECRET=y\n"),
+                ("baby-buddy", ""),
+            ):
+                project = paths.projects / app_id
+                project.mkdir(parents=True)
+                (project / "docker-compose.yml").write_text("services: {}\n")
+                (project / ".env").write_text(env)
+            host = "mu3lab.example.ts.net"
+            bodies = []
+            client = self._client(bodies)
+            self.assertEqual(sync_sign_in(catalog, host, client, paths, app_id="nextcloud"), ["nextcloud"])
+            self.assertEqual(len(bodies), 1)
+            self.assertIn("slug: mu3lab-nextcloud", bodies[0])
+            bodies.clear()
+            self.assertEqual(sync_sign_in(catalog, host, client, paths, app_id="baby-buddy"), [])
+            self.assertEqual(len(bodies), 1)
+            self.assertIn("Mu3Lab Baby Buddy provider", bodies[0])
+            bodies.clear()
+            self.assertCountEqual(sync_sign_in(catalog, host, client, paths), ["actual-budget", "nextcloud"])
+            self.assertEqual(len(bodies), 3)
+
     def test_owner_guard_is_read_from_the_manifest_env_key(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))

@@ -143,30 +143,54 @@ def gate_blueprint(catalog: Catalog, host: str, paths: RuntimePaths) -> str:
     return render_gate_blueprint(host, dashboard.manifest.route.https_port, gated)
 
 
-def sync_sign_in(catalog: Catalog, host: str, authentik: Authentik, paths: RuntimePaths | None = None) -> list[str]:
+def _oidc_settings(app: App, paths: RuntimePaths) -> OidcApp | None:
+    manifest = app.manifest
+    oidc = manifest.sign_in.oidc
+    if not installed(app, paths) or oidc is None or manifest.route is None:
+        return None
+    values = read_runtime_env(paths.projects / app.id / ".env")
+    client_id, secret = values.get(oidc.env.client_id, ""), values.get(oidc.env.client_secret, "")
+    if not client_id or not secret:
+        return None  # Core projects are materialized later; kept credentials alone don't install an optional app.
+    return OidcApp(
+        app.id,
+        manifest.name,
+        manifest.route.https_port,
+        client_id,
+        secret,
+        oidc.redirect_paths,
+        values.get(oidc.initial_owner_env, ""),
+    )
+
+
+def _gated(app: App) -> bool:
+    return app.manifest.route is not None and app.manifest.route.access in {"gate", "trusted_header"}
+
+
+def sync_sign_in(
+    catalog: Catalog,
+    host: str,
+    authentik: Authentik,
+    paths: RuntimePaths | None = None,
+    *,
+    app_id: str | None = None,
+) -> list[str]:
+    """Apply sign-in blueprints; with ``app_id``, only the one that app's sign-in lives in.
+
+    Each import rewrites every provider it names and takes tens of seconds, so
+    an app install must not re-import every other app's sign-in as well.
+    """
     paths = paths or RuntimePaths()
     if not host:
         raise ValueError("This server's private address is not known yet.")
-    authentik.apply_blueprint(DASHBOARD_BLUEPRINT, gate_blueprint(catalog, host, paths))
+    target = catalog.get(app_id) if app_id else None
+    if target is None or _gated(target):
+        authentik.apply_blueprint(DASHBOARD_BLUEPRINT, gate_blueprint(catalog, host, paths))
     applied: list[str] = []
-    for app in catalog.apps:
-        manifest = app.manifest
-        oidc = manifest.sign_in.oidc
-        if not installed(app, paths) or oidc is None or manifest.route is None:
+    for app in (target,) if target else catalog.apps:
+        settings = _oidc_settings(app, paths)
+        if settings is None:
             continue
-        values = read_runtime_env(paths.projects / app.id / ".env")
-        client_id, secret = values.get(oidc.env.client_id, ""), values.get(oidc.env.client_secret, "")
-        if not client_id or not secret:
-            continue  # Core projects are materialized later; kept credentials alone don't install an optional app.
-        settings = OidcApp(
-            app.id,
-            manifest.name,
-            manifest.route.https_port,
-            client_id,
-            secret,
-            oidc.redirect_paths,
-            values.get(oidc.initial_owner_env, ""),
-        )
         authentik.apply_blueprint(oidc_blueprint_name(app.id), render_oidc_blueprint(host, settings))
         applied.append(app.id)
     return applied

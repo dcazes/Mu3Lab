@@ -407,6 +407,7 @@ class InstallTests(unittest.TestCase):
             self.assertIn("whole household", rule.periodic(ctx))
             self.assertFalse(rule.periodic(ctx))
         self.mocks["sync_sign_in"].assert_called_once()
+        self.assertEqual(self.mocks["sync_sign_in"].call_args.kwargs["app_id"], "actual-budget")
 
     def test_owner_guard_restores_restriction_if_authentik_update_fails(self):
         ctx, rule, database = self.guard_context()
