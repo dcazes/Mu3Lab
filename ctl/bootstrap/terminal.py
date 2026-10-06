@@ -30,6 +30,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -322,7 +323,11 @@ def warm_up(url: str, timeout: float = 120, *, redirect_host: str = "") -> bool:
             if (
                 exc.code in (302, 303, 307, 308)
                 and redirect_host
-                and install._authentik_redirect_is_expected(exc.headers.get("Location"), redirect_host)
+                # Authentik's own pages redirect with a relative Location
+                # ("/flows/..."); resolve it against the URL that was asked.
+                and install._authentik_redirect_is_expected(
+                    urllib.parse.urljoin(url, exc.headers.get("Location") or ""), redirect_host
+                )
             ):
                 return True
         except OSError:

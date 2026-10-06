@@ -38,6 +38,24 @@ class DashboardReadinessTests(unittest.TestCase):
             )
             self.assertTrue(terminal.warm_up("https://host.ts.net:8446", redirect_host="host.ts.net"))
 
+    def test_authentiks_relative_redirect_to_its_own_login_is_ready(self):
+        with patch("ctl.bootstrap.terminal.urllib.request.build_opener") as opener:
+            opener.return_value.open.side_effect = urllib.error.HTTPError(
+                "https://host.ts.net/", 302, "login", {"Location": "/flows/-/default/authentication/?next=/"}, None
+            )
+            self.assertTrue(terminal.warm_up("https://host.ts.net/", redirect_host="host.ts.net"))
+
+    def test_relative_redirect_on_another_port_is_not_authentik(self):
+        with (
+            patch("ctl.bootstrap.terminal.urllib.request.build_opener") as opener,
+            patch("ctl.bootstrap.terminal.time.monotonic", side_effect=[0, 0, 2]),
+            patch("ctl.bootstrap.terminal.time.sleep"),
+        ):
+            opener.return_value.open.side_effect = urllib.error.HTTPError(
+                "https://host.ts.net:8446/", 302, "login", {"Location": "/login"}, None
+            )
+            self.assertFalse(terminal.warm_up("https://host.ts.net:8446/", timeout=1, redirect_host="host.ts.net"))
+
     def test_route_failure_stops_before_opening_dashboard(self):
         with (
             patch.object(terminal, "warm_up", return_value=False),
