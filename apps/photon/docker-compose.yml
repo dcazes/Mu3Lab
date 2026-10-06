@@ -1,0 +1,32 @@
+name: mu3lab-photon
+
+services:
+  photon:
+    image: rtuszik/photon-docker:2.4.0@sha256:21549c60f9e6488fff3217e40429a652c4b445f374800333fe32859e47cec293
+    restart: unless-stopped
+    ports: ["127.0.0.1:2322:2322"]
+    environment:
+      REGION: ${PHOTON_REGION:?PHOTON_REGION is required}
+      IMPORT_MODE: db
+      # Official GraphHopper downloads, verified by their MD5 files.
+      BASE_URL: https://download1.graphhopper.com/public/
+      UPDATE_STRATEGY: PARALLEL
+      UPDATE_INTERVAL: 90d
+      LOG_LEVEL: INFO
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/photon:/photon/data
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [photon]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:2322/status >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 3600s
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

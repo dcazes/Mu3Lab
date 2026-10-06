@@ -320,7 +320,7 @@ def fix_host_base(check: dict, ctx: dict) -> dict:
 def _runtime_layout_check(root: Path) -> dict:
     """Check the approved persistent-data root without creating it."""
     paths = RuntimePaths(root)
-    user_paths = (paths.data, paths.backups, paths.runtime, paths.projects)
+    user_paths = (paths.data, paths.media, paths.backups, paths.runtime, paths.projects)
     try:
         missing = [path for path in user_paths if not path.is_dir()]
         # Secrets are deliberately root-only. Checking the directory itself

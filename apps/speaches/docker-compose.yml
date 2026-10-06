@@ -1,0 +1,45 @@
+name: mu3lab-speaches
+
+services:
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+    restart: unless-stopped
+    ports: ["127.0.0.1:8092:8000"]
+    environment:
+      ENABLE_UI: "false"
+      LOG_LEVEL: info
+      # Free memory (graphics memory too) after five idle minutes; Speaches loads again on demand.
+      WHISPER__TTL: "300"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/speaches/models:/home/ubuntu/.cache/huggingface/hub
+    depends_on:
+      models-init: {condition: service_completed_successfully}
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [speaches]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 30s
+
+  # The image runs as "ubuntu" (1000); a folder Docker creates belongs to root.
+  models-init:
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "ubuntu:ubuntu", "/models"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/speaches/models:/models
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

@@ -1,0 +1,40 @@
+# Photon — see ctl/manifest/models.py for every field.
+id: photon
+capabilities: [geocoder]
+name: Photon
+tier: optional
+group: infrastructure
+category: maps
+tagline: Private map lookups for your location history
+summary: Turns map coordinates into street, town, and country names on your own server, so apps such as Dawarich
+  never send your location history to a public map service.
+version: 1.3.0
+upstream: rtuszik/photon-docker
+service:
+  local_port: 2322
+  health:
+    path: /status
+  # The first start downloads and unpacks the map index (about 5 GB for Canada).
+  start_timeout_seconds: 3600
+sign_in:
+  method: none
+  note: Internal map lookup service; no browser interface and no sign-in.
+ui:
+  available: false
+  unavailable_reason: Photon is an internal map lookup service used by other apps; it has no browser interface.
+configuration:
+- key: region
+  env: PHOTON_REGION
+  type: enum
+  label: Map region to download
+  # The country of this computer's time zone, when a ready-made index exists for it.
+  default: '{{country_code}}'
+  required: true
+  options: [ca, us, mx, ar, de, fr, es, nl, at, dk, lu, ad, sk, ru, in, jp, europe, north-america, south-america,
+    asia, africa, australia-oceania]
+env:
+  # What apps using the geocoder connect to (see integrates_with in Dawarich).
+  MU3LAB_GEOCODER_HOST: photon:2322
+resource_guidance: The index needs disk space (about 15 GB unpacked for Canada; continents are far larger) and a few
+  GB of memory. The first start downloads it and can take up to an hour.
+setup_action: Install Photon so Dawarich can show place names without sending your locations anywhere.

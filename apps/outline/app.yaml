@@ -1,0 +1,86 @@
+# Outline — see ctl/manifest/models.py for every field.
+id: outline
+capabilities: [wiki]
+name: Outline
+tier: optional
+group: apps
+category: productivity
+tagline: Household wiki and notes
+summary: A fast, collaborative wiki for household notes, plans, recipes, and manuals. Shared collections for
+  everyone, private documents for each person, and real-time editing together.
+version: v1.10.1
+upstream: outline/outline
+service:
+  local_port: 3005
+  health:
+    path: /_health
+  start_timeout_seconds: 300
+route:
+  https_port: 8463
+  caddy_port: 19480
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-outline
+    redirect_paths:
+    - /auth/oidc.callback
+    launch_path: /auth/oidc
+    env:
+      client_id: OUTLINE_OIDC_CLIENT_ID
+      client_secret: OUTLINE_OIDC_CLIENT_SECRET
+    initial_owner_env: MU3LAB_INITIAL_OWNER_USERNAME
+account:
+  mode: oidc_first_login
+  user_action: Open Outline; Authentik signs you in and makes you its administrator.
+secrets:
+- env: OUTLINE_SECRET_KEY
+  kind: hex
+  length: 32
+- env: OUTLINE_UTILS_SECRET
+  kind: hex
+  length: 32
+- env: OUTLINE_DB_PASSWORD
+  length: 32
+env:
+  OUTLINE_URL: '{{public_url}}'
+  # Outline reads Authentik's endpoints from this issuer when it starts.
+  OUTLINE_OIDC_ISSUER_URL: 'https://{{dns_name}}/application/o/mu3lab-outline/'
+  OUTLINE_OIDC_LOGOUT_URI: 'https://{{dns_name}}/application/o/mu3lab-outline/end-session/'
+rules:
+# Outline makes the first person who signs in its administrator, so until the
+# installing owner has, Authentik admits only them.
+- rule: initial_owner_guard
+  with:
+    owner_signed_in:
+      script:
+        service: postgres
+        script: scripts/owner-signed-in.sh
+        interpreter:
+        - sh
+        - -s
+        - --
+        expect: MU3LAB_OUTLINE_OWNER_OK
+mobile:
+  primary: outline-pwa
+  clients:
+  - id: outline-pwa
+    name: Outline web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://www.getoutline.com/
+    source: https://github.com/outline/outline
+    setup: pwa
+    summary: Read and edit your household wiki from the phone's home screen.
+    caveat: Your phone must be connected to the Mu3Lab tailnet.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Outline address in your phone's browser; Authentik signs you in.
+    - Use the browser's share or menu button and choose Add to Home Screen.
+resource_guidance: Moderate; a small database and Redis cache plus uploaded attachments.
+setup_action: Install Outline for a shared household wiki and personal notes.

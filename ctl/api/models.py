@@ -1067,6 +1067,22 @@ class ToolExecuteResponse(ApiModel):
     outcome: str
 
 
+class VoiceKeyStatus(ApiModel):
+    ok: bool
+    available: bool  # a speech app is installed
+    exists: bool
+    created_at: str = ""
+    base_url: str = ""
+    models: list[str]
+
+
+class VoiceKeyCreated(ApiModel):
+    ok: bool
+    key: str
+    base_url: str
+    models: list[str]
+
+
 class ChatConnectResponse(ApiModel):
     ok: bool
     verification_uri_complete: str

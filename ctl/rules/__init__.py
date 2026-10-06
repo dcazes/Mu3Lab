@@ -69,6 +69,10 @@ class Rule:
         """Return a line for the worker log when something changed, else ""."""
         return ""
 
+    def rewire(self, ctx: HookContext) -> None:
+        """Refresh what this rule generates after an app this one works with came or went."""
+        return None
+
 
 _RULES: dict[str, type[Rule]] = {}
 
@@ -119,6 +123,7 @@ def _load_all() -> None:
         initial_owner_guard,
         needs_embedding_model,
         password_login_off_after_setup,
+        per_person_accounts,
         provider_routing,
         staged_first_start,
     )

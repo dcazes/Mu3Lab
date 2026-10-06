@@ -14,6 +14,7 @@ from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StartPlan, StepFailed, load_app_hooks
 from ctl.engine.jobs import _append_runtime_diagnostics, _event, _fail, _failure_code, _job_log, _start_failure_message
 from ctl.engine.project import Facts
+from ctl.engine.rewire import rewire_consumers
 from ctl.engine.runtime import render_rules
 from ctl.identity import installed, mode_for, sync_sign_in
 from ctl.image_downloads import ImageDownloadStore
@@ -261,6 +262,8 @@ def run_install(
         if not ok:
             log(f"Chat assistants were not updated: {redact(detail)}")
         onboarding_state.mark_configured(app.id, paths)
+        # Apps that work with this one (LiteLLM routing speech) pick it up now.
+        rewire_consumers(app, registry.catalog, log, paths)
         if complete_job:
             store.transition(
                 job_id, "succeeded", actor=actor, detail=f"{service.name} installed and verified.", step_id="finalize"

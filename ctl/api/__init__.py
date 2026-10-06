@@ -28,6 +28,7 @@ from ctl.api.routes import (
     snapshot,
     system,
     vault,
+    voice,
 )
 from ctl.identity import sync_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError
@@ -85,7 +86,20 @@ def create_app(dist: Path = DIST) -> FastAPI:
     app.add_exception_handler(ResponseValidationError, response_error_handler)
     app.add_exception_handler(ValidationError, response_error_handler)
     app.include_router(system.health_router)
-    for module in (system, identity, services, install_batches, jobs, providers, vault, calendar, mcp, chat, people):
+    for module in (
+        system,
+        identity,
+        services,
+        install_batches,
+        jobs,
+        providers,
+        vault,
+        calendar,
+        mcp,
+        chat,
+        people,
+        voice,
+    ):
         app.include_router(module.router)
     app.include_router(snapshot.router)
     if dist.is_dir():

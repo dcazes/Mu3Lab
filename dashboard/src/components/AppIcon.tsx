@@ -1,11 +1,16 @@
 import {
+  AudioLines,
   Baby,
   BookOpenText,
   Bot,
   Compass,
   Flame,
+  Gamepad2,
   KeyRound,
+  ListChecks,
   type LucideIcon,
+  MapPinned,
+  MessagesSquare,
   Network,
   Route,
   ShieldCheck,
@@ -13,6 +18,7 @@ import {
 import type { CSSProperties } from 'react';
 import {
   siActualbudget,
+  siAudiobookshelf,
   siAuthentik,
   siCaddy,
   siImmich,
@@ -20,6 +26,8 @@ import {
   siMealie,
   siNextcloud,
   siOllama,
+  siOpenstreetmap,
+  siOutline,
   type SimpleIcon,
   siPaperlessngx,
   siTailscale,
@@ -38,6 +46,9 @@ const brands: Record<string, SimpleIcon> = {
   'paperless-ngx': siPaperlessngx,
   nextcloud: siNextcloud,
   tailscale: siTailscale,
+  audiobookshelf: siAudiobookshelf,
+  outline: siOutline,
+  photon: siOpenstreetmap,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
@@ -48,6 +59,11 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   adventurelog: { icon: Compass, color: '#16a34a' },
   surfsense: { icon: BookOpenText, color: '#6366f1' },
   'baby-buddy': { icon: Baby, color: '#ec4899' },
+  'beaver-habits': { icon: ListChecks, color: '#b45309' },
+  romm: { icon: Gamepad2, color: '#7c3aed' },
+  dawarich: { icon: MapPinned, color: '#0891b2' },
+  'open-webui': { icon: MessagesSquare, color: '#64748b' },
+  speaches: { icon: AudioLines, color: '#db2777' },
   tailnet: { icon: Network, color: '#64748b' },
 };
 

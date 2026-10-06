@@ -1,0 +1,23 @@
+:19478 {
+	bind 127.0.0.1
+	route {
+		reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9001
+		forward_auth 127.0.0.1:9001 {
+			uri /outpost.goauthentik.io/auth/caddy
+			header_up Host {http.request.hostport}
+			header_up X-Forwarded-Host {http.request.hostport}
+			header_up X-Forwarded-Proto https
+			copy_headers X-Authentik-Email
+			trusted_proxies private_ranges
+		}
+		redir /login* /gui 302
+		redir /register* /gui 302
+		redir /demo* /gui 302
+		reverse_proxy 127.0.0.1:8086 {
+			# Set replaces the client header; deletes run after sets.
+			header_up X-Mu3lab-Email {http.request.header.X-Authentik-Email}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {http.request.hostport}
+		}
+	}
+}

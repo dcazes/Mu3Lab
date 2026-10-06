@@ -1,0 +1,62 @@
+name: mu3lab-open-webui
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.11.4@sha256:9591b13f13843c7721c2b8eaf7382846c81b3ffe126526d1888d1fed50c6a33f
+    restart: unless-stopped
+    ports: ["127.0.0.1:3212:8080"]
+    environment:
+      WEBUI_URL: ${OPEN_WEBUI_URL:?OPEN_WEBUI_URL is required}
+      WEBUI_SECRET_KEY: ${OPEN_WEBUI_SECRET_KEY:?OPEN_WEBUI_SECRET_KEY is required}
+      # Mu3Lab's settings always win over values Open WebUI saved earlier.
+      ENABLE_PERSISTENT_CONFIG: "false"
+      # Authentik is the only way in.
+      ENABLE_SIGNUP: "false"
+      ENABLE_LOGIN_FORM: "false"
+      ENABLE_OAUTH_SIGNUP: "true"
+      OAUTH_AUTO_REDIRECT: "true"
+      OAUTH_MERGE_ACCOUNTS_BY_EMAIL: "true"
+      OAUTH_CLIENT_ID: ${OPEN_WEBUI_OIDC_CLIENT_ID:?OPEN_WEBUI_OIDC_CLIENT_ID is required}
+      OAUTH_CLIENT_SECRET: ${OPEN_WEBUI_OIDC_CLIENT_SECRET:?OPEN_WEBUI_OIDC_CLIENT_SECRET is required}
+      OPENID_PROVIDER_URL: ${OPEN_WEBUI_OIDC_DISCOVERY_URL:?OPEN_WEBUI_OIDC_DISCOVERY_URL is required}
+      OAUTH_PROVIDER_NAME: Mu3Lab
+      OAUTH_SCOPES: openid email profile
+      # Mu3Lab operators are administrators; everyone else in the household is a user.
+      ENABLE_OAUTH_ROLE_MANAGEMENT: "true"
+      OAUTH_ROLES_CLAIM: groups
+      OAUTH_ADMIN_ROLES: mu3lab-operators
+      OAUTH_ALLOWED_ROLES: mu3lab-users,mu3lab-operators
+      DEFAULT_USER_ROLE: user
+      # Models come only from LiteLLM; Ollama holds no chat models.
+      ENABLE_OLLAMA_API: "false"
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
+      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      RAG_EMBEDDING_MODEL: mu3lab-embed
+      AUDIO_STT_ENGINE: ${AUDIO_STT_ENGINE:-web}
+      AUDIO_STT_OPENAI_API_BASE_URL: http://litellm:4000/v1
+      AUDIO_STT_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      AUDIO_STT_MODEL: ${AUDIO_STT_MODEL:-}
+      AUDIO_TTS_ENGINE: ${AUDIO_TTS_ENGINE:-}
+      AUDIO_TTS_OPENAI_API_BASE_URL: http://litellm:4000/v1
+      AUDIO_TTS_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      AUDIO_TTS_MODEL: ${AUDIO_TTS_MODEL:-}
+      AUDIO_TTS_VOICE: ${AUDIO_TTS_VOICE:-}
+      ENABLE_VERSION_UPDATE_CHECK: "false"
+      ENABLE_COMMUNITY_SHARING: "false"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/open-webui:/app/backend/data
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

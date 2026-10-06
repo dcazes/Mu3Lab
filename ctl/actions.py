@@ -836,11 +836,11 @@ def ensure_runtime_layout(root: Path, user: str, log: Callable[[str], None]) -> 
     permission, user-owned children such as `data/` remain unreachable.
     """
     lines: list[str] = []
-    paths = [root, root / "data", root / "backups", root / "state", root / "projects"]
+    paths = [root, root / "data", root / "media", root / "backups", root / "state", root / "projects"]
+    # Media libraries are read by app containers running as other users.
+    modes = {root / "state": "0700", root / "media": "0755"}
     for path in paths:
-        res = privilege.run_privileged(
-            ["install", "-d", "-m", "0700" if path == root / "state" else "0750", str(path)], lines.append
-        )
+        res = privilege.run_privileged(["install", "-d", "-m", modes.get(path, "0750"), str(path)], lines.append)
         if res.get("need_terminal"):
             return _fail(lines, terminal_command=res["terminal_command"])
         if not res["ok"]:

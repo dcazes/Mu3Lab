@@ -36,3 +36,17 @@ def timezone(etc: Path = Path("/etc"), run=subprocess.run) -> str:
     except (OSError, subprocess.SubprocessError):
         pass
     return next((name for name in candidates if name and _valid(name)), DEFAULT_TIMEZONE)
+
+
+def country_code(zone: str | None = None, table: Path = Path("/usr/share/zoneinfo/zone.tab")) -> str:
+    """The two-letter country of the computer's timezone (``ca`` for America/Toronto), else ""."""
+    zone = zone or timezone()
+    try:
+        lines = table.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) >= 3 and not line.startswith("#") and fields[2] == zone:
+            return fields[0].lower()
+    return ""

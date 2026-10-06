@@ -43,11 +43,12 @@ After this task LobeChat works exactly as before. All existing tests pass.
 
      ```python
      class ChatProvider(Protocol):
-         interface: ClassVar[str]                 # e.g. "lobehub-v1", "open-webui-v1"
+         interface: ClassVar[str]  # e.g. "lobehub-v1", "open-webui-v1"
          connection: ClassVar[Literal["per_person_approval", "managed"]]
-         asks_before_changes: ClassVar[bool]      # can the app itself ask before a tool call?
+         asks_before_changes: ClassVar[bool]  # can the app itself ask before a tool call?
+
          def health(self) -> ChatHealth: ...
-         def begin_connection(self, uid: str) -> ConnectionStart: ...      # managed: raise NotSupported
+         def begin_connection(self, uid: str) -> ConnectionStart: ...  # managed: raise NotSupported
          def poll_connection(self, uid: str) -> ConnectionState: ...
          def sync_assistants(self, desired: list[DesiredAssistant], people: list[Person]) -> SyncReport: ...
          def assistant_report(self, uid: str) -> list[AssistantStatus]: ...

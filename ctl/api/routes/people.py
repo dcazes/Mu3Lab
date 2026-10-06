@@ -6,11 +6,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import people
+from ctl import people, voice_keys
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OperatorMutation
+from ctl.integrations.litellm import LiteLLMError
 from ctl.jobs import JobStore
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
@@ -76,6 +77,13 @@ async def change_person(
     except people.PeopleError as exc:
         raise ApiError(409, str(exc), headers=_NO_STORE) from exc
     _audit(str(admin["username"]), f"{action} for {username}.")
+    uid = str((result.get("person") or {}).get("uid") or "")
+    if action == "deactivate" and uid:
+        # A removed person's devices must stop reaching Mu3Lab's speech at once.
+        try:
+            await run_in_threadpool(voice_keys.revoke, uid)
+        except LiteLLMError as exc:
+            _audit(str(admin["username"]), f"Voice key for {username} could not be revoked yet: {exc}")
     return JSONResponse(
         models.PersonResponse.model_validate({"ok": True, **result}).model_dump(mode="json", exclude_none=True),
         headers=_NO_STORE,

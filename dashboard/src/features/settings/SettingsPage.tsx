@@ -9,12 +9,14 @@ import { settingsSectionsFor } from './sections';
 import { SecuritySettings } from './SecuritySettings';
 import { SignInSettings } from './SignInSettings';
 import { SystemSettings } from './SystemSettings';
+import { VoiceSettings } from './VoiceSettings';
 
 const PAGES: Record<string, () => JSX.Element> = {
   ai: AiSettings,
   integrations: IntegrationsSettings,
   'sign-in': SignInSettings,
   calendar: CalendarSettings,
+  voice: VoiceSettings,
   people: PeopleSettings,
   security: SecuritySettings,
   system: SystemSettings,

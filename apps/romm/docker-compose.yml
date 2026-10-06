@@ -1,0 +1,76 @@
+name: mu3lab-romm
+
+services:
+  romm:
+    image: rommapp/romm:5.3.1@sha256:0d66b4ea152a237c7f24b95e87459f46d3c596a7c0b35a82f26bc971487278b3
+    restart: unless-stopped
+    ports: ["127.0.0.1:8091:8080"]
+    environment:
+      TZ: ${TZ:-UTC}
+      DB_HOST: db
+      DB_NAME: romm
+      DB_USER: romm
+      DB_PASSWD: ${ROMM_DB_PASSWORD:?ROMM_DB_PASSWORD is required}
+      ROMM_AUTH_SECRET_KEY: ${ROMM_AUTH_SECRET_KEY:?ROMM_AUTH_SECRET_KEY is required}
+      ROMM_BASE_URL: ${ROMM_PUBLIC_URL:?ROMM_PUBLIC_URL is required}
+      # Authentik is the only way in: no first-run wizard, no RomM passwords.
+      DISABLE_SETUP_WIZARD: "true"
+      DISABLE_USERPASS_LOGIN: "true"
+      ROMM_SESSION_SECURE_COOKIE: "true"
+      OIDC_ENABLED: "true"
+      OIDC_AUTOLOGIN: "true"
+      OIDC_PROVIDER: authentik
+      OIDC_CLIENT_ID: ${ROMM_OIDC_CLIENT_ID:?ROMM_OIDC_CLIENT_ID is required}
+      OIDC_CLIENT_SECRET: ${ROMM_OIDC_CLIENT_SECRET:?ROMM_OIDC_CLIENT_SECRET is required}
+      OIDC_REDIRECT_URI: ${ROMM_OIDC_REDIRECT_URI:?ROMM_OIDC_REDIRECT_URI is required}
+      OIDC_SERVER_APPLICATION_URL: ${ROMM_OIDC_APPLICATION_URL:?ROMM_OIDC_APPLICATION_URL is required}
+      OIDC_SERVER_METADATA_URL: ${ROMM_OIDC_METADATA_URL:?ROMM_OIDC_METADATA_URL is required}
+      # Mu3Lab operators are RomM administrators; the rest of the household are players.
+      OIDC_CLAIM_ROLES: groups
+      OIDC_ROLE_ADMIN: mu3lab-operators
+      OIDC_ROLE_EDITOR: mu3lab-users
+      OIDC_USERNAME_ATTRIBUTE: preferred_username
+      HASHEOUS_API_ENABLED: "true"
+      SCREENSCRAPER_USER: ${ROMM_SCREENSCRAPER_USER:-}
+      SCREENSCRAPER_PASSWORD: ${ROMM_SCREENSCRAPER_PASSWORD:-}
+      RETROACHIEVEMENTS_API_KEY: ${ROMM_RETROACHIEVEMENTS_API_KEY:-}
+      STEAMGRIDDB_API_KEY: ${ROMM_STEAMGRIDDB_API_KEY:-}
+    volumes:
+      - ${MU3LAB_MEDIA_ROMS:?MU3LAB_MEDIA_ROMS is required}:/romm/library
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/romm/assets:/romm/assets
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/romm/config:/romm/config
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/romm/resources:/romm/resources
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/romm/redis:/redis-data
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [mu3lab_frontend, romm_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/heartbeat >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  db:
+    image: mariadb:11.8@sha256:6422478cb8e159f080fb1d8ccf65101e26fe51385787fde7d16c3b165a331f15
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${ROMM_DB_ROOT_PASSWORD:?ROMM_DB_ROOT_PASSWORD is required}
+      MARIADB_DATABASE: romm
+      MARIADB_USER: romm
+      MARIADB_PASSWORD: ${ROMM_DB_PASSWORD:?ROMM_DB_PASSWORD is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/romm/db:/var/lib/mysql
+    networks: [romm_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+networks:
+  mu3lab_frontend: {external: true}
+  romm_internal: {internal: true}

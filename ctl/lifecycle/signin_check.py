@@ -139,6 +139,25 @@ def _json_launch(service_id: str, client: httpx.Client, origin: str) -> httpx.Re
     return httpx.Response(302, headers={"location": target}, request=response.request)
 
 
+def _form_launch(client: httpx.Client, origin: str, page_path: str, action: str, name: str) -> httpx.Response:
+    """Do what the launch page does in a browser: submit the sign-in form with its hidden fields."""
+    page = client.get(origin + page_path)
+    _check_cookies(page, urlsplit(origin).hostname or "")
+    forms = re.findall(r"<form\b([^>]*)>(.*?)</form>", page.text, flags=re.S | re.I)
+    body = next(
+        (
+            inner
+            for attrs, inner in forms
+            if re.search(rf'action="{re.escape(action)}"', attrs) and "post" in attrs.lower()
+        ),
+        None,
+    )
+    if page.status_code != 200 or body is None:
+        raise SignInError(f"{name} did not serve its Authentik sign-in form.")
+    fields = dict(re.findall(r'<input[^>]*type="hidden"[^>]*name="([^"]+)"[^>]*value="([^"]*)"', body))
+    return client.post(origin + action, data=fields, headers={"Origin": origin, "Referer": origin + page_path})
+
+
 def _entry(service_id: str, client: httpx.Client, origin: str, launch_path: str) -> httpx.Response:
     """Start sign-in using the protocol declared by the app."""
     manifest = load().get(service_id).manifest
@@ -146,6 +165,8 @@ def _entry(service_id: str, client: httpx.Client, origin: str, launch_path: str)
     assert oidc is not None
     if oidc.launch == "json_post":
         return _json_launch(service_id, client, origin)
+    if oidc.form_launch is not None:
+        return _form_launch(client, origin, oidc.form_launch.page, oidc.form_launch.action, manifest.name)
     if oidc.launch == "csrf_form":
         page = client.get(origin + launch_path)
         _check_cookies(page, urlsplit(origin).hostname or "")

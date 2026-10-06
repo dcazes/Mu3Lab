@@ -1,0 +1,92 @@
+# Open WebUI — see ctl/manifest/models.py for every field.
+id: open-webui
+capabilities: [web_chat]
+name: Open WebUI
+tier: optional
+group: ai
+category: ai
+tagline: AI chat with voice and your documents
+summary: A full-featured AI chat workspace. Chat with Mu3Lab's models, talk and listen with local voice when Speech
+  is installed, and ask questions about your own documents.
+version: v0.11.4
+upstream: open-webui/open-webui
+depends_on:
+- litellm
+service:
+  local_port: 3212
+  health:
+    path: /health
+  start_timeout_seconds: 600
+route:
+  https_port: 8471
+  caddy_port: 19488
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-open-webui
+    redirect_paths:
+    - /oauth/oidc/callback
+    launch_path: /oauth/oidc/login
+    env:
+      client_id: OPEN_WEBUI_OIDC_CLIENT_ID
+      client_secret: OPEN_WEBUI_OIDC_CLIENT_SECRET
+      discovery_url: OPEN_WEBUI_OIDC_DISCOVERY_URL
+    initial_owner_env: MU3LAB_INITIAL_OWNER_USERNAME
+account:
+  mode: oidc_first_login
+  user_action: Open Open WebUI; Authentik signs you in and makes you its administrator.
+secrets:
+- env: OPEN_WEBUI_SECRET_KEY
+  length: 48
+env:
+  OPEN_WEBUI_URL: '{{public_url}}'
+  LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
+integrates_with:
+# With Mu3Lab's speech app, voice runs on this server; without it, in the browser.
+- capability: speech
+  env:
+    AUDIO_STT_ENGINE: openai
+    AUDIO_STT_MODEL: mu3lab-stt
+    AUDIO_TTS_ENGINE: openai
+    AUDIO_TTS_MODEL: mu3lab-tts
+    AUDIO_TTS_VOICE: '{{provider:MU3LAB_TTS_VOICE}}'
+  absent_env:
+    AUDIO_STT_ENGINE: web
+    AUDIO_TTS_ENGINE: ''
+rules:
+# Open WebUI makes the first person who signs in its administrator, so until the
+# installing owner has, Authentik admits only them.
+- rule: initial_owner_guard
+  with:
+    owner_signed_in:
+      script:
+        service: open-webui
+        script: scripts/owner-signed-in.py
+        interpreter:
+        - python3
+        - '-'
+        expect: MU3LAB_OPEN_WEBUI_OWNER_OK
+mobile:
+  primary: open-webui-pwa
+  clients:
+  - id: open-webui-pwa
+    name: Open WebUI web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://openwebui.com/
+    source: https://github.com/open-webui/open-webui
+    setup: pwa
+    summary: Chat and talk with your AI models from the phone's home screen.
+    caveat: Your phone must be connected to the Mu3Lab tailnet. Voice needs microphone permission in the browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Open WebUI address; Authentik signs you in.
+    - Use the browser's share or menu button and choose Add to Home Screen.
+resource_guidance: Moderate; a few hundred MB of memory. Models run through LiteLLM, voice through Speech.
+setup_action: Install Open WebUI for a chat workspace with voice and document questions.

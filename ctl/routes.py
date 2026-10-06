@@ -17,6 +17,8 @@ from ctl.service_state import tailnet_dns_name
 
 START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
+# The Authentik outpost header that carries each kind of trusted identity.
+IDENTITY_HEADERS = {"username": "X-Authentik-Username", "email": "X-Authentik-Email"}
 
 
 def _generated_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
@@ -87,6 +89,7 @@ def _block(service: Service) -> str:
     route = service.manifest.route
     assert route is not None and service.proxy_port is not None
     host = "{http.request." + route.forwarded_host + "}"
+    identity = IDENTITY_HEADERS[route.trusted_value]
     lines = [f":{service.proxy_port} {{", "\tbind 127.0.0.1", "\troute {"]
 
     def proxy(indent: str, trusted: bool = False, strip: bool = False) -> None:
@@ -99,7 +102,7 @@ def _block(service: Service) -> str:
             lines.extend(
                 [
                     f"{indent}\t# Set replaces the client header; deletes run after sets.",
-                    f"{indent}\theader_up {route.trusted_header} {{http.request.header.X-Authentik-Username}}",
+                    f"{indent}\theader_up {route.trusted_header} {{http.request.header.{identity}}}",
                 ]
             )
         lines.extend(
@@ -135,8 +138,8 @@ def _block(service: Service) -> str:
             ]
         )
         headers = route.copy_identity_headers
-        if route.access == "trusted_header" and "X-Authentik-Username" not in headers:
-            headers = (*headers, "X-Authentik-Username")
+        if route.access == "trusted_header" and identity not in headers:
+            headers = (*headers, identity)
         if headers:
             lines.append(f"{indent}\tcopy_headers {' '.join(headers)}")
         lines.extend([f"{indent}\ttrusted_proxies private_ranges", f"{indent}}}"])

@@ -160,6 +160,9 @@ def _oidc_settings(app: App, paths: RuntimePaths) -> OidcApp | None:
         secret,
         oidc.redirect_paths,
         values.get(oidc.initial_owner_env, ""),
+        (oidc.role_claim.claim, oidc.role_claim.admin, oidc.role_claim.user, oidc.role_claim.multi)
+        if oidc.role_claim
+        else None,
     )
 
 

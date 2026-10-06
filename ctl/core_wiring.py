@@ -31,6 +31,8 @@ class RoutingParams(Params):
     runner_api_base_env: str = ""
     embedding_model: str = ""
     embedding_provider: str = ""
+    # Set by integrates_with when a speech app is installed; empty otherwise.
+    speech_url_env: str = ""
     admin_email_env: str = ""
     admin_password_env: str = ""
     bootstrap_flag_env: str = ""
@@ -96,6 +98,31 @@ def _provider_keys(paths: RuntimePaths) -> list[dict]:
     ]
 
 
+# Stable names clients use, whichever speech models the speech app is set to.
+SPEECH_TO_TEXT = "mu3lab-stt"
+TEXT_TO_SPEECH = "mu3lab-tts"
+
+
+def speech_models(env: dict[str, str], params: RoutingParams) -> list[dict]:
+    """Route the stable speech names to the installed speech app, if there is one."""
+    base = env.get(params.speech_url_env, "") if params.speech_url_env else ""
+    stt, tts = env.get("MU3LAB_STT_MODEL", ""), env.get("MU3LAB_TTS_MODEL", "")
+    if not base or not stt or not tts:
+        return []
+    return [
+        {
+            "model_name": name,
+            # The speech app is internal-only and needs no key; LiteLLM's client still requires one.
+            "litellm_params": {"model": f"openai/{model}", "api_base": base, "api_key": "unused"},
+            "model_info": {"mode": mode},
+        }
+        for name, model, mode in (
+            (SPEECH_TO_TEXT, stt, "audio_transcription"),
+            (TEXT_TO_SPEECH, tts, "audio_speech"),
+        )
+    ]
+
+
 def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog: Catalog) -> dict[str, bool | int]:
     env_path, config_path = RoutingProject(app, params).files(paths)
     env = read_runtime_env(env_path)
@@ -140,9 +167,11 @@ def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog:
                 },
             }
         )
+        models.extend(speech_models(env, params))
         config = {
             "model_list": models,
-            "general_settings": {"master_key": f"os.environ/{params.master_key_env}"},
+            # Keys and budgets live in LiteLLM's database; what people say or ask is never logged there.
+            "general_settings": {"master_key": f"os.environ/{params.master_key_env}", "disable_spend_logs": True},
             "litellm_settings": {"drop_params": True},
         }
         write_atomic(config_path, yaml.safe_dump(config, sort_keys=False).encode())

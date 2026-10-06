@@ -1,0 +1,90 @@
+name: mu3lab-outline
+
+services:
+  outline:
+    image: outlinewiki/outline:1.10.1@sha256:832051f039b446c87aa23929cf92c00980c66aaa2d744d118c48c016ec816ad8
+    restart: unless-stopped
+    ports: ["127.0.0.1:3005:3000"]
+    environment:
+      NODE_ENV: production
+      URL: ${OUTLINE_URL:?OUTLINE_URL is required}
+      PORT: "3000"
+      SECRET_KEY: ${OUTLINE_SECRET_KEY:?OUTLINE_SECRET_KEY is required}
+      UTILS_SECRET: ${OUTLINE_UTILS_SECRET:?OUTLINE_UTILS_SECRET is required}
+      DATABASE_URL: postgres://outline:${OUTLINE_DB_PASSWORD:?OUTLINE_DB_PASSWORD is required}@postgres:5432/outline
+      PGSSLMODE: disable
+      REDIS_URL: redis://redis:6379
+      FILE_STORAGE: local
+      FILE_STORAGE_LOCAL_ROOT_DIR: /var/lib/outline/data
+      FILE_STORAGE_UPLOAD_MAX_SIZE: "104857600"
+      # Tailscale and Caddy terminate HTTPS before Outline.
+      FORCE_HTTPS: "false"
+      TELEMETRY: "false"
+      DEFAULT_LANGUAGE: en_US
+      OIDC_CLIENT_ID: ${OUTLINE_OIDC_CLIENT_ID:?OUTLINE_OIDC_CLIENT_ID is required}
+      OIDC_CLIENT_SECRET: ${OUTLINE_OIDC_CLIENT_SECRET:?OUTLINE_OIDC_CLIENT_SECRET is required}
+      OIDC_ISSUER_URL: ${OUTLINE_OIDC_ISSUER_URL:?OUTLINE_OIDC_ISSUER_URL is required}
+      OIDC_LOGOUT_URI: ${OUTLINE_OIDC_LOGOUT_URI:-}
+      OIDC_DISPLAY_NAME: Mu3Lab
+      OIDC_USERNAME_CLAIM: preferred_username
+      OIDC_SCOPES: openid profile email
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/outline/files:/var/lib/outline/data
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      files-init: {condition: service_completed_successfully}
+    networks: [mu3lab_frontend, outline_internal]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/_health | grep -q OK || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: outline
+      POSTGRES_PASSWORD: ${OUTLINE_DB_PASSWORD:?OUTLINE_DB_PASSWORD is required}
+      POSTGRES_DB: outline
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/outline/postgres:/var/lib/postgresql/data
+    networks: [outline_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U outline -d outline"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    networks: [outline_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Outline runs as nodejs (1001); a folder Docker creates belongs to root.
+  files-init:
+    image: outlinewiki/outline:1.10.1@sha256:832051f039b446c87aa23929cf92c00980c66aaa2d744d118c48c016ec816ad8
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "1001:1001", "/var/lib/outline/data"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/outline/files:/var/lib/outline/data
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
+networks:
+  mu3lab_frontend: {external: true}
+  outline_internal: {internal: true}

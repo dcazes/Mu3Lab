@@ -17,7 +17,7 @@ service:
   uses_gpu: true
 sign_in:
   method: none
-  note: Internal-only embedding and tiny-model runner; no browser or MCP route.
+  note: Internal-only embedding runner (no chat models); no browser or MCP route.
 ui:
   available: false
   unavailable_reason: Ollama is an internal model and embedding API; it does not ship a browser UI.

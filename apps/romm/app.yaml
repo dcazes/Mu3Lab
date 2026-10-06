@@ -1,0 +1,92 @@
+# RomM — see ctl/manifest/models.py for every field.
+id: romm
+capabilities: [games]
+name: RomM
+tier: optional
+group: apps
+category: media
+tagline: Retro games, playable in your browser
+summary: Organizes the game files you own into a library with box art and details, and plays many classic
+  systems right in the browser with saves kept on your server.
+version: 5.3.1
+upstream: rommapp/romm
+media:
+- name: roms
+  purpose: Your own game files, one folder per system (for example roms/snes/). Add only games you own.
+service:
+  local_port: 8091
+  health:
+    path: /api/heartbeat
+  start_timeout_seconds: 300
+route:
+  https_port: 8464
+  caddy_port: 19481
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-romm
+    redirect_paths:
+    - /api/oauth/openid
+    launch_path: /api/login/openid
+    env:
+      client_id: ROMM_OIDC_CLIENT_ID
+      client_secret: ROMM_OIDC_CLIENT_SECRET
+      discovery_url: ROMM_OIDC_METADATA_URL
+account:
+  mode: oidc_first_login
+  user_action: Open RomM; Authentik signs you in. Add game files under /srv/mu3lab/media/roms, one folder per system.
+secrets:
+- env: ROMM_AUTH_SECRET_KEY
+  kind: hex
+  length: 32
+- env: ROMM_DB_PASSWORD
+  length: 32
+- env: ROMM_DB_ROOT_PASSWORD
+  length: 32
+configuration:
+- key: screenscraper_user
+  env: ROMM_SCREENSCRAPER_USER
+  type: string
+  label: ScreenScraper username (optional, for box art and details)
+  default: ''
+- key: screenscraper_password
+  env: ROMM_SCREENSCRAPER_PASSWORD
+  type: secret
+  label: ScreenScraper password (optional)
+- key: retroachievements_api_key
+  env: ROMM_RETROACHIEVEMENTS_API_KEY
+  type: secret
+  label: RetroAchievements API key (optional)
+- key: steamgriddb_api_key
+  env: ROMM_STEAMGRIDDB_API_KEY
+  type: secret
+  label: SteamGridDB API key (optional, for cover art)
+env:
+  ROMM_PUBLIC_URL: '{{public_url}}'
+  ROMM_OIDC_REDIRECT_URI: '{{public_url}}/api/oauth/openid'
+  ROMM_OIDC_APPLICATION_URL: 'https://{{dns_name}}/application/o/mu3lab-romm'
+mobile:
+  primary: romm-web
+  clients:
+  - id: romm-web
+    name: RomM web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://romm.app/
+    source: https://github.com/rommapp/romm
+    setup: pwa
+    summary: Browse your library and play supported systems with touch controls.
+    caveat: Your phone must be connected to the Mu3Lab tailnet. Some systems need a desktop browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private RomM address and sign in with Authentik.
+    - Use the browser menu to add RomM to the Home Screen.
+resource_guidance: Moderate; library scans use CPU for a while. Game files live under /srv/mu3lab/media, which
+  backups leave out; saves and states are backed up.
+setup_action: Install RomM to organize and play the retro games you own.

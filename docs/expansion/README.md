@@ -84,11 +84,13 @@ Update this table in the same commit that merges each task. Use only:
 |---|---|---|
 | 0-1 grocy-fixes | not started | |
 | 0-2 grocy-live-acceptance | not started | Needs owner for phone checks |
-| 1-1 … 1-9 platform | not started | |
+| 1-2 media root, 1-4 (email header, form launch), 1-5 soft deps, 1-6 per-person accounts, 1-9 role claims | implemented 2026-10-06 | See [notes/implementation-2026-10-06.md](notes/implementation-2026-10-06.md) |
+| 1-1, 1-3 (GPU card), 1-7, 1-8 | not started | Ollama idle unload done |
 | 2-1 … 2-4 kopia | not started | |
-| 3-1 … 3-5 chat | not started | |
-| 4-1 … 4-3 speech | not started | |
-| 5-01 … 5-12 apps | not started | |
+| 3-3 open-webui (as an optional app) | implemented 2026-10-06 | Chat choice 3-1, 3-2, 3-4 and Hermes 3-5 not started |
+| 4-1 speaches, 4-2 routing and voice keys | implemented 2026-10-06 | 4-3 Wyoming bridge waits for Home Assistant |
+| 5-02 beaver, 5-03 audiobookshelf, 5-04 outline, 5-05 romm, 5-06 photon, 5-07 dawarich | implemented 2026-10-06 | VM acceptance pending |
+| 5-01 homebox, 5-08 … 5-12 | not started | |
 | 6-1 acceptance | not started | |
 
 ## Conventions used in these documents
