@@ -257,6 +257,18 @@ def docker_cmd_with_stdin(
     return proc.returncode, output.replace(stdin_data, "[redacted]").strip()
 
 
+def _compose_project_command(projdir: Path, extra_files: list[Path] | None = None) -> list[str]:
+    files = [projdir / "docker-compose.yml"]
+    record = projdir / "docker-compose.digest.yml"
+    if record.is_file():
+        files.append(record)
+    files.extend(extra_files or [])
+    command = ["docker", "compose"]
+    for path in files:
+        command.extend(["-f", str(path)])
+    return [*command, "--project-directory", str(projdir)]
+
+
 def compose_up(
     projdir: Path,
     log: Callable[[str], None],
@@ -274,15 +286,7 @@ def compose_up(
     string, no shell games beyond one quoted layer) stays exact. Extra files
     are reviewed service-owned overrides, never browser-provided paths.
     """
-    files = [projdir / "docker-compose.yml"]
-    digest_override = projdir / "docker-compose.digest.yml"
-    if digest_override.is_file():
-        files.append(digest_override)
-    files += list(extra_files or [])
-    argv = ["docker", "compose"]
-    for compose_file in files:
-        argv.extend(["-f", str(compose_file)])
-    argv.extend(["--project-directory", str(projdir), "up", "-d"])
+    argv = [*_compose_project_command(projdir, extra_files), "up", "-d"]
     if recreate:
         argv.append("--force-recreate")
     if wait_timeout is not None:
@@ -300,34 +304,28 @@ def compose_up(
     return docker_cmd(argv, log, timeout=timeout, env=env)
 
 
-def compose_config(projdir: Path, log: Callable[[str], None], *, env: dict[str, str] | None = None) -> tuple[int, str]:
-    """Validate one materialized curated project before any image pull."""
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        str(projdir / "docker-compose.yml"),
-        "--project-directory",
-        str(projdir),
-        "config",
-        "--quiet",
-    ]
+def compose_config(
+    projdir: Path,
+    log: Callable[[str], None],
+    *,
+    env: dict[str, str] | None = None,
+    extra_files: list[Path] | None = None,
+) -> tuple[int, str]:
+    """Validate the same materialized Compose configuration that startup uses."""
+    command = [*_compose_project_command(projdir, extra_files), "config", "--quiet"]
     return docker_cmd(command, log, timeout=60, env=env)
 
 
 def compose_pull(
-    projdir: Path, log: Callable[[str], None], *, timeout: int = 1800, env: dict[str, str] | None = None
+    projdir: Path,
+    log: Callable[[str], None],
+    *,
+    timeout: int = 1800,
+    env: dict[str, str] | None = None,
+    extra_files: list[Path] | None = None,
 ) -> tuple[int, str]:
-    """Pull images declared by one curated, already-validated Compose file."""
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        str(projdir / "docker-compose.yml"),
-        "--project-directory",
-        str(projdir),
-        "pull",
-    ]
+    """Pull the selected release and accelerator images before startup."""
+    command = [*_compose_project_command(projdir, extra_files), "pull"]
     return docker_cmd_stream(command, log, timeout=timeout, env=env)
 
 
@@ -464,23 +462,17 @@ def docker_container_statuses(project: str) -> tuple[int, str]:
 
 
 def compose_image_list(
-    projdir: Path, log: Callable[[str], None], *, env: dict[str, str] | None = None
+    projdir: Path,
+    log: Callable[[str], None],
+    *,
+    env: dict[str, str] | None = None,
+    extra_files: list[Path] | None = None,
 ) -> tuple[int, list[str]]:
-    """Resolved registry images of one curated project, each listed once.
+    """Resolved registry images of the selected Compose project, each listed once.
 
     Services built locally from a Dockerfile have nothing to download.
     """
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        str(projdir / "docker-compose.yml"),
-        "--project-directory",
-        str(projdir),
-        "config",
-        "--format",
-        "json",
-    ]
+    command = [*_compose_project_command(projdir, extra_files), "config", "--format", "json"]
     rc, output = docker_cmd(command, log, timeout=60, env=env)
     if rc:
         return rc, []

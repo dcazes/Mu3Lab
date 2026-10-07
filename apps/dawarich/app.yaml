@@ -14,6 +14,8 @@ service:
   local_port: 3006
   health:
     path: /api/v1/health
+    headers:
+      X-Forwarded-Proto: https
   start_timeout_seconds: 600
 route:
   https_port: 8465

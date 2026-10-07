@@ -42,6 +42,7 @@ class InstallTests(unittest.TestCase):
         class FakeCompose:
             def __init__(self, directory, gpu_mode="cpu"):
                 self.directory = directory
+                self.gpu_mode = gpu_mode
 
             def validate(self, log):
                 test.calls.append("validate")

@@ -145,12 +145,12 @@ def run_install(
             raise StepFailed(stage_name, failure_code, f"Compose validation failed: {output}")
         failure_code = "image_pull_failed"
         stage("pull_images", "Downloading pinned application images.")
-        rc, output = download_images(project, app.id, job_id, log)
+        rc, output = download_images(project, app.id, job_id, log, compose=ctx.compose)
         if rc:
             raise StepFailed(stage_name, failure_code, f"Image pull failed: {output}")
         failure_code = "image_digest_failed"
         stage("resolve_digests", "Resolving images to immutable OCI digests.")
-        images = app_releases.pin(service, root, log, paths)
+        images = app_releases.pin(service, root, log, paths, gpu_mode=ctx.compose.gpu_mode)
         if state:
             state.set_installation(app.id, "starting", job_id=job_id, manifest_version="3", image_digests=images)
         if app.manifest.sign_in.method == "oidc":
@@ -304,7 +304,9 @@ def run_periodic(store: JobStore, root: Path, log: Callable[[str], None]) -> Non
             log(f"{app.manifest.name} maintenance deferred safely: {redact(str(exc))}")
 
 
-def download_images(project: Path, service_id: str, job_id: str, log: Callable[[str], None]) -> tuple[int, str]:
+def download_images(
+    project: Path, service_id: str, job_id: str, log: Callable[[str], None], *, compose: Compose | None = None
+) -> tuple[int, str]:
     """Download images with Mu3Lab's verified parallel fetcher, else Docker's pull."""
     downloads = ImageDownloadStore.runtime()
 
@@ -312,7 +314,8 @@ def download_images(project: Path, service_id: str, job_id: str, log: Callable[[
         if downloads:
             downloads.update(service_id, job_id, snapshot)
 
-    rc, images = actions.compose_image_list(project, log)
+    compose = compose or Compose(project)
+    rc, images = actions.compose_image_list(project, log, extra_files=compose.overrides())
     if rc == 0 and images:
         try:
             image_fetch.fetch_images(images, RuntimePaths().runtime / "image-cache", log, report=report)
@@ -321,4 +324,4 @@ def download_images(project: Path, service_id: str, job_id: str, log: Callable[[
             log(f"Fast download unavailable ({exc}); using Docker's own download instead.")
     # Docker's pull reports no totals, so the dashboard shows it without a percentage.
     report({"state": "docker"})
-    return actions.compose_pull(project, log)
+    return actions.compose_pull(project, log, extra_files=compose.overrides())

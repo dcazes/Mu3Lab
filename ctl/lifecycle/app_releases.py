@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from ctl import actions
+from ctl.engine.compose import Compose
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 from ctl.store import records
@@ -202,7 +203,14 @@ def align(service: Service, root: Path, paths: RuntimePaths | None = None) -> No
     write(service.id, Release(current.version, kept), paths)
 
 
-def pin(service: Service, root: Path, log: Callable[[str], None], paths: RuntimePaths | None = None) -> dict[str, str]:
+def pin(
+    service: Service,
+    root: Path,
+    log: Callable[[str], None],
+    paths: RuntimePaths | None = None,
+    *,
+    gpu_mode: str = "cpu",
+) -> dict[str, str]:
     """Record the release a new install runs; keep the one data was left at.
 
     Uninstalling with "keep data" leaves the record, so reinstalling reconnects
@@ -214,7 +222,9 @@ def pin(service: Service, root: Path, log: Callable[[str], None], paths: Runtime
         log(f"Keeping {service.name} {current.version or 'as installed'}, the release its existing data uses.")
         return current.images
     release = approved(service, root)
-    images = compose_images(_project(service.id, paths) / "docker-compose.yml")
+    images: dict[str, str] = {}
+    for compose_file in Compose(_project(service.id, paths), gpu_mode=gpu_mode).files():
+        images.update(compose_images(compose_file))
     if not images:
         raise RuntimeError("the curated deployment did not declare any images")
     pinned = {}

@@ -117,7 +117,8 @@ def _healthy(service: Service) -> tuple[bool, str]:
         return _tcp_open(port), f"TCP port {port}"
     url = str(health["url"])
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:
+        request = urllib.request.Request(url, headers=health.get("headers", {}))
+        with urllib.request.urlopen(request, timeout=3) as response:
             return 200 <= response.status < 400, f"HTTP {response.status}"
     except (urllib.error.URLError, OSError) as exc:
         return False, f"unreachable: {exc.reason if isinstance(exc, urllib.error.URLError) else exc}"

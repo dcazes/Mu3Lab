@@ -16,7 +16,8 @@ def wait_healthy(service: Service, timeout: int = 180) -> tuple[bool, str]:
     while time.monotonic() < deadline:
         try:
             if service.health["kind"] == "http":
-                with urllib.request.urlopen(str(service.health["url"]), timeout=5) as response:
+                request = urllib.request.Request(str(service.health["url"]), headers=service.health.get("headers", {}))
+                with urllib.request.urlopen(request, timeout=5) as response:
                     if 200 <= response.status < 400:
                         return True, f"HTTP {response.status}"
                     last = f"HTTP {response.status}"

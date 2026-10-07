@@ -41,6 +41,7 @@ class Health(Model):
     kind: Literal["http", "tcp"] = "http"
     path: str = "/"
     port: Port | None = None  # defaults to service.local_port
+    headers: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("path")
     @classmethod

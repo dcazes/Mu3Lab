@@ -120,7 +120,7 @@ def _health(manifest: AppManifest) -> dict[str, Any]:
     port = health.port or manifest.service.local_port
     if health.kind == "tcp":
         return {"kind": "tcp", "port": port}
-    return {"kind": "http", "url": f"http://127.0.0.1:{port}{health.path}"}
+    return {"kind": "http", "url": f"http://127.0.0.1:{port}{health.path}", "headers": health.headers}
 
 
 def service_from(manifest: AppManifest) -> Service:
