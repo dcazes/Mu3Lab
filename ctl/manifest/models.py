@@ -41,6 +41,7 @@ class Health(Model):
     kind: Literal["http", "tcp"] = "http"
     path: str = "/"
     port: Port | None = None  # defaults to service.local_port
+    headers: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("path")
     @classmethod
@@ -92,6 +93,9 @@ class Route(Model):
     access: Literal["open", "gate", "trusted_header"] = "open"
     copy_identity_headers: tuple[str, ...] = ()
     trusted_header: str = "Remote-User"
+    # What the trusted header carries: the Authentik username, or the email for
+    # apps that identify people by email (Beaver Habits).
+    trusted_value: Literal["username", "email"] = "username"
     token_bypass: TokenBypass | None = None
     blocked_paths: tuple[BlockedPath, ...] = ()
     redirects: tuple[Redirect, ...] = ()
@@ -126,6 +130,19 @@ class JsonLaunch(Model):
     session_check_path: str = ""  # already signed in? then the launcher just opens the app
 
 
+class FormLaunch(Model):
+    """The app's sign-in page holds a small form that starts Authentik sign-in when submitted.
+
+    Rails apps (Dawarich) need a POST carrying the page's own anti-forgery
+    token, so a plain link cannot start sign-in. Mu3Lab serves a launch page
+    that loads ``page``, submits the form whose action is ``action``, and the
+    app then hands over to Authentik.
+    """
+
+    page: str = Field(pattern=r"^/[\w\-./]*$")
+    action: str = Field(pattern=r"^/[\w\-./]*$")
+
+
 class FirstRunCheck(Model):
     """A JSON endpoint whose fields prove the app skipped its own first-run setup."""
 
@@ -134,13 +151,28 @@ class FirstRunCheck(Model):
     message: str
 
 
+class RoleClaim(Model):
+    """A claim naming the person's role in the app's own words, served as its own scope.
+
+    The app requests the scope named ``claim`` (Audiobookshelf asks for its
+    group claim by name) and receives the same-named claim.
+    """
+
+    claim: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$")
+    admin: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,40}$")  # for Mu3Lab operators
+    user: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,40}$")  # for everyone else in the household
+    multi: bool = True  # a list of one role, for apps that read a group list
+
+
 class Oidc(Model):
     client_id: str
     redirect_paths: tuple[str, ...]
+    role_claim: RoleClaim | None = None
     launch_path: str
     # How a browser starts sign-in: follow redirects, POST JSON, or submit a CSRF form.
-    launch: Literal["redirect", "json_post", "csrf_form"] = "redirect"
+    launch: Literal["redirect", "json_post", "csrf_form", "form_post"] = "redirect"
     json_launch: JsonLaunch | None = None
+    form_launch: FormLaunch | None = None
     env: OidcEnv
     first_run_checks: tuple[FirstRunCheck, ...] = ()
     initial_owner_env: str = ""  # env var holding the only username allowed on first sign-in
@@ -149,6 +181,8 @@ class Oidc(Model):
     def _launch_details(self) -> Oidc:
         if (self.launch == "json_post") != (self.json_launch is not None):
             raise ValueError("json_post launch needs json_launch details, and only it may have them")
+        if (self.launch == "form_post") != (self.form_launch is not None):
+            raise ValueError("form_post launch needs form_launch details, and only it may have them")
         return self
 
 
@@ -260,6 +294,9 @@ class CredentialScript(Model):
     service: str  # the app's compose service to run it in
     script: str  # file name inside the connector folder
     interpreter: tuple[str, ...]  # e.g. ["python", "manage.py", "shell"]; the script arrives on stdin
+    # Pass the installing owner's username as the script's only argument, so it can
+    # find the owner's account even after other household members become admins.
+    owner_username: bool = False
 
 
 class ReviewedUpdate(Model):
@@ -327,6 +364,48 @@ class Mobile(Model):
         return self
 
 
+# --- Working with other apps -----------------------------------------------------------
+
+
+class Integration(Model):
+    """Settings that depend on whether an app providing a capability is installed.
+
+    ``env`` applies while a provider is installed; its values may read the
+    provider's own settings as ``{{provider:<ENV>}}``. ``absent_env`` applies
+    otherwise. Installing or removing the provider re-renders this app.
+    """
+
+    capability: str
+    env: dict[str, str] = Field(default_factory=dict)
+    absent_env: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("env", "absent_env")
+    @classmethod
+    def _env_names(cls, value: dict[str, str]) -> dict[str, str]:
+        bad = [name for name in value if not ENV_NAME.fullmatch(name)]
+        if bad:
+            raise ValueError(f"invalid environment variable names: {', '.join(bad)}")
+        return value
+
+
+# --- Media libraries -------------------------------------------------------------------
+
+
+class MediaFolder(Model):
+    """A library under the media root (``/srv/mu3lab/media/<name>``) that people fill themselves.
+
+    Compose files mount it as ``${MU3LAB_MEDIA_<NAME>}``. Uninstall never deletes
+    it, and backups leave it out: it is large and people already have the files.
+    """
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$")
+    purpose: str
+
+    @property
+    def env(self) -> str:
+        return "MU3LAB_MEDIA_" + self.name.upper().replace("-", "_")
+
+
 # --- Display ---------------------------------------------------------------------------
 
 
@@ -355,6 +434,7 @@ class AppManifest(Model):
     capabilities: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
     data_dir: str = ""  # folder under /srv/mu3lab/data; defaults to the app id
+    media: tuple[MediaFolder, ...] = ()
     service: ServiceSpec
     route: Route | None = None
     sign_in: SignIn
@@ -362,6 +442,7 @@ class AppManifest(Model):
     secrets: tuple[Secret, ...] = ()
     env: dict[str, str | dict[str, Any] | list[Any]] = Field(default_factory=dict)
     configuration: tuple[ConfigField, ...] = ()
+    integrates_with: tuple[Integration, ...] = ()
     rules: tuple[RuleRef, ...] = ()
     chat: Chat = Chat()
     mobile: Mobile | None = None

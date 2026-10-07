@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
+from ctl.engine import template
 from ctl.engine.hooks import HookContext
+from ctl.engine.project import lookup_for
+from ctl.engine.template import TemplateError
 from ctl.rules import Params, Rule, RuleError, register
 
 if TYPE_CHECKING:
@@ -26,7 +29,9 @@ class ContainerScriptParams(Params):
     service: str
     script: str
     interpreter: tuple[str, ...] = Field(min_length=1)
-    args: tuple[str, ...] = ()  # "{{owner_json}}" becomes the installing owner's identity
+    # "{{owner_json}}" becomes the installing owner's identity; other placeholders
+    # ({{dns_name}}, {{public_url}}) are filled like manifest settings.
+    args: tuple[str, ...] = ()
     expect: str = ""  # a line the script prints on success
     needs_owner: bool = False
     purpose: str
@@ -55,7 +60,11 @@ class ContainerScript(Rule):
             ctx.fail(
                 "configure_application", "identity_email_missing", f"{params.purpose} needs your Authentik identity."
             )
-        args = [owner if arg == "{{owner_json}}" else arg for arg in params.args]
+        try:
+            args = [owner if arg == "{{owner_json}}" else self._fact(ctx, arg) for arg in params.args]
+        except TemplateError as exc:
+            ctx.fail("configure_application", "application_configuration_failed", f"{params.purpose}: {exc}")
+            return
         ctx.stage("configure_application", params.purpose + ".")
         result = ctx.run_script(
             params.service, params.script, params.interpreter, args=args, timeout=params.timeout_seconds
@@ -69,6 +78,13 @@ class ContainerScript(Rule):
         outputs = {key: value for key, value in result.outputs.items() if key.isupper()}
         if outputs:
             ctx.set_env(outputs)
+
+    @staticmethod
+    def _fact(ctx: HookContext, arg: str) -> str:
+        """Fill ``{{dns_name}}`` and other known facts the way manifest settings are filled."""
+        if ctx.facts is None:
+            return arg
+        return template.render(arg, lookup_for(ctx.app, ctx.facts, ctx.env()))
 
     def after_start(self, ctx: HookContext) -> None:
         if self.params.at == "after_start":

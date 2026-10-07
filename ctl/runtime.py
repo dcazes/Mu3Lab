@@ -27,6 +27,11 @@ class RuntimePaths:
         return self.root / "data"
 
     @property
+    def media(self) -> Path:
+        """Large libraries people add themselves (audiobooks, games); never deleted by uninstall."""
+        return self.root / "media"
+
+    @property
     def backups(self) -> Path:
         return self.root / "backups"
 
@@ -47,6 +52,7 @@ class RuntimePaths:
         return {
             "root": str(self.root),
             "data": str(self.data),
+            "media": str(self.media),
             "backups": str(self.backups),
             "runtime": str(self.runtime),
             "projects": str(self.projects),

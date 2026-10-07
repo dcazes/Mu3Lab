@@ -88,12 +88,63 @@ def discovery_url(dns_name: str, app_id: str) -> str:
     return f"https://{dns_name}/application/o/mu3lab-{app_id}/.well-known/openid-configuration"
 
 
+def installed(app: App, paths: RuntimePaths) -> bool:
+    """Core apps are always present; an optional app is installed while its project exists."""
+    return app.manifest.tier != "optional" or (paths.projects / app.id / "docker-compose.yml").is_file()
+
+
+def provider(capability: str, facts: Facts, exclude: str = "") -> App | None:
+    """The installed app that provides ``capability`` (one at most is honoured)."""
+    return next(
+        (
+            other
+            for other in facts.catalog.apps
+            if capability in other.manifest.capabilities and other.id != exclude and installed(other, facts.paths)
+        ),
+        None,
+    )
+
+
+def _integrations(app: App, facts: Facts, env: dict[str, str]) -> None:
+    for integration in app.manifest.integrates_with:
+        source = provider(integration.capability, facts, exclude=app.id)
+        values = integration.env if source else integration.absent_env
+        if not source:
+            # Settings that only made sense with the provider must not outlive it.
+            for name in set(integration.env) - set(integration.absent_env):
+                env.pop(name, None)
+        provided = read_runtime_env(facts.paths.projects / source.id / ".env") if source else {}
+        base = lookup_for(app, facts, env)
+
+        def lookup(name: str, base: template.Lookup = base, provided: dict[str, str] = provided) -> str | None:
+            if name.startswith("provider:"):
+                return provided.get(name.split(":", 1)[1]) or None
+            return base(name)
+
+        for name, value in values.items():
+            try:
+                env[name] = template.render(value, lookup)
+            except template.TemplateError:
+                env.pop(name, None)  # the provider has not published that setting yet
+
+
 def _config_default(field: ConfigField) -> str | None:
     if field.default is None:
         return None
     if isinstance(field.default, bool):
         return "true" if field.default else "false"
     return str(field.default)
+
+
+def _rendered_default(field: ConfigField, default: str, lookup: template.Lookup) -> str | None:
+    """A default may name a fact (``{{country_code}}``); one that is unknown or not an allowed choice is left unset."""
+    try:
+        value = template.render(default, lookup)
+    except template.TemplateError:
+        return None
+    if field.type == "enum" and value not in field.options:
+        return None
+    return value
 
 
 @dataclass(frozen=True)
@@ -131,6 +182,8 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
             "discovery_url": discovery_url(facts.dns_name, app.id) if facts.dns_name else None,
             "data_root": str(facts.paths.data),
             "tz": env.get("TZ") or None,
+            "country_code": hostinfo.country_code(env.get("TZ")) or None,
+            "currency_code": hostinfo.currency_code(hostinfo.country_code(env.get("TZ"))),
         }
         if name in known:
             return known[name]
@@ -143,6 +196,8 @@ def build_env(app: App, facts: Facts, existing: dict[str, str], hooks: list[EnvH
     manifest = app.manifest
     env = dict(existing)
     env["MU3LAB_DATA_ROOT"] = str(facts.paths.data)
+    for folder in manifest.media:
+        env[folder.env] = str(facts.paths.media / folder.name)
     # Assigned, not defaulted: apps follow the computer if its timezone changes.
     env["TZ"] = hostinfo.timezone()
     store = SecretStore(facts.paths)
@@ -164,9 +219,12 @@ def build_env(app: App, facts: Facts, existing: dict[str, str], hooks: list[EnvH
     for field in manifest.configuration:
         default = _config_default(field)
         if default is not None and field.env not in env:
-            env[field.env] = default
+            default = _rendered_default(field, default, lookup_for(app, facts, env))
+            if default is not None:
+                env[field.env] = default
     for hook in hooks:
         hook(app, env)
+    _integrations(app, facts, env)
     lookup = lookup_for(app, facts, env)
     for name, value in manifest.env.items():
         try:
@@ -199,9 +257,20 @@ def _write_private(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
+def _media_folders(app: App, facts: Facts) -> None:
+    """Create the app's libraries as this (unprivileged) user, so people can add files to them.
+
+    Docker would otherwise create a missing bind-mount source owned by root.
+    Existing folders are left exactly as they are.
+    """
+    for folder in app.manifest.media:
+        (facts.paths.media / folder.name).mkdir(mode=0o775, parents=True, exist_ok=True)
+
+
 def render(app: App, facts: Facts, hooks: list[EnvHook] | None = None) -> Path:
     """Write the app's runtime project and return its directory."""
     target = facts.paths.projects / app.id
+    _media_folders(app, facts)
     _copy_folder(app.folder, target)
     env_path = target / ".env"
     env = build_env(app, facts, read_runtime_env(env_path), hooks or [])

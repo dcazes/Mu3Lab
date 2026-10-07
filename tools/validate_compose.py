@@ -12,12 +12,17 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ctl.engine.project import Facts, render
+from ctl.engine.project import Facts
+from ctl.engine.runtime import render_rules
 from ctl.manifest.catalog import load
+from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
 from ctl.secrets import runtime_env_text
+from ctl.store.workflows import JobIdentity
 
 ROOT = Path(__file__).resolve().parents[1]
+# Rules that write the installing owner into first-start settings need one, as at install.
+OWNER = JobIdentity(owner_uid="test-only", email="owner@example.test", username="owner", display_name="Owner")
 
 
 def main() -> int:
@@ -37,7 +42,7 @@ def main() -> int:
         # Explicit manifest defaults for first-start rules and required settings.
         projects = []
         for app in catalog.apps:
-            project = render(app, facts)
+            project = render_rules(app, facts, rules_for(app.manifest), OWNER)
             values = {field.env: "test-only" for field in app.manifest.configuration if field.required}
             if app.manifest.sign_in.oidc:
                 oidc = app.manifest.sign_in.oidc
@@ -59,6 +64,7 @@ def main() -> int:
             shutil.copytree(source.parent, target)
             (target / ".env").write_text("")
             projects.append(target / "docker-compose.yml")
+        failures: list[str] = []
         for compose in projects:
             proc = subprocess.run(
                 [
@@ -77,10 +83,12 @@ def main() -> int:
                 check=False,
             )
             if proc.returncode:
-                print(compose.parent.name + ": " + proc.stderr.strip())
-                return 1
-        print(f"{len(projects)} rendered Compose projects validated.")
-    return 0
+                failures.append(compose.parent.name + ": " + proc.stderr.strip())
+        # Report every failing project, not only the first, so none hides behind another.
+        for failure in failures:
+            print(failure)
+        print(f"{len(projects) - len(failures)} of {len(projects)} rendered Compose projects validated.")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

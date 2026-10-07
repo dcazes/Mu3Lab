@@ -54,13 +54,23 @@ class RegistryV3Tests(unittest.TestCase):
                 "nextcloud",
                 "baby-buddy",
                 "grocy",
+                "beaver-habits",
+                "outline",
+                "audiobookshelf",
+                "romm",
+                "photon",
+                "dawarich",
+                "open-webui",
+                "speaches",
             },
         )
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
-                self.assertIsNotNone(service.private_https_port)
-                self.assertIsNotNone(service.proxy_port)
+                # Apps people open get a private address; internal services (speech, maps) have none.
+                routed = service.manifest.ui.available
+                self.assertEqual(service.private_https_port is not None, routed)
+                self.assertEqual(service.proxy_port is not None, routed)
 
     def test_install_is_the_only_initial_optional_action(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "not_installed"), ["install"])

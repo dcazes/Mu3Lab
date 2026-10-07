@@ -127,7 +127,9 @@ class UninstallTests(unittest.TestCase):
 class RemovalBlueprintTests(unittest.TestCase):
     def test_oidc_removal_deletes_application_provider_and_claims(self):
         content = render_removal_blueprint("nextcloud", "Nextcloud", oidc=True)
-        self.assertEqual(content.count("state: absent"), 4)
+        # Application, provider, claims, role claim (apps such as Audiobookshelf) and owner policy.
+        self.assertEqual(content.count("state: absent"), 5)
+        self.assertIn("name: Mu3Lab Nextcloud role claim", content)
         self.assertIn("slug: mu3lab-nextcloud", content)
         self.assertIn("name: Mu3Lab Nextcloud provider", content)
         self.assertNotIn("state: present", content)

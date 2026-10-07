@@ -10,9 +10,13 @@ services:
     environment:
       OLLAMA_API_BASE: http://ollama:11434
       STORE_MODEL_IN_DB: "false"
+      # Personal keys (budgets, allowed models, revocation) live here.
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?LITELLM_DB_PASSWORD is required}@db:5432/litellm
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-    networks: [mu3lab_frontend, mu3lab_backend]
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [mu3lab_frontend, mu3lab_backend, litellm_internal]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
@@ -20,6 +24,24 @@ services:
       timeout: 10s
       retries: 48
 
+  db:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?LITELLM_DB_PASSWORD is required}
+      POSTGRES_DB: litellm
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/litellm/postgres:/var/lib/postgresql/data
+    networks: [litellm_internal]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  litellm_internal: {internal: true}

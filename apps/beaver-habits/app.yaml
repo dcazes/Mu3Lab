@@ -1,0 +1,79 @@
+# Beaver Habits — see ctl/manifest/models.py for every field.
+id: beaver-habits
+capabilities: [habits]
+name: Beaver Habits
+tier: optional
+group: apps
+category: family
+tagline: Daily habits and streaks
+summary: A simple daily habit tracker. Tick off habits each day, keep streaks, and see your consistency at a glance.
+  Each household member has their own private list.
+version: 0.10.0
+upstream: daya0576/beaverhabits
+service:
+  local_port: 8086
+  health:
+    path: /health
+route:
+  https_port: 8461
+  caddy_port: 19478
+  access: trusted_header
+  # Beaver identifies people by email and trusts this header only for accounts
+  # that already exist; per_person_accounts below creates them.
+  trusted_header: X-Mu3lab-Email
+  trusted_value: email
+  redirects:
+  - path: /login*
+    to: /gui
+  - path: /register*
+    to: /gui
+  - path: /demo*
+    to: /gui
+sign_in:
+  method: trusted_header
+  note: Authentik protects the private route and tells Beaver Habits who you are by your email address. Mu3Lab
+    creates a private habit list for every household member; client-supplied identity headers are replaced at the
+    proxy.
+account:
+  mode: trusted_header
+  user_action: Open Beaver Habits and add your first habit.
+secrets:
+- env: BEAVER_STORAGE_SECRET
+  length: 48
+- env: BEAVER_JWT_SECRET
+  length: 48
+rules:
+- rule: per_person_accounts
+  with:
+    service: beaver
+    script: scripts/sync-people.py
+    interpreter:
+    - python
+    - '-'
+    expect: MU3LAB_BEAVER_PEOPLE_OK
+    purpose: Create a private habit list for each household member
+mobile:
+  primary: beaver-pwa
+  clients:
+  - id: beaver-pwa
+    name: Beaver Habits web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://github.com/daya0576/beaverhabits
+    source: https://github.com/daya0576/beaverhabits
+    setup: pwa
+    summary: Tick off today's habits from your phone's home screen.
+    caveat: Your phone must be connected to the Mu3Lab tailnet. On iPhone the home-screen app keeps its own sign-in,
+      so you sign in once inside it.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Beaver Habits address in your phone's browser and sign in with Authentik.
+    - Use the browser's share or menu button and choose Add to Home Screen.
+resource_guidance: Very light; one small database file.
+setup_action: Install Beaver Habits to track daily habits and streaks.

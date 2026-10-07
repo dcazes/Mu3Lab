@@ -12,6 +12,7 @@ from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
 from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
+from ctl.engine.rewire import rewire_consumers
 from ctl.jobs import JobStore
 from ctl.lifecycle import maintenance
 from ctl.lifecycle.health import wait_healthy
@@ -143,6 +144,8 @@ def _uninstall(
         return
     if state:
         state.reset_service(service.id)
+    # Apps that used this one (Open WebUI using speech) drop those settings now.
+    rewire_consumers(registry.catalog.get(service.id), registry.catalog, log)
     _sync_chat_assistants(log)
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
 

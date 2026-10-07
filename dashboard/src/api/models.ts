@@ -121,3 +121,5 @@ export type VaultSetupResult = components['schemas']['VaultSetupResult'];
 export type VaultStatus = components['schemas']['VaultStatus'];
 export type VaultStatusBrowser_extension = components['schemas']['VaultStatusBrowser_extension'];
 export type VaultSyncResponse = components['schemas']['VaultSyncResponse'];
+export type VoiceKeyCreated = components['schemas']['VoiceKeyCreated'];
+export type VoiceKeyStatus = components['schemas']['VoiceKeyStatus'];

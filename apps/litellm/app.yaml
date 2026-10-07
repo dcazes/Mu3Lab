@@ -23,6 +23,11 @@ route:
   access: gate
   audience: operators
   forwarded_host: host
+  # Devices and apps outside Mu3Lab use the API with a personal key (Settings,
+  # Voice and AI key); LiteLLM checks it. The admin pages stay behind Authentik.
+  token_bypass:
+    path: /v1/*
+    header_prefix: 'Bearer '
 sign_in:
   method: gate
   note: Authentik protects the private dashboard route. LiteLLM Community does not receive a native per-user OIDC
@@ -35,6 +40,15 @@ secrets:
 - env: LITELLM_MASTER_KEY
   kind: hex
   length: 32
+- env: LITELLM_DB_PASSWORD
+  length: 32
+integrates_with:
+# Speech-to-text and text-to-speech under the stable names mu3lab-stt and mu3lab-tts.
+- capability: speech
+  env:
+    MU3LAB_SPEECH_URL: '{{provider:MU3LAB_SPEECH_URL}}'
+    MU3LAB_STT_MODEL: '{{provider:MU3LAB_STT_MODEL}}'
+    MU3LAB_TTS_MODEL: '{{provider:MU3LAB_TTS_MODEL}}'
 rules:
 - rule: provider_routing
   with:
@@ -48,3 +62,4 @@ rules:
     runner_api_base_env: OLLAMA_API_BASE
     embedding_model: nomic-embed-text
     embedding_provider: ollama
+    speech_url_env: MU3LAB_SPEECH_URL

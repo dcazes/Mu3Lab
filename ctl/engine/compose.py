@@ -68,7 +68,7 @@ class Compose:
         return [path for path in self.files(extra) if path.name not in ("docker-compose.yml", RELEASE_RECORD)]
 
     def validate(self, log: Log) -> tuple[int, str]:
-        return actions.compose_config(self.directory, log)
+        return actions.compose_config(self.directory, log, extra_files=self.overrides())
 
     def up(
         self,

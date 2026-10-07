@@ -1,0 +1,82 @@
+# Audiobookshelf — see ctl/manifest/models.py for every field.
+id: audiobookshelf
+capabilities: [audiobooks]
+name: Audiobookshelf
+tier: optional
+group: apps
+category: media
+tagline: Audiobooks and podcasts
+summary: Stream your audiobooks and podcasts with synced listening progress, bookmarks, and sleep timers. Official
+  phone apps download books for offline listening.
+version: v2.37.1
+upstream: advplyr/audiobookshelf
+media:
+- name: audiobooks
+  purpose: Your audiobook files, one folder per book (for example Author/Title/files).
+- name: podcasts
+  purpose: Podcast episodes Audiobookshelf downloads for you.
+service:
+  local_port: 13378
+  health:
+    path: /healthcheck
+route:
+  https_port: 8462
+  caddy_port: 19479
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-audiobookshelf
+    redirect_paths:
+    - /audiobookshelf/auth/openid/callback
+    - /audiobookshelf/auth/openid/mobile-redirect
+    launch_path: /audiobookshelf/auth/openid?callback=/audiobookshelf/login
+    env:
+      client_id: ABS_OIDC_CLIENT_ID
+      client_secret: ABS_OIDC_CLIENT_SECRET
+    role_claim:
+      claim: abs_roles
+      admin: admin
+      user: user
+account:
+  mode: api_bootstrap
+  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to /srv/mu3lab/media/audiobooks.
+mobile:
+  primary: audiobookshelf-app
+  clients:
+  - id: audiobookshelf-app
+    name: Audiobookshelf
+    kind: native
+    support: official
+    platforms:
+    - android
+    install:
+      android: https://play.google.com/store/apps/details?id=com.audiobookshelf.app
+    homepage: https://www.audiobookshelf.org/
+    source: https://github.com/advplyr/audiobookshelf-app
+    setup: server_url
+    summary: Stream or download audiobooks and podcasts with progress synced to the server.
+    caveat: Your phone must be connected to the Mu3Lab tailnet to sync; downloaded books play offline. The official
+      iPhone app is still a TestFlight beta, so iPhones use the web player for now.
+    steps:
+    - Install Audiobookshelf and connect your phone to the Mu3Lab tailnet.
+    - Enter the private Mu3Lab Audiobookshelf address as the server.
+    - Tap Sign in with Mu3Lab; Authentik signs you in and returns you to the app.
+  - id: audiobookshelf-web
+    name: Audiobookshelf web player
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://www.audiobookshelf.org/
+    setup: pwa
+    summary: Listen in the browser and add it to the home screen; this is the way in on iPhone.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Audiobookshelf address and sign in with Authentik.
+    - Use the browser menu to add it to the Home Screen.
+resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups leave out.
+setup_action: Install Audiobookshelf to listen to your audiobooks and podcasts anywhere.

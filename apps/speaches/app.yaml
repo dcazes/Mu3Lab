@@ -1,0 +1,51 @@
+# Speaches — see ctl/manifest/models.py for every field.
+id: speaches
+capabilities: [speech]
+name: Speech (Whisper and Kokoro)
+tier: optional
+group: ai
+category: ai
+tagline: Private speech-to-text and text-to-speech
+summary: Turns speech into text with Whisper and reads text aloud with natural voices, on your own server. Chat,
+  Home Assistant, other apps, and your own devices use it through Mu3Lab's AI gateway; audio never leaves home.
+version: v0.8.3
+upstream: speaches-ai/speaches
+service:
+  local_port: 8092
+  health:
+    path: /health
+  uses_gpu: true
+  start_timeout_seconds: 300
+sign_in:
+  method: none
+  note: Internal speech service; apps and devices reach it through LiteLLM with their own keys.
+ui:
+  available: false
+  unavailable_reason: Speech has no screen of its own; use it from chat, Home Assistant, or with your personal voice key.
+configuration:
+- key: stt_model
+  env: MU3LAB_STT_MODEL
+  type: enum
+  label: Speech recognition model (the larger one needs an NVIDIA graphics card to be fast)
+  default: deepdml/faster-whisper-large-v3-turbo-ct2
+  options:
+  - deepdml/faster-whisper-large-v3-turbo-ct2
+  - Systran/faster-whisper-small
+- key: tts_model
+  env: MU3LAB_TTS_MODEL
+  type: enum
+  label: Voice model
+  default: speaches-ai/Kokoro-82M-v1.0-ONNX-int8
+  options:
+  - speaches-ai/Kokoro-82M-v1.0-ONNX-int8
+- key: tts_voice
+  env: MU3LAB_TTS_VOICE
+  type: string
+  label: Default voice
+  default: af_heart
+env:
+  # What apps using speech connect to (see integrates_with in LiteLLM and Open WebUI).
+  MU3LAB_SPEECH_URL: http://speaches:8000/v1
+resource_guidance: The best recognition model uses about 2.5 GB of graphics memory while in use and is unloaded after
+  five idle minutes. Models need about 2 GB of disk.
+setup_action: Install Speech to talk to chat and Home Assistant, and to dictate on your own devices.

@@ -7,7 +7,10 @@ services:
     ports: ["127.0.0.1:11434:11434"]
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
-      OLLAMA_KEEP_ALIVE: 24h
+      # Ollama only serves the small embedding model; free the GPU for speech
+      # and images after ten idle minutes.
+      OLLAMA_KEEP_ALIVE: 10m
+      OLLAMA_MAX_LOADED_MODELS: "1"
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/ollama:/root/.ollama
     networks: [mu3lab_frontend, mu3lab_backend]

@@ -17,6 +17,10 @@ class ProviderRouting(Rule):
         ctx.stage("provider_routing", "Preparing private AI provider routing.")
         write_routing(ctx.app, self.params, ctx.facts.paths, ctx.facts.catalog)
 
+    def rewire(self, ctx: HookContext) -> None:
+        # A speech app arriving or leaving changes the routed models.
+        self.before_start(ctx)
+
     def after_healthy(self, ctx: HookContext) -> None:
         if self.params.mode == "gateway":
             # The account hook has confirmed login; remove the first-start password

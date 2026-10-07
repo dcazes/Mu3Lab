@@ -32,6 +32,12 @@ class MobileClientTests(unittest.TestCase):
                 "nextcloud",
                 "baby-buddy",
                 "grocy",
+                "beaver-habits",
+                "outline",
+                "audiobookshelf",
+                "romm",
+                "dawarich",
+                "open-webui",
             },
         )
         self.assertEqual(mobile["lobehub"]["primary"], "lobechat-pwa")

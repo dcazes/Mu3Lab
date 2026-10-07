@@ -1,0 +1,107 @@
+name: mu3lab-dawarich
+
+x-dawarich: &dawarich
+  image: freikin/dawarich:1.15.3@sha256:589e3606b11b61c3fa2d9661832cb73645a9b93a9cc7d807a071e2bc6c584498
+  restart: unless-stopped
+  environment: &dawarich-env
+    RAILS_ENV: production
+    TIME_ZONE: ${TZ:-UTC}
+    SECRET_KEY_BASE: ${DAWARICH_SECRET_KEY_BASE:?DAWARICH_SECRET_KEY_BASE is required}
+    DATABASE_HOST: db
+    DATABASE_PORT: "5432"
+    DATABASE_USERNAME: dawarich
+    DATABASE_PASSWORD: ${DAWARICH_DB_PASSWORD:?DAWARICH_DB_PASSWORD is required}
+    DATABASE_NAME: dawarich
+    REDIS_URL: redis://redis:6379
+    APPLICATION_HOSTS: ${DAWARICH_HOST:?DAWARICH_HOST is required},localhost,127.0.0.1
+    APPLICATION_PROTOCOL: https
+    SELF_HOSTED: "true"
+    STORE_GEODATA: "true"
+    RAILS_LOG_TO_STDOUT: "true"
+    # Authentik is the only way in.
+    ALLOW_EMAIL_PASSWORD_LOGIN: "false"
+    ALLOW_EMAIL_PASSWORD_REGISTRATION: "false"
+    OIDC_CLIENT_ID: ${DAWARICH_OIDC_CLIENT_ID:?DAWARICH_OIDC_CLIENT_ID is required}
+    OIDC_CLIENT_SECRET: ${DAWARICH_OIDC_CLIENT_SECRET:?DAWARICH_OIDC_CLIENT_SECRET is required}
+    OIDC_ISSUER: ${DAWARICH_OIDC_ISSUER:?DAWARICH_OIDC_ISSUER is required}
+    OIDC_REDIRECT_URI: ${DAWARICH_OIDC_REDIRECT_URI:?DAWARICH_OIDC_REDIRECT_URI is required}
+    OIDC_PROVIDER_NAME: Mu3Lab
+    OIDC_AUTO_REGISTER: "true"
+    PHOTON_API_HOST: ${PHOTON_API_HOST:-}
+    PHOTON_API_USE_HTTPS: "false"
+  volumes:
+    - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich/storage:/var/app/storage
+    - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich/public:/var/app/public
+    - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich/watched:/var/app/tmp/imports/watched
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  app:
+    <<: *dawarich
+    entrypoint: web-entrypoint.sh
+    command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
+    ports: ["127.0.0.1:3006:3000"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    networks: [mu3lab_frontend, mu3lab_backend, dawarich_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --header='X-Forwarded-Proto: https' -qO- http://127.0.0.1:3000/api/v1/health | grep -q '\"ok\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+
+  sidekiq:
+    <<: *dawarich
+    entrypoint: sidekiq-entrypoint.sh
+    command: ["sidekiq"]
+    environment:
+      <<: *dawarich-env
+      BACKGROUND_PROCESSING_CONCURRENCY: "3"
+    depends_on:
+      app: {condition: service_healthy}
+    networks: [mu3lab_frontend, mu3lab_backend, dawarich_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f sidekiq"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  db:
+    image: postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      POSTGRES_USER: dawarich
+      POSTGRES_PASSWORD: ${DAWARICH_DB_PASSWORD:?DAWARICH_DB_PASSWORD is required}
+      POSTGRES_DB: dawarich
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich/postgres:/var/lib/postgresql/data
+    networks: [dawarich_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dawarich -d dawarich"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    command: ["redis-server", "--save", "900", "1", "--appendonly", "no"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich/redis:/data
+    networks: [dawarich_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}
+  dawarich_internal: {internal: true}

@@ -1,0 +1,42 @@
+name: mu3lab-beaver-habits
+
+services:
+  beaver:
+    image: daya0576/beaverhabits:0.10.0@sha256:d39bea489faedfbc55a29bb73bd8bd1845f52e406dd77ba264bd20ba1439e1e8
+    restart: unless-stopped
+    ports: ["127.0.0.1:8086:8080"]
+    environment:
+      TRUSTED_EMAIL_HEADER: X-Mu3lab-Email
+      NICEGUI_STORAGE_SECRET: ${BEAVER_STORAGE_SECRET:?BEAVER_STORAGE_SECRET is required}
+      JWT_SECRET: ${BEAVER_JWT_SECRET:?BEAVER_JWT_SECRET is required}
+      HABITS_STORAGE: DATABASE
+      MAX_USER_COUNT: "-1"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/beaver-habits:/app/.user
+    depends_on:
+      data-init: {condition: service_completed_successfully}
+    networks: [mu3lab_frontend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # The image runs as "nobody"; a folder Docker creates belongs to root.
+  data-init:
+    image: daya0576/beaverhabits:0.10.0@sha256:d39bea489faedfbc55a29bb73bd8bd1845f52e406dd77ba264bd20ba1439e1e8
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "nobody:nogroup", "/app/.user"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/beaver-habits:/app/.user
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
+networks:
+  mu3lab_frontend: {external: true}

@@ -1,0 +1,132 @@
+# Dawarich — see ctl/manifest/models.py for every field.
+id: dawarich
+capabilities: [location_history]
+name: Dawarich
+tier: optional
+group: apps
+category: family
+tagline: Your private location history
+summary: A private replacement for Google Timeline. Phones record where you go, and you browse trips, visits, and
+  places you have been on a map. Each person's history is private to them.
+version: 1.15.3
+upstream: Freika/dawarich
+service:
+  local_port: 3006
+  health:
+    path: /api/v1/health
+    headers:
+      X-Forwarded-Proto: https
+  start_timeout_seconds: 600
+route:
+  https_port: 8465
+  caddy_port: 19482
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-dawarich
+    redirect_paths:
+    - /users/auth/openid_connect/callback
+    # Dawarich starts sign-in with a form carrying its own anti-forgery token.
+    launch_path: /__mu3lab/login
+    launch: form_post
+    form_launch:
+      page: /users/sign_in
+      action: /users/auth/openid_connect
+    env:
+      client_id: DAWARICH_OIDC_CLIENT_ID
+      client_secret: DAWARICH_OIDC_CLIENT_SECRET
+account:
+  mode: oidc_first_login
+  user_action: Open Dawarich; Authentik signs you in as its administrator. Then set up your phone.
+secrets:
+- env: DAWARICH_SECRET_KEY_BASE
+  kind: hex
+  length: 64
+- env: DAWARICH_DB_PASSWORD
+  length: 32
+env:
+  DAWARICH_HOST: '{{dns_name}}'
+  DAWARICH_OIDC_ISSUER: 'https://{{dns_name}}/application/o/mu3lab-dawarich/'
+  DAWARICH_OIDC_REDIRECT_URI: '{{public_url}}/users/auth/openid_connect/callback'
+integrates_with:
+# Place names come only from Mu3Lab's own Photon; without it Dawarich shows none
+# rather than sending locations to a public service.
+- capability: geocoder
+  env:
+    PHOTON_API_HOST: '{{provider:MU3LAB_GEOCODER_HOST}}'
+rules:
+# Before anyone can sign in, the owner's administrator account is created already
+# linked to their Authentik sign-in, and Dawarich's demo administrator is deleted.
+- rule: container_script
+  with:
+    at: after_healthy
+    service: app
+    script: scripts/adopt-owner.rb
+    interpreter:
+    - bin/rails
+    - runner
+    - /dev/stdin
+    args:
+    - '{{owner_json}}'
+    expect: MU3LAB_DAWARICH_OWNER_OK
+    needs_owner: true
+    timeout_seconds: 180
+    purpose: Make your Authentik account Dawarich's administrator and remove its demo account
+mobile:
+  primary: dawarich-ios
+  clients:
+  - id: dawarich-ios
+    name: Dawarich
+    kind: native
+    support: official
+    platforms:
+    - ios
+    install:
+      ios: https://apps.apple.com/us/app/dawarich/id6739544999
+    homepage: https://dawarich.app/
+    setup: api_token
+    summary: Records your location in the background and sends it to your Dawarich.
+    caveat: Tailscale must stay connected (always-on) so points reach the server; the app keeps points while offline
+      and sends them later.
+    steps:
+    - In the Tailscale app, turn on VPN On Demand so your phone stays connected to the Mu3Lab tailnet.
+    - Open Dawarich in a browser, go to Settings, and copy your API key.
+    - Install Dawarich, enter the private Mu3Lab Dawarich address and paste your API key.
+  - id: owntracks
+    name: OwnTracks
+    kind: native
+    support: community
+    platforms:
+    - android
+    - ios
+    install:
+      android: https://play.google.com/store/apps/details?id=org.owntracks.android
+      ios: https://apps.apple.com/us/app/owntracks/id692424691
+    homepage: https://owntracks.org/
+    source: https://github.com/owntracks/android
+    setup: api_token
+    summary: A battery-friendly open-source location reporter that works with Dawarich.
+    caveat: Tailscale must stay connected (always-on); OwnTracks keeps points while offline and sends them later.
+    steps:
+    - On Android open Settings, Network, VPN, Tailscale and turn on Always-on VPN (on iPhone use VPN On Demand).
+    - Open Dawarich in a browser, go to Settings, and copy your API key.
+    - In OwnTracks choose HTTP mode and set the URL to the private Mu3Lab Dawarich address followed by
+      /api/v1/owntracks/points?api_key= and your API key.
+  - id: dawarich-web
+    name: Dawarich web
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://dawarich.app/
+    setup: pwa
+    summary: Browse your map and timeline from the phone's browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Dawarich address and sign in with Authentik.
+resource_guidance: Moderate; imports of long Google Timeline histories use several GB of memory for a while.
+setup_action: Install Dawarich to keep your location history on your own server. Install Photon too for place names.

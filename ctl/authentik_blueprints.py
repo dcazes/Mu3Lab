@@ -45,6 +45,8 @@ class OidcApp:
     client_secret: str
     redirect_paths: tuple[str, ...]
     initial_owner: str = ""  # while set, only this username may sign in
+    # (claim, admin value, user value, list?) for apps that read the role in their own words.
+    role_claim: tuple[str, str, str, bool] | None = None
 
 
 def quote(value: str) -> str:
@@ -280,6 +282,29 @@ entries:
 """
 
 
+def _role_scope(app: OidcApp) -> str:
+    """A scope named after the app's role claim, carrying the person's role in the app's own words."""
+    if not app.role_claim:
+        return ""
+    claim, admin_value, user_value, multi = app.role_claim
+    role = f"{admin_value!r} if admin else {user_value!r}"
+    value = f"[{role}]" if multi else role
+    return f"""
+  - id: mu3lab-{app.id}-roles
+    model: authentik_providers_oauth2.scopemapping
+    state: present
+    identifiers:
+      name: Mu3Lab {app.name} role claim
+    attrs:
+      name: Mu3Lab {app.name} role claim
+      scope_name: {claim}
+      description: Your role in {app.name}
+      expression: |
+        names = {{group.name for group in request.user.ak_groups.all()}}
+        admin = bool(names & {{"mu3lab-operators", "authentik Admins"}})
+        return {{{quote(claim)}: {value}}}"""
+
+
 def render_oidc_blueprint(host: str, app: OidcApp) -> str:
     """One app's confidential OIDC client, its claims and who may sign in."""
     host = validate_host(host)
@@ -324,7 +349,7 @@ entries:
           "name": request.user.name or request.user.username,
           "groups": groups,
           "mu3lab_role": "admin" if admin else "user",
-        }}
+        }}{_role_scope(app)}
   - id: mu3lab-{app.id}-provider
     model: authentik_providers_oauth2.oauth2provider
     state: present
@@ -346,7 +371,7 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
-        - !KeyOf mu3lab-{app.id}-claims
+        - !KeyOf mu3lab-{app.id}-claims{"" if not app.role_claim else chr(10) + f"        - !KeyOf mu3lab-{app.id}-roles"}
       redirect_uris:
 {redirects}
   - model: authentik_core.application
@@ -417,6 +442,10 @@ def render_removal_blueprint(app_id: str, name: str, *, oidc: bool) -> str:
     state: absent
     identifiers:
       name: Mu3Lab {name} verified identity claims
+  - model: authentik_providers_oauth2.scopemapping
+    state: absent
+    identifiers:
+      name: Mu3Lab {name} role claim
   - model: authentik_policies_expression.expressionpolicy
     state: absent
     identifiers:

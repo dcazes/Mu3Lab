@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -103,13 +104,34 @@ class GrocyTests(unittest.TestCase):
         self.assertIn("password_verify('admin'", script)
         self.assertIn("RemoveApiKey", script)
 
+    def test_api_requests_without_a_key_still_go_through_authentik(self):
+        block = _block(load().get("grocy"))
+        matcher = block.split("@api_token {", 1)[1].split("}", 1)[0]
+        # Only a request carrying the phone-app key header skips the gate; any other /api/ request
+        # falls through to the gated handler.
+        self.assertIn("path /api/*", matcher)
+        self.assertIn('header GROCY-API-KEY "*"', matcher)
+        gated = block.split("\t\thandle {", 1)[1]
+        self.assertIn("forward_auth", gated)
+        self.assertIn("header_up X-Mu3lab-User {http.request.header.X-Authentik-Username}", gated)
+
+    def test_currency_follows_the_computers_country(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = load_catalog()
+            with unittest.mock.patch("ctl.hostinfo.country_code", return_value="ca"):
+                project = render(catalog.get("grocy"), Facts("box.test", RuntimePaths(Path(tmp)), catalog))
+            self.assertEqual(read_runtime_env(project / ".env")["GROCY_CURRENCY"], "CAD")
+
     def test_connector_credential_comes_only_from_the_output_marker(self):
         app, connector = load_catalog().connector("grocy-community")
         self.assertEqual(connector.provision.service, "grocy")
         self.assertEqual(connector.credentials[0].key, "api_key")
         script = (app.connector_folder(connector.id) / connector.provision.script).read_text()
         self.assertIn("'MU3LAB_OUTPUT api_key='", script)
-        self.assertIn("expected exactly one administrator", script)
+        # The owner is found by username, so other household administrators never block it.
+        self.assertTrue(connector.provision.owner_username)
+        self.assertIn("$argv[1]", script)
+        self.assertNotIn("expected exactly one administrator", script)
         self.assertIn("MU3LAB_ERROR", script)
 
     def test_review_and_connector_keep_writes_off_at_gateway(self):

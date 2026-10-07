@@ -12,7 +12,17 @@ class LoopbackError(ValueError):
     """An app's setup API refused or did not answer; the message never contains credentials."""
 
 
-def request(port: int, path: str, *, method: str = "GET", data: Any = None, token: str = "") -> Any:
+def request(
+    port: int,
+    path: str,
+    *,
+    method: str = "GET",
+    data: Any = None,
+    token: str = "",
+    json_reply: bool = True,
+    timeout: float = 20,
+) -> Any:
+    """Send one request; return the parsed JSON reply, or None when ``json_reply`` is False (plain "OK")."""
     headers = {"Accept": "application/json"}
     if data is not None:
         headers["Content-Type"] = "application/json"
@@ -25,9 +35,9 @@ def request(port: int, path: str, *, method: str = "GET", data: Any = None, toke
         method=method,
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             raw = response.read(2 * 1024 * 1024)
-            return json.loads(raw) if raw else None
+            return json.loads(raw) if raw and json_reply else None
     except urllib.error.HTTPError as exc:
         raise LoopbackError(f"Setup request {path} failed (HTTP {exc.code}).") from None
     except (OSError, ValueError) as exc:

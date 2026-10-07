@@ -1,0 +1,25 @@
+name: mu3lab-audiobookshelf
+
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:2.37.1@sha256:581d68b2a6fc7ebf58d81c878a9f387cbbc0d88ac9d37b298b9cee10168af85b
+    restart: unless-stopped
+    ports: ["127.0.0.1:13378:80"]
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/audiobookshelf/config:/config
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/audiobookshelf/metadata:/metadata
+      - ${MU3LAB_MEDIA_AUDIOBOOKS:?MU3LAB_MEDIA_AUDIOBOOKS is required}:/audiobooks
+      - ${MU3LAB_MEDIA_PODCASTS:?MU3LAB_MEDIA_PODCASTS is required}:/podcasts
+    networks: [mu3lab_frontend]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/healthcheck >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+networks:
+  mu3lab_frontend: {external: true}
