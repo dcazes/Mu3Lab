@@ -8,9 +8,9 @@ services:
     environment:
       PUID: "1000"
       PGID: "1000"
-      TZ: ${TZ:-America/Toronto}
+      TZ: ${TZ:-UTC}
       GROCY_CULTURE: ${GROCY_CULTURE:-en}
-      GROCY_CURRENCY: ${GROCY_CURRENCY:-CAD}
+      GROCY_CURRENCY: ${GROCY_CURRENCY:-USD}
       GROCY_BASE_URL: ${GROCY_PUBLIC_URL:?GROCY_PUBLIC_URL is required}
       GROCY_AUTH_CLASS: Grocy\Middleware\Auth\Mu3labReverseProxyAuthMiddleware
       GROCY_REVERSE_PROXY_AUTH_HEADER: X-Mu3lab-User

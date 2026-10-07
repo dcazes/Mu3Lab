@@ -50,3 +50,32 @@ def country_code(zone: str | None = None, table: Path = Path("/usr/share/zoneinf
         if len(fields) >= 3 and not line.startswith("#") and fields[2] == zone:
             return fields[0].lower()
     return ""
+
+
+# Currencies of the countries whose time zones Mu3Lab sees most; anything else uses USD.
+_EURO = ("at", "be", "cy", "de", "ee", "es", "fi", "fr", "gr", "hr", "ie", "it", "lt", "lu", "lv", "mt", "nl", "pt")
+CURRENCIES = {
+    **dict.fromkeys(_EURO, "EUR"),
+    "ca": "CAD",
+    "us": "USD",
+    "mx": "MXN",
+    "br": "BRL",
+    "ar": "ARS",
+    "gb": "GBP",
+    "ch": "CHF",
+    "se": "SEK",
+    "no": "NOK",
+    "dk": "DKK",
+    "pl": "PLN",
+    "cz": "CZK",
+    "au": "AUD",
+    "nz": "NZD",
+    "jp": "JPY",
+    "in": "INR",
+    "za": "ZAR",
+}
+
+
+def currency_code(country: str | None = None) -> str:
+    """The usual currency of the computer's country (``CAD`` for Canada), else ``USD``."""
+    return CURRENCIES.get(country if country is not None else country_code(), "USD")

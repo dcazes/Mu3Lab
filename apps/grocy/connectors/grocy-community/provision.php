@@ -1,5 +1,5 @@
 <?php
-// Prints the dedicated "Mu3Lab MCP" API key for Grocy's one prepared administrator.
+// Prints the dedicated "Mu3Lab MCP" API key for the owner's Grocy administrator account.
 // Uses Grocy's own token generator; never raw SQLite SQL.
 use Grocy\Services\ApiKeyService;
 use Grocy\Services\DatabaseMigrationService;
@@ -21,21 +21,24 @@ DatabaseMigrationService::GetInstance()->MigrateDatabase();
 $db = DatabaseService::GetInstance()->GetDbConnection();
 $keys = ApiKeyService::GetInstance();
 
+// Household members also become Grocy administrators, so the owner is found by
+// the username Mu3Lab installed Grocy for, not by being the only administrator.
+$username = $argv[1] ?? '';
+if ($username === '') {
+    throw new RuntimeException('the owner username is missing');
+}
+$owner = $db->users()->where('username', $username)->fetch();
+if ($owner === null) {
+    throw new RuntimeException('the owner has no Grocy account yet');
+}
+if ($owner->username === 'admin' && password_verify('admin', $owner->password)) {
+    throw new RuntimeException('the owner still uses the default admin password');
+}
 $permission = $db->permission_hierarchy()->where('name', 'ADMIN')->fetch();
-$ids = [];
-foreach ($db->user_permissions()->where('permission_id', $permission->id)->fetchAll() as $row) {
-    if ($db->users()->where('id', $row->user_id)->fetch() !== null) {
-        $ids[$row->user_id] = true;
-    }
+if ($db->user_permissions()->where('user_id', $owner->id)->where('permission_id', $permission->id)->fetch() === null) {
+    throw new RuntimeException('the owner is not a Grocy administrator');
 }
-if (count($ids) !== 1) {
-    throw new RuntimeException('expected exactly one administrator');
-}
-$ownerId = array_key_first($ids);
-$owner = $db->users()->where('id', $ownerId)->fetch();
-if ($owner === null || ($owner->username === 'admin' && password_verify('admin', $owner->password))) {
-    throw new RuntimeException('expected exactly one prepared administrator');
-}
+$ownerId = $owner->id;
 define('GROCY_USER_ID', $ownerId);
 // Reuse the dedicated key if the runtime credential file needs recovery.
 $key = $db->api_keys()->where('user_id', $ownerId)->where('description', 'Mu3Lab MCP')

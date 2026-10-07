@@ -23,8 +23,8 @@ provision:
   - abc
   - php
   - --
-provision_note: Creates a dedicated Mu3Lab MCP API key for exactly one prepared Grocy administrator; connect chat
-  before adding other household members.
+  owner_username: true
+provision_note: Creates (or reuses) a dedicated Mu3Lab MCP API key for the owner's Grocy administrator account.
 review_note: MIT-licensed mcp-grocy 2.8.0 uses the Grocy 4.7.1 API. Raw API tools, user listing, and printer actions
   are blocked.
 reviewed: true

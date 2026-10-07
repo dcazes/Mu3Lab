@@ -33,10 +33,9 @@ sign_in:
     env:
       client_id: DAWARICH_OIDC_CLIENT_ID
       client_secret: DAWARICH_OIDC_CLIENT_SECRET
-    initial_owner_env: MU3LAB_INITIAL_OWNER_USERNAME
 account:
   mode: oidc_first_login
-  user_action: Open Dawarich; Authentik signs you in and makes you its administrator. Then set up your phone.
+  user_action: Open Dawarich; Authentik signs you in as its administrator. Then set up your phone.
 secrets:
 - env: DAWARICH_SECRET_KEY_BASE
   kind: hex
@@ -54,30 +53,23 @@ integrates_with:
   env:
     PHOTON_API_HOST: '{{provider:MU3LAB_GEOCODER_HOST}}'
 rules:
-# Every new Dawarich account is an ordinary user, so the owner signs in first;
-# the finish step then makes them administrator and removes Dawarich's demo
-# administrator before anyone else is admitted.
-- rule: initial_owner_guard
+# Before anyone can sign in, the owner's administrator account is created already
+# linked to their Authentik sign-in, and Dawarich's demo administrator is deleted.
+- rule: container_script
   with:
-    owner_signed_in:
-      script:
-        service: app
-        script: scripts/owner-signed-in.rb
-        interpreter:
-        - bin/rails
-        - runner
-        - /dev/stdin
-        expect: MU3LAB_DAWARICH_OWNER_OK
-        timeout_seconds: 120
-    finish:
-      service: app
-      script: scripts/finish-owner.rb
-      interpreter:
-      - bin/rails
-      - runner
-      - /dev/stdin
-      expect: MU3LAB_DAWARICH_OWNER_OK
-      timeout_seconds: 120
+    at: after_healthy
+    service: app
+    script: scripts/adopt-owner.rb
+    interpreter:
+    - bin/rails
+    - runner
+    - /dev/stdin
+    args:
+    - '{{owner_json}}'
+    expect: MU3LAB_DAWARICH_OWNER_OK
+    needs_owner: true
+    timeout_seconds: 180
+    purpose: Make your Authentik account Dawarich's administrator and remove its demo account
 mobile:
   primary: dawarich-ios
   clients:

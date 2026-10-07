@@ -40,6 +40,13 @@ account:
   user_action: Open Grocy; Authentik signs you in, then add your first products and locations.
 env:
   GROCY_PUBLIC_URL: '{{public_url}}'
+configuration:
+- key: currency
+  env: GROCY_CURRENCY
+  type: string
+  label: Currency for prices (a three-letter code such as CAD, USD, or EUR)
+  # The usual currency of this computer's country.
+  default: '{{currency_code}}'
 rules:
 - rule: container_script
   with:

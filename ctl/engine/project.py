@@ -183,6 +183,7 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
             "data_root": str(facts.paths.data),
             "tz": env.get("TZ") or None,
             "country_code": hostinfo.country_code(env.get("TZ")) or None,
+            "currency_code": hostinfo.currency_code(hostinfo.country_code(env.get("TZ"))),
         }
         if name in known:
             return known[name]

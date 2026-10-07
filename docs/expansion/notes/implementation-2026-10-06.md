@@ -68,3 +68,47 @@ commit. Grocy fixes (task 0-1) and the remaining apps were not part of the reque
 2. Pre-existing, not caused by this work: `tools/validate_compose.py` stops at
    AdventureLog (`MU3LAB_OWNER_EMAIL` missing in its test env), so it never checks
    later apps. All projects were validated separately for this commit.
+
+## Second pass (same day): automatic owner accounts and fixes
+
+Owner decisions: generated passwords saved to the vault (never the owner's own
+password); Photon stays on the prebuilt all-Canada index; the owner runs VM testing.
+
+**No first-visit step any more.** Authentik's `sub` for an app is the person's
+`user.uid` (checked in Authentik 2026.8.3: `_resolve_sub` → `user.uid` for the
+default `hashed_user_id` mode), the same value the dashboard receives as
+`X-authentik-uid` and stores as the owner's ID. So each app's owner account is now
+created at install, already linked to the owner's sign-in, through the app's own code:
+
+| App | Script | How (verified against the pinned image) |
+|---|---|---|
+| Outline | `scripts/adopt-owner.js` | Outline's `accountProvisioner` (what its OIDC sign-in runs): workspace + owner admin + link (provider = Authentik's host, ID = sub). Re-run changes nothing. |
+| Dawarich | `scripts/adopt-owner.rb` | Owner created as admin with `provider=openid_connect, uid=sub`; demo admin deleted through Dawarich's own deletion; not re-seeded after restart. Refuses an email already linked to another sign-in. |
+| Open WebUI | `scripts/adopt-owner.py` | Open WebUI's account service creates the owner as admin with `oauth.oidc.sub`; also merges by email. Refuses a conflicting link. |
+
+The owner guard and its script/finish additions are therefore unused and were
+removed; `container_script` arguments may now name facts such as `{{dns_name}}`.
+
+**Default accounts.** Every app's default administrator is now the owner's own
+Authentik username (Grocy, Mealie, Audiobookshelf, Outline, Dawarich, Open WebUI,
+Immich and the rest) or removed. Two internal service logins keep fixed names and
+generated, vault-saved passwords: FreeLLMAPI (`mu3lab-gateway@localhost.test`) and
+the LiteLLM admin page (`admin` + master key). They are installed during core setup;
+renaming them to the owner is possible later but out of scope here.
+
+**Fixed:**
+- Grocy chat provisioning finds the owner by username (connector `owner_username: true`);
+  verified in the real image with two administrators: same key reused; unknown or missing
+  owner refused.
+- Grocy time zone falls back to UTC; currency is a setting defaulting from the
+  computer's country (`{{currency_code}}`, CAD in Canada).
+- Regression test: Grocy `/api/*` without the key header still goes through Authentik.
+- `tools/validate_compose.py` renders rules with a placeholder owner and reports every
+  failing project: 36 of 36 now validate.
+
+**Still open:** Photon's index is included in backups (manual and pre-update only);
+excluding it belongs to the Kopia task's `backup.exclude`.
+
+**Re-verified:** `make verify` (716 Python tests, dashboard checks and build), all 36
+Compose projects, `caddy validate` on all 19 generated routes, and each new owner
+script live against its pinned image.

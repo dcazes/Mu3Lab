@@ -28,10 +28,9 @@ sign_in:
     env:
       client_id: OUTLINE_OIDC_CLIENT_ID
       client_secret: OUTLINE_OIDC_CLIENT_SECRET
-    initial_owner_env: MU3LAB_INITIAL_OWNER_USERNAME
 account:
   mode: oidc_first_login
-  user_action: Open Outline; Authentik signs you in and makes you its administrator.
+  user_action: Open Outline; Authentik signs you in as its administrator.
 secrets:
 - env: OUTLINE_SECRET_KEY
   kind: hex
@@ -47,19 +46,23 @@ env:
   OUTLINE_OIDC_ISSUER_URL: 'https://{{dns_name}}/application/o/mu3lab-outline/'
   OUTLINE_OIDC_LOGOUT_URI: 'https://{{dns_name}}/application/o/mu3lab-outline/end-session/'
 rules:
-# Outline makes the first person who signs in its administrator, so until the
-# installing owner has, Authentik admits only them.
-- rule: initial_owner_guard
+# Before anyone can sign in, Outline's own account provisioning creates the workspace
+# with the owner as administrator, already linked to their Authentik sign-in.
+- rule: container_script
   with:
-    owner_signed_in:
-      script:
-        service: postgres
-        script: scripts/owner-signed-in.sh
-        interpreter:
-        - sh
-        - -s
-        - --
-        expect: MU3LAB_OUTLINE_OWNER_OK
+    at: after_healthy
+    service: outline
+    script: scripts/adopt-owner.js
+    interpreter:
+    - node
+    - '-'
+    args:
+    - '{{owner_json}}'
+    - '{{dns_name}}'
+    expect: MU3LAB_OUTLINE_OWNER_OK
+    needs_owner: true
+    timeout_seconds: 180
+    purpose: Create Outline's workspace with your Authentik account as its administrator
 mobile:
   primary: outline-pwa
   clients:

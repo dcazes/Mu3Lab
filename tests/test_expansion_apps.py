@@ -123,23 +123,24 @@ class ManifestContractTests(unittest.TestCase):
                 self.assertFalse(manifest.ui.available)
                 self.assertEqual(manifest.sign_in.method, "none")
 
-    def test_first_sign_in_apps_admit_only_the_owner_until_they_have_signed_in(self):
+    def test_owner_accounts_are_created_at_install_not_on_first_sign_in(self):
         catalog = load()
         for app_id in ("outline", "dawarich", "open-webui"):
             with self.subTest(app=app_id):
-                oidc = catalog.get(app_id).manifest.sign_in.oidc
-                assert oidc is not None
-                self.assertEqual(oidc.initial_owner_env, "MU3LAB_INITIAL_OWNER_USERNAME")
-                self.assertIn("initial_owner_guard", [rule.rule for rule in catalog.get(app_id).manifest.rules])
+                manifest = catalog.get(app_id).manifest
+                assert manifest.sign_in.oidc is not None
+                self.assertEqual(manifest.sign_in.oidc.initial_owner_env, "")
+                scripts = [rule.with_ for rule in manifest.rules if rule.rule == "container_script"]
+                self.assertEqual(scripts[0]["at"], "after_healthy")
+                self.assertIn("{{owner_json}}", scripts[0]["args"])
 
     def test_app_scripts_report_with_their_markers(self):
         folder = Path(__file__).resolve().parents[1] / "apps"
         markers = {
             "beaver-habits/scripts/sync-people.py": "MU3LAB_BEAVER_PEOPLE_OK",
-            "outline/scripts/owner-signed-in.sh": "MU3LAB_OUTLINE_OWNER_OK",
-            "dawarich/scripts/owner-signed-in.rb": "MU3LAB_DAWARICH_OWNER_OK",
-            "dawarich/scripts/finish-owner.rb": "MU3LAB_DAWARICH_OWNER_OK",
-            "open-webui/scripts/owner-signed-in.py": "MU3LAB_OPEN_WEBUI_OWNER_OK",
+            "outline/scripts/adopt-owner.js": "MU3LAB_OUTLINE_OWNER_OK",
+            "dawarich/scripts/adopt-owner.rb": "MU3LAB_DAWARICH_OWNER_OK",
+            "open-webui/scripts/adopt-owner.py": "MU3LAB_OPEN_WEBUI_OWNER_OK",
         }
         for script, marker in markers.items():
             with self.subTest(script=script):

@@ -31,10 +31,9 @@ sign_in:
       client_id: OPEN_WEBUI_OIDC_CLIENT_ID
       client_secret: OPEN_WEBUI_OIDC_CLIENT_SECRET
       discovery_url: OPEN_WEBUI_OIDC_DISCOVERY_URL
-    initial_owner_env: MU3LAB_INITIAL_OWNER_USERNAME
 account:
   mode: oidc_first_login
-  user_action: Open Open WebUI; Authentik signs you in and makes you its administrator.
+  user_action: Open Open WebUI; Authentik signs you in as its administrator.
 secrets:
 - env: OPEN_WEBUI_SECRET_KEY
   length: 48
@@ -54,18 +53,21 @@ integrates_with:
     AUDIO_STT_ENGINE: web
     AUDIO_TTS_ENGINE: ''
 rules:
-# Open WebUI makes the first person who signs in its administrator, so until the
-# installing owner has, Authentik admits only them.
-- rule: initial_owner_guard
+# Before anyone can sign in, the owner's administrator account is created already
+# linked to their Authentik sign-in, so no one else can become the first user.
+- rule: container_script
   with:
-    owner_signed_in:
-      script:
-        service: open-webui
-        script: scripts/owner-signed-in.py
-        interpreter:
-        - python3
-        - '-'
-        expect: MU3LAB_OPEN_WEBUI_OWNER_OK
+    at: after_healthy
+    service: open-webui
+    script: scripts/adopt-owner.py
+    interpreter:
+    - python3
+    - '-'
+    args:
+    - '{{owner_json}}'
+    expect: MU3LAB_OPEN_WEBUI_OWNER_OK
+    needs_owner: true
+    purpose: Make your Authentik account Open WebUI's administrator
 mobile:
   primary: open-webui-pwa
   clients:

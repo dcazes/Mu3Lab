@@ -293,6 +293,9 @@ class CredentialScript(Model):
     service: str  # the app's compose service to run it in
     script: str  # file name inside the connector folder
     interpreter: tuple[str, ...]  # e.g. ["python", "manage.py", "shell"]; the script arrives on stdin
+    # Pass the installing owner's username as the script's only argument, so it can
+    # find the owner's account even after other household members become admins.
+    owner_username: bool = False
 
 
 class ReviewedUpdate(Model):

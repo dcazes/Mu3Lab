@@ -34,7 +34,6 @@ from ctl.manifest.models import Oidc
 from ctl.registry import load as load_registry
 from ctl.routes import _block
 from ctl.rules import rules_for
-from ctl.rules.initial_owner_guard import InitialOwnerGuard
 from ctl.rules.per_person_accounts import DIGEST_ENV, PerPersonAccounts, digest, household
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -221,43 +220,6 @@ class PerPersonAccountsTests(unittest.TestCase):
             with self.assertRaises(Exception) as raised:
                 rule.after_healthy(ctx)
             self.assertIn("could not create household accounts", str(raised.exception))
-
-
-class OwnerGuardScriptTests(unittest.TestCase):
-    def _rule(self, app_id: str) -> InitialOwnerGuard:
-        return next(rule for rule in rules_for(load().get(app_id).manifest) if isinstance(rule, InitialOwnerGuard))
-
-    def test_script_check_lifts_the_guard_once_the_owner_signed_in(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            ctx = scripted(
-                "outline",
-                RuntimePaths(Path(tmp)),
-                [ok("MU3LAB_OUTLINE_OWNER_OK")],
-                "MU3LAB_INITIAL_OWNER_USERNAME=owner\n",
-            )
-            self.assertIn("whole household", self._rule("outline").periodic(ctx))
-            self.assertEqual(ctx.calls[0][2], ["owner", "owner@example.com"])
-            self.assertEqual(ctx.env()["MU3LAB_INITIAL_OWNER_USERNAME"], "")
-            self.assertEqual(ctx.reregistered, 1)
-
-    def test_guard_stays_until_the_finish_step_succeeds(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            answers = [ok("MU3LAB_DAWARICH_OWNER_OK"), ScriptResult(ok=False, raw="MU3LAB_ERROR not yet")]
-            ctx = scripted("dawarich", RuntimePaths(Path(tmp)), answers, "MU3LAB_INITIAL_OWNER_USERNAME=owner\n")
-            rule = self._rule("dawarich")
-            self.assertEqual(rule.periodic(ctx), "")
-            self.assertEqual(ctx.env()["MU3LAB_INITIAL_OWNER_USERNAME"], "owner")
-            ctx.answers = [ok("MU3LAB_DAWARICH_OWNER_OK"), ok("MU3LAB_DAWARICH_OWNER_OK")]
-            self.assertIn("whole household", rule.periodic(ctx))
-            self.assertEqual(json.loads(ctx.calls[-1][2][0])["email"], "owner@example.com")
-
-    def test_not_signed_in_changes_nothing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            ctx = scripted(
-                "open-webui", RuntimePaths(Path(tmp)), [ScriptResult(ok=True)], "MU3LAB_INITIAL_OWNER_USERNAME=owner\n"
-            )
-            self.assertEqual(self._rule("open-webui").periodic(ctx), "")
-            self.assertEqual(ctx.env()["MU3LAB_INITIAL_OWNER_USERNAME"], "owner")
 
 
 class RouteAndSignInTests(unittest.TestCase):
