@@ -93,6 +93,7 @@ def run() -> int:
     stopping = False
     waiting_for_runtime_reported = False
     next_mcp_reconcile = 0.0
+    next_operation_reconcile = 0.0
     next_chat_sync = 0.0
     next_rule_maintenance = 0.0
     next_vault_sync = 0.0
@@ -139,6 +140,14 @@ def run() -> int:
                 vault_sync.run(lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab vault saving deferred safely: {exc}", flush=True)
+        if time.monotonic() >= next_operation_reconcile:
+            next_operation_reconcile = time.monotonic() + 60
+            try:
+                from ctl.lifecycle import maintenance
+
+                maintenance.reconcile(store, lambda line: print(line, flush=True))
+            except Exception as exc:
+                print(f"Mu3Lab operation recovery deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_mcp_reconcile:
             next_mcp_reconcile = time.monotonic() + 60
             try:

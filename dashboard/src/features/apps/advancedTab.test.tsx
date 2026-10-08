@@ -47,7 +47,7 @@ const backups = {
   ],
 };
 
-function setup(update = release()) {
+function setup(update = release(), app = mealie) {
   const posts: unknown[] = [];
   stubFetch((path, init) => {
     if (path.endsWith('/updates')) return update;
@@ -58,7 +58,7 @@ function setup(update = release()) {
     }
     return undefined;
   });
-  renderWithDashboard(<AdvancedTab service={mealie} />, dashboardData([mealie]));
+  renderWithDashboard(<AdvancedTab service={app} />, dashboardData([app]));
   return posts;
 }
 
@@ -108,5 +108,25 @@ describe('AdvancedTab backups', () => {
     await vi.waitFor(() =>
       expect(posts).toEqual([{ action: 'restore', snapshot_id: 'a'.repeat(64), confirm: 'Mealie' }]),
     );
+  });
+
+  it('offers only recovery while an earlier update could not be undone', async () => {
+    const blocked = {
+      ...mealie,
+      recovery: {
+        operation_id: 'op',
+        kind: 'update' as const,
+        detail: 'v3.23.0 did not start, and putting back v3.22.0 failed (disk full).',
+        snapshot_id: 'a'.repeat(64),
+        since: '2026-10-08T10:00:00Z',
+      },
+    };
+    const posts = setup(release(), blocked);
+    expect(await screen.findByText('Mealie needs attention.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back up now' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry recovery' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'recover' }]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore the backup from before…' }));
+    expect(await screen.findByRole('dialog', { name: 'Restore Mealie?' })).toBeInTheDocument();
   });
 });

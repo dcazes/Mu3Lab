@@ -82,6 +82,16 @@ class ServiceChecks(ApiModel):
     sign_in: ServiceCheck
 
 
+class ServiceRecovery(ApiModel):
+    """An update or restore that could not be undone; the app waits for a person."""
+
+    operation_id: str
+    kind: Literal["backup", "restore", "update"]
+    detail: str
+    snapshot_id: str
+    since: str
+
+
 class ServiceUpdate(ApiModel):
     repository: str
     installed_version: str
@@ -158,6 +168,7 @@ class Service(ApiModel):
     identity: ServiceIdentity | None = None
     containers: list[ServiceContainersItem] | None = None
     checks: ServiceChecks | None = None
+    recovery: ServiceRecovery | None = None
     blocking_check: Literal["process", "route", "sign_in"] | None = None
 
     display_state: DisplayState
@@ -843,6 +854,7 @@ class ServiceActionRequest(RequestModel):
         "backup",
         "restore",
         "update",
+        "recover",
     ]
     confirm: str = ""
     snapshot_id: str = ""

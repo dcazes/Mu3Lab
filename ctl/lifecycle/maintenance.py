@@ -1,41 +1,91 @@
-"""Back up, restore and update one installed catalog app.
+"""Back up, restore and update one installed catalog app, durably.
 
 All three stop the app so its databases are copied consistently, and all
 three end with the app back in the state it was in (running or stopped)
-unless something failed. The step that swaps data or release, and the one
-that puts it back, run to the end even if someone cancels the job.
+unless something failed. The steps that swap data or release, and the ones
+that put them back, run to the end even if someone cancels the job.
 
 An update always takes a fresh, integrity-checked backup first. If the new
 release does not come up healthy, the backup and the previous release are put
 back automatically, so a failed update costs a few minutes, not the app.
+
+Every step is recorded in the operation journal (``ctl.operations``) before
+it runs, with what undoing it needs. A job reclaimed after its worker died
+continues from that record:
+
+- before anything changed: run again from the start;
+- after the update's new release was applied: start it and check its health
+  again; keep it if healthy, otherwise put the previous release and data back;
+- after a restore began swapping data: finish the restore;
+- while putting things back: put them back again (restoring a backup and
+  rewriting a release record are both safe to repeat).
+
+A job that ended without finishing its operation (cancelled while its worker
+was down, or stopped by an unexpected error) gets a ``recover`` job, which
+brings the app to a safe end instead of carrying on. If putting things back
+fails, the operation needs attention: the app is blocked except for retrying
+recovery or restoring a backup, and the backup to use is named.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ctl import actions, backups, job_guard
 from ctl.control_state import ControlState
 from ctl.engine.runtime import render_service
-from ctl.jobs import JobStore, job_params, redact
+from ctl.jobs import JobConflict, JobStore, job_params, redact
 from ctl.lifecycle import app_releases
 from ctl.lifecycle.app_releases import Release
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.uninstall import data_directories
+from ctl.operations import Operation, OperationStore, State
 from ctl.registry import Service
 
-MAINTENANCE_ACTIONS = frozenset({"backup", "restore", "update"})
+JOURNALED_ACTIONS = frozenset({"backup", "restore", "update"})
+MAINTENANCE_ACTIONS = JOURNALED_ACTIONS | {"recover"}
 # Releases can migrate large databases on first start.
 START_TIMEOUT = 900
+# Phases in which neither the app's data nor its release has changed yet.
+UNCHANGED = frozenset({"prepare", "stop_app", "backup", "backed_up"})
+RECOVERY_ACTOR = "worker"
+# Attempts (first run, reclaims and recoveries) before an operation needs a person.
+MAX_ATTEMPTS = 5
 
 Log = Callable[[str], None]
 
 
 class _Failed(Exception):
-    def __init__(self, stage: str, code: str, message: str) -> None:
+    def __init__(self, stage: str, code: str, message: str, outcome: State = "failed") -> None:
         super().__init__(message)
-        self.stage, self.code, self.message = stage, code, message
+        self.stage, self.code, self.message, self.outcome = stage, code, message, outcome
+
+
+@dataclass
+class _Run:
+    """One worker attempt at one journaled operation."""
+
+    service: Service
+    project: Path
+    root: Path
+    journal: OperationStore
+    op: Operation
+    step: Callable[[str, str], None]
+    log: Log
+
+    @property
+    def running(self) -> bool:
+        return self.op.was_running
+
+    def mark(self, phase: str, detail: str, **fields) -> None:
+        """Journal the step, and what undoing it needs, before taking it."""
+        self.op = self.journal.advance(self.op.id, phase, **fields)
+        self.step(phase, detail)
+
+    def directories(self) -> list[Path]:
+        return data_directories(self.service, self.root)
 
 
 def _stop(service: Service, project: Path, root: Path, log: Log) -> None:
@@ -79,29 +129,84 @@ def _short(snapshot_id: str) -> str:
     return snapshot_id[:8]
 
 
-def _backup(service: Service, project: Path, root: Path, step: Callable[[str, str], None], log: Log, running: bool):
-    step("backup", f"Saving a backup of {service.name}.")
+def _restart_if_stopped(run: _Run) -> None:
+    """Undo only the stop: used when a step fails before any data or release changed."""
+    if run.running and run.op.phase in UNCHANGED - {"prepare"}:
+        _start(run.service, run.project, run.root, run.log)
+
+
+def _housekeeping(run: _Run) -> None:
+    """Prune old backups once nothing an unfinished operation may need can be removed."""
+    run.mark("housekeeping", "Tidying up old backups.")
+    others = run.journal.protected(run.service.id, excluding=run.op.id)
+    if others:
+        run.log("Old backups are kept for now: another operation on this app may still need them.")
+        return
+    try:
+        backups.prune(run.service.id, run.log)
+    except (backups.BackupError, OSError) as exc:
+        run.log(f"Old backups were not pruned this time: {exc}")
+
+
+def _put_back(run: _Run, code: str, cause: str) -> None:
+    """Return the app to its data and release from just before the operation."""
+    op = run.op
+    before = op.previous_release.version if op.previous_release else "the previous release"
+    evidence = (
+        f" Backup {_short(op.recovery_snapshot)} holds the data from before; restore it to recover."
+        if op.recovery_snapshot
+        else ""
+    )
+    try:
+        _stop(run.service, run.project, run.root, run.log)
+        if op.recovery_snapshot:
+            backups.restore(run.service.id, op.recovery_snapshot, run.directories(), run.log)
+        app_releases.restore_previous(run.service.id, op.previous_release)
+    except (_Failed, backups.BackupError, OSError) as exc:
+        raise _Failed(
+            "rollback", code, f"{cause}, and putting back {before} failed ({exc}).{evidence}", "needs_attention"
+        ) from exc
+    if run.running:
+        restarted, again = _start(run.service, run.project, run.root, run.log)
+        if not restarted:
+            raise _Failed(
+                "rollback",
+                code,
+                f"{cause}. {before} and its data were put back, but {run.service.name} did not start: {again}."
+                f"{evidence}",
+                "needs_attention",
+            )
+
+
+def _backup(run: _Run) -> str:
+    service = run.service
+    saved, error = None, ""
+    if run.op.phase == "housekeeping":
+        _housekeeping(run)
+        return f"Backup of {service.name} saved and checked."
     with job_guard.uncancellable():
-        if running:
-            _stop(service, project, root, log)
-        saved, error = None, ""
+        run.mark("backup", f"Saving a backup of {service.name}.")
+        if run.running:
+            _stop(service, run.project, run.root, run.log)
         try:
             saved = backups.snapshot(
                 service.id,
-                data_directories(service, root),
+                run.directories(),
                 "manual",
-                log,
-                version=app_releases.installed_version(service, root),
+                run.log,
+                version=app_releases.installed_version(service, run.root),
+                prune_old=False,
             )
         except (backups.BackupError, OSError) as exc:
             error = str(exc)
-        if running:
-            step("start_app", f"Starting {service.name} again.")
-            started, detail = _start(service, project, root, log)
+        if run.running:
+            run.mark("start_app", f"Starting {service.name} again.")
+            started, detail = _start(service, run.project, run.root, run.log)
             if not started:
                 raise _Failed("start_app", "health_check_failed", f"{service.name} did not start again: {detail}")
-    if not saved:
-        raise _Failed("backup", "backup_failed", error)
+        if not saved:
+            raise _Failed("backup", "backup_failed", error)
+        _housekeeping(run)
     return f"Backup {_short(saved['snapshot_id'])} saved and checked ({saved['files']} files)."
 
 
@@ -131,156 +236,236 @@ def _release_for(service: Service, version: str, root: Path, log: Log) -> Releas
     return release
 
 
-def _restore(
-    service: Service,
-    project: Path,
-    root: Path,
-    step: Callable[[str, str], None],
-    log: Log,
-    running: bool,
-    snapshot_id: str,
-):
-    directories = data_directories(service, root)
+def _save_before(run: _Run, reason: str, label: str) -> None:
+    """Stop the app and save the backup an undo would put back."""
+    service = run.service
+    run.mark("stop_app", f"Stopping {service.name}.")
+    _stop(service, run.project, run.root, run.log)
+    run.mark("backup", label)
+    previous = run.op.previous_release
     try:
-        chosen = next((snap for snap in backups.snapshots(service.id, log) if snap["id"] == snapshot_id), None)
-    except backups.BackupError as exc:
-        raise _Failed("restore", "restore_failed", str(exc)) from exc
-    if not chosen:
-        raise _Failed("restore", "restore_failed", "That backup no longer exists.")
-    previous = app_releases.installed(service, root)
+        saved = backups.snapshot(
+            service.id,
+            run.directories(),
+            reason,
+            run.log,
+            version=previous.version if previous else "",
+            prune_old=False,
+        )
+    except (backups.BackupError, OSError) as exc:
+        _restart_if_stopped(run)
+        verb = "updated" if reason == "pre-update" else "restored"
+        raise _Failed("backup", "backup_failed", f"Nothing was {verb}: {exc}") from exc
+    run.mark(
+        "backed_up", f"Backup {_short(saved['snapshot_id'])} saved and checked.", recovery_snapshot=saved["snapshot_id"]
+    )
+
+
+def _restore(run: _Run) -> str:
+    service = run.service
+    snapshot_id = run.op.chosen_snapshot
+    previous = run.op.previous_release
     installed = previous.version if previous else ""
-    # Data goes back with the release it was saved from: restoring the backup
-    # taken before an update is how an update is undone.
-    switch = bool(chosen["version"]) and chosen["version"] != installed
-    release = None
-    if switch:
-        step("download_images", f"Downloading {service.name} {chosen['version']}, the release this backup is from.")
-        release = _release_for(service, chosen["version"], root, log)
-    with job_guard.uncancellable():
-        step("stop_app", f"Stopping {service.name}.")
-        _stop(service, project, root, log)
-        step("backup", "Saving the current data first, so this restore can be undone.")
+    moved = ""
+    when = ""
+    if run.op.phase in {"prepare", "stop_app", "backup"}:
         try:
-            safety = backups.snapshot(service.id, directories, "pre-restore", log, version=installed)
-        except (backups.BackupError, OSError) as exc:
-            if running:
-                _start(service, project, root, log)
-            raise _Failed("backup", "backup_failed", f"Nothing was restored: {exc}") from exc
-        step("restore", f"Putting back backup {_short(snapshot_id)}.")
-        try:
-            backups.restore(service.id, snapshot_id, directories, log)
-            if release:
-                app_releases.write(service.id, release)
-        except (backups.BackupError, OSError) as exc:
-            step("rollback", "Restore failed; putting the current data back.")
+            chosen = next((snap for snap in backups.snapshots(service.id, run.log) if snap["id"] == snapshot_id), None)
+        except backups.BackupError as exc:
+            _restart_if_stopped(run)
+            raise _Failed("restore", "restore_failed", str(exc)) from exc
+        if not chosen:
+            _restart_if_stopped(run)
+            raise _Failed("restore", "restore_failed", "That backup no longer exists.")
+        when = chosen["time"][:16].replace("T", " ")
+        # Data goes back with the release it was saved from: restoring the backup
+        # taken before an update is how an update is undone.
+        release = None
+        if chosen["version"] and chosen["version"] != installed:
+            run.step(
+                "download_images", f"Downloading {service.name} {chosen['version']}, the release this backup is from."
+            )
             try:
-                backups.restore(service.id, safety["snapshot_id"], directories, log)
-                app_releases.restore_previous(service.id, previous)
-            except (backups.BackupError, OSError) as undo:
-                raise _Failed(
-                    "rollback",
-                    "restore_rollback_failed",
-                    f"The restore failed ({exc}) and so did undoing it ({undo}). "
-                    f"Backup {_short(safety['snapshot_id'])} holds the data from just before; restore it to recover.",
-                ) from undo
-            if running:
-                _start(service, project, root, log)
-            raise _Failed("restore", "restore_failed", f"Nothing changed: {exc}") from exc
-        if running:
-            step("start_app", f"Starting {service.name}.")
-            started, detail = _start(service, project, root, log)
+                release = _release_for(service, chosen["version"], run.root, run.log)
+            except _Failed:
+                _restart_if_stopped(run)
+                raise
+            moved = f" {service.name} is back on {chosen['version']}."
+        with job_guard.uncancellable():
+            if release:
+                run.op = run.journal.advance(run.op.id, run.op.phase, target_release=release)
+            _save_before(run, "pre-restore", "Saving the current data first, so this restore can be undone.")
+    with job_guard.uncancellable():
+        if run.op.phase == "rollback":
+            _put_back(run, "restore_rollback_failed", "The restore was interrupted")
+            raise _Failed(
+                "restore",
+                "restore_failed",
+                "The restore was interrupted; the data from just before it was put back.",
+                "rolled_back",
+            )
+        if run.op.phase in {"backed_up", "restore"}:
+            run.mark("restore", f"Putting back backup {_short(snapshot_id)}.")
+            try:
+                backups.restore(service.id, snapshot_id, run.directories(), run.log)
+                if run.op.target_release:
+                    app_releases.write(service.id, run.op.target_release)
+            except (backups.BackupError, OSError) as exc:
+                run.mark("rollback", "Restore failed; putting the current data back.")
+                _put_back(run, "restore_rollback_failed", f"The restore failed ({exc})")
+                raise _Failed("restore", "restore_failed", f"Nothing changed: {exc}", "rolled_back") from exc
+        if run.running and run.op.phase in {"restore", "start_app"}:
+            run.mark("start_app", f"Starting {service.name}.")
+            started, detail = _start(service, run.project, run.root, run.log)
             if not started:
                 raise _Failed(
                     "start_app",
                     "health_check_failed",
                     f"The backup was restored but {service.name} did not start: {detail}. "
-                    f"Backup {_short(safety['snapshot_id'])} holds the data from before the restore.",
+                    f"Backup {_short(run.op.recovery_snapshot)} holds the data from before the restore.",
                 )
-    when = chosen["time"][:16].replace("T", " ")
-    moved = f" {service.name} is back on {chosen['version']}." if switch else ""
-    return (
-        f"Restored the backup from {when} UTC.{moved} "
-        f"The data from just before is kept as backup {_short(safety['snapshot_id'])}."
+        _housekeeping(run)
+    restored = f"Restored the backup from {when} UTC." if when else f"Restored backup {_short(snapshot_id)}."
+    return f"{restored}{moved} The data from just before is kept as backup {_short(run.op.recovery_snapshot)}."
+
+
+def _apply(run: _Run) -> tuple[bool, str]:
+    """Switch to the recorded target release and start it; safe to repeat."""
+    target = run.op.target_release
+    assert target is not None
+    run.mark(
+        "apply_update", f"Starting {run.service.name} {target.version}. Upgrading its data can take a few minutes."
+    )
+    _refresh_definition(run.service, run.root, run.log)
+    app_releases.write(run.service.id, target)
+    return _start(run.service, run.project, run.root, run.log)
+
+
+def _update(run: _Run, supporting_only: bool) -> str:
+    service = run.service
+    target = run.op.target_release
+    assert target is not None
+    previous = run.op.previous_release
+    current = previous.version if previous else "the installed release"
+    if run.op.phase == "prepare":
+        run.step("download_images", f"Downloading {service.name} {target.version}. The app keeps running meanwhile.")
+        try:
+            app_releases.download(target.images, run.log)
+        except RuntimeError as exc:
+            raise _Failed("download_images", "image_pull_failed", f"Nothing changed: {exc}") from exc
+    with job_guard.uncancellable():
+        if run.op.phase in {"prepare", "stop_app", "backup"}:
+            _save_before(run, "pre-update", f"Saving a backup of {service.name} {current}.")
+        detail = "the worker stopped while the update was being put back"
+        if run.op.phase in {"backed_up", "apply_update"}:
+            # On a resumed attempt this is the health re-check: a release that
+            # comes up healthy is kept; anything else is rolled back.
+            started, detail = _apply(run)
+            if started:
+                if not run.running:
+                    _stop(service, run.project, run.root, run.log)
+                _housekeeping(run)
+                moved = (
+                    f"Updated {service.name}'s supporting services"
+                    if supporting_only
+                    else f"Updated {service.name} from {current} to {target.version}"
+                )
+                return f"{moved}. Backup {_short(run.op.recovery_snapshot)} holds the data from before."
+            run.mark("rollback", f"{target.version} did not start; putting back {current} and its data.")
+        if run.op.phase == "housekeeping":
+            _housekeeping(run)
+            return f"Updated {service.name} to {target.version}. Backup {_short(run.op.recovery_snapshot)} holds the data from before."
+        _put_back(run, "update_rollback_failed", f"{target.version} did not start ({redact(detail)[-300:]})")
+    raise _Failed(
+        "apply_update",
+        "update_rolled_back",
+        f"{service.name} {target.version} did not start ({redact(detail)[-300:]}). "
+        f"Mu3Lab put back {current} with its data from just before; nothing was lost.",
+        "rolled_back",
     )
 
 
-def _update(
-    service: Service,
-    project: Path,
-    root: Path,
-    step: Callable[[str, str], None],
-    log: Log,
-    running: bool,
-    target: str,
-):
-    state = app_releases.status(service, root)
-    release = app_releases.approved(service, root)
-    if release.version != target:
-        raise _Failed(
-            "check_release",
-            "approval_changed",
-            f"Mu3Lab now approves {service.name} {release.version} instead of {target}. Check for updates again.",
-        )
-    if not state["update_available"]:
-        raise _Failed("check_release", "already_current", f"{service.name} is already up to date.")
-    previous = app_releases.installed(service, root)
-    current = previous.version if previous else "the installed release"
-    step("download_images", f"Downloading {service.name} {target}. The app keeps running meanwhile.")
-    try:
-        app_releases.download(release.images, log)
-    except RuntimeError as exc:
-        raise _Failed("download_images", "image_pull_failed", f"Nothing changed: {exc}") from exc
-    directories = data_directories(service, root)
-    with job_guard.uncancellable():
-        step("stop_app", f"Stopping {service.name}.")
-        _stop(service, project, root, log)
-        step("backup", f"Saving a backup of {service.name} {current}.")
-        try:
-            saved = backups.snapshot(
-                service.id, directories, "pre-update", log, version=previous.version if previous else ""
-            )
-        except (backups.BackupError, OSError) as exc:
-            if running:
-                _start(service, project, root, log)
-            raise _Failed("backup", "backup_failed", f"Nothing was updated: {exc}") from exc
-        step("apply_update", f"Starting {service.name} {target}. Upgrading its data can take a few minutes.")
-        _refresh_definition(service, root, log)
-        app_releases.write(service.id, release)
-        started, detail = _start(service, project, root, log)
+def _recover(run: _Run) -> tuple[State, str]:
+    """Bring an operation whose job ended early, or whose undo failed, to a safe end."""
+    op, service = run.op, run.service
+    if op.state == "needs_attention" or op.phase == "rollback":
+        run.mark("rollback", f"Putting back {service.name}'s data and release from before.")
+        code = "update_rollback_failed" if op.kind == "update" else "restore_rollback_failed"
+        _put_back(run, code, f"The earlier {op.kind} could not be undone")
+        state: State = "resolved" if op.state == "needs_attention" else "rolled_back"
+        return state, f"{service.name} is back to how it was before the {op.kind}."
+    if op.phase == "prepare":
+        return "cancelled", f"The {op.kind} stopped before anything changed."
+    if op.phase in UNCHANGED or op.kind == "backup":
+        if run.running:
+            run.mark("start_app", f"Starting {service.name} again.")
+            started, detail = _start(service, run.project, run.root, run.log)
+            if not started:
+                raise _Failed("start_app", "health_check_failed", f"{service.name} did not start again: {detail}")
+        return "cancelled", f"The {op.kind} stopped before {service.name}'s data or release changed."
+    if op.kind == "update" and op.phase in {"apply_update", "housekeeping"}:
+        started, detail = _apply(run)
         if started:
-            if not running:
-                _stop(service, project, root, log)
-            moved = (
-                f"Updated {service.name}'s supporting services"
-                if state["supporting_only"]
-                else f"Updated {service.name} from {current} to {target}"
-            )
-            return f"{moved}. Backup {_short(saved['snapshot_id'])} holds the data from before."
-        step("rollback", f"{target} did not start; putting back {current} and its data.")
-        try:
-            _stop(service, project, root, log)
-            backups.restore(service.id, saved["snapshot_id"], directories, log)
-            app_releases.restore_previous(service.id, previous)
-        except (_Failed, backups.BackupError, OSError) as exc:
+            if not run.running:
+                _stop(service, run.project, run.root, run.log)
+            return "succeeded", f"{service.name} came up healthy on its new release, so the update was kept."
+        run.mark("rollback", "The new release is not healthy; putting back the previous one and its data.")
+        _put_back(run, "update_rollback_failed", f"The interrupted update did not come up healthy ({detail})")
+        return "rolled_back", f"The interrupted update was undone; {service.name} is back to how it was before."
+    if op.kind == "restore" and op.phase in {"start_app", "housekeeping"}:
+        if run.running:
+            started, detail = _start(service, run.project, run.root, run.log)
+            if not started:
+                raise _Failed("start_app", "health_check_failed", f"{service.name} did not start: {detail}")
+        return "succeeded", "The restore had finished; the app was started again."
+    # A restore that stopped while swapping data: the data from just before goes back.
+    run.mark("rollback", "The restore was interrupted; putting back the data from just before.")
+    _put_back(run, "restore_rollback_failed", "The interrupted restore could not be undone")
+    return "rolled_back", f"The interrupted restore was undone; {service.name} is back to how it was before."
+
+
+def _begin(
+    store: JobStore, journal: OperationStore, job: dict, service: Service, root: Path, running: bool
+) -> tuple[Operation, bool, bool]:
+    """The job's operation and whether it is resumed. Validates a new update first."""
+    job_id, action = str(job["id"]), str(job["action"])
+    existing = journal.for_job(job_id)
+    previous = existing.previous_release if existing else app_releases.installed(service, root)
+    target = None
+    supporting_only = False
+    if action == "update" and not existing:
+        state = app_releases.status(service, root)
+        target = app_releases.approved(service, root)
+        requested = job_params(job).get("target_version", "")
+        if target.version != requested:
             raise _Failed(
-                "rollback",
-                "update_rollback_failed",
-                f"{target} did not start ({redact(detail)}) and putting back {current} failed ({exc}). "
-                f"Backup {_short(saved['snapshot_id'])} holds the data from before the update.",
-            ) from exc
-        restarted, again = _start(service, project, root, log) if running else (True, "")
-        if not restarted:
-            raise _Failed(
-                "rollback",
-                "update_rollback_failed",
-                f"{target} did not start, and {current} did not start again after its data was put back: {again}",
+                "check_release",
+                "approval_changed",
+                f"Mu3Lab now approves {service.name} {target.version} instead of {requested}. Check for updates again.",
             )
-        raise _Failed(
-            "apply_update",
-            "update_rolled_back",
-            f"{service.name} {target} did not start ({redact(detail)[-300:]}). "
-            f"Mu3Lab put back {current} with its data from just before; nothing was lost.",
-        )
+        if not state["update_available"]:
+            raise _Failed("check_release", "already_current", f"{service.name} is already up to date.")
+        supporting_only = bool(state["supporting_only"])
+    elif existing and existing.target_release and existing.previous_release:
+        supporting_only = existing.target_release.version == existing.previous_release.version
+    op, resumed = journal.begin(
+        job_id,
+        service.id,
+        action,  # type: ignore[arg-type]
+        was_running=running,
+        previous_release=previous,
+        target_release=target,
+        chosen_snapshot=job_params(job).get("snapshot_id", "") if action == "restore" else "",
+    )
+    return op, resumed, supporting_only
+
+
+def _recovery_target(journal: OperationStore, job: dict, service: Service) -> Operation:
+    requested = job_params(job).get("operation_id", "")
+    op = journal.get(requested) if requested else journal.needing_attention(service.id)
+    if op is None or op.service_id != service.id or op.state not in {"active", "needs_attention"}:
+        raise _Failed("validate_service", "nothing_to_recover", f"{service.name} has nothing left to recover.")
+    return op
 
 
 def execute(store: JobStore, state: ControlState | None, job: dict, service: Service, root: Path) -> None:
@@ -288,8 +473,8 @@ def execute(store: JobStore, state: ControlState | None, job: dict, service: Ser
 
     job_id, action = str(job["id"]), str(job["action"])
     actor = str(job.get("actor") or "worker")
-    params = job_params(job)
     project = project_path(service, root)
+    journal = OperationStore(store.database)
 
     def log(line: str) -> None:
         store.append_event(job_id, "log", line)
@@ -300,17 +485,29 @@ def execute(store: JobStore, state: ControlState | None, job: dict, service: Ser
     store.transition(
         job_id, "running", actor=actor, detail=f"{action.title()} started for {service.name}.", step_id=action
     )
-    running = _was_running(state, service)
+    run: _Run | None = None
+    final: State = "succeeded"
     try:
         if service.stage != "optional" or not (project / "docker-compose.yml").is_file():
             raise _Failed("validate_service", "unsupported_action", f"{service.name} is not an installed catalog app.")
-        if action == "backup":
-            detail = _backup(service, project, root, step, log, running)
-        elif action == "restore":
-            detail = _restore(service, project, root, step, log, running, params.get("snapshot_id", ""))
+        if action == "recover":
+            run = _Run(service, project, root, journal, _recovery_target(journal, job, service), step, log)
+            with job_guard.uncancellable():
+                final, detail = _recover(run)
         else:
-            detail = _update(service, project, root, step, log, running, params.get("target_version", ""))
+            op, resumed, supporting_only = _begin(store, journal, job, service, root, _was_running(state, service))
+            run = _Run(service, project, root, journal, op, step, log)
+            if resumed:
+                log(f"Continuing this {action} after the worker restarted (it had reached: {op.phase}).")
+            if action == "backup":
+                detail = _backup(run)
+            elif action == "restore":
+                detail = _restore(run)
+            else:
+                detail = _update(run, supporting_only)
     except _Failed as failure:
+        if run is not None:
+            journal.finish(run.op.id, failure.outcome, failure.message)
         store.transition(
             job_id,
             "failed",
@@ -320,6 +517,56 @@ def execute(store: JobStore, state: ControlState | None, job: dict, service: Ser
             step_id=failure.stage,
         )
         return
+    except job_guard.JobInterrupted as interruption:
+        # Only the download can be cancelled; the operation then never changed anything.
+        if run is not None and interruption.reason == job_guard.CANCELLED and run.op.phase == "prepare":
+            journal.finish(run.op.id, "cancelled", "Cancelled before anything changed.")
+        raise
+    assert run is not None
+    journal.finish(run.op.id, final, detail)
+    if final in {"succeeded", "resolved", "rolled_back"} and action in {"restore", "recover"}:
+        # A later restore or recovery that worked settles any earlier failed undo.
+        journal.resolve(service.id, f"Settled by {action} job {job_id}.")
     if state:
-        state.set_installation(service.id, "running" if running else "stopped", job_id=job_id, route_state="ready")
+        state.set_installation(service.id, "running" if run.running else "stopped", job_id=job_id, route_state="ready")
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
+def _busy(store: JobStore, service_id: str) -> bool:
+    return any(job["service_id"] == service_id for job in store.active_jobs())
+
+
+def reconcile(store: JobStore, log: Log) -> int:
+    """Queue a recovery job for every operation whose job ended without finishing it."""
+    journal = OperationStore(store.database)
+    queued = 0
+    for op in journal.orphaned():
+        if _busy(store, op.service_id):
+            continue  # another job holds the app; try again on the next pass
+        attempt = journal.count_attempt(op.id)
+        if attempt > MAX_ATTEMPTS:
+            # Recovery itself keeps stopping without an answer: stop guessing.
+            journal.finish(
+                op.id,
+                "needs_attention",
+                f"Mu3Lab could not finish the interrupted {op.kind} after {MAX_ATTEMPTS} tries.",
+            )
+            log(f"An interrupted {op.kind} for {op.service_id} needs attention.")
+            continue
+        try:
+            store.create(
+                kind="lifecycle",
+                service_id=op.service_id,
+                action="recover",
+                actor=RECOVERY_ACTOR,
+                actor_subject=f"system:{RECOVERY_ACTOR}",
+                namespace="maintenance.recover",
+                detail=f"Finishing an interrupted {op.kind} safely.",
+                idempotency_key=f"recover:{op.id}:{attempt}",
+                params={"operation_id": op.id},
+            )
+        except JobConflict:
+            continue  # another job holds the app; try again on the next pass
+        queued += 1
+        log(f"Queued recovery of an interrupted {op.kind} for {op.service_id}.")
+    return queued

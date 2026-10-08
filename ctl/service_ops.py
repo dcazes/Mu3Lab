@@ -37,6 +37,7 @@ SUPPORTED_ACTIONS = frozenset(
         "backup",
         "restore",
         "update",
+        "recover",
     }
 )
 UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})

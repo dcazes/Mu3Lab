@@ -241,8 +241,13 @@ def snapshot(
     version: str = "",
     paths: RuntimePaths | None = None,
     retention: Retention = Retention(),
+    prune_old: bool = True,
 ) -> dict[str, Any]:
-    """Snapshot the app's (stopped) data folders, verify the repository, apply retention."""
+    """Snapshot the app's (stopped) data folders, verify the repository, apply retention.
+
+    ``prune_old=False`` leaves retention to the caller: an update or restore
+    prunes only once nothing it may still need to put back can be removed.
+    """
     paths = paths or RuntimePaths()
     if reason not in REASONS:
         raise BackupError("unknown backup reason")
@@ -285,7 +290,22 @@ def snapshot(
         },
         paths,
     )
-    # Retention is housekeeping: a failure leaves an extra snapshot, never a missing one.
+    if prune_old:
+        prune(service_id, log, paths=paths, retention=retention)
+    return {
+        "snapshot_id": snapshot_id,
+        "files": int(summary.get("total_files_processed") or 0),
+        "bytes": int(summary.get("total_bytes_processed") or 0),
+    }
+
+
+def prune(service_id: str, log: Log, *, paths: RuntimePaths | None = None, retention: Retention = Retention()) -> bool:
+    """Apply the retention policy to one app's snapshots.
+
+    Retention is housekeeping: a failure leaves an extra snapshot, never a
+    missing one.
+    """
+    paths = paths or RuntimePaths()
     rc, output = _restic(
         [
             "forget",
@@ -303,11 +323,7 @@ def snapshot(
     )
     if rc:
         log(f"Old backups were not pruned this time: {output[-300:]}")
-    return {
-        "snapshot_id": snapshot_id,
-        "files": int(summary.get("total_files_processed") or 0),
-        "bytes": int(summary.get("total_bytes_processed") or 0),
-    }
+    return rc == 0
 
 
 def _tag(tags: list[str], name: str) -> str:

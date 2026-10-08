@@ -2769,6 +2769,7 @@ export interface components {
       reason: string;
       /** Recommended Action */
       recommended_action?: string | null;
+      recovery?: components['schemas']['ServiceRecovery'] | null;
       /** Required */
       required: boolean;
       /** Resource Guidance */
@@ -2809,7 +2810,8 @@ export interface components {
         | 'uninstall_delete_data'
         | 'backup'
         | 'restore'
-        | 'update';
+        | 'update'
+        | 'recover';
       /**
        * Confirm
        * @default
@@ -2947,6 +2949,25 @@ export interface components {
       clients: components['schemas']['MobileClient'][];
       /** Primary */
       primary: string;
+    };
+    /**
+     * ServiceRecovery
+     * @description An update or restore that could not be undone; the app waits for a person.
+     */
+    ServiceRecovery: {
+      /** Detail */
+      detail: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'backup' | 'restore' | 'update';
+      /** Operation Id */
+      operation_id: string;
+      /** Since */
+      since: string;
+      /** Snapshot Id */
+      snapshot_id: string;
     };
     /** ServiceUi */
     ServiceUi: {

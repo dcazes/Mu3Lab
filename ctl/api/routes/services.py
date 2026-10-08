@@ -30,6 +30,7 @@ from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.lifecycle import app_releases
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
+from ctl.operations import OperationStore
 from ctl.registry import Service
 from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
@@ -44,6 +45,8 @@ MANUAL_INITIALIZATION_MODES = frozenset(
 
 # An app must be installed (running or stopped) to be backed up, restored or updated.
 MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped"})
+# While an app's earlier update or restore could not be undone, only these may run.
+RECOVERY_ACTIONS = frozenset({"recover", "restore"})
 SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"], route_class=ContractRoute)
@@ -92,6 +95,19 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
     subject = runtime.mutation_subject(operator)
+    journal = OperationStore.runtime()
+    blocking = journal.needing_attention(service.id) if journal else None
+    if blocking and action not in RECOVERY_ACTIONS:
+        raise ApiError(
+            409,
+            {
+                "code": "recovery_required",
+                "stage": "recovery",
+                "message": f"{service.name} needs attention first: {blocking.detail}",
+                "retryable": False,
+                "recommended_action": "Retry recovery, or restore the backup from before.",
+            },
+        )
     previous = store.by_idempotency_key(
         key or "",
         kind="lifecycle",
@@ -136,8 +152,13 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         raise ApiError(409, "service manifest is not deployable")
     control = ControlState.runtime()
     params: dict[str, str] = {}
-    if action in MAINTENANCE_ACTIONS:
-        params = _maintenance_params(service, action, body, _effective_state(service, control))
+    if action == "recover":
+        if not blocking:
+            raise ApiError(409, f"{service.name} has nothing to recover.")
+        params = {"operation_id": blocking.id}
+    elif action in MAINTENANCE_ACTIONS:
+        state = "needs_attention" if blocking else _effective_state(service, control)
+        params = _maintenance_params(service, action, body, state)
     else:
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):

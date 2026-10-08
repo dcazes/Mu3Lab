@@ -1,4 +1,4 @@
-import { Archive, History } from 'lucide-react';
+import { Archive, History, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { postJsonApi, type BackupSnapshot, type BackupsResponse, type Service } from '../../api';
 import { Button } from '../../components/Button';
@@ -93,6 +93,54 @@ function RestoreDialog({
   );
 }
 
+/** An update or restore that could not be undone: only recovery may run until it is settled. */
+function Recovery({
+  service,
+  backups,
+  busy,
+  onRestore,
+}: {
+  service: Service;
+  backups: BackupSnapshot[] | null;
+  busy: boolean;
+  onRestore: (backup: BackupSnapshot) => void;
+}) {
+  const { refresh } = useDashboard();
+  const { pending, run } = useAction();
+  const recovery = service.recovery;
+  if (!recovery) return null;
+  const before = backups?.find((backup) => backup.id === recovery.snapshot_id) ?? null;
+  const retry = async () => {
+    await run(
+      'recover',
+      () => postJsonApi(`/api/v1/services/${service.id}/actions`, { action: 'recover' }),
+      `Recovering ${service.name}`,
+    );
+    void refresh();
+  };
+  return (
+    <div className="card-pad recovery" role="alert">
+      <p className="warning-text">
+        <b>{service.name} needs attention.</b> {recovery.detail}
+      </p>
+      <p className="muted">
+        Other actions are paused until {service.name} is back to a known state. Retrying puts back the data and release
+        from before the {recovery.kind}.
+      </p>
+      <div className="recovery-actions">
+        <Button size="sm" icon={RotateCcw} loading={pending === 'recover'} disabled={busy} onClick={() => void retry()}>
+          Retry recovery
+        </Button>
+        {before && (
+          <Button size="sm" icon={History} disabled={busy} onClick={() => onRestore(before)}>
+            Restore the backup from before…
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function BackupsCard({ service }: { service: Service }) {
   const confirm = useConfirm();
   const { data, refresh } = useDashboard();
@@ -128,12 +176,19 @@ export function BackupsCard({ service }: { service: Service }) {
       title="Backups"
       description="Encrypted copies of this app's data, kept on this server. Mu3Lab saves one before every update."
       actions={
-        <Button size="sm" icon={Archive} loading={pending === 'backup'} disabled={busy} onClick={() => void backUp()}>
+        <Button
+          size="sm"
+          icon={Archive}
+          loading={pending === 'backup'}
+          disabled={busy || Boolean(service.recovery)}
+          onClick={() => void backUp()}
+        >
           Back up now
         </Button>
       }
       flush
     >
+      <Recovery service={service} backups={backups} busy={busy} onRestore={setRestoring} />
       {error ? (
         <p className="muted card-pad">{error}</p>
       ) : !backups ? (

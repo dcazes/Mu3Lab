@@ -69,6 +69,7 @@ class _Workflow(unittest.TestCase):
                 maintenance.backups, "restore", side_effect=lambda _s, snap, *_a, **_k: self.restored.append(snap)
             )
         )
+        self.prune = self.stack.enter_context(patch.object(maintenance.backups, "prune", return_value=True))
 
     def tearDown(self):
         self.stack.close()

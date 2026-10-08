@@ -11,6 +11,7 @@ from ctl.api.security import IdentityData
 from ctl.control_state import ControlState
 from ctl.identity import projection as identity_projection
 from ctl.jobs import JobStore
+from ctl.operations import OperationStore
 from ctl.registry import RegistryError, Service
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -48,6 +49,7 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
     # Active jobs first, however old, so a long-running one is never missed.
     jobs = list({job["id"]: job for job in [*store.active_jobs(), *store.jobs(limit=100)]}.values()) if store else []
     control_state = ControlState.runtime()
+    journal = OperationStore.runtime()
     operator = bool(identity and identity["writes_enabled"])
     now = time.time()
     statuses = [
@@ -142,6 +144,19 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
             }
         if not item.get("mobile"):
             item.pop("mobile", None)
+        blocking = journal.needing_attention(service.id) if journal else None
+        if blocking:
+            # Only retrying recovery or restoring a backup may run; the Backups card offers both.
+            item["state"] = "needs_attention"
+            item["detail"] = blocking.detail
+            item["allowed_actions"] = []
+            item["recovery"] = {
+                "operation_id": blocking.id,
+                "kind": blocking.kind,
+                "detail": blocking.detail,
+                "snapshot_id": blocking.recovery_snapshot,
+                "since": blocking.updated_at,
+            }
         if latest and latest["state"] in {"queued", "running"}:
             item["state"] = "queued" if latest["state"] == "queued" else "verifying"
             item["detail"] = str(latest.get("detail") or "An operation is in progress.")

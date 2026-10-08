@@ -4545,6 +4545,16 @@
             ],
             "title": "Recommended Action"
           },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "required": {
             "title": "Required",
             "type": "boolean"
@@ -4669,7 +4679,8 @@
               "uninstall_delete_data",
               "backup",
               "restore",
-              "update"
+              "update",
+              "recover"
             ],
             "title": "Action",
             "type": "string"
@@ -5171,6 +5182,45 @@
           "clients"
         ],
         "title": "ServiceMobile0",
+        "type": "object"
+      },
+      "ServiceRecovery": {
+        "description": "An update or restore that could not be undone; the app waits for a person.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "backup",
+              "restore",
+              "update"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "kind",
+          "detail",
+          "snapshot_id",
+          "since"
+        ],
+        "title": "ServiceRecovery",
         "type": "object"
       },
       "ServiceUi": {

@@ -176,7 +176,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | implemented; release acceptance pending |
 | [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | implemented; release acceptance pending |
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
-| [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | open |
+| [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | implemented for backup/restore/update; release acceptance pending |
 | [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | open |
 | [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | open |
 | [R12](#r12) | Roll back full deployment configuration as well as data/images | P1 | S | L | R09, R11, R13 | open |
@@ -353,6 +353,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r09"></a>
 
 ### R09 — Reclaimed jobs lack a durable phase journal for destructive operations
+
+**Implementation progress (2026-10-08):** Backup, restore and update are journaled in `operations`/`operation_steps` (migration 0005). Each phase and its recovery backup, previous/target release and original running state are recorded before the effect; a reclaimed job resumes from the recorded phase, an orphaned operation gets a `recover` job that ends it safely, and a failed undo blocks the app as needs attention with Retry recovery / Restore the backup from before. Backups referenced by unfinished operations are not pruned. Install, uninstall and reset are deliberately not journaled (owner decision). Branch `fix/review-milestone-b`. Details, inventory and remaining work: [B1 record](2026-10-08-milestone-b1-implementation.md). Release verification: pending VM interruption matrix.
 
 **Evidence:** [worker](../../ctl/worker.py) dispatches a reclaimed job from its entry point. [maintenance](../../ctl/lifecycle/maintenance.py) keeps `previous`, `saved`, `safety`, and original running state in local variables. Stage log events describe progress but do not drive resumption. `uncancellable` protects cooperative cancellation, not process/power failure.
 
@@ -603,7 +605,7 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R35 — Subprocess execution is not bounded for all failure paths
 
-**Implementation progress (2026-10-08):** One runner, [ctl/process.py](../../ctl/process.py), now executes every privileged, Docker, self-update, uv and status-probe command. It applies one monotonic deadline to the whole command, drains stdout and stderr concurrently, keeps a byte-bounded output tail with a dropped-line count, caps both line length and the number of lines written to job logs, and runs the child in its own session so a timeout terminates and reaps the whole process group (including `sg docker -c` grandchildren). A raising log callback (a cancelled job) no longer abandons the command: output keeps draining until it exits, then the interruption is re-raised. Restic containers are now named and labelled; a timed-out container is stopped, and a data-changing restic command waits for (or refuses to race) a container that survived an earlier attempt. `self_update._new_code` no longer drains stderr before stdout and has a deadline. Branch: `fix/review-milestone-b`. Tests: `tests/test_process.py`, streaming cases in `tests/test_actions.py`, container cases in `tests/test_backups.py`. Remaining: the Bitwarden CLI and installer-only `dpkg`/`tailscale` probes still use `subprocess.run` with timeouts; general Docker-operation identity and reconciliation for other containers belongs to R10; VM acceptance (floods, hung children, surviving container) is pending.
+**Implementation progress (2026-10-08):** One runner, [ctl/process.py](../../ctl/process.py), now executes every privileged, Docker, self-update, uv and status-probe command. It applies one monotonic deadline to the whole command, drains stdout and stderr concurrently, keeps a byte-bounded output tail with a dropped-line count, caps both line length and the number of lines written to job logs, and runs the child in its own session so a timeout terminates and reaps the whole process group (including `sg docker -c` grandchildren). A raising log callback (a cancelled job) no longer abandons the command: output keeps draining until it exits, then the interruption is re-raised. Restic containers are now named and labelled; a timed-out container is stopped, and a data-changing restic command waits for (or refuses to race) a container that survived an earlier attempt. `self_update._new_code` no longer drains stderr before stdout and has a deadline. Branch: `fix/review-milestone-b`; see the [B1 record](2026-10-08-milestone-b1-implementation.md). Tests: `tests/test_process.py`, streaming cases in `tests/test_actions.py`, container cases in `tests/test_backups.py`. Remaining: the Bitwarden CLI and installer-only `dpkg`/`tailscale` probes still use `subprocess.run` with timeouts; general Docker-operation identity and reconciliation for other containers belongs to R10; VM acceptance (floods, hung children, surviving container) is pending.
 
 **Evidence:** [actions.docker_cmd_stream](../../ctl/actions.py) bounds individual line length but accumulates an unbounded list and queue. After output ends, `proc.wait()` has no remaining deadline. If a log callback raises `JobInterrupted`, cleanup is not protected by a `finally`. [self_update._new_code](../../ctl/self_update.py) sequentially drains stderr then stdout and can deadlock on a full stdout pipe. Killing a Docker CLI does not by itself prove its containerized operation stopped.
 
@@ -729,7 +731,7 @@ These should be small, independently reviewable changes. Full per-person approva
 
 ### Milestone B — Durable recovery and deployment identity
 
-- [ ] **B1:** R09 operation journal and R35 bounded executor.
+- [x] **B1 implementation:** R09 operation journal and R35 bounded executor ([record](2026-10-08-milestone-b1-implementation.md)). VM interruption acceptance remains pending.
 - [ ] **B2:** R10 resource locks and interrupted-effect reconciliation.
 - [ ] **B3:** R11 immutable deployment IDs; R16 canonical config and private publication.
 - [ ] **B4:** R12 complete deployment rollback; R13 staged restore.

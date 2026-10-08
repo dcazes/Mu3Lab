@@ -105,6 +105,7 @@ export type ServiceInitialization = components['schemas']['ServiceInitialization
 export type ServiceInitializationResponse = components['schemas']['ServiceInitializationResponse'];
 export type ServiceLogsResponse = components['schemas']['ServiceLogsResponse'];
 export type ServiceMobile0 = components['schemas']['ServiceMobile0'];
+export type ServiceRecovery = components['schemas']['ServiceRecovery'];
 export type ServiceUi = components['schemas']['ServiceUi'];
 export type ServiceUpdate = components['schemas']['ServiceUpdate'];
 export type ServicesResponse = components['schemas']['ServicesResponse'];
