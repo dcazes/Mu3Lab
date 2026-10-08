@@ -60,17 +60,17 @@ describe('ToolCategories', () => {
     });
   });
 
-  it('keeps writes unavailable even when their saved permission is enabled', () => {
+  it('offers enabled writes only as requests requiring human approval', () => {
     const trashOn = server({
       categories: server().categories!.map((category) => ({ ...category, enabled: true })),
       tools: server().tools.map((tool) => ({ ...tool, enabled: true })),
     });
     render(<ToolCategories server={trashOn} reload={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Trash/ }));
-    expect(screen.getByText('Unavailable in chat')).toBeInTheDocument();
+    expect(screen.getByText('Requires approval')).toBeInTheDocument();
     const writeSwitch = screen.getByRole('switch', { name: 'Delete assets' });
-    expect(writeSwitch).toBeDisabled();
-    expect(writeSwitch).not.toBeChecked();
+    expect(writeSwitch).not.toBeDisabled();
+    expect(writeSwitch).toBeChecked();
     expect(putJsonApi).not.toHaveBeenCalled();
   });
 

@@ -169,10 +169,10 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | ID | Finding / outcome to deliver | Priority | Evidence | Effort | Dependencies | Status |
 |---|---|---|---|---|---|---|
 | [R01](#r01) | Close bootstrap identity-header trust gap | P0 | R/S | S | — | implemented |
-| [R02](#r02) | Enforce per-call approval on every chat write path | P0 | R/S | L | R03 | in progress |
-| [R03](#r03) | Bind chat tools to people and explicit data scope | P1 | S | L | — | open |
+| [R02](#r02) | Enforce per-call approval on every chat write path | P0 | R/S | L | R03 | implemented; release acceptance pending |
+| [R03](#r03) | Bind chat tools to people and explicit data scope | P1 | S | L | — | implemented for operator-only; release acceptance pending |
 | [R04](#r04) | Stop retrying ambiguous non-idempotent tool writes | P1 | R | S | — | implemented |
-| [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | in progress |
+| [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | implemented; release acceptance pending |
 | [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | open |
 | [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | open |
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
@@ -233,7 +233,7 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R02 — Chat write approval is not enforced by the gateway
 
-**Implementation progress (2026-10-08):** Immediate containment is implemented: all gateway writes are denied, including direct and wrapped calls with enabled saved switches; generated policy also denies writes for legacy images. Discovery, instructions and chat controls reflect this. Full subject-bound durable approval and pinned-client acceptance remain pending on R03, so the finding remains in progress. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
+**Implementation progress (2026-10-08):** Durable exact-input human approval now governs direct/helper chat writes and dashboard console writes. Ownership, CSRF, binding, expiry, revocation, atomic dispatch and unknown-outcome containment are implemented. Owner: Codex. Automated and disposable-container checks recorded; pinned-client/VM release acceptance remains pending. Evidence and recovery instructions: [gateway authority implementation record](2026-10-08-gateway-authority-implementation.md).
 
 **Evidence:** [gateway](../../platform/tool-gateway/gateway.py) `handle_call`/`call_tool` execute an enabled write; [gateway policy](../../ctl/mcp_gateway.py) converts `needs_approval` into an enabled boolean; [LobeHub adapter](../../ctl/integrations/lobehub.py) `_upsert_assistant` does not configure a verified per-call approval contract. E01 invokes both wrapped and direct write tools without any approval token. [MCP console](../../ctl/mcp_console.py) has nonce checks, but is a separate path.
 
@@ -258,6 +258,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R03 — App-scoped chat tokens do not identify the person or isolate their data
 
+**Implementation progress (2026-10-08):** Operator-only shared upstream credentials are the selected scope. Person/provider/app/version credentials, current operator verification, bounded membership freshness, member denial and per-person gateway sessions are implemented. This does not provide private upstream isolation between operators. Owner: Codex. Real two-account/client release acceptance remains pending. Evidence: [gateway authority implementation record](2026-10-08-gateway-authority-implementation.md).
+
 **Evidence:** [mcp_gateway.py](../../ctl/mcp_gateway.py) `app_token(service_id)` and `app_policy`; [lobehub_ops.py](../../ctl/lobehub_ops.py) builds one desired assistant/token list and synchronizes it for every connected person. The gateway authenticates an app token and forwards one upstream configuration. Gateway call logs lack a person identifier.
 
 **Impact:** personal chat accounts can access the same connector authority. Actual exposure depends on each app credential's scope; this review does not claim every connector currently leaks every user's data. The architecture cannot enforce personal isolation as written.
@@ -277,7 +279,7 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R04 — Ambiguous transport failure automatically retries writes
 
-**Implementation progress (2026-10-08):** Explicit retry semantics and initialization on every fresh session are implemented. Unsafe calls receive one dispatch and unknown-outcome guidance after transport loss; safe reads/discovery have at most one retry. Transport regression tests pass. A real commit-then-disconnect connector and durable reconciliation remain acceptance/follow-up work. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
+**Implementation progress (2026-10-08):** Explicit retry semantics and initialization on every fresh session are implemented. Unsafe calls receive one dispatch and unknown-outcome guidance after transport loss; safe reads/discovery have at most one retry. Transport regression tests pass. A real HTTP commit-then-disconnect fixture now records one dispatch and a durable unknown outcome; app-specific reconciliation remains follow-up work. See [the gateway authority record](2026-10-08-gateway-authority-implementation.md). Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
 
 **Evidence:** gateway `Connector.request` retries `URLError`/`OSError` for any method. E02 simulates a lost reply after the first write and observes two submissions. The second transport attempt also skips `_initialize` because initialization is conditioned on `attempt == 1`.
 
@@ -295,7 +297,7 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R05 — Missing gateway policy preserves previously granted access
 
-**Implementation progress (2026-10-08):** Missing/unreadable/invalid policy now clears cached authority; same-timestamp changes are detected by content hash. Snapshot construction and unique private atomic publication are serialized. Monotonic revisions, revision diagnostics, token-rotation/replay coverage and failed-publication revocation acknowledgment remain open. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
+**Implementation progress (2026-10-08):** Durable monotonic policy revisions, exact committed hashes, acknowledgement and invalidation before permission mutations are implemented. Missing/stale policy and failed publication deny access. Owner: Codex. Automated and disposable-container checks recorded; pinned-client/VM release acceptance remains pending. Evidence and recovery instructions: [gateway authority implementation record](2026-10-08-gateway-authority-implementation.md).
 
 **Evidence:** gateway `PolicyStore.get` returns cached policy when `os.stat` fails. E03 deletes a loaded policy file and still sees the enabled app. Changes are detected using only floating-point modification time.
 
@@ -713,7 +715,7 @@ The owner authorized implementation on 2026-10-08, starting with the highest-pri
 - [x] **A4:** R08 scoped request identity and explicit busy/conflict responses.
 - [x] **A5:** R20 truthful route readiness, plus immediate R33 caveats.
 
-A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). A4 and the immediate A5 route fix are recorded in [the mutation/readiness implementation record](2026-10-08-mutation-readiness-implementation.md). Full R02/R05/R20 and VM/client acceptance remain open; these checked tasks do not mark Milestone A exited.
+A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). A4 and the immediate A5 route fix are recorded in [the mutation/readiness implementation record](2026-10-08-mutation-readiness-implementation.md). R02/R03/R05 implementation is recorded in [the gateway authority record](2026-10-08-gateway-authority-implementation.md); full R20 and VM/client acceptance remain open; these checked tasks do not mark Milestone A exited.
 
 These should be small, independently reviewable changes. Full per-person approvals follow; containment must not wait for a complete chat-provider refactor.
 
@@ -731,7 +733,7 @@ These should be small, independently reviewable changes. Full per-person approva
 
 ### Milestone C — Household trust and recovery product
 
-- [ ] **C1:** R03 per-person/data-scope contract; finish R02 gateway approvals.
+- [x] **C1 implementation:** R03 operator-only person-bound scope and R02 durable gateway approvals. Pinned real client/two-account release acceptance remains pending.
 - [ ] **C2:** R06 bounded gateway and R07 revocation reconciliation.
 - [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design.
 - [ ] **C4:** R17 staged self-update and R18 enforceable API/executor boundary.

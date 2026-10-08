@@ -10,23 +10,27 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import secrets
 import shutil
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard, platform_releases
+import yaml
+
+from ctl import actions, job_guard, people, platform_releases
 from ctl.bootstrap import stamps
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import Review
 from ctl.mcp_review import load as load_review
+from ctl.platform_apps import by_capability
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
-from ctl.store.secrets import SecretStore
+from ctl.store import records
+from gateway_authority import Authority, canonical, validate_policy
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "platform" / "tool-gateway"
@@ -48,16 +52,19 @@ def review_for(server) -> Review:
     return load_review(server.id, server.review, ROOT)
 
 
+def authority() -> Authority:
+    return Authority(project() / "authority")
+
+
+def operator_token(subject: str, service_id: str) -> str:
+    return authority().credential(subject, service_id)
+
+
 def app_token(service_id: str) -> str:
-    """The bearer token one app's assistant uses; created once, never logged."""
-    paths = RuntimePaths()
-    with locked(paths.state / "gateway-tokens.lock"):
-        store = SecretStore(paths)
-        value = store.get("gateway", service_id)
-        if value is None:
-            value = secrets.token_urlsafe(32)
-            store.put("gateway", service_id, value)
-        return value
+    """Control-plane discovery only; never permits tool calls or human approval."""
+    store = authority()
+    store.grant_subject("control-discovery", operator=True)
+    return store.credential("control-discovery", service_id, provider="control-discovery")
 
 
 # --------------------------------------------------------------------------- switches
@@ -84,15 +91,12 @@ def tool_states(server, review: Review, activity: McpActivity | None = None) -> 
 def instructions(app_name: str, review: Review, states: dict[str, Any]) -> str:
     """The category map every app assistant carries, including what is switched off."""
     hint = f"Mu3Lab: Settings, Chat integrations, {app_name}"
-    states = states | {
-        "tools": {name: tool.access == "read" and states["tools"][name] for name, tool in review.tools.items()}
-    }
     lines = [
         f"You are the {app_name} assistant in Mu3Lab. You work only with {app_name}.",
         "",
         "The tools you can see directly are only the most common ones. Call find_tools to see more: with no",
         "arguments it lists every category below, and with a category it lists that category's tools and inputs.",
-        "Run a reading tool with use_tool. Chat writes are currently unavailable.",
+        "Run a reading tool with use_tool. Writes create a request for your approval in Mu3Lab.",
         "",
         f"{app_name} tool categories:",
     ]
@@ -113,7 +117,10 @@ def instructions(app_name: str, review: Review, states: dict[str, Any]) -> str:
         "Rules:",
         "- Before saying something cannot be done, call find_tools to check.",
         f"- If the tool needed is switched off, say which category or tool the owner can switch on in {hint}.",
-        "- Chat writes stay unavailable until Mu3Lab can verify human approval for each call. A tool switch cannot enable them.",
+        "- A write switch only permits approval requests. A human must approve the exact arguments in Mu3Lab before each change.",
+        "- Show approval_url to the operator when a change request returns one. Human approval happens only in Mu3Lab.",
+        "- Never claim a change completed before its recorded outcome is succeeded.",
+        "- These connectors expose shared service-account data to operators; they do not isolate personal records.",
         "- Use ids from earlier results; never guess them.",
     ]
     if review.guidance:
@@ -128,10 +135,28 @@ def app_policy(server, app_name: str) -> dict[str, Any]:
     review = review_for(server)
     states = tool_states(server, review)
     upstream_token = read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", "")
+    from ctl.control_state import ControlState
+
+    control = ControlState.runtime()
+    runtime = control.mcp_server(server.id) if control else None
+    schemas = {tool["id"]: tool.get("parameters") for tool in (runtime or {}).get("tool_snapshot", [])}
+    dns = str(records.get("status", "network").get("dns_name", ""))
+    route = by_capability("private_proxy").manifest.route
+    approval_origin = f"https://{dns}:{route.https_port}" if dns and route else ""
+    states["tools"] = {
+        name: enabled
+        and (review.tools[name].access == "read" or (isinstance(schemas.get(name), dict) and bool(approval_origin)))
+        for name, enabled in states["tools"].items()
+    }
     return {
         "name": app_name,
         "server_id": server.id,
-        "token_sha256": hashlib.sha256(app_token(server.service_id).encode()).hexdigest(),
+        "data_scope": review.data_scope,
+        "delegation": review.delegation,
+        "audience": "operators",
+        "approval_required": True,
+        "approval_origin": approval_origin,
+        "connector_revision": f"{server.revision}:{review.revision}",
         "upstream": {
             "url": server.endpoint,
             "headers": {"Authorization": f"Bearer {upstream_token}"} if upstream_token else {},
@@ -152,8 +177,8 @@ def app_policy(server, app_name: str) -> dict[str, Any]:
                 "category": tool.category,
                 "access": tool.access,
                 "core": tool.core,
-                # Contain writes even while an older gateway image is being replaced.
-                "enabled": tool.access == "read" and states["tools"][name],
+                "enabled": states["tools"][name] and (tool.access == "read" or isinstance(schemas.get(name), dict)),
+                "schema": schemas.get(name) or {"type": "object", "properties": {}},
             }
             for name, tool in review.tools.items()
         },
@@ -173,12 +198,33 @@ def build_policy() -> dict[str, Any]:
     apps: dict[str, Any] = {}
     for server in load_catalog(registry):
         runtime = state.mcp_server(server.id) if state else None
-        if not server.gateway or not runtime or not runtime["enabled"]:
+        if not server.gateway or not runtime or not runtime["enabled"] or runtime["state"] != "live":
             continue
         if server.service_id in apps:
             raise ValueError(f"{names[server.service_id]} has more than one enabled connector")
         apps[server.service_id] = app_policy(server, names[server.service_id])
-    return {"version": 1, "apps": apps}
+    return {"version": 2, "apps": apps}
+
+
+def _invalidate_policy(directory: Path) -> int:
+    # Removing old-format authority also closes the rolling-upgrade window.
+    # Refuse the mutation if invalidation cannot be persisted.
+    (directory / "policy.json").unlink(missing_ok=True)
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return authority().invalidate()
+
+
+@contextmanager
+def policy_change():
+    directory = project() / "policy"
+    directory.mkdir(mode=0o750, parents=True, exist_ok=True)
+    with locked(directory / "policy.lock"):
+        _invalidate_policy(directory)
+        yield
 
 
 def write_policy(policy: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -186,9 +232,36 @@ def write_policy(policy: dict[str, Any] | None = None) -> dict[str, Any]:
     directory = project() / "policy"
     directory.mkdir(mode=0o750, parents=True, exist_ok=True)
     with locked(directory / "policy.lock"):
-        policy = build_policy() if policy is None else policy
-        write_atomic(directory / "policy.json", json.dumps(policy, indent=1, sort_keys=True).encode())
-    return policy
+        try:
+            candidate = dict(build_policy() if policy is None else policy)
+        except (OSError, ValueError):
+            _invalidate_policy(directory)
+            raise
+        candidate["version"] = 2
+        candidate.pop("revision", None)
+        current_path = directory / "policy.json"
+        if current_path.exists():
+            try:
+                existing = json.loads(current_path.read_text())
+                revision = existing.pop("revision")
+                if existing == candidate:
+                    payload = current_path.read_bytes()
+                    authority().check_policy(revision, hashlib.sha256(payload).hexdigest())
+                    return existing | {"revision": revision}
+            except (ValueError, OSError, KeyError):
+                pass
+        revision = _invalidate_policy(directory)
+        candidate["revision"] = revision
+        validate_policy(candidate)
+        payload = canonical(candidate).encode()
+        write_atomic(current_path, payload)
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        authority().publish(revision, hashlib.sha256(payload).hexdigest())
+        return candidate
 
 
 # --------------------------------------------------------------------------- lifecycle
@@ -197,9 +270,19 @@ def write_policy(policy: dict[str, Any] | None = None) -> dict[str, Any]:
 def _materialize() -> Path:
     target = project()
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
-    for name in ("Dockerfile", "docker-compose.yml", "gateway.py"):
+    for name in ("Dockerfile", "docker-compose.yml", "gateway.py", "requirements.txt"):
         shutil.copy2(SOURCE / name, target / name)
+    shutil.copy2(ROOT / "gateway_authority.py", target / "gateway_authority.py")
+    (target / "authority").mkdir(mode=0o700, exist_ok=True)
     platform_releases.pin_compose(ROOT, SOURCE / "docker-compose.yml", target / "docker-compose.yml")
+    compose_path = target / "docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text())
+    compose["services"]["mcp-gateway"]["build"] = {
+        "context": ".",
+        "dockerfile": "Dockerfile",
+        "args": {"GATEWAY_SOURCE": "."},
+    }
+    compose_path.write_text(yaml.safe_dump(compose, sort_keys=False))
     (target / "logs").mkdir(mode=0o750, exist_ok=True)
     env = read_runtime_env(target / ".env")
     env.update({"MU3LAB_UID": str(os.getuid()), "MU3LAB_GID": str(os.getgid())})
@@ -217,8 +300,15 @@ def _ensure_network(log) -> None:
 def healthy() -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=5) as response:
-            return response.status == 200
-    except (urllib.error.URLError, OSError):
+            status = json.loads(response.read(4096))
+            expected = authority().policy_state()
+            return (
+                response.status == 200
+                and status.get("revision") == expected["revision"]
+                and status.get("policy_sha256") == expected["digest"]
+                and expected["acknowledged"] == expected["revision"]
+            )
+    except (urllib.error.URLError, OSError, ValueError):
         return False
 
 
@@ -227,7 +317,9 @@ def _build_gateway(target: Path, log) -> tuple[int, str]:
     if platform_releases.exact_tag(ROOT):
         return 0, ""  # _materialize selected the release's verified immutable image.
     with locked(target / ".build.lock"):
-        digest = stamps.digest(target, [target / "Dockerfile", target / "gateway.py"])
+        digest = stamps.digest(
+            target, [target / name for name in ("Dockerfile", "gateway.py", "gateway_authority.py", "requirements.txt")]
+        )
         stamp = target / ".build.sha256"
         if stamps.read(stamp) == digest:
             return 0, ""
@@ -296,3 +388,62 @@ def surface(service_id: str) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def verify_operator(subject: str) -> None:
+    """Refresh operator authority from Authentik, never caller-provided role text."""
+    store = authority()
+    try:
+        allowed = subject in people.operator_subjects()
+    except ValueError:
+        store.revoke_subject(subject)
+        raise ValueError("Operator membership could not be verified; connector access remains unavailable.") from None
+    store.grant_subject(subject, operator=allowed)
+    if not allowed:
+        raise ValueError("Shared connector credentials are available only to current operators.")
+
+
+def dispatch_operation(operation: str, subject: str) -> dict[str, Any]:
+    """Execute an already approved immutable operation, with no argument override."""
+    verify_operator(subject)
+    record = authority().view(operation, subject)
+    token = operator_token(subject, record["app"])
+    url = f"http://127.0.0.1:{PORT}/apps/{record['app']}/operations/{operation}/execute"
+    request = urllib.request.Request(
+        url, data=b"{}", headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=135) as response:
+            result = json.loads(response.read(64_001))
+        if not isinstance(result, dict) or not result.get("outcome"):
+            raise ValueError(
+                "Gateway could not establish a dispatch outcome. Check the operation status before retrying."
+            )
+        return result
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        if isinstance(exc, urllib.error.HTTPError):
+            exc.close()
+        # No POST retry: the gateway may have dispatched already. Its journal is authority.
+        current = authority().view(operation, subject)
+        return {
+            "ok": current["state"] == "succeeded",
+            "outcome": current["state"],
+            "operation_id": operation,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Dispatch could not be confirmed. Refresh the operation and inspect the app before requesting another change.",
+                    }
+                ],
+                "isError": True,
+            },
+        }
+
+
+def current_policy() -> dict[str, Any]:
+    payload = (project() / "policy" / "policy.json").read_bytes()
+    policy = json.loads(payload)
+    validate_policy(policy)
+    authority().check_policy(policy["revision"], hashlib.sha256(payload).hexdigest())
+    return policy

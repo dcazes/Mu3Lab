@@ -11,15 +11,18 @@ it changes and never widens it.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from gateway_authority import Authority, validate_arguments
+from gateway_authority import validate_policy as _validate_policy
 
 POLICY_PATH = os.environ.get("GATEWAY_POLICY", "/config/policy.json")
 CALL_LOG = os.environ.get("GATEWAY_CALL_LOG", "/logs/calls.jsonl")
@@ -39,12 +42,27 @@ class GatewayError(Exception):
     """A problem the assistant should read and act on, returned as a tool error."""
 
 
+class UnknownOutcome(GatewayError):
+    """Dispatch happened without a reliable reply; never repeat it automatically."""
+
+
+class ConnectorRefused(GatewayError):
+    """A definitive connector error reply."""
+
+
+AUTHORITY = Authority(os.environ.get("GATEWAY_AUTHORITY", "/authority"), initialize=False)
+
+
 # --------------------------------------------------------------------------- policy
 
 
 class PolicyStore:
-    def __init__(self, path: str):
+    def __init__(self, path: str, authority: Authority | None = None):
         self.path = path
+        directory = Path(path).parent
+        self.authority = authority or Authority(
+            (directory.parent if directory.name == "policy" else directory) / "authority", initialize=False
+        )
         self._lock = threading.Lock()
         self._digest = ""
         self._policy: dict = {"apps": {}}
@@ -60,6 +78,8 @@ class PolicyStore:
                     raise ValueError("gateway policy is too large")
                 policy = json.loads(payload)
                 _validate_policy(policy)
+                digest = hashlib.sha256(payload.encode()).hexdigest()
+                self.authority.check_policy(policy["revision"], digest, acknowledge=True)
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 self._policy, self._digest = {"apps": {}}, ""
                 CONNECTORS.forget()
@@ -73,32 +93,7 @@ class PolicyStore:
             return self._policy
 
 
-def _validate_policy(policy: object) -> None:
-    """Validate the authorization fields before any app entry can be used."""
-    if not isinstance(policy, dict) or policy.get("version") != 1 or not isinstance(policy.get("apps"), dict):
-        raise ValueError("gateway policy is malformed")
-    for app in policy["apps"].values():
-        if not isinstance(app, dict):
-            raise ValueError("gateway app is malformed")
-        if not isinstance(app.get("upstream"), dict) or not isinstance(app["upstream"].get("url"), str):
-            raise ValueError("gateway upstream is malformed")
-        if not isinstance(app.get("tools"), dict) or not isinstance(app.get("categories"), list):
-            raise ValueError("gateway tools are malformed")
-        categories = {}
-        for category in app["categories"]:
-            if not isinstance(category, dict) or not isinstance(category.get("id"), str):
-                raise ValueError("gateway category is malformed")
-            if type(category.get("enabled")) is not bool or category["id"] in categories:
-                raise ValueError("gateway category switch is malformed")
-            categories[category["id"]] = category
-        for name, tool in app["tools"].items():
-            if not isinstance(tool, dict) or tool.get("name") != name or tool.get("category") not in categories:
-                raise ValueError("gateway tool is malformed")
-            if tool.get("access") not in ("read", "write") or type(tool.get("enabled")) is not bool:
-                raise ValueError("gateway tool permission is malformed")
-
-
-POLICY = PolicyStore(POLICY_PATH)
+POLICY = PolicyStore(POLICY_PATH, AUTHORITY)
 
 
 # --------------------------------------------------------------------------- upstream MCP client
@@ -165,7 +160,7 @@ class Connector:
         self.session = session
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"}, expect_reply=False)
 
-    def request(self, method: str, params: dict, *, retry_safe: bool = False) -> dict:
+    def request(self, method: str, params: dict, *, retry_safe: bool = False, before_dispatch=None) -> dict:
         """Retry only operations whose caller explicitly declares safe to repeat."""
         with self._lock:
             for attempt in (1, 2):
@@ -173,18 +168,25 @@ class Connector:
                 try:
                     if not self.session:
                         self._initialize()
+                    if before_dispatch:
+                        before_dispatch()
                     self._next_id += 1
                     dispatched = True
                     reply, _ = self._post({"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params})
                     if reply.get("error"):
-                        message = str((reply["error"] or {}).get("message", "error"))[:300]
-                        raise GatewayError(f"The connector refused the request: {message}")
+                        raise ConnectorRefused("The connector refused the request; inspect the app for details.")
                     result = reply.get("result")
+                    if not isinstance(result, dict) and not retry_safe:
+                        raise UnknownOutcome(
+                            "The connector returned no reliable outcome. Do not repeat the change automatically."
+                        )
                     return result if isinstance(result, dict) else {}
                 except (HTTPError, URLError, OSError) as exc:
+                    if isinstance(exc, HTTPError):
+                        exc.close()
                     self.session = ""
                     if dispatched and not retry_safe:
-                        raise GatewayError(
+                        raise UnknownOutcome(
                             "The connector call's outcome is unknown. It was not retried; check the app before trying again."
                         ) from None
                     recoverable = not isinstance(exc, HTTPError) or exc.code in {400, 404}
@@ -193,6 +195,14 @@ class Connector:
                     if isinstance(exc, HTTPError):
                         raise GatewayError(f"The connector answered HTTP {exc.code}.") from None
                     raise GatewayError("The connector is not reachable right now.") from None
+                except ConnectorRefused:
+                    raise
+                except (ValueError, GatewayError):
+                    if dispatched and not retry_safe:
+                        raise UnknownOutcome(
+                            "The connector reply could not establish the outcome. Check the app before another attempt."
+                        ) from None
+                    raise
             raise GatewayError("The connector is not reachable right now.")
 
     def list_tools(self) -> dict[str, dict]:
@@ -223,6 +233,8 @@ class ConnectorPool:
 
     def get(self, app_id: str, app: dict) -> Connector:
         key = json.dumps(app["upstream"], sort_keys=True)
+        principal = app.get("_principal", {})
+        app_id = f"{app_id}:{principal.get('subject')}:{principal.get('provider')}:{principal.get('version')}"
         with self._lock:
             current = self._connectors.get(app_id)
             if current is None or current[0] != key:
@@ -266,7 +278,11 @@ def _check_enabled(app: dict, name: str, tool: dict) -> None:
 
 
 def _enabled(app: dict, tool: dict) -> bool:
-    return bool(tool["access"] == "read" and tool["enabled"] and _categories(app)[tool["category"]]["enabled"])
+    return bool(
+        (tool["access"] == "read" or app.get("approval_required", False))
+        and tool["enabled"]
+        and _categories(app)[tool["category"]]["enabled"]
+    )
 
 
 def _describe(upstream: dict | None) -> str:
@@ -310,6 +326,19 @@ def _meta_tools(app: dict) -> list[dict]:
             },
         },
     ]
+    if app.get("approval_required"):
+        tools.append(
+            {
+                "name": CHANGE,
+                "description": "Request a change. Mu3Lab returns a link where the operator must approve the exact inputs; this call does not execute the change.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}},
+                    "required": ["tool"],
+                    "additionalProperties": False,
+                },
+            }
+        )
     return tools
 
 
@@ -371,7 +400,7 @@ def find_tools(app_id: str, app: dict, arguments: dict) -> dict:
             "what": _describe(upstream.get(tool["name"])),
             "changes_data": tool["access"] == "write",
             "state": "on" if on else "off",
-            "run_with": USE if on else None,
+            "run_with": (CHANGE if tool["access"] == "write" else USE) if on else None,
         }
         if on:
             entry["inputs"] = upstream[tool["name"]].get("inputSchema") or {"type": "object", "properties": {}}
@@ -394,15 +423,85 @@ def call_tool(app_id: str, app: dict, name: str, arguments: dict, *, via: str) -
     if via == CHANGE and tool["access"] != "write":
         raise GatewayError(f"'{name}' only reads data; run it with {USE}.")
     _check_enabled(app, name, tool)
-    if tool["access"] == "write":
+    if tool["access"] == "write" and (not app.get("approval_required") or not app.get("_principal")):
         raise GatewayError("Chat writes are unavailable until Mu3Lab can verify approval for each call.")
     connector = CONNECTORS.get(app_id, app)
     if name not in connector.list_tools():
         raise GatewayError(f"The connector does not offer '{name}' right now.")
-    result = connector.request(
-        "tools/call", {"name": name, "arguments": arguments}, retry_safe=tool["access"] == "read"
-    )
+    schema = connector.list_tools()[name].get("inputSchema") or {"type": "object"}
+    try:
+        validate_arguments(schema, arguments)
+        if tool["access"] == "write":
+            operation = AUTHORITY.prepare(app["_principal"], app_id, app, name, arguments, schema, app["_revision"])
+            url = f"{app.get('approval_origin', '')}/tool-approvals/{operation['id']}"
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"This change awaits your approval in Mu3Lab: [Review the exact change]({url}). Nothing has been dispatched.",
+                    }
+                ],
+                "structuredContent": {
+                    "operation_id": operation["id"],
+                    "state": operation["state"],
+                    "approval_url": url,
+                },
+                "isError": False,
+            }
+    except ValueError as exc:
+        raise GatewayError(str(exc)) from None
+    result = connector.request("tools/call", {"name": name, "arguments": arguments}, retry_safe=True)
     return _bounded(result)
+
+
+def execute_operation(app_id: str, app: dict, operation: str) -> dict:
+    principal = app["_principal"]
+    record = AUTHORITY.view(operation, principal["subject"], arguments=True)
+    if record["state"] in {"succeeded", "failed", "outcome_unknown", "dispatching", "rejected", "revoked", "expired"}:
+        return {
+            "ok": record["state"] == "succeeded",
+            "outcome": record["state"],
+            "operation_id": operation,
+            "result": {},
+        }
+    connector = CONNECTORS.get(app_id, app)
+    offered = connector.list_tools().get(record["tool"])
+    if not offered:
+        raise GatewayError("The connector no longer offers this tool.")
+    schema = offered.get("inputSchema") or {"type": "object"}
+
+    def authorize():
+        current = POLICY.get()
+        selected = current["apps"].get(app_id)
+        if not selected or AUTHORITY.claim(operation, principal, selected, schema, current["revision"]) is None:
+            raise GatewayError("This request was revoked or already attempted.")
+
+    try:
+        result = connector.request(
+            "tools/call",
+            {"name": record["tool"], "arguments": record["arguments"]},
+            retry_safe=False,
+            before_dispatch=authorize,
+        )
+        outcome = "failed" if result.get("isError") else "succeeded"
+        AUTHORITY.finish(operation, outcome)
+        return {"ok": outcome == "succeeded", "outcome": outcome, "operation_id": operation, "result": _bounded(result)}
+    except UnknownOutcome:
+        AUTHORITY.finish(operation, "outcome_unknown")
+        return {
+            "ok": False,
+            "outcome": "outcome_unknown",
+            "operation_id": operation,
+            "result": _text("The outcome is unknown. Check the app before requesting another change.", error=True),
+        }
+    except ConnectorRefused:
+        AUTHORITY.finish(operation, "failed")
+        return {
+            "ok": False,
+            "outcome": "failed",
+            "operation_id": operation,
+            "result": _text("The connector refused the change.", error=True),
+        }
 
 
 def _bounded(result: dict) -> dict:
@@ -454,6 +553,10 @@ def _log_call(app_id: str, app: dict, tool: str, via: str, outcome: str, started
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "app": app_id,
         "server": app.get("server_id", ""),
+        "subject": app.get("_principal", {}).get("subject", ""),
+        "credential_version": app.get("_principal", {}).get("version", 0),
+        "provider": app.get("_principal", {}).get("provider", ""),
+        "operation_id": app.get("_operation_id", ""),
         "tool": tool[:100],
         "via": via,
         "outcome": outcome,
@@ -480,11 +583,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             try:
-                apps = len(POLICY.get()["apps"])
+                policy = POLICY.get()
+                apps = len(policy["apps"])
             except (OSError, ValueError):
                 self._send(503, {"ok": False})
                 return
-            self._send(200, {"ok": True, "apps": apps})
+            self._send(200, {"ok": True, "apps": apps, "revision": policy["revision"], "policy_sha256": POLICY._digest})
             return
         self._send(405 if self._app_id() else 404, {"error": "not found"})
 
@@ -494,19 +598,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def _app_id(self) -> str:
         parts = self.path.split("?", 1)[0].strip("/").split("/")
-        return parts[1] if len(parts) == 3 and parts[0] == "apps" and parts[2] == "mcp" else ""
+        if len(parts) == 3 and parts[0] == "apps" and parts[2] == "mcp":
+            return parts[1]
+        if (
+            len(parts) == 5
+            and parts[0] == "apps"
+            and parts[2] == "operations"
+            and parts[4] == "execute"
+            and re.fullmatch(r"[0-9a-f]{32}", parts[3])
+        ):
+            return parts[1]
+        return ""
 
     def _authorized(self, app: dict) -> bool:
         header = self.headers.get("Authorization", "")
         if not header.startswith("Bearer "):
             return False
-        digest = hashlib.sha256(header.removeprefix("Bearer ").encode()).hexdigest()
-        return hmac.compare_digest(digest, str(app.get("token_sha256", "")))
+        try:
+            app["_principal"] = AUTHORITY.authenticate(header.removeprefix("Bearer "), app["_app_id"])
+            return True
+        except (ValueError, OSError, KeyError):
+            return False
 
     def do_POST(self):
         app_id = self._app_id()
         try:
-            app = POLICY.get()["apps"].get(app_id) if app_id else None
+            policy = POLICY.get()
+            selected = policy["apps"].get(app_id) if app_id else None
+            app = dict(selected) | {"_app_id": app_id, "_revision": policy["revision"]} if selected else None
         except (OSError, ValueError):
             self._send(503, {"error": "gateway policy unavailable"})
             return
@@ -518,6 +637,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         request_id = None
         try:
+            if "/operations/" in self.path:
+                if app["_principal"]["provider"] == "control-discovery":
+                    self._send(403, {"error": "discovery credential cannot execute changes"})
+                    return
+                operation = self.path.split("/")[4]
+                started = time.monotonic()
+                result = execute_operation(app_id, app, operation)
+                record = AUTHORITY.view(operation, app["_principal"]["subject"])
+                app["_operation_id"] = operation
+                _log_call(app_id, app, record["tool"], "approved_operation", result["outcome"], started)
+                self._send(200, result)
+                return
             size = int(self.headers.get("Content-Length", "0"))
             if size < 1 or size > MAX_REQUEST:
                 raise GatewayError("Request is empty or too large.")
@@ -527,6 +658,15 @@ class Handler(BaseHTTPRequestHandler):
             request_id = message.get("id")
             method = str(message.get("method", ""))
             params = message.get("params") or {}
+            if not isinstance(params, dict):
+                raise GatewayError("'params' must be an object.")
+            if app["_principal"]["provider"] == "control-discovery" and method not in {
+                "initialize",
+                "notifications/initialized",
+                "ping",
+                "tools/list",
+            }:
+                raise GatewayError("This credential permits tool discovery only.")
             if request_id is None:
                 self._send(202, None)
                 return
@@ -547,9 +687,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": method}})
                 return
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "result": result})
-        except GatewayError as exc:
+        except (GatewayError, ValueError) as exc:
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": str(exc)}})
-        except (ValueError, TypeError, KeyError):
+        except (TypeError, KeyError):
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32600, "message": "bad request"}})
 
     def _call(self, app_id: str, app: dict, params: dict) -> dict:
@@ -563,7 +703,14 @@ class Handler(BaseHTTPRequestHandler):
         except GatewayError as exc:
             _log_call(app_id, app, str(arguments.get("tool") or name), name, "refused", started)
             return _text(str(exc), error=True)
-        _log_call(app_id, app, tool, via, "error" if result.get("isError") else "ok", started)
+        outcome = (
+            "awaiting_approval"
+            if (result.get("structuredContent") or {}).get("state") in {"pending", "approved"}
+            else "error"
+            if result.get("isError")
+            else "ok"
+        )
+        _log_call(app_id, app, tool, via, outcome, started)
         return result
 
     def _send(self, status: int, value: dict | None) -> None:
@@ -580,6 +727,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    AUTHORITY.recover_dispatches()
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("GATEWAY_PORT", "8080"))), Handler).serve_forever()
 
 

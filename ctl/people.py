@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked
+from gateway_authority import Authority
 
 ADMIN_GROUP = "mu3lab-operators"
 MEMBER_GROUP = "mu3lab-household"
@@ -134,6 +135,10 @@ def change(username: str, action: str, authentik_origin: str, role: str = "") ->
                 raise PeopleError(
                     "The installation administrator must stay active to keep Mu3Lab's sign-in management working."
                 )
+            if removing_admin:
+                directory = RuntimePaths().projects / "mcp-gateway" / "authority"
+                if (directory / "authority.db").is_file():
+                    Authority(directory, initialize=False).revoke_subject(str(user["uid"]))
             if action == "invite":
                 return _invite(client, user, authentik_origin)
             if action == "role":
@@ -143,3 +148,13 @@ def change(username: str, action: str, authentik_origin: str, role: str = "") ->
             return {"person": _view(user)}
     except AuthentikError as exc:
         raise PeopleError(str(exc)) from exc
+
+
+def operator_subjects() -> set[str]:
+    """Only current active Authentik operators may receive shared connector credentials."""
+    try:
+        return {
+            str(user["uid"]) for user in Authentik.runtime().users() if user.get("is_active") and _role(user) == "admin"
+        }
+    except AuthentikError:
+        raise PeopleError("Current operator membership could not be verified.") from None

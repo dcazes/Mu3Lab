@@ -158,6 +158,12 @@ def _app(**tool_overrides):
     return {
         "name": "Demo",
         "server_id": "demo",
+        "data_scope": "operator_only",
+        "audience": "operators",
+        "delegation": "none",
+        "approval_required": False,
+        "approval_origin": "https://dashboard.test:8446",
+        "connector_revision": "test:1",
         "upstream": {"url": "http://demo/mcp"},
         "categories": [
             {"id": "search", "title": "Search", "summary": "Find things.", "enabled": True},

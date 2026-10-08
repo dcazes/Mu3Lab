@@ -33,6 +33,7 @@ from ctl.api.routes import (
     services,
     snapshot,
     system,
+    tool_approvals,
     vault,
     voice,
 )
@@ -95,6 +96,7 @@ def create_app(dist: Path = DIST) -> FastAPI:
     app.include_router(system.health_router)
     for module in (
         system,
+        tool_approvals,
         identity,
         services,
         install_batches,

@@ -100,6 +100,15 @@ export function ChatPage() {
     );
   return (
     <div className="chat">
+      <div className="chat-banner" role="status">
+        App connectors use shared service credentials and are operator-only. Each write requires approval of its exact
+        inputs in Mu3Lab.
+        {data.identity.is_admin && (
+          <LinkButton to="/tool-approvals" size="sm">
+            Review change requests
+          </LinkButton>
+        )}
+      </div>
       {connection && (
         <div className="chat-banner" role="status">
           One-time step: choose <b>Authorize</b> below so Mu3Lab can add your app assistants to chat.

@@ -16,7 +16,17 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ctl import mcp_gateway
+from gateway_authority import Authority
 from tests.test_mcp_gateway import FakeConnector, _app, _review, gateway
+
+
+def publish_fixture(path: Path, policy: dict) -> dict:
+    store = Authority(path.parent / "authority")
+    policy = policy | {"version": 2, "revision": store.invalidate()}
+    payload = json.dumps(policy).encode()
+    path.write_bytes(payload)
+    store.publish(policy["revision"], hashlib.sha256(payload).hexdigest())
+    return policy
 
 
 class WriteContainmentTests(unittest.TestCase):
@@ -48,7 +58,7 @@ class PolicyRevocationTests(unittest.TestCase):
             path = Path(tmp) / "policy.json"
             store = gateway.PolicyStore(str(path))
             original = {"version": 1, "apps": {"demo": _app()}}
-            path.write_text(json.dumps(original))
+            original = publish_fixture(path, original)
             self.assertEqual(store.get(), original)
             path.unlink()
             with self.assertRaises((OSError, ValueError)):
@@ -60,18 +70,18 @@ class PolicyRevocationTests(unittest.TestCase):
     def test_same_timestamp_replacement_is_seen(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "policy.json"
-            path.write_text(json.dumps({"version": 1, "apps": {"demo": _app()}}))
+            publish_fixture(path, {"apps": {"demo": _app()}})
             stamp = path.stat().st_mtime_ns
             store = gateway.PolicyStore(str(path))
             self.assertIn("demo", store.get()["apps"])
-            path.write_text(json.dumps({"version": 1, "apps": {}}))
+            publish_fixture(path, {"apps": {}})
             os.utime(path, ns=(stamp, stamp))
             self.assertEqual(store.get()["apps"], {})
 
     def test_unreadable_or_invalid_tool_policy_is_not_cached_authority(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "policy.json"
-            path.write_text(json.dumps({"version": 1, "apps": {"demo": _app()}}))
+            publish_fixture(path, {"apps": {"demo": _app()}})
             store = gateway.PolicyStore(str(path))
             store.get()
             with patch("builtins.open", side_effect=PermissionError), self.assertRaises(OSError):
@@ -161,10 +171,14 @@ class GatewayHttpBoundaryTests(unittest.TestCase):
             path = Path(tmp) / "policy.json"
             app = _app(rename={"enabled": True, "core": True})
             app["token_sha256"] = hashlib.sha256(b"test-token").hexdigest()
-            path.write_text(json.dumps({"version": 1, "apps": {"demo": app}}))
+            publish_fixture(path, {"apps": {"demo": app}})
+            authority = Authority(path.parent / "authority")
+            authority.grant_subject("operator", operator=True)
+            token = authority.credential("operator", "demo")
             connector = FakeConnector(["search", "details", "rename"])
             with (
                 patch.object(gateway, "POLICY", gateway.PolicyStore(str(path))),
+                patch.object(gateway, "AUTHORITY", authority),
                 patch.object(gateway, "CALL_LOG", str(Path(tmp) / "calls.jsonl")),
                 patch.object(gateway.CONNECTORS, "get", return_value=connector),
             ):
@@ -184,7 +198,7 @@ class GatewayHttpBoundaryTests(unittest.TestCase):
                         request = Request(
                             url,
                             data=json.dumps(payload).encode(),
-                            headers={"Authorization": "Bearer test-token", "Content-Type": "application/json"},
+                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                         )
                         with urlopen(request, timeout=5) as response:
                             return json.loads(response.read())["result"]
@@ -207,10 +221,12 @@ class GatewayHttpBoundaryTests(unittest.TestCase):
 
 
 class GatewayDeploymentTests(unittest.TestCase):
-    def test_published_policy_disables_writes_even_for_a_legacy_gateway(self):
+    def test_policy_disables_writes_without_a_verified_input_schema(self):
         with tempfile.TemporaryDirectory() as tmp:
             review = mcp_gateway.load_review("demo", _review(tmp).name, Path(tmp))
-            server = type("Server", (), {"id": "demo", "service_id": "demo", "endpoint": "http://demo/mcp"})()
+            server = type(
+                "Server", (), {"id": "demo", "service_id": "demo", "endpoint": "http://demo/mcp", "revision": "test-1"}
+            )()
             states = {"categories": {"search": True, "trash": True}, "tools": dict.fromkeys(review.tools, True)}
             with (
                 patch.object(mcp_gateway, "review_for", return_value=review),

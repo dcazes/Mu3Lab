@@ -18,6 +18,14 @@ import { DashboardProvider, useDashboard, useDashboardLoader } from './state/das
 const CalendarPage = lazy(() => import('./features/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })));
 const SettingsPage = lazy(() => import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 
+const ToolApprovalPage = lazy(() =>
+  import('./features/approvals/ToolApprovalPage').then((m) => ({ default: m.ToolApprovalPage })),
+);
+
+const ToolApprovalsPage = lazy(() =>
+  import('./features/approvals/ToolApprovalPage').then((m) => ({ default: m.ToolApprovalsPage })),
+);
+
 export function Routes() {
   const path = usePath();
   const { data } = useDashboard();
@@ -26,6 +34,9 @@ export function Routes() {
   const app = path.match(/^\/apps\/([^/]+)(?:\/([^/]+))?$/);
   if (app && data.services.services.some((service) => service.id === app[1]))
     return <AppDetailPage id={app[1]} tab={app[2] || 'overview'} />;
+  if (path === '/tool-approvals') return <ToolApprovalsPage />;
+  const approval = path.match(/^\/tool-approvals\/([0-9a-f]{32})$/);
+  if (approval) return <ToolApprovalPage id={approval[1]} />;
   if (path === '/chat') return <ChatPage />;
   if (path === '/calendar') return <CalendarPage />;
   const settings = path.match(/^\/settings\/([^/]+)$/);

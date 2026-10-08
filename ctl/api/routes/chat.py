@@ -46,14 +46,14 @@ def chat_status(operator: Member) -> models.ChatStatus:
     uid = str(operator.get("subject_id") or "")
     return models.ChatStatus.model_validate(
         {
-            "assistants": assistant_report(uid),
+            "assistants": assistant_report(uid, operator=operator["is_admin"]),
             "connected": bool(chat_connections.records().get(uid, {}).get("key")),
             "ok": True,
             "ready": ready,
             "url": provider["url"],
             "authentication": provider["authentication"],
             "providers": [provider],
-            "mcp_enabled_count": sum(1 for item in mcp["servers"] if item["enabled"]),
+            "mcp_enabled_count": sum(1 for item in mcp["servers"] if item["enabled"]) if operator["is_admin"] else 0,
             "detail": provider["detail"],
         }
     )

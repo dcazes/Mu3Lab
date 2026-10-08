@@ -170,6 +170,7 @@ class AgentSyncTests(unittest.TestCase):
             patch.object(lobehub_ops.chat_connections, "records", return_value={"owner": {"key": "sk-lh-working"}}),
             patch.object(lobehub_ops.chat_connections, "save") as save,
             patch.object(lobehub_ops, "desired_assistants", return_value=[]),
+            patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
             patch.object(lobehub_ops, "LobeHub", Client),
@@ -206,6 +207,7 @@ class AgentSyncTests(unittest.TestCase):
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
             patch.object(lobehub_ops.chat_connections, "save") as save,
             patch.object(lobehub_ops, "desired_assistants", return_value=[]),
+            patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
             patch.object(lobehub_ops, "LobeHub", Client),
@@ -253,8 +255,10 @@ class AgentSyncTests(unittest.TestCase):
             patch.object(lobehub_ops, "load_registry"),
             patch.object(lobehub_ops, "load", return_value=Mock(apps=apps)),
         ):
-            report = {item["id"]: item["status"] for item in lobehub_ops.assistant_report("me")}
-            stranger = {item["id"]: item["status"] for item in lobehub_ops.assistant_report("someone-else")}
+            report = {item["id"]: item["status"] for item in lobehub_ops.assistant_report("me", operator=True)}
+            stranger = {
+                item["id"]: item["status"] for item in lobehub_ops.assistant_report("someone-else", operator=True)
+            }
         self.assertEqual(
             report, {"unreviewed": "needs_review", "down": "connector_down", "ready": "ready", "waiting": "pending"}
         )

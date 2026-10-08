@@ -688,7 +688,7 @@ class ChatProvider(ApiModel):
 class ChatAssistant(ApiModel):
     id: str
     name: str
-    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review"]
+    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"]
     detail: str
 
 
@@ -1110,3 +1110,38 @@ class PersonInvite(ApiModel):
 
 
 PersonResponse.model_rebuild()
+
+
+class ApprovalOperation(ApiModel):
+    id: str
+    subject: str
+    provider: str
+    credential_version: int
+    app: str
+    server: str
+    tool: str
+    connector_revision: str
+    policy_revision: int
+    state: Literal[
+        "pending", "approved", "dispatching", "succeeded", "failed", "outcome_unknown", "rejected", "revoked", "expired"
+    ]
+    created_at: float
+    expires_at: float
+    dispatch_at: float
+    completed_at: float
+    arguments: dict[str, JsonValue] | None = None
+
+
+class ApprovalResponse(ApiModel):
+    ok: bool
+    operation: ApprovalOperation
+    execution: dict[str, JsonValue] | None = None
+
+
+class ApprovalsResponse(ApiModel):
+    ok: bool
+    operations: list[ApprovalOperation]
+
+
+class ApprovalDecisionRequest(RequestModel):
+    decision: Literal["approve", "reject"]
