@@ -141,7 +141,7 @@ class FakeConnector:
     def list_tools(self):
         return self.tools
 
-    def request(self, method, params):
+    def request(self, method, params, *, retry_safe=False):
         self.calls.append((method, params))
         return {"content": [{"type": "text", "text": "done"}]}
 
@@ -179,9 +179,9 @@ class GatewayTests(unittest.TestCase):
         names = [tool["name"] for tool in gateway.list_tools("demo", _app())]
         self.assertEqual(names, ["search", "find_tools", "use_tool"])
 
-    def test_change_tool_appears_only_while_a_changing_tool_is_on(self):
+    def test_change_tool_stays_hidden_even_while_a_changing_tool_is_on(self):
         app = _app(rename={"enabled": True})
-        self.assertIn("change_with_tool", [tool["name"] for tool in gateway.list_tools("demo", app)])
+        self.assertNotIn("change_with_tool", [tool["name"] for tool in gateway.list_tools("demo", app)])
 
     def test_overview_lists_switched_off_categories_with_the_switch_to_flip(self):
         overview = gateway.find_tools("demo", _app(), {})["categories"]

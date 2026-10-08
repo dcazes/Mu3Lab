@@ -90,7 +90,7 @@ Mu3Lab installs **Vaultwarden**, a self-hosted server that works with the Bitwar
 <td valign="top">
 
 ### 🤖 A chat assistant that uses your apps
-LobeChat comes with **one assistant per installed app**. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **anything that changes data asks you first**.
+LobeChat comes with **one assistant per installed app**. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **chat writes are unavailable until the gateway can verify approval for each call**.
 
 </td>
 </tr>
@@ -131,7 +131,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | Remote access | Private Tailscale HTTPS for every app, built in | Port forwarding or a reverse proxy you configure |
 | Sign-in | One account across apps, wired up automatically | A separate login for each app |
 | Passwords | Vault created and filled with every app login | Up to you |
-| AI assistant | A chat assistant per app that can read and act, with approval for changes | None, or a separate project |
+| AI assistant | A chat assistant per app for reads; chat writes currently unavailable | None, or a separate project |
 | AI models | Free cloud providers plus local models, with automatic failover | Bring your own |
 | App catalog | Curated and reviewed, pinned to digests, one integration contract per app | Large, community-submitted |
 | Health | "Ready" means health, route and sign-in all verified | "Running" means the container started |
@@ -230,7 +230,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 
 - **No public exposure.** Apps are reachable only from devices on your Tailscale network. Reusable Tailscale auth keys are never accepted.
 - **Forged identities are ignored.** The control plane trusts Authentik identity headers only when they arrive with a shared proxy token, and every change needs a same-origin request and a CSRF token bound to your session.
-- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and write tools need your approval each time.
+- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and the gateway currently blocks all chat writes.
 - **Pinned supply chain.** Every image is pinned to an immutable digest. Apps move only to versions the maintainer has tested and approved, and only when you choose to update, with a backup first. See [App updates](docs/app-updates.md).
 - **Data outside Git.** Everything lives under `/srv/mu3lab`. The repository holds definitions and safe defaults, never app data, backups or unencrypted secrets.
 
@@ -280,7 +280,7 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 - [x] One-command, resumable installer with a guided Tailscale step
 - [x] Authentik SSO wired into every app, plus a pre-filled Vaultwarden vault
 - [x] AI slice: LobeChat, LiteLLM, FreeLLMAPI and Ollama, with GPU detection
-- [x] Per-app chat assistants through reviewed MCP connectors with write approval
+- [x] Per-app chat assistants through reviewed MCP connectors (reads; chat writes disabled)
 - [x] Parallel image downloads with size estimates before install
 - [x] Encrypted local backups of catalog apps, with guided restore
 - [x] One-click updates to tested versions, with a backup first and automatic rollback

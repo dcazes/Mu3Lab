@@ -46,23 +46,56 @@ class PolicyStore:
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.Lock()
-        self._mtime = -1.0
+        self._digest = ""
         self._policy: dict = {"apps": {}}
 
     def get(self) -> dict:
-        try:
-            mtime = os.stat(self.path).st_mtime
-        except OSError:
-            return self._policy
+        # Read every time: mtime cannot establish that a revocation was published,
+        # and a cached grant is never authority after a missing/unreadable file.
         with self._lock:
-            if mtime != self._mtime:
+            try:
                 with open(self.path, encoding="utf-8") as handle:
-                    policy = json.load(handle)
-                if not isinstance(policy, dict) or not isinstance(policy.get("apps"), dict):
-                    raise ValueError("gateway policy is malformed")
-                self._policy, self._mtime = policy, mtime
+                    payload = handle.read(MAX_UPSTREAM + 1)
+                if len(payload) > MAX_UPSTREAM:
+                    raise ValueError("gateway policy is too large")
+                policy = json.loads(payload)
+                _validate_policy(policy)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                self._policy, self._digest = {"apps": {}}, ""
+                CONNECTORS.forget()
+                if isinstance(exc, (TypeError, KeyError)):
+                    raise ValueError("gateway policy is malformed") from None
+                raise
+            digest = hashlib.sha256(payload.encode()).hexdigest()
+            if digest != self._digest:
+                self._policy, self._digest = policy, digest
                 CONNECTORS.forget()
             return self._policy
+
+
+def _validate_policy(policy: object) -> None:
+    """Validate the authorization fields before any app entry can be used."""
+    if not isinstance(policy, dict) or policy.get("version") != 1 or not isinstance(policy.get("apps"), dict):
+        raise ValueError("gateway policy is malformed")
+    for app in policy["apps"].values():
+        if not isinstance(app, dict):
+            raise ValueError("gateway app is malformed")
+        if not isinstance(app.get("upstream"), dict) or not isinstance(app["upstream"].get("url"), str):
+            raise ValueError("gateway upstream is malformed")
+        if not isinstance(app.get("tools"), dict) or not isinstance(app.get("categories"), list):
+            raise ValueError("gateway tools are malformed")
+        categories = {}
+        for category in app["categories"]:
+            if not isinstance(category, dict) or not isinstance(category.get("id"), str):
+                raise ValueError("gateway category is malformed")
+            if type(category.get("enabled")) is not bool or category["id"] in categories:
+                raise ValueError("gateway category switch is malformed")
+            categories[category["id"]] = category
+        for name, tool in app["tools"].items():
+            if not isinstance(tool, dict) or tool.get("name") != name or tool.get("category") not in categories:
+                raise ValueError("gateway tool is malformed")
+            if tool.get("access") not in ("read", "write") or type(tool.get("enabled")) is not bool:
+                raise ValueError("gateway tool permission is malformed")
 
 
 POLICY = PolicyStore(POLICY_PATH)
@@ -132,29 +165,33 @@ class Connector:
         self.session = session
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"}, expect_reply=False)
 
-    def request(self, method: str, params: dict) -> dict:
+    def request(self, method: str, params: dict, *, retry_safe: bool = False) -> dict:
+        """Retry only operations whose caller explicitly declares safe to repeat."""
         with self._lock:
             for attempt in (1, 2):
+                dispatched = False
                 try:
-                    if not self.session and attempt == 1:
+                    if not self.session:
                         self._initialize()
                     self._next_id += 1
+                    dispatched = True
                     reply, _ = self._post({"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params})
                     if reply.get("error"):
                         message = str((reply["error"] or {}).get("message", "error"))[:300]
                         raise GatewayError(f"The connector refused the request: {message}")
                     result = reply.get("result")
                     return result if isinstance(result, dict) else {}
-                except HTTPError as exc:
-                    # A restarted connector forgets our session; start a new one once.
-                    if attempt == 1 and exc.code in {400, 404}:
-                        self._initialize()
+                except (HTTPError, URLError, OSError) as exc:
+                    self.session = ""
+                    if dispatched and not retry_safe:
+                        raise GatewayError(
+                            "The connector call's outcome is unknown. It was not retried; check the app before trying again."
+                        ) from None
+                    recoverable = not isinstance(exc, HTTPError) or exc.code in {400, 404}
+                    if attempt == 1 and recoverable:
                         continue
-                    raise GatewayError(f"The connector answered HTTP {exc.code}.") from None
-                except (URLError, OSError):
-                    if attempt == 1:
-                        self.session = ""
-                        continue
+                    if isinstance(exc, HTTPError):
+                        raise GatewayError(f"The connector answered HTTP {exc.code}.") from None
                     raise GatewayError("The connector is not reachable right now.") from None
             raise GatewayError("The connector is not reachable right now.")
 
@@ -164,7 +201,7 @@ class Connector:
         tools: dict[str, dict] = {}
         cursor = None
         for _page in range(20):
-            result = self.request("tools/list", {"cursor": cursor} if cursor else {})
+            result = self.request("tools/list", {"cursor": cursor} if cursor else {}, retry_safe=True)
             for tool in result.get("tools") or []:
                 if isinstance(tool, dict) and tool.get("name"):
                     tools[str(tool["name"])] = tool
@@ -229,7 +266,7 @@ def _check_enabled(app: dict, name: str, tool: dict) -> None:
 
 
 def _enabled(app: dict, tool: dict) -> bool:
-    return bool(tool["enabled"] and _categories(app)[tool["category"]]["enabled"])
+    return bool(tool["access"] == "read" and tool["enabled"] and _categories(app)[tool["category"]]["enabled"])
 
 
 def _describe(upstream: dict | None) -> str:
@@ -273,17 +310,6 @@ def _meta_tools(app: dict) -> list[dict]:
             },
         },
     ]
-    if any(tool["access"] == "write" and _enabled(app, tool) for tool in app["tools"].values()):
-        tools.append(
-            {
-                "name": CHANGE,
-                "description": (
-                    f"Run a {app['name']} tool that changes data, by the name {FIND} returned. "
-                    "The owner is asked to approve every call; say what will change before calling."
-                ),
-                "inputSchema": tools[1]["inputSchema"],
-            }
-        )
     return tools
 
 
@@ -345,12 +371,14 @@ def find_tools(app_id: str, app: dict, arguments: dict) -> dict:
             "what": _describe(upstream.get(tool["name"])),
             "changes_data": tool["access"] == "write",
             "state": "on" if on else "off",
-            "run_with": (CHANGE if tool["access"] == "write" else USE) if on else None,
+            "run_with": USE if on else None,
         }
         if on:
             entry["inputs"] = upstream[tool["name"]].get("inputSchema") or {"type": "object", "properties": {}}
         elif tool["name"] not in upstream:
             entry["note"] = "The connector does not offer this tool right now."
+        elif tool["access"] == "write":
+            entry["note"] = "Chat writes are unavailable until Mu3Lab can verify approval for each call."
         else:
             entry["note"] = _switch_hint(app)
         listed.append(entry)
@@ -362,14 +390,18 @@ def find_tools(app_id: str, app: dict, arguments: dict) -> dict:
 def call_tool(app_id: str, app: dict, name: str, arguments: dict, *, via: str) -> dict:
     tool = _reviewed(app, name)
     if via == USE and tool["access"] != "read":
-        raise GatewayError(f"'{name}' changes data; run it with {CHANGE} so the owner can approve it.")
+        raise GatewayError(f"'{name}' changes data; chat writes are unavailable until approval can be verified.")
     if via == CHANGE and tool["access"] != "write":
         raise GatewayError(f"'{name}' only reads data; run it with {USE}.")
     _check_enabled(app, name, tool)
+    if tool["access"] == "write":
+        raise GatewayError("Chat writes are unavailable until Mu3Lab can verify approval for each call.")
     connector = CONNECTORS.get(app_id, app)
     if name not in connector.list_tools():
         raise GatewayError(f"The connector does not offer '{name}' right now.")
-    result = connector.request("tools/call", {"name": name, "arguments": arguments})
+    result = connector.request(
+        "tools/call", {"name": name, "arguments": arguments}, retry_safe=tool["access"] == "read"
+    )
     return _bounded(result)
 
 

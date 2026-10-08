@@ -18,12 +18,13 @@ from pathlib import Path
 from typing import Any
 
 from ctl import actions, job_guard, platform_releases
+from ctl.bootstrap import stamps
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import Review
 from ctl.mcp_review import load as load_review
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import locked
+from ctl.secret_file import locked, write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl.store.secrets import SecretStore
 
@@ -83,12 +84,15 @@ def tool_states(server, review: Review, activity: McpActivity | None = None) -> 
 def instructions(app_name: str, review: Review, states: dict[str, Any]) -> str:
     """The category map every app assistant carries, including what is switched off."""
     hint = f"Mu3Lab: Settings, Chat integrations, {app_name}"
+    states = states | {
+        "tools": {name: tool.access == "read" and states["tools"][name] for name, tool in review.tools.items()}
+    }
     lines = [
         f"You are the {app_name} assistant in Mu3Lab. You work only with {app_name}.",
         "",
         "The tools you can see directly are only the most common ones. Call find_tools to see more: with no",
         "arguments it lists every category below, and with a category it lists that category's tools and inputs.",
-        "Run a reading tool with use_tool and a changing tool with change_with_tool.",
+        "Run a reading tool with use_tool. Chat writes are currently unavailable.",
         "",
         f"{app_name} tool categories:",
     ]
@@ -109,7 +113,7 @@ def instructions(app_name: str, review: Review, states: dict[str, Any]) -> str:
         "Rules:",
         "- Before saying something cannot be done, call find_tools to check.",
         f"- If the tool needed is switched off, say which category or tool the owner can switch on in {hint}.",
-        "- Tools that change data ask the owner to approve each call. Say exactly what will change first.",
+        "- Chat writes stay unavailable until Mu3Lab can verify human approval for each call. A tool switch cannot enable them.",
         "- Use ids from earlier results; never guess them.",
     ]
     if review.guidance:
@@ -148,7 +152,8 @@ def app_policy(server, app_name: str) -> dict[str, Any]:
                 "category": tool.category,
                 "access": tool.access,
                 "core": tool.core,
-                "enabled": states["tools"][name],
+                # Contain writes even while an older gateway image is being replaced.
+                "enabled": tool.access == "read" and states["tools"][name],
             }
             for name, tool in review.tools.items()
         },
@@ -178,13 +183,11 @@ def build_policy() -> dict[str, Any]:
 
 def write_policy(policy: dict[str, Any] | None = None) -> dict[str, Any]:
     job_guard.checkpoint()
-    policy = build_policy() if policy is None else policy
     directory = project() / "policy"
     directory.mkdir(mode=0o750, parents=True, exist_ok=True)
-    temporary = directory / ".policy.json.tmp"
-    temporary.write_text(json.dumps(policy, indent=1, sort_keys=True), encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    os.replace(temporary, directory / "policy.json")
+    with locked(directory / "policy.lock"):
+        policy = build_policy() if policy is None else policy
+        write_atomic(directory / "policy.json", json.dumps(policy, indent=1, sort_keys=True).encode())
     return policy
 
 
@@ -219,6 +222,34 @@ def healthy() -> bool:
         return False
 
 
+def _build_gateway(target: Path, log) -> tuple[int, str]:
+    """Development refreshes must not silently reuse an image with older gateway code."""
+    if platform_releases.exact_tag(ROOT):
+        return 0, ""  # _materialize selected the release's verified immutable image.
+    with locked(target / ".build.lock"):
+        digest = stamps.digest(target, [target / "Dockerfile", target / "gateway.py"])
+        stamp = target / ".build.sha256"
+        if stamps.read(stamp) == digest:
+            return 0, ""
+        rc, output = actions.docker_cmd(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(target / "docker-compose.yml"),
+                "--project-directory",
+                str(target),
+                "build",
+                "mcp-gateway",
+            ],
+            log,
+            timeout=300,
+        )
+        if rc == 0:
+            stamps.write(stamp, digest)
+        return rc, output
+
+
 def refresh(log) -> tuple[bool, str]:
     """Write the current policy and make sure the gateway is running it."""
     job_guard.checkpoint()
@@ -227,6 +258,9 @@ def refresh(log) -> tuple[bool, str]:
     except (OSError, ValueError) as exc:
         return False, f"Tool gateway policy could not be written: {exc}"
     target = _materialize()
+    rc, output = _build_gateway(target, log)
+    if rc:
+        return False, "Tool gateway could not build the current code: " + output[-400:]
     _ensure_network(log)
     rc, output = actions.compose_up(target, log, wait_timeout=120)
     if rc:

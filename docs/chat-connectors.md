@@ -13,8 +13,9 @@ How Mu3Lab gives each app's chat assistant a small, reliable set of tools.
   The main assistant has no app tools; it delegates to app assistants.
 - **Every tool is reviewed.** Mu3Lab decides what each tool does (reads or changes data), which
   category it belongs to, and whether it starts on. New, unreviewed tools stay unreachable.
-- **Changes ask first.** Tools that change data start switched off, and when switched on,
-  LobeChat asks the owner before each call.
+- **Writes fail closed.** Chat tools that change data are unavailable until the gateway can verify
+  human approval for every call. Saved switches cannot bypass this restriction. The dashboard's
+  operator test console has its own confirmation path; it does not establish chat approval.
 
 ## Architecture
 
@@ -31,14 +32,15 @@ token, so an assistant's credential reaches only its app. For each app the assis
 
 | Tool | Purpose | Approval |
 |---|---|---|
-| Up to 6 **everyday tools** | The app's most common requests, passed straight through | Reads: none. Changes: every call |
+| Up to 6 **everyday tools** | The app's most common requests, passed straight through | Reads: none. Writes are not listed |
 | `find_tools` | Lists every category (on and off) or the tools in one category, with inputs | None |
 | `use_tool` | Runs a switched-on tool that only reads | None |
-| `change_with_tool` | Runs a switched-on tool that changes data; listed only while one is on | Every call |
+| `change_with_tool` | Currently not listed; calls are rejected even if the saved write switch is on | Unavailable |
 
 The gateway enforces the owner's switches and the reviewed read/change split on every call; the
 model cannot reach a switched-off tool, an unreviewed tool, or a changing tool through
-`use_tool`. It also returns the category map as the MCP `instructions`, and Mu3Lab writes the
+`use_tool`. Direct and wrapped writes are rejected before connector dispatch. Write discovery
+shows them as off with an approval-unavailable explanation. It also returns the category map as the MCP `instructions`, and Mu3Lab writes the
 same map into the assistant's instructions.
 
 This follows the pattern of Docker's MCP Gateway and IBM ContextForge (a policy gateway in front

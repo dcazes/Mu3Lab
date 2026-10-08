@@ -46,7 +46,7 @@ function ToolRow({
         <b>
           {toolLabel(tool.id)}
           {tool.core && <Badge tone="blue">Everyday</Badge>}
-          {changes && <Badge tone="amber">Asks you first</Badge>}
+          {changes && <Badge tone="amber">Unavailable in chat</Badge>}
           {tool.offered === false && <Badge>Not offered by this version</Badge>}
         </b>
         {tool.title && <small>{tool.title}</small>}
@@ -56,8 +56,8 @@ function ToolRow({
         <input
           type="checkbox"
           role="switch"
-          checked={tool.enabled}
-          disabled={readOnly || !categoryOn || pending === tool.id || tool.offered === false}
+          checked={!changes && tool.enabled}
+          disabled={changes || readOnly || !categoryOn || pending === tool.id || tool.offered === false}
           onChange={(event) => void toggle(event.target.checked)}
         />
       </label>
@@ -80,7 +80,7 @@ function Category({
 }) {
   const [open, setOpen] = useState(false);
   const { pending, run } = useAction();
-  const on = tools.filter((tool) => tool.enabled).length;
+  const on = tools.filter((tool) => tool.risk !== 'write' && tool.enabled).length;
   const toggle = async (enabled: boolean) => {
     const saved = await run(
       'category',
@@ -151,8 +151,8 @@ export function ToolCategories({
     <div className="stack">
       <p className="muted">
         Chat always sees the everyday tools and can look up the rest from categories that are on. It knows about
-        categories that are off and tells you when one is needed. Tools that change data start off and ask you before
-        every use.
+        categories that are off and tells you when one is needed. Chat writes are unavailable until approval can be
+        verified for every call. Saved write permissions do not enable chat writes.
       </p>
       <div className="tool-categories">
         {categories.map((category) => (
