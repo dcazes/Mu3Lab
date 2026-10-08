@@ -232,7 +232,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
-        self.assertIn("X-Mu3Lab-Proxy-Token", caddyfile)
+        self.assertNotIn("header_up X-Mu3Lab-Proxy-Token", caddyfile)
 
     def test_ingress_health_uses_dedicated_caddy_endpoint(self):
         self.assertTrue(load().get("ingress").health["url"].endswith("/__mu3lab_caddy_health"))

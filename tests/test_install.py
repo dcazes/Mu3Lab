@@ -306,6 +306,9 @@ class CaddyFixTests(unittest.TestCase):
         projdir = root / "apps" / "ingress"
         projdir.mkdir(parents=True)
         (projdir / "docker-compose.yml").touch()
+        source = Path(__file__).resolve().parents[1] / "apps/ingress"
+        for name in ("Caddyfile", "Caddyfile.authenticated"):
+            (projdir / name).write_text((source / name).read_text())
         from ctl.secrets import ensure_platform_tokens
 
         ensure_platform_tokens(token_factory=lambda: "test-only-token")
@@ -563,7 +566,7 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertLess(ids.index("tailscale_join"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("vaultwarden_serve"), ids.index("authentik"))
         self.assertLess(ids.index("authentik_setup"), ids.index("dashboard_protection"))
-        self.assertLess(ids.index("serve"), ids.index("dashboard_protection"))
+        self.assertLess(ids.index("dashboard_protection"), ids.index("serve"))
 
     def test_pkg_verify_tolerates_unjoined(self):
         # Installing must not flunk itself on the NEXT step's job.
