@@ -6,7 +6,7 @@ Baseline: **`ca299152c3a08a1ee0c7d4695e9e8938f4a880e8`**, branch `main`
 
 Scope: concept, architecture, security boundaries, implementation, operational recovery, dashboard, tests, release process, and existing expansion plans.
 
-Deliverable status: **review completed; implementation tasks remain open**. No application fixes, installations, migrations, or production operations were performed for this review.
+Deliverable status: **review completed; priority security implementation started on 2026-10-08**. Progress and acceptance limits are recorded in [the implementation record](2026-10-08-priority-security-implementation.md). No application fixes, installations, migrations, or production operations were performed for this review.
 
 ## Navigation
 
@@ -164,15 +164,15 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 **Priority:** P0 = security boundary/release blocker; P1 = data safety, authorization, recovery, or major correctness; P2 = maintainability, performance, accessibility, or operational hardening.
 **Evidence:** R = isolated reproduction; S = direct source observation; D = design/verification gap.
 **Effort:** S ≈ 0.5–2 engineering days; M ≈ 3–5; L ≈ 1–2 weeks; XL = split into smaller milestones. These are planning ranges, not commitments; upstream/VM work can dominate.
-**Status:** `open` → `in progress` → `implemented` → `verified`; alternatively `blocked` or `accepted risk`. Only mark verified when the item-specific acceptance criteria pass. No row below is a completed fix.
+**Status:** `open` → `in progress` → `implemented` → `verified`; alternatively `blocked` or `accepted risk`. Only mark verified when the item-specific acceptance criteria pass. Implementation progress is tracked below; no finding is yet marked release-verified.
 
 | ID | Finding / outcome to deliver | Priority | Evidence | Effort | Dependencies | Status |
 |---|---|---|---|---|---|---|
-| [R01](#r01) | Close bootstrap identity-header trust gap | P0 | R/S | S | — | open |
-| [R02](#r02) | Enforce per-call approval on every chat write path | P0 | R/S | L | R03 | open |
+| [R01](#r01) | Close bootstrap identity-header trust gap | P0 | R/S | S | — | implemented |
+| [R02](#r02) | Enforce per-call approval on every chat write path | P0 | R/S | L | R03 | in progress |
 | [R03](#r03) | Bind chat tools to people and explicit data scope | P1 | S | L | — | open |
-| [R04](#r04) | Stop retrying ambiguous non-idempotent tool writes | P1 | R | S | — | open |
-| [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | open |
+| [R04](#r04) | Stop retrying ambiguous non-idempotent tool writes | P1 | R | S | — | implemented |
+| [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | in progress |
 | [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | open |
 | [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | open |
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | open |
@@ -200,7 +200,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R30](#r30) | Unify local/CI verification and strengthen release provenance | P2 | S | M | R25, R29 | open |
 | [R31](#r31) | Expose and enforce inference/data-destination policy | P1 | S/D | L | R03, R16 | open |
 | [R32](#r32) | Measure footprint and simplify first-use/recovery journeys | P2 | D | M | R14, R20, R31 | open |
-| [R33](#r33) | Reconcile documentation, promises, and expansion status | P1 | S | S | Immediate caveats; final wording follows fixes | open |
+| [R33](#r33) | Reconcile documentation, promises, and expansion status | P1 | S | S | Immediate caveats; final wording follows fixes | in progress |
 | [R34](#r34) | Establish per-integration ownership and acceptance evidence | P2 | D | L | R25, R29 | open |
 | [R35](#r35) | Make subprocess output, deadlines, and cleanup truly bounded | P1 | S | M | — | open |
 
@@ -211,6 +211,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r01"></a>
 
 ### R01 — Bootstrap Caddy can turn caller identity headers into trusted headers
+
+**Implementation progress (2026-10-08):** Bootstrap lockdown, ordered identity stripping, gate-before-publication, legacy-runtime replacement and restart stamping are implemented. Real pinned-Caddy/real-API tests pass with a mock identity provider. Fresh-VM interrupted setup/upgrade and real sign-in acceptance remain pending; this finding is implemented, not release-verified. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
 
 **Evidence:** [starter Caddyfile](../../apps/ingress/Caddyfile), [installer](../../ctl/install.py) `fix_caddy`, `STEPS`, and [API security](../../ctl/api/security.py) `trusted_proxy`, `resolve_identity`, `csrf_token`. The starter proxy adds `X-Mu3Lab-Proxy-Token` but has no forward-auth gate and does not remove incoming `X-Authentik-*`. `serve` publishes the dashboard before `dashboard_protection`. E07 reproduces API acceptance of that proxy-equivalent header set, including issuance of usable CSRF material.
 
@@ -230,6 +232,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r02"></a>
 
 ### R02 — Chat write approval is not enforced by the gateway
+
+**Implementation progress (2026-10-08):** Immediate containment is implemented: all gateway writes are denied, including direct and wrapped calls with enabled saved switches; generated policy also denies writes for legacy images. Discovery, instructions and chat controls reflect this. Full subject-bound durable approval and pinned-client acceptance remain pending on R03, so the finding remains in progress. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
 
 **Evidence:** [gateway](../../platform/tool-gateway/gateway.py) `handle_call`/`call_tool` execute an enabled write; [gateway policy](../../ctl/mcp_gateway.py) converts `needs_approval` into an enabled boolean; [LobeHub adapter](../../ctl/integrations/lobehub.py) `_upsert_assistant` does not configure a verified per-call approval contract. E01 invokes both wrapped and direct write tools without any approval token. [MCP console](../../ctl/mcp_console.py) has nonce checks, but is a separate path.
 
@@ -273,6 +277,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R04 — Ambiguous transport failure automatically retries writes
 
+**Implementation progress (2026-10-08):** Explicit retry semantics and initialization on every fresh session are implemented. Unsafe calls receive one dispatch and unknown-outcome guidance after transport loss; safe reads/discovery have at most one retry. Transport regression tests pass. A real commit-then-disconnect connector and durable reconciliation remain acceptance/follow-up work. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
+
 **Evidence:** gateway `Connector.request` retries `URLError`/`OSError` for any method. E02 simulates a lost reply after the first write and observes two submissions. The second transport attempt also skips `_initialize` because initialization is conditioned on `attempt == 1`.
 
 **Implementation:**
@@ -288,6 +294,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r05"></a>
 
 ### R05 — Missing gateway policy preserves previously granted access
+
+**Implementation progress (2026-10-08):** Missing/unreadable/invalid policy now clears cached authority; same-timestamp changes are detected by content hash. Snapshot construction and unique private atomic publication are serialized. Monotonic revisions, revision diagnostics, token-rotation/replay coverage and failed-publication revocation acknowledgment remain open. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
 
 **Evidence:** gateway `PolicyStore.get` returns cached policy when `os.stat` fails. E03 deletes a loaded policy file and still sees the enabled app. Changes are detected using only floating-point modification time.
 
@@ -637,6 +645,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R33 — Documentation overstates or mislocates some implemented guarantees
 
+**Implementation progress (2026-10-08):** README, chat connector documentation, assistant instructions and the chat tool controls now disclose that chat writes are unavailable. Broader SSO, recovery, inference, expansion-status and release promises still require reconciliation; this finding remains in progress. Owner: Codex. Started: 2026-10-08. Verified on: pending item-specific release acceptance. Evidence, commits and remaining limitations: [implementation record](2026-10-08-priority-security-implementation.md).
+
 **Evidence:** README statements about per-write approval, universally verified ready state and resumable jobs exceed the code above. Its filesystem tree lists old `secrets/` and `runtime/` paths and labels backups planned while the roadmap says implemented. Expansion README's allowed tracker statuses and actual status rows differ; intentional partial implementations exist (e.g. optional Open WebUI rather than selected household provider). Existing Kopia notes assume some rollback guarantees that R11–R15 show need strengthening.
 
 **Implementation:** add an immediate known-limitations/release-readiness section tied to R-IDs; fix the runtime tree from `RuntimePaths`; distinguish implemented/tested/VM-verified/device-verified/release-verified. Keep dated evidence attached to every completed expansion task. Cross-link this tracker to the expansion tasks rather than cloning their requirements. Amend the backup and chat specifications to distinguish observed existing behavior from intended guarantees. Generate catalog tables and port/platform inventories from manifests to reduce drift. Archive superseded handoff claims while preserving decisions/history.
@@ -689,15 +699,17 @@ Unimplemented expansion entries (HomeBox, n8n, ComfyUI, Mosquitto/Home Assistant
 
 ## 11. Delivery sequence and reviewable work packages
 
-This is a proposed order for the review findings. It does not mark earlier expansion phases merged or automatically authorize changing their recorded branch/approval process.
+The owner authorized implementation on 2026-10-08, starting with the highest-priority changes and a clean committed checkpoint. The first tranche follows this sequence on `fix/review-priority-a`; branch selection and checkpoint evidence are in [the implementation record](2026-10-08-priority-security-implementation.md). This tracker does not independently change other expansion decisions.
 
 ### Milestone A — Contain the demonstrated safety gaps
 
-- [ ] **A1:** R01 starter ingress lockdown and a real Caddy-to-API negative test.
-- [ ] **A2:** R02 immediate fail-closed gate for writes lacking verifiable approval; retain disabled/default-off behavior.
-- [ ] **A3:** R04 no ambiguous write retry; R05 missing-policy denial.
+- [x] **A1:** R01 starter ingress lockdown and a real Caddy-to-API negative test.
+- [x] **A2:** R02 immediate fail-closed gate for writes lacking verifiable approval; retain disabled/default-off behavior.
+- [x] **A3:** R04 no ambiguous write retry; R05 missing-policy denial.
 - [ ] **A4:** R08 scoped request identity and explicit busy/conflict responses.
 - [ ] **A5:** R20 truthful route readiness, plus immediate R33 caveats.
+
+A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). Full R02/R05 and VM/client acceptance remain open; these checked containment tasks do not mark Milestone A exited.
 
 These should be small, independently reviewable changes. Full per-person approvals follow; containment must not wait for a complete chat-provider refactor.
 
