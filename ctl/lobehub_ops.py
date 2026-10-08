@@ -10,6 +10,7 @@ from ctl.control_state import ControlState
 from ctl.integrations.lobehub import AssistantSyncError, ChatError, LobeHub
 from ctl.manifest.catalog import load
 from ctl.mcp_catalog import load as load_connectors
+from ctl.people import operator_subjects
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -25,7 +26,7 @@ def origin() -> str:
     return f"https://{host}:{route.https_port}"
 
 
-def desired_assistants() -> list[dict[str, Any]]:
+def desired_assistants(subject: str) -> list[dict[str, Any]]:
     state = ControlState.runtime()
     if state is None:
         return []
@@ -57,13 +58,13 @@ def desired_assistants() -> list[dict[str, Any]]:
                 "description": assistant.description,
                 "instructions": instructions,
                 "url": mcp_gateway.endpoint(app.id),
-                "token": mcp_gateway.app_token(app.id),
+                "token": mcp_gateway.operator_token(subject, app.id),
             }
         )
     return result
 
 
-def assistant_report(uid: str) -> list[dict[str, str]]:
+def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]]:
     """Why each installed app does or does not have an assistant in this person's chat."""
     state = ControlState.runtime()
     if state is None:
@@ -78,7 +79,12 @@ def assistant_report(uid: str) -> list[dict[str, str]]:
         reviewed = [connector for connector in connectors if connector.service_id == app.id and connector.gateway]
         runtimes = [state.mcp_server(connector.id) for connector in reviewed]
         live = any(runtime and runtime["enabled"] and runtime["state"] == "live" for runtime in runtimes)
-        if not reviewed:
+        if not operator:
+            status, detail = (
+                "operator_only",
+                "This connector uses shared service credentials and is available only to operators.",
+            )
+        elif not reviewed:
             status, detail = "needs_review", "Its connector's tools have not been reviewed for chat yet."
         elif not live:
             current = next((runtime["state"] for runtime in runtimes if runtime), "not started")
@@ -101,7 +107,10 @@ def sync_agents(log) -> tuple[bool, str]:
     if not any(record.get("key") for record in records.values()):
         return True, "Assistants will be prepared when each person connects chat."
     try:
-        desired = desired_assistants()
+        operators = operator_subjects()
+        authority = mcp_gateway.authority()
+        for uid in records:
+            authority.grant_subject(uid, operator=uid in operators)
         state = ControlState.runtime()
         if state is None:
             return True, "Chat synchronization waits for application state."
@@ -114,6 +123,8 @@ def sync_agents(log) -> tuple[bool, str]:
         }
         address = origin()
     except (ChatError, OSError, ValueError) as exc:
+        for uid in records:
+            mcp_gateway.authority().revoke_subject(uid)
         log(str(exc))
         return False, str(exc)
     failures = []
@@ -122,6 +133,7 @@ def sync_agents(log) -> tuple[bool, str]:
             continue
         # One person's revoked key or failed request must not stop everyone else's assistants.
         try:
+            desired = desired_assistants(uid) if uid in operators else []
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
             chat_connections.save(uid, {**record, "managed": managed, "error": ""}, paths)
@@ -129,6 +141,7 @@ def sync_agents(log) -> tuple[bool, str]:
             chat_connections.save(uid, {**record, "managed": exc.managed, "error": str(exc)}, paths)
             failures.append(str(exc))
         except (ChatError, OSError, ValueError) as exc:
+            authority.revoke_subject(uid)
             # Keep the reason with the person so the dashboard can show it, not just the worker log.
             chat_connections.save(uid, {**record, "error": str(exc)}, paths)
             failures.append(str(exc))

@@ -1,0 +1,8 @@
+# Root-context gateway builds send only the reviewed runtime sources.
+**
+!gateway_authority.py
+!platform/
+!platform/tool-gateway/
+!platform/tool-gateway/Dockerfile
+!platform/tool-gateway/gateway.py
+!platform/tool-gateway/requirements.txt

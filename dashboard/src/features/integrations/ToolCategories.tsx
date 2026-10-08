@@ -46,7 +46,7 @@ function ToolRow({
         <b>
           {toolLabel(tool.id)}
           {tool.core && <Badge tone="blue">Everyday</Badge>}
-          {changes && <Badge tone="amber">Asks you first</Badge>}
+          {changes && <Badge tone="amber">Requires approval</Badge>}
           {tool.offered === false && <Badge>Not offered by this version</Badge>}
         </b>
         {tool.title && <small>{tool.title}</small>}
@@ -151,8 +151,8 @@ export function ToolCategories({
     <div className="stack">
       <p className="muted">
         Chat always sees the everyday tools and can look up the rest from categories that are on. It knows about
-        categories that are off and tells you when one is needed. Tools that change data start off and ask you before
-        every use.
+        categories that are off and tells you when one is needed. These connectors use shared application data and are
+        operator-only. Each enabled write creates a request to review and approve in Mu3Lab before it runs.
       </p>
       <div className="tool-categories">
         {categories.map((category) => (

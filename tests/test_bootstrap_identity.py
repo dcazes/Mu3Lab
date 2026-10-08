@@ -88,7 +88,7 @@ class BootstrapIdentityTests(unittest.TestCase):
         self.assertLess(ids.index("vaultwarden_setup"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("tailscale_join"), ids.index("authentik_setup"))
         self.assertLess(ids.index("authentik_setup"), ids.index("dashboard_protection"))
-        self.assertLess(ids.index("serve"), ids.index("dashboard_protection"))
+        self.assertLess(ids.index("dashboard_protection"), ids.index("serve"))
 
     def test_dashboard_authentik_blueprint_is_declarative_and_secret_free(self):
         content = render_gate_blueprint(
@@ -134,3 +134,39 @@ class BootstrapIdentityTests(unittest.TestCase):
     def test_dashboard_blueprint_rejects_non_tailnet_hosts(self):
         with self.assertRaises(ValueError):
             render_gate_blueprint("127.0.0.1", 8446)
+
+    def test_bootstrap_dashboard_does_not_proxy_or_mint_trusted_identity(self):
+        root = Path(__file__).resolve().parents[1]
+        starter = (root / "apps/ingress/Caddyfile").read_text()
+        dashboard = starter.split(":19460 {", 1)[1].split(":19461 {", 1)[0]
+        self.assertNotIn("reverse_proxy", dashboard)
+        self.assertNotIn("header_up X-Mu3Lab-Proxy-Token", dashboard)
+        self.assertIn('respond "Mu3Lab setup is in progress." 503', dashboard)
+
+    def test_authenticated_dashboard_removes_inbound_identity_before_authentication(self):
+        root = Path(__file__).resolve().parents[1]
+        content = (root / "apps/ingress/Caddyfile.authenticated").read_text()
+        dashboard = content.split(":19460 {", 1)[1].split(":19461 {", 1)[0]
+        for header in ("X-Authentik-*", "X-Mu3Lab-Proxy-Token"):
+            self.assertLess(dashboard.index(f"request_header -{header}"), dashboard.index("forward_auth"))
+
+    def test_old_runtime_ingress_is_replaced_by_denying_bootstrap_on_restart(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp, runtime_paths(RuntimePaths(Path(tmp))):
+            target = RuntimePaths(Path(tmp)).projects / "ingress" / "Caddyfile"
+            target.parent.mkdir(parents=True)
+            target.write_text(":19460 {\n reverse_proxy 127.0.0.1:8787\n}\n")
+            selected = install._safe_caddy_configuration(root)
+            self.assertEqual(selected, target)
+            self.assertIn('respond "Mu3Lab setup is in progress." 503', target.read_text())
+            self.assertNotIn("reverse_proxy 127.0.0.1:8787", target.read_text())
+
+    def test_healthy_ingress_without_boundary_stamp_must_restart(self):
+        root = Path(__file__).resolve().parents[1]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            runtime_paths(RuntimePaths(Path(tmp))),
+            patch("ctl.install._tcp_open", return_value=True),
+            patch("ctl.install._caddy_health_status", return_value=204),
+        ):
+            self.assertEqual(install._caddy_check({"root": root})["state"], "down")

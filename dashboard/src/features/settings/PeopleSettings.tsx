@@ -22,6 +22,8 @@ interface Person {
   role: Role;
   active: boolean;
   last_login: string;
+  /** Mu3Lab's own record of a removal or demotion while it revokes access. */
+  access?: { kind: 'deactivated' | 'demoted'; state: 'pending' | 'complete'; pending: number; detail: string };
 }
 
 interface Invite {
@@ -134,10 +136,14 @@ export function PeopleSettings() {
   const confirm = useConfirm();
   const { data } = useDashboard();
   const { run } = useAction();
-  const people = useApi<{ people: Person[] }>('/api/v1/people', { interval: 30000 });
+  const [revoking, setRevoking] = useState(false);
+  // Poll quickly while a revocation is still running so its progress is visible.
+  const people = useApi<{ people: Person[] }>('/api/v1/people', { interval: revoking ? 5000 : 30000 });
   const [adding, setAdding] = useState(false);
   const [invite, setInvite] = useState<{ invite: Invite; name: string } | null>(null);
   const list = people.data?.people || [];
+  const pending = list.some((person) => person.access?.state === 'pending');
+  if (pending !== revoking) setRevoking(pending);
 
   const change = async (person: Person, action: 'role' | 'invite' | 'deactivate' | 'reactivate', role?: Role) => {
     const who = person.name || person.username;
@@ -146,7 +152,7 @@ export function PeopleSettings() {
       !(await confirm({
         title: `Remove ${who}?`,
         description:
-          'They can no longer sign in to Mu3Lab or its apps. Their account and what they saved in apps are kept, so you can bring them back later.',
+          'Mu3Lab stops their access at once, then ends their sign-in and sessions and revokes their voice key and chat tools, retrying until each is done. Some apps’ own mobile logins can keep working until they expire. Their account and what they saved in apps are kept, so you can bring them back later.',
         confirmLabel: 'Remove',
         tone: 'danger',
       }))
@@ -208,6 +214,11 @@ export function PeopleSettings() {
                           ? `last signed in ${relativeTime(person.last_login)}`
                           : 'has not signed in yet'}
                     </small>
+                    {person.access?.state === 'pending' && (
+                      <small className="warning-text" role="status">
+                        {person.access.detail}
+                      </small>
+                    )}
                   </span>
                   <Badge tone={person.role === 'admin' ? 'blue' : 'gray'}>{ROLE_TEXT[person.role].label}</Badge>
                   <Menu

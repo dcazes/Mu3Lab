@@ -825,6 +825,29 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
     return _propagate(res)
 
 
+def _ingress_boundary_digest(root: Path) -> str:
+    source = root / "apps" / by_capability("private_proxy").id
+    return stamps.digest(root, [source / "Caddyfile", source / "Caddyfile.authenticated"])
+
+
+def _ingress_boundary_stamp() -> Path:
+    return RuntimePaths().projects / by_capability("private_proxy").id / ".ingress-boundary.sha256"
+
+
+def _safe_caddy_configuration(root: Path) -> Path:
+    """Never restart a legacy runtime dashboard proxy that can trust caller identity."""
+    source = root / "apps" / by_capability("private_proxy").id
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
+    if not target.is_file():
+        return source / "Caddyfile"
+    deployed = target.read_text(encoding="utf-8")
+    authenticated = (source / "Caddyfile.authenticated").read_text(encoding="utf-8")
+    if not routes.base_matches(authenticated, deployed):
+        # Retain optional app routes, but deny the dashboard until the gate step succeeds.
+        target.write_text(routes.rebase((source / "Caddyfile").read_text(encoding="utf-8"), deployed), encoding="utf-8")
+    return target
+
+
 def fix_caddy(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
@@ -832,8 +855,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     projdir = ctx["root"] / "apps" / by_capability("private_proxy").id
     if not (projdir / "docker-compose.yml").is_file():
         return {"ok": False, "error": "apps/ingress/docker-compose.yml missing from checkout."}
-    runtime_caddy = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
-    source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
+    source_caddy = _safe_caddy_configuration(ctx["root"])
     _update_progress(
         ctx,
         "caddy",
@@ -855,6 +877,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
         log,
         env={"MU3LAB_CADDYFILE": str(source_caddy), "MU3LAB_INGRESS_TOKEN": ingress_token},
         on_output=compose_activity,
+        recreate=True,  # Config file contents may change without changing the Compose mount path.
     )
     log(out or f"(exit {rc})")
     if rc != 0:
@@ -867,6 +890,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     for _ in range(30):
         if _tcp_open(CADDY_PORT) and _caddy_health_status() == 204:
             log(f"Caddy health endpoint answering on :{CADDY_PORT}")
+            stamps.write(_ingress_boundary_stamp(), _ingress_boundary_digest(ctx["root"]))
             return {"ok": True}
         _time.sleep(2)
     return {
@@ -1871,6 +1895,15 @@ def fix_tailscale_operator(check: dict, ctx: dict) -> dict:
 
 
 def _caddy_check(ctx: dict) -> dict:
+    if stamps.read(_ingress_boundary_stamp()) != _ingress_boundary_digest(ctx["root"]):
+        return {
+            "name": "caddy",
+            "status": "missing",
+            "state": "down",
+            "blocking": False,
+            "detail": "The ingress identity boundary needs to be applied.",
+            "action": "Restart Caddy with the current policy.",
+        }
     if not _tcp_open(CADDY_PORT):
         return {
             "name": "caddy",
@@ -2304,15 +2337,14 @@ STEPS: list[Step] = [
         "check": check_authentik_setup,
         "fix": fix_authentik_setup,
     },
-    # Publish the private dashboard route before the operator tests the
-    # Authentik gate; the route is tailnet-only while the gate is configured.
-    {"id": "serve", "label": "Private address for the dashboard", "check": _serve_check, "fix": fix_serve},
     {
         "id": "dashboard_protection",
         "label": "Require sign-in for the dashboard",
         "check": check_dashboard_protection,
         "fix": fix_dashboard_protection,
     },
+    # The gate probe uses loopback with the tailnet Host; no published route is needed.
+    {"id": "serve", "label": "Private address for the dashboard", "check": _serve_check, "fix": fix_serve},
     {
         "id": "core_images",
         "label": "Download the core apps",
@@ -2343,8 +2375,8 @@ PHASES = (
             "authentik_serve",
             "lobehub_serve",
             "authentik_setup",
-            "serve",
             "dashboard_protection",
+            "serve",
         ),
     ),
     ("Download the core apps", ("core_images",)),

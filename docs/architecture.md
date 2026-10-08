@@ -31,7 +31,20 @@ REST API with a machine credential. LobeHub uses its device approval flow and
 per-person API keys. Vaultwarden uses its registration/organization interfaces
 for bootstrap and invitations, and the pinned Bitwarden CLI for routine vault
 operations. Each CLI session has a disposable private cache. Chat talks to
-app connectors through a tool gateway; app-data writes require approval.
+app connectors through a tool gateway with person/provider/app/version credentials.
+Current shared application connectors are operator-only; household members have
+ordinary chat without connector access. Direct/helper writes and console writes
+create an immutable operation in the isolated gateway authority store. A human
+approves the exact stored inputs through the authenticated dashboard, and the
+gateway atomically claims one dispatch attempt after rechecking current policy.
+Lost replies and interrupted dispatches remain unknown and are never resent.
+
+`gateway_authority.py` owns the dedicated gateway SQLite database and encryption
+key under `projects/mcp-gateway/authority/`. Only this directory, read-only policy
+and metadata logs are mounted into the gateway. Policy revisions and committed
+hashes invalidate old grants before permission changes; health confirms gateway
+acknowledgement. Back up this database with its matching key as well as the
+control-plane store. See [the authority implementation and recovery record](reviews/2026-10-08-gateway-authority-implementation.md).
 
 `ctl/store/` owns one SQLite database, `/srv/mu3lab/state/mu3lab.db`, and numbered
 SQL migrations. One private `secrets.key` encrypts scoped credential rows.

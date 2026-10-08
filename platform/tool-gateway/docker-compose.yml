@@ -1,13 +1,16 @@
 name: mu3lab-mcp-gateway
 services:
   mcp-gateway:
-    build: .
+    build:
+      context: ../..
+      dockerfile: platform/tool-gateway/Dockerfile
     restart: unless-stopped
     user: ${MU3LAB_UID:?MU3LAB_UID is required}:${MU3LAB_GID:?MU3LAB_GID is required}
     read_only: true
     volumes:
     - ./policy:/config:ro
     - ./logs:/logs
+    - ./authority:/authority
     ports:
     - 127.0.0.1:8822:8080
     networks:

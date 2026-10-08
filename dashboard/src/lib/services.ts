@@ -14,6 +14,7 @@ export const stateLabel: Record<Service['display_state'], string> = {
   running: 'Running',
   stopped: 'Stopped',
   working: 'Working',
+  checking: 'Checking',
   not_installed: 'Not installed',
   needs_attention: 'Needs attention',
 };
@@ -21,10 +22,14 @@ export const stateLabel: Record<Service['display_state'], string> = {
 export function stateTone(state: string): Tone {
   return (
     (
-      { running: 'green', stopped: 'gray', working: 'blue', not_installed: 'gray', needs_attention: 'red' } as Record<
-        string,
-        Tone
-      >
+      {
+        running: 'green',
+        stopped: 'gray',
+        working: 'blue',
+        checking: 'blue',
+        not_installed: 'gray',
+        needs_attention: 'red',
+      } as Record<string, Tone>
     )[state] || 'gray'
   );
 }
@@ -66,6 +71,32 @@ export function launchTarget(service: Service): LaunchTarget | null {
   if (identity?.mode === 'local') return routeUrl ? { url: routeUrl, label: 'Log in' } : null;
   if (identity?.mode === 'none' && !routeUrl) return null;
   return { url, label: ui?.launch_label || 'Open' };
+}
+
+export type CheckName = keyof NonNullable<Service['checks']>;
+
+export const checkLabel: Record<CheckName, string> = {
+  process: 'Health check',
+  route: 'Private address',
+  sign_in: 'Sign-in',
+};
+
+const checkTone: Record<string, Tone> = {
+  pass: 'green',
+  checking: 'blue',
+  pending: 'blue',
+  fail: 'red',
+  stale: 'amber',
+  not_required: 'gray',
+};
+
+/** The checks this app requires, in the order they gate "usable". */
+export function requiredChecks(service: Service) {
+  const checks = service.checks;
+  if (!checks) return [];
+  return (Object.keys(checkLabel) as CheckName[])
+    .filter((name) => checks[name].state !== 'not_required')
+    .map((name) => ({ name, label: checkLabel[name], tone: checkTone[checks[name].state] || 'gray', ...checks[name] }));
 }
 
 export const signInLabel: Record<string, string> = {

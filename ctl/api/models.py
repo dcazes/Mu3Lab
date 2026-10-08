@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-DisplayState = Literal["running", "stopped", "working", "not_installed", "needs_attention"]
+DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_attention"]
 
 
 class ApiModel(BaseModel):
@@ -19,6 +19,7 @@ class ApiErrorResponse(ApiModel):
     message: str
     recommended_action: str
     error: str | dict[str, JsonValue]
+    blocking_job_id: str | None = None
 
 
 TailscaleConnectionState = Literal["connected"] | Literal["disconnected"] | Literal["unavailable"]
@@ -64,6 +65,21 @@ class ServiceUi(ApiModel):
     authentication: str
     reason: str | None
     launch_label: str | None = None
+
+
+class ServiceCheck(ApiModel):
+    state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
+    detail: str
+    checked_at: str
+    last_success_at: str
+    last_failure_at: str
+    failures: int
+
+
+class ServiceChecks(ApiModel):
+    process: ServiceCheck
+    route: ServiceCheck
+    sign_in: ServiceCheck
 
 
 class ServiceUpdate(ApiModel):
@@ -141,6 +157,8 @@ class Service(ApiModel):
     initialization: ServiceInitialization | None = None
     identity: ServiceIdentity | None = None
     containers: list[ServiceContainersItem] | None = None
+    checks: ServiceChecks | None = None
+    blocking_check: Literal["process", "route", "sign_in"] | None = None
 
     display_state: DisplayState
     reason: str
@@ -687,7 +705,7 @@ class ChatProvider(ApiModel):
 class ChatAssistant(ApiModel):
     id: str
     name: str
-    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review"]
+    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"]
     detail: str
 
 
@@ -952,6 +970,15 @@ class OkResponse(ApiModel):
     id: str | None = None
 
 
+class PersonAccess(ApiModel):
+    kind: Literal["deactivated", "demoted"]
+    state: Literal["pending", "complete"]
+    pending: int
+    pending_targets: list[str]
+    detail: str
+    since: str
+
+
 class Person(ApiModel):
     username: str
     uid: str
@@ -960,6 +987,7 @@ class Person(ApiModel):
     role: Literal["admin", "member", ""]
     active: bool
     last_login: str
+    access: PersonAccess | None = None
 
 
 class PeopleResponse(ApiModel):
@@ -1109,3 +1137,38 @@ class PersonInvite(ApiModel):
 
 
 PersonResponse.model_rebuild()
+
+
+class ApprovalOperation(ApiModel):
+    id: str
+    subject: str
+    provider: str
+    credential_version: int
+    app: str
+    server: str
+    tool: str
+    connector_revision: str
+    policy_revision: int
+    state: Literal[
+        "pending", "approved", "dispatching", "succeeded", "failed", "outcome_unknown", "rejected", "revoked", "expired"
+    ]
+    created_at: float
+    expires_at: float
+    dispatch_at: float
+    completed_at: float
+    arguments: dict[str, JsonValue] | None = None
+
+
+class ApprovalResponse(ApiModel):
+    ok: bool
+    operation: ApprovalOperation
+    execution: dict[str, JsonValue] | None = None
+
+
+class ApprovalsResponse(ApiModel):
+    ok: bool
+    operations: list[ApprovalOperation]
+
+
+class ApprovalDecisionRequest(RequestModel):
+    decision: Literal["approve", "reject"]

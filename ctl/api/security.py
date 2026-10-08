@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
 
-from ctl import bootstrap_state
+from ctl import access, bootstrap_state
 from ctl.api.errors import ApiError
 from ctl.provisioning import ProvisioningStore
 from ctl.secrets import platform_values
@@ -134,6 +134,15 @@ def resolve_identity(request: Request) -> IdentityData:
     authenticated = bool(username)
     operator = authenticated and bool(OPERATOR_GROUPS.intersection(groups))
     member = authenticated and bool(MEMBER_GROUPS.intersection(groups))
+    # An Authentik session can outlive a deactivation or demotion; Mu3Lab's own
+    # record of that change wins over whatever the session still claims.
+    held = access.hold(subject_id) if authenticated and subject_id else None
+    detail = ""
+    if held and held["kind"] == "deactivated":
+        operator = member = False
+        detail = "This account has been deactivated."
+    elif held and held["kind"] == "demoted":
+        operator = False
     if operator:
         _record_operator_traversal()
     return {
@@ -144,7 +153,8 @@ def resolve_identity(request: Request) -> IdentityData:
         "email": email,
         "display_name": display_name,
         "groups": list(groups),
-        "detail": (
+        "detail": detail
+        or (
             "Authenticated through Authentik."
             if member
             else "Tailnet access is private, but Authentik protection and operator role mapping are not configured yet."

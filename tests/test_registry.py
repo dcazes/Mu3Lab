@@ -232,7 +232,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
-        self.assertIn("X-Mu3Lab-Proxy-Token", caddyfile)
+        self.assertNotIn("header_up X-Mu3Lab-Proxy-Token", caddyfile)
 
     def test_ingress_health_uses_dedicated_caddy_endpoint(self):
         self.assertTrue(load().get("ingress").health["url"].endswith("/__mu3lab_caddy_health"))
@@ -357,6 +357,7 @@ class RegistryTests(unittest.TestCase):
                 patch("ctl.service_state.RuntimePaths", return_value=paths),
                 patch("ctl.service_state._compose_state", return_value="running") as compose,
                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+                patch("ctl.service_state.route_probe", return_value=(True, 0.0)),
             ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8457})
         self.assertEqual(compose.call_args.args[0], project / "docker-compose.yml")
@@ -375,6 +376,7 @@ class RegistryTests(unittest.TestCase):
             with (
                 patch("ctl.service_state.RuntimePaths", return_value=paths),
                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+                patch("ctl.service_state.route_probe", return_value=(True, 0.0)),
             ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8443}, {source: "running"})
         self.assertEqual(state["lifecycle_state"], "ready")

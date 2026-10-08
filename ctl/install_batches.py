@@ -10,7 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from ctl.control_state import ControlState
-from ctl.jobs import JobStore
+from ctl.jobs import JobConflict, JobStore
 from ctl.registry import Registry, RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -118,7 +118,7 @@ class InstallBatchStore:
         with self._connect() as conn:
             item = conn.execute(
                 """
-                SELECT service_id FROM install_batch_items
+                SELECT i.service_id, b.owner_uid FROM install_batch_items i JOIN install_batches b ON b.id = i.batch_id
                 WHERE batch_id = ? AND ordinal = ?
             """,
                 (batch_id, ordinal),
@@ -128,34 +128,40 @@ class InstallBatchStore:
         idempotency_key = (
             f"batch:{batch_id}:{ordinal}:retry:{uuid4().hex}" if force_new else f"batch:{batch_id}:{ordinal}"
         )
+        identity = workflow_secrets.job_identity(f"batch:{batch_id}")
+
+        def commit_state(job_id: str) -> None:
+            now = _now()
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE install_batch_items SET state = 'queued', job_id = ?, started_at = ?
+                    WHERE batch_id = ? AND ordinal = ?
+                """,
+                    (job_id, now, batch_id, ordinal),
+                )
+                conn.execute(
+                    """
+                    UPDATE install_batches SET state = 'running', current_ordinal = ?, updated_at = ?
+                    WHERE id = ?
+                """,
+                    (ordinal, now, batch_id),
+                )
+            ControlState(self.database).set_installation(str(item["service_id"]), "queued", job_id=job_id)
+
         job = jobs.create(
             kind="lifecycle",
             service_id=str(item["service_id"]),
+            actor_subject=str(item["owner_uid"]),
+            namespace="batch.install",
+            request={"batch_id": batch_id, "ordinal": ordinal},
+            prepare=(lambda job_id: workflow_secrets.save_job_identity(job_id, **identity)) if identity else None,
             action="install",
             actor=actor,
             detail="Queued by a reviewed application install batch.",
             idempotency_key=idempotency_key,
+            commit_state=commit_state,
         )
-        identity = workflow_secrets.job_identity(f"batch:{batch_id}")
-        if identity:
-            workflow_secrets.save_job_identity(str(job["id"]), **identity)
-        now = _now()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE install_batch_items SET state = 'queued', job_id = ?, started_at = ?
-                WHERE batch_id = ? AND ordinal = ?
-            """,
-                (job["id"], now, batch_id, ordinal),
-            )
-            conn.execute(
-                """
-                UPDATE install_batches SET state = 'running', current_ordinal = ?, updated_at = ?
-                WHERE id = ?
-            """,
-                (ordinal, now, batch_id),
-            )
-        ControlState(self.database).set_installation(str(item["service_id"]), "queued", job_id=str(job["id"]))
         return job
 
     def create(
@@ -174,13 +180,18 @@ class InstallBatchStore:
         """Record the plan; the worker's download manager then starts downloads,
         and each app is set up once its download is ready."""
         parallel_downloads = _clamp_parallel(parallel_downloads)
+        if not owner_uid or not actor or len(idempotency_key) > 128:
+            raise ValueError("invalid batch request identity")
+        fingerprint = jobs._request_hash(
+            "lifecycle",
+            "install-batch",
+            "install",
+            {"service_ids": service_ids, "parallel_downloads": parallel_downloads},
+        )
         with self._connect() as conn:
-            if idempotency_key:
-                existing = conn.execute(
-                    "SELECT id FROM install_batches WHERE idempotency_key = ?", (idempotency_key,)
-                ).fetchone()
-                if existing:
-                    return self.get(str(existing["id"])) or {}
+            existing = self._replay_batch(conn, owner_uid, idempotency_key, fingerprint)
+            if existing:
+                return self.get(existing) or {}
         plan = self.plan(registry, service_ids, control)
         if not plan:
             raise ValueError("all selected applications are already installed")
@@ -188,6 +199,10 @@ class InstallBatchStore:
         appended = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            existing = self._replay_batch(conn, owner_uid, idempotency_key, fingerprint)
+            if existing:
+                return self.get(existing) or {}
+
             # Keep one queue visible to its owner and append new selections behind
             # existing items. The transaction also prevents duplicate submissions.
             active = conn.execute(
@@ -199,15 +214,15 @@ class InstallBatchStore:
             if active:
                 appended = True
                 batch_id = str(active["id"])
-                existing = conn.execute(
+                present_items = conn.execute(
                     "SELECT service_id, ordinal, priority FROM install_batch_items WHERE batch_id = ?", (batch_id,)
                 ).fetchall()
-                present = {str(item["service_id"]) for item in existing}
+                present = {str(item["service_id"]) for item in present_items}
                 plan = [(slug, explicit) for slug, explicit in plan if slug not in present]
                 if not plan:
                     raise ValueError("all selected applications are already queued")
-                ordinal_start = max((int(item["ordinal"]) for item in existing), default=-1) + 1
-                priority_start = max((int(item["priority"]) for item in existing), default=-1) + 1
+                ordinal_start = max((int(item["ordinal"]) for item in present_items), default=-1) + 1
+                priority_start = max((int(item["priority"]) for item in present_items), default=-1) + 1
             busy = {
                 str(row[0])
                 for row in conn.execute(
@@ -251,9 +266,33 @@ class InstallBatchStore:
                     for index, (service_id, explicit) in enumerate(plan)
                 ),
             )
-        if not appended:
-            workflow_secrets.save_job_identity(f"batch:{batch_id}", **identity)
+            if not appended:
+                workflow_secrets.save_job_identity(f"batch:{batch_id}", **identity)
+            if idempotency_key:
+                conn.execute(
+                    "INSERT INTO batch_requests VALUES (?, ?, ?, ?)",
+                    (owner_uid, idempotency_key, fingerprint, batch_id),
+                )
         return self.get(batch_id) or {}
+
+    @staticmethod
+    def _replay_batch(conn, owner_uid: str, key: str, fingerprint: str) -> str:
+        if not key:
+            return ""
+        row = conn.execute(
+            "SELECT * FROM batch_requests WHERE owner_uid = ? AND idempotency_key = ?", (owner_uid, key)
+        ).fetchone()
+        if row:
+            if row["request_hash"] != fingerprint:
+                raise JobConflict("idempotency_conflict")
+            return str(row["batch_id"])
+        legacy = conn.execute(
+            "SELECT id FROM install_batches WHERE idempotency_key = ? AND id NOT IN (SELECT batch_id FROM batch_requests)",
+            (key,),
+        ).fetchone()
+        if legacy:
+            raise JobConflict("idempotency_conflict")
+        return ""
 
     def get(self, batch_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -306,29 +345,37 @@ class InstallBatchStore:
     def _enqueue_reset(self, batch_id: str, ordinal: int, actor: str, jobs: JobStore) -> dict[str, Any]:
         with self._connect() as conn:
             item = conn.execute(
-                "SELECT service_id FROM install_batch_items WHERE batch_id = ? AND ordinal = ?", (batch_id, ordinal)
+                "SELECT i.service_id, b.owner_uid FROM install_batch_items i JOIN install_batches b ON b.id = i.batch_id WHERE batch_id = ? AND ordinal = ?",
+                (batch_id, ordinal),
             ).fetchone()
         if not item:
             raise ValueError("batch reset item not found")
+
+        def commit_state(job_id: str) -> None:
+            now = _now()
+            with self._connect() as conn:
+                conn.execute(
+                    """UPDATE install_batch_items SET state = 'resetting', job_id = ?,
+                                started_at = ?, completed_at = '' WHERE batch_id = ? AND ordinal = ?""",
+                    (job_id, now, batch_id, ordinal),
+                )
+                conn.execute(
+                    "UPDATE install_batches SET state = 'resetting', current_ordinal = ?, updated_at = ? WHERE id = ?",
+                    (ordinal, now, batch_id),
+                )
+
         job = jobs.create(
             kind="lifecycle",
             service_id=str(item["service_id"]),
             action="reset",
+            actor_subject=str(item["owner_uid"]),
+            namespace="batch.reset",
+            request={"batch_id": batch_id, "ordinal": ordinal},
             actor=actor,
             detail="Queued cleanup for a failed application installation.",
             idempotency_key=f"batch-reset:{batch_id}:{ordinal}",
+            commit_state=commit_state,
         )
-        now = _now()
-        with self._connect() as conn:
-            conn.execute(
-                """UPDATE install_batch_items SET state = 'resetting', job_id = ?,
-                            started_at = ?, completed_at = '' WHERE batch_id = ? AND ordinal = ?""",
-                (job["id"], now, batch_id, ordinal),
-            )
-            conn.execute(
-                "UPDATE install_batches SET state = 'resetting', current_ordinal = ?, updated_at = ? WHERE id = ?",
-                (ordinal, now, batch_id),
-            )
         return job
 
     def advance_for_job(self, job_id: str, jobs: JobStore) -> None:
@@ -668,27 +715,31 @@ class InstallBatchStore:
         failed = next((item for item in batch["items"] if item["state"] in {"failed", "cancelled"}), None)
         if not failed or not failed["job_id"]:
             raise ValueError("batch has no retryable failed item")
-        retry = jobs.retry(
+        identity = workflow_secrets.job_identity(f"batch:{batch_id}")
+
+        def commit_state(job_id: str) -> None:
+            now = _now()
+            with self._connect() as conn:
+                conn.execute(
+                    """UPDATE install_batch_items SET state = 'queued', job_id = ?,
+                                error_json = '{}', started_at = ?, completed_at = ''
+                                WHERE batch_id = ? AND ordinal = ?""",
+                    (job_id, now, batch_id, failed["ordinal"]),
+                )
+                conn.execute(
+                    """UPDATE install_batches SET state = 'running', error_json = '{}',
+                                current_ordinal = ?, updated_at = ? WHERE id = ?""",
+                    (failed["ordinal"], now, batch_id),
+                )
+
+        jobs.retry(
             str(failed["job_id"]),
             actor=str(batch["actor"]),
+            actor_subject=str(batch["owner_uid"]),
             idempotency_key=f"batch:{batch_id}:{failed['ordinal']}:retry:{uuid4().hex}",
+            prepare=(lambda job_id: workflow_secrets.save_job_identity(job_id, **identity)) if identity else None,
+            commit_state=commit_state,
         )
-        identity = workflow_secrets.job_identity(f"batch:{batch_id}")
-        if identity:
-            workflow_secrets.save_job_identity(str(retry["id"]), **identity)
-        now = _now()
-        with self._connect() as conn:
-            conn.execute(
-                """UPDATE install_batch_items SET state = 'queued', job_id = ?,
-                            error_json = '{}', started_at = ?, completed_at = ''
-                            WHERE batch_id = ? AND ordinal = ?""",
-                (retry["id"], now, batch_id, failed["ordinal"]),
-            )
-            conn.execute(
-                """UPDATE install_batches SET state = 'running', error_json = '{}',
-                            current_ordinal = ?, updated_at = ? WHERE id = ?""",
-                (failed["ordinal"], now, batch_id),
-            )
         return self.get(batch_id) or {}
 
     def begin_reset(self, batch_id: str, jobs: JobStore) -> dict[str, Any]:

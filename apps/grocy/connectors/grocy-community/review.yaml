@@ -1,4 +1,6 @@
 schema_version: 1
+data_scope: operator_only
+delegation: none
 server: grocy-community
 revision: 2.8.0
 reviewed_at: '2026-10-04'

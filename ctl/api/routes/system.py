@@ -137,7 +137,15 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
     """Queue the self-update. It restarts the dashboard and worker, so nothing else may be running."""
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="update",
+        service_id=self_update.SERVICE_ID,
+        action=self_update.ACTION,
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.update",
+    )
     if previous:
         return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     current = self_update.status(ROOT)
@@ -153,6 +161,8 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
         service_id=self_update.SERVICE_ID,
         action=self_update.ACTION,
         actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.update",
         detail="Owner requested a Mu3Lab update.",
         idempotency_key=key,
     )

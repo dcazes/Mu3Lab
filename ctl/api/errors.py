@@ -9,6 +9,8 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse
 from pydantic import JsonValue, ValidationError
 
+from ctl.jobs import JobConflict
+
 
 class ApiError(Exception):
     """Raised by handlers and dependencies; rendered as `{"ok": false, "error": ...}`."""
@@ -80,4 +82,26 @@ def response_error_handler(_request: Request, exc: Exception) -> JSONResponse:
         },
         status_code=500,
         headers={"Cache-Control": "no-store"},
+    )
+
+
+def job_conflict_handler(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, JobConflict)
+    message = (
+        "This request key was already used for a different request."
+        if exc.code == "idempotency_conflict"
+        else "Another operation is active for this resource."
+    )
+    recommendation = (
+        "Use a new key only for a new operation; retry the original request unchanged."
+        if exc.code == "idempotency_conflict"
+        else "Wait for the blocking job to finish or cancel it before requesting another operation."
+    )
+    return api_error_handler(
+        request,
+        ApiError(
+            409,
+            {"message": message, "code": exc.code, "recommended_action": recommendation},
+            blocking_job_id=exc.job_id,
+        ),
     )

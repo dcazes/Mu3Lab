@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import actions, mcp_config, mcp_console
+from ctl import actions, mcp_config, mcp_console, mcp_gateway
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -118,10 +118,20 @@ async def put_configuration(
     return models.McpServerResponse.model_validate({"ok": True, "server": _server_view(server_id, operator)})
 
 
-def _apply_switches(server, actor: str, detail: str) -> None:
+def _apply_switches(server, actor: str, detail: str, mutate=None) -> None:
     """Push a switch change to the gateway and the app's assistant."""
 
-    ok, message = rebind_app(server.service_id, lambda _line: None)
+    try:
+        with mcp_gateway.policy_change():
+            if mutate:
+                mutate()
+            ok, message = rebind_app(server.service_id, lambda _line: None)
+    except (OSError, ValueError):
+        raise ApiError(
+            503,
+            "The permission change could not be applied safely. Check gateway policy health.",
+            code="gateway_policy_unavailable",
+        ) from None
     store = JobStore.runtime()
     if store:
         store.record_audit(actor=actor, event="mcp.switches.changed", detail=detail)
@@ -144,12 +154,12 @@ async def put_category(
     if not server.gateway or review_for(server).category(category_id) is None:
         raise ApiError(404, "unknown tool category")
     enabled = payload_model.enabled
-    McpActivity().set_category(server.id, category_id, enabled)
     await run_in_threadpool(
         _apply_switches,
         server,
         operator["username"],
         f"{server.id}: category {category_id} switched {'on' if enabled else 'off'}.",
+        lambda: McpActivity().set_category(server.id, category_id, enabled),
     )
     return models.McpServerResponse.model_validate({"ok": True, "server": _server_view(server_id, operator)})
 
@@ -201,9 +211,12 @@ async def _put_gateway_tool(server, tool_name: str, permission: str, operator: I
     allowed = {"auto", "disabled"} if tool.access == "read" else {"needs_approval", "disabled"}
     if permission not in allowed:
         raise ApiError(422, "tools that change data must ask for approval or be switched off")
-    McpActivity().set_permission(server.id, tool_name, permission)
     await run_in_threadpool(
-        _apply_switches, server, operator["username"], f"{server.id}: {tool_name} set to {permission}."
+        _apply_switches,
+        server,
+        operator["username"],
+        f"{server.id}: {tool_name} set to {permission}.",
+        lambda: McpActivity().set_permission(server.id, tool_name, permission),
     )
     return {"ok": True, "server_id": server.id, "tool_name": tool_name, "permission": permission}
 
@@ -220,7 +233,7 @@ async def prepare_tool_call(
     try:
         return models.ToolPrepareResponse.model_validate(
             await run_in_threadpool(
-                mcp_console.prepare, server_id, tool_name, payload.get("arguments"), operator["username"]
+                mcp_console.prepare, server_id, tool_name, payload.get("arguments"), runtime.mutation_subject(operator)
             )
         )
     except (ValueError, TypeError, AttributeError) as exc:
@@ -243,7 +256,7 @@ async def execute_tool_call(
                     server_id,
                     tool_name,
                     payload.get("arguments"),
-                    operator["username"],
+                    runtime.mutation_subject(operator),
                     nonce=str(payload.get("confirmation_token") or ""),
                     idempotency_key=request.headers.get("idempotency-key", ""),
                 )
@@ -261,6 +274,20 @@ def queue_action(server_id: str, action: str, request: Request, operator: Operat
     server = runtime.mcp_server(server_id, reg)
     if server.status != "accepted" or not server.compose_dir:
         raise ApiError(409, "MCP server has not passed runtime review")
+    store = runtime.job_store()
+    subject = runtime.mutation_subject(operator)
+    key = runtime.idempotency_key(request)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="wiring",
+        service_id=f"mcp:{server.id}",
+        action=action,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="mcp.actions",
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     if action == "update" and not server.reviewed_update:
         raise ApiError(409, "no reviewed MCP update is available")
     if action == "prepare":
@@ -277,6 +304,8 @@ def queue_action(server_id: str, action: str, request: Request, operator: Operat
             service_id=f"mcp:{server.id}",
             action=action,
             actor=operator["username"],
+            actor_subject=subject,
+            namespace="mcp.actions",
             detail=f"Operator requested MCP {action} for {server.service_id}.",
             idempotency_key=runtime.idempotency_key(request),
         )

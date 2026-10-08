@@ -1,11 +1,5 @@
-# Mu3Lab :: core/ingress/Caddyfile
-# WHAT:  Minimal starter: :19460 proxies to the real dashboard (:8787).
-# WHY:   TLS terminates at Tailscale Serve (tailnet), so Caddy stays plain
-#        HTTP on loopback with auto_https off. Forward-auth blocks, tailnet
-#        host vars, and per-app routes arrive with the apps (later phases) —
-#        adding them now would ship untested security config.
-# DEBUG: `docker exec <caddy> caddy validate --config /etc/caddy/Caddyfile
-#        --adapter caddyfile`; `curl -i http://127.0.0.1:19460/__mu3lab_caddy_health`.
+# Bootstrap ingress denies dashboard traffic until the Authentik gate is ready.
+# TLS terminates at Tailscale Serve; all listeners stay on loopback.
 {
 	auto_https off
 	admin off
@@ -22,8 +16,10 @@
 		respond 204
 	}
 	handle {
-		reverse_proxy 127.0.0.1:8787 {
-			header_up X-Mu3Lab-Proxy-Token {env.MU3LAB_INGRESS_TOKEN}
+		route {
+			request_header -X-Authentik-*
+			request_header -X-Mu3Lab-Proxy-Token
+			respond "Mu3Lab setup is in progress." 503
 		}
 	}
 }

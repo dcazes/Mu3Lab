@@ -11,10 +11,11 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard, platform_releases
+from ctl import actions, job_guard, mcp_gateway, platform_releases
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
@@ -99,14 +100,15 @@ def _siblings(server, state: ControlState) -> list:
 
 
 def _stop_connector(server, state: ControlState, log) -> tuple[bool, str]:
-    project = credential_path(server.id).parent
-    if (project / "docker-compose.yml").is_file():
-        rc, output = actions.compose_action(project, "stop", log)
-        if rc:
-            return False, redact(output)
-    state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-    ok, detail = unbind(server, log)
-    return ok, detail
+    with mcp_gateway.policy_change() if server.gateway else nullcontext():
+        project = credential_path(server.id).parent
+        if (project / "docker-compose.yml").is_file():
+            rc, output = actions.compose_action(project, "stop", log)
+            if rc:
+                return False, redact(output)
+        state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+        ok, detail = unbind(server, log)
+        return ok, detail
 
 
 def _materialize(server, root: Path) -> Path:
@@ -656,28 +658,34 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             )
         return
     if action == "disable":
-        project = credential_path(server.id).parent
-        if (project / "docker-compose.yml").is_file():
-            rc, output = actions.compose_action(project, "stop", log)
-            if rc:
+        with mcp_gateway.policy_change() if server.gateway else nullcontext():
+            project = credential_path(server.id).parent
+            if (project / "docker-compose.yml").is_file():
+                rc, output = actions.compose_action(project, "stop", log)
+                if rc:
+                    store.transition(
+                        job_id,
+                        "failed",
+                        actor=actor,
+                        detail=redact(output),
+                        error_code="mcp_stop_failed",
+                        step_id="stop",
+                    )
+                    return
+            state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+            linked, link_detail = unbind(server, log)
+            if not linked:
                 store.transition(
-                    job_id, "failed", actor=actor, detail=redact(output), error_code="mcp_stop_failed", step_id="stop"
+                    job_id,
+                    "failed",
+                    actor=actor,
+                    detail=link_detail,
+                    error_code="lobehub_registration_failed",
+                    step_id="register",
                 )
                 return
-        state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-        linked, link_detail = unbind(server, log)
-        if not linked:
-            store.transition(
-                job_id,
-                "failed",
-                actor=actor,
-                detail=link_detail,
-                error_code="lobehub_registration_failed",
-                step_id="register",
-            )
+            store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
             return
-        store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
-        return
     for other in others:
         log(f"Switching off {other.name}.")
         stopped, stop_detail = _stop_connector(other, state, log)

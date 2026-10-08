@@ -8,8 +8,11 @@ and auditability.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
+import secrets
 import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -18,6 +21,7 @@ from typing import Any
 from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import locked, read_or_create_key
 from ctl.status.signals import changed
 from ctl.store import db
 
@@ -91,6 +95,14 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+class JobConflict(RuntimeError):
+    """A rejected mutation; no job, private inputs or desired state were changed."""
+
+    def __init__(self, code: str, job_id: str = "") -> None:
+        super().__init__(code)
+        self.code, self.job_id = code, job_id
+
+
 class JobStore:
     """Small SQLite store with explicit state transitions and append-only audit."""
 
@@ -116,6 +128,10 @@ class JobStore:
         idempotency_key: str | None = None,
         prepare: Callable[[str], None] | None = None,
         params: dict[str, str] | None = None,
+        actor_subject: str = "",
+        namespace: str = "",
+        request: dict[str, Any] | None = None,
+        commit_state: Callable[[str], object] | None = None,
     ) -> dict[str, str]:
         """Create a queued job. Callers must authenticate and authorize first.
 
@@ -130,31 +146,40 @@ class JobStore:
             raise ValueError("invalid safe job request")
         if idempotency_key is not None and (not idempotency_key.strip() or len(idempotency_key) > 128):
             raise ValueError("invalid idempotency key")
+        subject = actor_subject or f"actor:{actor}"
+        namespace = namespace or f"jobs:{kind}"
+        fingerprint = self._request_hash(kind, service_id, action, request if request is not None else params or {})
         job_id, now = uuid4().hex, _now()
         with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             if idempotency_key:
-                row = conn.execute(
-                    "SELECT id, state, created_at FROM jobs WHERE idempotency_key = ?", (idempotency_key,)
-                ).fetchone()
-                if row:
-                    return dict(row)
+                previous = self._replay(conn, idempotency_key, subject, namespace, fingerprint)
+                if previous:
+                    return {key: str(previous[key]) for key in ("id", "state", "created_at")}
             active = conn.execute(
-                "SELECT id, state, created_at FROM jobs WHERE service_id = ? "
+                "SELECT * FROM jobs WHERE service_id = ? "
                 "AND state IN ('queued', 'running', 'waiting_for_confirmation') "
                 "ORDER BY created_at DESC LIMIT 1",
                 (service_id,),
             ).fetchone()
             if active:
-                return dict(active)
+                if (active["actor_subject"], active["request_namespace"], active["request_hash"]) != (
+                    subject,
+                    namespace,
+                    fingerprint,
+                ):
+                    raise JobConflict("resource_busy", str(active["id"]))
+                self._remember_request(conn, idempotency_key, subject, namespace, fingerprint, str(active["id"]))
+                return {key: str(active[key]) for key in ("id", "state", "created_at")}
             if prepare:
                 prepare(job_id)
             conn.execute(
                 """
                 INSERT INTO jobs
                 (id, kind, service_id, action, state, actor, created_at, updated_at,
-                 detail, idempotency_key, params_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 detail, idempotency_key, params_json, actor_subject, request_namespace, request_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     job_id,
@@ -168,12 +193,18 @@ class JobStore:
                     redact(detail),
                     idempotency_key,
                     json.dumps(redact_data(params or {}), sort_keys=True),
+                    subject,
+                    namespace,
+                    fingerprint,
                 ),
             )
             conn.execute(
                 "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
                 (job_id, actor, "job.created", now, redact(f"{kind}:{action}")),
             )
+            self._remember_request(conn, idempotency_key, subject, namespace, fingerprint, job_id)
+            if commit_state:
+                commit_state(job_id)
         return {"id": job_id, "state": "queued", "created_at": now}
 
     def transition(
@@ -192,7 +223,8 @@ class JobStore:
         runner = execution.worker_id if execution and execution.job_id == job_id else ""
         now = _now()
         with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT state, lease_owner, cancel_requested_at FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
@@ -229,7 +261,8 @@ class JobStore:
         now = _now()
         expires = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
         with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             # A job whose runner died after someone asked to cancel it is
             # finished as cancelled, never started again.
             abandoned = conn.execute(
@@ -347,13 +380,86 @@ class JobStore:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return dict(row) if row else None
 
-    def by_idempotency_key(self, key: str) -> dict[str, Any] | None:
-        """Return the original mutation result record for safe HTTP retries."""
-        if not key:
-            return None
+    def _request_hash(self, kind: str, service_id: str, action: str, request: dict[str, Any]) -> str:
+        payload = json.dumps(
+            [kind, service_id, action, request], sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        key_path = self.database.with_suffix(".request-key")
+        with locked(self.database.with_suffix(".request-key.lock")):
+            if not key_path.exists() and self.database.exists():
+                with self._connect() as connection:
+                    if (
+                        connection.execute("SELECT 1 FROM jobs WHERE request_hash != '' LIMIT 1").fetchone()
+                        or connection.execute("SELECT 1 FROM batch_requests LIMIT 1").fetchone()
+                    ):
+                        raise RuntimeError(
+                            "The mutation fingerprint key is missing; restore it before accepting requests."
+                        )
+            key = read_or_create_key(key_path, lambda: secrets.token_bytes(32))
+        if len(key) != 32:
+            raise RuntimeError("The mutation fingerprint key is invalid; restore it before accepting requests.")
+        return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+    @staticmethod
+    def _remember_request(conn, key, subject, namespace, fingerprint, job_id) -> None:
+        if key:
+            conn.execute(
+                "INSERT INTO mutation_requests VALUES (?, ?, ?, ?, ?)", (subject, namespace, key, fingerprint, job_id)
+            )
+
+    @staticmethod
+    def _replay(conn, key, subject, namespace, fingerprint) -> dict[str, Any] | None:
+        row = conn.execute(
+            "SELECT j.*, r.request_hash AS replay_hash FROM mutation_requests r JOIN jobs j ON j.id = r.job_id "
+            "WHERE r.actor_subject = ? AND r.namespace = ? AND r.idempotency_key = ?",
+            (subject, namespace, key),
+        ).fetchone()
+        if row:
+            if not hmac.compare_digest(str(row["replay_hash"]), fingerprint):
+                raise JobConflict("idempotency_conflict")
+            return dict(row)
+        legacy = conn.execute("SELECT 1 FROM jobs WHERE idempotency_key = ? AND request_hash = ''", (key,)).fetchone()
+        if legacy:
+            raise JobConflict("idempotency_conflict")  # Legacy rows cannot prove exact caller/payload identity.
+        return None
+
+    def by_idempotency_key(
+        self,
+        key: str,
+        *,
+        kind: str,
+        service_id: str,
+        action: str,
+        actor: str,
+        actor_subject: str = "",
+        namespace: str = "",
+        request: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+        check_active: bool = True,
+    ) -> dict[str, Any] | None:
+        """Replay only a matching principal, namespace and exact command; never a global key."""
+        fingerprint = self._request_hash(kind, service_id, action, request if request is not None else params or {})
+        subject, namespace = actor_subject or f"actor:{actor}", namespace or f"jobs:{kind}"
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE idempotency_key = ?", (key,)).fetchone()
-        return dict(row) if row else None
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            previous = self._replay(conn, key, subject, namespace, fingerprint) if key else None
+            if previous or not check_active:
+                return previous
+            active = conn.execute(
+                "SELECT * FROM jobs WHERE service_id = ? AND state IN ('queued', 'running', 'waiting_for_confirmation')",
+                (service_id,),
+            ).fetchone()
+            if not active:
+                return None
+            if (active["actor_subject"], active["request_namespace"], active["request_hash"]) != (
+                subject,
+                namespace,
+                fingerprint,
+            ):
+                raise JobConflict("resource_busy", str(active["id"]))
+            self._remember_request(conn, key, subject, namespace, fingerprint, str(active["id"]))
+            return dict(active)
 
     def retry(
         self,
@@ -362,26 +468,48 @@ class JobStore:
         actor: str,
         idempotency_key: str | None = None,
         prepare: Callable[[str], None] | None = None,
+        actor_subject: str = "",
+        commit_state: Callable[[str], object] | None = None,
     ) -> dict[str, str]:
         """Queue a new attempt from a retryable terminal/waiting record."""
         with self._connect() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        if not row:
-            raise KeyError(job_id)
-        if row["state"] not in {"failed", "waiting_for_confirmation"}:
-            raise ValueError("job is not retryable")
-        if row["state"] == "waiting_for_confirmation":
-            self.transition(job_id, "cancelled", actor=actor, detail="Superseded by an explicit retry.")
-        return self.create(
-            kind=str(row["kind"]),
-            service_id=str(row["service_id"]),
-            action=str(row["action"]),
-            actor=actor,
-            detail=f"Retry of job {job_id}",
-            idempotency_key=idempotency_key,
-            prepare=prepare,
-            params=job_params(dict(row)),
-        )
+            if not row:
+                raise KeyError(job_id)
+            retry_request = {"original_job_id": job_id}
+            previous = self.by_idempotency_key(
+                idempotency_key or "",
+                kind=str(row["kind"]),
+                service_id=str(row["service_id"]),
+                action=str(row["action"]),
+                actor=actor,
+                actor_subject=actor_subject,
+                namespace="jobs.retry",
+                request=retry_request,
+                check_active=False,
+            )
+            if previous:
+                return {key: str(previous[key]) for key in ("id", "state", "created_at")}
+            if row["state"] not in {"failed", "waiting_for_confirmation"}:
+                raise ValueError("job is not retryable")
+            if row["state"] == "waiting_for_confirmation":
+                self.transition(job_id, "cancelled", actor=actor, detail="Superseded by an explicit retry.")
+            return self.create(
+                kind=str(row["kind"]),
+                service_id=str(row["service_id"]),
+                action=str(row["action"]),
+                actor=actor,
+                actor_subject=actor_subject,
+                namespace="jobs.retry",
+                request=retry_request,
+                detail=f"Retry of job {job_id}",
+                idempotency_key=idempotency_key,
+                prepare=prepare,
+                params=job_params(dict(row)),
+                commit_state=commit_state,
+            )
 
     def cancel(self, job_id: str, *, actor: str) -> str:
         """Cancel a job; a running one stops at its next checkpoint.
@@ -391,7 +519,8 @@ class JobStore:
         """
         now = _now()
         with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT state FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if not row:
                 raise KeyError(job_id)
