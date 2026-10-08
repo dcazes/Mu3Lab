@@ -5,17 +5,18 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from ctl import process
 from ctl.control_state import ControlState
 
 
 def detect() -> str:
     try:
-        if subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=4).returncode == 0:
+        if process.completed(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=4).returncode == 0:
             return "nvidia"
     except (OSError, subprocess.SubprocessError):
         pass
     try:
-        pci = subprocess.run(["lspci"], capture_output=True, text=True, timeout=4).stdout.lower()
+        pci = process.completed(["lspci"], capture_output=True, text=True, timeout=4).stdout.lower()
     except (OSError, subprocess.SubprocessError):
         pci = ""
     return "amd" if "amd" in pci or "advanced micro devices" in pci else "cpu"

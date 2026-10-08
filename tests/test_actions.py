@@ -343,3 +343,39 @@ class ComposeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StreamingTests(unittest.TestCase):
+    """R35: a cancelled job must not abandon a running Docker command."""
+
+    def test_interrupting_log_lets_the_command_finish_and_reraises(self):
+        import tempfile
+
+        from ctl import job_guard
+
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "finished"
+            child = [
+                sys.executable,
+                "-c",
+                f"import time; print('pulling', flush=True); time.sleep(0.5); open({str(marker)!r}, 'w').write('x')",
+            ]
+            seen = []
+
+            def log(line):
+                seen.append(line)
+                if line == "pulling":
+                    raise job_guard.JobInterrupted(job_guard.CANCELLED)
+
+            with (
+                patch("ctl.actions._docker_invocation", return_value=child),
+                self.assertRaises(job_guard.JobInterrupted),
+            ):
+                actions.docker_cmd_stream(["docker", "pull", "x"], log, timeout=10)
+            self.assertTrue(marker.exists())
+        self.assertEqual(seen, ["$ docker pull x", "pulling"])
+
+    def test_stream_timeout_reports_124(self):
+        child = [sys.executable, "-c", "import time; time.sleep(30)"]
+        with patch("ctl.actions._docker_invocation", return_value=child):
+            self.assertEqual(actions.docker_cmd_stream(["docker", "pull", "x"], _silent, timeout=1)[0], 124)

@@ -202,7 +202,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R32](#r32) | Measure footprint and simplify first-use/recovery journeys | P2 | D | M | R14, R20, R31 | open |
 | [R33](#r33) | Reconcile documentation, promises, and expansion status | P1 | S | S | Immediate caveats; final wording follows fixes | in progress |
 | [R34](#r34) | Establish per-integration ownership and acceptance evidence | P2 | D | L | R25, R29 | open |
-| [R35](#r35) | Make subprocess output, deadlines, and cleanup truly bounded | P1 | S | M | — | open |
+| [R35](#r35) | Make subprocess output, deadlines, and cleanup truly bounded | P1 | S | M | — | implemented; release acceptance pending |
 
 For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link`, and `Remaining limitations` in its finding section when implementation starts. An empty assignment means unassigned, not implicitly assigned to the reviewer. Use the R-number in commits/PRs and link back here. Keep status in this table as the authoritative review tracker; expansion task IDs remain in the expansion tracker.
 
@@ -602,6 +602,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r35"></a>
 
 ### R35 — Subprocess execution is not bounded for all failure paths
+
+**Implementation progress (2026-10-08):** One runner, [ctl/process.py](../../ctl/process.py), now executes every privileged, Docker, self-update, uv and status-probe command. It applies one monotonic deadline to the whole command, drains stdout and stderr concurrently, keeps a byte-bounded output tail with a dropped-line count, caps both line length and the number of lines written to job logs, and runs the child in its own session so a timeout terminates and reaps the whole process group (including `sg docker -c` grandchildren). A raising log callback (a cancelled job) no longer abandons the command: output keeps draining until it exits, then the interruption is re-raised. Restic containers are now named and labelled; a timed-out container is stopped, and a data-changing restic command waits for (or refuses to race) a container that survived an earlier attempt. `self_update._new_code` no longer drains stderr before stdout and has a deadline. Branch: `fix/review-milestone-b`. Tests: `tests/test_process.py`, streaming cases in `tests/test_actions.py`, container cases in `tests/test_backups.py`. Remaining: the Bitwarden CLI and installer-only `dpkg`/`tailscale` probes still use `subprocess.run` with timeouts; general Docker-operation identity and reconciliation for other containers belongs to R10; VM acceptance (floods, hung children, surviving container) is pending.
 
 **Evidence:** [actions.docker_cmd_stream](../../ctl/actions.py) bounds individual line length but accumulates an unbounded list and queue. After output ends, `proc.wait()` has no remaining deadline. If a log callback raises `JobInterrupted`, cleanup is not protected by a `finally`. [self_update._new_code](../../ctl/self_update.py) sequentially drains stderr then stdout and can deadlock on a full stdout pipe. Killing a Docker CLI does not by itself prove its containerized operation stopped.
 

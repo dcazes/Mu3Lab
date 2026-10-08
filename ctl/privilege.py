@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import os
 import shlex
-import subprocess
 from collections.abc import Callable
 
-from ctl import job_guard
+from ctl import job_guard, process
 
 SESSION_EXPIRED = (
     "Mu3Lab no longer has administrator access. Go back to the terminal window, "
@@ -37,15 +36,10 @@ def _exec(argv: list[str], timeout: int = 300, env: dict | None = None) -> tuple
     inherits the environment unchanged.
     """
     job_guard.checkpoint()
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env={**os.environ, **(env or {})})
-        return proc.returncode, (proc.stdout + proc.stderr).strip()
-    except FileNotFoundError:
-        return 127, f"{argv[0]}: command not found"
-    except subprocess.TimeoutExpired:
+    result = process.run(argv, timeout=timeout, env={**os.environ, **(env or {})})
+    if result.status == "timeout":
         return 124, f"{argv[0]}: timed out"
-    except OSError as exc:
-        return 126, f"{argv[0]}: {exc}"
+    return result.returncode, result.output
 
 
 def has_fresh_sudo(_exec=_exec) -> bool:

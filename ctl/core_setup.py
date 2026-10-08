@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions
+from ctl import actions, process
 from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
@@ -44,7 +44,7 @@ def capacity() -> dict:
         pass
     try:
         docker_ready = (
-            subprocess.run(actions.docker_argv(["docker", "info"]), capture_output=True, timeout=5).returncode == 0
+            process.completed(actions.docker_argv(["docker", "info"]), capture_output=True, timeout=5).returncode == 0
         )
     except (OSError, subprocess.SubprocessError):
         docker_ready = False

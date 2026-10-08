@@ -18,6 +18,7 @@ import re
 import secrets
 import shutil
 import tempfile
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -37,6 +38,13 @@ HOST = "mu3lab"
 REASONS = frozenset({"manual", "pre-update", "pre-restore"})
 _SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
 _VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
+# Every restic container carries this label so one that outlived its Docker
+# CLI (a timeout, a worker restart) can be found before anything else runs.
+CONTAINER_LABEL = "mu3lab.role=restic"
+# Commands that change the repository or an app's data.
+MUTATING = frozenset({"init", "backup", "check", "forget", "restore"})
+SURVIVOR_WAIT_SECONDS = 1800
+STOP_SECONDS = 30
 
 Log = Callable[[str], None]
 
@@ -115,7 +123,19 @@ def _restic(
     paths: RuntimePaths,
     timeout: int = 3600,
 ) -> tuple[int, str]:
-    """Run one restic command against the local repository in its pinned container."""
+    """Run one restic command against the local repository in its pinned container.
+
+    The container is named and labelled. Before a command that changes data
+    runs, any restic container still running from an earlier attempt is waited
+    for, so a retried restore never races the previous one. If this command
+    times out, its container is stopped before returning: killing the Docker
+    CLI alone would leave restic writing.
+    """
+    if args and args[0] in MUTATING:
+        survivor = _wait_for_survivors(log)
+        if survivor:
+            return 1, survivor
+    name = f"mu3lab-restic-{secrets.token_hex(6)}"
     with tempfile.TemporaryDirectory(prefix="mu3lab-restic-") as temporary:
         password_file = Path(temporary) / "password"
         write_atomic(password_file, _repository_password(paths).encode())
@@ -123,6 +143,10 @@ def _restic(
             "docker",
             "run",
             "--rm",
+            "--name",
+            name,
+            "--label",
+            CONTAINER_LABEL,
             "--network",
             "none",
             "--hostname",
@@ -139,7 +163,39 @@ def _restic(
         for source, target, read_only in mounts:
             command.extend(["-v", f"{source}:{target}{':ro' if read_only else ''}"])
         command.extend([RESTIC_IMAGE, "--no-cache", "--retry-lock", "10m", *args])
-        return actions.docker_cmd(command, log, timeout=timeout)
+        rc, output = actions.docker_cmd(command, log, timeout=timeout)
+        if rc == 124:
+            _stop_container(name, log)
+        return rc, output
+
+
+def _running_restic() -> list[str]:
+    rc, output = actions.docker_cmd(
+        ["docker", "ps", "--quiet", "--filter", f"label={CONTAINER_LABEL}"], lambda _line: None, timeout=30
+    )
+    return output.split() if rc == 0 else []
+
+
+def _wait_for_survivors(log: Log) -> str:
+    """Wait for earlier restic containers to exit; return an error if they don't."""
+    deadline = time.monotonic() + SURVIVOR_WAIT_SECONDS
+    running = _running_restic()
+    if running:
+        log("A backup command from an earlier attempt is still running; waiting for it to finish.")
+    while running:
+        if time.monotonic() >= deadline:
+            return (
+                "A backup command from an earlier attempt is still running, so nothing was changed. "
+                "Try again once it has finished."
+            )
+        time.sleep(5)
+        running = _running_restic()
+    return ""
+
+
+def _stop_container(name: str, log: Log) -> None:
+    """Stop a restic container that outlived its command; restic exits cleanly on SIGTERM."""
+    actions.docker_cmd(["docker", "stop", "--time", str(STOP_SECONDS), name], log, timeout=STOP_SECONDS + 30)
 
 
 def _json_lines(output: str) -> list[Any]:

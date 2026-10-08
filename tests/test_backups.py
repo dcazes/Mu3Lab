@@ -68,12 +68,17 @@ class ResticTests(unittest.TestCase):
         self.mealie = self.paths.data / "mealie"
         self.mealie.mkdir()
         self.calls: list[list[str]] = []
+        self.bookkeeping: list[list[str]] = []
 
     def tearDown(self):
         self.temp.cleanup()
 
     def docker(self, outputs):
         def run(argv, _log, timeout=300):
+            if backups.RESTIC_IMAGE not in argv:
+                # Container bookkeeping: none survive unless a test says so.
+                self.bookkeeping.append(argv)
+                return outputs.get(argv[1], (0, ""))
             self.calls.append(argv)
             command = argv[argv.index(backups.RESTIC_IMAGE) + 4]
             return outputs.get(command, (0, ""))
@@ -134,3 +139,48 @@ class ResticTests(unittest.TestCase):
         self.assertEqual(listed[0]["reason"], "pre-update")
         self.assertEqual(listed[0]["version"], "v3.22.0")
         self.assertEqual(listed[0]["short_id"], "aaaaaaaa")
+
+    def test_restic_containers_are_named_and_labelled(self):
+        with self.docker({"snapshots": (0, "[]")}):
+            backups.snapshots("mealie", paths=self.paths)
+        listing = self.calls[0]
+        self.assertIn(backups.CONTAINER_LABEL, listing)
+        self.assertTrue(listing[listing.index("--name") + 1].startswith("mu3lab-restic-"))
+        # A read-only listing never waits for other restic containers.
+        self.assertEqual(self.bookkeeping, [])
+
+    def test_a_restic_container_that_outlives_a_timeout_is_stopped(self):
+        with (
+            self.docker({"backup": (124, "docker: timed out")}),
+            self.assertRaisesRegex(BackupError, "did not complete"),
+        ):
+            backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
+        name = self.calls[0][self.calls[0].index("--name") + 1]
+        self.assertIn(["docker", "stop", "--time", str(backups.STOP_SECONDS), name], self.bookkeeping)
+
+    def test_a_surviving_restic_container_blocks_a_data_change(self):
+        with (
+            self.docker({"ps": (0, "abc123\n")}),
+            patch("ctl.backups.time.sleep"),
+            patch("ctl.backups.SURVIVOR_WAIT_SECONDS", 0),
+            self.assertRaisesRegex(BackupError, "earlier attempt is still running"),
+        ):
+            backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
+        self.assertEqual(self.calls, [])
+
+    def test_a_finished_survivor_lets_the_data_change_continue(self):
+        answers = iter([(0, "abc123\n"), (0, "")])
+        summary = json.dumps({"message_type": "summary", "snapshot_id": "b" * 64})
+        outputs = {"backup": (0, summary)}
+
+        def run(argv, _log, timeout=300):
+            if backups.RESTIC_IMAGE not in argv:
+                return next(answers, (0, ""))
+            self.calls.append(argv)
+            return outputs.get(argv[argv.index(backups.RESTIC_IMAGE) + 4], (0, ""))
+
+        lines: list[str] = []
+        with patch("ctl.backups.actions.docker_cmd", side_effect=run), patch("ctl.backups.time.sleep"):
+            backups.snapshot("mealie", [self.mealie], "manual", lines.append, paths=self.paths)
+        self.assertIn("still running; waiting", lines[0])
+        self.assertEqual(self.calls[0][self.calls[0].index(backups.RESTIC_IMAGE) + 4], "backup")

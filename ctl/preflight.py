@@ -28,6 +28,7 @@ import socket
 import subprocess
 from pathlib import Path
 
+from ctl import process
 from ctl.platform_apps import by_capability
 
 # ---------------------------------------------------------------------------
@@ -105,12 +106,7 @@ def _run(argv: list[str], timeout: int = 10) -> tuple[int, str]:
     exception. stdout+stderr are merged because error text is diagnostic.
     """
     try:
-        proc = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        proc = process.completed(argv, timeout=timeout)
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except FileNotFoundError:
         return 127, f"{argv[0]}: command not found"

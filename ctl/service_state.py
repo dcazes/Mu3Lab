@@ -17,12 +17,13 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ctl import process
 from ctl.actions import docker_argv
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
 
-def tailscale_status(run=subprocess.run) -> dict[str, object]:
+def tailscale_status(run=process.completed) -> dict[str, object]:
     """Return a minimal, sanitized projection of this node's Tailscale status."""
     try:
         proc = run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5)
@@ -83,7 +84,7 @@ def tailscale_status(run=subprocess.run) -> dict[str, object]:
     }
 
 
-def tailnet_dns_name(run=subprocess.run) -> str:
+def tailnet_dns_name(run=process.completed) -> str:
     """Return this node's MagicDNS name without exposing local fallback URLs."""
     return str(tailscale_status(run=run)["dns_name"])
 
@@ -169,7 +170,7 @@ def route_answers(url: str, now=time.monotonic) -> bool:
 def _tailnet_route_present(port: int) -> bool | None:
     """Check only the local Tailscale Serve configuration; None when it cannot be read."""
     try:
-        proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=5)
+        proc = process.completed(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
@@ -177,7 +178,7 @@ def _tailnet_route_present(port: int) -> bool | None:
     return port in serve_ports(proc.stdout)
 
 
-def tailnet_serve_status(run=subprocess.run) -> dict[str, object]:
+def tailnet_serve_status(run=process.completed) -> dict[str, object]:
     """Return whether local Serve status is readable and its HTTPS ports."""
     try:
         proc = run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=5)
@@ -212,7 +213,7 @@ def tailnet_serve_ports() -> set[int]:
     return {int(port) for port in ports} if isinstance(ports, list) else set()
 
 
-def _compose_state(compose_file: Path, run=subprocess.run) -> str:
+def _compose_state(compose_file: Path, run=process.completed) -> str:
     """Read containers by Compose labels without evaluating private env files."""
     try:
         proc = run(
@@ -262,7 +263,7 @@ def _compose_state(compose_file: Path, run=subprocess.run) -> str:
     return "stopped"
 
 
-def compose_states(run=subprocess.run) -> dict[str, str]:
+def compose_states(run=process.completed) -> dict[str, str]:
     """Inspect all Compose working directories with one bounded Docker call."""
     try:
         proc = run(
@@ -308,7 +309,7 @@ def _memory_bytes(text: str) -> int | None:
     return int(float(match.group(1)) * _MEM_UNITS.get(match.group(2).lower(), 1))
 
 
-def container_memory(run=subprocess.run, now=time.monotonic) -> dict[str, int]:
+def container_memory(run=process.completed, now=time.monotonic) -> dict[str, int]:
     """Memory in bytes used by each running container, keyed by container name.
 
     ``docker stats`` samples for about a second and the dashboard polls every
@@ -339,7 +340,7 @@ def container_memory(run=subprocess.run, now=time.monotonic) -> dict[str, int]:
     return usage
 
 
-def compose_snapshot(run=subprocess.run) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
+def compose_snapshot(run=process.completed) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
     """Inspect all Compose projects and safe container fields in one Docker call."""
     try:
         proc = run(

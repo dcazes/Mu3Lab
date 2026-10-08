@@ -176,7 +176,7 @@ class SystemTailscaleContractTests(unittest.TestCase):
             patch("ctl.status.host.psutil.disk_usage", return_value=SimpleNamespace(total=500, used=200, percent=40)),
             patch("ctl.status.host.psutil.cpu_percent", return_value=2.0),
             patch("ctl.status.host.psutil.boot_time", return_value=1),
-            patch("ctl.status.host.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="active\n")),
+            patch("ctl.status.host.process.completed", return_value=SimpleNamespace(returncode=0, stdout="active\n")),
             patch("ctl.status.host.RuntimePaths") as runtime_paths,
             patch("ctl.status.host.backup_readiness", return_value={}),
             patch("ctl.status.host.container_memory", return_value={"mu3lab-ollama": 5}),

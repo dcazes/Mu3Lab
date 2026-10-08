@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ctl import job_guard, platform_releases, toolchain
+from ctl import job_guard, platform_releases, process, toolchain
 from ctl.jobs import JobStore
 
 if TYPE_CHECKING:
@@ -41,6 +41,8 @@ UNATTENDED = frozenset({"dashboard_build", "dashboard_protection", "core_images"
 # Restarting the dashboard and worker happens last, after the job is recorded.
 RESTART_STEP = "service"
 FETCH_TTL_SECONDS = 600
+# ``finish`` can rebuild the dashboard and download core images.
+NEW_CODE_TIMEOUTS = {"plan": 600, "finish": 4 * 3600}
 UNITS = ("mu3lab-ctl.service", "mu3lab-worker.service")
 
 Log = Callable[[str], None]
@@ -49,9 +51,7 @@ _cache: dict[str, Any] = {}
 
 def _git(root: Path, *args: str, timeout: int = 60) -> tuple[int, str]:
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, timeout=timeout, check=False
-        )
+        proc = process.completed(["git", "-C", str(root), *args], timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
     return proc.returncode, (proc.stdout if proc.returncode == 0 else proc.stderr).strip()
@@ -223,16 +223,18 @@ class _Failed(Exception):
 def _new_code(root: Path, command: str, log: Log) -> dict[str, Any]:
     """Run ``plan`` or ``finish`` from the checkout as it is now on disk."""
     argv = [str(root / ".venv" / "bin" / "python"), "-m", "ctl.self_update", command]
-    try:
-        proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-    except OSError as exc:
-        return {"ok": False, "error": str(exc)}
-    assert proc.stderr is not None and proc.stdout is not None
-    for line in proc.stderr:
+
+    def progress(line: str) -> None:
         if line.strip():
-            log(line.rstrip())
-    output = proc.stdout.read().strip().splitlines()
-    proc.wait()
+            log(line)
+
+    # stderr carries progress, stdout the one-line JSON result; both drain at once.
+    ran = process.run(argv, cwd=root, timeout=NEW_CODE_TIMEOUTS[command], on_line=progress, echo="stderr")
+    if ran.status in {"not_found", "error"}:
+        return {"ok": False, "error": ran.output}
+    if ran.status == "timeout":
+        return {"ok": False, "error": f"The new release's {command} step did not finish in time."}
+    output = ran.stdout.splitlines()
     try:
         result = json.loads(output[-1]) if output else {}
     except ValueError:
@@ -250,7 +252,7 @@ def _python_packages(root: Path, log: Log) -> None:
 
 def _run(argv: list[str], root: Path, timeout: int = 1800) -> tuple[int, str]:
     try:
-        proc = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=timeout, check=False)
+        proc = process.completed(argv, cwd=root, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)
     return proc.returncode, (proc.stdout + proc.stderr).strip()

@@ -7,6 +7,7 @@ import time
 
 import psutil
 
+from ctl import process
 from ctl.actions import docker_argv
 from ctl.backups import readiness as backup_readiness
 from ctl.runtime import RuntimePaths
@@ -16,7 +17,7 @@ from ctl.service_state import container_memory, tailnet_serve_status, tailscale_
 def _worker_state() -> str:
     """systemd's word for the background worker ("active", "failed", ...), or "unknown"."""
     try:
-        proc = subprocess.run(
+        proc = process.completed(
             ["systemctl", "--user", "is-active", "mu3lab-worker.service"], capture_output=True, text=True, timeout=5
         )
     except (OSError, subprocess.SubprocessError):
@@ -32,7 +33,8 @@ def observe_system() -> dict:
     disk = psutil.disk_usage(str(RuntimePaths().root.parent))
     try:
         docker = (
-            subprocess.run(docker_argv(["docker", "info"]), capture_output=True, text=True, timeout=5).returncode == 0
+            process.completed(docker_argv(["docker", "info"]), capture_output=True, text=True, timeout=5).returncode
+            == 0
         )
     except (OSError, subprocess.SubprocessError):
         docker = False
