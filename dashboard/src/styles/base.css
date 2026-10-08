@@ -67,6 +67,10 @@ svg {
   color: var(--red);
 }
 
+.warning-text {
+  color: var(--amber);
+}
+
 .danger-text {
   color: var(--red) !important;
 }

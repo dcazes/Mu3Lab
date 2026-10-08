@@ -174,7 +174,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R04](#r04) | Stop retrying ambiguous non-idempotent tool writes | P1 | R | S | — | implemented |
 | [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | implemented; release acceptance pending |
 | [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | implemented; release acceptance pending |
-| [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | open |
+| [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | implemented; release acceptance pending |
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
 | [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | open |
 | [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | open |
@@ -320,6 +320,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r07"></a>
 
 ### R07 — Deactivation can leave external credentials active without durable retry
+
+**Implementation progress (2026-10-08):** Implemented for Mu3Lab-issued credentials (owner decision). Deactivation and demotion record a local access hold first; Mu3Lab's API honours it on the next request and chat tool credentials end before the answer. Authentik account, sessions and tokens, group changes, gateway credentials, voice key and chat assistants are revoked as durable tasks with backoff until done; the People page shows pending revocations. Reconciliation no longer re-grants held subjects. Native app tokens are documented per app as residual risk. Owner: Claude. Commit: `fix(R07): make deactivation and demotion durable`. Verified on: pending real-Authentik and disposable-install acceptance. Details: [status, gateway and revocation record](2026-10-08-status-gateway-revocation-implementation.md#r07--durable-deactivation-and-demotion).
 
 **Evidence:** [people route](../../ctl/api/routes/people.py) updates Authentik, attempts voice-key revocation, logs a `LiteLLMError`, and returns success. There is no durable pending-revocation job there. [chat synchronization](../../ctl/lobehub_ops.py) iterates saved chat connections without an active-household filter. App-issued mobile/API tokens may have independent lifetimes; these need per-app verification.
 

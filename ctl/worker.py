@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from ctl import job_guard, self_update
+from ctl import access, job_guard, self_update
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.jobs import JobStore
@@ -111,6 +111,7 @@ def run() -> int:
     download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
     status_thread = reconciler.start(downloads_stopping)
     sign_in.start(downloads_stopping, lambda line: print(line, flush=True))
+    access.start(downloads_stopping, lambda line: print(line, flush=True))
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait

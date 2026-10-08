@@ -132,3 +132,89 @@ trickling and oversized upstream bodies; and through a real bounded HTTP server:
 malformed params, oversized body, per-person 429 with `Retry-After`, concurrent slow
 tools bounded per person, slow client body cut off with 408, excess connections
 refused, liveness independent of readiness.
+
+## R07 — durable deactivation and demotion
+
+### Contract
+
+`ctl/access.py` and migration `0004_access_revocation.sql` add two tables:
+
+- `access_holds`, keyed by Authentik subject: `deactivated` or `demoted`, with who
+  recorded it and when. This is Mu3Lab's record of intent.
+- `access_revocations`: one row per (subject, target) with `pending`/`done`,
+  attempts, next attempt time and a redacted last error. Rows cascade with their hold.
+
+| Change | Immediate effect | Retried revocation targets |
+| --- | --- | --- |
+| Deactivate | Hold recorded before any external call. `resolve_identity` treats the subject as signed out of Mu3Lab (no role, no writes) whatever the Authentik session still claims. Chat tool (gateway) credentials are revoked before the API answers. | Authentik account disabled; Authentik browser sessions and tokens (including app passwords) deleted; gateway credentials and pending approvals revoked; voice key deleted; Mu3Lab chat assistants detached from their tools (conversations and agents kept). |
+| Demote administrator | Hold recorded; Mu3Lab treats the subject as a household member at once. | Administrator and Authentik superuser groups removed; gateway credentials revoked; chat assistants detached. |
+| Reactivate | Deactivation hold and its outstanding tasks removed; Authentik account re-enabled. An unfinished demotion is re-recorded so reactivation cannot hand back an administrator role. | — |
+| Promote | Demotion hold removed. | — |
+
+A failed Authentik call during deactivation or demotion no longer fails the change:
+the hold already denies Mu3Lab access and the Authentik task is retried. The person
+lookup and the last-administrator check still need Authentik. A held administrator
+no longer counts toward "at least one administrator". `operator_subjects()` excludes
+held subjects, so chat synchronization cannot re-grant them gateway credentials; it
+already removes managed assistants for anyone who is not a current operator.
+
+The worker runs due tasks on its own thread every 30 seconds, independent of jobs.
+Failures back off 30 s, 60 s, 120 s … up to one hour, and continue until done. The
+people API also starts an immediate attempt in the background after a change, so the
+common case finishes within seconds. Tasks are idempotent and check that a username
+still belongs to the same subject before touching an Authentik account.
+
+The People page shows "Sign-in disabled; N access revocations pending" (or
+"Administrator access removed; …") with the last problem, and polls every 5 seconds
+while anything is pending. The removal confirmation now says that some apps' own
+mobile logins can keep working until they expire.
+
+### Residual risk: native app sessions and tokens
+
+Disabling the Authentik account and deleting its sessions stops new sign-ins
+everywhere and stops Authentik-gated requests. It does not reach credentials an
+app issued itself after a successful sign-in. These are expected behaviours from
+each app's design and have not yet been verified against each pinned version; that
+verification is part of release acceptance.
+
+| App | Sign-in | What can keep working after deactivation | Owner action until per-app revocation exists |
+| --- | --- | --- | --- |
+| Immich | OIDC | Existing web/mobile sessions and personal API keys | Delete the user's sessions/keys or the user in Immich administration |
+| Nextcloud | OIDC | Web session; app passwords and device tokens used by desktop/mobile sync | Disable the user in Nextcloud Users, which also blocks app passwords |
+| Paperless-ngx | OIDC | Web session; REST API tokens (mobile apps) | Delete the user's token or disable the user in Paperless administration |
+| Audiobookshelf | OIDC | Mobile app tokens | Disable the user in Audiobookshelf settings |
+| Mealie | OIDC | Session token; long-lived API tokens | Delete the user's API tokens or the user in Mealie administration |
+| Actual Budget | OIDC | Existing session token until it expires or is logged out | Remove the user in Actual's user management |
+| AdventureLog | OIDC | Existing web session | Deactivate the user in AdventureLog administration |
+| Dawarich | OIDC | Per-user API key used by location-tracking apps (uploads continue) | Rotate the user's API key or remove the user in Dawarich |
+| Open WebUI | OIDC | Session token (lifetime is Open WebUI's JWT setting) and API keys | Set the user's role to pending or delete the user in Open WebUI |
+| Outline | OIDC | Web session; API tokens | Suspend the user in Outline settings |
+| RomM | OIDC | Existing web session | Disable the user in RomM administration |
+| LobeHub (chat) | OIDC | Existing chat browser session until it expires. Mu3Lab's own chat key for the person stays with Mu3Lab; its assistants lose their tools. | None for Mu3Lab-managed tools; sign the person out in LobeHub if it offers it |
+| Grocy, Baby Buddy, Beaver Habits | Authentik trusted header | Every request passes the Authentik outpost; access ends with the deleted session. Grocy API keys the person created remain. | Delete the person's Grocy API keys |
+| LiteLLM, FreeLLMAPI, SurfSense | Authentik gate | Gated by the outpost; app-local logins behind the gate are administrator accounts, not per person. Voice keys are revoked by Mu3Lab. | — |
+| Vaultwarden | Separate login | The person's vault account and its device sessions are independent of Authentik and are not disabled. | Disable or delete the user in the Vaultwarden admin page if their vault access should end |
+
+### Tests
+
+`tests/test_access_revocation.py`: deactivation while voice and chat are down denies
+Mu3Lab access at once, revokes gateway credentials before the answer, keeps the two
+failed targets pending with their reason, respects backoff, and completes after
+recovery without another request; backoff doubling and cap; Authentik outage keeps
+the deactivation and finishes later; held subjects get no operator credentials;
+reactivation releases and cancels; repeat deactivation re-queues; a pending hold
+does not count as an administrator; demotion keeps membership but removes
+administration, retries a failed group change, survives deactivate/reactivate, and is
+released by promotion; session and token deletion is limited to the person; a
+reused username belonging to someone else is never touched; a held operator's
+session is refused administration through the real API; an unreadable store fails
+closed. `tests/test_people.py` keeps passing on an isolated store.
+
+### Remaining R07 acceptance
+
+- Real Authentik: confirm session and token endpoints and filters on the pinned
+  version, and that deleted sessions end outpost-gated access promptly.
+- Disposable install: deactivate someone while LiteLLM and chat are stopped, start
+  them, and watch the People page reach "complete" with no further action.
+- Verify each row of the residual-risk table against the pinned app versions;
+  per-app revocation where an API exists is later work.

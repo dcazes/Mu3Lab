@@ -15,7 +15,9 @@ from ctl.integrations.authentik import Authentik
 from ctl.runtime import RuntimePaths
 
 
-class PeopleTests(unittest.TestCase):
+class AuthentikFixture:
+    """A fake Authentik REST API holding a small household."""
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -33,9 +35,10 @@ class PeopleTests(unittest.TestCase):
         runtime = patch("ctl.people.Authentik.runtime", return_value=client)
         runtime.start()
         self.addCleanup(runtime.stop)
-        paths = patch("ctl.people.RuntimePaths", return_value=RuntimePaths(Path(temporary.name)))
-        paths.start()
-        self.addCleanup(paths.stop)
+        for module in ("ctl.people", "ctl.access"):
+            paths = patch(f"{module}.RuntimePaths", return_value=RuntimePaths(Path(temporary.name)))
+            paths.start()
+            self.addCleanup(paths.stop)
 
     def _user(self, pk, username, groups):
         return {
@@ -86,6 +89,8 @@ class PeopleTests(unittest.TestCase):
             return httpx.Response(200, json=user)
         self.fail(f"Unexpected REST request: {request.method} {path}")
 
+
+class PeopleTests(AuthentikFixture, unittest.TestCase):
     def test_listing_filters_service_users_and_outsiders(self):
         result = people.list_people()
         self.assertEqual([user["username"] for user in result], ["member", "owner"])

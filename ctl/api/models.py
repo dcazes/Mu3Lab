@@ -970,6 +970,15 @@ class OkResponse(ApiModel):
     id: str | None = None
 
 
+class PersonAccess(ApiModel):
+    kind: Literal["deactivated", "demoted"]
+    state: Literal["pending", "complete"]
+    pending: int
+    pending_targets: list[str]
+    detail: str
+    since: str
+
+
 class Person(ApiModel):
     username: str
     uid: str
@@ -978,6 +987,7 @@ class Person(ApiModel):
     role: Literal["admin", "member", ""]
     active: bool
     last_login: str
+    access: PersonAccess | None = None
 
 
 class PeopleResponse(ApiModel):

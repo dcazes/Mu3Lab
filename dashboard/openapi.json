@@ -3393,6 +3393,16 @@
       },
       "Person": {
         "properties": {
+          "access": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonAccess"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "active": {
             "title": "Active",
             "type": "boolean"
@@ -3437,6 +3447,55 @@
           "last_login"
         ],
         "title": "Person",
+        "type": "object"
+      },
+      "PersonAccess": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "deactivated",
+              "demoted"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "pending_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Targets",
+            "type": "array"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "complete"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "pending",
+          "pending_targets",
+          "detail",
+          "since"
+        ],
+        "title": "PersonAccess",
         "type": "object"
       },
       "PersonChangeRequest": {

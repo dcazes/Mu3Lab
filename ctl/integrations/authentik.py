@@ -196,6 +196,26 @@ class Authentik:
         data = self.request("POST", f"/core/users/{pk}/recovery/", json={"token_duration": f"hours={hours}"})
         return str(data["link"])
 
+    def end_sessions(self, username: str) -> int:
+        """Delete a person's Authentik browser sessions and their API/app-password tokens."""
+
+        def owned(item: dict[str, Any], field: str) -> bool:
+            # The filter is authoritative; an embedded owner, when present, must agree.
+            owner = item.get(field)
+            return not isinstance(owner, dict) or owner.get("username") == username
+
+        ended = 0
+        params = {"user__username": username}
+        for session in list(self._all("/core/authenticated_sessions/", params)):
+            if owned(session, "user"):
+                self.request("DELETE", f"/core/authenticated_sessions/{session['uuid']}/")
+                ended += 1
+        for token in list(self._all("/core/tokens/", params)):
+            if owned(token, "user_obj"):
+                self.request("DELETE", f"/core/tokens/{token['identifier']}/")
+                ended += 1
+        return ended
+
     def group(self, name: str, *, create: bool = True) -> dict[str, Any] | None:
         found = next((item for item in self._all("/core/groups/", {"name": name}) if item["name"] == name), None)
         if found is None and create:

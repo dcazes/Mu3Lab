@@ -2446,6 +2446,7 @@ export interface components {
     };
     /** Person */
     Person: {
+      access?: components['schemas']['PersonAccess'] | null;
       /** Active */
       active: boolean;
       /** Email */
@@ -2463,6 +2464,27 @@ export interface components {
       uid: string;
       /** Username */
       username: string;
+    };
+    /** PersonAccess */
+    PersonAccess: {
+      /** Detail */
+      detail: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'deactivated' | 'demoted';
+      /** Pending */
+      pending: number;
+      /** Pending Targets */
+      pending_targets: string[];
+      /** Since */
+      since: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'pending' | 'complete';
     };
     /** PersonChangeRequest */
     PersonChangeRequest: {

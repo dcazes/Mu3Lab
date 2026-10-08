@@ -75,6 +75,7 @@ export type OkResponse = components['schemas']['OkResponse'];
 export type ParallelDownloadsRequest = components['schemas']['ParallelDownloadsRequest'];
 export type PeopleResponse = components['schemas']['PeopleResponse'];
 export type Person = components['schemas']['Person'];
+export type PersonAccess = components['schemas']['PersonAccess'];
 export type PersonChangeRequest = components['schemas']['PersonChangeRequest'];
 export type PersonInvite = components['schemas']['PersonInvite'];
 export type PersonRequest = components['schemas']['PersonRequest'];
