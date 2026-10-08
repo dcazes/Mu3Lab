@@ -1,5 +1,7 @@
 # Priority security implementation — 2026-10-08
 
+> **Superseded status (2026-10-08):** this is a historical record of one tranche. Statuses it gives for R02, R03, R05 and R20 were later advanced; the [review tracker](2026-10-07-project-review.md#4-prioritized-change-tracker) is authoritative, and the [gateway authority](2026-10-08-gateway-authority-implementation.md) and [status/gateway/revocation](2026-10-08-status-gateway-revocation-implementation.md) records describe the later work.
+
 This records the first implementation tranche of the [project review](2026-10-07-project-review.md), specifically A1, A2 and the immediate protections in A3. It does not claim completion of all 35 findings or the rest of Milestone A.
 
 ## Branch and checkpoint

@@ -719,7 +719,7 @@ The owner authorized implementation on 2026-10-08, starting with the highest-pri
 - [x] **A4:** R08 scoped request identity and explicit busy/conflict responses.
 - [x] **A5:** R20 truthful route readiness, plus immediate R33 caveats.
 
-A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). A4 and the immediate A5 route fix are recorded in [the mutation/readiness implementation record](2026-10-08-mutation-readiness-implementation.md). R02/R03/R05 implementation is recorded in [the gateway authority record](2026-10-08-gateway-authority-implementation.md); full R20 and VM/client acceptance remain open; these checked tasks do not mark Milestone A exited.
+A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). A4 and the immediate A5 route fix are recorded in [the mutation/readiness implementation record](2026-10-08-mutation-readiness-implementation.md). R02/R03/R05 implementation is recorded in [the gateway authority record](2026-10-08-gateway-authority-implementation.md); full R20 is recorded in [the status/gateway/revocation record](2026-10-08-status-gateway-revocation-implementation.md). Milestone A implementation is complete; VM/client acceptance remains open, so Milestone A is not exited.
 
 These should be small, independently reviewable changes. Full per-person approvals follow; containment must not wait for a complete chat-provider refactor.
 
@@ -738,7 +738,7 @@ These should be small, independently reviewable changes. Full per-person approva
 ### Milestone C — Household trust and recovery product
 
 - [x] **C1 implementation:** R03 operator-only person-bound scope and R02 durable gateway approvals. Pinned real client/two-account release acceptance remains pending.
-- [ ] **C2:** R06 bounded gateway and R07 revocation reconciliation.
+- [x] **C2 implementation:** R06 bounded gateway and R07 revocation reconciliation ([record](2026-10-08-status-gateway-revocation-implementation.md)). Release acceptance remains pending.
 - [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design.
 - [ ] **C4:** R17 staged self-update and R18 enforceable API/executor boundary.
 - [ ] **C5:** R19 calendar sync and R31 data-destination policy.

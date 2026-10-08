@@ -1,5 +1,7 @@
 # R08 and R20 implementation — 2026-10-08
 
+> **Superseded status (2026-10-08):** this is a historical record of one tranche. Statuses it gives for R03, R05 and R20 were later advanced; the [review tracker](2026-10-07-project-review.md#4-prioritized-change-tracker) is authoritative, and the [gateway authority](2026-10-08-gateway-authority-implementation.md) and [status/gateway/revocation](2026-10-08-status-gateway-revocation-implementation.md) records describe the later work.
+
 This continues the [project review](2026-10-07-project-review.md) after the [first security tranche](2026-10-08-priority-security-implementation.md). It records the implementation contract, migrations, regression coverage, and outstanding acceptance work. The review table remains the authoritative status tracker.
 
 ## Checkpoint and branch
