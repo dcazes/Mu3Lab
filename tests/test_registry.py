@@ -357,7 +357,7 @@ class RegistryTests(unittest.TestCase):
                 patch("ctl.service_state.RuntimePaths", return_value=paths),
                 patch("ctl.service_state._compose_state", return_value="running") as compose,
                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
-                patch("ctl.service_state.route_answers", return_value=True),
+                patch("ctl.service_state.route_probe", return_value=(True, 0.0)),
             ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8457})
         self.assertEqual(compose.call_args.args[0], project / "docker-compose.yml")
@@ -376,7 +376,7 @@ class RegistryTests(unittest.TestCase):
             with (
                 patch("ctl.service_state.RuntimePaths", return_value=paths),
                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
-                patch("ctl.service_state.route_answers", return_value=True),
+                patch("ctl.service_state.route_probe", return_value=(True, 0.0)),
             ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8443}, {source: "running"})
         self.assertEqual(state["lifecycle_state"], "ready")

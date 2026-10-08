@@ -91,7 +91,7 @@ def allowed_actions(service: Service, state: str) -> list[str]:
         return ["restart"] if service.stage != "optional" else ["retry_setup", "restart", *uninstall]
     if state == "stopped":
         return ["start", *uninstall]
-    if state in {"ready", "running", "starting", "configured", "installed"}:
+    if state in {"ready", "running", "starting", "configured", "installed", "checking", "stale"}:
         result = ["restart"]
         if service.lifecycle != "always_on":
             result.insert(0, "stop")

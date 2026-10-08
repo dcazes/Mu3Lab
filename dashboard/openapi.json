@@ -4255,9 +4255,35 @@
             ],
             "title": "Auth"
           },
+          "blocking_check": {
+            "anyOf": [
+              {
+                "enum": [
+                  "process",
+                  "route",
+                  "sign_in"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Check"
+          },
           "category": {
             "title": "Category",
             "type": "string"
+          },
+          "checks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceChecks"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "compose_present": {
             "title": "Compose Present",
@@ -4307,6 +4333,7 @@
               "running",
               "stopped",
               "working",
+              "checking",
               "not_installed",
               "needs_attention"
             ],
@@ -4603,6 +4630,72 @@
           "action"
         ],
         "title": "ServiceActionRequest",
+        "type": "object"
+      },
+      "ServiceCheck": {
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "last_failure_at": {
+            "title": "Last Failure At",
+            "type": "string"
+          },
+          "last_success_at": {
+            "title": "Last Success At",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pass",
+              "checking",
+              "fail",
+              "pending",
+              "stale",
+              "not_required"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "detail",
+          "checked_at",
+          "last_success_at",
+          "last_failure_at",
+          "failures"
+        ],
+        "title": "ServiceCheck",
+        "type": "object"
+      },
+      "ServiceChecks": {
+        "properties": {
+          "process": {
+            "$ref": "#/components/schemas/ServiceCheck"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ServiceCheck"
+          },
+          "sign_in": {
+            "$ref": "#/components/schemas/ServiceCheck"
+          }
+        },
+        "required": [
+          "process",
+          "route",
+          "sign_in"
+        ],
+        "title": "ServiceChecks",
         "type": "object"
       },
       "ServiceConfigField": {

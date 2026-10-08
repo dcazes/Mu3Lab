@@ -187,7 +187,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R17](#r17) | Stage self-updates away from the running checkout | P1 | S | L | R09, R14, R16 | open |
 | [R18](#r18) | Make API/worker privilege boundary explicit and enforceable | P1 | S | L | R09, R16 | open |
 | [R19](#r19) | Separate calendar reads from sync; preserve conflict information | P1 | S | M | R08, R09 | open |
-| [R20](#r20) | Derive usable status from successful required checks | P1 | R | S | — | in progress |
+| [R20](#r20) | Derive usable status from successful required checks | P1 | R | S | — | implemented; release acceptance pending |
 | [R21](#r21) | Bound observer cycles and schedule maintenance independently | P2 | S | M | R09, R20 | open |
 | [R22](#r22) | Add browser request deadlines and resource-scoped state | P2 | S | M | — | open |
 | [R23](#r23) | Complete keyboard and assistive-technology interactions | P2 | S/D | M | — | open |
@@ -498,7 +498,7 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R20 — A required route can fail probing while the service remains ready
 
-**Implementation progress (2026-10-08):** The reproduced required-route defect is fixed: only successful probes establish route readiness; failed/missing routes suppress green usability and launch links, including legacy cached observations. Internal services without a required browser route remain supported. Full R20 stays in progress for sign-in evidence expiry, observation freshness, debouncing and typed observations. Owner: Codex. Started: 2026-10-08. Commit: `fix: bind mutation identity and require verified service routes`. Verified on: pending item-specific acceptance. Details, tests and remaining sequence: [mutation/readiness record](2026-10-08-mutation-readiness-implementation.md).
+**Implementation progress (2026-10-08):** Implemented. Typed process, route and sign-in checks (`ctl/status/checks.py`) carry per-check timestamps, last success and consecutive failures across observer cycles. Usable state and launch links require every required check: a successful route probe (a working route keeps a bounded grace of two missed probes or 120 seconds, shown as *Checking*), sign-in evidence re-verified by the worker every 6 hours and no older than 24 hours, and an observation younger than 90 seconds. A missing Serve route fails without grace; an unreadable Serve status lets the probe decide. Internal services require neither route nor sign-in; separate-login apps never claim verified sign-in. The dashboard shows each required check and its last success. Owner: Claude. Commit: `fix(R20): derive usable status from fresh required checks`. Verified on: pending disposable-install and phone acceptance. Details: [status, gateway and revocation record](2026-10-08-status-gateway-revocation-implementation.md).
 
 **Evidence:** [service_state.status](../../ctl/service_state.py) sets `route_ready` for both `verified` and `configured`; when a healthy app's configured route probe fails it remains configured. E08 returns `state=ready`, `route_state=configured`, `route_ready=True` with `route_answers=False`. This contradicts the README's route-verification promise.
 

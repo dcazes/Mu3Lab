@@ -125,21 +125,24 @@ def _healthy(service: Service) -> tuple[bool, str]:
 
 
 ROUTE_PROBE_TTL = 60.0
-_route_probes: dict[str, tuple[float, bool]] = {}
+# A failed probe is repeated sooner, so a blip is confirmed or cleared quickly.
+ROUTE_FAILURE_TTL = 30.0
+_route_probes: dict[str, tuple[float, bool, float]] = {}
 
 
-def route_answers(url: str, now=time.monotonic) -> bool:
-    """Whether the app's private HTTPS address really answers, checked at most once a minute.
+def route_probe(url: str, now=time.monotonic, clock=time.time) -> tuple[bool, float]:
+    """Whether the app's private HTTPS address really answers, and when that was checked.
 
     A published Tailscale port only shows the route is configured. This
     fetches it through Tailscale and Caddy with certificate checks on. A
     redirect to sign in, or an app's own "please log in", still counts as
     answering; 404 (for example an app the sign-in gate does not know) and
-    server errors do not.
+    server errors do not. Results are reused briefly; a reused result keeps
+    its original check time so it is never counted as a second observation.
     """
     cached = _route_probes.get(url)
-    if cached and now() - cached[0] < ROUTE_PROBE_TTL:
-        return cached[1]
+    if cached and now() - cached[0] < (ROUTE_PROBE_TTL if cached[1] else ROUTE_FAILURE_TTL):
+        return cached[1], cached[2]
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *_args, **_kwargs):
@@ -151,20 +154,26 @@ def route_answers(url: str, now=time.monotonic) -> bool:
             answered = response.status < 400
     except urllib.error.HTTPError as exc:
         answered = exc.code in {301, 302, 303, 307, 308, 401, 403}
+        exc.close()
     except (urllib.error.URLError, OSError, ValueError):
         answered = False
-    _route_probes[url] = (now(), answered)
-    return answered
+    checked_at = clock()
+    _route_probes[url] = (now(), answered, checked_at)
+    return answered, checked_at
 
 
-def _tailnet_route_present(port: int) -> bool:
-    """Check only the local Tailscale Serve configuration, never a URL input."""
+def route_answers(url: str, now=time.monotonic) -> bool:
+    return route_probe(url, now=now)[0]
+
+
+def _tailnet_route_present(port: int) -> bool | None:
+    """Check only the local Tailscale Serve configuration; None when it cannot be read."""
     try:
         proc = subprocess.run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
     if proc.returncode != 0:
-        return False
+        return None
     return port in serve_ports(proc.stdout)
 
 
@@ -391,8 +400,19 @@ def status(
     root: Path,
     route_ports: set[int] | None = None,
     project_states: dict[str, str] | None = None,
+    *,
+    serve_readable: bool = True,
+    previous: dict | None = None,
+    now: float | None = None,
 ) -> dict:
-    """Return browser-safe service state without starting, stopping, or logging in."""
+    """Return browser-safe service state without starting, stopping, or logging in.
+
+    ``previous`` is this service's last observation; its checks carry route
+    history (last success, consecutive failures) into this cycle.
+    """
+    from ctl.status.checks import Check, process_check, route_check
+
+    now = time.time() if now is None else now
     runtime_file = RuntimePaths().projects / service.id / "docker-compose.yml"
     compose_file = runtime_file if runtime_file.is_file() else service.compose_path(root) / "docker-compose.yml"
     if not compose_file.is_file():
@@ -424,41 +444,52 @@ def status(
             lifecycle_state = "starting"
         else:
             lifecycle_state = "needs_attention"
+    prior_checks = (previous or {}).get("checks") or {}
+    process = process_check(Check.load(prior_checks.get("process")), lifecycle_state, detail, now)
     route_port = service.private_https_port
     route_required = route_port is not None
-    route_configured = (
-        route_port is None
-        or service.route == "ready"
-        or (route_port in route_ports if route_ports is not None else _tailnet_route_present(route_port))
-    )
+    route_configured: bool | None
+    if route_port is None or service.route == "ready":
+        route_configured = True
+    elif route_ports is not None:
+        route_configured = (route_port in route_ports) if serve_readable else None
+    else:
+        route_configured = _tailnet_route_present(route_port)
     healthy = lifecycle_state == "ready"
     health_state = "healthy" if healthy else ("starting" if lifecycle_state == "starting" else "unknown")
-    # "verified" means a real request through the private address succeeded;
-    # a published port alone is only "configured".
-    route_probed = bool(
-        route_required
-        and route_configured
-        and healthy
-        and dns_name
-        and route_answers(f"https://{dns_name}:{route_port}{service.ui.get('path', '') or '/'}")
+    probe = (
+        route_probe(f"https://{dns_name}:{route_port}{service.ui.get('path', '') or '/'}")
+        if route_required and healthy and dns_name and route_configured is not False
+        else None
     )
+    route = route_check(
+        Check.load(prior_checks.get("route")),
+        required=route_required,
+        configured=route_configured,
+        healthy=healthy,
+        dns_known=bool(dns_name),
+        probe=probe,
+        now=now,
+    )
+    # "verified" means a real request through the private address succeeded
+    # (or a working route is inside its short grace period after one miss);
+    # a published port alone is only "configured".
     route_state = (
         "not_required"
         if not route_required
         else "verified"
-        if route_probed
+        if route.satisfied
         else "configured"
-        if route_configured and healthy
+        if route_configured is not False and healthy
         else service.route
     )
-    # Publication is configuration, not evidence that this route works.
-    route_ready = route_required and route_state == "verified"
+    route_ready = route_required and route.satisfied
     # A healthy process is not yet a usable app unless its declared private
     # route has also been verified. Keep that distinction visible so the UI
     # cannot call a merely-installed service "ready".
     if healthy and route_required and not route_ready:
         lifecycle_state = "needs_setup"
-        detail = "The app is healthy, but its required private HTTPS route has not passed verification."
+        detail = route.detail or "The app is healthy, but its required private HTTPS route has not passed verification."
     setup_state = (
         "configured" if lifecycle_state == "ready" else ("blocked" if lifecycle_state == "blocked" else "needs_setup")
     )
@@ -524,4 +555,6 @@ def status(
             "reason": ui_reason,
         },
         "compose_present": (runtime_file.is_file() if service.stage == "optional" else compose_file.is_file()),
+        "checks": {"process": process.public(), "route": route.public()},
+        "blocking_check": "route" if healthy and route_required and not route_ready else None,
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { identity, readyUi, service } from '../test/fixtures';
-import { canInstall, launchTarget, needsAttention, signInSummary } from './services';
+import { canInstall, launchTarget, needsAttention, requiredChecks, signInSummary, stateLabel } from './services';
 
 describe('launchTarget', () => {
   it('preserves the managed Nextcloud provider ID reported by the server', () => {
@@ -95,5 +95,36 @@ describe('service state helpers', () => {
       'red',
     );
     expect(signInSummary(service('b', 'B', 'optional', { identity: identity({ state: 'ready' }) })).tone).toBe('green');
+  });
+});
+
+describe('requiredChecks', () => {
+  const check = (state: 'pass' | 'checking' | 'not_required', last_success_at = '') => ({
+    state,
+    detail: '',
+    checked_at: '',
+    last_success_at,
+    last_failure_at: '',
+    failures: 0,
+  });
+
+  it('lists only the checks an app requires, keeping the last success visible', () => {
+    const app = service('mealie', 'Mealie', 'optional', {
+      display_state: 'checking',
+      checks: {
+        process: check('pass'),
+        route: check('checking', '2026-10-08T12:00:00+00:00'),
+        sign_in: check('not_required'),
+      },
+    });
+    expect(stateLabel[app.display_state]).toBe('Checking');
+    expect(requiredChecks(app).map((item) => [item.name, item.tone, item.last_success_at])).toEqual([
+      ['process', 'green', ''],
+      ['route', 'blue', '2026-10-08T12:00:00+00:00'],
+    ]);
+  });
+
+  it('shows nothing for observations without typed checks', () => {
+    expect(requiredChecks(service('mealie', 'Mealie', 'optional'))).toEqual([]);
   });
 });

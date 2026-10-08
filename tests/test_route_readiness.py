@@ -19,7 +19,7 @@ class RouteReadinessTests(unittest.TestCase):
         with (
             patch("ctl.service_state._healthy", return_value=(True, "healthy")),
             patch("ctl.service_state._compose_state", return_value="running"),
-            patch("ctl.service_state.route_answers", return_value=answers),
+            patch("ctl.service_state.route_probe", return_value=(answers, 1_000.0)),
         ):
             return status(service, dns, ROOT, {service.private_https_port})
 

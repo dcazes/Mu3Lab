@@ -2691,8 +2691,11 @@ export interface components {
         ('install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'uninstall' | 'uninstall_delete_data')[] | null;
       /** Auth */
       auth: 'oidc' | 'proxy' | 'trusted_header' | 'local' | 'excluded';
+      /** Blocking Check */
+      blocking_check?: ('process' | 'route' | 'sign_in') | null;
       /** Category */
       category: string;
+      checks?: components['schemas']['ServiceChecks'] | null;
       /** Compose Present */
       compose_present: boolean;
       /** Configuration */
@@ -2707,7 +2710,7 @@ export interface components {
        * Display State
        * @enum {string}
        */
-      display_state: 'running' | 'stopped' | 'working' | 'not_installed' | 'needs_attention';
+      display_state: 'running' | 'stopped' | 'working' | 'checking' | 'not_installed' | 'needs_attention';
       /** Group */
       group: 'apps' | 'ai' | 'infrastructure';
       /** Health State */
@@ -2795,6 +2798,30 @@ export interface components {
        * @default
        */
       snapshot_id?: string;
+    };
+    /** ServiceCheck */
+    ServiceCheck: {
+      /** Checked At */
+      checked_at: string;
+      /** Detail */
+      detail: string;
+      /** Failures */
+      failures: number;
+      /** Last Failure At */
+      last_failure_at: string;
+      /** Last Success At */
+      last_success_at: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'pass' | 'checking' | 'fail' | 'pending' | 'stale' | 'not_required';
+    };
+    /** ServiceChecks */
+    ServiceChecks: {
+      process: components['schemas']['ServiceCheck'];
+      route: components['schemas']['ServiceCheck'];
+      sign_in: components['schemas']['ServiceCheck'];
     };
     /** ServiceConfigField */
     ServiceConfigField: {

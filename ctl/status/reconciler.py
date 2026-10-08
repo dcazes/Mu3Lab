@@ -15,7 +15,7 @@ from ctl.jobs import redact
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import project_path
-from ctl.service_state import compose_snapshot, status, tailnet_dns_name, tailnet_serve_ports
+from ctl.service_state import compose_snapshot, status, tailnet_dns_name, tailnet_serve_status
 from ctl.status import signals, snapshots
 from ctl.status.host import observe_system
 from ctl.store import db, records
@@ -27,10 +27,25 @@ INTERVAL = 5
 def reconcile(paths: RuntimePaths = RuntimePaths()) -> None:
     registry = load()
     dns_name = tailnet_dns_name()
-    ports = tailnet_serve_ports()
+    serve = tailnet_serve_status()
+    ports = {int(port) for port in serve["ports"]} if isinstance(serve["ports"], list) else set()
     states, containers = compose_snapshot()
+    # Route history (last success, consecutive misses) carries across cycles.
+    previous = snapshots.read(paths)
+
+    def observe(service):
+        return status(
+            service,
+            dns_name,
+            ROOT,
+            ports,
+            states,
+            serve_readable=serve["state"] == "available",
+            previous=previous.get(service.id),
+        )
+
     with ThreadPoolExecutor(max_workers=min(4, len(registry.services))) as pool:
-        projections = list(pool.map(lambda service: status(service, dns_name, ROOT, ports, states), registry.services))
+        projections = list(pool.map(observe, registry.services))
     for service, projection in zip(registry.services, projections, strict=True):
         projection["containers"] = containers.get(str(project_path(service, ROOT).resolve()), [])
     core = core_plan(ROOT)

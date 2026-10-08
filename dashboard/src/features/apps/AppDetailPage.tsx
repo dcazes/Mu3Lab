@@ -9,7 +9,7 @@ import { Badge, Dot, StatusBadge } from '../../components/Status';
 import { CopyField } from '../../components/CopyField';
 import { humanize, relativeTime } from '../../lib/format';
 import { Link } from '../../lib/router';
-import { isInstalled, isRunning, launchTarget, signInSummary } from '../../lib/services';
+import { isInstalled, isRunning, launchTarget, requiredChecks, signInSummary } from '../../lib/services';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
 import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
@@ -153,6 +153,9 @@ function Overview({ service, address, devices }: { service: Service; address: st
                 </span>
               ),
             },
+            ...(isInstalled(service) && requiredChecks(service).length
+              ? [{ label: 'Checks', value: <Checks service={service} /> }]
+              : []),
             // With a devices section below, its server address card carries the address.
             ...(address && !devices
               ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }]
@@ -188,6 +191,23 @@ function Overview({ service, address, devices }: { service: Service; address: st
       </Card>
       {devices && <DevicesSection service={service} address={address} />}
     </div>
+  );
+}
+
+function Checks({ service }: { service: Service }) {
+  return (
+    <ul className="check-list">
+      {requiredChecks(service).map((check) => (
+        <li key={check.name} className="inline wrap">
+          <Dot tone={check.tone} />
+          {check.label}
+          <span className="muted">
+            · {humanize(check.state === 'pass' ? 'OK' : check.state)}
+            {check.state !== 'pass' && check.last_success_at && `, last OK ${relativeTime(check.last_success_at)}`}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

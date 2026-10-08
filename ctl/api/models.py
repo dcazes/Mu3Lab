@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-DisplayState = Literal["running", "stopped", "working", "not_installed", "needs_attention"]
+DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_attention"]
 
 
 class ApiModel(BaseModel):
@@ -65,6 +65,21 @@ class ServiceUi(ApiModel):
     authentication: str
     reason: str | None
     launch_label: str | None = None
+
+
+class ServiceCheck(ApiModel):
+    state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
+    detail: str
+    checked_at: str
+    last_success_at: str
+    last_failure_at: str
+    failures: int
+
+
+class ServiceChecks(ApiModel):
+    process: ServiceCheck
+    route: ServiceCheck
+    sign_in: ServiceCheck
 
 
 class ServiceUpdate(ApiModel):
@@ -142,6 +157,8 @@ class Service(ApiModel):
     initialization: ServiceInitialization | None = None
     identity: ServiceIdentity | None = None
     containers: list[ServiceContainersItem] | None = None
+    checks: ServiceChecks | None = None
+    blocking_check: Literal["process", "route", "sign_in"] | None = None
 
     display_state: DisplayState
     reason: str
