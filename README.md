@@ -310,6 +310,10 @@ use the pinned toolchain; dashboard preview, checks and builds use Docker.
 See [Development](docs/development.md) for isolated backend setup and release
 checks, and [Acceptance](docs/acceptance.md) for the real-device test journey.
 
+The [2026-10-07 project review and change tracker](docs/reviews/2026-10-07-project-review.md)
+assesses the concept, architecture and implementation, with prioritized fixes,
+implementation steps, acceptance criteria and a supporting evidence record.
+
 | Path | What's there |
 |---|---|
 | [`ctl/store/`](ctl/store), [`ctl/status/`](ctl/status) | Shared private state, encrypted credentials and worker health observations |
