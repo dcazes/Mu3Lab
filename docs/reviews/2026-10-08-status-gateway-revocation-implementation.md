@@ -89,3 +89,46 @@ Dashboard tests cover the *Checking* label and required-check list.
   provider, stop the worker; confirm each state and recovery on desktop and phone.
 - R21 still owns whole-cycle budgets; a single slow cycle can still approach the
   90-second window.
+
+## R06 — gateway validation and resource bounds
+
+All changes are in `platform/tool-gateway/gateway.py` (shared pin helper in
+`gateway_authority.py`; policy field in `ctl/mcp_gateway.py`).
+
+| Area | Behaviour | Limit |
+| --- | --- | --- |
+| JSON-RPC envelope | `parse_message` requires one object, `jsonrpc: "2.0"`, a string method, an integer or short string id, and object params. Parse error −32700 and invalid request −32600 answer HTTP 400; invalid params −32602 and unknown method −32601 answer as JSON-RPC errors. `tools/call` requires a string `name` and object `arguments`. | id/method ≤ 128 chars |
+| Nesting and size | Requests deeper than the limit are refused before use; arguments stay capped at 64 KB and validated against the verified schema before any dispatch. | depth 32; body 256 KB (413 above) |
+| Schema drift | Policy carries `schema_sha256` for each tool whose input schema Mu3Lab captured when it verified the connector. A tool whose live schema no longer matches is hidden from `tools/list`, shown off in `find_tools` with a re-verify note, refused by `call_tool`, and refused before an approved write is claimed. | — |
+| Rate limits | Token buckets per person, credential provider and app: all requests, and separately tool calls. Excess gets HTTP 429 with `Retry-After`. Bucket table is bounded. | 40 burst + 2/s; calls 15 burst + 0.5/s |
+| Concurrency | At most N requests at once per principal (HTTP 429), and a fixed number of open connections (excess refused with an immediate 503, not queued). Waiting for a busy connector is bounded and answers "busy". | 4 per principal; 32 connections; 30 s connector wait |
+| Deadlines | Socket reads time out; the body must arrive within its own deadline however slowly it trickles (408). Each request has a whole-request deadline covering connector wait, initialization and upstream reads; upstream bodies are read in chunks and stopped at the deadline or size cap. An approved write keeps a single 120 s dispatch window and is never retried. | socket 10 s; body 10 s; request 90 s |
+| Stream replies | SSE events are parsed per event (multi-line `data:` joined); the reply is the message whose id matches the request. Notifications and server-initiated requests are ignored; a stream without the reply is an error (an unknown outcome for a write). A plain JSON reply with a different id is refused. | — |
+| Output | Total budget covers text and non-text content; oversized or deeply nested items and items past the count cap are left out with a note; structured content must fit and stay shallow. | 60 000 chars; 50 items |
+| Health | `/live` answers whenever the process does. `/health` stays readiness (policy committed and acknowledged) and now reports capacity counters: active requests, open and maximum connections, rate-limited, busy and refused counts. No secrets or subjects are exposed. | — |
+
+Older policies without `schema_sha256` keep today's behaviour until the control
+plane republishes policy, which happens on the next connector or switch change and
+on gateway refresh. Older gateway images ignore the new field.
+
+### Residual limits
+
+- Pinning is trust-on-verification: Mu3Lab pins the schema it saw when it last
+  verified (enabled, started or updated) the connector. A connector that already
+  presents a changed schema at that moment is pinned as presented; the review
+  covers tool names and read/write access, not schemas.
+- Limits are per gateway process and reset on restart. They are sized for a
+  household, not for hostile multi-tenant traffic.
+- Authentication failures are not rate limited separately; bearer tokens are
+  256-bit random values and failures return before any connector work.
+
+### Tests
+
+`tests/test_gateway_limits.py`: envelope errors and depth; SSE id matching,
+multi-line data and missing replies; schema drift withheld on every path and never
+dispatched, matching pins run, invalid arguments never dispatched, policy pins the
+verified snapshot; output caps; rate-limit buckets and table bound; busy connector,
+trickling and oversized upstream bodies; and through a real bounded HTTP server:
+malformed params, oversized body, per-person 429 with `Retry-After`, concurrent slow
+tools bounded per person, slow client body cut off with 408, excess connections
+refused, liveness independent of readiness.

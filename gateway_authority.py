@@ -32,6 +32,11 @@ def canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def schema_digest(schema: object) -> str:
+    """Pin for a tool's verified input schema; an absent schema pins the empty object schema."""
+    return hashlib.sha256(canonical(schema or {"type": "object", "properties": {}}).encode()).hexdigest()
+
+
 def validate_arguments(schema: dict, arguments: dict) -> None:
     if not isinstance(arguments, dict) or len(canonical(arguments).encode()) > 64_000:
         raise ValueError("Tool arguments must be an object within the 64 KB limit.")

@@ -173,7 +173,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R03](#r03) | Bind chat tools to people and explicit data scope | P1 | S | L | — | implemented for operator-only; release acceptance pending |
 | [R04](#r04) | Stop retrying ambiguous non-idempotent tool writes | P1 | R | S | — | implemented |
 | [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | implemented; release acceptance pending |
-| [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | open |
+| [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | implemented; release acceptance pending |
 | [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | open |
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
 | [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | open |
@@ -308,6 +308,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r06"></a>
 
 ### R06 — Gateway validation and resource controls are incomplete
+
+**Implementation progress (2026-10-08):** Implemented. Typed JSON-RPC envelope with deterministic errors, depth and size caps, verified-schema pinning that withholds drifted tools, per-person request and tool-call rate limits (429 with `Retry-After`), bounded per-person concurrency and open connections, socket, body and whole-request deadlines, bounded connector waits, SSE reply selection by JSON-RPC id, total output budget, and `/live` separate from `/health` readiness with capacity counters. Owner: Claude. Commit: `fix(R06): validate and bound gateway requests`. Verified on: pending real-client and disposable-install acceptance. Details and residual limits: [status, gateway and revocation record](2026-10-08-status-gateway-revocation-implementation.md#r06--gateway-validation-and-resource-bounds).
 
 **Evidence:** gateway checks body size and argument-object type but does not validate arguments against the tool schema. `ThreadingHTTPServer` has no application concurrency limit; socket body reads have no explicit deadline. All calls for an app share a connector lock and a 120-second upstream timeout. `params` can be a list and trigger an uncaught `.get` error. The dashboard console does have JSON Schema validation.
 

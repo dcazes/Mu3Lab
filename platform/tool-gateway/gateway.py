@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from gateway_authority import Authority, validate_arguments
+from gateway_authority import Authority, schema_digest, validate_arguments
 from gateway_authority import validate_policy as _validate_policy
 
 POLICY_PATH = os.environ.get("GATEWAY_POLICY", "/config/policy.json")
@@ -33,6 +33,22 @@ MAX_TEXT = 60_000
 CALL_LOG_LIMIT = 5_000_000
 TOOL_CACHE_SECONDS = 600
 SEARCH_LIMIT = 8
+# Request shape and resource bounds. A household gateway serves a handful of
+# people; these limits keep one slow client, one slow connector or one runaway
+# assistant from exhausting it for everyone else.
+MAX_DEPTH = 32
+MAX_ID_LENGTH = 128
+MAX_CONTENT_ITEMS = 50
+MAX_CONNECTIONS = 32
+MAX_ACTIVE_PER_PRINCIPAL = 4
+SOCKET_TIMEOUT = 10
+BODY_DEADLINE = 10
+REQUEST_DEADLINE = 90
+WRITE_TIMEOUT = 120
+CONNECTOR_WAIT = 30
+# (burst, refill per second) for every request, and separately for tool calls.
+REQUEST_RATE = (40, 2.0)
+CALL_RATE = (15, 0.5)
 FIND, USE, CHANGE = "find_tools", "use_tool", "change_with_tool"
 META_TOOLS = (FIND, USE, CHANGE)
 _WORD = re.compile(r"[a-z0-9]+")
@@ -48,6 +64,144 @@ class UnknownOutcome(GatewayError):
 
 class ConnectorRefused(GatewayError):
     """A definitive connector error reply."""
+
+
+class RpcError(Exception):
+    """A malformed or refused request, answered with a deterministic JSON-RPC error."""
+
+    def __init__(self, code: int, message: str, *, status: int = 200, retry_after: int = 0):
+        super().__init__(message)
+        self.code, self.status, self.retry_after = code, status, retry_after
+
+
+PARSE_ERROR, INVALID_REQUEST, INVALID_PARAMS = -32700, -32600, -32602
+
+
+def _too_deep(value: object) -> bool:
+    stack = [(value, 1)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            return True
+        if isinstance(current, dict):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            stack.extend((item, depth + 1) for item in current)
+    return False
+
+
+def parse_message(raw: bytes) -> tuple[object, str, dict]:
+    """Validate one JSON-RPC 2.0 envelope; return its id, method and params."""
+    try:
+        message = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise RpcError(PARSE_ERROR, "The request is not valid JSON.", status=400) from None
+    if not isinstance(message, dict):
+        raise RpcError(INVALID_REQUEST, "Send one JSON-RPC request object; batches are not supported.", status=400)
+    if _too_deep(message):
+        raise RpcError(INVALID_REQUEST, f"The request is nested more than {MAX_DEPTH} levels deep.", status=400)
+    request_id = message.get("id")
+    if message.get("jsonrpc") != "2.0":
+        raise RpcError(INVALID_REQUEST, "The request must declare jsonrpc 2.0.", status=400)
+    if request_id is not None and (
+        type(request_id) not in (int, str) or (isinstance(request_id, str) and len(request_id) > MAX_ID_LENGTH)
+    ):
+        raise RpcError(INVALID_REQUEST, "The request id must be a short string or an integer.", status=400)
+    method = message.get("method")
+    if not isinstance(method, str) or not method or len(method) > MAX_ID_LENGTH:
+        raise RpcError(INVALID_REQUEST, "The request method must be a short string.", status=400)
+    params = message.get("params", {})
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        raise RpcError(INVALID_PARAMS, "'params' must be an object.")
+    return request_id, method, params
+
+
+class RateLimiter:
+    """Token buckets per principal; only bounded, non-secret keys are kept."""
+
+    def __init__(self, burst: int, per_second: float, *, limit: int = 1000, clock=time.monotonic):
+        self.burst, self.per_second, self.limit, self.clock = burst, per_second, limit, clock
+        self._lock = threading.Lock()
+        self._buckets: dict[str, tuple[float, float]] = {}
+
+    def take(self, key: str) -> int:
+        """Spend one token; return 0, or the whole seconds to wait before retrying."""
+        with self._lock:
+            now = self.clock()
+            tokens, stamp = self._buckets.get(key, (float(self.burst), now))
+            tokens = min(float(self.burst), tokens + (now - stamp) * self.per_second)
+            if len(self._buckets) >= self.limit and key not in self._buckets:
+                self._evict(now)
+            if tokens < 1:
+                self._buckets[key] = (tokens, now)
+                return max(1, int((1 - tokens) / self.per_second + 0.999))
+            self._buckets[key] = (tokens - 1, now)
+            return 0
+
+    def _evict(self, now: float) -> None:
+        # Refilled buckets carry no state worth keeping; past that, forget the least recent.
+        kept = {
+            key: (tokens, stamp)
+            for key, (tokens, stamp) in self._buckets.items()
+            if tokens + (now - stamp) * self.per_second < self.burst
+        }
+        if len(kept) >= self.limit:
+            kept = dict(sorted(kept.items(), key=lambda item: item[1][1])[len(kept) - self.limit + 1 :])
+        self._buckets = kept
+
+
+class Capacity:
+    """Concurrent requests per principal, plus counters for readiness diagnostics."""
+
+    def __init__(self, per_principal: int = MAX_ACTIVE_PER_PRINCIPAL):
+        self.per_principal = per_principal
+        self._lock = threading.Lock()
+        self._active: dict[str, int] = {}
+        self.counters = {"rate_limited": 0, "busy": 0, "connections_refused": 0}
+
+    def enter(self, key: str) -> bool:
+        with self._lock:
+            if self._active.get(key, 0) >= self.per_principal:
+                self.counters["busy"] += 1
+                return False
+            self._active[key] = self._active.get(key, 0) + 1
+            return True
+
+    def leave(self, key: str) -> None:
+        with self._lock:
+            remaining = self._active.get(key, 1) - 1
+            if remaining > 0:
+                self._active[key] = remaining
+            else:
+                self._active.pop(key, None)
+
+    def count(self, name: str) -> None:
+        with self._lock:
+            self.counters[name] += 1
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {"active": sum(self._active.values()), **self.counters}
+
+
+REQUESTS = RateLimiter(*REQUEST_RATE)
+CALLS = RateLimiter(*CALL_RATE)
+CAPACITY = Capacity()
+# The whole-request deadline of the request this thread is serving.
+_REQUEST = threading.local()
+
+
+def _deadline() -> float:
+    return getattr(_REQUEST, "deadline", 0.0) or time.monotonic() + REQUEST_DEADLINE
+
+
+def _remaining(deadline: float) -> float:
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("request deadline reached")
+    return left
 
 
 AUTHORITY = Authority(os.environ.get("GATEWAY_AUTHORITY", "/authority"), initialize=False)
@@ -99,17 +253,53 @@ POLICY = PolicyStore(POLICY_PATH, AUTHORITY)
 # --------------------------------------------------------------------------- upstream MCP client
 
 
-def _decode(payload: bytes, content_type: str) -> dict:
+def _decode(payload: bytes, content_type: str, request_id: object = None) -> dict:
+    """Return the JSON-RPC reply to ``request_id``.
+
+    A Streamable HTTP stream may carry notifications and server requests
+    before the reply; only the message answering this request counts.
+    """
     text = payload.decode("utf-8", errors="replace")
     if "text/event-stream" in content_type or text.lstrip().startswith(("event:", "data:")):
-        frames = [line[5:].strip() for line in text.splitlines() if line.startswith("data:")]
-        if not frames:
-            raise GatewayError("The connector returned an empty response.")
-        text = frames[-1]
+        messages = []
+        for event in re.split(r"\r?\n\r?\n", text):
+            data = "\n".join(line[5:].removeprefix(" ") for line in event.splitlines() if line.startswith("data:"))
+            if not data.strip():
+                continue
+            try:
+                messages.append(json.loads(data))
+            except ValueError:
+                continue
+        replies = [
+            message
+            for message in messages
+            if isinstance(message, dict)
+            and ("result" in message or "error" in message)
+            and (request_id is None or message.get("id") == request_id)
+        ]
+        if not replies:
+            raise GatewayError("The connector's stream did not contain a reply to this request.")
+        return replies[-1]
     decoded = json.loads(text)
     if not isinstance(decoded, dict):
         raise GatewayError("The connector returned an unexpected response.")
+    if request_id is not None and "id" in decoded and decoded["id"] != request_id:
+        raise GatewayError("The connector answered a different request.")
     return decoded
+
+
+def _read(response, deadline: float) -> bytes:
+    """Read at most MAX_UPSTREAM bytes, giving up at the request deadline."""
+    chunks, size = [], 0
+    while True:
+        _remaining(deadline)
+        chunk = response.read1(65536) if hasattr(response, "read1") else response.read(65536)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > MAX_UPSTREAM:
+            raise GatewayError("The connector's answer was too large; ask for fewer results.")
+        chunks.append(chunk)
 
 
 class Connector:
@@ -124,7 +314,7 @@ class Connector:
         self._lock = threading.Lock()
         self._next_id = 0
 
-    def _post(self, body: dict, *, expect_reply: bool = True) -> tuple[dict, str]:
+    def _post(self, body: dict, *, expect_reply: bool = True, timeout: float | None = None) -> tuple[dict, str]:
         headers = {
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
@@ -134,14 +324,13 @@ class Connector:
         if self.session:
             headers["Mcp-Session-Id"] = self.session
         request = Request(self.url, data=json.dumps(body).encode(), headers=headers, method="POST")
-        with urlopen(request, timeout=120) as response:
+        deadline = time.monotonic() + timeout if timeout else _deadline()
+        with urlopen(request, timeout=min(_remaining(deadline), WRITE_TIMEOUT)) as response:
             session = response.headers.get("Mcp-Session-Id", "") or self.session
-            payload = response.read(MAX_UPSTREAM + 1)
-            if len(payload) > MAX_UPSTREAM:
-                raise GatewayError("The connector's answer was too large; ask for fewer results.")
+            payload = _read(response, deadline)
             if not expect_reply or not payload.strip():
                 return {}, session
-            return _decode(payload, response.headers.get("Content-Type", "")), session
+            return _decode(payload, response.headers.get("Content-Type", ""), body.get("id")), session
 
     def _initialize(self) -> None:
         self.session = ""
@@ -162,48 +351,59 @@ class Connector:
 
     def request(self, method: str, params: dict, *, retry_safe: bool = False, before_dispatch=None) -> dict:
         """Retry only operations whose caller explicitly declares safe to repeat."""
-        with self._lock:
-            for attempt in (1, 2):
-                dispatched = False
-                try:
-                    if not self.session:
-                        self._initialize()
-                    if before_dispatch:
-                        before_dispatch()
-                    self._next_id += 1
-                    dispatched = True
-                    reply, _ = self._post({"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params})
-                    if reply.get("error"):
-                        raise ConnectorRefused("The connector refused the request; inspect the app for details.")
-                    result = reply.get("result")
-                    if not isinstance(result, dict) and not retry_safe:
-                        raise UnknownOutcome(
-                            "The connector returned no reliable outcome. Do not repeat the change automatically."
-                        )
-                    return result if isinstance(result, dict) else {}
-                except (HTTPError, URLError, OSError) as exc:
-                    if isinstance(exc, HTTPError):
-                        exc.close()
-                    self.session = ""
-                    if dispatched and not retry_safe:
-                        raise UnknownOutcome(
-                            "The connector call's outcome is unknown. It was not retried; check the app before trying again."
-                        ) from None
-                    recoverable = not isinstance(exc, HTTPError) or exc.code in {400, 404}
-                    if attempt == 1 and recoverable:
-                        continue
-                    if isinstance(exc, HTTPError):
-                        raise GatewayError(f"The connector answered HTTP {exc.code}.") from None
-                    raise GatewayError("The connector is not reachable right now.") from None
-                except ConnectorRefused:
-                    raise
-                except (ValueError, GatewayError):
-                    if dispatched and not retry_safe:
-                        raise UnknownOutcome(
-                            "The connector reply could not establish the outcome. Check the app before another attempt."
-                        ) from None
-                    raise
-            raise GatewayError("The connector is not reachable right now.")
+        if not self._lock.acquire(timeout=min(CONNECTOR_WAIT, max(0.0, _deadline() - time.monotonic()))):
+            raise GatewayError("The connector is busy with other requests; try again shortly.")
+        try:
+            return self._request(method, params, retry_safe=retry_safe, before_dispatch=before_dispatch)
+        finally:
+            self._lock.release()
+
+    def _request(self, method: str, params: dict, *, retry_safe: bool, before_dispatch) -> dict:
+        for attempt in (1, 2):
+            dispatched = False
+            try:
+                if not self.session:
+                    self._initialize()
+                if before_dispatch:
+                    before_dispatch()
+                self._next_id += 1
+                dispatched = True
+                reply, _ = self._post(
+                    {"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params},
+                    # A change is dispatched once; give it the full upstream time.
+                    timeout=None if retry_safe else WRITE_TIMEOUT,
+                )
+                if reply.get("error"):
+                    raise ConnectorRefused("The connector refused the request; inspect the app for details.")
+                result = reply.get("result")
+                if not isinstance(result, dict) and not retry_safe:
+                    raise UnknownOutcome(
+                        "The connector returned no reliable outcome. Do not repeat the change automatically."
+                    )
+                return result if isinstance(result, dict) else {}
+            except (HTTPError, URLError, OSError) as exc:
+                if isinstance(exc, HTTPError):
+                    exc.close()
+                self.session = ""
+                if dispatched and not retry_safe:
+                    raise UnknownOutcome(
+                        "The connector call's outcome is unknown. It was not retried; check the app before trying again."
+                    ) from None
+                recoverable = not isinstance(exc, HTTPError) or exc.code in {400, 404}
+                if attempt == 1 and recoverable:
+                    continue
+                if isinstance(exc, HTTPError):
+                    raise GatewayError(f"The connector answered HTTP {exc.code}.") from None
+                raise GatewayError("The connector is not reachable right now.") from None
+            except ConnectorRefused:
+                raise
+            except (ValueError, GatewayError):
+                if dispatched and not retry_safe:
+                    raise UnknownOutcome(
+                        "The connector reply could not establish the outcome. Check the app before another attempt."
+                    ) from None
+                raise
+        raise GatewayError("The connector is not reachable right now.")
 
     def list_tools(self) -> dict[str, dict]:
         if self.tools and time.monotonic() - self.tools_at < TOOL_CACHE_SECONDS:
@@ -277,6 +477,22 @@ def _check_enabled(app: dict, name: str, tool: dict) -> None:
         raise GatewayError(f"'{name}' {kind} switched off. {_switch_hint(app)}")
 
 
+def _drifted(tool: dict, upstream: dict | None) -> bool:
+    """Whether the connector now describes this tool differently from when Mu3Lab verified it."""
+    pinned = tool.get("schema_sha256")
+    return bool(pinned and upstream is not None and schema_digest(upstream.get("inputSchema")) != pinned)
+
+
+def _offered(app: dict, upstream: dict[str, dict]) -> dict[str, dict]:
+    """Upstream tools that are reviewed and still match their verified input schema."""
+    return {
+        name: tool for name, tool in upstream.items() if name in app["tools"] and not _drifted(app["tools"][name], tool)
+    }
+
+
+DRIFT_NOTE = "The connector changed this tool since Mu3Lab verified it. Re-verify the connector in Mu3Lab first."
+
+
 def _enabled(app: dict, tool: dict) -> bool:
     return bool(
         (tool["access"] == "read" or app.get("approval_required", False))
@@ -343,7 +559,7 @@ def _meta_tools(app: dict) -> list[dict]:
 
 
 def list_tools(app_id: str, app: dict) -> list[dict]:
-    upstream = CONNECTORS.get(app_id, app).list_tools()
+    upstream = _offered(app, CONNECTORS.get(app_id, app).list_tools())
     direct = [
         {
             "name": name,
@@ -357,7 +573,8 @@ def list_tools(app_id: str, app: dict) -> list[dict]:
 
 
 def find_tools(app_id: str, app: dict, arguments: dict) -> dict:
-    upstream = CONNECTORS.get(app_id, app).list_tools()
+    available = CONNECTORS.get(app_id, app).list_tools()
+    upstream = _offered(app, available)
     categories = _categories(app)
     category_id = arguments.get("category")
     query = str(arguments.get("query") or "").strip()
@@ -404,6 +621,8 @@ def find_tools(app_id: str, app: dict, arguments: dict) -> dict:
         }
         if on:
             entry["inputs"] = upstream[tool["name"]].get("inputSchema") or {"type": "object", "properties": {}}
+        elif tool["name"] in available and tool["name"] not in upstream:
+            entry["note"] = DRIFT_NOTE
         elif tool["name"] not in upstream:
             entry["note"] = "The connector does not offer this tool right now."
         elif tool["access"] == "write":
@@ -426,9 +645,12 @@ def call_tool(app_id: str, app: dict, name: str, arguments: dict, *, via: str) -
     if tool["access"] == "write" and (not app.get("approval_required") or not app.get("_principal")):
         raise GatewayError("Chat writes are unavailable until Mu3Lab can verify approval for each call.")
     connector = CONNECTORS.get(app_id, app)
-    if name not in connector.list_tools():
+    offered = connector.list_tools().get(name)
+    if offered is None:
         raise GatewayError(f"The connector does not offer '{name}' right now.")
-    schema = connector.list_tools()[name].get("inputSchema") or {"type": "object"}
+    if _drifted(tool, offered):
+        raise GatewayError(DRIFT_NOTE)
+    schema = offered.get("inputSchema") or {"type": "object"}
     try:
         validate_arguments(schema, arguments)
         if tool["access"] == "write":
@@ -468,6 +690,8 @@ def execute_operation(app_id: str, app: dict, operation: str) -> dict:
     offered = connector.list_tools().get(record["tool"])
     if not offered:
         raise GatewayError("The connector no longer offers this tool.")
+    if _drifted(app["tools"].get(record["tool"], {}), offered):
+        raise GatewayError(DRIFT_NOTE)
     schema = offered.get("inputSchema") or {"type": "object"}
 
     def authorize():
@@ -505,9 +729,12 @@ def execute_operation(app_id: str, app: dict, operation: str) -> dict:
 
 
 def _bounded(result: dict) -> dict:
+    """Cap what one tool result can put into a chat: text, other content and structure."""
     content = []
     budget = MAX_TEXT
-    for item in result.get("content") or []:
+    items = result.get("content") if isinstance(result.get("content"), list) else []
+    omitted = max(0, len(items) - MAX_CONTENT_ITEMS)
+    for item in items[:MAX_CONTENT_ITEMS]:
         if not isinstance(item, dict):
             continue
         if item.get("type") == "text":
@@ -516,11 +743,19 @@ def _bounded(result: dict) -> dict:
                 text = text[:budget] + "\n[Result shortened by Mu3Lab; ask for fewer results or a narrower search.]"
             budget = max(0, budget - len(text))
             content.append({"type": "text", "text": text})
-        else:
-            content.append(item)
+            continue
+        size = len(json.dumps(item))
+        if size > budget or _too_deep(item):
+            omitted += 1
+            continue
+        budget -= size
+        content.append(item)
+    if omitted:
+        content.append({"type": "text", "text": f"[Mu3Lab left out {omitted} oversized result item(s).]"})
     bounded = {"content": content, "isError": bool(result.get("isError"))}
-    if "structuredContent" in result and len(json.dumps(result["structuredContent"])) <= MAX_TEXT:
-        bounded["structuredContent"] = result["structuredContent"]
+    structured = result.get("structuredContent")
+    if structured is not None and not _too_deep(structured) and len(json.dumps(structured)) <= MAX_TEXT:
+        bounded["structuredContent"] = structured
     return bounded
 
 
@@ -579,18 +814,37 @@ def _log_call(app_id: str, app: dict, tool: str, via: str, outcome: str, started
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Applies to every socket read, headers included, so a silent client is dropped.
+    timeout = SOCKET_TIMEOUT
 
     def do_GET(self):
+        if self.path == "/live":
+            # Liveness: the process answers. Readiness (policy, capacity) is /health.
+            self._send(200, {"ok": True})
+            return
         if self.path == "/health":
             try:
                 policy = POLICY.get()
                 apps = len(policy["apps"])
             except (OSError, ValueError):
-                self._send(503, {"ok": False})
+                self._send(503, {"ok": False, "reason": "policy_unavailable", "capacity": self.server_capacity()})
                 return
-            self._send(200, {"ok": True, "apps": apps, "revision": policy["revision"], "policy_sha256": POLICY._digest})
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "apps": apps,
+                    "revision": policy["revision"],
+                    "policy_sha256": POLICY._digest,
+                    "capacity": self.server_capacity(),
+                },
+            )
             return
         self._send(405 if self._app_id() else 404, {"error": "not found"})
+
+    def server_capacity(self) -> dict:
+        connections = getattr(self.server, "connections", None)
+        return CAPACITY.snapshot() | (connections() if connections else {})
 
     def do_DELETE(self):
         # Stateless server: there is no session to end.
@@ -620,6 +874,32 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError, KeyError):
             return False
 
+    def _body(self) -> bytes:
+        """Read the declared body within one deadline, however slowly it trickles in."""
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            size = -1
+        if size < 1 or size > MAX_REQUEST:
+            raise RpcError(INVALID_REQUEST, "Request is empty or too large.", status=413 if size > 0 else 400)
+        deadline = time.monotonic() + BODY_DEADLINE
+        chunks, received = [], 0
+        while received < size:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise RpcError(INVALID_REQUEST, "The request body arrived too slowly.", status=408)
+            self.connection.settimeout(min(left, SOCKET_TIMEOUT))
+            try:
+                chunk = self.rfile.read1(size - received)
+            except TimeoutError:
+                raise RpcError(INVALID_REQUEST, "The request body arrived too slowly.", status=408) from None
+            if not chunk:
+                raise RpcError(INVALID_REQUEST, "The request body ended early.", status=400)
+            chunks.append(chunk)
+            received += len(chunk)
+        self.connection.settimeout(SOCKET_TIMEOUT)
+        return b"".join(chunks)
+
     def do_POST(self):
         app_id = self._app_id()
         try:
@@ -635,6 +915,26 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized(app):
             self._send(401, {"error": "unauthorized"})
             return
+        principal = app["_principal"]
+        key = f"{principal['subject']}:{principal['provider']}:{app_id}"
+        wait = REQUESTS.take(key)
+        if wait:
+            CAPACITY.count("rate_limited")
+            self._send_error(None, RpcError(-32000, "Too many requests; slow down.", status=429, retry_after=wait))
+            return
+        if not CAPACITY.enter(key):
+            self._send_error(
+                None, RpcError(-32000, "Too many requests are already running.", status=429, retry_after=2)
+            )
+            return
+        _REQUEST.deadline = time.monotonic() + REQUEST_DEADLINE
+        try:
+            self._dispatch(app_id, app, key)
+        finally:
+            _REQUEST.deadline = 0.0
+            CAPACITY.leave(key)
+
+    def _dispatch(self, app_id: str, app: dict, key: str) -> None:
         request_id = None
         try:
             if "/operations/" in self.path:
@@ -649,17 +949,7 @@ class Handler(BaseHTTPRequestHandler):
                 _log_call(app_id, app, record["tool"], "approved_operation", result["outcome"], started)
                 self._send(200, result)
                 return
-            size = int(self.headers.get("Content-Length", "0"))
-            if size < 1 or size > MAX_REQUEST:
-                raise GatewayError("Request is empty or too large.")
-            message = json.loads(self.rfile.read(size))
-            if not isinstance(message, dict):
-                raise GatewayError("Batched requests are not supported.")
-            request_id = message.get("id")
-            method = str(message.get("method", ""))
-            params = message.get("params") or {}
-            if not isinstance(params, dict):
-                raise GatewayError("'params' must be an object.")
+            request_id, method, params = parse_message(self._body())
             if app["_principal"]["provider"] == "control-discovery" and method not in {
                 "initialize",
                 "notifications/initialized",
@@ -682,21 +972,30 @@ class Handler(BaseHTTPRequestHandler):
             elif method == "tools/list":
                 result = {"tools": list_tools(app_id, app)}
             elif method == "tools/call":
+                wait = CALLS.take(key)
+                if wait:
+                    CAPACITY.count("rate_limited")
+                    raise RpcError(-32000, "Too many tool calls; slow down.", status=429, retry_after=wait)
                 result = self._call(app_id, app, params)
             else:
-                self._send(200, {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": method}})
-                return
+                raise RpcError(-32601, f"Method not found: {method}")
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "result": result})
+        except RpcError as exc:
+            self._send_error(request_id, exc)
         except (GatewayError, ValueError) as exc:
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": str(exc)}})
         except (TypeError, KeyError):
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32600, "message": "bad request"}})
 
     def _call(self, app_id: str, app: dict, params: dict) -> dict:
-        name = str(params.get("name", ""))
-        arguments = params.get("arguments") or {}
+        name = params.get("name")
+        if not isinstance(name, str) or not name or len(name) > MAX_ID_LENGTH:
+            raise RpcError(INVALID_PARAMS, "'name' must be the tool's name.")
+        arguments = params.get("arguments")
+        if arguments is None:
+            arguments = {}
         if not isinstance(arguments, dict):
-            return _text("'arguments' must be an object.", error=True)
+            raise RpcError(INVALID_PARAMS, "'arguments' must be an object.")
         started = time.monotonic()
         try:
             result, tool, via = handle_call(app_id, app, name, arguments)
@@ -713,11 +1012,25 @@ class Handler(BaseHTTPRequestHandler):
         _log_call(app_id, app, tool, via, outcome, started)
         return result
 
-    def _send(self, status: int, value: dict | None) -> None:
+    def _send_error(self, request_id, error: RpcError) -> None:
+        headers = {"Retry-After": str(error.retry_after)} if error.retry_after else {}
+        self._send(
+            error.status,
+            {"jsonrpc": "2.0", "id": request_id, "error": {"code": error.code, "message": str(error)}},
+            headers,
+        )
+
+    def _send(self, status: int, value: dict | None, headers: dict | None = None) -> None:
         body = b"" if value is None else json.dumps(value).encode()
         self.send_response(status)
         if value is not None:
             self.send_header("Content-Type", "application/json")
+        for name, header in (headers or {}).items():
+            self.send_header(name, header)
+        if status >= 400 and status not in {401, 404, 405}:
+            # A refused or malformed request leaves the stream in an unknown state.
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -726,9 +1039,57 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+class BoundedServer(ThreadingHTTPServer):
+    """A threaded server that refuses connections beyond a fixed number at once."""
+
+    daemon_threads = True
+
+    def __init__(self, address, handler, max_connections: int = MAX_CONNECTIONS):
+        super().__init__(address, handler)
+        self._slots = threading.BoundedSemaphore(max_connections)
+        self._max = max_connections
+        self._open = 0
+        self._count_lock = threading.Lock()
+
+    def connections(self) -> dict:
+        with self._count_lock:
+            return {"connections": self._open, "max_connections": self._max}
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            CAPACITY.count("connections_refused")
+            try:
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 2\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        with self._count_lock:
+            self._open += 1
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._release()
+
+    def _release(self) -> None:
+        with self._count_lock:
+            self._open -= 1
+        self._slots.release()
+
+
 def main() -> None:
     AUTHORITY.recover_dispatches()
-    ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("GATEWAY_PORT", "8080"))), Handler).serve_forever()
+    BoundedServer(("0.0.0.0", int(os.environ.get("GATEWAY_PORT", "8080"))), Handler).serve_forever()
 
 
 if __name__ == "__main__":

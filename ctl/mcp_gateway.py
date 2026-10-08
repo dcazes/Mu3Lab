@@ -30,7 +30,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl.store import records
-from gateway_authority import Authority, canonical, validate_policy
+from gateway_authority import Authority, canonical, schema_digest, validate_policy
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "platform" / "tool-gateway"
@@ -179,6 +179,8 @@ def app_policy(server, app_name: str) -> dict[str, Any]:
                 "core": tool.core,
                 "enabled": states["tools"][name] and (tool.access == "read" or isinstance(schemas.get(name), dict)),
                 "schema": schemas.get(name) or {"type": "object", "properties": {}},
+                # Pins the schema Mu3Lab verified; the gateway withholds the tool if the connector drifts.
+                **({"schema_sha256": schema_digest(schemas[name])} if isinstance(schemas.get(name), dict) else {}),
             }
             for name, tool in review.tools.items()
         },

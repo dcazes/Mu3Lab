@@ -111,7 +111,7 @@ class TransportSafetyTests(unittest.TestCase):
             events.append("initialize")
             connector.session = "fresh"
 
-        def post(body):
+        def post(body, **_options):
             events.append(body["method"])
             if len(events) == 1:
                 raise URLError("lost reply")
