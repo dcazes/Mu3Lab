@@ -108,6 +108,8 @@ No production services were deployed or restarted. The test Caddy containers wer
 
 ## Next work in the authorized plan
 
+Update: R08/A4 and the immediate R20/A5 route task are now implemented; see [the subsequent mutation/readiness record](2026-10-08-mutation-readiness-implementation.md). The list below preserves the original handoff; use the main review table for current statuses.
+
 1. **R08 / A4:** inventory all idempotency lookup/create callers before changing the store contract. Bind keys to immutable actor and operation namespace; compare canonical request fingerprints; return explicit conflicts for changed payloads and different active operations. Update request/state writes and API error contracts together, and regenerate API clients if response contracts change. Reproduce queued start followed by stop/delete as a failing test before edits.
 2. **R20 / A5:** require verified required routes for usable status; preserve valid internal-service cases. Reproduce failed route probes across API projection and dashboard before changing status derivation.
 3. **R03 then full R02:** settle personal/shared/operator scopes from existing product decisions, implement subject-bound gateway credentials, and build durable per-call approval before replacing this tranche's write deny.

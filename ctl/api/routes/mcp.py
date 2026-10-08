@@ -261,6 +261,20 @@ def queue_action(server_id: str, action: str, request: Request, operator: Operat
     server = runtime.mcp_server(server_id, reg)
     if server.status != "accepted" or not server.compose_dir:
         raise ApiError(409, "MCP server has not passed runtime review")
+    store = runtime.job_store()
+    subject = runtime.mutation_subject(operator)
+    key = runtime.idempotency_key(request)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="wiring",
+        service_id=f"mcp:{server.id}",
+        action=action,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="mcp.actions",
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     if action == "update" and not server.reviewed_update:
         raise ApiError(409, "no reviewed MCP update is available")
     if action == "prepare":
@@ -277,6 +291,8 @@ def queue_action(server_id: str, action: str, request: Request, operator: Operat
             service_id=f"mcp:{server.id}",
             action=action,
             actor=operator["username"],
+            actor_subject=subject,
+            namespace="mcp.actions",
             detail=f"Operator requested MCP {action} for {server.service_id}.",
             idempotency_key=runtime.idempotency_key(request),
         )

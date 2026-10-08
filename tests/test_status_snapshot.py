@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from ctl import bootstrap_state
 from ctl.api import create_app
 from ctl.control_state import ControlState
+from ctl.registry import load
 from ctl.status import snapshots
 from ctl.status.display import projection
 from ctl.store import checklist, db
@@ -120,3 +121,31 @@ class SnapshotTests(unittest.TestCase):
         )
         self.assertEqual(projection({"state": "degraded", "installation_state": "installed"})["installed"], True)
         self.assertEqual(projection({"state": "planned"})["display_state"], "not_installed")
+
+    def test_legacy_configured_observation_cannot_claim_ready(self):
+        service = load().get("mealie")
+        observed = service.public() | {
+            "state": "ready",
+            "health_state": "healthy",
+            "route_state": "configured",
+            "route_ready": True,
+            "detail": "Ready",
+            "containers": [],
+            "compose_present": True,
+            "last_error": "",
+            "update": None,
+            "ui": {
+                "state": "ready",
+                "url": "https://test.ts.net:8447",
+                "label": "Open",
+                "authentication": service.auth,
+                "reason": None,
+            },
+        }
+        snapshots.write([observed], "2026-10-08T12:00:00+00:00")
+        response = self.client.get("/api/v1/services", headers=OPERATOR)
+        self.assertEqual(response.status_code, 200, response.text)
+        app = next(item for item in response.json()["services"] if item["id"] == "mealie")
+        self.assertFalse(app["route_ready"])
+        self.assertEqual(app["display_state"], "needs_attention")
+        self.assertIsNone(app["ui"].get("url"))

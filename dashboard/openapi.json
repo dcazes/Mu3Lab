@@ -3,6 +3,17 @@
     "schemas": {
       "ApiErrorResponse": {
         "properties": {
+          "blocking_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Job Id"
+          },
           "code": {
             "title": "Code",
             "type": "string"

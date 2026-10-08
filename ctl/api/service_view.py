@@ -72,7 +72,18 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
         for service in registry.services
     ]
     result = []
-    for service, item in zip(registry.services, statuses, strict=True):
+    for service, original in zip(registry.services, statuses, strict=True):
+        item = dict(original)
+        if service.private_https_port is not None and item.get("route_state") != "verified":
+            item["route_ready"] = False
+            item["url"] = ""
+            item["ui"] = dict(item.get("ui") or {}) | {
+                "state": "route_pending" if service.ui.get("available") else "unavailable",
+                "url": None,
+            }
+            if item.get("state") in {"ready", "running"}:
+                item["state"] = item["lifecycle_state"] = "needs_setup"
+                item["detail"] = "The app's required private HTTPS route has not passed verification."
         live_state = str(item["state"])
         latest = next((job for job in jobs if job["service_id"] == service.id), None)
         installation = control_state.installation(service.id) if control_state else None

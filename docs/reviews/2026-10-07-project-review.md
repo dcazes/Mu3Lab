@@ -175,7 +175,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R05](#r05) | Fail closed on missing/stale gateway policy | P1 | R | S | — | in progress |
 | [R06](#r06) | Validate and bound gateway requests, sessions, and concurrency | P1 | S | M | R02–R05 | open |
 | [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | open |
-| [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | open |
+| [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
 | [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | open |
 | [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | open |
 | [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | open |
@@ -187,7 +187,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R17](#r17) | Stage self-updates away from the running checkout | P1 | S | L | R09, R14, R16 | open |
 | [R18](#r18) | Make API/worker privilege boundary explicit and enforceable | P1 | S | L | R09, R16 | open |
 | [R19](#r19) | Separate calendar reads from sync; preserve conflict information | P1 | S | M | R08, R09 | open |
-| [R20](#r20) | Derive usable status from successful required checks | P1 | R | S | — | open |
+| [R20](#r20) | Derive usable status from successful required checks | P1 | R | S | — | in progress |
 | [R21](#r21) | Bound observer cycles and schedule maintenance independently | P2 | S | M | R09, R20 | open |
 | [R22](#r22) | Add browser request deadlines and resource-scoped state | P2 | S | M | — | open |
 | [R23](#r23) | Complete keyboard and assistive-technology interactions | P2 | S/D | M | — | open |
@@ -328,6 +328,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r08"></a>
 
 ### R08 — Job idempotency conflates different requests and conflicting actions
+
+**Implementation progress (2026-10-08):** Subject/namespace/request-bound keys, explicit busy/conflict responses, completed replay before state validation, and atomic jobs/private inputs/desired-state updates are implemented. Includes scoped batch request identities and migration of legacy metadata without inventing missing identity. Owner: Codex. Started: 2026-10-08. Commit: `fix: bind mutation identity and require verified service routes`. Release verification: pending disposable-runtime/browser acceptance. Details and evidence: [mutation/readiness record](2026-10-08-mutation-readiness-implementation.md).
 
 **Evidence:** [JobStore.create](../../ctl/jobs.py) searches only the global idempotency key, then returns any active job for the service regardless of action/actor. E04/E05 demonstrate both cases. [service actions](../../ctl/api/routes/services.py) can update installation state using the newly requested action even when the returned queued job is a different existing operation.
 
@@ -493,6 +495,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r20"></a>
 
 ### R20 — A required route can fail probing while the service remains ready
+
+**Implementation progress (2026-10-08):** The reproduced required-route defect is fixed: only successful probes establish route readiness; failed/missing routes suppress green usability and launch links, including legacy cached observations. Internal services without a required browser route remain supported. Full R20 stays in progress for sign-in evidence expiry, observation freshness, debouncing and typed observations. Owner: Codex. Started: 2026-10-08. Commit: `fix: bind mutation identity and require verified service routes`. Verified on: pending item-specific acceptance. Details, tests and remaining sequence: [mutation/readiness record](2026-10-08-mutation-readiness-implementation.md).
 
 **Evidence:** [service_state.status](../../ctl/service_state.py) sets `route_ready` for both `verified` and `configured`; when a healthy app's configured route probe fails it remains configured. E08 returns `state=ready`, `route_state=configured`, `route_ready=True` with `route_answers=False`. This contradicts the README's route-verification promise.
 
@@ -706,10 +710,10 @@ The owner authorized implementation on 2026-10-08, starting with the highest-pri
 - [x] **A1:** R01 starter ingress lockdown and a real Caddy-to-API negative test.
 - [x] **A2:** R02 immediate fail-closed gate for writes lacking verifiable approval; retain disabled/default-off behavior.
 - [x] **A3:** R04 no ambiguous write retry; R05 missing-policy denial.
-- [ ] **A4:** R08 scoped request identity and explicit busy/conflict responses.
-- [ ] **A5:** R20 truthful route readiness, plus immediate R33 caveats.
+- [x] **A4:** R08 scoped request identity and explicit busy/conflict responses.
+- [x] **A5:** R20 truthful route readiness, plus immediate R33 caveats.
 
-A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). Full R02/R05 and VM/client acceptance remain open; these checked containment tasks do not mark Milestone A exited.
+A1–A3 implementation and automated checks are recorded in [the 2026-10-08 implementation record](2026-10-08-priority-security-implementation.md). A4 and the immediate A5 route fix are recorded in [the mutation/readiness implementation record](2026-10-08-mutation-readiness-implementation.md). Full R02/R05/R20 and VM/client acceptance remain open; these checked tasks do not mark Milestone A exited.
 
 These should be small, independently reviewable changes. Full per-person approvals follow; containment must not wait for a complete chat-provider refactor.
 

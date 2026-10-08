@@ -1330,6 +1330,8 @@ export interface components {
   schemas: {
     /** ApiErrorResponse */
     ApiErrorResponse: {
+      /** Blocking Job Id */
+      blocking_job_id?: string | null;
       /** Code */
       code: string;
       /** Error */

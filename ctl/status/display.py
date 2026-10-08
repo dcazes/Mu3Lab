@@ -25,5 +25,7 @@ def projection(item: dict) -> dict:
     if state == "config_required":
         reason = "Complete this app's settings before installing it."
     elif state == "needs_setup":
-        reason = "Finish this app's setup or sign-in before using it."
+        ui = item.get("ui") or {}
+        if ui.get("state") != "route_pending" or not reason:
+            reason = "Finish this app's setup or sign-in before using it."
     return {"display_state": display, "reason": reason, "installed": bool(installed)}

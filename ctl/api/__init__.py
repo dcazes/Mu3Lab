@@ -14,7 +14,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from ctl import __version__
-from ctl.api.errors import ApiError, api_error_handler, response_error_handler, validation_error_handler
+from ctl.api.errors import (
+    ApiError,
+    api_error_handler,
+    job_conflict_handler,
+    response_error_handler,
+    validation_error_handler,
+)
 from ctl.api.routes import (
     calendar,
     chat,
@@ -32,7 +38,7 @@ from ctl.api.routes import (
 )
 from ctl.identity import sync_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError
-from ctl.jobs import redact
+from ctl.jobs import JobConflict, redact
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
@@ -82,6 +88,7 @@ def _mount_dashboard(app: FastAPI, dist: Path) -> None:
 def create_app(dist: Path = DIST) -> FastAPI:
     app = FastAPI(title="Mu3Lab control plane", version=__version__, lifespan=_lifespan)
     app.add_exception_handler(ApiError, api_error_handler)
+    app.add_exception_handler(JobConflict, job_conflict_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(ResponseValidationError, response_error_handler)
     app.add_exception_handler(ValidationError, response_error_handler)

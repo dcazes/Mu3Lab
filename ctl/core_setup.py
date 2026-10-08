@@ -338,7 +338,15 @@ def _run(
             provisioning.update("core", "failed", error="Core installation failed; see the core job for details.")
 
 
-def start(store: JobStore, actor: str, root: Path, idempotency_key: str | None = None) -> dict[str, str]:
+def start(
+    store: JobStore,
+    actor: str,
+    root: Path,
+    idempotency_key: str | None = None,
+    *,
+    actor_subject: str = "",
+    prepare=None,
+) -> dict[str, str]:
     """Queue core reconciliation; the persistent worker owns execution."""
     del root  # retained in the public call shape while release layout is migrated
     return store.create(
@@ -346,18 +354,25 @@ def start(store: JobStore, actor: str, root: Path, idempotency_key: str | None =
         service_id="core-suite",
         action="install",
         actor=actor,
+        actor_subject=actor_subject,
+        namespace="core.install",
+        prepare=prepare,
         detail="Reconcile the reviewed core platform",
         idempotency_key=idempotency_key,
     )
 
 
-def start_verify(store: JobStore, actor: str, idempotency_key: str | None = None) -> dict[str, str]:
+def start_verify(
+    store: JobStore, actor: str, idempotency_key: str | None = None, *, actor_subject: str = ""
+) -> dict[str, str]:
     """Queue contract verification without pulling or recreating services."""
     return store.create(
         kind="verification",
         service_id="core-suite",
         action="verify",
         actor=actor,
+        actor_subject=actor_subject,
+        namespace="core.verify",
         detail="Verify live core platform contracts",
         idempotency_key=idempotency_key,
     )

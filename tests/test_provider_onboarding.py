@@ -180,7 +180,12 @@ class ProviderRouteTests(unittest.TestCase):
         store = patch("ctl.api.routes.providers.runtime.job_store").start()
         self.addCleanup(patch.stopall)
         store.return_value.by_idempotency_key.return_value = None
-        store.return_value.create.return_value = {"id": "job-1", "state": "queued"}
+
+        def create(**kwargs):
+            kwargs["prepare"]("job-1")
+            return {"id": "job-1", "state": "queued"}
+
+        store.return_value.create.side_effect = create
         self.saved = patch(
             "ctl.api.routes.providers.save", side_effect=lambda pid, label, _key: {"id": pid, "label": label}
         )

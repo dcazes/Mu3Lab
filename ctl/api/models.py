@@ -19,6 +19,7 @@ class ApiErrorResponse(ApiModel):
     message: str
     recommended_action: str
     error: str | dict[str, JsonValue]
+    blocking_job_id: str | None = None
 
 
 TailscaleConnectionState = Literal["connected"] | Literal["disconnected"] | Literal["unavailable"]

@@ -451,19 +451,20 @@ def status(
         if route_configured and healthy
         else service.route
     )
-    # Usable once configured; "verified" additionally records a real request.
-    route_ready = route_required and route_state in {"verified", "configured"}
+    # Publication is configuration, not evidence that this route works.
+    route_ready = route_required and route_state == "verified"
     # A healthy process is not yet a usable app unless its declared private
     # route has also been verified. Keep that distinction visible so the UI
     # cannot call a merely-installed service "ready".
     if healthy and route_required and not route_ready:
         lifecycle_state = "needs_setup"
+        detail = "The app is healthy, but its required private HTTPS route has not passed verification."
     setup_state = (
         "configured" if lifecycle_state == "ready" else ("blocked" if lifecycle_state == "blocked" else "needs_setup")
     )
     ui = dict(service.ui)
     ui_available = bool(ui.get("available", False))
-    url = public_url(service, dns_name)
+    url = public_url(service, dns_name) if route_ready else ""
     if route_ready and ui_available and not url and dns_name:
         port = service.private_https_port or service.https_port
         suffix = "" if port == 443 else f":{port}"

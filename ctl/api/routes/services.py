@@ -89,6 +89,21 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     if action not in SUPPORTED_ACTIONS:
         raise ApiError(400, "unsupported service action")
     service = runtime.service(service_id)
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    subject = runtime.mutation_subject(operator)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="lifecycle",
+        service_id=service.id,
+        action=action,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="services.actions",
+        request=body,
+    )
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
     # Deleting data cannot be undone: the request must repeat the app's name,
     # so a replayed or scripted "uninstall" can never escalate to it.
     if action == "uninstall_delete_data" and str(body.get("confirm", "")).strip().casefold() != service.name.casefold():
@@ -127,17 +142,22 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):
             raise ApiError(409, "action is not valid for the current service state")
-    store = runtime.job_store()
-    key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
-    if previous:
-        return {"ok": True, "duplicate": True, "job": previous}
     try:
         job = store.create(
             kind="lifecycle",
             service_id=service.id,
             action=action,
             actor=operator["username"],
+            actor_subject=subject,
+            namespace="services.actions",
+            request=body,
+            commit_state=(
+                lambda job_id: control.set_installation(
+                    service.id, "uninstalling" if action in UNINSTALL_ACTIONS else "queued", job_id=job_id
+                )
+            )
+            if control and action not in MAINTENANCE_ACTIONS
+            else None,
             detail=f"Operator requested {action} for {service.name}.",
             idempotency_key=key,
             prepare=runtime.identity_for_job(operator)
@@ -149,9 +169,6 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         raise ApiError(409, str(exc)) from exc
     if action in MAINTENANCE_ACTIONS:
         return {"ok": True, "job": job}
-    if control and job.get("state") == "queued":
-        queued_state = "uninstalling" if action in UNINSTALL_ACTIONS else "queued"
-        control.set_installation(service.id, queued_state, job_id=str(job["id"]))
     return {"ok": True, "job": job}
 
 
