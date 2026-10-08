@@ -1,8 +1,12 @@
 """Persistent Mu3Lab workflow worker.
 
-The web process queues reviewed jobs but cannot execute Docker or host actions.
-This process claims durable leases from SQLite and resumes abandoned work after
-its previous worker lease expires.
+The web process queues reviewed jobs; this process claims durable leases from
+SQLite and resumes abandoned work after its previous worker lease expires.
+
+Only one worker executes at a time (``resource_locks.WorkerLock``): a second
+one, or a restarted one while a paused one still lives, waits. Each job holds
+its resource's lock while it runs, and no job is claimed while a command an
+earlier worker started is still running (``job_processes``).
 """
 
 from __future__ import annotations
@@ -14,9 +18,10 @@ import threading
 import time
 from pathlib import Path
 
-from ctl import access, job_guard, self_update
+from ctl import access, job_guard, resource_locks, self_update
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
+from ctl.job_processes import JobProcesses
 from ctl.jobs import JobStore
 from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
@@ -54,6 +59,14 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         execute_service_claimed(store, job, worker_id, ROOT)
 
 
+def resources(job: dict) -> tuple[str, ...]:
+    """The lock keys a job holds while it runs: its app, connector, provider or the platform."""
+    service_id = str(job.get("service_id") or "")
+    if service_id == self_update.SERVICE_ID:
+        return ("platform",)
+    return (service_id if ":" in service_id else f"app:{service_id}",)
+
+
 def run_job(store: JobStore, job: dict, worker_id: str) -> None:
     """Run one claimed job, stopping it cleanly if it is cancelled or its lease is lost."""
     job_id = str(job["id"])
@@ -64,7 +77,16 @@ def run_job(store: JobStore, job: dict, worker_id: str) -> None:
         )
         heartbeat_thread.start()
         try:
-            _dispatch(store, job, worker_id)
+            with resource_locks.hold(*resources(job)):
+                _dispatch(store, job, worker_id)
+        except resource_locks.Busy as busy:
+            store.transition(
+                job_id,
+                "failed",
+                actor=worker_id,
+                detail=f"Nothing was changed: {busy}. Try again once it has finished.",
+                error_code="resource_busy",
+            )
         except job_guard.JobInterrupted as interruption:
             if interruption.reason == job_guard.CANCELLED:
                 store.acknowledge_cancel(job_id, worker_id)
@@ -104,15 +126,12 @@ def run() -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    # App images download in the background, several at once, while setup
-    # jobs run one at a time below.
     downloads_stopping = threading.Event()
-    from ctl import download_manager
-
-    download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
-    status_thread = reconciler.start(downloads_stopping)
-    sign_in.start(downloads_stopping, lambda line: print(line, flush=True))
-    access.start(downloads_stopping, lambda line: print(line, flush=True))
+    status_thread: threading.Thread | None = None
+    lock = resource_locks.WorkerLock()
+    waiting_for_lock_reported = False
+    processes: JobProcesses | None = None
+    leftovers_reported: list[str] = []
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait
@@ -126,6 +145,24 @@ def run() -> int:
             time.sleep(POLL_SECONDS)
             continue
         waiting_for_runtime_reported = False
+        if not lock.held:
+            if not lock.try_acquire():
+                if not waiting_for_lock_reported:
+                    print("Another Mu3Lab worker is running; this one waits until it stops.", flush=True)
+                    waiting_for_lock_reported = True
+                time.sleep(POLL_SECONDS)
+                continue
+            # Background work starts only once this is the one executing worker.
+            from ctl import download_manager
+
+            processes = JobProcesses(store.database)
+            processes.install()
+            # App images download in the background, several at once, while
+            # setup jobs run one at a time below.
+            download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
+            status_thread = reconciler.start(downloads_stopping)
+            sign_in.start(downloads_stopping, lambda line: print(line, flush=True))
+            access.start(downloads_stopping, lambda line: print(line, flush=True))
         if time.monotonic() >= next_rule_maintenance:
             next_rule_maintenance = time.monotonic() + 60
             try:
@@ -170,6 +207,16 @@ def run() -> int:
                 batches.reconcile(store)
         except Exception as exc:
             print(f"Mu3Lab batch reconciliation deferred safely: {exc}", flush=True)
+        assert processes is not None
+        leftovers = processes.settle(lambda line: print(line, flush=True))
+        if leftovers:
+            # Never start new work while an earlier worker's command may still be changing things.
+            if leftovers != leftovers_reported:
+                print(f"Mu3Lab waits for an earlier worker's command to finish: {', '.join(leftovers)}", flush=True)
+                leftovers_reported = leftovers
+            time.sleep(POLL_SECONDS)
+            continue
+        leftovers_reported = []
         job = store.claim(worker_id)
         if job is None:
             time.sleep(POLL_SECONDS)
@@ -190,7 +237,9 @@ def run() -> int:
                 print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
     downloads_stopping.set()
     signals.changed.set()
-    status_thread.join(timeout=2)
+    if status_thread is not None:
+        status_thread.join(timeout=2)
+    lock.release()
     return 0
 
 

@@ -102,6 +102,14 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
 
 
 def sync_agents(log) -> tuple[bool, str]:
+    from ctl import access, resource_locks
+
+    # Revocation rewrites the same per-person records; never interleave with it.
+    with resource_locks.hold(access.CHAT_LOCK):
+        return _sync_agents(log)
+
+
+def _sync_agents(log) -> tuple[bool, str]:
     paths = RuntimePaths()
     records = chat_connections.records(paths)
     if not any(record.get("key") for record in records.values()):

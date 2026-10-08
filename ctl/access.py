@@ -42,6 +42,7 @@ TARGET_LABELS = {
 RETRY_BASE_SECONDS = 30
 RETRY_MAX_SECONDS = 3600
 INTERVAL = 30
+CHAT_LOCK = "chat-assistants"
 
 
 def _now() -> str:
@@ -197,17 +198,19 @@ def _voice_key(subject: str, _username: str) -> None:
 
 def _chat(subject: str, _username: str) -> None:
     """Detach every Mu3Lab assistant's tools; conversations and agents stay."""
-    from ctl import chat_connections
+    from ctl import chat_connections, resource_locks
     from ctl.integrations.lobehub import LobeHub
     from ctl.lobehub_ops import origin
 
-    entry = chat_connections.records().get(subject) or {}
-    managed = entry.get("managed") or {}
-    if not entry.get("key") or not managed:
-        return
-    with LobeHub(origin(), entry["key"]) as client:
-        managed = client.ensure_assistants([], managed, installed=set(managed))
-    chat_connections.save(subject, {**entry, "managed": managed, "error": ""})
+    # Chat synchronization rewrites the same records; never interleave with it.
+    with resource_locks.hold(CHAT_LOCK):
+        entry = chat_connections.records().get(subject) or {}
+        managed = entry.get("managed") or {}
+        if not entry.get("key") or not managed:
+            return
+        with LobeHub(origin(), entry["key"]) as client:
+            managed = client.ensure_assistants([], managed, installed=set(managed))
+        chat_connections.save(subject, {**entry, "managed": managed, "error": ""})
 
 
 HANDLERS: dict[str, Callable[[str, str], None]] = {

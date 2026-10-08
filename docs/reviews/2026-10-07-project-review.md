@@ -177,7 +177,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R07](#r07) | Make deactivation and credential revocation durable | P1 | S | M | R03, R09 | implemented; release acceptance pending |
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
 | [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | implemented for backup/restore/update; release acceptance pending |
-| [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | open |
+| [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | implemented; release acceptance pending |
 | [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | open |
 | [R12](#r12) | Roll back full deployment configuration as well as data/images | P1 | S | L | R09, R11, R13 | open |
 | [R13](#r13) | Stage restores and enforce complete storage layouts | P1 | S | L | R09, R11 | open |
@@ -374,6 +374,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r10"></a>
 
 ### R10 — A job lease does not fence an already-running external effect
+
+**Implementation progress (2026-10-08):** A kernel `flock` worker execution lock (held for the worker's lifetime, so a paused worker keeps it), sorted re-entrant per-resource locks (`app:`/`mcp:`/`provider:`/`platform` per job, consumer apps during re-wiring, `backup-repository`, `chat-assistants`), and a `job_processes` record of every command a job starts (pid plus kernel start time and deadline) that stops new claims while an earlier worker's command still runs, stopping it only once past its own deadline. Branch `fix/review-milestone-b`; details and limits in the [B2 record](2026-10-08-milestone-b2-implementation.md). Release verification: pending VM suspend/survivor drill.
 
 **Evidence:** [job_guard](../../ctl/job_guard.py) explicitly permits an in-flight command to finish. Lease loss is detected at checkpoints. [JobStore.claim](../../ctl/jobs.py) can hand an expired job to another worker while the first command/container still runs. The default worker is serial, but process overlap, stale children, or a paused process can violate that assumption.
 
@@ -732,7 +734,7 @@ These should be small, independently reviewable changes. Full per-person approva
 ### Milestone B — Durable recovery and deployment identity
 
 - [x] **B1 implementation:** R09 operation journal and R35 bounded executor ([record](2026-10-08-milestone-b1-implementation.md)). VM interruption acceptance remains pending.
-- [ ] **B2:** R10 resource locks and interrupted-effect reconciliation.
+- [x] **B2 implementation:** R10 resource locks and interrupted-effect reconciliation ([record](2026-10-08-milestone-b2-implementation.md)). VM suspend/survivor drill remains pending.
 - [ ] **B3:** R11 immutable deployment IDs; R16 canonical config and private publication.
 - [ ] **B4:** R12 complete deployment rollback; R13 staged restore.
 - [ ] **B5:** R15 retention protection and truthful verification.

@@ -23,6 +23,10 @@ Every command Mu3Lab runs goes through ``run`` (or ``completed``, its
 Killing a Docker CLI does not stop the container it started. Callers that
 start long-lived containers name them so they can be found and stopped; see
 ``ctl.backups``.
+
+A tracker (``set_tracker``) is told about every child as it starts and again
+once it has been reaped; the worker uses it to record the commands a job
+runs, so a later worker can tell whether one outlived its worker (R10).
 """
 
 from __future__ import annotations
@@ -49,6 +53,25 @@ FORWARD_LINE_CHARS = 2000
 KILL_GRACE_SECONDS = 5.0
 _QUEUE_LINES = 32
 _POLL_SECONDS = 0.5
+
+# Called with (process, argv, timeout) after a child starts; returns a callable
+# run once the child has been reaped, or None when it does not track this one.
+Tracker = Callable[[subprocess.Popen, Sequence[str], float], Callable[[], None] | None]
+_tracker: Tracker | None = None
+
+
+def set_tracker(tracker: Tracker | None) -> None:
+    global _tracker
+    _tracker = tracker
+
+
+def _track(proc: subprocess.Popen, argv: Sequence[str], timeout: float) -> Callable[[], None] | None:
+    if _tracker is None:
+        return None
+    try:
+        return _tracker(proc, argv, timeout)
+    except Exception:  # bookkeeping must never stop the command itself
+        return None
 
 
 @dataclass(frozen=True)
@@ -187,6 +210,7 @@ def run(
         message = f"{argv[0]}: {exc}"
         return Result("error", 126, message, "", message)
 
+    untrack = _track(proc, argv, timeout)
     inbox: queue.Queue[tuple[Stream, str] | None] = queue.Queue(maxsize=_QUEUE_LINES)
     halt = threading.Event()
     assert proc.stdout is not None and proc.stderr is not None
@@ -264,6 +288,11 @@ def run(
     finally:
         # Reached on timeout and on anything raised by this loop itself.
         stop(proc)
+        if untrack is not None and proc.poll() is not None:
+            try:
+                untrack()
+            except Exception:
+                pass
         halt.set()
         for thread in threads:
             thread.join(timeout=1)

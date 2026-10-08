@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ctl import actions
+from ctl import actions, resource_locks
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, write_atomic
 from ctl.store import records
@@ -45,6 +45,7 @@ CONTAINER_LABEL = "mu3lab.role=restic"
 MUTATING = frozenset({"init", "backup", "check", "forget", "restore"})
 SURVIVOR_WAIT_SECONDS = 1800
 STOP_SECONDS = 30
+REPOSITORY_LOCK = "backup-repository"
 
 Log = Callable[[str], None]
 
@@ -132,9 +133,21 @@ def _restic(
     CLI alone would leave restic writing.
     """
     if args and args[0] in MUTATING:
-        survivor = _wait_for_survivors(log)
-        if survivor:
-            return 1, survivor
+        # One data-changing restic command at a time, across every process.
+        try:
+            with resource_locks.hold(REPOSITORY_LOCK, paths=paths):
+                survivor = _wait_for_survivors(log)
+                if survivor:
+                    return 1, survivor
+                return _run_restic(args, log, mounts=mounts, paths=paths, timeout=timeout)
+        except resource_locks.Busy:
+            return 1, "Another backup task is still using the backup repository; try again later."
+    return _run_restic(args, log, mounts=mounts, paths=paths, timeout=timeout)
+
+
+def _run_restic(
+    args: list[str], log: Log, *, mounts: Sequence[tuple[Path, str, bool]], paths: RuntimePaths, timeout: int
+) -> tuple[int, str]:
     name = f"mu3lab-restic-{secrets.token_hex(6)}"
     with tempfile.TemporaryDirectory(prefix="mu3lab-restic-") as temporary:
         password_file = Path(temporary) / "password"
