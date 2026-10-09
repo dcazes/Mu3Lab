@@ -1,4 +1,5 @@
 import {
+  ArchiveRestore,
   AudioLines,
   Baby,
   BookOpenText,
@@ -65,6 +66,7 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   'open-webui': { icon: MessagesSquare, color: '#64748b' },
   speaches: { icon: AudioLines, color: '#db2777' },
   tailnet: { icon: Network, color: '#64748b' },
+  'kopia-ui': { icon: ArchiveRestore, color: '#2563eb' },
 };
 
 // Near-black brand colors would vanish in dark mode; those glyphs follow the text color.

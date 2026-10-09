@@ -1,0 +1,32 @@
+# Kopia's web page, read-only. The repository is mounted read-only and Kopia
+# connects read-only too, so nothing here can change a backup. Its connection
+# settings live in memory and are made again at each start.
+name: mu3lab-kopia-ui
+
+services:
+  kopia:
+    # The same pinned image Mu3Lab's own backups use (ctl/backups.py, KOPIA_IMAGE).
+    image: docker.io/kopia/kopia:0.23.1@sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e
+    restart: unless-stopped
+    ports: ["127.0.0.1:51515:51515"]
+    env_file: [".env"]
+    environment:
+      KOPIA_CHECK_FOR_UPDATES: "false"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        kopia repository connect filesystem --path=/repo --readonly
+        --override-username=mu3lab --override-hostname=mu3lab
+        && exec kopia server start --readonly --insecure --address=0.0.0.0:51515 --refresh-interval=5m
+    volumes:
+      - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia:/repo:ro
+      - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/restores:/restores
+    read_only: true
+    tmpfs: [/app/config, /app/cache, /app/logs, /tmp]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      # Up and refusing anyone without the password; the check never sends it.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:51515/ | grep -q 401"]
+      interval: 10s
+      timeout: 5s
+      retries: 30

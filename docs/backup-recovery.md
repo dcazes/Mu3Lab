@@ -10,6 +10,10 @@ This page is for the cases the dashboard cannot handle: restoring by hand, and b
 
 If the server was off at the scheduled time, the run starts about ten minutes after it is back on. Changing the schedule never starts a backup straight away.
 
+## Browsing backups and restoring single files
+
+Administrators can open **Security & backups → Open backups** (Kopia's own web page, behind Authentik; Mu3Lab signs in to Kopia for you). It shows every backup Mu3Lab has made. Restore a single file or folder into `/srv/mu3lab/backups/restores/`, then copy it where you need it. The page is read-only: the repository is mounted read-only and Kopia connects read-only, so it cannot change, add or remove a backup. To roll back a whole app, use that app's **Backups** card instead; it stops the app first.
+
 ## The backup password and the recovery sheet
 
 Every backup is encrypted with one password, which Mu3Lab created when it first needed it and never changes. Mu3Lab keeps it in its encrypted store on this server, so if the server is lost, that copy is lost too. Two other copies exist:
@@ -38,6 +42,7 @@ You need: the backup password (sheet or vault), and a copy of `/srv/mu3lab/backu
 | Kopia repository (encrypted backups) | `/srv/mu3lab/backups/kopia/` |
 | Kopia's connection settings and cache on this server | `/srv/mu3lab/state/kopia/` |
 | Repository password | Mu3Lab's encrypted secret store (`platform` / `backup-password`), the printed recovery sheet, and each administrator's vault |
+| Files restored from the backup browser | `/srv/mu3lab/backups/restores/` |
 | Older restic backups (before the switch) | `/srv/mu3lab/backups/` (the `config`, `data`, `index`, `keys`, `locks` and `snapshots` entries) |
 
 Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|scheduled|pre-update|pre-restore|platform>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`.

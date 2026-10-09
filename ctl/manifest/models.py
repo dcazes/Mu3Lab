@@ -84,6 +84,17 @@ class Redirect(Model):
     status: Literal[301, 302, 307, 308] = 302
 
 
+class UpstreamBasicAuth(Model):
+    """Caddy signs in to the app with its own login once Authentik has admitted the visitor.
+
+    Both values are the app's generated settings. The header is built when Caddy
+    starts and reaches it as an environment value, never written into the Caddyfile.
+    """
+
+    user_env: str
+    password_env: str
+
+
 class Route(Model):
     https_port: Port  # Tailscale Serve port on the tailnet hostname
     caddy_port: Port = Field(ge=19460, le=19499)  # loopback Caddy listener
@@ -102,6 +113,7 @@ class Route(Model):
     forwarded_host: Literal["host", "hostport"] = "hostport"
     # Who Authentik admits through a gate: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"
+    upstream_basic_auth: UpstreamBasicAuth | None = None
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
     # apps/ingress/Caddyfile; every other route is generated from its manifest.
     generated: bool = True
@@ -486,6 +498,9 @@ class AppManifest(Model):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":
             raise ValueError("a trusted_header route needs trusted_header sign-in")
+        if self.route and self.route.upstream_basic_auth and self.route.access == "open":
+            # The login it adds would be handed to anyone who reached the address.
+            raise ValueError("upstream_basic_auth needs a route Authentik guards")
         secret_names = [secret.env for secret in self.secrets]
         if len(secret_names) != len(set(secret_names)):
             raise ValueError("secret env names must be unique")

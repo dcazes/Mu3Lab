@@ -184,6 +184,19 @@ class VaultSyncTests(unittest.TestCase):
         ids = [item.mu3lab_id for item in vault_sync.items_for(PARTNER, "host.ts.net", self.paths)]
         self.assertNotIn("platform:backup-password", ids)
 
+    def test_administrators_get_logins_caddy_supplies_as_a_fallback(self):
+        (self.paths.projects / "kopia-ui").mkdir(parents=True)
+        (self.paths.projects / "kopia-ui" / ".env").write_text(
+            "KOPIA_SERVER_USERNAME=mu3lab-ui\nKOPIA_SERVER_PASSWORD=ui-secret\n"
+        )
+        items = {item.mu3lab_id: item for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)}
+        login = items["service:kopia-ui"]
+        self.assertEqual(
+            (login.username, login.password, login.url), ("mu3lab-ui", "ui-secret", "https://host.ts.net:8470")
+        )
+        partner = [item.mu3lab_id for item in vault_sync.items_for(PARTNER, "host.ts.net", self.paths)]
+        self.assertNotIn("service:kopia-ui", partner)
+
     def test_no_backup_password_is_saved_when_the_repository_lost_it(self):
         with patch("ctl.vault_sync.backups.repository_password", side_effect=backups.BackupError("missing")):
             ids = [item.mu3lab_id for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)]

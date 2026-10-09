@@ -877,7 +877,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     rc, out = actions.compose_up(
         projdir,
         log,
-        env={"MU3LAB_CADDYFILE": str(source_caddy), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        env=routes.ingress_env(source_caddy, ingress_token),
         on_output=compose_activity,
         recreate=True,  # Config file contents may change without changing the Compose mount path.
     )
@@ -1556,7 +1556,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     ingress_result["rc"], ingress_result["out"] = actions.compose_up(
         ctx["root"] / "apps" / by_capability("private_proxy").id,
         log,
-        env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        env=routes.ingress_env(target, ingress_token),
         recreate=True,  # the file path is unchanged on updates, so Caddy must restart to read it
         on_output=ingress_activity,
     )

@@ -157,3 +157,34 @@ Owner decisions: the backup password goes on a printable sheet and into **every 
   - the scheduled tag only for the schedule's own jobs;
   - the dashboard card.
 - **Not done:** the plan's Home warning after 3 days without a backup. With a weekly default, a fixed 3-day threshold would be wrong; the card's last-run outcome covers this for now.
+
+## Step 4: the read-only backup browser (2026-10-09)
+
+- **App.** `apps/kopia-ui` is a core app, installed by core setup. It uses the same pinned image as Mu3Lab's backups, on the ports the expansion plan reserved: 51515, 8470 and 19487. It is named `kopia-ui` because "kopia" already names the engine in shared code.
+  - The repository is mounted `:ro`, and Kopia both connects and serves `--readonly`.
+  - Its connection settings live in memory only (tmpfs, a read-only root).
+  - Only `backups/restores` is writable.
+  - Kopia reads the repository password and its own login from the environment, so neither appears in the process list.
+- **Rule `reads_backups`.** Hands the app the repository password and the backups folder. Before the app starts, it creates the repository (with Mu3Lab's policy) if no backup has been made yet, plus the restores folder.
+- **Route option `upstream_basic_auth`.**
+  - After Authentik admits an administrator, Caddy adds `Authorization: Basic …` from `{env.MU3LAB_UPSTREAM_AUTH_<APP>}`, replacing anything the visitor sent.
+  - `routes.write_upstream_auth` writes those values into a 0600 file that Caddy loads as an optional `env_file`. All four places that start Caddy now go through `routes.ingress_env`.
+  - An open route may not use the option, and the login is also saved to administrators' vaults as a fallback.
+- **Verified against the real image, with throwaway repositories:**
+  - `repository connect --readonly` works on a read-only mount, and a fingerprint of every repository file was identical before and after the interface ran;
+  - 401 without the password or with a wrong one, 200 with the Caddy-style header;
+  - listing works;
+  - a policy change is refused;
+  - a full restore brought back the content and its owner;
+  - the real Compose file reached healthy, and its health check never sends the password.
+- **Tests:**
+  - the read-only mounts and flags;
+  - no secret on the command line;
+  - the same image as `KOPIA_IMAGE`;
+  - left out of backups;
+  - the route (golden file);
+  - the 0600 login file;
+  - the open-route guard;
+  - every Caddy start going through the helper;
+  - the rule;
+  - the vault fallback, for administrators only.

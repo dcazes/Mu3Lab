@@ -9,6 +9,10 @@ services:
     network_mode: host
     environment:
       MU3LAB_INGRESS_TOKEN: ${MU3LAB_INGRESS_TOKEN:?MU3LAB_INGRESS_TOKEN is required}
+    # App logins Caddy adds after Authentik admits someone (ctl/routes.py, upstream_basic_auth).
+    env_file:
+      - path: ${MU3LAB_INGRESS_SECRETS:-/dev/null}
+        required: false
     volumes:
       - ${MU3LAB_CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

@@ -125,5 +125,6 @@ def _load_all() -> None:
         password_login_off_after_setup,
         per_person_accounts,
         provider_routing,
+        reads_backups,
         staged_first_start,
     )

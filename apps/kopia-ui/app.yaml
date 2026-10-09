@@ -1,0 +1,44 @@
+# Kopia backup browser — see ctl/manifest/models.py for every field.
+# Read-only: it can browse every backup and restore files into
+# /srv/mu3lab/backups/restores, never change, add or remove a backup.
+id: kopia-ui
+capabilities: [backup_browser]
+name: Kopia backups
+tier: core
+group: apps
+category: infrastructure
+tagline: Browse your backups and restore single files
+summary: Kopia's own web page for every backup Mu3Lab makes. Administrators can look inside any backup and restore
+  single files or folders into the restores folder. Restoring a whole app is done from that app's Backups card.
+version: v0.23.1
+upstream: kopia/kopia
+backup:
+  include: false
+  reason: It holds no data of its own; it only reads the backups.
+service:
+  local_port: 51515
+  health:
+    kind: tcp
+route:
+  https_port: 8470
+  caddy_port: 19487
+  access: gate
+  audience: operators
+  forwarded_host: host
+  # Caddy signs in to Kopia after Authentik admits an administrator, so nobody types Kopia's password.
+  upstream_basic_auth:
+    user_env: KOPIA_SERVER_USERNAME
+    password_env: KOPIA_SERVER_PASSWORD
+sign_in:
+  method: gate
+  note: Authentik admits administrators only; Mu3Lab then signs in to Kopia for them.
+ui:
+  label: Open backups
+resource_guidance: A small web server; it reads backups only while someone browses them.
+secrets:
+- env: KOPIA_SERVER_PASSWORD
+  length: 32
+env:
+  KOPIA_SERVER_USERNAME: mu3lab-ui
+rules:
+- rule: reads_backups

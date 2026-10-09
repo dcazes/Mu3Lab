@@ -131,6 +131,22 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                     "Created by Mu3Lab. Authentik guards this page; this login unlocks it.",
                 )
             )
+        for service in registry.services:
+            # Caddy signs in to these after Authentik; the login is kept in case that ever fails.
+            route = service.manifest.route
+            auth = route.upstream_basic_auth if route else None
+            env = read_runtime_env(paths.projects / service.id / ".env") if auth else {}
+            if auth and env.get(auth.password_env):
+                items.append(
+                    Item(
+                        f"service:{service.id}",
+                        service.name,
+                        env.get(auth.user_env, ""),
+                        env[auth.password_env],
+                        _origin(host, service.private_https_port),
+                        "Created by Mu3Lab. Authentik guards this page and signs you in; this login is a fallback.",
+                    )
+                )
         backup_password = _backup_password(paths)
         if backup_password:
             items.append(
