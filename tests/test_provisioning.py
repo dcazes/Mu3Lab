@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl import mcp_ops
+from ctl import core_setup, mcp_ops
 from ctl.control_state import ControlState
 from ctl.core_setup import core_services, execute_claimed, plan
 from ctl.core_wiring import configure
@@ -21,6 +21,7 @@ from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
 from ctl.engine.project import Facts
 from ctl.jobs import JobStore
+from ctl.provider_ops import PROBE_MAX_TOKENS
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import load
 from ctl.rules import rules_for
@@ -270,6 +271,44 @@ class CoreWiringTests(unittest.TestCase):
                 mcp_ops.preenable("firecrawl", Path(tmp))
             materialize.assert_called_once()
             self.assertFalse(state.mcp_server("firecrawl-official")["enabled"])
+
+    def test_a_passing_recheck_after_a_failed_one_is_recorded_as_verified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "control.sqlite3")
+            provisioning = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
+            for outcome in ((False, "A provider answered with nothing"), (True, "verified")):
+                store.create(kind="verification", service_id="core-suite", action="verify", actor="owner")
+                claimed = store.claim("worker")
+                with (
+                    patch("ctl.core_setup.ProvisioningStore.runtime", return_value=provisioning),
+                    patch("ctl.core_setup.configure_wiring", return_value={}),
+                    patch("ctl.core_setup._verify_platform", return_value=outcome),
+                ):
+                    execute_claimed(store, claimed, "worker", Path(tmp))
+            self.assertEqual(store.get(claimed["id"])["state"], "succeeded")
+            phases = {phase["phase_id"]: phase for phase in provisioning.summary()["phases"]}
+            self.assertEqual(phases["verification"]["actual_state"], "verified")
+            self.assertEqual(phases["core"]["actual_state"], "verified")
+
+    def test_the_chat_check_leaves_reasoning_models_room_to_answer(self):
+        sent = []
+        with (
+            patch("ctl.core_setup._http_ok", return_value=True),
+            patch(
+                "ctl.core_setup.read_runtime_env",
+                return_value={
+                    "LITELLM_MASTER_KEY": "k",
+                    "AUTH_AUTHENTIK_ID": "a",
+                    "AUTH_AUTHENTIK_SECRET": "b",
+                    "APP_URL": "c",
+                },
+            ),
+            patch("ctl.core_setup._stream_chat_ok", side_effect=lambda _url, payload, _headers: sent.append(payload)),
+        ):
+            core_setup._verify_platform(
+                RuntimePaths(Path("/nonexistent")), {"chat_configured": True, "gateway_key": "k"}
+            )
+        self.assertGreaterEqual(sent[0]["max_tokens"], PROBE_MAX_TOKENS)
 
     def test_verification_only_job_never_pulls_or_recreates_services(self):
         with tempfile.TemporaryDirectory() as tmp:

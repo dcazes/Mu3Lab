@@ -25,6 +25,7 @@ from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
 from ctl.jobs import JobStore, redact
 from ctl.platform_apps import by_capability
+from ctl.provider_ops import PROBE_MAX_TOKENS
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
@@ -250,7 +251,7 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     chat_payload = {
         "model": "mu3lab-chat",
         "messages": [{"role": "user", "content": "Reply with OK."}],
-        "max_tokens": 4,
+        "max_tokens": PROBE_MAX_TOKENS,  # reasoning models think first; 4 tokens left them empty
         "temperature": 0,
     }
     if not _stream_chat_ok("http://127.0.0.1:4000/v1/chat/completions", chat_payload, headers):
@@ -320,8 +321,8 @@ def _run(
                     provisioning.update("core", "failed", detail=detail, error=detail)
             return
         if provisioning:
-            provisioning.update("core", "verified", detail="Core services and private integration checks passed.")
-            provisioning.update("verification", "verified", detail=detail)
+            _mark_verified(provisioning, "core", "Core services and private integration checks passed.")
+            _mark_verified(provisioning, "verification", detail)
         store.transition(
             job_id, "succeeded", actor=actor, detail="Core suite installed and passed application-level checks."
         )
@@ -378,6 +379,16 @@ def start_verify(
     )
 
 
+def _mark_verified(provisioning: ProvisioningStore, phase_id: str, detail: str) -> None:
+    """Record a passing check, even when an earlier check of this phase failed.
+
+    A failed phase may only move on by being run again, so a passing re-check
+    is recorded as a run that then verified, never a jump from failed.
+    """
+    provisioning.update(phase_id, "running", detail=detail)
+    provisioning.update(phase_id, "verified", detail=detail)
+
+
 def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
     provisioning = ProvisioningStore.runtime()
     store.transition(job_id, "running", actor=actor, detail="Live platform verification started.", step_id="verify")
@@ -398,8 +409,8 @@ def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
             )
             return
         if provisioning:
-            provisioning.update("core", "verified", detail="Core services remain configured and reachable.")
-            provisioning.update("verification", "verified", detail=detail)
+            _mark_verified(provisioning, "core", "Core services remain configured and reachable.")
+            _mark_verified(provisioning, "verification", detail)
         store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
     except (OSError, ValueError, RuntimeError) as exc:
         detail = "Platform verification failed safely: " + redact(str(exc))
