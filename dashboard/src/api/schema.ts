@@ -1230,6 +1230,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/backups/recovery-sheet': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open Recovery Sheet
+     * @description The backup password and where the backups are, for printing. Each opening is audited.
+     */
+    post: operations['open_recovery_sheet_api_v1_system_backups_recovery_sheet_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/config': {
     parameters: {
       query?: never;
@@ -2623,6 +2643,7 @@ export interface components {
       /** Ok */
       ok: boolean;
       platform: components['schemas']['BackupProtection'];
+      recovery_sheet?: components['schemas']['RecoverySheetStatus'] | null;
     };
     /** ProviderCatalogItem */
     ProviderCatalogItem: {
@@ -2806,6 +2827,40 @@ export interface components {
       id: string;
       /** State */
       state: string;
+    };
+    /**
+     * RecoverySheet
+     * @description What a new computer needs to open the backups. Sent once, never cached.
+     */
+    RecoverySheet: {
+      /** Copies */
+      copies: string[];
+      /** Generated At */
+      generated_at: string;
+      /** Kopia Image */
+      kopia_image: string;
+      /** Ok */
+      ok: boolean;
+      /** Password */
+      password: string;
+      /** Password Check */
+      password_check: string;
+      /** Repository */
+      repository: string;
+      /** Server */
+      server: string;
+      /** Version */
+      version: string;
+    };
+    /**
+     * RecoverySheetStatus
+     * @description When an administrator last opened the recovery sheet; never its contents.
+     */
+    RecoverySheetStatus: {
+      /** Opened At */
+      opened_at: string;
+      /** Opened By */
+      opened_by: string;
     };
     /** Service */
     Service: {
@@ -9998,6 +10053,89 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  open_recovery_sheet_api_v1_system_backups_recovery_sheet_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RecoverySheet'];
         };
       };
       /** @description Bad Request */

@@ -3738,6 +3738,16 @@
           },
           "platform": {
             "$ref": "#/components/schemas/BackupProtection"
+          },
+          "recovery_sheet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecoverySheetStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4388,6 +4398,82 @@
           "state"
         ],
         "title": "QueuedJob",
+        "type": "object"
+      },
+      "RecoverySheet": {
+        "description": "What a new computer needs to open the backups. Sent once, never cached.",
+        "properties": {
+          "copies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Copies",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "kopia_image": {
+            "title": "Kopia Image",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "password_check": {
+            "title": "Password Check",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "server",
+          "generated_at",
+          "version",
+          "password",
+          "password_check",
+          "repository",
+          "kopia_image",
+          "copies"
+        ],
+        "title": "RecoverySheet",
+        "type": "object"
+      },
+      "RecoverySheetStatus": {
+        "description": "When an administrator last opened the recovery sheet; never its contents.",
+        "properties": {
+          "opened_at": {
+            "title": "Opened At",
+            "type": "string"
+          },
+          "opened_by": {
+            "title": "Opened By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opened_at",
+          "opened_by"
+        ],
+        "title": "RecoverySheetStatus",
         "type": "object"
       },
       "Service": {
@@ -14303,6 +14389,98 @@
           }
         },
         "summary": "Start Platform Backup",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/backups/recovery-sheet": {
+      "post": {
+        "description": "The backup password and where the backups are, for printing. Each opening is audited.",
+        "operationId": "open_recovery_sheet_api_v1_system_backups_recovery_sheet_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoverySheet"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Open Recovery Sheet",
         "tags": [
           "system"
         ]

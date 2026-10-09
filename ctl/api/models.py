@@ -620,12 +620,34 @@ class CoreAppBackup(ApiModel):
     protection: BackupProtection | None = None
 
 
+class RecoverySheetStatus(ApiModel):
+    """When an administrator last opened the recovery sheet; never its contents."""
+
+    opened_at: str
+    opened_by: str
+
+
 class PlatformBackupStatus(ApiModel):
     """Mu3Lab's own state and each core app, each from its own backup evidence."""
 
     ok: bool
     platform: BackupProtection
     core_apps: list[CoreAppBackup]
+    recovery_sheet: RecoverySheetStatus | None = None
+
+
+class RecoverySheet(ApiModel):
+    """What a new computer needs to open the backups. Sent once, never cached."""
+
+    ok: bool
+    server: str
+    generated_at: str
+    version: str
+    password: str
+    password_check: str
+    repository: str
+    kopia_image: str
+    copies: list[str]
 
 
 class BackupsResponse(ApiModel):

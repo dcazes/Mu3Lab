@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, platform_backup, self_update
+from ctl import __version__, platform_backup, recovery_sheet, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -21,6 +22,7 @@ from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+from ctl.service_state import tailnet_dns_name
 from ctl.store import records
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -179,7 +181,26 @@ def backups(_member: Member) -> models.BackupReadiness:
 @router.get("/system/backups/platform", response_model=models.PlatformBackupStatus, response_model_exclude_none=True)
 def platform_backup_status(_operator: Operator) -> models.PlatformBackupStatus:
     """Mu3Lab's own backup and each core app's, from their own evidence."""
-    return models.PlatformBackupStatus.model_validate({"ok": True, **platform_backup.status(ROOT)})
+    return models.PlatformBackupStatus.model_validate(
+        {"ok": True, **platform_backup.status(ROOT), "recovery_sheet": recovery_sheet.status(RuntimePaths())}
+    )
+
+
+_NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
+
+
+@router.post("/system/backups/recovery-sheet", response_model=models.RecoverySheet)
+def open_recovery_sheet(operator: OperatorMutation) -> JSONResponse:
+    """The backup password and where the backups are, for printing. Each opening is audited."""
+    store = runtime.job_store()  # no audit log, no sheet
+    sheet = recovery_sheet.contents(tailnet_dns_name(), str(operator["username"]), RuntimePaths())
+    store.record_audit(
+        actor=str(operator["username"]),
+        event="backup.recovery_sheet_opened",
+        detail="Opened the recovery sheet, which shows the backup password.",
+    )
+    body = models.RecoverySheet.model_validate({"ok": True, **sheet}).model_dump(mode="json")
+    return JSONResponse(body, headers=_NO_STORE)
 
 
 @router.post("/system/backups/platform", response_model=models.JobResponse, response_model_exclude_none=True)

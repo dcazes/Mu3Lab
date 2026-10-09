@@ -14,11 +14,12 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from ctl import backups, job_guard, platform_backup
+from ctl import backups, job_guard, platform_backup, recovery_sheet
 from ctl.api import create_app
 from ctl.jobs import JobStore
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
+from ctl.store.secrets import SecretStore
 from tests import test_maintenance
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -245,6 +246,42 @@ class PlatformApiTests(unittest.TestCase):
         status = self.client.get("/api/v1/system/backups/platform", headers=self.headers).json()
         self.assertEqual(status["platform"]["state"], "missing")
         self.assertTrue(any(app["id"] == "ollama" and not app["included"] for app in status["core_apps"]))
+
+    def test_the_recovery_sheet_is_for_administrators_never_cached_and_audited(self):
+        store = JobStore.runtime()
+        assert store is not None
+        response = self.client.post("/api/v1/system/backups/recovery-sheet", headers=self.headers, json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        sheet = response.json()
+        paths = RuntimePaths()
+        self.assertEqual(sheet["password"], SecretStore(paths).get("platform", "backup-password"))
+        self.assertEqual(sheet["password_check"], recovery_sheet.password_check(sheet["password"]))
+        self.assertEqual(sheet["repository"], str(paths.backups / "kopia"))
+        events = [event for event in store.audit() if event["event"] == "backup.recovery_sheet_opened"]
+        self.assertTrue(events)
+        self.assertNotIn(sheet["password"], str(events))
+        status = self.client.get("/api/v1/system/backups/platform", headers=self.headers).json()
+        self.assertEqual(status["recovery_sheet"]["opened_at"], sheet["generated_at"])
+        # The same password every time: the backups never change their password.
+        again = self.client.post("/api/v1/system/backups/recovery-sheet", headers=self.headers, json={}).json()
+        self.assertEqual(again["password"], sheet["password"])
+
+
+class RecoverySheetTests(unittest.TestCase):
+    def test_the_check_code_confirms_a_password_without_revealing_it(self):
+        code = recovery_sheet.password_check("correct horse")
+        self.assertRegex(code, r"^[0-9A-F]{4}-[0-9A-F]{4}$")
+        self.assertEqual(code, recovery_sheet.password_check("correct horse"))
+        self.assertNotEqual(code, recovery_sheet.password_check("correct hors"))
+
+    def test_status_says_never_until_someone_opens_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            paths.state.mkdir(parents=True)
+            self.assertIsNone(recovery_sheet.status(paths))
+            recovery_sheet.contents("host.ts.net", "owner", paths)
+            self.assertEqual(recovery_sheet.status(paths)["opened_by"], "owner")
 
 
 if __name__ == "__main__":

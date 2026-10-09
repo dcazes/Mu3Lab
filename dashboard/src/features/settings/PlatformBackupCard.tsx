@@ -8,6 +8,7 @@ import { relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { RecoverySheetCard } from './RecoverySheetCard';
 
 const PLATFORM_JOB = 'mu3lab-platform';
 
@@ -43,26 +44,39 @@ export function PlatformBackupCard() {
     void reload();
   };
   return (
-    <Card
-      title="Mu3Lab itself"
-      description="Your settings, people, every app's passwords and keys, and the core apps. Without these, restored app data cannot be opened on a new computer."
-      actions={
-        <Button size="sm" icon={Archive} loading={pending === 'platform'} disabled={busy} onClick={() => void backUp()}>
-          Back up now
-        </Button>
-      }
-    >
-      {status && (
-        <Facts
-          items={[
-            { label: 'Mu3Lab settings and secrets', value: state(status.platform) },
-            ...status.core_apps.map((app) => ({
-              label: app.name,
-              value: app.included ? state(app.protection) : <span className="muted">Not backed up: {app.reason}</span>,
-            })),
-          ]}
-        />
-      )}
-    </Card>
+    <>
+      <Card
+        title="Mu3Lab itself"
+        description="Your settings, people, every app's passwords and keys, and the core apps. Without these, restored app data cannot be opened on a new computer."
+        actions={
+          <Button
+            size="sm"
+            icon={Archive}
+            loading={pending === 'platform'}
+            disabled={busy}
+            onClick={() => void backUp()}
+          >
+            Back up now
+          </Button>
+        }
+      >
+        {status && (
+          <Facts
+            items={[
+              { label: 'Mu3Lab settings and secrets', value: state(status.platform) },
+              ...status.core_apps.map((app) => ({
+                label: app.name,
+                value: app.included ? (
+                  state(app.protection)
+                ) : (
+                  <span className="muted">Not backed up: {app.reason}</span>
+                ),
+              })),
+            ]}
+          />
+        )}
+      </Card>
+      <RecoverySheetCard status={status?.recovery_sheet} onOpened={() => void reload()} />
+    </>
   );
 }

@@ -245,7 +245,7 @@ def check(log: Log, *, read_data: str = "", paths: RuntimePaths | None = None) -
     records.put("backup", "repository", {**current, **update}, paths)
 
 
-def _repository_password(paths: RuntimePaths) -> str:
+def repository_password(paths: RuntimePaths) -> str:
     """Create the repository password once and keep it in the encrypted store.
 
     A repository that already exists is never given a new password: that
@@ -318,7 +318,7 @@ def _run_kopia(
     with tempfile.TemporaryDirectory(prefix="mu3lab-kopia-") as temporary:
         # The password reaches Kopia through a private env-file, never a command line.
         env_file = Path(temporary) / "env"
-        write_atomic(env_file, f"KOPIA_PASSWORD={_repository_password(paths)}\n".encode())
+        write_atomic(env_file, f"KOPIA_PASSWORD={repository_password(paths)}\n".encode())
         command = [
             "docker",
             "run",

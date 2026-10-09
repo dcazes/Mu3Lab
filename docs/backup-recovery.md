@@ -2,7 +2,28 @@
 
 Mu3Lab backs up each installed catalog app's data with [Kopia](https://kopia.io), into an encrypted repository on this server. You restore an app from its **Backups** card in the dashboard; Mu3Lab stops the app, unpacks the backup beside the current data, swaps it in, and puts the old data back if the app does not start.
 
-This page is for the cases the dashboard cannot handle: restoring by hand, and backups made before Mu3Lab switched to Kopia. A full guide to rebuilding Mu3Lab on a new computer from an off-site copy will be added here with the off-site copy itself.
+This page is for the cases the dashboard cannot handle: restoring by hand, and backups made before Mu3Lab switched to Kopia. It also explains the recovery sheet, the one thing you must keep somewhere other than this server.
+
+## The backup password and the recovery sheet
+
+Every backup is encrypted with one password, which Mu3Lab created when it first needed it and never changes. Mu3Lab keeps it in its encrypted store on this server, so if the server is lost, that copy is lost too. Two other copies exist:
+
+- **The recovery sheet.** An administrator opens it from **Security & backups → Recovery sheet** and prints it. It shows the password in eight groups of eight characters, as a QR code, and with a check code. Each opening is recorded in the audit log (who and when, never the password).
+- **Each administrator's vault.** Mu3Lab saves it to every administrator's Bitwarden as **Mu3Lab backup password**, under *Mu3Lab app logins*. Bitwarden keeps a copy on each signed-in phone and computer, so it is still there when this server is off.
+
+To confirm a password you typed back from paper is right, compare its check code with the one on the sheet:
+
+```bash
+read -rs PASSWORD && printf %s "$PASSWORD" | sha256sum | cut -c1-8 | tr a-f A-F | sed 's/..../&-/'; unset PASSWORD
+```
+
+Type the password without spaces and press Enter; nothing is shown while you type. It prints a code like `AB12-CD34`.
+
+## Rebuilding on a new computer
+
+> **Not yet complete.** The step-by-step rebuild, and a rehearsal of it on a test machine, are the last part of this milestone. Until then, this is what a rebuild needs; do not delete anything from the old server while it still runs.
+
+You need: the backup password (sheet or vault), and a copy of `/srv/mu3lab/backups/kopia/` from the old server. Today the backups exist only on that server, so if its disk has failed they cannot be recovered. A copy to another computer is a later step.
 
 ## Where things are
 
@@ -10,7 +31,7 @@ This page is for the cases the dashboard cannot handle: restoring by hand, and b
 |---|---|
 | Kopia repository (encrypted backups) | `/srv/mu3lab/backups/kopia/` |
 | Kopia's connection settings and cache on this server | `/srv/mu3lab/state/kopia/` |
-| Repository password | Mu3Lab's encrypted secret store (`platform` / `backup-password`) |
+| Repository password | Mu3Lab's encrypted secret store (`platform` / `backup-password`), the printed recovery sheet, and each administrator's vault |
 | Older restic backups (before the switch) | `/srv/mu3lab/backups/` (the `config`, `data`, `index`, `keys`, `locks` and `snapshots` entries) |
 
 Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|pre-update|pre-restore>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`.

@@ -1405,3 +1405,78 @@ a.row-main:hover b,
   text-align: center;
   color: var(--text-3);
 }
+
+/* Recovery sheet: shown in a dialog on screen, printed on its own. */
+.recovery-sheet h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+.recovery-sheet header p,
+.recovery-sheet section > p {
+  margin: 4px 0;
+}
+.recovery-sheet section {
+  margin-top: 16px;
+}
+.recovery-sheet h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.recovery-sheet code {
+  overflow-wrap: anywhere;
+}
+.recovery-warning {
+  padding: 8px 12px;
+  border: 1px solid var(--amber, #b7791f);
+  border-radius: 6px;
+}
+.recovery-password {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  margin: 8px 0;
+}
+.recovery-groups {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: ui-monospace, 'DejaVu Sans Mono', Menlo, Consolas, monospace;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+}
+.recovery-password .qr {
+  width: 132px;
+  height: 132px;
+  flex: none;
+  background: #fff;
+}
+.recovery-password .qr svg {
+  width: 100%;
+  height: 100%;
+}
+body > .recovery-sheet {
+  display: none;
+}
+@media (max-width: 520px) {
+  .recovery-groups {
+    grid-template-columns: repeat(2, auto);
+  }
+}
+@media print {
+  body.printing-recovery-sheet > *:not(.recovery-sheet) {
+    display: none !important;
+  }
+  body.printing-recovery-sheet > .recovery-sheet {
+    display: block;
+    color: #000;
+    background: #fff;
+    font-size: 12pt;
+  }
+  body.printing-recovery-sheet {
+    background: #fff;
+  }
+}

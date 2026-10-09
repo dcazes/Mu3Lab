@@ -184,7 +184,7 @@ class ProtectionTests(unittest.TestCase):
         (self.paths.backups / "kopia").mkdir(parents=True)
         (self.paths.backups / "kopia" / backups.REPOSITORY_MARKER).write_text("kopia", encoding="utf-8")
         with self.assertRaisesRegex(backups.BackupError, "password for it is missing"):
-            backups._repository_password(self.paths)
+            backups.repository_password(self.paths)
 
 
 if __name__ == "__main__":
