@@ -605,6 +605,64 @@ describe('Calendar', () => {
   });
 });
 
+describe('Calendar sync', () => {
+  const event = (overrides = {}) => ({
+    id: 'local-1',
+    title: 'Piano',
+    start: new Date().toISOString(),
+    end: new Date(Date.now() + 3600000).toISOString(),
+    all_day: false,
+    editable: true,
+    revision: 'r',
+    local: true,
+    ...overrides,
+  });
+
+  it('sends waiting events with an explicit sync, never by reading', async () => {
+    let pending = true;
+    const fetchMock = stubFetch((path, init) => {
+      if (path === '/api/v1/calendar/sync' && init?.method === 'POST') {
+        pending = false;
+        return { ok: true, moved: 1, conflicts: [], kept: [] };
+      }
+      if (path.startsWith('/api/v1/calendar/events'))
+        return { ok: true, state: 'connected', pending_upload: pending, events: pending ? [event()] : [] };
+      return undefined;
+    });
+    renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/calendar/sync', expect.objectContaining({ method: 'POST' })),
+    );
+    const reads = fetchMock.mock.calls.filter(([path]) => String(path).startsWith('/api/v1/calendar/events'));
+    expect(reads.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    await waitFor(() => expect(reads.length).toBeGreaterThanOrEqual(1));
+  });
+
+  it('offers both versions of an event that also changed in Nextcloud', async () => {
+    const fetchMock = stubFetch((path) => {
+      if (path.endsWith('/resolve')) return { ok: true };
+      if (path.startsWith('/api/v1/calendar/events'))
+        return {
+          ok: true,
+          state: 'connected',
+          events: [event({ conflict: 'This event was also changed in Nextcloud. Choose which version to keep.' })],
+        };
+      return undefined;
+    });
+    renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
+    fireEvent.click(await screen.findByText('⚠ Piano'));
+    const dialog = screen.getByRole('dialog', { name: 'Edit event' });
+    expect(within(dialog).getByText('Two versions of this event')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep mine' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/calendar/events/local-1/resolve',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ keep: 'mine' }) }),
+      ),
+    );
+  });
+});
+
 describe('Shell', () => {
   it('shows a clear offline screen when Mu3Lab is unreachable', async () => {
     vi.stubGlobal(

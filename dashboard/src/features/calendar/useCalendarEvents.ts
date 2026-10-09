@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type CalendarEvents, postApi, type Service } from '../../api';
+import { toast } from 'sonner';
+import { api, ApiError, type CalendarEvents, type CalendarSync, postApi, postJsonApi, type Service } from '../../api';
 
 export interface CalendarRange {
   start: string;
@@ -43,7 +44,22 @@ export function useCalendarEvents(range: CalendarRange | null, nextcloud: Servic
     };
     setLoading(true);
     try {
-      const body = await fetchEvents();
+      let body = await fetchEvents();
+      if (body.pending_upload) {
+        // Reading never sends anything; this explicit request moves events kept on Mu3Lab into Nextcloud.
+        try {
+          const report = await postJsonApi<CalendarSync>('/api/v1/calendar/sync', {});
+          for (const title of report.kept)
+            toast.info(`“${title}” was changed in Nextcloud after you deleted it here, so it was kept.`);
+          if (report.conflicts.length)
+            toast.warning(
+              `${report.conflicts.length === 1 ? `“${report.conflicts[0]}” was` : `${report.conflicts.length} events were`} also changed in Nextcloud. Open it to choose which version to keep.`,
+            );
+          if (report.moved || report.kept.length || report.conflicts.length) body = await fetchEvents();
+        } catch {
+          /* Events stay on Mu3Lab and are sent on the next load. */
+        }
+      }
       if (body.state === 'local' && body.nextcloud_ready && nextcloudState === 'running' && !autoConnectAttempted) {
         autoConnectAttempted = true;
         try {

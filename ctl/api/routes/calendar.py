@@ -40,7 +40,8 @@ def calendar_writer(request: Request, identity: Reader) -> IdentityData:
     if not identity.get("writes_enabled"):
         raise ApiError(403, "operator identity required")
     if not mutation_allowed(request):
-        raise ApiError(403, "same-origin mutation verification failed")
+        # The standard code, so the dashboard refreshes its session and retries as everywhere else.
+        raise ApiError(403, "same-origin CSRF verification failed", code="csrf_failed")
     return identity
 
 
@@ -225,25 +226,21 @@ def _connected(owner_uid: str, state: ControlState | None) -> bool:
 def _with_local(
     owner_uid: str, result: models.CalendarEvents, start: datetime | None, end: datetime | None, limit: int
 ) -> models.CalendarEvents:
-    """Upload local events after connecting; show any that could not move yet."""
+    """Show events still kept on Mu3Lab beside Nextcloud's. Reading never sends anything."""
     try:
-        if not local_calendar.has_events(owner_uid):
-            return result
-        moved = local_calendar.push_to_nextcloud(owner_uid)
-        if moved:
-            result = models.CalendarEvents.model_validate(calendar.events(owner_uid, start=start, end=end, limit=limit))
         if not local_calendar.has_events(owner_uid):
             return result
         now = datetime.now(UTC)
         start = start or now.replace(second=0, microsecond=0)
         remaining = local_calendar.list_events(owner_uid, start, end or start + timedelta(days=30), limit)
+        pending = local_calendar.pending_upload(owner_uid)
     except calendar.CalendarError:
         return result
     merged = sorted(
         [*result.events, *(models.CalendarEvent.model_validate(item) for item in remaining)],
         key=lambda item: item.start,
     )
-    return result.model_copy(update={"events": merged[: max(1, min(limit, 100))]})
+    return result.model_copy(update={"events": merged[: max(1, min(limit, 100))], "pending_upload": pending})
 
 
 @router.get("/events", response_model=models.CalendarEvents, response_model_exclude_none=True)
@@ -340,3 +337,33 @@ async def delete_event(
         )
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
+
+
+@router.post("/sync", response_model=models.CalendarSync, response_model_exclude_none=True)
+async def sync(writer: Writer) -> models.CalendarSync:
+    """Send events kept on Mu3Lab to the connected Nextcloud calendar, never overwriting its changes."""
+    owner_uid = str(writer["subject_id"])
+    if not _connected(owner_uid, ControlState.runtime()):
+        raise ApiError(409, "Connect Nextcloud before syncing the calendar.", state="not_connected")
+    try:
+        report = await run_in_threadpool(local_calendar.push_to_nextcloud, owner_uid)
+    except calendar.CalendarError as exc:
+        raise _raise(exc, 401 if exc.state == "authentication_expired" else 503) from exc
+    return models.CalendarSync.model_validate({"ok": True, **report})
+
+
+@router.post("/events/{event_id}/resolve", response_model=models.OkResponse, response_model_exclude_none=True)
+async def resolve_conflict(
+    payload_model: models.CalendarResolveRequest, event_id: str, writer: Writer
+) -> models.OkResponse:
+    """Keep this version (replacing Nextcloud's) or Nextcloud's (dropping the local edit)."""
+    if not _is_local(event_id):
+        raise ApiError(404, "This event no longer needs a choice. Refresh the calendar.", state="not_found")
+    try:
+        return models.OkResponse.model_validate(
+            await run_in_threadpool(
+                local_calendar.resolve_conflict, str(writer["subject_id"]), event_id, payload_model.keep
+            )
+        )
+    except calendar.CalendarError as exc:
+        raise _raise(exc, 404 if exc.state == "not_found" else 503) from exc

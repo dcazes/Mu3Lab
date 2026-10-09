@@ -506,6 +506,14 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R19 — Calendar GET performs writes and local sync can overwrite remote changes
 
+**Implementation progress (2026-10-09): done** on `fix/review-milestone-c`.
+- **Reads.** `GET /calendar/events` makes no DAV request and reports `pending_upload`. The dashboard then calls the new `POST /calendar/sync`, which uses the writer guard and returns the standard `csrf_failed` code.
+- **Versions.** The copy-out keeps each event's ETag. Edited copies go back with `If-Match`; on 412 or 404 the edit stays local as a conflict, and `POST /calendar/events/{id}/resolve` settles it with `mine` or `server`.
+- **Deletes.** Deletions use `If-Match`; on 412 the event is kept in Nextcloud and the sync reports it.
+- **Creates.** A 412 on a create is safe because new events' file names are Mu3Lab's own UUIDs.
+- **Locks and failures.** Storage and locking are per person, and a failed sync keeps everything for the next one.
+- **Tests:** zero DAV calls on read (this test fails on the old route), version checks on edit and delete, both conflict choices, a failed sync, a slow person not blocking another, and older stores.
+
 **Evidence:** [calendar route](../../ctl/api/routes/calendar.py) `list_events → _with_local → push_to_nextcloud` uploads/deletes events during GET, using a reader dependency rather than the mutation guard. [local_calendar](../../ctl/local_calendar.py) sends modified copied events without `If-Match`, deletes without revision checks, and treats 412 as “already present” for create synchronization. A content conflict can be discarded as a successful move. A single lock covers the remote synchronization loop for all people.
 
 **Implementation:** make GET read-only; create an authenticated sync command when connection/local changes require it. Preserve upstream ETags/source calendar identity in imported records and tombstones. Use `If-Match` for edits/deletes; on 412 retain local intent and present a conflict instead of dropping it. For duplicate creates, compare stable UID/content or recover the prior operation outcome before deleting the local copy. Take an owner-scoped short lock to stage intents, release it during network calls, then commit only if the revision still matches. Reuse standard `OwnerMutation`/`csrf_failed` errors so session refresh behaves consistently.
@@ -759,7 +767,7 @@ These should be small, independently reviewable changes. Full per-person approva
 - [x] **C2 implementation:** R06 bounded gateway and R07 revocation reconciliation ([record](2026-10-08-status-gateway-revocation-implementation.md)). Release acceptance remains pending.
 - [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design. Step 1, the Kopia engine, is implemented ([record](2026-10-08-milestone-c3-kopia-engine.md)).
 - [ ] **C4:** R17 staged self-update and R18 enforceable API/executor boundary.
-- [ ] **C5:** R19 calendar sync and R31 data-destination policy.
+- [ ] **C5:** R19 calendar sync (done 2026-10-09) and R31 data-destination policy (owner chose a single household switch).
 
 **Exit:** two-user isolation test, real approve/deny interaction, new-host restore, and published-release update drill pass. Product UI decisions still open in the existing expansion plan remain explicit decision items during implementation.
 

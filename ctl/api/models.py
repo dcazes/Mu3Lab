@@ -517,6 +517,8 @@ class CalendarEvent(ApiModel):
     editable: bool | None = None
     revision: str | None = None
     local: bool | None = None
+    # Set when a local edit met a change made in Nextcloud; the person chooses which to keep.
+    conflict: str | None = None
 
 
 class CalendarEventsCalendar(ApiModel):
@@ -530,8 +532,19 @@ class CalendarEvents(ApiModel):
     calendar: CalendarEventsCalendar | None = None
     fetched_at: str | None = None
     nextcloud_ready: bool | None = None
+    # Events kept on Mu3Lab are waiting to be sent; POST /calendar/sync sends them.
+    pending_upload: bool | None = None
     events: list[CalendarEvent]
     error: str | None = None
+
+
+class CalendarSync(ApiModel):
+    """What one sync sent, and what it could not send without asking."""
+
+    ok: bool
+    moved: int
+    conflicts: list[str]
+    kept: list[str]
 
 
 class ProviderMetadataResponse(ApiModel):
@@ -931,6 +944,10 @@ class BackupScheduleRequest(RequestModel):
     frequency: BackupFrequency
     weekday: int = Field(ge=0, le=6)
     time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+class CalendarResolveRequest(RequestModel):
+    keep: Literal["mine", "server"]
 
 
 class ServiceActionRequest(RequestModel):

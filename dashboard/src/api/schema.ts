@@ -209,6 +209,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/calendar/events/{event_id}/resolve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve Conflict
+     * @description Keep this version (replacing Nextcloud's) or Nextcloud's (dropping the local edit).
+     */
+    post: operations['resolve_conflict_api_v1_calendar_events__event_id__resolve_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/calendar/sync': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sync
+     * @description Send events kept on Mu3Lab to the connected Nextcloud calendar, never overwriting its changes.
+     */
+    post: operations['sync_api_v1_calendar_sync_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/catalog': {
     parameters: {
       query?: never;
@@ -1863,6 +1903,8 @@ export interface components {
     CalendarEvent: {
       /** All Day */
       all_day: boolean;
+      /** Conflict */
+      conflict?: string | null;
       /** Editable */
       editable?: boolean | null;
       /** End */
@@ -1910,6 +1952,8 @@ export interface components {
       nextcloud_ready?: boolean | null;
       /** Ok */
       ok: boolean;
+      /** Pending Upload */
+      pending_upload?: boolean | null;
       /** State */
       state: string;
     };
@@ -1920,10 +1964,32 @@ export interface components {
       /** Name */
       name: string;
     };
+    /** CalendarResolveRequest */
+    CalendarResolveRequest: {
+      /**
+       * Keep
+       * @enum {string}
+       */
+      keep: 'mine' | 'server';
+    };
     /** CalendarSelectRequest */
     CalendarSelectRequest: {
       /** Calendar Id */
       calendar_id: string;
+    };
+    /**
+     * CalendarSync
+     * @description What one sync sent, and what it could not send without asking.
+     */
+    CalendarSync: {
+      /** Conflicts */
+      conflicts: string[];
+      /** Kept */
+      kept: string[];
+      /** Moved */
+      moved: number;
+      /** Ok */
+      ok: boolean;
     };
     /** CatalogProfile */
     CatalogProfile: {
@@ -4832,6 +4898,178 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  resolve_conflict_api_v1_calendar_events__event_id__resolve_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CalendarResolveRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  sync_api_v1_calendar_sync_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CalendarSync'];
         };
       };
       /** @description Bad Request */
