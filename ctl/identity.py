@@ -188,6 +188,7 @@ def sync_sign_in(
         raise ValueError("This server's private address is not known yet.")
     target = catalog.get(app_id) if app_id else None
     if target is None or _gated(target):
+        authentik.remove_duplicate_default_brands()
         authentik.apply_blueprint(DASHBOARD_BLUEPRINT, gate_blueprint(catalog, host, paths))
     applied: list[str] = []
     for app in (target,) if target else catalog.apps:

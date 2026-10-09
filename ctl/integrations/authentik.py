@@ -27,6 +27,7 @@ from ctl.secrets import read_runtime_env
 
 TOKEN_ENV = "AUTHENTIK_BOOTSTRAP_TOKEN"
 DEFAULT_URL = "http://127.0.0.1:9001"
+DEFAULT_BRAND = "authentik-default"
 # An import is one synchronous transaction that took up to ~45s on a loaded
 # server. Abandoning it does not cancel it: it keeps its locks and the next
 # import queues behind it, so waiting is the only way to get a true answer.
@@ -152,6 +153,7 @@ class Authentik:
             ("/flows/instances/", "slug", "default-provider-authorization-implicit-consent"),
             ("/flows/instances/", "slug", "default-provider-invalidation-flow"),
             ("/crypto/certificatekeypairs/", "name", "authentik Self-signed Certificate"),
+            ("/core/brands/", "domain", DEFAULT_BRAND),
         )
         deadline = time.monotonic() + timeout
         while True:
@@ -173,6 +175,22 @@ class Authentik:
                     "Authentik's default sign-in flows and signing certificate are not ready yet. Try setup again."
                 )
             time.sleep(min(2, remaining))
+
+    def remove_duplicate_default_brands(self) -> int:
+        """Delete extra brands named like Authentik's default; return how many.
+
+        Earlier Mu3Lab versions could create one before Authentik made its own,
+        and two brands with the same domain make every later import fail.
+        """
+        brands = list(self._all("/core/brands/", {"domain": DEFAULT_BRAND}))
+        if not any(brand.get("default") for brand in brands):
+            return 0
+        removed = 0
+        for brand in brands:
+            if brand.get("domain") == DEFAULT_BRAND and not brand.get("default"):
+                self.request("DELETE", f"/core/brands/{brand['brand_uuid']}/")
+                removed += 1
+        return removed
 
     # --- People ----------------------------------------------------------------
 

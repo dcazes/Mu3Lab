@@ -180,6 +180,9 @@ class IdentityContractTests(unittest.TestCase):
 
     def _client(self, bodies):
         def send(request):
+            if request.method == "GET" and request.url.path == "/api/v3/core/brands/":
+                # The duplicate-brand cleanup that runs before the dashboard's sign-in.
+                return httpx.Response(200, json={"results": [], "pagination": {"next": 0}})
             self.assertEqual(request.method, "POST")
             self.assertEqual(request.url.path, "/api/v3/managed/blueprints/import/")
             self.assertEqual(request.headers["authorization"], "Bearer test-token")

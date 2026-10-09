@@ -208,8 +208,11 @@ WELCOME_FLOW = """  - model: authentik_stages_prompt.prompt
       order: 30
   - model: authentik_brands.brand
     state: present
+    # Authentik's own default brand: matching on domain alone created a second
+    # one when this ran before Authentik's built-in blueprint had made it.
     identifiers:
       domain: authentik-default
+      default: true
     attrs:
       flow_recovery: !KeyOf mu3lab-welcome-flow
 """
