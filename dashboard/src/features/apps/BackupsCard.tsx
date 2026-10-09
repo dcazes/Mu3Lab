@@ -189,6 +189,11 @@ export function BackupsCard({ service }: { service: Service }) {
       flush
     >
       <Recovery service={service} backups={backups} busy={busy} onRestore={setRestoring} />
+      {listing?.protection && backups && backups.length > 0 && (
+        <p className={`card-pad ${listing.protection.state === 'checked' ? 'muted' : 'warning-text'}`}>
+          {listing.protection.detail}
+        </p>
+      )}
       {error ? (
         <p className="muted card-pad">{error}</p>
       ) : !backups ? (

@@ -10,6 +10,7 @@ export type ApprovalResponse = components['schemas']['ApprovalResponse'];
 export type ApprovalsResponse = components['schemas']['ApprovalsResponse'];
 export type AuditEvent = components['schemas']['AuditEvent'];
 export type AuditResponse = components['schemas']['AuditResponse'];
+export type BackupProtection = components['schemas']['BackupProtection'];
 export type BackupReadiness = components['schemas']['BackupReadiness'];
 export type BackupSnapshot = components['schemas']['BackupSnapshot'];
 export type BackupsResponse = components['schemas']['BackupsResponse'];

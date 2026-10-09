@@ -1,0 +1,2 @@
+ALTER TABLE operations ADD COLUMN bundle TEXT NOT NULL DEFAULT '';
+ALTER TABLE operations ADD COLUMN restore_plans TEXT NOT NULL DEFAULT '{}';

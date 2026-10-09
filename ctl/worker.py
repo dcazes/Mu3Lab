@@ -163,6 +163,9 @@ def run() -> int:
             status_thread = reconciler.start(downloads_stopping)
             sign_in.start(downloads_stopping, lambda line: print(line, flush=True))
             access.start(downloads_stopping, lambda line: print(line, flush=True))
+            from ctl import backups
+
+            backups.start_verification(downloads_stopping, lambda line: print(line, flush=True))
         if time.monotonic() >= next_rule_maintenance:
             next_rule_maintenance = time.monotonic() + 60
             try:

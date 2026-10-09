@@ -88,15 +88,7 @@ class InterruptedUpdateTests(_Journal):
 
     def test_a_restart_while_putting_the_old_release_back_finishes_putting_it_back(self):
         self.script("_start", [(False, "boom"), (True, "")])
-        restores = iter([LEASE_LOST, None])
-
-        def restore(_service, snapshot, *_args, **_kwargs):
-            outcome = next(restores)
-            if outcome:
-                raise outcome
-            self.restored.append(snapshot)
-
-        self.stack.enter_context(patch.object(maintenance.backups, "restore", side_effect=restore))
+        self.data.swap_failures = [LEASE_LOST]
         job = self.queue("update", target_version=NEW.version)
         self.assertFalse(self.attempt(job))
         self.assertEqual(self.operation(job).phase, "rollback")
@@ -117,7 +109,7 @@ class InterruptedUpdateTests(_Journal):
 
     def test_a_failed_rollback_needs_attention_and_keeps_its_backup(self):
         self.script("_start", [(False, "boom")])
-        self.stack.enter_context(patch.object(maintenance.backups, "restore", side_effect=BackupError("disk full")))
+        self.data.swap_failures = [BackupError("disk full")]
         job = self.queue("update", target_version=NEW.version)
         self.attempt(job)
         record = self.store.get(job)
@@ -131,15 +123,7 @@ class InterruptedUpdateTests(_Journal):
 
     def test_retrying_recovery_resolves_the_block(self):
         self.script("_start", [(False, "boom"), (True, "")])
-        restores = [BackupError("disk full"), None]
-
-        def restore(_service, snapshot, *_args, **_kwargs):
-            outcome = restores.pop(0)
-            if outcome:
-                raise outcome
-            self.restored.append(snapshot)
-
-        self.stack.enter_context(patch.object(maintenance.backups, "restore", side_effect=restore))
+        self.data.swap_failures = [BackupError("disk full")]
         update = self.queue("update", target_version=NEW.version)
         self.attempt(update)
         blocking = self.journal.needing_attention("mealie")
@@ -163,18 +147,10 @@ class InterruptedRestoreTests(_Journal):
 
     def test_a_restart_while_swapping_data_finishes_the_restore_with_the_same_safety_backup(self):
         self.script("_start", [(True, "")])
-        outcomes = [LEASE_LOST, None]
-
-        def restore(_service, snapshot, *_args, **_kwargs):
-            outcome = outcomes.pop(0)
-            if outcome:
-                raise outcome
-            self.restored.append(snapshot)
-
-        self.stack.enter_context(patch.object(maintenance.backups, "restore", side_effect=restore))
+        self.data.swap_failures = [LEASE_LOST]
         job = self.queue("restore", snapshot_id=CHOSEN)
         self.assertFalse(self.attempt(job))
-        self.assertEqual(self.operation(job).phase, "restore")
+        self.assertEqual(self.operation(job).phase, "swap")
         self.assertTrue(self.attempt(job))
         self.assertEqual(self.store.get(job)["state"], "succeeded", self.store.get(job)["detail"])
         self.assertEqual(self.restored, [CHOSEN])
@@ -184,15 +160,9 @@ class InterruptedRestoreTests(_Journal):
 
     def test_a_restore_whose_undo_fails_blocks_the_app_until_a_restore_works(self):
         self.script("_start", [(True, ""), (True, "")])
-        outcomes = [BackupError("unreadable"), BackupError("disk full"), None]
-
-        def restore(_service, snapshot, *_args, **_kwargs):
-            outcome = outcomes.pop(0)
-            if outcome:
-                raise outcome
-            self.restored.append(snapshot)
-
-        self.stack.enter_context(patch.object(maintenance.backups, "restore", side_effect=restore))
+        # The swap fails, swapping the old folders back fails, and so does restoring the safety backup.
+        self.data.swap_failures = [BackupError("unreadable"), BackupError("disk full")]
+        self.data.undo_failures = [BackupError("folders gone")]
         first = self.queue("restore", snapshot_id=CHOSEN)
         self.attempt(first)
         self.assertEqual(self.store.get(first)["error_code"], "restore_rollback_failed")
@@ -263,11 +233,12 @@ class CancelTests(_Journal):
         self.assertEqual(self.installed(), OLD)
 
 
-class RecoveryApiTests(unittest.TestCase):
+class _Api(unittest.TestCase):
     headers = test_maintenance.MaintenanceApiTests.headers
 
     def setUp(self):
         self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
         self.stack.enter_context(patch("ctl.api.security.ingress_token", return_value="token"))
         self.stack.enter_context(patch("ctl.api.security.csrf_token", return_value="bound"))
         self.stack.enter_context(patch("ctl.api.routes.services._effective_state", return_value="ready"))
@@ -276,15 +247,20 @@ class RecoveryApiTests(unittest.TestCase):
         journal = OperationStore.runtime()
         assert store is not None and journal is not None
         self.store, self.journal = store, journal
+
+    def post(self, body):
+        return self.client.post("/api/v1/services/mealie/actions", headers=self.headers, json=body)
+
+
+class RecoveryApiTests(_Api):
+    def setUp(self):
+        super().setUp()
+        store, journal = self.store, self.journal
         failed = store.create(kind="lifecycle", service_id="mealie", action="update", actor="owner")["id"]
         store.transition(failed, "failed", actor="worker", detail="Rollback failed.")
         op, _ = journal.begin(failed, "mealie", "update", was_running=True, previous_release=OLD, target_release=NEW)
         journal.finish(op.id, "needs_attention", "Putting back v3.22.0 failed (disk full).")
         self.addCleanup(journal.resolve, "mealie", "test cleanup")
-        self.addCleanup(self.stack.close)
-
-    def post(self, body):
-        return self.client.post("/api/v1/services/mealie/actions", headers=self.headers, json=body)
 
     def test_other_actions_wait_until_recovery_is_settled(self):
         for body in ({"action": "stop"}, {"action": "update"}, {"action": "backup"}):
@@ -302,3 +278,24 @@ class RecoveryApiTests(unittest.TestCase):
         assert blocking is not None
         self.assertEqual(job_params(job), {"operation_id": blocking.id})
         self.store.transition(job["id"], "cancelled", actor="test")
+
+
+class RecoveryPendingApiTests(_Api):
+    """An operation whose job ended mid-way blocks starting the app until it is recovered."""
+
+    def setUp(self):
+        super().setUp()
+        interrupted = self.store.create(kind="lifecycle", service_id="mealie", action="restore", actor="owner")["id"]
+        self.journal.begin(interrupted, "mealie", "restore", was_running=True, previous_release=OLD)
+        self.store.transition(interrupted, "cancelled", actor="worker", detail="Worker stopped.")
+        self.addCleanup(self._finish, interrupted)
+
+    def _finish(self, job_id):
+        operation = self.journal.for_job(job_id)
+        if operation and operation.state == "active":
+            self.journal.finish(operation.id, "cancelled", "test cleanup")
+
+    def test_starting_the_app_waits_for_the_recovery(self):
+        response = self.post({"action": "start"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("recovery_pending", response.text)

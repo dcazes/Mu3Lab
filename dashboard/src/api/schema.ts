@@ -1558,6 +1558,48 @@ export interface components {
       /** Ok */
       ok: boolean;
     };
+    /**
+     * BackupProtection
+     * @description One app's backup evidence; never inferred from another app's backups.
+     */
+    BackupProtection: {
+      /**
+       * Completed At
+       * @default
+       */
+      completed_at?: string;
+      /**
+       * Detail
+       * @default
+       */
+      detail?: string;
+      /**
+       * Off Device
+       * @default false
+       */
+      off_device?: boolean;
+      /**
+       * Restore Tested At
+       * @default
+       */
+      restore_tested_at?: string;
+      /**
+       * Snapshot Id
+       * @default
+       */
+      snapshot_id?: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'missing' | 'stale' | 'unchecked' | 'checked';
+      /**
+       * Verification
+       * @default none
+       * @enum {string}
+       */
+      verification?: 'none' | 'structure' | 'data';
+    };
     /** BackupReadiness */
     BackupReadiness: {
       /**
@@ -1625,6 +1667,7 @@ export interface components {
       backups: components['schemas']['BackupSnapshot'][];
       /** Ok */
       ok: boolean;
+      protection?: components['schemas']['BackupProtection'] | null;
       readiness: components['schemas']['BackupReadiness'];
       /** Service Id */
       service_id: string;

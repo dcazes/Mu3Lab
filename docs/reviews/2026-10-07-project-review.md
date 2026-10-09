@@ -179,10 +179,10 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | implemented for backup/restore/update; release acceptance pending |
 | [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | implemented; release acceptance pending |
 | [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | implemented; release acceptance pending |
-| [R12](#r12) | Roll back full deployment configuration as well as data/images | P1 | S | L | R09, R11, R13 | open |
-| [R13](#r13) | Stage restores and enforce complete storage layouts | P1 | S | L | R09, R11 | open |
+| [R12](#r12) | Roll back full deployment configuration as well as data/images | P1 | S | L | R09, R11, R13 | implemented; release acceptance pending |
+| [R13](#r13) | Stage restores and enforce complete storage layouts | P1 | S | L | R09, R11 | implemented; release acceptance pending |
 | [R14](#r14) | Provide complete independent disaster recovery | P1 | S | XL | R11, R13, R16 | open |
-| [R15](#r15) | Make backup protection, retention, and verification truthful | P1 | S | M | R11, R13 | open |
+| [R15](#r15) | Make backup protection, retention, and verification truthful | P1 | S | M | R11, R13 | implemented (local repository); release acceptance pending |
 | [R16](#r16) | Canonical configuration and safe concurrent private-file writes | P1 | S | L | — | implemented for catalog apps; release acceptance pending |
 | [R17](#r17) | Stage self-updates away from the running checkout | P1 | S | L | R09, R14, R16 | open |
 | [R18](#r18) | Make API/worker privilege boundary explicit and enforceable | P1 | S | L | R09, R16 | open |
@@ -399,6 +399,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R12 — Rollback restores images/data but can retain new deployment files
 
+**Implementation progress (2026-10-08):** A hash-verified, private deployment bundle (all project files, settings, release, storage list) is captured before every change; the new definition is staged and validated before the app stops; rollback and release-switching restores put the whole bundle back; re-wiring no longer copies new deployment files. Branch `fix/review-milestone-b`; [B4/B5 record](2026-10-08-milestone-b4-b5-implementation.md).
+
 **Evidence:** maintenance `_refresh_definition` re-renders the current app folder and aligns the image record. Rollback restores data and `docker-compose.digest.yml`, not the old Compose file, overrides, templates, environment, or integration configuration. `_refresh_definition` logs an `OSError` and continues. [rewire](../../ctl/engine/rewire.py) also re-renders from current source outside the backup-first update path.
 
 **Implementation:** before mutation, save an immutable private deployment bundle: source revision, resolved Compose/overrides, generated files, secret references/version identifiers, exact image digests, and storage manifest. Stage and validate the new bundle before stopping the app. Applying a deployment switches a bundle reference; rollback switches back the complete previous bundle and restores its matching data. Required render/copy failures must abort before starting the new release. Do not copy unrelated new deployment files during configuration-only rewiring. Verify health, required sign-in, route and connector compatibility before claiming success.
@@ -408,6 +410,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r13"></a>
 
 ### R13 — Restore is in-place and accepts an incomplete folder set
+
+**Implementation progress (2026-10-08):** Restores are planned against the target deployment's folder set (missing folders with data are refused, links refused), staged beside the live folders with `restic restore --verify` while the app runs, swapped per folder under the journal, kept aside until the app is healthy, and swapped back if it is not; the API blocks starting an app with an interrupted restore. Branch `fix/review-milestone-b`; [B4/B5 record](2026-10-08-milestone-b4-b5-implementation.md).
 
 **Evidence:** [backups.restore](../../ctl/backups.py) writes each saved folder in place using `--delete`. It rejects unknown saved paths but does not reject a snapshot that omits a currently expected data folder. Missing source directories are silently omitted by `sources()`. Storage discovery is inferred from current source Compose through [uninstall.data_directories](../../ctl/lifecycle/uninstall.py), not the installed release.
 
@@ -447,6 +451,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r15"></a>
 
 ### R15 — Backup verification and retention need per-app, operation-aware evidence
+
+**Implementation progress (2026-10-08):** Per-app backup evidence and states (missing/stale/unchecked/checked with structure/data level, restore tested, local only), repository check records, a weekly 5% data read-back, checks and pruning moved out of manual-backup downtime, and no new password for an existing repository. Off-device copy waits for R14. Branch `fix/review-milestone-b`; [B4/B5 record](2026-10-08-milestone-b4-b5-implementation.md).
 
 **Evidence:** `readiness()` uses one global `backup/verification` record, directory presence, and Docker executable presence. The record can remain “verified” indefinitely and does not prove coverage of every app. `snapshot()` runs repository check and pruning while the caller has the app stopped. A pre-restore safety snapshot can run retention before the chosen restore snapshot is used. Plain restic `check` does not read/verify all pack data; this is explicitly distinguished in the [restic repository documentation](https://restic.readthedocs.io/en/stable/045_working_with_repos.html).
 
@@ -740,8 +746,8 @@ These should be small, independently reviewable changes. Full per-person approva
 - [x] **B1 implementation:** R09 operation journal and R35 bounded executor ([record](2026-10-08-milestone-b1-implementation.md)). VM interruption acceptance remains pending.
 - [x] **B2 implementation:** R10 resource locks and interrupted-effect reconciliation ([record](2026-10-08-milestone-b2-implementation.md)). VM suspend/survivor drill remains pending.
 - [x] **B3 implementation:** R11 immutable deployment IDs; R16 canonical config and private publication ([record](2026-10-08-milestone-b3-implementation.md)). VM upgrade/import acceptance remains pending.
-- [ ] **B4:** R12 complete deployment rollback; R13 staged restore.
-- [ ] **B5:** R15 retention protection and truthful verification.
+- [x] **B4 implementation:** R12 complete deployment rollback; R13 staged restore ([B4/B5 record](2026-10-08-milestone-b4-b5-implementation.md)).
+- [x] **B5 implementation:** R15 retention protection and truthful verification ([B4/B5 record](2026-10-08-milestone-b4-b5-implementation.md)). Milestone B implementation is complete; the VM interruption matrix (exit criterion) remains pending.
 
 **Exit:** VM interruption matrix restores exact artifacts/data across every destructive boundary. Review migrations separately from behavior changes. Do not roll out a new backup engine and new restore semantics without an independently testable compatibility boundary.
 

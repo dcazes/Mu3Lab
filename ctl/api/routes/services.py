@@ -24,6 +24,7 @@ from ctl.api.security import (
 )
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
 from ctl.backups import BackupError
+from ctl.backups import protection as backup_protection
 from ctl.backups import readiness as backup_readiness
 from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
@@ -106,6 +107,23 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
                 "message": f"{service.name} needs attention first: {blocking.detail}",
                 "retryable": False,
                 "recommended_action": "Retry recovery, or restore the backup from before.",
+            },
+        )
+    if (
+        journal
+        and not blocking
+        and action not in RECOVERY_ACTIONS
+        and any(op.service_id == service.id for op in journal.orphaned())
+    ):
+        # An interrupted restore may have some folders swapped: nothing may start the app first.
+        raise ApiError(
+            409,
+            {
+                "code": "recovery_pending",
+                "stage": "recovery",
+                "message": f"Mu3Lab is finishing an interrupted task on {service.name}; try again in a minute.",
+                "retryable": True,
+                "recommended_action": "Wait for the recovery to finish.",
             },
         )
     previous = store.by_idempotency_key(
@@ -411,5 +429,11 @@ def service_backups(service_id: str, _operator: Operator) -> models.BackupsRespo
     except BackupError as exc:
         raise ApiError(503, str(exc)) from exc
     return models.BackupsResponse.model_validate(
-        {"ok": True, "service_id": service.id, "backups": snapshots, "readiness": backup_readiness()}
+        {
+            "ok": True,
+            "service_id": service.id,
+            "backups": snapshots,
+            "readiness": backup_readiness(),
+            "protection": backup_protection(service.id),
+        }
     )

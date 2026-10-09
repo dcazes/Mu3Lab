@@ -25,7 +25,7 @@ must not be pruned; see ``protected``.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -73,6 +73,10 @@ class Operation:
     detail: str
     created_at: str
     updated_at: str
+    # The deployment copy (``ctl.lifecycle.deployments``) an undo puts back.
+    bundle: str = ""
+    # Staged restore plans by purpose ("restore", "rollback"); see ``ctl.backups``.
+    restore_plans: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, row: Any) -> Operation:
@@ -92,6 +96,8 @@ class Operation:
             detail=str(row["detail"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
+            bundle=str(row["bundle"]),
+            restore_plans=json.loads(row["restore_plans"] or "{}"),
         )
 
 
@@ -184,6 +190,7 @@ class OperationStore:
         *,
         recovery_snapshot: str | None = None,
         target_release: Release | None = None,
+        bundle: str | None = None,
     ) -> Operation:
         """Record the step about to be taken, and what undoing it needs, before taking it."""
         with self._connect() as connection:
@@ -197,10 +204,40 @@ class OperationStore:
                     "UPDATE operations SET target_release=? WHERE id=?",
                     (_release_text(target_release), operation_id),
                 )
+            if bundle is not None:
+                connection.execute("UPDATE operations SET bundle=? WHERE id=?", (bundle, operation_id))
             connection.execute("UPDATE operations SET phase=?, updated_at=? WHERE id=?", (phase, _now(), operation_id))
             self._step(connection, operation_id, phase, "begin")
             row = connection.execute("SELECT * FROM operations WHERE id=?", (operation_id,)).fetchone()
         return Operation.load(row)
+
+    def save_plan(self, operation_id: str, purpose: str, plan: dict[str, Any] | None) -> Operation:
+        """Record a staged restore's progress (or drop it with ``None``) before acting on it."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT restore_plans FROM operations WHERE id=?", (operation_id,)).fetchone()
+            if not row:
+                raise KeyError(operation_id)
+            plans = json.loads(row[0] or "{}")
+            if plan is None:
+                plans.pop(purpose, None)
+            else:
+                plans[purpose] = plan
+            connection.execute(
+                "UPDATE operations SET restore_plans=?, updated_at=? WHERE id=?",
+                (json.dumps(plans, sort_keys=True), _now(), operation_id),
+            )
+            row = connection.execute("SELECT * FROM operations WHERE id=?", (operation_id,)).fetchone()
+        return Operation.load(row)
+
+    def bundles(self, service_id: str) -> set[str]:
+        """Deployment copies an unfinished or unresolved operation of this app may still put back."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT bundle FROM operations WHERE service_id=? AND state IN ('active', 'needs_attention')",
+                (service_id,),
+            ).fetchall()
+        return {str(row[0]) for row in rows if row[0]}
 
     def finish(self, operation_id: str, state: State, detail: str = "") -> None:
         if state == "active":

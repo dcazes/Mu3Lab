@@ -401,6 +401,61 @@
         "title": "AuditResponse",
         "type": "object"
       },
+      "BackupProtection": {
+        "description": "One app's backup evidence; never inferred from another app's backups.",
+        "properties": {
+          "completed_at": {
+            "default": "",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "off_device": {
+            "default": false,
+            "title": "Off Device",
+            "type": "boolean"
+          },
+          "restore_tested_at": {
+            "default": "",
+            "title": "Restore Tested At",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "default": "",
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "missing",
+              "stale",
+              "unchecked",
+              "checked"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "verification": {
+            "default": "none",
+            "enum": [
+              "none",
+              "structure",
+              "data"
+            ],
+            "title": "Verification",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "BackupProtection",
+        "type": "object"
+      },
       "BackupReadiness": {
         "properties": {
           "available": {
@@ -582,6 +637,16 @@
           "ok": {
             "title": "Ok",
             "type": "boolean"
+          },
+          "protection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupProtection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "readiness": {
             "$ref": "#/components/schemas/BackupReadiness"

@@ -285,8 +285,13 @@ def _media_folders(app: App, facts: Facts) -> None:
         (facts.paths.media / folder.name).mkdir(mode=0o775, parents=True, exist_ok=True)
 
 
-def render(app: App, facts: Facts, hooks: list[EnvHook] | None = None) -> Path:
-    """Write the app's runtime project and return its directory."""
+def render(app: App, facts: Facts, hooks: list[EnvHook] | None = None, *, copy_files: bool = True) -> Path:
+    """Write the app's runtime project and return its directory.
+
+    ``copy_files=False`` refreshes only settings and templates: re-wiring an
+    app for another app's arrival must not slip in newer deployment files
+    from the checkout outside its own backed-up update (R12).
+    """
     target = facts.paths.projects / app.id
     with resource_locks.hold(f"app:{app.id}", timeout=RENDER_LOCK_SECONDS, paths=facts.paths):
         settings = AppSettings(app.id, facts.paths)
@@ -311,7 +316,8 @@ def render(app: App, facts: Facts, hooks: list[EnvHook] | None = None) -> Path:
             {name: value for name, value in env.items() if name not in fixed_names(app.manifest) | configured}
         )
         _media_folders(app, facts)
-        _copy_folder(app.folder, target)
+        if copy_files or not (target / "docker-compose.yml").is_file():
+            _copy_folder(app.folder, target)
         for path, text in outputs.items():
             _write_private(path, text)
     return target

@@ -70,7 +70,7 @@ def rewire_one(app: App, facts: Facts, log: Log) -> bool:
     before = _fingerprint(project)
     rules = rules_for(app.manifest)
     owner = onboarding_state.read(app.id, facts.paths).get("owner")
-    render_rules(app, facts, rules, owner)
+    render_rules(app, facts, rules, owner, copy_files=False)
     compose = Compose(project, gpu_mode=resolved_mode() if app.manifest.service.uses_gpu else "cpu")
     ctx = HookContext(app, project, compose, log, lambda name, detail: log(f"{name}: {detail}"), owner, facts)
     for rule in rules:

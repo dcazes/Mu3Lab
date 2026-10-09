@@ -27,6 +27,55 @@ OLD = Release("v3.22.0", {"mealie": "ghcr.io/mealie-recipes/mealie:v3.22.0@sha25
 NEW = Release("v3.23.0", {"mealie": "ghcr.io/mealie-recipes/mealie:v3.23.0@sha256:new"})
 
 
+class FakeStagedRestore:
+    """The staged-restore steps of ``ctl.backups``, recording what reached the live data.
+
+    ``swap_failures``/``stage_failures`` hold exceptions to raise on the next calls.
+    """
+
+    def __init__(self, test) -> None:
+        self.test = test
+        self.swap_failures: list[BaseException] = []
+        self.stage_failures: list[BaseException] = []
+        self.undo_failures: list[BaseException] = []
+
+    def install(self, stack: ExitStack) -> None:
+        backups_module = maintenance.backups
+        stack.enter_context(patch.object(backups_module, "plan_restore", side_effect=self.plan))
+        stack.enter_context(patch.object(backups_module, "stage", side_effect=self.stage))
+        stack.enter_context(patch.object(backups_module, "swap", side_effect=self.swap))
+        stack.enter_context(patch.object(backups_module, "undo", side_effect=self.undo))
+        stack.enter_context(patch.object(backups_module, "wipe"))
+        stack.enter_context(patch.object(backups_module, "leftovers", return_value=[]))
+
+    def plan(self, _service, snapshot_id, _directories, _log, *, tag, **_kwargs):
+        return {"snapshot_id": snapshot_id, "tag": tag, "roots": {"mealie": "planned"}, "absent": []}
+
+    def stage(self, _service, plan, _log, save, **_kwargs):
+        if self.stage_failures:
+            raise self.stage_failures.pop(0)
+        plan = {**plan, "roots": {name: "staged" for name in plan["roots"]}}
+        save(plan)
+        return plan
+
+    def swap(self, plan, save, **_kwargs):
+        if self.swap_failures:
+            raise self.swap_failures.pop(0)
+        self.test.restored.append(plan["snapshot_id"])
+        plan = {**plan, "roots": {name: "swapped" for name in plan["roots"]}}
+        save(plan)
+        return plan
+
+    def undo(self, plan, save, **_kwargs):
+        if self.undo_failures:
+            raise self.undo_failures.pop(0)
+        if any(state == "swapped" for state in plan["roots"].values()):
+            self.test.undone.append(plan["snapshot_id"])
+        plan = {**plan, "roots": {name: "undone" for name in plan["roots"]}}
+        save(plan)
+        return plan
+
+
 class _Workflow(unittest.TestCase):
     """Mealie installed at OLD on a machine whose checkout approves NEW."""
 
@@ -64,12 +113,16 @@ class _Workflow(unittest.TestCase):
                 maintenance.backups, "snapshot", return_value={"snapshot_id": "c" * 64, "files": 1, "bytes": 1}
             )
         )
-        self.stack.enter_context(
-            patch.object(
-                maintenance.backups, "restore", side_effect=lambda _s, snap, *_a, **_k: self.restored.append(snap)
-            )
-        )
         self.prune = self.stack.enter_context(patch.object(maintenance.backups, "prune", return_value=True))
+        self.check = self.stack.enter_context(patch.object(maintenance.backups, "check"))
+        self.stack.enter_context(patch.object(maintenance, "_validate_definition"))
+        # Deployment copies are real, under this test's runtime root.
+        self.paths.state.mkdir(parents=True, exist_ok=True)
+        for module in ("ctl.lifecycle.deployments", "ctl.lifecycle.maintenance"):
+            self.stack.enter_context(patch(f"{module}.RuntimePaths", return_value=self.paths))
+        self.undone: list[str] = []
+        self.data = FakeStagedRestore(self)
+        self.data.install(self.stack)
 
     def tearDown(self):
         self.stack.close()

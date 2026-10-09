@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +15,11 @@ from ctl import backups
 from ctl.backups import BackupError, readiness
 from ctl.runtime import RuntimePaths
 from ctl.store import records
+from ctl.store.secrets import SecretStore
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 class BackupReadinessTests(unittest.TestCase):
@@ -40,6 +48,9 @@ class BackupReadinessTests(unittest.TestCase):
             records.put(
                 "backup", "verification", {"snapshot_id": "abc", "integrity_checked_at": "2026-01-01T00:00:00Z"}, paths
             )
+            # A snapshot alone is not enough: a repository check must have passed recently.
+            self.assertEqual(readiness(paths)["state"], "local_only")
+            records.put("backup", "repository", {"ok": True, "structure_checked_at": _now()}, paths)
             result = readiness(paths)
         self.assertEqual(result["state"], "verified")
 
@@ -65,8 +76,11 @@ class ResticTests(unittest.TestCase):
         for path in (self.paths.data, self.paths.backups, self.paths.runtime):
             path.mkdir()
         (self.paths.backups / "config").write_text("restic", encoding="utf-8")
+        self.paths.state.mkdir(exist_ok=True)
+        SecretStore(self.paths).put("platform", "backup-password", "test-password")
         self.mealie = self.paths.data / "mealie"
         self.mealie.mkdir()
+        (self.mealie / "old.db").write_text("old", encoding="utf-8")
         self.calls: list[list[str]] = []
         self.bookkeeping: list[list[str]] = []
 
@@ -80,7 +94,18 @@ class ResticTests(unittest.TestCase):
                 self.bookkeeping.append(argv)
                 return outputs.get(argv[1], (0, ""))
             self.calls.append(argv)
+            if "--entrypoint" in argv:  # deleting restore leftovers
+                for place in argv[argv.index("--") + 1 :]:
+                    shutil.rmtree(self.paths.data / Path(place).name, ignore_errors=True)
+                return 0, ""
             command = argv[argv.index(backups.RESTIC_IMAGE) + 4]
+            if command == "restore" and outputs.get("restore", (0, ""))[0] == 0:
+                # Restic restores the included path under the mounted staging folder.
+                mount = next(part for part in argv if part.endswith(":/restore"))
+                include = argv[argv.index("--include") + 1]
+                restored = Path(mount.rsplit(":", 1)[0]) / include.lstrip("/")
+                restored.mkdir(parents=True)
+                (restored / "new.db").write_text("new", encoding="utf-8")
             return outputs.get(command, (0, ""))
 
         return patch("ctl.backups.actions.docker_cmd", side_effect=run)
@@ -114,14 +139,20 @@ class ResticTests(unittest.TestCase):
         with self.assertRaises(BackupError):
             backups.snapshot("mealie", [Path("/etc")], "manual", lambda _l: None, paths=self.paths)
 
-    def test_restore_replaces_each_folder_in_its_own_run(self):
+    def test_restore_stages_and_verifies_beside_the_live_folder_then_swaps(self):
         with self.docker({"snapshots": (0, _snapshot_listing(["/data/mealie"]))}):
-            backups.restore("mealie", "a" * 64, [self.mealie], lambda _l: None, paths=self.paths)
-        restore = self.calls[-1]
-        self.assertIn(f"{self.mealie}:/data/mealie", restore)
+            backups.restore("mealie", "a" * 64, [self.mealie], lambda _l: None, paths=self.paths, tag="test-tag")
+        restore = next(argv for argv in self.calls if "restore" in argv)
         mounts = [restore[i + 1] for i, part in enumerate(restore) if part == "-v"]
-        self.assertEqual(len(mounts), 3)  # repository, password, and this one folder
-        self.assertEqual(restore[-5:], ["restore", f"{'a' * 64}:/data/mealie", "--target", "/data/mealie", "--delete"])
+        self.assertEqual(len(mounts), 3)  # repository, password, and this folder's staging place
+        self.assertTrue(mounts[-1].startswith(f"{self.paths.data}/.mealie.mu3lab-staged-test-tag:"))
+        self.assertEqual(
+            restore[-7:], ["restore", "a" * 64, "--target", "/restore", "--include", "/data/mealie", "--verify"]
+        )
+        self.assertIn("--verify", restore)
+        self.assertEqual(sorted(path.name for path in self.mealie.iterdir()), ["new.db"])
+        # Nothing is left beside it once it is in place.
+        self.assertEqual([path.name for path in self.paths.data.iterdir()], ["mealie"])
 
     def test_restore_refuses_another_apps_or_layouts_backup(self):
         for listing in (_snapshot_listing(["/data/paperless"]), "[]"):
@@ -184,3 +215,54 @@ class ResticTests(unittest.TestCase):
             backups.snapshot("mealie", [self.mealie], "manual", lines.append, paths=self.paths)
         self.assertIn("still running; waiting", lines[0])
         self.assertEqual(self.calls[0][self.calls[0].index(backups.RESTIC_IMAGE) + 4], "backup")
+
+
+class StagedRestoreTests(ResticTests):
+    """R13: a restore never leaves old and new data side by side, whatever stops it."""
+
+    def setUp(self):
+        super().setUp()
+        self.recipes = self.paths.data / "mealie-recipes"
+        self.plans: list[dict] = []
+
+    def plan(self, saved=("/data/mealie",), directories=None):
+        with self.docker({"snapshots": (0, _snapshot_listing(list(saved)))}):
+            return backups.plan_restore(
+                "mealie", "a" * 64, directories or [self.mealie], lambda _l: None, tag="test-tag", paths=self.paths
+            )
+
+    def test_a_backup_missing_a_folder_the_app_uses_is_refused(self):
+        self.recipes.mkdir()
+        (self.recipes / "soup.json").write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(BackupError, "does not include mealie-recipes"):
+            self.plan(directories=[self.mealie, self.recipes])
+
+    def test_a_missing_folder_with_no_data_here_either_is_recorded_not_refused(self):
+        plan = self.plan(directories=[self.mealie, self.recipes])
+        self.assertEqual(plan["not_in_backup"], ["mealie-recipes"])
+
+    def test_a_linked_data_folder_is_refused(self):
+        shutil.rmtree(self.mealie)
+        os.symlink("/etc", self.mealie)
+        with self.assertRaisesRegex(BackupError, "is a link"):
+            self.plan()
+
+    def test_a_failed_staging_leaves_the_live_data_untouched(self):
+        plan = self.plan()
+        with self.docker({"restore": (1, "no space left on device")}), self.assertRaises(BackupError):
+            backups.stage("mealie", plan, lambda _l: None, self.plans.append, paths=self.paths)
+        self.assertEqual([path.name for path in self.mealie.iterdir()], ["old.db"])
+
+    def test_an_interrupted_swap_finishes_or_undoes_the_same_way_every_time(self):
+        plan = self.plan()
+        with self.docker({}):
+            plan = backups.stage("mealie", plan, lambda _l: None, self.plans.append, paths=self.paths)
+        # Stopped between the two renames: the live folder is aside, the new one not yet in place.
+        os.rename(self.mealie, self.paths.data / ".mealie.mu3lab-previous-test-tag")
+        swapped = backups.swap(plan, self.plans.append, paths=self.paths)
+        self.assertEqual([path.name for path in self.mealie.iterdir()], ["new.db"])
+        backups.undo(swapped, self.plans.append, paths=self.paths)
+        self.assertEqual([path.name for path in self.mealie.iterdir()], ["old.db"])
+        backups.undo(swapped, self.plans.append, paths=self.paths)  # repeating changes nothing
+        self.assertEqual([path.name for path in self.mealie.iterdir()], ["old.db"])
+        self.assertEqual(self.plans[-1]["roots"], {"mealie": "undone"})

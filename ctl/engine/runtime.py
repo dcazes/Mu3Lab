@@ -15,8 +15,10 @@ from ctl.store import onboarding as onboarding_state
 from ctl.store.workflows import JobIdentity
 
 
-def render_rules(app: App, facts: Facts, rules: list[Rule], owner: JobIdentity | None) -> Path:
-    return render(app, facts, hooks=[partial(rule.prepare_env, owner=owner) for rule in rules])
+def render_rules(
+    app: App, facts: Facts, rules: list[Rule], owner: JobIdentity | None, *, copy_files: bool = True
+) -> Path:
+    return render(app, facts, hooks=[partial(rule.prepare_env, owner=owner) for rule in rules], copy_files=copy_files)
 
 
 def render_service(service: Service, root: Path) -> Path:

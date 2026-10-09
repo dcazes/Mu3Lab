@@ -37,19 +37,21 @@ from ctl import actions, backups, job_guard
 from ctl.control_state import ControlState
 from ctl.engine.runtime import render_service
 from ctl.jobs import JobConflict, JobStore, job_params, redact
-from ctl.lifecycle import app_releases
+from ctl.lifecycle import app_releases, deployments
 from ctl.lifecycle.app_releases import Release
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.uninstall import data_directories
 from ctl.operations import Operation, OperationStore, State
 from ctl.registry import Service
+from ctl.runtime import RuntimePaths
 
 JOURNALED_ACTIONS = frozenset({"backup", "restore", "update"})
 MAINTENANCE_ACTIONS = JOURNALED_ACTIONS | {"recover"}
 # Releases can migrate large databases on first start.
 START_TIMEOUT = 900
-# Phases in which neither the app's data nor its release has changed yet.
-UNCHANGED = frozenset({"prepare", "stop_app", "backup", "backed_up"})
+# Phases in which neither the app's data nor its release has changed yet (staged
+# files are undone from the deployment bundle; staged data is only deleted).
+UNCHANGED = frozenset({"prepare", "stage_definition", "stage_restore", "stop_app", "backup", "backed_up"})
 RECOVERY_ACTOR = "worker"
 # Attempts (first run, reclaims and recoveries) before an operation needs a person.
 MAX_ATTEMPTS = 5
@@ -129,27 +131,125 @@ def _short(snapshot_id: str) -> str:
     return snapshot_id[:8]
 
 
-def _restart_if_stopped(run: _Run) -> None:
-    """Undo only the stop: used when a step fails before any data or release changed."""
-    if run.running and run.op.phase in UNCHANGED - {"prepare"}:
+def _tag(run: _Run, purpose: str) -> str:
+    return f"{run.op.id[:12]}-{purpose[:1]}"
+
+
+def _directories(run: _Run, storage: list[str] | None = None) -> list[Path]:
+    """The data folders a deployment uses: its bundle's record, else the installed project's."""
+    if storage is not None:
+        return [RuntimePaths().data / name for name in storage]
+    return run.directories()
+
+
+def _capture(run: _Run) -> None:
+    """Keep a verified copy of the whole current deployment before anything changes (R12)."""
+    if run.op.bundle:
+        return
+    previous = run.op.previous_release
+    bundle = deployments.capture(
+        run.service,
+        f"{run.op.id[:12]}-{previous.id if previous else 'none'}",
+        release_id=previous.id if previous else "",
+        storage=[path.name for path in run.directories()],
+    )
+    run.op = run.journal.advance(run.op.id, run.op.phase, bundle=bundle)
+
+
+def _put_deployment_back(run: _Run) -> None:
+    """The Compose files, overrides, rendered files, settings and release record from before."""
+    if run.op.bundle:
+        deployments.restore(run.service, run.op.bundle)
+    else:
+        app_releases.restore_previous(run.service.id, run.op.previous_release)
+
+
+def _plan(run: _Run, purpose: str, snapshot_id: str, storage: list[str] | None = None) -> dict:
+    plan = run.op.restore_plans.get(purpose)
+    if plan:
+        return plan
+    plan = backups.plan_restore(
+        run.service.id, snapshot_id, _directories(run, storage), run.log, tag=_tag(run, purpose)
+    )
+    run.op = run.journal.save_plan(run.op.id, purpose, plan)
+    return plan
+
+
+def _saver(run: _Run, purpose: str) -> Callable[[dict], None]:
+    def save(plan: dict) -> None:
+        run.op = run.journal.save_plan(run.op.id, purpose, plan)
+
+    return save
+
+
+def _tidy(run: _Run) -> None:
+    """Delete the folders kept aside and any staged copies; only after the app is verified."""
+    for purpose, plan in list(run.op.restore_plans.items()):
+        try:
+            backups.wipe(backups.leftovers(plan), run.log)
+        except (backups.BackupError, OSError) as exc:
+            run.log(f"Restore leftovers were not removed this time: {exc}")
+            continue
+        run.op = run.journal.save_plan(run.op.id, purpose, None)
+
+
+def _abandon(run: _Run) -> None:
+    """Undo whatever a step that failed before any data changed had done: staged files, a stop."""
+    plan = run.op.restore_plans.get("restore")
+    if plan and not any(state == "swapped" for state in plan["roots"].values()):
+        _tidy(run)
+    if run.op.bundle and run.op.kind == "update":
+        _put_deployment_back(run)
+    if run.running and run.op.phase in {"stop_app", "backup", "backed_up"}:
         _start(run.service, run.project, run.root, run.log)
 
 
 def _housekeeping(run: _Run) -> None:
-    """Prune old backups once nothing an unfinished operation may need can be removed."""
-    run.mark("housekeeping", "Tidying up old backups.")
+    """Check the repository and prune old backups, after the app is back up."""
+    run.mark("housekeeping", "Checking the backup and tidying up old ones.")
+    _tidy(run)
+    try:
+        backups.check(run.log)
+    except (backups.BackupError, OSError) as exc:
+        run.log(f"The backup repository could not be checked this time: {exc}")
     others = run.journal.protected(run.service.id, excluding=run.op.id)
     if others:
         run.log("Old backups are kept for now: another operation on this app may still need them.")
-        return
+    else:
+        try:
+            backups.prune(run.service.id, run.log)
+        except (backups.BackupError, OSError) as exc:
+            run.log(f"Old backups were not pruned this time: {exc}")
     try:
-        backups.prune(run.service.id, run.log)
-    except (backups.BackupError, OSError) as exc:
-        run.log(f"Old backups were not pruned this time: {exc}")
+        deployments.prune(run.service.id, run.journal.bundles(run.service.id))
+    except OSError as exc:
+        run.log(f"Old deployment copies were not removed this time: {exc}")
+
+
+def _put_back_data(run: _Run) -> None:
+    op = run.op
+    restored = op.restore_plans.get("restore")
+    if op.kind == "restore" and restored:
+        # The data from before is still beside the restored copy: swap it back.
+        try:
+            backups.undo(restored, _saver(run, "restore"))
+            return
+        except (backups.BackupError, OSError) as exc:
+            run.log(f"The folders from before could not be swapped back ({exc}); restoring the backup instead.")
+    if op.kind == "update" and op.recovery_snapshot:
+        # The new release may have migrated the data in place: put the backup back.
+        storage = deployments.manifest(run.service.id, op.bundle)["storage"] if op.bundle else None
+        plan = _plan(run, "rollback", op.recovery_snapshot, storage)
+        plan = backups.stage(run.service.id, plan, run.log, _saver(run, "rollback"))
+        backups.swap(plan, _saver(run, "rollback"))
+    elif op.kind == "restore" and op.recovery_snapshot and restored:
+        plan = _plan(run, "rollback", op.recovery_snapshot)
+        plan = backups.stage(run.service.id, plan, run.log, _saver(run, "rollback"))
+        backups.swap(plan, _saver(run, "rollback"))
 
 
 def _put_back(run: _Run, code: str, cause: str) -> None:
-    """Return the app to its data and release from just before the operation."""
+    """Return the app to its data, deployment and release from just before the operation."""
     op = run.op
     before = op.previous_release.version if op.previous_release else "the previous release"
     evidence = (
@@ -159,10 +259,9 @@ def _put_back(run: _Run, code: str, cause: str) -> None:
     )
     try:
         _stop(run.service, run.project, run.root, run.log)
-        if op.recovery_snapshot:
-            backups.restore(run.service.id, op.recovery_snapshot, run.directories(), run.log)
-        app_releases.restore_previous(run.service.id, op.previous_release)
-    except (_Failed, backups.BackupError, OSError) as exc:
+        _put_back_data(run)
+        _put_deployment_back(run)
+    except (_Failed, backups.BackupError, deployments.BundleError, OSError) as exc:
         raise _Failed(
             "rollback", code, f"{cause}, and putting back {before} failed ({exc}).{evidence}", "needs_attention"
         ) from exc
@@ -176,6 +275,7 @@ def _put_back(run: _Run, code: str, cause: str) -> None:
                 f"{evidence}",
                 "needs_attention",
             )
+    _tidy(run)
 
 
 def _backup(run: _Run) -> str:
@@ -186,9 +286,11 @@ def _backup(run: _Run) -> str:
         return f"Backup of {service.name} saved and checked."
     with job_guard.uncancellable():
         run.mark("backup", f"Saving a backup of {service.name}.")
+        _capture(run)
         if run.running:
             _stop(service, run.project, run.root, run.log)
         try:
+            # Checked once the app is running again, so the check adds no downtime.
             saved = backups.snapshot(
                 service.id,
                 run.directories(),
@@ -197,6 +299,7 @@ def _backup(run: _Run) -> str:
                 version=app_releases.installed_version(service, run.root),
                 release_id=_installed_id(service, run.root),
                 prune_old=False,
+                verify=False,
             )
         except (backups.BackupError, OSError) as exc:
             error = str(exc)
@@ -208,16 +311,26 @@ def _backup(run: _Run) -> str:
         if not saved:
             raise _Failed("backup", "backup_failed", error)
         _housekeeping(run)
-    return f"Backup {_short(saved['snapshot_id'])} saved and checked ({saved['files']} files)."
+    return f"Backup {_short(saved['snapshot_id'])} saved ({saved['files']} files)."
 
 
 def _refresh_definition(service: Service, root: Path, log: Log) -> None:
-    """Copy the approved Compose definition, which may differ between releases."""
-    try:
-        render_service(service, root)
-        app_releases.align(service, root)
-    except OSError as exc:
-        log(f"The approved configuration could not be copied ({exc}); keeping the current one.")
+    """Copy the approved Compose definition, which may differ between releases. Raises on failure."""
+    render_service(service, root)
+    app_releases.align(service, root)
+
+
+def _validate_definition(run: _Run) -> None:
+    """The staged files must form a valid Compose project before the app is stopped."""
+    from ctl.compute import compose_overrides
+
+    rc, output = actions.compose_config(
+        run.project, run.log, extra_files=compose_overrides(run.service.id, run.project)
+    )
+    if rc:
+        raise _Failed(
+            "stage_definition", "definition_invalid", f"The new release's settings are not valid: {output[-300:]}"
+        )
 
 
 def _installed_id(service: Service, root: Path) -> str:
@@ -260,6 +373,7 @@ def _release_for(service: Service, snapshot: dict, root: Path, log: Log, variant
 def _save_before(run: _Run, reason: str, label: str) -> None:
     """Stop the app and save the backup an undo would put back."""
     service = run.service
+    _capture(run)
     run.mark("stop_app", f"Stopping {service.name}.")
     _stop(service, run.project, run.root, run.log)
     run.mark("backup", label)
@@ -275,7 +389,7 @@ def _save_before(run: _Run, reason: str, label: str) -> None:
             prune_old=False,
         )
     except (backups.BackupError, OSError) as exc:
-        _restart_if_stopped(run)
+        _abandon(run)
         verb = "updated" if reason == "pre-update" else "restored"
         raise _Failed("backup", "backup_failed", f"Nothing was {verb}: {exc}") from exc
     run.mark(
@@ -288,22 +402,20 @@ def _restore(run: _Run) -> str:
     snapshot_id = run.op.chosen_snapshot
     previous = run.op.previous_release
     installed = previous.version if previous else ""
-    moved = ""
-    when = ""
-    if run.op.phase in {"prepare", "stop_app", "backup"}:
+    moved = when = ""
+    if run.op.phase in {"prepare", "stage_restore"}:
         try:
             chosen = next((snap for snap in backups.snapshots(service.id, run.log) if snap["id"] == snapshot_id), None)
         except backups.BackupError as exc:
-            _restart_if_stopped(run)
             raise _Failed("restore", "restore_failed", str(exc)) from exc
         if not chosen:
-            _restart_if_stopped(run)
             raise _Failed("restore", "restore_failed", "That backup no longer exists.")
         when = chosen["time"][:16].replace("T", " ")
         # Data goes back with the release it was saved from: restoring the backup
-        # taken before an update is how an update is undone.
+        # taken before an update is how an update is undone. A backup naming its
+        # release moves to exactly that deployment, even at the same version label.
         release = None
-        # A backup naming its release moves to exactly that deployment, even at the same version label.
+        storage = None
         chosen_id = str(chosen.get("release_id") or "")
         switch = (
             chosen_id != previous.id
@@ -314,18 +426,25 @@ def _restore(run: _Run) -> str:
             run.step(
                 "download_images", f"Downloading {service.name} {chosen['version']}, the release this backup is from."
             )
-            try:
-                variant = previous.variant if previous else "cpu"
-                release = _release_for(service, chosen, run.root, run.log, variant)
-            except _Failed:
-                _restart_if_stopped(run)
-                raise
+            release = _release_for(service, chosen, run.root, run.log, previous.variant if previous else "cpu")
             moved = f" {service.name} is back on {chosen['version']}."
-        with job_guard.uncancellable():
+            # The deployment that release ran with decides which folders must be in the backup.
+            bundle = deployments.latest_for_release(service.id, release.id)
+            if bundle:
+                storage = list(deployments.manifest(service.id, bundle)["storage"])
+        try:
+            run.mark("stage_restore", f"Unpacking backup {_short(snapshot_id)} beside the current data.")
             if release:
                 run.op = run.journal.advance(run.op.id, run.op.phase, target_release=release)
-            _save_before(run, "pre-restore", "Saving the current data first, so this restore can be undone.")
+            plan = _plan(run, "restore", snapshot_id, storage)
+            # Staged while the app still runs: nothing live changes until the swap.
+            backups.stage(service.id, plan, run.log, _saver(run, "restore"))
+        except backups.BackupError as exc:
+            _abandon(run)
+            raise _Failed("restore", "restore_failed", f"Nothing changed: {exc}") from exc
     with job_guard.uncancellable():
+        if run.op.phase in {"stage_restore", "stop_app", "backup"}:
+            _save_before(run, "pre-restore", "Saving the current data first, so this restore can be undone.")
         if run.op.phase == "rollback":
             _put_back(run, "restore_rollback_failed", "The restore was interrupted")
             raise _Failed(
@@ -334,29 +453,62 @@ def _restore(run: _Run) -> str:
                 "The restore was interrupted; the data from just before it was put back.",
                 "rolled_back",
             )
-        if run.op.phase in {"backed_up", "restore"}:
-            run.mark("restore", f"Putting back backup {_short(snapshot_id)}.")
+        if run.op.phase in {"backed_up", "swap"}:
+            run.mark("swap", f"Putting backup {_short(snapshot_id)} in place.")
             try:
-                backups.restore(service.id, snapshot_id, run.directories(), run.log)
-                if run.op.target_release:
-                    app_releases.write(service.id, run.op.target_release)
-            except (backups.BackupError, OSError) as exc:
-                run.mark("rollback", "Restore failed; putting the current data back.")
+                backups.swap(run.op.restore_plans["restore"], _saver(run, "restore"))
+                _switch_deployment(run)
+            except (backups.BackupError, deployments.BundleError, OSError) as exc:
+                run.mark("rollback", "The restore failed; putting the current data back.")
                 _put_back(run, "restore_rollback_failed", f"The restore failed ({exc})")
                 raise _Failed("restore", "restore_failed", f"Nothing changed: {exc}", "rolled_back") from exc
-        if run.running and run.op.phase in {"restore", "start_app"}:
+        if run.running and run.op.phase in {"swap", "start_app"}:
             run.mark("start_app", f"Starting {service.name}.")
             started, detail = _start(service, run.project, run.root, run.log)
             if not started:
+                # The data from before is still beside it: never leave an app that will not start.
+                run.mark("rollback", f"{service.name} did not start on the restored data; putting back what it had.")
+                _put_back(
+                    run, "restore_rollback_failed", f"{service.name} did not start on the restored data ({detail})"
+                )
                 raise _Failed(
                     "start_app",
-                    "health_check_failed",
-                    f"The backup was restored but {service.name} did not start: {detail}. "
-                    f"Backup {_short(run.op.recovery_snapshot)} holds the data from before the restore.",
+                    "restore_rolled_back",
+                    f"{service.name} did not start on the restored backup ({redact(detail)[-300:]}), "
+                    "so Mu3Lab put back the data it had before; nothing was lost.",
+                    "rolled_back",
                 )
+        backups.record_restore_tested(service.id)
         _housekeeping(run)
     restored = f"Restored the backup from {when} UTC." if when else f"Restored backup {_short(snapshot_id)}."
     return f"{restored}{moved} The data from just before is kept as backup {_short(run.op.recovery_snapshot)}."
+
+
+def _switch_deployment(run: _Run) -> None:
+    """Move to the deployment the restored data belongs to: its whole bundle when kept, else its images."""
+    target = run.op.target_release
+    if not target:
+        return
+    bundle = deployments.latest_for_release(run.service.id, target.id)
+    if bundle and bundle != run.op.bundle:
+        deployments.restore(run.service, bundle)
+        run.log("The settings and files that release ran with were put back too.")
+    else:
+        run.log("That release's own deployment files were not kept; its images run with the current files.")
+    app_releases.write(run.service.id, target)
+
+
+def _stage_definition(run: _Run) -> None:
+    """Render and check the new release's files while the app still runs; undo them on failure."""
+    _capture(run)
+    run.mark("stage_definition", "Preparing the new release's settings and files.")
+    try:
+        _refresh_definition(run.service, run.root, run.log)
+        _validate_definition(run)
+    except (_Failed, OSError, ValueError, RuntimeError) as exc:
+        _put_deployment_back(run)
+        message = exc.message if isinstance(exc, _Failed) else str(exc)
+        raise _Failed("stage_definition", "definition_invalid", f"Nothing changed: {message}") from exc
 
 
 def _apply(run: _Run) -> tuple[bool, str]:
@@ -366,7 +518,6 @@ def _apply(run: _Run) -> tuple[bool, str]:
     run.mark(
         "apply_update", f"Starting {run.service.name} {target.version}. Upgrading its data can take a few minutes."
     )
-    _refresh_definition(run.service, run.root, run.log)
     app_releases.write(run.service.id, target)
     return _start(run.service, run.project, run.root, run.log)
 
@@ -384,7 +535,9 @@ def _update(run: _Run, supporting_only: bool) -> str:
         except RuntimeError as exc:
             raise _Failed("download_images", "image_pull_failed", f"Nothing changed: {exc}") from exc
     with job_guard.uncancellable():
-        if run.op.phase in {"prepare", "stop_app", "backup"}:
+        if run.op.phase in {"prepare", "stage_definition"}:
+            _stage_definition(run)
+        if run.op.phase in {"stage_definition", "stop_app", "backup"}:
             _save_before(run, "pre-update", f"Saving a backup of {service.name} {current}.")
         detail = "the worker stopped while the update was being put back"
         if run.op.phase in {"backed_up", "apply_update"}:
@@ -404,13 +557,16 @@ def _update(run: _Run, supporting_only: bool) -> str:
             run.mark("rollback", f"{target.version} did not start; putting back {current} and its data.")
         if run.op.phase == "housekeeping":
             _housekeeping(run)
-            return f"Updated {service.name} to {target.version}. Backup {_short(run.op.recovery_snapshot)} holds the data from before."
+            return (
+                f"Updated {service.name} to {target.version}. "
+                f"Backup {_short(run.op.recovery_snapshot)} holds the data from before."
+            )
         _put_back(run, "update_rollback_failed", f"{target.version} did not start ({redact(detail)[-300:]})")
     raise _Failed(
         "apply_update",
         "update_rolled_back",
         f"{service.name} {target.version} did not start ({redact(detail)[-300:]}). "
-        f"Mu3Lab put back {current} with its data from just before; nothing was lost.",
+        f"Mu3Lab put back {current} with its data and settings from just before; nothing was lost.",
         "rolled_back",
     )
 
@@ -427,8 +583,8 @@ def _recover(run: _Run) -> tuple[State, str]:
     if op.phase == "prepare":
         return "cancelled", f"The {op.kind} stopped before anything changed."
     if op.phase in UNCHANGED or op.kind == "backup":
-        if run.running:
-            run.mark("start_app", f"Starting {service.name} again.")
+        _abandon(run)
+        if run.running and op.phase not in {"stop_app", "backup", "backed_up"} and op.kind == "backup":
             started, detail = _start(service, run.project, run.root, run.log)
             if not started:
                 raise _Failed("start_app", "health_check_failed", f"{service.name} did not start again: {detail}")
@@ -446,7 +602,10 @@ def _recover(run: _Run) -> tuple[State, str]:
         if run.running:
             started, detail = _start(service, run.project, run.root, run.log)
             if not started:
-                raise _Failed("start_app", "health_check_failed", f"{service.name} did not start: {detail}")
+                run.mark("rollback", "The restored data does not start; putting back the data from before.")
+                _put_back(run, "restore_rollback_failed", f"{service.name} did not start ({detail})")
+                return "rolled_back", f"The restored data did not start, so {service.name} is back to how it was."
+        _tidy(run)
         return "succeeded", "The restore had finished; the app was started again."
     # A restore that stopped while swapping data: the data from just before goes back.
     run.mark("rollback", "The restore was interrupted; putting back the data from just before.")
@@ -465,7 +624,7 @@ def _begin(
     supporting_only = False
     if action == "update" and not existing:
         state = app_releases.status(service, root)
-        target = app_releases.approved(service, root)
+        target = app_releases.approved(service, root, previous.variant if previous else "cpu")
         requested = job_params(job).get("target_version", "")
         if target.version != requested:
             raise _Failed(

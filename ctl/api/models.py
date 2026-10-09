@@ -597,10 +597,23 @@ class BackupSnapshot(ApiModel):
     paths: list[str]
 
 
+class BackupProtection(ApiModel):
+    """One app's backup evidence; never inferred from another app's backups."""
+
+    state: Literal["missing", "stale", "unchecked", "checked"]
+    snapshot_id: str = ""
+    completed_at: str = ""
+    verification: Literal["none", "structure", "data"] = "none"
+    restore_tested_at: str = ""
+    off_device: bool = False
+    detail: str = ""
+
+
 class BackupsResponse(ApiModel):
     ok: bool
     service_id: str
     backups: list[BackupSnapshot]
+    protection: BackupProtection | None = None
     readiness: BackupReadiness
 
 
