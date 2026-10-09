@@ -779,9 +779,9 @@ These should be small, independently reviewable changes. Full per-person approva
 
 - [x] **C1 implementation:** R03 operator-only person-bound scope and R02 durable gateway approvals. Pinned real client/two-account release acceptance remains pending.
 - [x] **C2 implementation:** R06 bounded gateway and R07 revocation reconciliation ([record](2026-10-08-status-gateway-revocation-implementation.md)). Release acceptance remains pending.
-- [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design. Step 1, the Kopia engine, is implemented ([record](2026-10-08-milestone-c3-kopia-engine.md)).
-- [ ] **C4:** R17 self-update rollback (simple version done 2026-10-09) and R18 (owner deferred enforced isolation; document the real boundary).
-- [ ] **C5:** R19 calendar sync (done 2026-10-09) and R31 data-destination policy (owner chose a single household switch).
+- [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material ([record](2026-10-08-milestone-c3-kopia-engine.md)). Implemented as of 2026-10-09: the Kopia engine, platform and core-app backups, the recovery sheet with vault copies, the schedule setting, the read-only backup browser, and `./install.sh --restore`. Remaining: the SFTP off-site copy (deferred until the owner has a second machine), the Home "no recent backup" warning, and the new-host rebuild rehearsal (owner declined a VM for now).
+- [ ] **C4:** R17 self-update rollback (simple version done 2026-10-09). R18 remaining: correct the worker comment and document the real trust boundary; the owner deferred enforced isolation.
+- [ ] **C5:** R19 calendar sync (done 2026-10-09). R31 remaining: a single household switch between outside providers (the default) and local only, plus a reviewed list of local models. Being planned: whether Unsloth Studio is added as an optional interface or later replaces Ollama (its `/v1/embeddings` landed in main on 2026-09-06, with no tagged release confirmed yet).
 
 **Exit:** two-user isolation test, real approve/deny interaction, new-host restore, and published-release update drill pass. Product UI decisions still open in the existing expansion plan remain explicit decision items during implementation.
 
