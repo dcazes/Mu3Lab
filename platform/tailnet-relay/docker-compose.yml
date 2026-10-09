@@ -1,0 +1,23 @@
+# Tailnet relay: lets app containers reach this server's own private HTTPS
+# address (Authentik's sign-in, for one). Tailscale accepts connections to
+# that address only when they arrive over the tailnet or from this computer
+# itself, so a container asking Authentik who signed in would be refused.
+# Apps map the private name to Docker's host address (`host-gateway`); this
+# relay listens only there and passes each encrypted connection on to
+# Tailscale unchanged, so it can neither read nor alter it.
+# The installer writes the configuration (ctl/tailnet_relay.py).
+name: mu3lab-tailnet-relay
+
+services:
+  relay:
+    image: nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["nginx", "-c", "/etc/mu3lab/nginx.conf", "-g", "daemon off;"]
+    volumes:
+      - ${MU3LAB_RELAY_CONFIG:?MU3LAB_RELAY_CONFIG is required}:/etc/mu3lab/nginx.conf:ro
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]

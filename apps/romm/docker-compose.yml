@@ -3,6 +3,7 @@ name: mu3lab-romm
 services:
   romm:
     image: rommapp/romm:5.3.1@sha256:0d66b4ea152a237c7f24b95e87459f46d3c596a7c0b35a82f26bc971487278b3
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     ports: ["127.0.0.1:8091:8080"]
     environment:

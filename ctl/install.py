@@ -163,6 +163,8 @@ DISPATCH = {
     (by_capability("identity_provider").id, "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
+    ("tailnet_relay", "missing"): "start_relay",
+    ("tailnet_relay", "ready"): "skip",
     ("lobehub_serve", "unshared"): "share_lobehub",
     ("lobehub_serve", "ready"): "skip",
     ("authentik_setup", "needs_user"): "create_account",
@@ -1285,6 +1287,20 @@ def fix_authentik_serve(check: dict, ctx: dict) -> dict:
     )
 
 
+def _tailnet_relay_check(ctx: dict) -> dict:
+    from ctl import tailnet_relay
+
+    verdict = tailnet_relay.status(_tailscale_dns_name_for_install(), ctx["log_fn"]("tailnet_relay"))
+    status = "ok" if verdict["state"] == "ready" else "missing"
+    return _row("tailnet_relay", status, verdict["detail"], verdict["state"])
+
+
+def fix_tailnet_relay(check: dict, ctx: dict) -> dict:
+    from ctl import tailnet_relay
+
+    return tailnet_relay.apply(_tailscale_dns_name_for_install(), ctx["log_fn"]("tailnet_relay"))
+
+
 def fix_lobehub_serve(check: dict, ctx: dict) -> dict:
     """Reserve LobeChat's stable private origin before core reconciliation."""
     return _tailscale_serve_port(
@@ -2326,6 +2342,12 @@ STEPS: list[Step] = [
         "fix": fix_authentik_serve,
     },
     {
+        "id": "tailnet_relay",
+        "label": "Let apps reach sign-in",
+        "check": _tailnet_relay_check,
+        "fix": fix_tailnet_relay,
+    },
+    {
         "id": "lobehub_serve",
         "label": "Private address for LobeChat",
         "check": lambda ctx: _serve_port_check(LOBEHUB_SERVE_PORT),
@@ -2373,6 +2395,7 @@ PHASES = (
         (
             by_capability("identity_provider").id,
             "authentik_serve",
+            "tailnet_relay",
             "lobehub_serve",
             "authentik_setup",
             "dashboard_protection",

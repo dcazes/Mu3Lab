@@ -115,3 +115,11 @@ While I was investigating a listing failure, a debug script run **outside the te
 
 No app data, container or existing secret was touched. The bug is fixed, and a regression test asserts the paths are passed through. Separately, the running dashboard and worker were started from `/home/dak/Desktop/Mu3Lab-expansion`, a worktree removed during branch cleanup earlier on 2026-10-08, so those services cannot restart from that path. Remediation awaits the owner's decision.
 
+
+## Fixes before the owner's reinstall (2026-10-09)
+
+- **Apps could not reach sign-in from inside Docker.** Ubuntu upgraded Tailscale from 1.102.5 to 1.104.1 on 2026-10-08, and it took effect at that afternoon's reboot. Since then, Tailscale Serve's port 443 listener is bound to `tailscale0` (`100.x%tailscale0:443`). It accepts the host and host-network containers but refuses containers on Docker networks, so Open WebUI and LobeChat could not load Authentik's sign-in settings, and their sign-in checks failed. This was observed, not taken from Tailscale's release notes.
+  - **The relay.** New `platform/tailnet-relay` is a pinned nginx running on the host network. It listens only on Docker's host address (the default bridge gateway), port 443, and admits private source addresses only. It passes each TLS connection through unchanged, so the certificate is still Tailscale's and the relay holds no keys.
+  - **Installer and apps.** The installer starts the relay in a new step, `tailnet_relay`, right after Authentik's private address is published. Every app that signs in through Authentik maps `MU3LAB_TAILNET_HOST` (now rendered into every app's settings) to `host-gateway` on the services that use the sign-in settings. A test enforces this for future apps.
+  - **Verified live.** A container on a Docker network received the real HTTPS answer through the relay, and the hardened relay (read-only, all capabilities dropped except binding and switching user) started and listened.
+- **The core-app backup step now uses the job's runtime root** for its snapshots, check and pruning, not a default. This is the same class of bug as the incident above, and a regression test covers every backup call.

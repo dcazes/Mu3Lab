@@ -173,12 +173,16 @@ def _back_up_platform(paths: RuntimePaths, log: Log) -> dict[str, Any]:
 
 
 def _back_up_core(
-    services: list[Service], root: Path, state: ControlState | None, step: Callable[[str, str], None], log: Log
+    services: list[Service],
+    root: Path,
+    state: ControlState | None,
+    step: Callable[[str, str], None],
+    log: Log,
+    paths: RuntimePaths,
 ) -> tuple[list[str], list[str]]:
     """Stop, back up and restart the core apps; return (saved names, problems)."""
     from ctl.service_ops import project_path
 
-    paths = RuntimePaths()
     running = [service for service in services if maintenance.was_running(state, service)]
     saved: list[str] = []
     problems: list[str] = []
@@ -195,7 +199,13 @@ def _back_up_core(
                 step("backup", f"Saving {service.name}'s data.")
                 try:
                     backups.snapshot(
-                        service.id, data_directories(service, root), "platform", log, prune_old=False, verify=False
+                        service.id,
+                        data_directories(service, root),
+                        "platform",
+                        log,
+                        prune_old=False,
+                        verify=False,
+                        paths=paths,
                     )
                     saved.append(service.name)
                 except (backups.BackupError, OSError) as exc:
@@ -235,14 +245,14 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
                 raise _Failed(
                     "platform", "platform_backup_failed", f"Mu3Lab's own state was not backed up: {exc}"
                 ) from exc
-            saved, problems = _back_up_core(services, root, ControlState.runtime(), step, log)
+            saved, problems = _back_up_core(services, root, ControlState.runtime(), step, log, paths)
         step("housekeeping", "Checking the backups and tidying up old ones.")
         try:
-            backups.check(log)
+            backups.check(log, paths=paths)
         except backups.BackupError as exc:
             problems.append(str(exc))
         for source in [backups.PLATFORM_SOURCE, *(service.id for service in services)]:
-            backups.prune(source, log)
+            backups.prune(source, log, paths=paths)
     except resource_locks.Busy as busy:
         store.transition(
             job_id, "failed", actor=actor, detail=f"Nothing was changed: {busy}.", error_code="resource_busy"

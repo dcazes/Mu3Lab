@@ -44,7 +44,7 @@ services:
       rustfs: {condition: service_healthy}
       rustfs-init: {condition: service_completed_successfully}
     networks: [mu3lab_frontend, mu3lab_mcp, lobehub_internal]
-    extra_hosts: ["host.docker.internal:host-gateway"]
+    extra_hosts: ["host.docker.internal:host-gateway", "${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/',{redirect:'manual'}).then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))"]

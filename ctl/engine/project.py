@@ -45,6 +45,7 @@ TEMPLATE_SUFFIX = ".tmpl"
 OIDC_SECRET_LENGTH = 40
 # Rendering waits this long for a job that holds the app.
 RENDER_LOCK_SECONDS = 600
+TAILNET_HOST = "MU3LAB_TAILNET_HOST"
 
 EnvHook = Callable[[App, dict[str, str]], None]
 
@@ -213,6 +214,9 @@ def build_env(
     manifest = app.manifest
     env = dict(existing)
     env["MU3LAB_DATA_ROOT"] = str(facts.paths.data)
+    if facts.dns_name:
+        # Containers resolve this server's private name to the tailnet relay (see platform/tailnet-relay).
+        env[TAILNET_HOST] = facts.dns_name
     for folder in manifest.media:
         env[folder.env] = str(facts.paths.media / folder.name)
     # Assigned, not defaulted: apps follow the computer if its timezone changes.

@@ -765,6 +765,7 @@ class DockerSessionTests(unittest.TestCase):
             "browser_extension": ["missing", "no_address", "not_needed", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
+            "tailnet_relay": ["missing", "ready"],
             "lobehub_serve": ["unshared", "ready"],
             "authentik_setup": ["needs_user", "ready"],
             "dashboard_protection": ["needs_apply", "needs_attention", "ready"],

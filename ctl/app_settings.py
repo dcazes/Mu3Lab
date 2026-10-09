@@ -42,7 +42,7 @@ IMPORTED = "meta:env-imported"
 
 def fixed_names(manifest: AppManifest) -> set[str]:
     """Variables recomputed from facts on every render; never stored."""
-    names = {"MU3LAB_DATA_ROOT", "TZ", *(folder.env for folder in manifest.media)}
+    names = {"MU3LAB_DATA_ROOT", "MU3LAB_TAILNET_HOST", "TZ", *(folder.env for folder in manifest.media)}
     oidc = manifest.sign_in.oidc
     if oidc:
         names.add(oidc.env.client_id)

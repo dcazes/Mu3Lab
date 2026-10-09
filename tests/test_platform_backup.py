@@ -115,8 +115,8 @@ class _Job(unittest.TestCase):
                 ),
             )
         )
-        self.stack.enter_context(patch.object(platform_backup.backups, "check"))
-        self.stack.enter_context(patch.object(platform_backup.backups, "prune"))
+        self.check = self.stack.enter_context(patch.object(platform_backup.backups, "check"))
+        self.prune = self.stack.enter_context(patch.object(platform_backup.backups, "prune"))
 
     def state(self):
         return None
@@ -162,6 +162,14 @@ class PlatformJobTests(_Job):
         self.assertNotIn("stop ollama", self.events)
         self.assertIn("Ollama is left out", job["detail"])
         self.assertFalse((self.paths.state / platform_backup.MARKER).exists())
+
+    def test_every_backup_step_uses_the_jobs_runtime_root(self):
+        self.run_job()
+        calls = [*self.snapshot.call_args_list, *self.platform.call_args_list, *self.check.call_args_list]
+        calls += self.prune.call_args_list
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertIs(call.kwargs.get("paths"), self.paths, call)
 
     def test_one_failed_backup_still_restarts_every_core_app(self):
         def snapshot(service_id, *_args, **_kwargs):
