@@ -259,6 +259,17 @@ class ReleaseIdentityRestoreTests(_Workflow):
         self.assertEqual(self.snapshot.call_args.kwargs["release_id"], OLD.id)
         self.assertEqual(app_releases.from_history("mealie", release_id=OLD.id), OLD)
 
+    def test_only_the_schedules_own_backups_are_tagged_as_scheduled(self):
+        self.stack.enter_context(patch.object(maintenance, "_start", return_value=(True, "")))
+        reasons = []
+        for actor in ("schedule", "owner"):
+            job = self.store.create(
+                kind="lifecycle", service_id="mealie", action="backup", actor=actor, params={"reason": "scheduled"}
+            )
+            maintenance.execute(self.store, None, self.store.get(job["id"]), self.service, self.root)
+            reasons.append(self.snapshot.call_args.args[2])
+        self.assertEqual(reasons, ["scheduled", "manual"])
+
 
 class UncancellableTests(unittest.TestCase):
     def test_a_cancel_waits_for_the_block_to_finish(self):

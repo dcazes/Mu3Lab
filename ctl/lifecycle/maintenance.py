@@ -295,7 +295,7 @@ def _put_back(run: _Run, code: str, cause: str) -> None:
     _tidy(run)
 
 
-def _backup(run: _Run) -> str:
+def _backup(run: _Run, reason: str = "manual") -> str:
     service = run.service
     saved, error = None, ""
     if run.op.phase == "housekeeping":
@@ -311,7 +311,7 @@ def _backup(run: _Run) -> str:
             saved = backups.snapshot(
                 service.id,
                 run.directories(),
-                "manual",
+                reason,
                 run.log,
                 version=app_releases.installed_version(service, run.root),
                 release_id=_installed_id(service, run.root),
@@ -706,7 +706,9 @@ def execute(store: JobStore, state: ControlState | None, job: dict, service: Ser
             if resumed:
                 log(f"Continuing this {action} after the worker restarted (it had reached: {op.phase}).")
             if action == "backup":
-                detail = _backup(run)
+                # Only the schedule's own jobs are tagged as scheduled; anything else is a manual backup.
+                scheduled = job_params(job).get("reason") == "scheduled" and job.get("actor") == "schedule"
+                detail = _backup(run, "scheduled" if scheduled else "manual")
             elif action == "restore":
                 detail = _restore(run)
             else:

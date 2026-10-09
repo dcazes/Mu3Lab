@@ -132,3 +132,28 @@ Owner decisions: the backup password goes on a printable sheet and into **every 
 - **Vault copy.** `vault_sync` adds **Mu3Lab backup password** to each administrator's *Mu3Lab app logins* collection. If no backup has needed the password yet, it is created first, so it is saved before it is needed. When the repository exists but its password is missing, nothing is saved.
 - **Honesty about copies.** Until the SFTP step, the sheet and the guide both say the backups exist only on this server.
 - **Tests:** the API (no-store, audited without the password, same password every time, status), household members refused, the check code, the vault copy for administrators only, and the dashboard (confirmation first, groups, check code, no copy warning).
+
+## Step 3: scheduled backups as a setting (2026-10-09)
+
+- **Setting.** `GET`/`PUT /api/v1/system/backups/schedule`, for administrators, with changes audited. The options are off, 6h, 12h, daily, or weekly with a day, plus a time in server-local time. The default is weekly, Sunday 03:30, as the owner chose. This replaces the plan's nightly default.
+- **Runs are ordinary jobs.** [`ctl/backup_schedule.py`](../../ctl/backup_schedule.py) runs once a minute from the worker. It queues the platform backup (Mu3Lab plus core apps), then one `backup` job per installed catalog app, with the actor `schedule` and the idempotency key `schedule:<time>:<app>`, so a worker restart never queues a run twice. App backups from the schedule are tagged `reason:scheduled`; any other actor's stay `manual`. Apps that are installing or changing, that need attention, or that have another job running are skipped and listed.
+- **Timing.**
+  - Scheduled times are worked out in local wall time, so daylight-saving changes keep 03:30 at 03:30.
+  - Only a time after both the last run and the last settings change counts.
+  - A brand-new schedule starts from the first check, so this update never stops the core apps by surprise.
+  - A missed run starts once the worker has been up for 10 minutes.
+- **Dashboard.** A Backup schedule card shows the current schedule, the next run and the last run's outcome, including failures and skipped apps.
+- **Tests:**
+  - weekly, daily, 6h and 12h times;
+  - US daylight-saving end (03:30 local moves from 07:30 to 08:30 UTC);
+  - the floors from the last run and the last change;
+  - validation;
+  - queue order and idempotency;
+  - skip reasons;
+  - no immediate first run;
+  - missed-run settling;
+  - status from jobs;
+  - the API (round trip, refusals, members refused);
+  - the scheduled tag only for the schedule's own jobs;
+  - the dashboard card.
+- **Not done:** the plan's Home warning after 3 days without a backup. With a weekly default, a fixed 3-day threshold would be wrong; the card's last-run outcome covers this for now.

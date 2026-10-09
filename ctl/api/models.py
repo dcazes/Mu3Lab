@@ -636,6 +636,31 @@ class PlatformBackupStatus(ApiModel):
     recovery_sheet: RecoverySheetStatus | None = None
 
 
+BackupFrequency = Literal["off", "6h", "12h", "daily", "weekly"]
+
+
+class BackupScheduleRun(ApiModel):
+    """How the last scheduled run went, from its jobs."""
+
+    scheduled_for: str
+    jobs: int
+    finished: int
+    failed: int
+    problems: list[str]
+    skipped: list[str]
+
+
+class BackupSchedule(ApiModel):
+    """When scheduled backups run, in this server's local time. Weekday: Monday is 0, Sunday 6."""
+
+    ok: bool
+    frequency: BackupFrequency
+    weekday: int
+    time: str
+    next_run_at: str
+    last_run: BackupScheduleRun | None = None
+
+
 class RecoverySheet(ApiModel):
     """What a new computer needs to open the backups. Sent once, never cached."""
 
@@ -900,6 +925,12 @@ class AppSizesResponse(ApiModel):
 
 class RequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class BackupScheduleRequest(RequestModel):
+    frequency: BackupFrequency
+    weekday: int = Field(ge=0, le=6)
+    time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
 class ServiceActionRequest(RequestModel):

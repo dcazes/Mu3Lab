@@ -1250,6 +1250,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/backups/schedule': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Backup Schedule Status
+     * @description When scheduled backups run, the next run, and how the last one went.
+     */
+    get: operations['backup_schedule_status_api_v1_system_backups_schedule_get'];
+    /** Update Backup Schedule */
+    put: operations['update_backup_schedule_api_v1_system_backups_schedule_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/config': {
     parameters: {
       query?: never;
@@ -1686,6 +1707,56 @@ export interface components {
       snapshot_present?: boolean | null;
       /** State */
       state?: string | null;
+    };
+    /**
+     * BackupSchedule
+     * @description When scheduled backups run, in this server's local time. Weekday: Monday is 0, Sunday 6.
+     */
+    BackupSchedule: {
+      /**
+       * Frequency
+       * @enum {string}
+       */
+      frequency: 'off' | '6h' | '12h' | 'daily' | 'weekly';
+      last_run?: components['schemas']['BackupScheduleRun'] | null;
+      /** Next Run At */
+      next_run_at: string;
+      /** Ok */
+      ok: boolean;
+      /** Time */
+      time: string;
+      /** Weekday */
+      weekday: number;
+    };
+    /** BackupScheduleRequest */
+    BackupScheduleRequest: {
+      /**
+       * Frequency
+       * @enum {string}
+       */
+      frequency: 'off' | '6h' | '12h' | 'daily' | 'weekly';
+      /** Time */
+      time: string;
+      /** Weekday */
+      weekday: number;
+    };
+    /**
+     * BackupScheduleRun
+     * @description How the last scheduled run went, from its jobs.
+     */
+    BackupScheduleRun: {
+      /** Failed */
+      failed: number;
+      /** Finished */
+      finished: number;
+      /** Jobs */
+      jobs: number;
+      /** Problems */
+      problems: string[];
+      /** Scheduled For */
+      scheduled_for: string;
+      /** Skipped */
+      skipped: string[];
     };
     /** BackupSnapshot */
     BackupSnapshot: {
@@ -10136,6 +10207,176 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['RecoverySheet'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  backup_schedule_status_api_v1_system_backups_schedule_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupSchedule'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  update_backup_schedule_api_v1_system_backups_schedule_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BackupScheduleRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupSchedule'];
         };
       };
       /** @description Bad Request */

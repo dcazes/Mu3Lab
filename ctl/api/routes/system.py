@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, platform_backup, recovery_sheet, self_update
+from ctl import __version__, backup_schedule, platform_backup, recovery_sheet, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -17,7 +17,7 @@ from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.backups import readiness as backup_readiness
 from ctl.compute import detect
 from ctl.control_state import COMPUTE_MODES, ControlState
-from ctl.jobs import JobConflict
+from ctl.jobs import JobConflict, JobStore
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
@@ -184,6 +184,29 @@ def platform_backup_status(_operator: Operator) -> models.PlatformBackupStatus:
     return models.PlatformBackupStatus.model_validate(
         {"ok": True, **platform_backup.status(ROOT), "recovery_sheet": recovery_sheet.status(RuntimePaths())}
     )
+
+
+@router.get("/system/backups/schedule", response_model=models.BackupSchedule, response_model_exclude_none=True)
+def backup_schedule_status(_operator: Operator) -> models.BackupSchedule:
+    """When scheduled backups run, the next run, and how the last one went."""
+    return models.BackupSchedule.model_validate({"ok": True, **backup_schedule.status(JobStore.runtime())})
+
+
+@router.put("/system/backups/schedule", response_model=models.BackupSchedule, response_model_exclude_none=True)
+def update_backup_schedule(
+    payload_model: models.BackupScheduleRequest, operator: OperatorMutation
+) -> models.BackupSchedule:
+    store = runtime.job_store()
+    try:
+        chosen = backup_schedule.save(payload_model.model_dump(), str(operator["username"]))
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    store.record_audit(
+        actor=str(operator["username"]),
+        event="backup.schedule_changed",
+        detail=f"Scheduled backups: {chosen['frequency']}, weekday {chosen['weekday']}, {chosen['time']}.",
+    )
+    return models.BackupSchedule.model_validate({"ok": True, **backup_schedule.status(store)})
 
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}

@@ -3,6 +3,7 @@ import { Callout, Card, Collapsible, Facts, PageHeader } from '../../components/
 import { Badge, Dot } from '../../components/Status';
 import { relativeTime } from '../../lib/format';
 import { useDashboard } from '../../state/dashboard';
+import { BackupScheduleCard } from './BackupScheduleCard';
 import { PlatformBackupCard } from './PlatformBackupCard';
 
 export function SecuritySettings() {
@@ -48,9 +49,9 @@ export function SecuritySettings() {
           </Callout>
         ) : (
           <Callout tone="warning" icon={ShieldAlert} title="Backup protection is not verified">
-            Mu3Lab won’t report your data as protected until a snapshot and integrity check succeed. Back up an app from
-            its Advanced tab; Mu3Lab also saves one before every app update. Scheduled backups are coming in a future
-            update.
+            Mu3Lab won’t report your data as protected until a snapshot and integrity check succeed. Scheduled backups
+            below save everything on their own; you can also back up an app from its Advanced tab, and Mu3Lab saves one
+            before every app update.
           </Callout>
         )}
         {backup.legacy_repository && (
@@ -68,6 +69,7 @@ export function SecuritySettings() {
           ]}
         />
       </Card>
+      {identity.is_admin && <BackupScheduleCard />}
       {identity.is_admin && <PlatformBackupCard />}
       <Collapsible title={`Audit log${audit.available ? ` (${audit.events.length})` : ''}`}>
         {audit.events.length ? (

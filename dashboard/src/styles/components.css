@@ -1480,3 +1480,14 @@ body > .recovery-sheet {
     background: #fff;
   }
 }
+
+.schedule-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+.schedule-form .field {
+  min-width: 150px;
+}

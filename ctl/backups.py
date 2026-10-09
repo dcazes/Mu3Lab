@@ -58,7 +58,7 @@ KOPIA_IMAGE = "docker.io/kopia/kopia:0.23.1@sha256:89fd95ee2942880ca00eae9642669
 HOST = "mu3lab"
 REPOSITORY_MARKER = "kopia.repository.f"
 KEEP_LATEST = 3
-REASONS = frozenset({"manual", "pre-update", "pre-restore", "platform"})
+REASONS = frozenset({"manual", "scheduled", "pre-update", "pre-restore", "platform"})
 # The Kopia source for Mu3Lab's own state (control database, key, deployments).
 PLATFORM_SOURCE = "mu3lab"
 _SNAPSHOT_ID = re.compile(r"^[0-9a-f]{16,64}$")

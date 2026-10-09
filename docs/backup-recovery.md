@@ -4,6 +4,12 @@ Mu3Lab backs up each installed catalog app's data with [Kopia](https://kopia.io)
 
 This page is for the cases the dashboard cannot handle: restoring by hand, and backups made before Mu3Lab switched to Kopia. It also explains the recovery sheet, the one thing you must keep somewhere other than this server.
 
+## When backups run
+
+**Security & backups → Backup schedule** sets how often Mu3Lab backs up everything on its own: off, every 6 hours, every 12 hours, daily, or weekly (the default, Sunday at 03:30), in this server's local time. A run backs up Mu3Lab itself and its core apps first (sign-in, the password vault and chat pause for a few minutes), then each installed app one at a time. Apps that are being installed or changed, or whose last change needs attention, are skipped and listed. Mu3Lab also backs up an app before every update and restore, whatever the schedule.
+
+If the server was off at the scheduled time, the run starts about ten minutes after it is back on. Changing the schedule never starts a backup straight away.
+
 ## The backup password and the recovery sheet
 
 Every backup is encrypted with one password, which Mu3Lab created when it first needed it and never changes. Mu3Lab keeps it in its encrypted store on this server, so if the server is lost, that copy is lost too. Two other copies exist:
@@ -34,7 +40,7 @@ You need: the backup password (sheet or vault), and a copy of `/srv/mu3lab/backu
 | Repository password | Mu3Lab's encrypted secret store (`platform` / `backup-password`), the printed recovery sheet, and each administrator's vault |
 | Older restic backups (before the switch) | `/srv/mu3lab/backups/` (the `config`, `data`, `index`, `keys`, `locks` and `snapshots` entries) |
 
-Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|pre-update|pre-restore>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`.
+Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|scheduled|pre-update|pre-restore|platform>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`.
 
 ## Restoring by hand with Kopia
 
