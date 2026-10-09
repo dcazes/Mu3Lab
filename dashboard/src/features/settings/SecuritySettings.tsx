@@ -3,6 +3,7 @@ import { Callout, Card, Collapsible, Facts, PageHeader } from '../../components/
 import { Badge, Dot } from '../../components/Status';
 import { relativeTime } from '../../lib/format';
 import { useDashboard } from '../../state/dashboard';
+import { PlatformBackupCard } from './PlatformBackupCard';
 
 export function SecuritySettings() {
   const { data } = useDashboard();
@@ -67,6 +68,7 @@ export function SecuritySettings() {
           ]}
         />
       </Card>
+      {identity.is_admin && <PlatformBackupCard />}
       <Collapsible title={`Audit log${audit.available ? ` (${audit.events.length})` : ''}`}>
         {audit.events.length ? (
           <div className="rows compact">

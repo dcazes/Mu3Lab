@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ctl import backups
 from ctl.runtime import RuntimePaths
@@ -77,6 +78,26 @@ class KopiaIntegrationTests(unittest.TestCase):
         backups.check(self.lines.append, read_data="100%", paths=self.paths)
         backups.maintain(self.lines.append, self.paths)
         self.assertEqual(backups.protection("mealie", self.paths)["verification"], "data")
+
+    def test_mu3labs_own_state_is_backed_up_as_its_own_source(self):
+        import sqlite3
+
+        from ctl import platform_backup
+
+        with sqlite3.connect(self.paths.state / "mu3lab.db") as database:
+            database.execute("CREATE TABLE people (name TEXT)")
+            database.execute("INSERT INTO people VALUES ('owner')")
+        # The secret store already created this install's own key; the export carries it.
+        self.paths.projects.mkdir()
+        (self.paths.projects / "mealie").mkdir()
+        (self.paths.projects / "mealie" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        with patch("ctl.platform_backup.RuntimePaths", return_value=self.paths):
+            saved = platform_backup._back_up_platform(self.paths, self.lines.append)
+        listed = backups.snapshots(backups.PLATFORM_SOURCE, paths=self.paths)
+        self.assertEqual([snap["id"] for snap in listed], [saved["snapshot_id"]])
+        self.assertEqual(listed[0]["paths"], ["/data/control", "/data/projects"])
+        self.assertFalse((self.paths.state / platform_backup.EXPORT).exists())
+        self.assertEqual(backups.snapshots("mealie", paths=self.paths), [])
 
 
 if __name__ == "__main__":

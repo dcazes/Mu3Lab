@@ -58,7 +58,9 @@ KOPIA_IMAGE = "docker.io/kopia/kopia:0.23.1@sha256:89fd95ee2942880ca00eae9642669
 HOST = "mu3lab"
 REPOSITORY_MARKER = "kopia.repository.f"
 KEEP_LATEST = 3
-REASONS = frozenset({"manual", "pre-update", "pre-restore"})
+REASONS = frozenset({"manual", "pre-update", "pre-restore", "platform"})
+# The Kopia source for Mu3Lab's own state (control database, key, deployments).
+PLATFORM_SOURCE = "mu3lab"
 _SNAPSHOT_ID = re.compile(r"^[0-9a-f]{16,64}$")
 _VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
 _RELEASE_ID = re.compile(r"^[0-9a-f]{16}$")
@@ -479,13 +481,46 @@ def snapshot(
     prunes only once nothing it may still need to put back can be removed.
     """
     paths = paths or RuntimePaths()
-    if reason not in REASONS or not _NAME.fullmatch(service_id):
-        raise BackupError("unknown backup reason")
+    if service_id == PLATFORM_SOURCE:
+        raise BackupError("That name is reserved for Mu3Lab's own backup.")
     folders = sources(data_directories, paths)
     if not folders:
         raise BackupError("This app has no data on this server to back up yet.")
+    return snapshot_source(
+        service_id,
+        [(folder.name, folder) for folder in folders],
+        reason,
+        log,
+        version=version,
+        release_id=release_id,
+        paths=paths,
+        retention=retention,
+        prune_old=prune_old,
+        verify=verify,
+    )
+
+
+def snapshot_source(
+    service_id: str,
+    folders: list[tuple[str, Path]],
+    reason: str,
+    log: Log,
+    *,
+    version: str = "",
+    release_id: str = "",
+    paths: RuntimePaths | None = None,
+    retention: Retention = Retention(),
+    prune_old: bool = True,
+    verify: bool = True,
+) -> dict[str, Any]:
+    """Snapshot named folders as the source ``/data/<service_id>``; ``snapshot`` checks app folders first."""
+    paths = paths or RuntimePaths()
+    if reason not in REASONS or not _NAME.fullmatch(service_id):
+        raise BackupError("unknown backup reason")
+    if not folders or any(not _NAME.fullmatch(name) or not path.is_dir() for name, path in folders):
+        raise BackupError("Refusing to back up an unexpected folder.")
     ensure_repository(log, paths)
-    tags = [f"app:{service_id}", f"reason:{reason}", f"folders:{'+'.join(folder.name for folder in folders)}"]
+    tags = [f"app:{service_id}", f"reason:{reason}", f"folders:{'+'.join(name for name, _path in folders)}"]
     if version and _VERSION.fullmatch(version):
         tags.append(f"version:{version}")
     if release_id and _RELEASE_ID.fullmatch(release_id):
@@ -502,7 +537,7 @@ def snapshot(
             *(f"--tags={tag}" for tag in tags),
         ],
         log,
-        mounts=[(folder, f"/data/{service_id}/{folder.name}", True) for folder in folders],
+        mounts=[(path, f"/data/{service_id}/{name}", True) for name, path in folders],
         paths=paths,
         timeout=6 * 3600,
     )

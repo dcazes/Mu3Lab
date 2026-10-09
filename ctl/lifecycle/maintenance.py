@@ -122,6 +122,23 @@ def _start(service: Service, project: Path, root: Path, log: Log) -> tuple[bool,
     return True, ""
 
 
+# For other jobs that briefly stop an app (the platform backup): same connector
+# handling, same health wait. A failed stop raises ``StopFailed``.
+StopFailed = _Failed
+
+
+def stop_app(service: Service, project: Path, root: Path, log: Log) -> None:
+    _stop(service, project, root, log)
+
+
+def start_app(service: Service, project: Path, root: Path, log: Log) -> tuple[bool, str]:
+    return _start(service, project, root, log)
+
+
+def was_running(state: ControlState | None, service: Service) -> bool:
+    return _was_running(state, service)
+
+
 def _was_running(state: ControlState | None, service: Service) -> bool:
     installation = state.installation(service.id) if state else None
     return not installation or installation["state"] != "stopped"

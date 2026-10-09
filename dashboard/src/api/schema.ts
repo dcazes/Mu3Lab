@@ -1206,6 +1206,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/backups/platform': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Platform Backup Status
+     * @description Mu3Lab's own backup and each core app's, from their own evidence.
+     */
+    get: operations['platform_backup_status_api_v1_system_backups_platform_get'];
+    put?: never;
+    /**
+     * Start Platform Backup
+     * @description Queue a backup of Mu3Lab itself; core apps stop for a few minutes while their data is saved.
+     */
+    post: operations['start_platform_backup_api_v1_system_backups_platform_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/config': {
     parameters: {
       query?: never;
@@ -1954,6 +1978,21 @@ export interface components {
         [key: string]: string | boolean | number | null;
       };
     };
+    /** CoreAppBackup */
+    CoreAppBackup: {
+      /** Id */
+      id: string;
+      /** Included */
+      included: boolean;
+      /** Name */
+      name: string;
+      protection?: components['schemas']['BackupProtection'] | null;
+      /**
+       * Reason
+       * @default
+       */
+      reason?: string;
+    };
     /** CoreSetupResponse */
     CoreSetupResponse: {
       capacity?: components['schemas']['CoreSetupResponseCapacity'] | null;
@@ -2573,6 +2612,17 @@ export interface components {
       /** Ok */
       ok: boolean;
       person: components['schemas']['Person'];
+    };
+    /**
+     * PlatformBackupStatus
+     * @description Mu3Lab's own state and each core app, each from its own backup evidence.
+     */
+    PlatformBackupStatus: {
+      /** Core Apps */
+      core_apps: components['schemas']['CoreAppBackup'][];
+      /** Ok */
+      ok: boolean;
+      platform: components['schemas']['BackupProtection'];
     };
     /** ProviderCatalogItem */
     ProviderCatalogItem: {
@@ -9782,6 +9832,172 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['SystemResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  platform_backup_status_api_v1_system_backups_platform_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlatformBackupStatus'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  start_platform_backup_api_v1_system_backups_platform_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */

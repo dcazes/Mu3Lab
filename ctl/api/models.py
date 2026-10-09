@@ -611,6 +611,23 @@ class BackupProtection(ApiModel):
     detail: str = ""
 
 
+class CoreAppBackup(ApiModel):
+    id: str
+    name: str
+    included: bool
+    # Why an app is left out (its data can be fetched again).
+    reason: str = ""
+    protection: BackupProtection | None = None
+
+
+class PlatformBackupStatus(ApiModel):
+    """Mu3Lab's own state and each core app, each from its own backup evidence."""
+
+    ok: bool
+    platform: BackupProtection
+    core_apps: list[CoreAppBackup]
+
+
 class BackupsResponse(ApiModel):
     ok: bool
     service_id: str

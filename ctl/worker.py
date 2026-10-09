@@ -18,7 +18,7 @@ import threading
 import time
 from pathlib import Path
 
-from ctl import access, job_guard, resource_locks, self_update
+from ctl import access, job_guard, platform_backup, resource_locks, self_update
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.job_processes import JobProcesses
@@ -51,6 +51,8 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == self_update.SERVICE_ID:
         self_update.execute_claimed(store, job, worker_id, ROOT)
+    elif job.get("service_id") == platform_backup.SERVICE_ID:
+        platform_backup.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
         execute_mcp_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("provider:"):
@@ -157,6 +159,10 @@ def run() -> int:
 
             processes = JobProcesses(store.database)
             processes.install()
+            try:
+                platform_backup.recover(ROOT, lambda line: print(line, flush=True))
+            except Exception as exc:  # never keep the worker from starting
+                print(f"Mu3Lab could not restart apps an interrupted backup stopped: {exc}", flush=True)
             # App images download in the background, several at once, while
             # setup jobs run one at a time below.
             download_manager.start(lambda line: print(line, flush=True), downloads_stopping)

@@ -82,3 +82,36 @@ Only the engine section of [`ctl/backups.py`](../../ctl/backups.py) and its test
   - the new-machine rebuild guide and drill.
 - **VM:** repeat the B interruption matrix on Kopia, and back up and restore a real database app (Mealie, Immich).
 - **Retention timing:** buckets use UTC days. Mu3Lab's nightly schedule will run in host local time, and DST is handled there.
+
+## Step 1b: backing up Mu3Lab itself (2026-10-08)
+
+- **What app backups hold.** Each app's data only. Its code comes from the git checkout and its images from their registries; media is excluded unless opted in. Confirmed with the owner.
+- **What git deliberately does not hold.** Each installation's own state, without which restored data cannot be opened. [`ctl/platform_backup.py`](../../ctl/platform_backup.py) backs it up as the Kopia source `mu3lab`:
+  - the control database, copied with SQLite's backup API, so the copy is consistent while the dashboard keeps running;
+  - the encryption key;
+  - the deployment copies (R12);
+  - the tool gateway's database;
+  - the runtime projects.
+- **Core apps.** Core apps with data (Authentik, Vaultwarden, LobeHub, LiteLLM, FreeLLMAPI, Firecrawl) are then stopped in reverse dependency order, backed up as their own sources, and started again in dependency order, as the owner chose.
+  - A marker records what the job stopped, so a worker that dies mid-way restarts those apps when it comes back.
+  - Apps the owner stopped are backed up but not started.
+  - The manifest field `backup: {include: false, reason}` leaves out data that can be fetched again. Ollama's downloaded models use it, and the reason is shown.
+- **Dashboard and API.**
+  - `POST /api/v1/system/backups/platform` queues the job.
+  - `GET /api/v1/system/backups/platform` reports each source's own evidence.
+  - Security & backups shows **Mu3Lab itself** with a **Back up now** button for administrators.
+- **Restoring this backup.** Restoring the `mu3lab` source belongs to the new-machine guide and drill (a later C3 step); it is intentionally not a dashboard button.
+- **Tests.**
+  - `tests/test_platform_backup.py`: order, left-out apps, a consistent copy of a live WAL database, stop and start order, a failure still restarts everything, interruption, crash recovery from the marker, apps the owner stopped, the API, and a check that no step falls back to the real runtime root.
+  - The opt-in integration test now also backs up the `mu3lab` source against the real image. It passed.
+
+### Incident: a debug run wrote to the owner's real installation
+
+While I was investigating a listing failure, a debug script run **outside the test harness** called the platform backup. A bug then showed: `_back_up_platform` did not pass its `paths` argument to the final snapshot call, so that call used the real runtime root. At 23:12 local time on 2026-10-08 it:
+
+- migrated `/srv/mu3lab/state/mu3lab.db` from schema 2 to 7;
+- added a `platform/backup-password` secret and the `backup-apps/mu3lab` and `backup/verification` records, which describe a snapshot of a throwaway test folder;
+- created a Kopia repository at `/srv/mu3lab/backups/kopia` and its configuration in `/srv/mu3lab/state/kopia`.
+
+No app data, container or existing secret was touched. The bug is fixed, and a regression test asserts the paths are passed through. Separately, the running dashboard and worker were started from `/home/dak/Desktop/Mu3Lab-expansion`, a worktree removed during branch cleanup earlier on 2026-10-08, so those services cannot restart from that path. Remediation awaits the owner's decision.
+

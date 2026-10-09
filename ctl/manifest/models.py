@@ -388,6 +388,20 @@ class Integration(Model):
         return value
 
 
+# --- Backups ---------------------------------------------------------------------------
+
+
+class BackupSpec(Model):
+    """Whether the app's data folders are backed up.
+
+    Leave an app out only when its data can be fetched again and holds nothing
+    people made (downloaded AI models, caches); ``reason`` is shown to them.
+    """
+
+    include: bool = True
+    reason: str = ""
+
+
 # --- Media libraries -------------------------------------------------------------------
 
 
@@ -435,6 +449,7 @@ class AppManifest(Model):
     depends_on: tuple[str, ...] = ()
     data_dir: str = ""  # folder under /srv/mu3lab/data; defaults to the app id
     media: tuple[MediaFolder, ...] = ()
+    backup: BackupSpec = BackupSpec()
     service: ServiceSpec
     route: Route | None = None
     sign_in: SignIn

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, self_update
+from ctl import __version__, platform_backup, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -16,6 +16,7 @@ from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.backups import readiness as backup_readiness
 from ctl.compute import detect
 from ctl.control_state import COMPUTE_MODES, ControlState
+from ctl.jobs import JobConflict
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
@@ -173,6 +174,45 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
 def backups(_member: Member) -> models.BackupReadiness:
     """Local encrypted-backup readiness; execution needs an authenticated job."""
     return models.BackupReadiness.model_validate({"ok": True, **backup_readiness()})
+
+
+@router.get("/system/backups/platform", response_model=models.PlatformBackupStatus, response_model_exclude_none=True)
+def platform_backup_status(_operator: Operator) -> models.PlatformBackupStatus:
+    """Mu3Lab's own backup and each core app's, from their own evidence."""
+    return models.PlatformBackupStatus.model_validate({"ok": True, **platform_backup.status(ROOT)})
+
+
+@router.post("/system/backups/platform", response_model=models.JobResponse, response_model_exclude_none=True)
+def start_platform_backup(request: Request, operator: OperatorMutation) -> models.JobResponse:
+    """Queue a backup of Mu3Lab itself; core apps stop for a few minutes while their data is saved."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    subject = runtime.mutation_subject(operator)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="backup",
+        service_id=platform_backup.SERVICE_ID,
+        action=platform_backup.ACTION,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="system.platform_backup",
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    try:
+        job = store.create(
+            kind="backup",
+            service_id=platform_backup.SERVICE_ID,
+            action=platform_backup.ACTION,
+            actor=operator["username"],
+            actor_subject=subject,
+            namespace="system.platform_backup",
+            detail="Operator requested a backup of Mu3Lab.",
+            idempotency_key=key,
+        )
+    except JobConflict as conflict:
+        raise ApiError(409, "A backup of Mu3Lab is already running.") from conflict
+    return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
 @router.get("/provisioning", response_model=models.ProvisioningResponse, response_model_exclude_none=True)
