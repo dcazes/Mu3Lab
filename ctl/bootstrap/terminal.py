@@ -548,10 +548,11 @@ def report_failure(screen: Screen, job: dict, log_path: Path) -> int:
             print(f"  Run this in a terminal:\n    {prompt['terminal_command']}")
         print("  Then run ./install.sh again. Finished steps are skipped.")
         return 1
-    print(f"Setup stopped at: {failed['label'] if failed else 'an unknown step'}")
+    print(f"Setup stopped at: {failed['label']}" if failed else "Setup stopped before its first step.")
     message = (failed or {}).get("error") or job.get("error") or ""
     if message:
         print(f"  Reason: {message}")
+        screen.log(failed["id"] if failed else "install", message)
     print("  Nothing that was already installed has been undone.")
     print("  Fix the reason above if it names one, then run ./install.sh again;")
     print("  it continues where it stopped.")

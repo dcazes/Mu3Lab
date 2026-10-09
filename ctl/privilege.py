@@ -33,10 +33,12 @@ def _exec(argv: list[str], timeout: int = 300, env: dict | None = None) -> tuple
     """Run argv, return (rc, merged output). Never raises, never uses shell.
 
     `env` merges over os.environ (used for DOCKER_CONFIG isolation); None
-    inherits the environment unchanged.
+    inherits the environment unchanged. sudo stays in the caller's session:
+    the password ``install.sh`` asked for is cached per terminal, and a new
+    session has no terminal, so sudo would ask again (or refuse with -n).
     """
     job_guard.checkpoint()
-    result = process.run(argv, timeout=timeout, env={**os.environ, **(env or {})})
+    result = process.run(argv, timeout=timeout, env={**os.environ, **(env or {})}, own_session=argv[:1] != ["sudo"])
     if result.status == "timeout":
         return 124, f"{argv[0]}: timed out"
     return result.returncode, result.output

@@ -13,7 +13,10 @@ Every command Mu3Lab runs goes through ``run`` (or ``completed``, its
   command cannot write unbounded job events.
 - The child runs in its own session. On timeout the whole process group gets
   SIGTERM, then SIGKILL, and is reaped; ``sg docker -c`` and similar wrappers
-  cannot leave a grandchild holding the pipes open.
+  cannot leave a grandchild holding the pipes open. ``own_session=False``
+  keeps the caller's session instead, for ``sudo``: its cached password is
+  tied to the terminal, and a new session has none. Only the child itself is
+  signalled then; sudo passes SIGTERM on to its command.
 - If the log callback raises (a cancelled job's ``JobInterrupted``), the
   command is not killed: like ``job_guard`` promises, a command already
   running may finish. Output keeps draining until it exits or the deadline
@@ -141,27 +144,30 @@ def _read(pipe: IO[bytes], stream: Stream, inbox: queue.Queue, stop: threading.E
         put(None)
 
 
-def _signal_group(proc: subprocess.Popen, signum: int) -> None:
-    try:
-        os.killpg(proc.pid, signum)
-    except (ProcessLookupError, PermissionError):
+def _signal_group(proc: subprocess.Popen, signum: int, group: bool = True) -> None:
+    if group:
         try:
-            proc.send_signal(signum)
-        except (ProcessLookupError, PermissionError, OSError):
+            os.killpg(proc.pid, signum)
+            return
+        except (ProcessLookupError, PermissionError):
             pass
+    try:
+        proc.send_signal(signum)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
-def stop(proc: subprocess.Popen, grace: float = KILL_GRACE_SECONDS) -> None:
-    """SIGTERM the process group, then SIGKILL after ``grace``, and reap the child."""
+def stop(proc: subprocess.Popen, grace: float = KILL_GRACE_SECONDS, *, group: bool = True) -> None:
+    """SIGTERM the process group (or only the child), then SIGKILL after ``grace``, and reap it."""
     if proc.poll() is not None:
         return
-    _signal_group(proc, signal.SIGTERM)
+    _signal_group(proc, signal.SIGTERM, group)
     try:
         proc.wait(timeout=grace)
         return
     except subprocess.TimeoutExpired:
         pass
-    _signal_group(proc, signal.SIGKILL)
+    _signal_group(proc, signal.SIGKILL, group)
     try:
         proc.wait(timeout=grace)
     except subprocess.TimeoutExpired:
@@ -182,6 +188,7 @@ def run(
     max_line: int = MAX_LINE_BYTES,
     forward_limit: int = FORWARD_LIMIT,
     clock: Callable[[], float] = time.monotonic,
+    own_session: bool = True,
 ) -> Result:
     """Run ``argv`` (never through a shell) and return its bounded outcome.
 
@@ -201,7 +208,7 @@ def run(
             stderr=subprocess.PIPE,
             cwd=cwd,
             env=dict(env) if env is not None else None,
-            start_new_session=True,
+            start_new_session=own_session,
         )
     except FileNotFoundError:
         message = f"{argv[0]}: command not found"
@@ -287,7 +294,7 @@ def run(
                 timed_out = True
     finally:
         # Reached on timeout and on anything raised by this loop itself.
-        stop(proc)
+        stop(proc, group=own_session)
         if untrack is not None and proc.poll() is not None:
             try:
                 untrack()

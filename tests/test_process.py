@@ -169,3 +169,23 @@ def _alive(pid: int) -> bool:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SessionTests(unittest.TestCase):
+    """sudo's cached password belongs to the terminal: a new session would lose it."""
+
+    def session_of_child(self, **kwargs) -> int:
+        result = process.run([sys.executable, "-c", "import os; print(os.getsid(0))"], timeout=10, **kwargs)
+        return int(result.stdout.strip())
+
+    def test_commands_get_their_own_session_by_default(self):
+        self.assertNotEqual(self.session_of_child(), os.getsid(0))
+
+    def test_own_session_false_keeps_the_callers_session_and_terminal(self):
+        self.assertEqual(self.session_of_child(own_session=False), os.getsid(0))
+
+    def test_a_command_in_the_callers_session_is_still_stopped_at_its_deadline(self):
+        started = time.monotonic()
+        result = process.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1, own_session=False)
+        self.assertEqual(result.status, "timeout")
+        self.assertLess(time.monotonic() - started, 10)
