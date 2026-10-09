@@ -25,7 +25,7 @@ from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
 from ctl.jobs import JobStore, redact
 from ctl.platform_apps import by_capability
-from ctl.provider_ops import PROBE_MAX_TOKENS
+from ctl.provider_ops import CHECK_MODEL, PROBE_MAX_TOKENS
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
@@ -197,6 +197,23 @@ def _stream_chat_ok(url: str, payload: dict, headers: dict[str, str]) -> bool:
     return False
 
 
+CHAT_ATTEMPTS = 3
+
+
+def _chat_ok(payload: dict, headers: dict[str, str], *, sleep=time.sleep) -> bool:
+    """Stream one short chat, retrying a moment later if the providers stumble.
+
+    FreeLLMAPI already falls through its ranked models, so a failure here means
+    every model it tried failed at once, usually a brief outage at a provider.
+    """
+    for attempt in range(CHAT_ATTEMPTS):
+        if _stream_chat_ok("http://127.0.0.1:4000/v1/chat/completions", payload, headers):
+            return True
+        if attempt + 1 < CHAT_ATTEMPTS:
+            sleep(20)
+    return False
+
+
 EMBEDDING_ATTEMPTS = 4
 EMBEDDING_TIMEOUT = 120
 
@@ -249,13 +266,16 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "FreeLLMAPI has no currently usable configured provider"
     headers = {"Authorization": f"Bearer {key}"}
     chat_payload = {
-        "model": "mu3lab-chat",
+        "model": CHECK_MODEL,
         "messages": [{"role": "user", "content": "Reply with OK."}],
         "max_tokens": PROBE_MAX_TOKENS,  # reasoning models think first; 4 tokens left them empty
         "temperature": 0,
     }
-    if not _stream_chat_ok("http://127.0.0.1:4000/v1/chat/completions", chat_payload, headers):
-        return False, "A streamed FreeLLMAPI chat request did not complete through LiteLLM"
+    if not _chat_ok(chat_payload, headers):
+        return False, (
+            f"No AI provider answered a short streamed chat through LiteLLM and FreeLLMAPI ({CHAT_ATTEMPTS} tries). "
+            "If your providers are working, run the check again in a few minutes."
+        )
     if not _embedding_ok(headers):
         return False, "The local embedding model did not return vectors through LiteLLM"
     host = tailnet_dns_name()

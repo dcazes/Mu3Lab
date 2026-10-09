@@ -35,6 +35,10 @@ MAX_MODEL_TESTS = 5
 KEY_ACCEPTED = frozenset({"healthy", "rate_limited"})
 # Enough room for reasoning models, which think before they answer.
 PROBE_MAX_TOKENS = 256
+# Checks of the chat route use FreeLLMAPI's fastest pick: its upkept ranking
+# favours small, quick, reliable models, which spend the least free quota. The
+# route itself (LiteLLM -> FreeLLMAPI -> provider) is the one chat uses.
+CHECK_MODEL = "mu3lab-fast"
 
 
 @dataclass(frozen=True)
@@ -186,7 +190,7 @@ def _forget_removed_keys(log) -> tuple[bool, str]:
 
 
 def _chat_route_check(log) -> StreamProbe:
-    """Confirm chat's own path (LiteLLM's mu3lab-chat through FreeLLMAPI) streams."""
+    """Confirm chat's own path (LiteLLM through FreeLLMAPI) streams, on the lightest model."""
     lite_key = read_runtime_env(RuntimePaths().projects / by_capability("model_proxy").id / ".env").get(
         "LITELLM_MASTER_KEY", ""
     )
@@ -194,8 +198,8 @@ def _chat_route_check(log) -> StreamProbe:
         return StreamProbe(
             False, 0, "", "", "litellm_unavailable", "LiteLLM master key is missing after reconciliation."
         )
-    log("LiteLLM probe: mu3lab-chat")
-    probe = _probe_stream("mu3lab-chat", lite_key, gateway="LiteLLM", url="http://127.0.0.1:4000/v1/chat/completions")
+    log(f"LiteLLM probe: {CHECK_MODEL}")
+    probe = _probe_stream(CHECK_MODEL, lite_key, gateway="LiteLLM", url="http://127.0.0.1:4000/v1/chat/completions")
     log(f"LiteLLM probe result: HTTP {probe.http_status or 'unavailable'}, {probe.error_code or 'complete'}")
     return probe
 

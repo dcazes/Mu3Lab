@@ -303,12 +303,27 @@ class CoreWiringTests(unittest.TestCase):
                     "APP_URL": "c",
                 },
             ),
-            patch("ctl.core_setup._stream_chat_ok", side_effect=lambda _url, payload, _headers: sent.append(payload)),
+            patch(
+                "ctl.core_setup._stream_chat_ok", side_effect=lambda _url, payload, _headers: not sent.append(payload)
+            ),
+            patch("ctl.core_setup._embedding_ok", return_value=False),
         ):
             core_setup._verify_platform(
                 RuntimePaths(Path("/nonexistent")), {"chat_configured": True, "gateway_key": "k"}
             )
         self.assertGreaterEqual(sent[0]["max_tokens"], PROBE_MAX_TOKENS)
+        # FreeLLMAPI's fastest pick, never a named model that could be retired.
+        self.assertEqual(sent[0]["model"], "mu3lab-fast")
+
+    def test_a_brief_provider_outage_is_retried_before_the_check_fails(self):
+        answers = iter([False, True])
+        sleep = Mock()
+        with patch("ctl.core_setup._stream_chat_ok", side_effect=lambda *_args: next(answers)):
+            self.assertTrue(core_setup._chat_ok({}, {}, sleep=sleep))
+        sleep.assert_called_once()
+        with patch("ctl.core_setup._stream_chat_ok", return_value=False) as stream:
+            self.assertFalse(core_setup._chat_ok({}, {}, sleep=sleep))
+        self.assertEqual(stream.call_count, core_setup.CHAT_ATTEMPTS)
 
     def test_verification_only_job_never_pulls_or_recreates_services(self):
         with tempfile.TemporaryDirectory() as tmp:
