@@ -14,11 +14,23 @@ its own commits or uncommitted edits is a developer's, updated by hand.
 Contract between releases: the worker running the *old* code pulls, then runs
 ``python -m ctl.self_update plan|finish`` from the *new* checkout, which
 prints one JSON object as its last line. Keep that interface stable.
+
+Going back (R17): before anything changes, Mu3Lab copies its database. Once
+the new release's install steps start, the worker cannot safely undo them
+itself (the dashboard has the database open, and the worker is about to be
+replaced), so ``ctl/update_guard.py`` does it. The guard runs as its own
+systemd unit from a copy outside the checkout. After the restart it checks
+that the new release answers; if the release fails to install or to start,
+it puts back the previous code, packages, dashboard and, if the database was
+upgraded, the database copy, and starts the previous release again.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -30,6 +42,7 @@ import httpx
 
 from ctl import job_guard, platform_releases, process, toolchain
 from ctl.jobs import JobStore
+from ctl.runtime import RuntimePaths
 
 if TYPE_CHECKING:
     from ctl.install import Step
@@ -44,6 +57,10 @@ FETCH_TTL_SECONDS = 600
 # ``finish`` can rebuild the dashboard and download core images.
 NEW_CODE_TIMEOUTS = {"plan": 600, "finish": 4 * 3600}
 UNITS = ("mu3lab-ctl.service", "mu3lab-worker.service")
+HEALTH_URL = "http://127.0.0.1:8787/api/health"
+DATABASE_COPY = "pre-update.db"
+GUARD_PLAN = "update-guard.json"
+GUARD_COPY = "update-guard.py"
 
 Log = Callable[[str], None]
 _cache: dict[str, Any] = {}
@@ -76,6 +93,9 @@ def status(root: Path, *, refresh: bool = False) -> dict[str, Any]:
         "blocked_reason": "",
         "checked_at": 0,
     }
+    last = last_update()
+    if last:
+        result["last_update"] = last
     current_tag = platform_releases.exact_tag(root)
     if not current_tag:
         result["blocked_reason"] = (
@@ -119,6 +139,18 @@ def status(root: Path, *, refresh: bool = False) -> dict[str, Any]:
     _rc, behind = _git(root, "rev-list", "--count", f"HEAD..{latest}")
     result.update({"available": True, "behind": int(behind), "changes": changes.splitlines()})
     return result
+
+
+def last_update(paths: RuntimePaths | None = None) -> dict[str, str] | None:
+    """How the most recent update ended, as the guard recorded it."""
+    from ctl.update_guard import RESULT
+
+    try:
+        value = json.loads(((paths or RuntimePaths()).state / RESULT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    keys = ("state", "at", "detail", "from", "to")
+    return {key: str(value.get(key, "")) for key in keys} if isinstance(value, dict) else None
 
 
 # --- Run by the newly pulled code -------------------------------------------------
@@ -279,7 +311,60 @@ def _restore(root: Path, before: str, packages_changed: bool, log: Log) -> str:
     return ""
 
 
-def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
+def _copy_database(paths: RuntimePaths) -> Path:
+    """A consistent copy of the control database while it is in use, to put back if the update fails."""
+    from ctl.platform_backup import _sqlite_copy
+
+    target = paths.state / DATABASE_COPY
+    target.unlink(missing_ok=True)
+    _sqlite_copy(paths.state / "mu3lab.db", target)
+    return target
+
+
+def _start_guard(root: Path, mode: str, plan: dict[str, Any], log: Log, paths: RuntimePaths) -> bool:
+    """Start the update guard as its own systemd unit, so it outlives the services it restarts."""
+    guard = paths.state / GUARD_COPY
+    shutil.copy2(Path(__file__).with_name("update_guard.py"), guard)
+    plan_file = paths.state / GUARD_PLAN
+    from ctl.secret_file import write_atomic
+
+    write_atomic(plan_file, json.dumps(plan, indent=2).encode())
+    interpreter = "/usr/bin/python3" if Path("/usr/bin/python3").is_file() else sys.executable
+    unit = f"mu3lab-update-guard-{secrets.token_hex(4)}"
+    rc, out = _run(
+        ["systemd-run", "--user", "--collect", f"--unit={unit}", interpreter, str(guard), mode, str(plan_file)],
+        root,
+        timeout=60,
+    )
+    if rc:
+        log(f"The update guard could not start ({out[-200:]}).")
+        return False
+    log(f"The update guard ({unit}) is {'checking the new release' if mode == 'verify' else 'going back'}.")
+    return True
+
+
+def _guard_plan(
+    root: Path, before: str, current: dict[str, Any], job_id: str, paths: RuntimePaths, reason: str = ""
+) -> dict[str, Any]:
+    env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG"}}
+    env.update({key: value for key, value in toolchain.uv_environment(root).items() if key.startswith("UV_")})
+    return {
+        "root": str(root),
+        "before": before,
+        "running": current.get("current_release") or before[:8],
+        "target": current["latest_release"],
+        "job_id": job_id,
+        "state": str(paths.state),
+        "database": str(paths.state / "mu3lab.db"),
+        "database_copy": str(paths.state / DATABASE_COPY),
+        "units": list(UNITS),
+        "health_url": HEALTH_URL,
+        "env": env,
+        "reason": reason,
+    }
+
+
+def _update(root: Path, step: Callable[[str, str], None], log: Log, job_id: str = "") -> str:
     current = status(root, refresh=True)
     if current["blocked_reason"]:
         raise _Failed("check", "update_blocked", current["blocked_reason"])
@@ -288,6 +373,13 @@ def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
     rc, before = _git(root, "rev-parse", "HEAD")
     if rc or not before:
         raise _Failed("check", "update_blocked", "Mu3Lab could not identify the running version.")
+    paths = RuntimePaths()
+    try:
+        _copy_database(paths)
+    except (OSError, ImportError) as exc:
+        raise _Failed("check", "update_blocked", f"Mu3Lab could not copy its database before updating: {exc}") from exc
+    except Exception as exc:  # sqlite3.Error: nothing has changed yet
+        raise _Failed("check", "update_blocked", f"Mu3Lab could not copy its database before updating: {exc}") from exc
     step("download", f"Downloading {current['behind']} change(s) from GitHub.")
     rc, out = _git(root, "checkout", "--quiet", "--detach", current["latest_release"], timeout=300)
     if rc:
@@ -322,14 +414,26 @@ def _update(root: Path, step: Callable[[str, str], None], log: Log) -> str:
         step("install", "Installing the update.")
         done = _new_code(root, "finish", log)
         if not done.get("ok"):
+            error = str(done.get("error", "unknown error"))
+            plan = _guard_plan(root, before, current, job_id, paths, reason=error[-300:])
+            going_back = _start_guard(root, "rollback", plan, log, paths)
             raise _Failed(
                 "install",
                 "install_failed",
-                f"Mu3Lab downloaded the update but couldn't finish it ({done.get('error', 'unknown error')}). "
-                f"Your apps keep running. In a terminal, run: cd {root} && ./install.sh",
+                f"Mu3Lab downloaded the update but couldn't finish it ({error}). "
+                + (
+                    f"It is going back to {plan['running']} by itself; the dashboard restarts in a few minutes."
+                    if going_back
+                    else f"Your apps keep running. In a terminal, run: cd {root} && ./install.sh"
+                ),
             )
+        if not _start_guard(root, "verify", _guard_plan(root, before, current, job_id, paths), log, paths):
+            log("The new release will not be checked after the restart.")
     head = _head(root)
-    return f"Mu3Lab updated to {head['commit']} ({head['date']}). The dashboard restarts now; reload the page."
+    return (
+        f"Mu3Lab updated to {head['commit']} ({head['date']}). The dashboard restarts now; reload the page. "
+        "Mu3Lab checks that it starts, and goes back to the previous version if it doesn't."
+    )
 
 
 def restart(log: Log) -> None:
@@ -350,7 +454,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
 
     store.transition(job_id, "running", actor=actor, detail="Updating Mu3Lab.", step_id="check")
     try:
-        detail = _update(root, step, log)
+        detail = _update(root, step, log, job_id)
     except _Failed as failure:
         store.transition(
             job_id, "failed", actor=actor, detail=failure.message, error_code=failure.code, step_id=failure.stage

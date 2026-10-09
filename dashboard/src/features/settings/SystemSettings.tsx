@@ -235,6 +235,16 @@ export function Mu3LabUpdates() {
         loaded.error && <p className="muted">{loaded.error}</p>
       ) : (
         <div className="stack">
+          {update.last_update?.state === 'rolled_back' && (
+            <Callout tone="warning" title={`Mu3Lab went back to ${update.last_update.from || 'the previous version'}`}>
+              {update.last_update.detail} Nothing else needs doing; you can try the update again later.
+            </Callout>
+          )}
+          {update.last_update?.state === 'needs_attention' && (
+            <Callout tone="danger" title="The last update needs your attention">
+              {update.last_update.detail}
+            </Callout>
+          )}
           {job?.state === 'failed' && (
             <Callout tone="warning" title="The last update didn’t finish">
               {job.detail}

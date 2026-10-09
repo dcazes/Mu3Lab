@@ -3620,6 +3620,16 @@
             "title": "Date",
             "type": "string"
           },
+          "last_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mu3LabUpdateResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ok": {
             "title": "Ok",
             "type": "boolean"
@@ -3641,6 +3651,40 @@
           "checked_at"
         ],
         "title": "Mu3LabUpdate",
+        "type": "object"
+      },
+      "Mu3LabUpdateResult": {
+        "description": "How the last update ended: verified, rolled_back or needs_attention.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "from": {
+            "default": "",
+            "title": "From",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "to": {
+            "default": "",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "at",
+          "detail"
+        ],
+        "title": "Mu3LabUpdateResult",
         "type": "object"
       },
       "OkResponse": {

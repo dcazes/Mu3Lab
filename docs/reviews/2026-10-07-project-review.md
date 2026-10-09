@@ -486,6 +486,20 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R17 — Self-update mutates the checkout and environment serving the running system
 
+**Implementation progress (2026-10-09): simple version, by owner decision.** Not the separate release folders, supervisor or schema-window design below.
+- **Database copy.** Before anything changes, the control database is copied with SQLite's backup API (`state/pre-update.db`, 0600); if it cannot be copied, nothing changes.
+- **The guard.** Rollback after "finish" starts is done by [`ctl/update_guard.py`](../../ctl/update_guard.py): standard library only, copied out of the checkout and started with `systemd-run --user`, so it outlives the restart.
+- **Verify.** It waits up to 5 minutes for `/api/health` to answer and both units to stay active, three checks in a row.
+- **Roll back** (a failed finish or a failed start):
+  1. stops both units;
+  2. puts the database copy back, only if the schema version changed, so work done meanwhile is kept otherwise;
+  3. checks out the previous commit and runs `uv sync`;
+  4. runs the previous release's own `self_update finish`, then starts the units and checks them again;
+  5. sets the update job to failed, so a restored database cannot replay it, audits the outcome, and writes `state/self-update.json`, which the updates card shows.
+- **If going back fails**, the person is told the exact `git checkout <commit> && ./install.sh`.
+- **Tests:** copy and refusal, a rollback on finish failure, verify after restart, verified, rolled back, the database restored only on a schema change, needs-attention guidance, and standard-library-only. A smoke run of the real script under `/usr/bin/python3` with dummy units passed.
+- **Not covered:** a new release that breaks `systemd-run` itself, and data written during the minutes between update and rollback when the schema changed. That data is lost, and the outcome text says the database was put back.
+
 **Evidence:** [self_update](../../ctl/self_update.py) checks out the new tag in the live root, synchronizes that root's Python environment, then runs new code. Before `finish`, some failures restore code/packages; failures after `finish` starts do not restore all runtime changes. `_new_code` drains stderr before stdout and has no overall timeout. Database migration can make old-code rollback incompatible.
 
 **Implementation:** download/verify a release into a separate immutable directory, create its own environment and dashboard assets, run checks using explicit paths, and build a durable update plan. Take the coordinated recovery bundle before applying compatible migrations/configuration. Switch the service target atomically only after staging succeeds. Use a small supervisor/restart handoff so the updating worker does not depend on replacing its own interpreter. Define database compatibility rules: reversible activation rollback only within a supported schema window; otherwise restore the coordinated state bundle. Track post-restart validation and report completion only when the new API/worker are healthy. Add bounded subprocess handling under R35. Record target commit and asset digests, not only the tag name.
@@ -766,7 +780,7 @@ These should be small, independently reviewable changes. Full per-person approva
 - [x] **C1 implementation:** R03 operator-only person-bound scope and R02 durable gateway approvals. Pinned real client/two-account release acceptance remains pending.
 - [x] **C2 implementation:** R06 bounded gateway and R07 revocation reconciliation ([record](2026-10-08-status-gateway-revocation-implementation.md)). Release acceptance remains pending.
 - [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design. Step 1, the Kopia engine, is implemented ([record](2026-10-08-milestone-c3-kopia-engine.md)).
-- [ ] **C4:** R17 staged self-update and R18 enforceable API/executor boundary.
+- [ ] **C4:** R17 self-update rollback (simple version done 2026-10-09) and R18 (owner deferred enforced isolation; document the real boundary).
 - [ ] **C5:** R19 calendar sync (done 2026-10-09) and R31 data-destination policy (owner chose a single household switch).
 
 **Exit:** two-user isolation test, real approve/deny interaction, new-host restore, and published-release update drill pass. Product UI decisions still open in the existing expansion plan remain explicit decision items during implementation.

@@ -2664,10 +2664,33 @@ export interface components {
       commit: string;
       /** Date */
       date: string;
+      last_update?: components['schemas']['Mu3LabUpdateResult'] | null;
       /** Ok */
       ok: boolean;
       /** Version */
       version: string;
+    };
+    /**
+     * Mu3LabUpdateResult
+     * @description How the last update ended: verified, rolled_back or needs_attention.
+     */
+    Mu3LabUpdateResult: {
+      /** At */
+      at: string;
+      /** Detail */
+      detail: string;
+      /**
+       * From
+       * @default
+       */
+      from?: string;
+      /** State */
+      state: string;
+      /**
+       * To
+       * @default
+       */
+      to?: string;
     };
     /** OkResponse */
     OkResponse: {

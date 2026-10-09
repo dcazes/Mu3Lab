@@ -78,6 +78,7 @@ export type McpUpdatesResponse = components['schemas']['McpUpdatesResponse'];
 export type Metric = components['schemas']['Metric'];
 export type MobileClient = components['schemas']['MobileClient'];
 export type Mu3LabUpdate = components['schemas']['Mu3LabUpdate'];
+export type Mu3LabUpdateResult = components['schemas']['Mu3LabUpdateResult'];
 export type OkResponse = components['schemas']['OkResponse'];
 export type ParallelDownloadsRequest = components['schemas']['ParallelDownloadsRequest'];
 export type PeopleResponse = components['schemas']['PeopleResponse'];

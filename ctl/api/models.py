@@ -696,6 +696,17 @@ class BackupsResponse(ApiModel):
     readiness: BackupReadiness
 
 
+class Mu3LabUpdateResult(ApiModel):
+    """How the last update ended: verified, rolled_back or needs_attention."""
+
+    state: str
+    at: str
+    detail: str
+    # Release names, deliberately not called from/to (a Python keyword).
+    from_: str = Field("", alias="from")
+    to: str = ""
+
+
 class Mu3LabUpdate(ApiModel):
     ok: bool
     version: str
@@ -706,6 +717,7 @@ class Mu3LabUpdate(ApiModel):
     changes: list[str]
     blocked_reason: str
     checked_at: float
+    last_update: Mu3LabUpdateResult | None = None
 
 
 class UpdateResponse(ApiModel):
