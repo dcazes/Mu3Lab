@@ -541,6 +541,11 @@
             ],
             "title": "Reason"
           },
+          "release_id": {
+            "default": "",
+            "title": "Release Id",
+            "type": "string"
+          },
           "short_id": {
             "title": "Short Id",
             "type": "string"
@@ -1479,6 +1484,17 @@
       "ConfigurationRequest": {
         "additionalProperties": false,
         "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
           "values": {
             "additionalProperties": {
               "anyOf": [
@@ -4912,6 +4928,17 @@
             ],
             "title": "Restart Required"
           },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
           "service_id": {
             "title": "Service Id",
             "type": "string"
@@ -5823,6 +5850,13 @@
       },
       "UpdateResponse": {
         "properties": {
+          "added_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added Services",
+            "type": "array"
+          },
           "approved_version": {
             "title": "Approved Version",
             "type": "string"
@@ -5842,6 +5876,13 @@
           "release_url": {
             "title": "Release Url",
             "type": "string"
+          },
+          "removed_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Services",
+            "type": "array"
           },
           "repository": {
             "title": "Repository",

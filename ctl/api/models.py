@@ -211,6 +211,8 @@ class ServiceConfigResponse(ApiModel):
     ok: bool
     service_id: str
     fields: list[ServiceConfigField]
+    # Send back as ``expected_revision`` so a stale form cannot overwrite a newer change.
+    revision: int | None = None
     restart_required: bool | None = None
 
 
@@ -590,6 +592,8 @@ class BackupSnapshot(ApiModel):
     time: str
     reason: Literal["manual"] | Literal["pre-update"] | Literal["pre-restore"]
     version: str
+    # The exact deployment the data belongs to; empty for backups made before release ids.
+    release_id: str = ""
     paths: list[str]
 
 
@@ -622,6 +626,8 @@ class UpdateResponse(ApiModel):
     supporting_only: bool
     update_enabled: bool
     blocked_reason: str
+    added_services: list[str] = Field(default_factory=list)
+    removed_services: list[str] = Field(default_factory=list)
 
 
 class McpServerAuth(ApiModel):
@@ -862,6 +868,7 @@ class ServiceActionRequest(RequestModel):
 
 class ConfigurationRequest(RequestModel):
     values: dict[str, str | bool | int | None] = Field(default_factory=dict)
+    expected_revision: int | None = None
 
 
 class ComputeRequest(RequestModel):

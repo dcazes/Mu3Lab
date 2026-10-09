@@ -17,13 +17,22 @@ function initialValues(config: ServiceConfigResponse | null): Record<string, Val
 
 function Form({ service, config }: { service: Service; config: ServiceConfigResponse }) {
   const [values, setValues] = useState<Record<string, Value>>(() => initialValues(config));
+  // Sent back so a save never overwrites a change someone else made after this form loaded.
+  const [revision, setRevision] = useState(config.revision ?? null);
   const { pending, run } = useAction();
   const set = (key: string, value: Value) => setValues((current) => ({ ...current, [key]: value }));
   const save = (event: FormEvent) => {
     event.preventDefault();
     void run(
       'save',
-      () => putJsonApi<ServiceConfigResponse>(`/api/v1/services/${service.id}/configuration`, { values }),
+      async () => {
+        const result = await putJsonApi<ServiceConfigResponse>(`/api/v1/services/${service.id}/configuration`, {
+          values,
+          expected_revision: revision,
+        });
+        setRevision(result.revision ?? null);
+        return result;
+      },
       (result) => (result.restart_required ? 'Saved. Restart the app to apply it.' : 'Settings saved'),
     );
   };

@@ -1,11 +1,17 @@
 """Turn an app folder into its runtime Compose project under ``/srv/mu3lab/projects/<id>``.
 
 The folder's files are copied, then the private ``.env`` is built from the
-manifest, in this order: existing values are kept; missing secrets are
-generated once; the OIDC client settings are assigned; configuration
-defaults fill gaps; each rule adds what it owns; templated ``env`` values are
-assigned from current facts. Files ending in ``.tmpl`` are rendered with the
-same values. Nothing here talks to Docker or another app.
+app's canonical settings (``ctl.app_settings``), in this order: stored managed
+values; missing secrets are generated once; the OIDC client settings are
+assigned; configuration defaults, then the operator's configuration; each
+rule adds what it owns; integrations; templated ``env`` values are assigned
+from current facts. Files ending in ``.tmpl`` are rendered with the same
+values. ``.env`` is an output only: it is never read back as input, and
+deleting it and rendering again reproduces it (R16).
+
+Every output is computed before any is written, and each is published
+privately (0600 from its first byte) and atomically. Rendering holds the
+app's resource lock. Nothing here talks to Docker or another app.
 """
 
 from __future__ import annotations
@@ -22,12 +28,14 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
-from ctl import hostinfo
+from ctl import hostinfo, resource_locks
+from ctl.app_settings import AppSettings, fixed_names
 from ctl.engine import template
 from ctl.engine.launch import caddy_handler
 from ctl.manifest.catalog import App, Catalog
 from ctl.manifest.models import ConfigField, Secret
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl.store.secrets import SecretStore
 
@@ -35,6 +43,8 @@ from ctl.store.secrets import SecretStore
 NOT_COPIED = frozenset({"app.yaml", "hooks.py", "connectors", "scripts", "__pycache__"})
 TEMPLATE_SUFFIX = ".tmpl"
 OIDC_SECRET_LENGTH = 40
+# Rendering waits this long for a job that holds the app.
+RENDER_LOCK_SECONDS = 600
 
 EnvHook = Callable[[App, dict[str, str]], None]
 
@@ -192,7 +202,14 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
     return lookup
 
 
-def build_env(app: App, facts: Facts, existing: dict[str, str], hooks: list[EnvHook]) -> dict[str, str]:
+def build_env(
+    app: App,
+    facts: Facts,
+    existing: dict[str, str],
+    hooks: list[EnvHook],
+    config: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """``existing`` holds the stored managed values; ``config`` the operator's, by field key."""
     manifest = app.manifest
     env = dict(existing)
     env["MU3LAB_DATA_ROOT"] = str(facts.paths.data)
@@ -217,6 +234,10 @@ def build_env(app: App, facts: Facts, existing: dict[str, str], hooks: list[EnvH
         if oidc.env.discovery_url and facts.dns_name:
             env[oidc.env.discovery_url] = discovery_url(facts.dns_name, app.id)
     for field in manifest.configuration:
+        chosen = (config or {}).get(field.key)
+        if chosen:
+            env[field.env] = chosen
+            continue
         default = _config_default(field)
         if default is not None and field.env not in env:
             default = _rendered_default(field, default, lookup_for(app, facts, env))
@@ -251,10 +272,7 @@ def _copy_folder(source: Path, target: Path) -> None:
 
 
 def _write_private(path: Path, text: str) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(text, encoding="utf-8")
-    os.chmod(temporary, 0o600)
-    temporary.replace(path)
+    write_atomic(path, text.encode("utf-8"))
 
 
 def _media_folders(app: App, facts: Facts) -> None:
@@ -270,16 +288,30 @@ def _media_folders(app: App, facts: Facts) -> None:
 def render(app: App, facts: Facts, hooks: list[EnvHook] | None = None) -> Path:
     """Write the app's runtime project and return its directory."""
     target = facts.paths.projects / app.id
-    _media_folders(app, facts)
-    _copy_folder(app.folder, target)
-    env_path = target / ".env"
-    env = build_env(app, facts, read_runtime_env(env_path), hooks or [])
-    _write_private(env_path, runtime_env_text(env))
-    lookup = lookup_for(app, facts, env)
-    for source in sorted(app.folder.glob(f"*{TEMPLATE_SUFFIX}")):
-        try:
-            text = template.render(source.read_text(encoding="utf-8"), lookup)
-        except template.TemplateError:
-            continue
-        _write_private(target / source.name.removesuffix(TEMPLATE_SUFFIX), text)
+    with resource_locks.hold(f"app:{app.id}", timeout=RENDER_LOCK_SECONDS, paths=facts.paths):
+        settings = AppSettings(app.id, facts.paths)
+        env_path = target / ".env"
+        settings.ensure_imported(app.manifest, env_path)
+        env = build_env(app, facts, settings.generated(), hooks or [], settings.config())
+        # Keep the existing line order, so an unchanged render is byte-for-byte unchanged;
+        # new names follow in sorted order, so a fresh render is deterministic too.
+        order = [name for name in read_runtime_env(env_path) if name in env]
+        env = {name: env[name] for name in order} | {name: env[name] for name in sorted(env) if name not in order}
+        # Stage every output first: a failure here publishes nothing.
+        outputs = {env_path: runtime_env_text(env)}
+        lookup = lookup_for(app, facts, env)
+        for source in sorted(app.folder.glob(f"*{TEMPLATE_SUFFIX}")):
+            try:
+                text = template.render(source.read_text(encoding="utf-8"), lookup)
+            except template.TemplateError:
+                continue  # a fact is not known yet; the previous output stays until it is
+            outputs[target / source.name.removesuffix(TEMPLATE_SUFFIX)] = text
+        configured = {field.env for field in app.manifest.configuration}
+        settings.replace_generated(
+            {name: value for name, value in env.items() if name not in fixed_names(app.manifest) | configured}
+        )
+        _media_folders(app, facts)
+        _copy_folder(app.folder, target)
+        for path, text in outputs.items():
+            _write_private(path, text)
     return target

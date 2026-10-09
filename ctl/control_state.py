@@ -78,6 +78,14 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+class RevisionConflict(ValueError):
+    """The configuration changed since the caller read it."""
+
+    def __init__(self, current: int) -> None:
+        super().__init__("This configuration was changed by someone else; reload it and try again.")
+        self.current = current
+
+
 class ControlState:
     """SQLite-backed settings, service installation, and MCP runtime state."""
 
@@ -491,10 +499,20 @@ class ControlState:
             )
         return self.initialization(service_id) or {}
 
-    def bump_config_revision(self, service_id: str) -> int:
+    def bump_config_revision(self, service_id: str, *, expected: int | None = None) -> int:
+        """Count one configuration change; with ``expected``, only if nobody else changed it first."""
         job_guard.checkpoint()
         now = _now()
         with self._connect() as conn:
+            if expected is not None:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT config_revision FROM service_installations WHERE service_id = ?", (service_id,)
+                ).fetchone()
+                current = int(row[0]) if row else 0
+                if current != expected:
+                    raise RevisionConflict(current)
             conn.execute(
                 """
                 INSERT INTO service_installations (service_id, state, config_revision, updated_at)

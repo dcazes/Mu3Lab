@@ -9,7 +9,6 @@ and ``fail()`` to stop the install with a plain-language reason.
 from __future__ import annotations
 
 import importlib.util
-import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from ctl.engine.compose import Compose, ScriptResult
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl.store.secrets import SecretStore
 from ctl.store.workflows import JobIdentity
@@ -88,10 +88,8 @@ class HookContext:
         merged = current | values
         if merged == current:
             return False
-        temporary = self.env_path.with_name(".env.tmp")
-        temporary.write_text(runtime_env_text(merged), encoding="utf-8")
-        os.chmod(temporary, 0o600)
-        temporary.replace(self.env_path)
+        # The store above is canonical; this publishes the same values now.
+        write_atomic(self.env_path, runtime_env_text(merged).encode())
         return True
 
     def fail(self, stage: str, code: str, message: str) -> None:

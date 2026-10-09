@@ -281,7 +281,9 @@ def confirm_service_initialization(service_id: str, operator: OperatorMutation) 
 
 
 def _managed_keys(service: Service) -> set[str]:
-    return {str(field["key"]) for field in service.configuration if field.get("managed")}
+    return service_config.managed_keys(service) | {
+        str(field["key"]) for field in service.configuration if field.get("managed")
+    }
 
 
 @router.get(
@@ -295,6 +297,7 @@ def get_service_configuration(service_id: str, _operator: Member) -> models.Serv
             "ok": True,
             "service_id": service.id,
             "fields": [field for field in service_config.read(service) if str(field["key"]) not in managed],
+            "revision": service_config.revision(service),
         }
     )
 
@@ -305,23 +308,42 @@ def get_service_configuration(service_id: str, _operator: Member) -> models.Serv
 async def put_service_configuration(
     payload_model: models.ConfigurationRequest, service_id: str, request: Request, operator: OperatorMutation
 ) -> models.ServiceConfigResponse:
-    values = (payload_model.model_dump()).get("values", {})
+    body = payload_model.model_dump()
     return models.ServiceConfigResponse.model_validate(
-        await run_in_threadpool(_write_service_configuration, service_id, values, operator)
+        await run_in_threadpool(
+            _write_service_configuration, service_id, body.get("values", {}), operator, body.get("expected_revision")
+        )
     )
 
 
 def _write_service_configuration(
-    service_id: str, values: dict[str, str | bool | int | None], operator: IdentityData
+    service_id: str,
+    values: dict[str, str | bool | int | None],
+    operator: IdentityData,
+    expected_revision: int | None = None,
 ) -> dict[str, object]:
     service = runtime.service(service_id)
     managed = _managed_keys(service)
     if isinstance(values, dict) and set(values).intersection(managed):
         raise ApiError(422, "managed account fields cannot be changed here")
     try:
-        fields = [field for field in service_config.write(service, values) if str(field["key"]) not in managed]
+        written = service_config.write(service, values, expected_revision=expected_revision)
+    except service_config.RevisionConflict as conflict:
+        raise ApiError(
+            409,
+            {
+                "code": "configuration_changed",
+                "stage": "configuration",
+                "message": str(conflict),
+                "retryable": True,
+                "recommended_action": "Reload the settings and make your change again.",
+            },
+        ) from conflict
+    except service_config.ConfigurationBusy as busy:
+        raise ApiError(409, str(busy)) from busy
     except (ValueError, TypeError, AttributeError, OSError) as exc:
         raise ApiError(422, str(exc)) from exc
+    fields = [field for field in written if str(field["key"]) not in managed]
     store = JobStore.runtime()
     if store:
         store.record_audit(
@@ -333,6 +355,7 @@ def _write_service_configuration(
         "ok": True,
         "service_id": service.id,
         "fields": fields,
+        "revision": service_config.revision(service),
         "restart_required": (RuntimePaths().projects / service.id / "docker-compose.yml").is_file(),
     }
 

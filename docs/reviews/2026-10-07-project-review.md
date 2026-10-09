@@ -178,12 +178,12 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R08](#r08) | Bind idempotency to request; reject conflicting active actions | P1 | R | M | — | implemented |
 | [R09](#r09) | Persist operation steps and recovery artifacts | P1 | S | XL | R08 | implemented for backup/restore/update; release acceptance pending |
 | [R10](#r10) | Prevent concurrent side effects after lease loss | P1 | S | L | R09, R35 | implemented; release acceptance pending |
-| [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | open |
+| [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | implemented; release acceptance pending |
 | [R12](#r12) | Roll back full deployment configuration as well as data/images | P1 | S | L | R09, R11, R13 | open |
 | [R13](#r13) | Stage restores and enforce complete storage layouts | P1 | S | L | R09, R11 | open |
 | [R14](#r14) | Provide complete independent disaster recovery | P1 | S | XL | R11, R13, R16 | open |
 | [R15](#r15) | Make backup protection, retention, and verification truthful | P1 | S | M | R11, R13 | open |
-| [R16](#r16) | Canonical configuration and safe concurrent private-file writes | P1 | S | L | — | open |
+| [R16](#r16) | Canonical configuration and safe concurrent private-file writes | P1 | S | L | — | implemented for catalog apps; release acceptance pending |
 | [R17](#r17) | Stage self-updates away from the running checkout | P1 | S | L | R09, R14, R16 | open |
 | [R18](#r18) | Make API/worker privilege boundary explicit and enforceable | P1 | S | L | R09, R16 | open |
 | [R19](#r19) | Separate calendar reads from sync; preserve conflict information | P1 | S | M | R08, R09 | open |
@@ -387,6 +387,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 
 ### R11 — Version strings do not uniquely identify a deployment
 
+**Implementation progress (2026-10-08):** Releases have a content-addressed `id` (images, compute variant, definition digest); history is kept by id and never overwritten; backups are tagged `release:<id>`; restore switches by id and refuses an older version-only backup that matches two deployments; the update plan includes variant overrides and reports added/removed services. Branch `fix/review-milestone-b`; [B3 record](2026-10-08-milestone-b3-implementation.md).
+
 **Evidence:** [app_releases.py](../../ctl/lifecycle/app_releases.py) stores history as `history[release.version] = images`; E06 overwrites an old supporting-service digest for the same app version. Backups tag only the version. `approved()` reads the base Compose file, while install pinning can include GPU overrides. Restoring a snapshot at the same app version may skip an image switch even when supporting images differ.
 
 **Implementation:** create `DeploymentRelease` with a content-addressed ID computed from canonical service images, selected CPU/GPU/platform variant, Compose/override hashes, generated non-secret configuration schema, and integration revision. Keep human version as a label. Store immutable releases by ID; never overwrite by version. Tag snapshots with release ID. Include the fully resolved override set when evaluating an update. Compare union of old/new service sets, including removals. Validate historical artifacts before offering restoration; reject ambiguity rather than guessing.
@@ -455,6 +457,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r16"></a>
 
 ### R16 — Configuration has multiple sources and unsafe concurrent file publication
+
+**Implementation progress (2026-10-08):** Each app's settings live in one encrypted store (`config:` operator values, `env:` managed/generated values); `.env` is rendered only from it, staged before publication, written private and atomic, under the app lock. Existing `.env` files are imported once (owner decision). Configuration writes check `expected_revision`. MCP connector projects are not yet covered. Branch `fix/review-milestone-b`; [B3 record](2026-10-08-milestone-b3-implementation.md).
 
 **Evidence:** [service_config](../../ctl/service_config.py) reads/writes `.env` directly, while [project rendering](../../ctl/engine/project.py) also treats existing `.env` values as input and stores selected generated secrets in `SecretStore`. This contradicts the broad architecture statement that `.env` is only a generated output. Multiple writers use predictable `.tmp` files and `write_text` before `chmod`, including project files and gateway policy. Those are atomic replacement patterns, but not locked read-modify-write transactions or private creation from the first byte.
 
@@ -735,7 +739,7 @@ These should be small, independently reviewable changes. Full per-person approva
 
 - [x] **B1 implementation:** R09 operation journal and R35 bounded executor ([record](2026-10-08-milestone-b1-implementation.md)). VM interruption acceptance remains pending.
 - [x] **B2 implementation:** R10 resource locks and interrupted-effect reconciliation ([record](2026-10-08-milestone-b2-implementation.md)). VM suspend/survivor drill remains pending.
-- [ ] **B3:** R11 immutable deployment IDs; R16 canonical config and private publication.
+- [x] **B3 implementation:** R11 immutable deployment IDs; R16 canonical config and private publication ([record](2026-10-08-milestone-b3-implementation.md)). VM upgrade/import acceptance remains pending.
 - [ ] **B4:** R12 complete deployment rollback; R13 staged restore.
 - [ ] **B5:** R15 retention protection and truthful verification.
 

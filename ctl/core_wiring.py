@@ -10,6 +10,7 @@ from typing import Literal
 import yaml
 from pydantic import model_validator
 
+from ctl.app_settings import AppSettings
 from ctl.control_state import ControlState
 from ctl.manifest.catalog import App, Catalog, cached
 from ctl.provider_catalog import BY_ID
@@ -147,6 +148,10 @@ def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog:
         env[params.service_key_env] = service_key
         env[params.api_base_env] = f"http://{gateway.id}:{gateway.manifest.service.local_port}/v1"
         env[params.runner_api_base_env] = f"http://{runner.id}:{runner.manifest.service.local_port}"
+        # Canonical first, so the next render of the model proxy keeps them.
+        AppSettings(app.id, paths).set_generated(
+            {name: env[name] for name in (params.service_key_env, params.api_base_env, params.runner_api_base_env)}
+        )
         models = [
             {
                 "model_name": name,

@@ -195,6 +195,7 @@ def _backup(run: _Run) -> str:
                 "manual",
                 run.log,
                 version=app_releases.installed_version(service, run.root),
+                release_id=_installed_id(service, run.root),
                 prune_old=False,
             )
         except (backups.BackupError, OSError) as exc:
@@ -219,10 +220,30 @@ def _refresh_definition(service: Service, root: Path, log: Log) -> None:
         log(f"The approved configuration could not be copied ({exc}); keeping the current one.")
 
 
-def _release_for(service: Service, version: str, root: Path, log: Log) -> Release:
-    """The images that make up ``version``, downloaded. Raises _Failed."""
-    target = app_releases.approved(service, root)
-    release = target if target.version == version else app_releases.from_history(service.id, version)
+def _installed_id(service: Service, root: Path) -> str:
+    """The installed release's id, kept in history so a backup tagged with it stays restorable."""
+    release = app_releases.installed(service, root)
+    return app_releases.remember(service.id, release) if release else ""
+
+
+def _release_for(service: Service, snapshot: dict, root: Path, log: Log, variant: str) -> Release:
+    """The exact release a backup was saved from, downloaded. Raises _Failed."""
+    version, release_id = str(snapshot.get("version") or ""), str(snapshot.get("release_id") or "")
+    target = app_releases.approved(service, root, variant)
+    try:
+        if release_id:
+            release = (
+                target if target.id == release_id else app_releases.from_history(service.id, release_id=release_id)
+            )
+        else:
+            release = target if target.version == version else app_releases.from_history(service.id, version)
+    except app_releases.AmbiguousRelease:
+        raise _Failed(
+            "download_images",
+            "release_ambiguous",
+            f"This server ran more than one deployment of {service.name} {version}, and this older backup does not "
+            "say which, so it can't be restored safely.",
+        ) from None
     if not release:
         raise _Failed(
             "download_images",
@@ -250,6 +271,7 @@ def _save_before(run: _Run, reason: str, label: str) -> None:
             reason,
             run.log,
             version=previous.version if previous else "",
+            release_id=app_releases.remember(service.id, previous) if previous else "",
             prune_old=False,
         )
     except (backups.BackupError, OSError) as exc:
@@ -281,12 +303,20 @@ def _restore(run: _Run) -> str:
         # Data goes back with the release it was saved from: restoring the backup
         # taken before an update is how an update is undone.
         release = None
-        if chosen["version"] and chosen["version"] != installed:
+        # A backup naming its release moves to exactly that deployment, even at the same version label.
+        chosen_id = str(chosen.get("release_id") or "")
+        switch = (
+            chosen_id != previous.id
+            if chosen_id and previous
+            else bool(chosen["version"]) and chosen["version"] != installed
+        )
+        if switch:
             run.step(
                 "download_images", f"Downloading {service.name} {chosen['version']}, the release this backup is from."
             )
             try:
-                release = _release_for(service, chosen["version"], run.root, run.log)
+                variant = previous.variant if previous else "cpu"
+                release = _release_for(service, chosen, run.root, run.log, variant)
             except _Failed:
                 _restart_if_stopped(run)
                 raise

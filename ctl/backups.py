@@ -38,6 +38,7 @@ HOST = "mu3lab"
 REASONS = frozenset({"manual", "pre-update", "pre-restore"})
 _SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
 _VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
+_RELEASE_ID = re.compile(r"^[0-9a-f]{16}$")
 # Every restic container carries this label so one that outlived its Docker
 # CLI (a timeout, a worker restart) can be found before anything else runs.
 CONTAINER_LABEL = "mu3lab.role=restic"
@@ -252,6 +253,7 @@ def snapshot(
     log: Log,
     *,
     version: str = "",
+    release_id: str = "",
     paths: RuntimePaths | None = None,
     retention: Retention = Retention(),
     prune_old: bool = True,
@@ -271,6 +273,9 @@ def snapshot(
     tags = [f"app:{service_id}", f"reason:{reason}"]
     if version and _VERSION.fullmatch(version):
         tags.append(f"version:{version}")
+    if release_id and _RELEASE_ID.fullmatch(release_id):
+        # The exact deployment the data belongs to; the version is only its label.
+        tags.append(f"release:{release_id}")
     tag_args = [part for tag in tags for part in ("--tag", tag)]
     rc, output = _restic(
         ["backup", "--json", "--host", HOST, *tag_args, *(target for _source, target in mapped)],
@@ -364,6 +369,7 @@ def snapshots(service_id: str, log: Log = lambda _line: None, paths: RuntimePath
                 "time": str(item.get("time", "")),
                 "reason": _tag(tags, "reason") or "manual",
                 "version": _tag(tags, "version"),
+                "release_id": _tag(tags, "release"),
                 "paths": [str(path) for path in item.get("paths") or []],
             }
         )

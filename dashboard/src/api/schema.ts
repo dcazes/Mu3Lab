@@ -1607,6 +1607,11 @@ export interface components {
       paths: string[];
       /** Reason */
       reason: 'manual' | 'pre-update' | 'pre-restore';
+      /**
+       * Release Id
+       * @default
+       */
+      release_id?: string;
       /** Short Id */
       short_id: string;
       /** Time */
@@ -1897,6 +1902,8 @@ export interface components {
     };
     /** ConfigurationRequest */
     ConfigurationRequest: {
+      /** Expected Revision */
+      expected_revision?: number | null;
       /** Values */
       values?: {
         [key: string]: string | boolean | number | null;
@@ -2874,6 +2881,8 @@ export interface components {
       ok: boolean;
       /** Restart Required */
       restart_required?: boolean | null;
+      /** Revision */
+      revision?: number | null;
       /** Service Id */
       service_id: string;
     };
@@ -3164,6 +3173,8 @@ export interface components {
     };
     /** UpdateResponse */
     UpdateResponse: {
+      /** Added Services */
+      added_services?: string[];
       /** Approved Version */
       approved_version: string;
       /** Blocked Reason */
@@ -3174,6 +3185,8 @@ export interface components {
       ok: boolean;
       /** Release Url */
       release_url: string;
+      /** Removed Services */
+      removed_services?: string[];
       /** Repository */
       repository: string;
       /** Supporting Only */

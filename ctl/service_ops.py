@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 
 from ctl import actions, job_guard
+from ctl.app_settings import AppSettings
 from ctl.compute import resolved_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
@@ -22,6 +22,7 @@ from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import sync_application
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
 
 SUPPORTED_ACTIONS = frozenset(
@@ -75,11 +76,12 @@ def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, s
         except OSError as exc:
             return False, f"Temporary setup file could not be removed: {exc}"
     env_path = project / ".env"
+    settings = AppSettings(service.id)
+    settings.remove_generated(name for name in settings.generated() if name.startswith("MU3LAB_BOOTSTRAP_"))
     if env_path.is_file():
         values = read_runtime_env(env_path)
         values = {key: value for key, value in values.items() if not key.startswith("MU3LAB_BOOTSTRAP_")}
-        env_path.write_text(runtime_env_text(values), encoding="utf-8")
-        os.chmod(env_path, 0o600)
+        write_atomic(env_path, runtime_env_text(values).encode())
     return True, "Failed containers and temporary setup files removed; persistent data preserved."
 
 

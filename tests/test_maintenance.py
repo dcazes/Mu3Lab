@@ -169,6 +169,44 @@ class RestoreWorkflowTests(_Workflow):
         self.download.assert_not_called()
 
 
+class ReleaseIdentityRestoreTests(_Workflow):
+    """R11: a backup brings back exactly the deployment it was saved from."""
+
+    OTHER = Release("v3.22.0", {"mealie": OLD.images["mealie"], "postgres": "postgres:16@sha256:other"})
+
+    def restore(self, **snapshot):
+        listing = [{"id": "a" * 64, "time": "2026-10-01T12:00:00Z", "paths": [], **snapshot}]
+        self.stack.enter_context(patch.object(maintenance.backups, "snapshots", return_value=listing))
+        self.stack.enter_context(patch.object(maintenance, "_start", return_value=(True, "")))
+        job = self.store.create(
+            kind="lifecycle", service_id="mealie", action="restore", actor="owner", params={"snapshot_id": "a" * 64}
+        )
+        maintenance.execute(self.store, None, self.store.get(job["id"]), self.service, self.root)
+        return self.store.get(job["id"])
+
+    def test_a_backup_of_another_deployment_at_the_same_version_switches_to_it(self):
+        app_releases.remember("mealie", self.OTHER)
+        job = self.restore(version="v3.22.0", release_id=self.OTHER.id)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.installed(), self.OTHER)
+        self.download.assert_called_once_with(self.OTHER.images, ANY)
+
+    def test_an_older_backup_whose_version_matches_two_deployments_is_refused(self):
+        app_releases.remember("mealie", self.OTHER)
+        app_releases.write("mealie", NEW)
+        job = self.restore(version="v3.22.0")
+        self.assertEqual(job["error_code"], "release_ambiguous")
+        self.assertEqual(self.restored, [])
+        self.assertEqual(self.installed(), NEW)
+
+    def test_backups_are_tagged_with_the_installed_release(self):
+        self.stack.enter_context(patch.object(maintenance, "_start", return_value=(True, "")))
+        job = self.store.create(kind="lifecycle", service_id="mealie", action="backup", actor="owner")
+        maintenance.execute(self.store, None, self.store.get(job["id"]), self.service, self.root)
+        self.assertEqual(self.snapshot.call_args.kwargs["release_id"], OLD.id)
+        self.assertEqual(app_releases.from_history("mealie", release_id=OLD.id), OLD)
+
+
 class UncancellableTests(unittest.TestCase):
     def test_a_cancel_waits_for_the_block_to_finish(self):
         with tempfile.TemporaryDirectory() as tmp:
