@@ -188,3 +188,36 @@ Owner decisions: the backup password goes on a printable sheet and into **every 
   - every Caddy start going through the helper;
   - the rule;
   - the vault fallback, for administrators only.
+
+## Step 5: rebuilding on a new computer (2026-10-09)
+
+The owner chose a guided terminal command and declined a VM rehearsal for now. The rebuild is therefore **built and tested but not rehearsed**, and the guide says so.
+
+- **`./install.sh --restore`.**
+  - Before any step runs, the terminal asks for the copied backups folder (it accepts the `kopia` folder or its parent, with no Docker needed) and the password. It shows the recovery sheet's check code to compare.
+  - No new account is created: the old vault and sign-in come back.
+  - The installer step `restore_backup` runs after `runtime_layout` and before `root_env`, `service` and every app. It is skipped and hidden on an ordinary install.
+- **[`ctl/rebuild.py`](../../ctl/rebuild.py), in order:**
+  1. Refuses if this computer has Mu3Lab data (its database or key, app data, projects, or a backups folder other than the source).
+  2. Writes a "started" marker, then copies the backups into place as root, unless they are already there.
+  3. Opens them with the typed password. The Kopia runner takes it directly, so no encrypted store is created before the real one is restored.
+  4. Restores the newest `mu3lab` backup: the control folder is staged, and the projects go straight into place.
+  5. Hands files owned by the old user ID to this user; container-owned files keep their owners.
+  6. Puts the database, key, deployments and the consistent gateway database in place, and checks that the restored store holds the typed password.
+  7. Cancels jobs left active on the old computer, clears setup progress and old command records, and audits the rebuild.
+  8. Restores each app's newest backup into new folders.
+- **Interruption.** A plain `./install.sh` refuses to continue a half-finished rebuild. `--restore` clears what the rebuild had written and starts again. It removes the backups folder only if the rebuild made it as a copy; backups the owner placed are never deleted.
+- **Apps.** Once a core-suite install succeeds after the rebuild, the worker queues a `start` job for each catalog app that was running, once.
+- **Tests:**
+  - 15 unit tests (`tests/test_rebuild.py`), against a simulated old computer with a running job, setup progress, secrets, deployments, projects and app data:
+    - wrong password;
+    - existing data;
+    - backups with no Mu3Lab backup;
+    - interruption and its cleanup;
+    - repeat runs;
+    - step order;
+    - forgetting the password;
+    - `install.sh` passing `--restore`;
+    - apps resuming once.
+  - The opt-in integration test against the real image backs up an "old computer" and rebuilds a second temporary root, including the real root-owned copy. It passed in 16.7 s. It checks secrets, data and the database folder's 999/700 owner and mode, cancelled jobs, file ownership, and the wrong password. Both roots had the same user ID, so the different-user-ID path is covered only by unit tests.
+- **Not done:** a rehearsal on a second machine, including Tailscale under the same name, every app starting on restored data, and `uninstall.sh` afterwards.

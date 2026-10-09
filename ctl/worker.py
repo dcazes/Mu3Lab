@@ -19,7 +19,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ctl import access, backup_schedule, job_guard, platform_backup, resource_locks, self_update
+from ctl import access, backup_schedule, job_guard, platform_backup, rebuild, resource_locks, self_update
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.job_processes import JobProcesses
@@ -196,6 +196,11 @@ def run() -> int:
                 backup_schedule.tick(store, ROOT, lambda line: print(line, flush=True), worker_started=started)
             except Exception as exc:
                 print(f"Mu3Lab scheduled backups deferred safely: {exc}", flush=True)
+            try:
+                # After a rebuild on a new computer: start the apps that were running before.
+                rebuild.resume(store, ROOT, lambda line: print(line, flush=True))
+            except Exception as exc:
+                print(f"Mu3Lab could not start the restored apps yet: {exc}", flush=True)
         if time.monotonic() >= next_operation_reconcile:
             next_operation_reconcile = time.monotonic() + 60
             try:

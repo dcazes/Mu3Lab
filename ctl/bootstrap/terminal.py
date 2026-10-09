@@ -48,6 +48,8 @@ SIGN_IN_REMINDER = 5 * 60
 NO_SKIP_NOTE = frozenset({"host_supported", "dashboard_src", "nvidia_toolkit", "browser_extension"})
 # After this step finishes, nothing needs the owner until the final sign-in.
 LAST_QUESTION_STEP = "tailscale_join"
+# Shown only when rebuilding from backups (./install.sh --restore).
+RESTORE_STEP = "restore_backup"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 BOLD, DIM, GREEN, RED, BLUE, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[34m", "\033[0m"
@@ -139,6 +141,33 @@ def _ask(prompt: str, secret: bool = False) -> str:
         raise SystemExit(
             "\nThe installer needs a terminal to ask questions. Run ./install.sh in a terminal window."
         ) from None
+
+
+def ask_restore(screen: Screen) -> dict[str, Any]:
+    """Where the copied backups are and their password, checked against the recovery sheet's code."""
+    from ctl import rebuild
+
+    screen.pause()
+    print(f"\n{BOLD}Rebuild from your backups{RESET}" if screen.tty else "\nRebuild from your backups")
+    print("  You need your recovery sheet (or the 'Mu3Lab backup password' in Bitwarden)")
+    print("  and a copy of the old computer's backups folder, /srv/mu3lab/backups/kopia.\n")
+    while True:
+        source, problem = rebuild.check_source(_ask("  Folder with the copied backups: "))
+        if source:
+            break
+        print(f"  {problem}")
+    while True:
+        password = _ask("  Backup password (type it without spaces; nothing is shown as you type): ", True)
+        password = "".join(password.split())
+        if not password:
+            continue
+        code = rebuild.describe_password(password)
+        answer = _ask(f"  Check code {code}. Is that the code on your recovery sheet? [y/n] ").lower()
+        if answer.startswith("y"):
+            break
+        print("  Then a character was mistyped. Let's try again.")
+    print()
+    return {"source": source, "password": password}
 
 
 def ask_new_account(screen: Screen) -> dict[str, str]:
@@ -396,7 +425,7 @@ def verify_dashboard(screen: Screen, host: str, stopped, timeout: float | None =
 # --- Main --------------------------------------------------------------------------------
 
 
-def run() -> int:
+def run(restoring: bool = False) -> int:
     if not sys.stdin.isatty():
         print("Run ./install.sh in a terminal window; it needs to ask you a few questions.")
         return 1
@@ -407,11 +436,17 @@ def run() -> int:
     stop = threading.Event()
     account: dict[str, str] = {}
     verified = True
-    fresh = not install._vaultwarden_account_exists()
+    # A rebuild brings back the old vault account, so no new one is created.
+    fresh = not restoring and not install._vaultwarden_account_exists()
     # Every question is asked here, before anything is downloaded, so the
     # owner can walk away once Tailscale (the first step that needs them) is
     # connected.
     print_intro(screen, fresh)
+    restore: dict[str, Any] = ask_restore(screen) if restoring else {}
+    from ctl import rebuild
+
+    # Shown when rebuilding, or to explain that an earlier rebuild did not finish.
+    show_restore = restoring or rebuild.interrupted()
     if fresh:
         account.update(ask_new_account(screen))
     elif sign_in_needs_owner({"root": ROOT}):
@@ -439,6 +474,8 @@ def run() -> int:
 
     def emit(event: dict) -> None:
         step_id = str(event.get("id", ""))
+        if step_id == RESTORE_STEP and not show_restore:
+            return  # an ordinary install never shows the rebuild step
         if event.get("type") == "step" and step_id in labels:
             status = event.get("status")
             if status == "installing":
@@ -475,6 +512,7 @@ def run() -> int:
         "emit": emit,
         "progress": progress,
         "account": get_account,
+        "restore": restore,
     }
 
     install.run_job(job, ctx)
@@ -586,9 +624,10 @@ def report_success(screen: Screen, dashboard: str, needs_provider: bool) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
     try:
-        return run()
+        return run(restoring="--restore" in args)
     except KeyboardInterrupt:
         print("\n\nStopped. Nothing is broken; run ./install.sh to continue where you left off.")
         return 130

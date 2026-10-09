@@ -99,6 +99,42 @@ class KopiaIntegrationTests(unittest.TestCase):
         self.assertFalse((self.paths.state / platform_backup.EXPORT).exists())
         self.assertEqual(backups.snapshots("mealie", paths=self.paths), [])
 
+    def test_a_new_computer_is_rebuilt_from_a_copy_of_the_backups(self):
+        from ctl import platform_backup, rebuild
+        from ctl.jobs import JobStore
+
+        store = JobStore(self.paths.state / "mu3lab.db")
+        store.create(kind="backup", service_id="mu3lab-platform", action="backup", actor="schedule")
+        store.claim("old-worker")
+        SecretStore(self.paths).put("app:mealie", "env:SECRET_KEY", "mealie-secret")
+        self.paths.projects.mkdir()
+        (self.paths.projects / "mealie").mkdir()
+        (self.paths.projects / "mealie" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        backups.snapshot("mealie", [self.mealie], "manual", self.lines.append, paths=self.paths)
+        with patch("ctl.platform_backup.RuntimePaths", return_value=self.paths):
+            platform_backup._back_up_platform(self.paths, self.lines.append)
+
+        with tempfile.TemporaryDirectory() as new_root:
+            new = RuntimePaths(Path(new_root))
+            try:
+                result = rebuild.restore(
+                    self.paths.backups / "kopia", "integration-test-password", self.lines.append, new
+                )
+                self.assertEqual(result["apps"], ["mealie"])
+                self.assertEqual(SecretStore(new).get("app:mealie", "env:SECRET_KEY"), "mealie-secret")
+                self.assertEqual((new.data / "mealie" / "recipes.db").read_text(), "original\n")
+                # A database folder keeps its container user and mode.
+                self.assertEqual(_as_root(new, "stat -c '%u %a' /r/data/mealie/pg"), "999 700")
+                self.assertTrue((new.projects / "mealie" / "docker-compose.yml").is_file())
+                self.assertEqual(JobStore(new.state / "mu3lab.db").active_jobs(), [])
+                # Mu3Lab's own files belong to this computer's user.
+                self.assertEqual((new.state / "mu3lab.db").stat().st_uid, os.getuid())
+                with self.assertRaises(rebuild.RebuildError):
+                    fresh = RuntimePaths(Path(new_root) / "again")
+                    rebuild.restore(self.paths.backups / "kopia", "wrong-password", self.lines.append, fresh)
+            finally:
+                _as_root(new, "rm -rf /r/data /r/backups /r/state /r/projects /r/again")
+
 
 if __name__ == "__main__":
     unittest.main()

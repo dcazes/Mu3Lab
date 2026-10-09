@@ -766,6 +766,7 @@ class DockerSessionTests(unittest.TestCase):
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
             "tailnet_relay": ["missing", "ready"],
+            "restore_backup": ["not_requested", "interrupted", "missing", "ready"],
             "lobehub_serve": ["unshared", "ready"],
             "authentik_setup": ["needs_user", "ready"],
             "dashboard_protection": ["needs_apply", "needs_attention", "ready"],

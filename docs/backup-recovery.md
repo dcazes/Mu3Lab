@@ -31,9 +31,36 @@ Type the password without spaces and press Enter; nothing is shown while you typ
 
 ## Rebuilding on a new computer
 
-> **Not yet complete.** The step-by-step rebuild, and a rehearsal of it on a test machine, are the last part of this milestone. Until then, this is what a rebuild needs; do not delete anything from the old server while it still runs.
+> **Not yet rehearsed.** The rebuild is built and covered by tests, but it has not been run end to end on a second machine. Until it has, keep the old computer's disk if you still can.
 
-You need: the backup password (sheet or vault), and a copy of `/srv/mu3lab/backups/kopia/` from the old server. Today the backups exist only on that server, so if its disk has failed they cannot be recovered. A copy to another computer is a later step.
+You need:
+- **The backup password**: from the recovery sheet, or *Mu3Lab backup password* in Bitwarden.
+- **A copy of the old computer's backups**: the folder `/srv/mu3lab/backups/kopia`, for example on a USB drive. Today the backups exist only on the old computer, so if its disk has failed they cannot be recovered. A copy to another computer is a later step.
+- **A fresh computer** that has never had Mu3Lab, running Ubuntu, Debian or a similar system. A rebuild never overwrites Mu3Lab data it finds.
+
+Steps:
+
+1. **Tailscale name.** In Tailscale's admin console, remove the old computer, and give the new one **the same name**. Your apps' private addresses then stay the same.
+2. **Get Mu3Lab.** On the new computer, get the code as for a normal install:
+
+   ```bash
+   git clone https://github.com/dcazes/Mu3Lab.git ~/Mu3Lab
+   ```
+
+3. **Start the rebuild:**
+
+   ```bash
+   cd ~/Mu3Lab && ./install.sh --restore
+   ```
+
+   It asks for the folder with the copied backups, then the backup password, and shows the password's check code. Compare it with the code on your recovery sheet; they must match. You do **not** create a new account: your old one comes back.
+4. **Let it run.** Setup installs the system software, then restores before anything else is created: Mu3Lab's settings, people and secrets, then sign-in, the password vault, chat and every app's data from each one's newest backup.
+   - Work that was running on the old computer is cancelled.
+   - Setup progress starts afresh, so the dashboard reports only what has worked on this computer.
+   - The normal setup then continues. Once the core apps are up, Mu3Lab starts the apps that were running before.
+5. **Check it.** Sign in to the dashboard with your old account, and open the password vault, chat and a few apps.
+
+If the rebuild stops halfway, a plain `./install.sh` refuses to continue with half the old data. Run `./install.sh --restore` again: it removes what it had restored and starts over. It never removes backups you put in `/srv/mu3lab/backups/kopia` yourself.
 
 ## Where things are
 

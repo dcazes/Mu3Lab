@@ -287,8 +287,12 @@ def _kopia(
     mounts: Sequence[tuple[Path, str, bool]] = (),
     paths: RuntimePaths,
     timeout: int = 3600,
+    password: str = "",
 ) -> tuple[int, str]:
     """Run one Kopia command against the local repository in its pinned container.
+
+    ``password`` is given only while rebuilding a new computer, before Mu3Lab's
+    own encrypted store (which normally holds it) has been restored.
 
     The container is named and labelled. Before a command that changes data
     runs, any backup container still running from an earlier attempt is
@@ -303,14 +307,20 @@ def _kopia(
                 survivor = _wait_for_survivors(log)
                 if survivor:
                     return 1, survivor
-                return _run_kopia(args, log, mounts=mounts, paths=paths, timeout=timeout)
+                return _run_kopia(args, log, mounts=mounts, paths=paths, timeout=timeout, password=password)
         except resource_locks.Busy:
             return 1, "Another backup task is still using the backup repository; try again later."
-    return _run_kopia(args, log, mounts=mounts, paths=paths, timeout=timeout)
+    return _run_kopia(args, log, mounts=mounts, paths=paths, timeout=timeout, password=password)
 
 
 def _run_kopia(
-    args: list[str], log: Log, *, mounts: Sequence[tuple[Path, str, bool]], paths: RuntimePaths, timeout: int
+    args: list[str],
+    log: Log,
+    *,
+    mounts: Sequence[tuple[Path, str, bool]],
+    paths: RuntimePaths,
+    timeout: int,
+    password: str = "",
 ) -> tuple[int, str]:
     name = f"mu3lab-kopia-{secrets.token_hex(6)}"
     for folder in (_repository(paths), _config(paths)):
@@ -318,7 +328,7 @@ def _run_kopia(
     with tempfile.TemporaryDirectory(prefix="mu3lab-kopia-") as temporary:
         # The password reaches Kopia through a private env-file, never a command line.
         env_file = Path(temporary) / "env"
-        write_atomic(env_file, f"KOPIA_PASSWORD={repository_password(paths)}\n".encode())
+        write_atomic(env_file, f"KOPIA_PASSWORD={password or repository_password(paths)}\n".encode())
         command = [
             "docker",
             "run",

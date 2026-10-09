@@ -118,6 +118,10 @@ DISPATCH = {
     ("root_env", "ready"): "skip",
     ("runtime_layout", "missing"): "create_runtime_layout",
     ("runtime_layout", "ready"): "skip",
+    ("restore_backup", "not_requested"): "skip",
+    ("restore_backup", "interrupted"): "report_interrupted_restore",
+    ("restore_backup", "missing"): "restore_from_backups",
+    ("restore_backup", "ready"): "skip",
     ("service", "no_unit"): "render_unit",
     ("service", "outdated"): "restart_service",
     ("service", "inactive"): "start_service",
@@ -2181,6 +2185,46 @@ class Step(TypedDict, total=False):
     verify_ok_states: tuple[str, ...]
 
 
+def _restore_check(ctx: dict) -> dict:
+    from ctl import rebuild
+
+    if rebuild.status(RuntimePaths()).get("restored_at"):
+        return {"status": "ok", "state": "ready", "detail": "Restored from your backups."}
+    if not ctx.get("restore") and rebuild.interrupted(RuntimePaths()):
+        # Never carry on with half the old data: only --restore may finish or redo it.
+        return {"status": "missing", "state": "interrupted", "detail": "A rebuild from backups did not finish."}
+    if not ctx.get("restore"):
+        return {"status": "ok", "state": "not_requested", "detail": "Not restoring from backups."}
+    return {"status": "missing", "state": "missing", "detail": "Mu3Lab will be restored from your backups."}
+
+
+def fix_restore_backup(check: dict, ctx: dict) -> dict:
+    from ctl import rebuild
+
+    if check.get("state") == "interrupted":
+        return {
+            "ok": False,
+            "error": "A rebuild from your backups stopped before it finished. Run ./install.sh --restore "
+            "again: it removes what it had restored and starts over.",
+        }
+    request = ctx["restore"]
+    log = ctx["log_fn"]("restore_backup")
+    _update_progress(
+        ctx,
+        "restore_backup",
+        phase="restoring",
+        activity="Opening your backups and restoring Mu3Lab, sign-in, the vault and your apps.",
+        timeout_seconds=6 * 3600,
+    )
+    try:
+        result = rebuild.restore(request["source"], request["password"], log)
+    except (rebuild.RebuildError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    finally:
+        request["password"] = ""  # needed only for this step; the restored settings hold it from here
+    return {"ok": True, "detail": f"Restored Mu3Lab and {len(result['apps'])} apps from your backups."}
+
+
 STEPS: list[Step] = [
     {
         "id": "host_supported",
@@ -2286,6 +2330,14 @@ STEPS: list[Step] = [
         "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
         "fix": fix_runtime_layout,
     },
+    # Only with ./install.sh --restore: put the old computer's Mu3Lab back
+    # before anything below creates new secrets, a database or app data.
+    {
+        "id": "restore_backup",
+        "label": "Restore from your backups",
+        "check": lambda ctx: _restore_check(ctx),
+        "fix": fix_restore_backup,
+    },
     {
         "id": "root_env",
         "label": "Generate private keys",
@@ -2384,7 +2436,7 @@ PHASES = (
     ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     (
         "Set up Mu3Lab",
-        ("dashboard_src", "dashboard_build", "runtime_layout", "root_env", "service"),
+        ("dashboard_src", "dashboard_build", "runtime_layout", "restore_backup", "root_env", "service"),
     ),
     (
         "Start your password vault",
