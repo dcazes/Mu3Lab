@@ -475,7 +475,7 @@
             "title": "Detail"
           },
           "engine": {
-            "default": "restic",
+            "default": "kopia",
             "title": "Engine",
             "type": "string"
           },
@@ -500,6 +500,17 @@
               }
             ],
             "title": "Last Verified At"
+          },
+          "legacy_repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Repository"
           },
           "off_device": {
             "anyOf": [

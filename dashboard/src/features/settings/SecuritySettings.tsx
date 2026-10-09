@@ -52,6 +52,13 @@ export function SecuritySettings() {
             update.
           </Callout>
         )}
+        {backup.legacy_repository && (
+          <p className="muted">
+            Backups made before Mu3Lab switched to Kopia are kept, untouched, in {backup.legacy_repository}. Mu3Lab no
+            longer lists them; docs/backup-recovery.md explains how to restore from them by hand. You can delete that
+            folder yourself once your new backups are working.
+          </p>
+        )}
         <Facts
           items={[
             { label: 'Repository', value: backup.repository_present ? 'Initialized' : 'Not initialized' },

@@ -1611,13 +1611,15 @@ export interface components {
       detail?: string | null;
       /**
        * Engine
-       * @default restic
+       * @default kopia
        */
       engine?: string;
       /** Integrity Verified */
       integrity_verified?: boolean | null;
       /** Last Verified At */
       last_verified_at?: string | null;
+      /** Legacy Repository */
+      legacy_repository?: string | null;
       /** Off Device */
       off_device?: boolean | null;
       /**

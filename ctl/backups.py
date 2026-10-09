@@ -1,14 +1,33 @@
 """Mu3Lab :: ctl/backups.py
 
-WHAT: Local Restic backups of one app's data folders, their restore, and
-      read-only readiness inspection.
+WHAT: Local Kopia backups of one app's data folders, their staged restore,
+      and read-only readiness inspection.
 WHY: Git is not a database or personal-data backup system. Backups remain
      encrypted, local, service-scoped, and independently restorable.
 HOW: App data belongs to container users (postgres, www-data), which the
-     unprivileged worker cannot read. Restic therefore runs in a pinned,
-     network-less container that sees only the repository, its password and
-     the app's own folders under the data root. Callers stop the app first so
+     unprivileged worker cannot read. Kopia therefore runs in a pinned,
+     network-less container that sees only the repository
+     (``/srv/mu3lab/backups/kopia``), its own configuration
+     (``/srv/mu3lab/state/kopia``), the password (a private env-file) and the
+     app's own folders under the data root. Callers stop the app first so
      databases are captured consistently.
+
+Facts checked against the pinned image (0.23.1), not assumed:
+
+- Kopia applies a source's retention policy every time it takes a snapshot.
+  Mu3Lab sets that policy to keep everything and applies its own retention
+  (``expired``/``prune``), so it can skip pruning while an unfinished
+  operation still needs a backup, exactly as before.
+- Pinning or editing a snapshot rewrites its manifest and changes its id, so
+  Mu3Lab never pins: ids stay stable in the journal and the dashboard.
+- Restoring ``<id>/<folder>`` into an existing directory gives that directory
+  the folder's own owner and mode and keeps every file's owner, so a database
+  folder stays owned by its container user.
+- With the password in the environment, Kopia writes no password file.
+
+An older restic repository (``/srv/mu3lab/backups/config``) is never touched;
+``readiness`` reports it so the owner knows it is there (decision: no
+migration; see docs/backup-recovery.md for restoring from it by hand).
 """
 
 from __future__ import annotations
@@ -33,19 +52,19 @@ from ctl.secret_file import locked, write_atomic
 from ctl.store import records
 from ctl.store.secrets import SecretStore
 
-RESTIC_IMAGE = "docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510"
-# Restic records the hostname; a container's is random, which would split
-# every app's history into one group per run.
+KOPIA_IMAGE = "docker.io/kopia/kopia:0.23.1@sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e"
+# Kopia records user@host; a container's hostname is random, which would split
+# every app's history into one source per run.
 HOST = "mu3lab"
+REPOSITORY_MARKER = "kopia.repository.f"
+KEEP_LATEST = 3
 REASONS = frozenset({"manual", "pre-update", "pre-restore"})
-_SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
+_SNAPSHOT_ID = re.compile(r"^[0-9a-f]{16,64}$")
 _VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
 _RELEASE_ID = re.compile(r"^[0-9a-f]{16}$")
-# Every restic container carries this label so one that outlived its Docker
+# Every backup container carries this label so one that outlived its Docker
 # CLI (a timeout, a worker restart) can be found before anything else runs.
-CONTAINER_LABEL = "mu3lab.role=restic"
-# Commands that change the repository or an app's data.
-MUTATING = frozenset({"init", "backup", "check", "forget", "restore"})
+CONTAINER_LABEL = "mu3lab.role=backup"
 SURVIVOR_WAIT_SECONDS = 1800
 STOP_SECONDS = 30
 # Backups and checks older than this are reported as stale.
@@ -75,36 +94,34 @@ class Retention:
     weekly: int = 4
     monthly: int = 12
 
-    def restic_args(self) -> list[str]:
-        """Return explicit retention flags for a future authenticated backup job."""
-        return ["--keep-daily", str(self.daily), "--keep-weekly", str(self.weekly), "--keep-monthly", str(self.monthly)]
-
 
 def readiness(paths: RuntimePaths = RuntimePaths(), retention: Retention = Retention()) -> dict:
     """Report verified backup facts, never infer protection from a directory.
 
-    Restic creates a ``config`` file only after repository initialization.
+    Kopia writes its repository marker only once the repository is created.
     The repository counts as verified only while its last structural check
     passed within ``STALE_DAYS``; each app's own protection is ``protection``.
     """
-    repository = paths.backups
+    repository = _repository(paths)
     engine_available = shutil.which("docker") is not None
-    repository_present = (repository / "config").is_file()
+    present = repository_present(paths)
     check = records.get("backup", "repository", paths)
     checked_at = str(check.get("structure_checked_at", "")) if check.get("ok") else ""
     snapshot_ok = bool(records.get("backup", "verification", paths).get("snapshot_id"))
     integrity_ok = bool(checked_at) and not _older_than(checked_at, STALE_DAYS)
-    if not engine_available or not repository_present:
+    if not engine_available or not present:
         state = "not_configured"
     elif snapshot_ok and integrity_ok:
         state = "verified"
     else:
         state = "local_only"
     return {
-        "engine": "restic",
+        "engine": "kopia",
         "available": engine_available,
         "repository_path": str(repository),
-        "repository_present": repository_present,
+        "repository_present": present,
+        # Backups made with restic before Mu3Lab moved to Kopia; kept untouched.
+        "legacy_repository": str(paths.backups) if (paths.backups / "config").is_file() else "",
         "retention": {"daily": retention.daily, "weekly": retention.weekly, "monthly": retention.monthly},
         "snapshot_present": snapshot_ok,
         "integrity_verified": integrity_ok,
@@ -169,7 +186,7 @@ def protection(service_id: str, paths: RuntimePaths | None = None) -> dict[str, 
 def data_check_due(paths: RuntimePaths | None = None) -> bool:
     """A repository exists and its stored data was not read back within ``DATA_CHECK_DAYS``."""
     paths = paths or RuntimePaths()
-    if not (paths.backups / "config").is_file():
+    if not repository_present(paths):
         return False
     stamp = str(records.get("backup", "repository", paths).get("data_checked_at", ""))
     return not stamp or _older_than(stamp, DATA_CHECK_DAYS)
@@ -184,6 +201,8 @@ def start_verification(stopping: threading.Event, log: Log, *, interval: float =
                 if data_check_due():
                     log("Checking a sample of the stored backup data.")
                     check(log, read_data=DATA_CHECK_SUBSET)
+                    # Reclaims the space of backups retention removed.
+                    maintain(log)
             except (BackupError, OSError) as exc:
                 log(f"The scheduled backup check did not pass: {exc}")
 
@@ -205,10 +224,14 @@ def record_restore_tested(service_id: str, paths: RuntimePaths | None = None) ->
 
 
 def check(log: Log, *, read_data: str = "", paths: RuntimePaths | None = None) -> None:
-    """Check the repository; with ``read_data`` (e.g. "5%") also read back that share of stored data."""
+    """Check every snapshot's structure; with ``read_data`` (e.g. "5%") also read back that share of files."""
     paths = paths or RuntimePaths()
-    args = ["check", *([f"--read-data-subset={read_data}"] if read_data else [])]
-    rc, output = _restic(args, log, paths=paths, timeout=6 * 3600 if read_data else 3600)
+    if not repository_present(paths):
+        raise BackupError("There is no backup repository to check yet.")
+    _connect(log, paths)
+    percent = read_data.rstrip("%") or "0"
+    args = ["snapshot", "verify", f"--verify-files-percent={percent}"]
+    rc, output = _kopia(args, log, paths=paths, timeout=6 * 3600 if read_data else 3600)
     now = datetime.now(UTC).isoformat(timespec="seconds")
     current = records.get("backup", "repository", paths)
     if rc:
@@ -229,7 +252,7 @@ def _repository_password(paths: RuntimePaths) -> str:
     with locked(paths.state / "backup-password.lock"):
         store = SecretStore(paths)
         password = store.get("platform", "backup-password")
-        if password is None and (paths.backups / "config").is_file():
+        if password is None and repository_present(paths):
             raise BackupError(
                 "The backup repository exists but Mu3Lab's password for it is missing, so it cannot be opened."
             )
@@ -239,7 +262,23 @@ def _repository_password(paths: RuntimePaths) -> str:
         return password
 
 
-def _restic(
+def _repository(paths: RuntimePaths) -> Path:
+    return paths.backups / "kopia"
+
+
+def _config(paths: RuntimePaths) -> Path:
+    return paths.state / "kopia"
+
+
+def repository_present(paths: RuntimePaths) -> bool:
+    return (_repository(paths) / REPOSITORY_MARKER).is_file()
+
+
+def _mutating(args: list[str]) -> bool:
+    return args[:2] != ["snapshot", "list"]
+
+
+def _kopia(
     args: list[str],
     log: Log,
     *,
@@ -247,34 +286,37 @@ def _restic(
     paths: RuntimePaths,
     timeout: int = 3600,
 ) -> tuple[int, str]:
-    """Run one restic command against the local repository in its pinned container.
+    """Run one Kopia command against the local repository in its pinned container.
 
     The container is named and labelled. Before a command that changes data
-    runs, any restic container still running from an earlier attempt is waited
-    for, so a retried restore never races the previous one. If this command
-    times out, its container is stopped before returning: killing the Docker
-    CLI alone would leave restic writing.
+    runs, any backup container still running from an earlier attempt is
+    waited for, so a retried restore never races the previous one. If this
+    command times out, its container is stopped before returning: killing the
+    Docker CLI alone would leave Kopia writing.
     """
-    if args and args[0] in MUTATING:
-        # One data-changing restic command at a time, across every process.
+    if _mutating(args):
+        # One data-changing Kopia command at a time, across every process.
         try:
             with resource_locks.hold(REPOSITORY_LOCK, paths=paths):
                 survivor = _wait_for_survivors(log)
                 if survivor:
                     return 1, survivor
-                return _run_restic(args, log, mounts=mounts, paths=paths, timeout=timeout)
+                return _run_kopia(args, log, mounts=mounts, paths=paths, timeout=timeout)
         except resource_locks.Busy:
             return 1, "Another backup task is still using the backup repository; try again later."
-    return _run_restic(args, log, mounts=mounts, paths=paths, timeout=timeout)
+    return _run_kopia(args, log, mounts=mounts, paths=paths, timeout=timeout)
 
 
-def _run_restic(
+def _run_kopia(
     args: list[str], log: Log, *, mounts: Sequence[tuple[Path, str, bool]], paths: RuntimePaths, timeout: int
 ) -> tuple[int, str]:
-    name = f"mu3lab-restic-{secrets.token_hex(6)}"
-    with tempfile.TemporaryDirectory(prefix="mu3lab-restic-") as temporary:
-        password_file = Path(temporary) / "password"
-        write_atomic(password_file, _repository_password(paths).encode())
+    name = f"mu3lab-kopia-{secrets.token_hex(6)}"
+    for folder in (_repository(paths), _config(paths)):
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="mu3lab-kopia-") as temporary:
+        # The password reaches Kopia through a private env-file, never a command line.
+        env_file = Path(temporary) / "env"
+        write_atomic(env_file, f"KOPIA_PASSWORD={_repository_password(paths)}\n".encode())
         command = [
             "docker",
             "run",
@@ -287,25 +329,31 @@ def _run_restic(
             "none",
             "--hostname",
             HOST,
-            "-v",
-            f"{paths.backups}:/repo",
-            "-v",
-            f"{password_file}:/run/restic-password:ro",
+            "--env-file",
+            str(env_file),
             "-e",
-            "RESTIC_REPOSITORY=/repo",
+            "KOPIA_CONFIG_PATH=/cfg/repository.config",
             "-e",
-            "RESTIC_PASSWORD_FILE=/run/restic-password",
+            "KOPIA_CACHE_DIRECTORY=/cfg/cache",
+            "-e",
+            "KOPIA_LOG_DIR=/cfg/logs",
+            "-e",
+            "KOPIA_CHECK_FOR_UPDATES=false",
+            "-v",
+            f"{_repository(paths)}:/repo",
+            "-v",
+            f"{_config(paths)}:/cfg",
         ]
         for source, target, read_only in mounts:
             command.extend(["-v", f"{source}:{target}{':ro' if read_only else ''}"])
-        command.extend([RESTIC_IMAGE, "--no-cache", "--retry-lock", "10m", *args])
+        command.extend([KOPIA_IMAGE, *args])
         rc, output = actions.docker_cmd(command, log, timeout=timeout)
         if rc == 124:
             _stop_container(name, log)
         return rc, output
 
 
-def _running_restic() -> list[str]:
+def _running_backups() -> list[str]:
     rc, output = actions.docker_cmd(
         ["docker", "ps", "--quiet", "--filter", f"label={CONTAINER_LABEL}"], lambda _line: None, timeout=30
     )
@@ -313,9 +361,9 @@ def _running_restic() -> list[str]:
 
 
 def _wait_for_survivors(log: Log) -> str:
-    """Wait for earlier restic containers to exit; return an error if they don't."""
+    """Wait for earlier backup containers to exit; return an error if they don't."""
     deadline = time.monotonic() + SURVIVOR_WAIT_SECONDS
-    running = _running_restic()
+    running = _running_backups()
     if running:
         log("A backup command from an earlier attempt is still running; waiting for it to finish.")
     while running:
@@ -325,45 +373,88 @@ def _wait_for_survivors(log: Log) -> str:
                 "Try again once it has finished."
             )
         time.sleep(5)
-        running = _running_restic()
+        running = _running_backups()
     return ""
 
 
 def _stop_container(name: str, log: Log) -> None:
-    """Stop a restic container that outlived its command; restic exits cleanly on SIGTERM."""
+    """Stop a backup container that outlived its command; Kopia exits cleanly on SIGTERM."""
     actions.docker_cmd(["docker", "stop", "--time", str(STOP_SECONDS), name], log, timeout=STOP_SECONDS + 30)
 
 
-def _json_lines(output: str) -> list[Any]:
-    """Docker merges restic's stderr into its output; keep only the JSON lines."""
-    values = []
-    for line in output.splitlines():
-        line = line.strip()
-        if line.startswith(("{", "[")):
-            try:
-                values.append(json.loads(line))
-            except ValueError:
-                continue
-    return values
+def _json(output: str, kind: type) -> Any:
+    """The first JSON value of ``kind`` in the output; Docker merges Kopia's progress (stderr) into it."""
+    decoder = json.JSONDecoder()
+    opener = "[" if kind is list else "{"
+    index = output.find(opener)
+    while index != -1:
+        try:
+            value, _end = decoder.raw_decode(output, index)
+        except ValueError:
+            value = None
+        if isinstance(value, kind):
+            return value
+        index = output.find(opener, index + 1)
+    return None
+
+
+IDENTITY = ["--override-username", HOST, "--override-hostname", HOST, "--no-persist-credentials"]
+
+
+def _connect(log: Log, paths: RuntimePaths) -> None:
+    """Connect this machine's Kopia configuration to the existing repository (a new host, lost state)."""
+    if (_config(paths) / "repository.config").is_file():
+        return
+    rc, output = _kopia(
+        ["repository", "connect", "filesystem", "--path=/repo", *IDENTITY], log, paths=paths, timeout=300
+    )
+    if rc:
+        raise BackupError(f"The backup repository could not be opened: {output[-500:]}")
 
 
 def ensure_repository(log: Log, paths: RuntimePaths | None = None) -> None:
+    """Create the repository once, with Mu3Lab's policy; reconnect to an existing one."""
     paths = paths or RuntimePaths()
-    if (paths.backups / "config").is_file():
+    if repository_present(paths):
+        _connect(log, paths)
         return
-    rc, output = _restic(["init"], log, paths=paths, timeout=300)
-    if rc or not (paths.backups / "config").is_file():
+    rc, output = _kopia(
+        ["repository", "create", "filesystem", "--path=/repo", *IDENTITY], log, paths=paths, timeout=300
+    )
+    if rc or not repository_present(paths):
         raise BackupError(f"The backup repository could not be created: {output[-500:]}")
+    # Mu3Lab applies retention itself (``prune``), so Kopia never expires a snapshot an
+    # unfinished operation still needs. Cache folders are kept: a restore must be exact.
+    rc, output = _kopia(
+        [
+            "policy",
+            "set",
+            "--global",
+            "--compression=zstd",
+            "--ignore-cache-dirs=false",
+            "--keep-latest=1000000",
+            "--keep-hourly=0",
+            "--keep-daily=0",
+            "--keep-weekly=0",
+            "--keep-monthly=0",
+            "--keep-annual=0",
+        ],
+        log,
+        paths=paths,
+        timeout=300,
+    )
+    if rc:
+        raise BackupError(f"The backup repository's policy could not be set: {output[-500:]}")
 
 
-def sources(data_directories: list[Path], paths: RuntimePaths | None = None) -> list[tuple[Path, str]]:
-    """Map each existing app data folder to its stable path inside snapshots."""
+def sources(data_directories: list[Path], paths: RuntimePaths | None = None) -> list[Path]:
+    """The app's data folders that exist on this server."""
     paths = paths or RuntimePaths()
     found = []
     for directory in data_directories:
         _check_root(directory, paths)
         if directory.exists():
-            found.append((directory, f"/data/{directory.name}"))
+            found.append(directory)
     return found
 
 
@@ -380,43 +471,48 @@ def snapshot(
     prune_old: bool = True,
     verify: bool = True,
 ) -> dict[str, Any]:
-    """Snapshot the app's (stopped) data folders, verify the repository, apply retention.
+    """Snapshot the app's (stopped) data folders as one source, verify, apply retention.
 
+    Each folder is mounted read-only at ``/data/<app>/<folder>`` and the
+    source ``/data/<app>`` is snapshotted, so an app has one history.
     ``prune_old=False`` leaves retention to the caller: an update or restore
     prunes only once nothing it may still need to put back can be removed.
     """
     paths = paths or RuntimePaths()
-    if reason not in REASONS:
+    if reason not in REASONS or not _NAME.fullmatch(service_id):
         raise BackupError("unknown backup reason")
-    mapped = sources(data_directories, paths)
-    if not mapped:
+    folders = sources(data_directories, paths)
+    if not folders:
         raise BackupError("This app has no data on this server to back up yet.")
     ensure_repository(log, paths)
-    tags = [f"app:{service_id}", f"reason:{reason}"]
+    tags = [f"app:{service_id}", f"reason:{reason}", f"folders:{'+'.join(folder.name for folder in folders)}"]
     if version and _VERSION.fullmatch(version):
         tags.append(f"version:{version}")
     if release_id and _RELEASE_ID.fullmatch(release_id):
         # The exact deployment the data belongs to; the version is only its label.
         tags.append(f"release:{release_id}")
-    tag_args = [part for tag in tags for part in ("--tag", tag)]
-    rc, output = _restic(
-        ["backup", "--json", "--host", HOST, *tag_args, *(target for _source, target in mapped)],
+    rc, output = _kopia(
+        [
+            "snapshot",
+            "create",
+            f"/data/{service_id}",
+            "--json",
+            "--fail-fast",
+            f"--description=Mu3Lab {reason} backup of {service_id}",
+            *(f"--tags={tag}" for tag in tags),
+        ],
         log,
-        mounts=[(source, target, True) for source, target in mapped],
+        mounts=[(folder, f"/data/{service_id}/{folder.name}", True) for folder in folders],
         paths=paths,
         timeout=6 * 3600,
     )
-    summary = next(
-        (
-            item
-            for item in reversed(_json_lines(output))
-            if isinstance(item, dict) and item.get("message_type") == "summary"
-        ),
-        None,
-    )
-    if rc or not summary or not summary.get("snapshot_id"):
+    manifest = _json(output, dict)
+    if rc or not manifest or not manifest.get("id"):
         raise BackupError(f"The backup did not complete: {output[-500:]}")
-    snapshot_id = str(summary["snapshot_id"])
+    summary = (manifest.get("rootEntry") or {}).get("summ") or {}
+    if int(summary.get("numFailed") or 0):
+        raise BackupError(f"The backup skipped {summary['numFailed']} unreadable files, so it is not complete.")
+    snapshot_id = str(manifest["id"])
     completed = datetime.now(UTC).isoformat(timespec="seconds")
     previous = records.get("backup-apps", service_id, paths)
     records.put(
@@ -450,65 +546,95 @@ def snapshot(
         prune(service_id, log, paths=paths, retention=retention)
     return {
         "snapshot_id": snapshot_id,
-        "files": int(summary.get("total_files_processed") or 0),
-        "bytes": int(summary.get("total_bytes_processed") or 0),
+        "files": int(summary.get("files") or 0),
+        "bytes": int(summary.get("size") or 0),
     }
+
+
+def expired(listing: list[dict], retention: Retention, keep_latest: int = KEEP_LATEST) -> list[str]:
+    """Snapshot ids the policy no longer keeps: the newest ``keep_latest``, then one per day, week and month."""
+    ordered = sorted(listing, key=lambda snap: snap["time"], reverse=True)
+    kept = {snap["id"] for snap in ordered[:keep_latest]}
+    buckets = (
+        (retention.daily, lambda when: when.strftime("%Y-%m-%d")),
+        (retention.weekly, lambda when: "{:04d}-{:02d}".format(*when.isocalendar()[:2])),
+        (retention.monthly, lambda when: when.strftime("%Y-%m")),
+    )
+    for count, key in buckets:
+        seen: list[str] = []
+        for snap in ordered:
+            try:
+                bucket = key(datetime.fromisoformat(snap["time"].replace("Z", "+00:00")))
+            except ValueError:
+                kept.add(snap["id"])  # an unreadable time is never a reason to delete
+                continue
+            if bucket in seen:
+                continue
+            if len(seen) >= count:
+                break
+            seen.append(bucket)
+            kept.add(snap["id"])
+    return [snap["id"] for snap in ordered if snap["id"] not in kept]
 
 
 def prune(service_id: str, log: Log, *, paths: RuntimePaths | None = None, retention: Retention = Retention()) -> bool:
     """Apply the retention policy to one app's snapshots.
 
     Retention is housekeeping: a failure leaves an extra snapshot, never a
-    missing one.
+    missing one. Kopia reclaims the space at its next full maintenance.
     """
     paths = paths or RuntimePaths()
-    rc, output = _restic(
-        [
-            "forget",
-            "--prune",
-            "--host",
-            HOST,
-            "--tag",
-            f"app:{service_id}",
-            "--keep-last",
-            "3",
-            *retention.restic_args(),
-        ],
-        log,
-        paths=paths,
-    )
+    try:
+        listing = snapshots(service_id, log, paths)
+    except BackupError as exc:
+        log(f"Old backups were not pruned this time: {exc}")
+        return False
+    removable = expired(listing, retention)
+    if not removable:
+        return True
+    rc, output = _kopia(["snapshot", "delete", *removable, "--delete"], log, paths=paths)
     if rc:
         log(f"Old backups were not pruned this time: {output[-300:]}")
     return rc == 0
 
 
-def _tag(tags: list[str], name: str) -> str:
-    return next((tag.split(":", 1)[1] for tag in tags if tag.startswith(f"{name}:")), "")
+def maintain(log: Log, paths: RuntimePaths | None = None) -> None:
+    """Kopia's full maintenance: reclaims the space of deleted snapshots."""
+    paths = paths or RuntimePaths()
+    if not repository_present(paths):
+        return
+    _connect(log, paths)
+    rc, output = _kopia(["maintenance", "run", "--full"], log, paths=paths, timeout=6 * 3600)
+    if rc:
+        raise BackupError(f"Backup repository maintenance failed: {output[-300:]}")
 
 
 def snapshots(service_id: str, log: Log = lambda _line: None, paths: RuntimePaths | None = None) -> list[dict]:
-    """The app's snapshots, newest first. An uninitialized repository has none."""
+    """The app's snapshots, newest first. A missing repository has none."""
     paths = paths or RuntimePaths()
-    if not (paths.backups / "config").is_file():
+    if not repository_present(paths) or not _NAME.fullmatch(service_id):
         return []
-    rc, output = _restic(
-        ["snapshots", "--json", "--host", HOST, "--tag", f"app:{service_id}"], log, paths=paths, timeout=120
-    )
-    listing = next((item for item in _json_lines(output) if isinstance(item, list)), None)
+    _connect(log, paths)
+    rc, output = _kopia(["snapshot", "list", f"/data/{service_id}", "--json"], log, paths=paths, timeout=120)
+    listing = _json(output, list)
     if rc or listing is None:
         raise BackupError(f"Backups could not be listed: {output[-300:]}")
     result = []
     for item in listing:
-        tags = [str(tag) for tag in item.get("tags") or []]
+        tags = item.get("tags") or {}
+        if tags.get("tag:app") != service_id:
+            continue
+        snapshot_id = str(item.get("id", ""))
+        folders = [name for name in str(tags.get("tag:folders", "")).split("+") if name]
         result.append(
             {
-                "id": str(item.get("id", "")),
-                "short_id": str(item.get("short_id") or str(item.get("id", ""))[:8]),
-                "time": str(item.get("time", "")),
-                "reason": _tag(tags, "reason") or "manual",
-                "version": _tag(tags, "version"),
-                "release_id": _tag(tags, "release"),
-                "paths": [str(path) for path in item.get("paths") or []],
+                "id": snapshot_id,
+                "short_id": snapshot_id[:8],
+                "time": str(item.get("startTime", "")),
+                "reason": str(tags.get("tag:reason") or "manual"),
+                "version": str(tags.get("tag:version") or ""),
+                "release_id": str(tags.get("tag:release") or ""),
+                "paths": [f"/data/{name}" for name in folders],
             }
         )
     return sorted(result, key=lambda snap: snap["time"], reverse=True)
@@ -580,10 +706,12 @@ def plan_restore(
 def stage(
     service_id: str, plan: dict[str, Any], log: Log, save: Callable[[dict[str, Any]], None], *, paths=None
 ) -> dict[str, Any]:
-    """Restore each folder beside the live one and verify it; the live data is untouched.
+    """Restore each folder beside the live one; the live data is untouched.
 
-    Restoring the parent path keeps each folder's own owner and mode (a
-    database folder must stay owned by its container user).
+    Kopia restores ``<snapshot>/<folder>`` into the staging folder itself,
+    which then takes the folder's own owner and mode (a database folder stays
+    owned by its container user). Every block read is authenticated, so a
+    damaged backup fails here rather than reaching the live data.
     """
     paths = paths or RuntimePaths()
     tag = plan["tag"]
@@ -594,14 +722,15 @@ def stage(
         if staging.exists():
             wipe([staging], log, paths=paths)  # a partial attempt from before
         staging.mkdir(mode=0o700)
-        rc, output = _restic(
-            ["restore", plan["snapshot_id"], "--target", "/restore", "--include", f"/data/{name}", "--verify"],
+        _connect(log, paths)
+        rc, output = _kopia(
+            ["snapshot", "restore", "--no-ignore-permission-errors", f"{plan['snapshot_id']}/{name}", "/restore"],
             log,
             mounts=[(staging, "/restore", False)],
             paths=paths,
             timeout=6 * 3600,
         )
-        if rc or not (staging / "data" / name).is_dir():
+        if rc or not staging.is_dir():
             raise BackupError(f"{name} could not be restored and checked: {output[-500:]}")
         plan = {**plan, "roots": {**plan["roots"], name: "staged"}}
         save(plan)
@@ -620,7 +749,7 @@ def swap(plan: dict[str, Any], save: Callable[[dict[str, Any]], None], *, paths=
         if state == "swapped":
             continue
         live, previous = paths.data / name, _place(name, PREVIOUS, tag, paths)
-        staged = _place(name, STAGED, tag, paths) / "data" / name
+        staged = _place(name, STAGED, tag, paths)
         if not staged.exists():
             raise BackupError(f"The restored copy of {name} is missing, so the restore cannot finish.")
         if live.exists() and not previous.exists():
@@ -683,7 +812,7 @@ def wipe(places: list[Path], log: Log, *, paths=None) -> None:
             "rm",
             "-v",
             f"{paths.data}:/mu3lab-data",
-            RESTIC_IMAGE,
+            KOPIA_IMAGE,
             "-rf",
             "--",
             *(f"/mu3lab-data/{place.name}" for place in present),

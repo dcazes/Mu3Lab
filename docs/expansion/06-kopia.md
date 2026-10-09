@@ -1,5 +1,7 @@
 # 06. Kopia replaces restic (Phase 2)
 
+> **Status (2026-10-08):** Task 2-1, the engine, is implemented on `fix/review-milestone-c`; see [the C3 Kopia record](../reviews/2026-10-08-milestone-c3-kopia-engine.md). Verified against Kopia 0.23.1, it differs from this plan in three ways. **No pins**, because pinning changes a snapshot's id. **Retention is applied by Mu3Lab**, because Kopia expires snapshots on every backup. **Restores use the R13 staged swap**, which also holds the previous data until the app is healthy, even though `--delete-extra` exists. One source per app (`/data/<app>/<folder>`) and the `folders:` tag are as planned.
+
 ## 1. Goal
 
 Replace restic with **Kopia** in every backup path, keeping every guarantee

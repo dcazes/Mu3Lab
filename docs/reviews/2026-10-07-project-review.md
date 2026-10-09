@@ -181,7 +181,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R11](#r11) | Give every deployment an immutable identity | P1 | R/S | M | — | implemented; release acceptance pending |
 | [R12](#r12) | Roll back full deployment configuration as well as data/images | P1 | S | L | R09, R11, R13 | implemented; release acceptance pending |
 | [R13](#r13) | Stage restores and enforce complete storage layouts | P1 | S | L | R09, R11 | implemented; release acceptance pending |
-| [R14](#r14) | Provide complete independent disaster recovery | P1 | S | XL | R11, R13, R16 | open |
+| [R14](#r14) | Provide complete independent disaster recovery | P1 | S | XL | R11, R13, R16 | in progress |
 | [R15](#r15) | Make backup protection, retention, and verification truthful | P1 | S | M | R11, R13 | implemented (local repository); release acceptance pending |
 | [R16](#r16) | Canonical configuration and safe concurrent private-file writes | P1 | S | L | — | implemented for catalog apps; release acceptance pending |
 | [R17](#r17) | Stage self-updates away from the running checkout | P1 | S | L | R09, R14, R16 | open |
@@ -432,6 +432,8 @@ For each row, add `Owner`, `PR/commit`, `Started`, `Verified on`, `Evidence link
 <a id="r14"></a>
 
 ### R14 — Backups do not yet enable independent machine-loss recovery
+
+**Implementation progress (2026-10-08):** Step 1 done: Kopia (0.23.1, verified against the real image) replaces restic behind the same functions, with Mu3Lab-owned retention (Kopia would otherwise expire snapshots on every backup) and no pins (pinning changes a snapshot's id). The old restic repository is kept untouched and reported. Platform recovery, recovery sheet, schedule, SFTP and the web UI follow. Branch `fix/review-milestone-c`; [record](2026-10-08-milestone-c3-kopia-engine.md).
 
 **Evidence:** backup jobs are restricted to optional apps. The repository password is only created/stored in the encrypted platform secret store. App backups cover data folders, not `state/mu3lab.db`, `state/secrets.key`, full deployment metadata, or foundation services. Media is intentionally excluded. The README acknowledges missing platform/off-device coverage but its suggested data copy alone does not preserve every recovery dependency.
 
@@ -755,7 +757,7 @@ These should be small, independently reviewable changes. Full per-person approva
 
 - [x] **C1 implementation:** R03 operator-only person-bound scope and R02 durable gateway approvals. Pinned real client/two-account release acceptance remains pending.
 - [x] **C2 implementation:** R06 bounded gateway and R07 revocation reconciliation ([record](2026-10-08-status-gateway-revocation-implementation.md)). Release acceptance remains pending.
-- [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design.
+- [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material, using the existing expansion design. Step 1, the Kopia engine, is implemented ([record](2026-10-08-milestone-c3-kopia-engine.md)).
 - [ ] **C4:** R17 staged self-update and R18 enforceable API/executor boundary.
 - [ ] **C5:** R19 calendar sync and R31 data-destination policy.
 

@@ -181,8 +181,8 @@ class ProtectionTests(unittest.TestCase):
         self.assertTrue(backups.protection("mealie", self.paths)["restore_tested_at"])
 
     def test_an_existing_repository_is_never_given_a_new_password(self):
-        self.paths.backups.mkdir()
-        (self.paths.backups / "config").write_text("restic", encoding="utf-8")
+        (self.paths.backups / "kopia").mkdir(parents=True)
+        (self.paths.backups / "kopia" / backups.REPOSITORY_MARKER).write_text("kopia", encoding="utf-8")
         with self.assertRaisesRegex(backups.BackupError, "password for it is missing"):
             backups._repository_password(self.paths)
 

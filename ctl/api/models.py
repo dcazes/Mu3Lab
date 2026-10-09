@@ -253,7 +253,7 @@ class Metric(ApiModel):
 
 class BackupReadiness(ApiModel):
     ok: bool = True
-    engine: str = "restic"
+    engine: str = "kopia"
     available: bool = False
     repository_path: str = ""
     retention: dict[str, int] = Field(default_factory=dict)
@@ -264,6 +264,8 @@ class BackupReadiness(ApiModel):
     snapshot_present: bool | None = None
     off_device: bool | None = None
     last_verified_at: str | None = None
+    # Folder of an older restic repository Mu3Lab no longer uses; kept untouched.
+    legacy_repository: str | None = None
 
 
 class TailscaleServeStatus(ApiModel):

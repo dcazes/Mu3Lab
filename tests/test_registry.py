@@ -206,7 +206,8 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn(checkout, paths.root.parents)
 
     def test_backup_policy_matches_the_product_default(self):
-        self.assertEqual(Retention().restic_args(), ["--keep-daily", "7", "--keep-weekly", "4", "--keep-monthly", "12"])
+        policy = Retention()
+        self.assertEqual((policy.daily, policy.weekly, policy.monthly), (7, 4, 12))
 
     def test_core_compose_files_are_valid_and_pin_identity_images(self):
         root = Path(__file__).resolve().parents[1]
