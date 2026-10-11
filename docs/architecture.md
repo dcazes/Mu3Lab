@@ -51,7 +51,7 @@ SQL migrations. One private `secrets.key` encrypts scoped credential rows.
 Job creation and encrypted job inputs commit together. App ownership has one
 canonical record. Container-specific `.env` files are generated private
 outputs, not another credential source. Application data remains in `data/`;
-restic snapshots remain in `backups/`. Database and encryption key must be
+Kopia backups remain in `backups/`. Database and encryption key must be
 preserved together.
 
 The worker's `ctl/status/` reconciler observes host and app health every five
@@ -61,6 +61,38 @@ It commits observations together. Page loads read these saved observations;
 Every viewer gets the same health state, with actions filtered by their role.
 The UI uses five display states and warns after 30 seconds without observations.
 Personal checklist changes merge by item on the server, so devices agree.
+
+## Trust boundary
+
+The dashboard backend (`mu3lab-ctl`) and the worker (`mu3lab-worker`) are two
+processes for reliability, not for security. Jobs survive restarts, run one at
+a time and resume after a crash because the worker owns them. The split does
+not limit what either process can do:
+
+- Both run as the same Linux user, from the same checkout, with the same
+  database and the same `secrets.key`. Either can read every stored credential.
+- That user is in the `docker` group. Docker access is equivalent to root on
+  the host, so either process could control the whole server.
+- The backend does call Docker and Authentik itself. It reads container logs
+  for the app and connector log views (`docker compose logs`), checks disk
+  space, and re-applies sign-in settings through Authentik when it starts.
+
+What actually protects the server is in front of the backend. It is reachable
+only on the tailnet (Tailscale), never from the public internet. Caddy sends
+every request through Authentik first and strips any identity headers a caller
+sends. The API checks the caller's role and a CSRF token on every change, and
+accepts only allowlisted job kinds and actions; it never takes a command,
+path or image from the browser. Chat tools pass through the separate tool
+gateway, whose approval records live in their own authority store.
+
+So a bug that lets someone run code inside the backend gives them the whole
+server. Keep dependencies pinned, keep the dashboard off the public internet,
+and treat any code-execution bug in `ctl/api/` as critical.
+
+Enforced isolation (the backend as a user without Docker or secrets, asking
+the worker through a narrow command channel) is deliberately deferred: it adds
+real complexity for a single-household server. Revisit it if Mu3Lab is ever
+offered to other people or exposed beyond the tailnet (review finding R18).
 
 ## Adding an app
 
