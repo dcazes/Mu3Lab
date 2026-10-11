@@ -21,7 +21,7 @@ from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, Literal
 
-from ctl import platform_backup
+from ctl import backups, platform_backup
 from ctl.control_state import ControlState
 from ctl.jobs import JobConflict, JobStore
 from ctl.lifecycle.uninstall import data_directories
@@ -243,3 +243,70 @@ def status(store: JobStore | None, paths: RuntimePaths | None = None, *, now: da
         "next_run_at": upcoming_at.isoformat(timespec="seconds") if upcoming_at else "",
         "last_run": outcome,
     }
+
+
+# How long past its due time a backup may be before Home asks for attention.
+GRACE = timedelta(hours=12)
+INTERVALS = {
+    "6h": timedelta(hours=6),
+    "12h": timedelta(hours=12),
+    "daily": timedelta(days=1),
+    "weekly": timedelta(days=7),
+}
+# With scheduled backups off, Home asks once the newest backup is this old.
+UNSCHEDULED_LIMIT = timedelta(days=7)
+
+
+def _age(stamp: str, now: datetime) -> timedelta | None:
+    try:
+        return now - datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+
+
+def _days(age: timedelta) -> str:
+    days = int(age.total_seconds() // 86400)
+    if days < 1:
+        return f"{max(1, int(age.total_seconds() // 3600))} hours ago"
+    return "yesterday" if days == 1 else f"{days} days ago"
+
+
+def attention(store: JobStore | None, paths: RuntimePaths | None = None, *, now: datetime | None = None) -> list[dict]:
+    """What Home should tell an administrator about backups: nothing while they keep up with the schedule.
+
+    Mu3Lab's own backup (its database, keys and core apps) is the measure: an
+    app backup cannot be restored onto a new computer without it. A new
+    install is not nagged before its first scheduled run was due.
+    """
+    paths = paths or RuntimePaths()
+    now = now or datetime.now(UTC)
+    chosen = settings(paths)
+    newest = str(backups.protection(backups.PLATFORM_SOURCE, paths).get("completed_at") or "")
+    last = records.get(*LAST_RUN, paths)
+    items: list[dict] = []
+    scheduled = chosen["frequency"] != "off"
+    limit = INTERVALS[chosen["frequency"]] + GRACE if scheduled else UNSCHEDULED_LIMIT
+    jobs = [job for job in (store.get(job_id) if store else None for job_id in last.get("jobs", [])) if job]
+    running = any(job["state"] in {"queued", "running"} for job in jobs)
+    age = _age(newest, now) if newest else None
+    if not running:
+        if age is not None and age > limit:
+            message = f"Mu3Lab's last backup was {_days(age)}."
+            items.append(
+                {"key": "backup-overdue", "message": message + ("" if scheduled else " Scheduled backups are off.")}
+            )
+        elif age is None:
+            # Since when a backup has been expected: the schedule's start, or its last change.
+            since = _age(str(last.get("scheduled_for") or chosen.get("changed_at") or ""), now)
+            if not scheduled or (since is not None and since > limit):
+                message = "Mu3Lab has not been backed up yet."
+                items.append(
+                    {"key": "backup-missing", "message": message + ("" if scheduled else " Scheduled backups are off.")}
+                )
+    failed = [job for job in jobs if job["state"] == "failed"]
+    if failed:
+        noun = "backup" if len(failed) == 1 else "backups"
+        items.append(
+            {"key": "backup-failed", "message": f"The last scheduled backup run had {len(failed)} failed {noun}."}
+        )
+    return items

@@ -519,6 +519,25 @@
         "title": "AuditResponse",
         "type": "object"
       },
+      "BackupAttention": {
+        "description": "One backup problem Home shows administrators; empty while backups keep up with the schedule.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "message"
+        ],
+        "title": "BackupAttention",
+        "type": "object"
+      },
       "BackupProtection": {
         "description": "One app's backup evidence; never inferred from another app's backups.",
         "properties": {
@@ -6049,6 +6068,14 @@
         "properties": {
           "audit": {
             "$ref": "#/components/schemas/AuditResponse"
+          },
+          "backup_attention": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BackupAttention"
+            },
+            "title": "Backup Attention",
+            "type": "array"
           },
           "catalog": {
             "$ref": "#/components/schemas/CatalogResponse"

@@ -195,6 +195,78 @@ class ScheduledReasonTests(unittest.TestCase):
         self.assertIn("scheduled", backups.REASONS)
 
 
+class AttentionTests(unittest.TestCase):
+    """Home warns administrators only when Mu3Lab's own backup falls behind the schedule."""
+
+    NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.paths = RuntimePaths(Path(self.tmp.name))
+        self.paths.state.mkdir(parents=True)
+        self.store = JobStore(self.paths.state / "mu3lab.db")
+
+    def backed_up(self, days_ago: float) -> None:
+        when = (self.NOW - timedelta(days=days_ago)).isoformat(timespec="seconds")
+        records.put("backup-apps", backups.PLATFORM_SOURCE, {"completed_at": when, "snapshot_id": "k1"}, self.paths)
+
+    def schedule(self, frequency: str, started_days_ago: float = 1) -> None:
+        records.put(*backup_schedule.SETTINGS, {"frequency": frequency, "weekday": 6, "time": "03:30"}, self.paths)
+        start = (self.NOW - timedelta(days=started_days_ago)).isoformat(timespec="seconds")
+        records.put(*backup_schedule.LAST_RUN, {"scheduled_for": start, "jobs": [], "skipped": []}, self.paths)
+
+    def keys(self) -> list[str]:
+        return [item["key"] for item in backup_schedule.attention(self.store, self.paths, now=self.NOW)]
+
+    def test_nothing_while_backups_keep_up(self):
+        self.schedule("weekly")
+        self.backed_up(6)
+        self.assertEqual(self.keys(), [])
+
+    def test_an_overdue_backup_is_reported_with_its_age(self):
+        self.schedule("weekly")
+        self.backed_up(9)
+        items = backup_schedule.attention(self.store, self.paths, now=self.NOW)
+        self.assertEqual([item["key"] for item in items], ["backup-overdue"])
+        self.assertIn("9 days ago", items[0]["message"])
+        # A daily schedule allows a day and a half.
+        self.schedule("daily")
+        self.backed_up(1.2)
+        self.assertEqual(self.keys(), [])
+        self.backed_up(2)
+        self.assertEqual(self.keys(), ["backup-overdue"])
+
+    def test_a_new_install_is_not_nagged_before_its_first_run_was_due(self):
+        self.schedule("weekly", started_days_ago=2)
+        self.assertEqual(self.keys(), [])
+        self.schedule("weekly", started_days_ago=8)
+        self.assertEqual(self.keys(), ["backup-missing"])
+
+    def test_backups_turned_off_are_named(self):
+        self.schedule("off")
+        items = backup_schedule.attention(self.store, self.paths, now=self.NOW)
+        self.assertEqual([item["key"] for item in items], ["backup-missing"])
+        self.assertIn("Scheduled backups are off", items[0]["message"])
+        self.backed_up(3)
+        self.assertEqual(self.keys(), [])
+
+    def test_failed_jobs_of_the_last_run_are_counted_and_a_running_run_is_left_alone(self):
+        self.schedule("weekly")
+        self.backed_up(9)
+        done = self.store.create(kind="lifecycle", service_id="mealie", action="backup", actor="schedule")
+        self.store.transition(done["id"], "failed", actor="worker", detail="disk full")
+        running = self.store.create(
+            kind="backup", service_id=platform_backup.SERVICE_ID, action="backup", actor="schedule"
+        )
+        last = {"scheduled_for": self.NOW.isoformat(), "jobs": [done["id"], running["id"]], "skipped": []}
+        records.put(*backup_schedule.LAST_RUN, last, self.paths)
+        items = backup_schedule.attention(self.store, self.paths, now=self.NOW)
+        # The overdue warning waits while the run is still going; its failure already shows.
+        self.assertEqual([item["key"] for item in items], ["backup-failed"])
+        self.assertIn("1 failed backup", items[0]["message"])
+
+
 class ScheduleApiTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ctl import bootstrap_state
+from ctl import backup_schedule, bootstrap_state
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.routes import chat, jobs, system
 from ctl.api.security import Member
 from ctl.api.service_view import service_snapshot
+from ctl.jobs import JobStore
 from ctl.store import db
 
 router = APIRouter(prefix="/api/v1", tags=["snapshot"], route_class=ContractRoute)
@@ -28,6 +29,7 @@ def snapshot(person: Member) -> models.SnapshotResponse:
             "core": jobs.core_setup(person),
             "provisioning": system.provisioning(person),
             "audit": jobs.audit(person) if person.get("is_admin") else {"ok": True, "available": False, "events": []},
+            "backup_attention": backup_schedule.attention(JobStore.runtime()) if person.get("is_admin") else [],
         }
 
     path = db.database()

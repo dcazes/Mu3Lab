@@ -1123,6 +1123,13 @@ class ChecklistResponse(ApiModel):
     items: dict[str, bool]
 
 
+class BackupAttention(ApiModel):
+    """One backup problem Home shows administrators; empty while backups keep up with the schedule."""
+
+    key: str
+    message: str
+
+
 class SnapshotResponse(ApiModel):
     services: ServicesResponse
     system: SystemResponse
@@ -1133,6 +1140,7 @@ class SnapshotResponse(ApiModel):
     core: CoreSetupResponse
     provisioning: ProvisioningResponse
     audit: AuditResponse
+    backup_attention: list[BackupAttention] = []
 
 
 class ParallelDownloadsRequest(RequestModel):

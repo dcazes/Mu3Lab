@@ -10,6 +10,8 @@ This page is for the cases the dashboard cannot handle: restoring by hand, and b
 
 If the server was off at the scheduled time, the run starts about ten minutes after it is back on. Changing the schedule never starts a backup straight away.
 
+Home tells administrators when backups fall behind: when Mu3Lab's own newest backup is older than the schedule allows (its interval plus 12 hours; a week when scheduled backups are off), when it has never been backed up once the first scheduled run was due, or when the last scheduled run had a failed backup. Each note links to Security & backups. Mu3Lab's own backup is the measure because an app's backup cannot be restored onto a new computer without it.
+
 ## Browsing backups and restoring single files
 
 Administrators can open **Security & backups → Open backups** (Kopia's own web page, behind Authentik; Mu3Lab signs in to Kopia for you). It shows every backup Mu3Lab has made. Restore a single file or folder into `/srv/mu3lab/backups/restores/`, then copy it where you need it. The page is read-only: the repository is mounted read-only and Kopia connects read-only, so it cannot change, add or remove a backup. To roll back a whole app, use that app's **Backups** card instead; it stops the app first.

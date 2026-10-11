@@ -1738,6 +1738,16 @@ export interface components {
       ok: boolean;
     };
     /**
+     * BackupAttention
+     * @description One backup problem Home shows administrators; empty while backups keep up with the schedule.
+     */
+    BackupAttention: {
+      /** Key */
+      key: string;
+      /** Message */
+      message: string;
+    };
+    /**
      * BackupProtection
      * @description One app's backup evidence; never inferred from another app's backups.
      */
@@ -3436,6 +3446,11 @@ export interface components {
     /** SnapshotResponse */
     SnapshotResponse: {
       audit: components['schemas']['AuditResponse'];
+      /**
+       * Backup Attention
+       * @default []
+       */
+      backup_attention?: components['schemas']['BackupAttention'][];
       catalog: components['schemas']['CatalogResponse'];
       chat: components['schemas']['ChatStatus'];
       core: components['schemas']['CoreSetupResponse'];

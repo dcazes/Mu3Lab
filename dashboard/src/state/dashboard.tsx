@@ -3,6 +3,7 @@ import {
   api,
   ApiError,
   type AuditResponse,
+  type BackupAttention,
   type CatalogResponse,
   type ChatStatus,
   type CoreSetupResponse,
@@ -22,6 +23,8 @@ export interface DashboardData {
   identity: IdentityResponse;
   jobs: JobsResponse;
   audit: AuditResponse;
+  // Administrators only; empty while backups keep up with the schedule.
+  backup_attention?: BackupAttention[];
   core: CoreSetupResponse;
   provisioning: ProvisioningResponse;
   chat: ChatStatus;

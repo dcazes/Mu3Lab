@@ -118,6 +118,20 @@ describe('Home', () => {
     const strip = screen.getByRole('region', { name: 'Needs attention' });
     expect(within(strip).getByText('Paperless-ngx: needs attention')).toBeInTheDocument();
   });
+
+  it('asks for attention when backups fall behind, linking to Backups', () => {
+    renderWithDashboard(
+      <HomePage />,
+      dashboardData([], {
+        backup_attention: [{ key: 'backup-overdue', message: "Mu3Lab's last backup was 9 days ago." }],
+      }),
+    );
+    const strip = screen.getByRole('region', { name: 'Needs attention' });
+    expect(within(strip).getByRole('link', { name: "Mu3Lab's last backup was 9 days ago." })).toHaveAttribute(
+      'href',
+      '/settings/security',
+    );
+  });
 });
 
 describe('App page', () => {
