@@ -1,10 +1,10 @@
-"""Open Mu3Lab's backup repository read-only, for an app that browses backups.
+"""Run Mu3Lab's backup service: Kopia's server, which makes, schedules and keeps every backup.
 
-The app is given the repository's password and where the backups are. The
-repository is created first if no backup has been made yet, with Mu3Lab's
-own policy (``backups.ensure_repository``), so the app always has one to open.
-The app mounts it read-only and must connect read-only too: Mu3Lab alone
-creates, prunes and maintains backups.
+The app is given the repository's password, where the backups are, and where
+its own cache and logs live. The repository is created first if no backup has
+been made yet, with Mu3Lab's policy (``backups.ensure_repository``), so the
+server always has one to open. Which folders it backs up, its schedule and
+its actions are kept in step by the worker (``ctl.backup_service``).
 """
 
 from __future__ import annotations
@@ -21,27 +21,33 @@ if TYPE_CHECKING:
     from ctl.manifest.catalog import App
 
 
-class ReadsBackupsParams(Params):
+class RunsBackupsParams(Params):
     password_env: str = "KOPIA_PASSWORD"
     backups_env: str = "MU3LAB_BACKUPS_ROOT"
+    state_env: str = "MU3LAB_STATE_ROOT"
 
 
 @register
-class ReadsBackups(Rule):
-    name = "reads_backups"
-    Params = ReadsBackupsParams
-    summary = "Gives the app read-only access to Mu3Lab's backups, creating the repository if needed."
-    params: ReadsBackupsParams
+class RunsBackups(Rule):
+    name = "runs_backups"
+    Params = RunsBackupsParams
+    summary = "Runs Kopia's server as Mu3Lab's backup service, creating the repository if needed."
+    params: RunsBackupsParams
 
     def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
         paths = RuntimePaths()
         env[self.params.password_env] = backups.repository_password(paths)
         env[self.params.backups_env] = str(paths.backups)
+        env[self.params.state_env] = str(paths.state)
 
     def before_start(self, ctx: HookContext) -> None:
+        from ctl import platform_backup
+
         paths = ctx.facts.paths if ctx.facts else RuntimePaths()
         try:
             backups.ensure_repository(ctx.log, paths)
         except backups.BackupError as exc:
             ctx.fail("before_start", "backup_repository_unavailable", str(exc))
         (paths.backups / "restores").mkdir(mode=0o750, exist_ok=True)
+        (paths.state / "kopia-server").mkdir(mode=0o700, exist_ok=True)
+        platform_backup.export_folder(paths)

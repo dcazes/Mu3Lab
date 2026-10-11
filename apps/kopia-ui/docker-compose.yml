@@ -1,28 +1,38 @@
-# Kopia's web page, read-only. The repository is mounted read-only and Kopia
-# connects read-only too, so nothing here can change a backup. Its connection
-# settings live in memory and are made again at each start.
+# Mu3Lab's backup service: Kopia's server makes, schedules and keeps every
+# backup (ctl/backup_service.py). It runs on the host network, listening on
+# loopback only, so its before- and after-actions can reach Mu3Lab at
+# 127.0.0.1:8787. Each app's data folders are mounted read-only by
+# docker-compose.sources.yml, which Mu3Lab writes. The connection settings
+# live in memory and are made again at each start; logs go to Docker's log.
 name: mu3lab-kopia-ui
 
 services:
   kopia:
-    # The same pinned image Mu3Lab's own backups use (ctl/backups.py, KOPIA_IMAGE).
+    # The same pinned image Mu3Lab's own Kopia commands use (ctl/backups.py, KOPIA_IMAGE).
     image: docker.io/kopia/kopia:0.23.1@sha256:89fd95ee2942880ca00eae964266958a394421ddbdf69bca62e38afc55f5900e
     restart: unless-stopped
-    ports: ["127.0.0.1:51515:51515"]
+    network_mode: host
     env_file: [".env"]
     environment:
       KOPIA_CHECK_FOR_UPDATES: "false"
+      KOPIA_CACHE_DIRECTORY: /cache
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
-        kopia repository connect filesystem --path=/repo --readonly
-        --override-username=mu3lab --override-hostname=mu3lab
-        && exec kopia server start --readonly --insecure --address=0.0.0.0:51515 --refresh-interval=5m
+        kopia repository connect filesystem --path=/repo
+        --override-username=mu3lab --override-hostname=mu3lab --enable-actions
+        --content-cache-size-mb=500 --metadata-cache-size-mb=500
+        && exec kopia server start --insecure --enable-actions --address=127.0.0.1:51515
+        --refresh-interval=5m --disable-file-logging --disable-content-log
     volumes:
-      - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia:/repo:ro
+      - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia:/repo
       - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/restores:/restores
+      - ${MU3LAB_STATE_ROOT:?MU3LAB_STATE_ROOT is required}/kopia-server:/cache
+      - ./backup-hook.sh:/hooks/backup-hook.sh:ro
+      # Schedules run in this computer's time zone.
+      - /etc/localtime:/etc/localtime:ro
     read_only: true
-    tmpfs: [/app/config, /app/cache, /app/logs, /tmp]
+    tmpfs: [/app/config, /tmp]
     security_opt: [no-new-privileges:true]
     healthcheck:
       # Up and refusing anyone without the password; the check never sends it.

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import actions, service_config
+from ctl import actions, backup_service, service_config
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -29,9 +29,9 @@ from ctl.backups import readiness as backup_readiness
 from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import app_releases
+from ctl.lifecycle import app_releases, in_progress
+from ctl.lifecycle import restore as app_restore
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
-from ctl.operations import OperationStore
 from ctl.registry import Service
 from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
@@ -46,8 +46,8 @@ MANUAL_INITIALIZATION_MODES = frozenset(
 
 # An app must be installed (running or stopped) to be backed up, restored or updated.
 MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped"})
-# While an app's earlier update or restore could not be undone, only these may run.
-RECOVERY_ACTIONS = frozenset({"recover", "restore"})
+# While an app's earlier restore or update was interrupted, only these may run.
+RECOVERY_ACTIONS = frozenset({"recover", "keep_update"})
 SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"], route_class=ContractRoute)
@@ -96,34 +96,29 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
     subject = runtime.mutation_subject(operator)
-    journal = OperationStore.runtime()
-    blocking = journal.needing_attention(service.id) if journal else None
+    active = {str(job["id"]) for job in store.active_jobs()}
+    note = in_progress.interrupted(service.id, active)
+    blocking = bool(note) or bool(app_restore.leftovers(service, ROOT))
     if blocking and action not in RECOVERY_ACTIONS:
         raise ApiError(
             409,
             {
                 "code": "recovery_required",
                 "stage": "recovery",
-                "message": f"{service.name} needs attention first: {blocking.detail}",
+                "message": f"A restore or update of {service.name} was interrupted; choose what happens first.",
                 "retryable": False,
-                "recommended_action": "Retry recovery, or restore the backup from before.",
+                "recommended_action": "Put the app back as it was, from its Backups card.",
             },
         )
-    if (
-        journal
-        and not blocking
-        and action not in RECOVERY_ACTIONS
-        and any(op.service_id == service.id for op in journal.orphaned())
-    ):
-        # An interrupted restore may have some folders swapped: nothing may start the app first.
+    if backup_service.holding(service.id):
         raise ApiError(
             409,
             {
-                "code": "recovery_pending",
-                "stage": "recovery",
-                "message": f"Mu3Lab is finishing an interrupted task on {service.name}; try again in a minute.",
+                "code": "backup_running",
+                "stage": "backup",
+                "message": f"{service.name} is being backed up; try again in a few minutes.",
                 "retryable": True,
-                "recommended_action": "Wait for the recovery to finish.",
+                "recommended_action": "Wait for the backup to finish.",
             },
         )
     previous = store.by_idempotency_key(
@@ -170,13 +165,13 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         raise ApiError(409, "service manifest is not deployable")
     control = ControlState.runtime()
     params: dict[str, str] = {}
-    if action == "recover":
+    if action in RECOVERY_ACTIONS:
         if not blocking:
-            raise ApiError(409, f"{service.name} has nothing to recover.")
-        params = {"operation_id": blocking.id}
+            raise ApiError(409, f"{service.name} has nothing to put back.")
+        if action == "keep_update" and not (note.get("kind") == "update" and note.get("applied")):
+            raise ApiError(409, f"{service.name} has no interrupted update to keep.")
     elif action in MAINTENANCE_ACTIONS:
-        state = "needs_attention" if blocking else _effective_state(service, control)
-        params = _maintenance_params(service, action, body, state)
+        params = _maintenance_params(service, action, body, _effective_state(service, control))
     else:
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):
@@ -206,19 +201,15 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         )
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
-    if action in MAINTENANCE_ACTIONS:
-        return {"ok": True, "job": job}
     return {"ok": True, "job": job}
 
 
 def _maintenance_params(service: Service, action: str, body: dict, state: str) -> dict[str, str]:
-    """Check a backup, restore or update request before it is queued."""
+    """Check a restore or update request before it is queued."""
     if service.stage != "optional":
-        raise ApiError(409, "Only apps installed from the catalog can be backed up, restored or updated here.")
+        raise ApiError(409, "Only apps installed from the catalog can be restored or updated here.")
     if state not in MAINTENANCE_STATES:
         raise ApiError(409, "Finish setting up the app first.")
-    if action == "backup":
-        return {}
     if action == "restore":
         # Restoring replaces the app's current data: repeat its name, as for deleting data.
         if str(body.get("confirm", "")).strip() != service.name:
@@ -436,4 +427,26 @@ def service_backups(service_id: str, _operator: Operator) -> models.BackupsRespo
             "readiness": backup_readiness(),
             "protection": backup_protection(service.id),
         }
+    )
+
+
+@router.post("/{service_id}/backups", response_model=models.BackupStarted, response_model_exclude_none=True)
+def back_up_service(service_id: str, operator: OperatorMutation) -> models.BackupStarted:
+    """Ask Kopia's backup service to back the app up now, exactly as a scheduled run does."""
+    if not operator.get("is_admin"):
+        raise ApiError(403, "Only a Mu3Lab administrator can do this.", code="admin_required")
+    service, store = runtime.service(service_id), runtime.job_store()
+    if service.stage != "optional":
+        raise ApiError(409, "Only apps installed from the catalog are backed up here.")
+    if backup_service.holding(service.id):
+        raise ApiError(409, f"{service.name} is already being backed up.")
+    if service.id not in backup_service.sources(ROOT):
+        raise ApiError(409, f"{service.name} has no data on this server to back up yet.")
+    try:
+        backup_service.trigger([service.id])
+    except OSError as exc:
+        raise ApiError(503, f"The backup service is not running, so nothing was backed up ({exc}).") from exc
+    store.record_audit(actor=str(operator["username"]), event="backup.requested", detail=f"Back up {service.name} now.")
+    return models.BackupStarted(
+        ok=True, detail=f"{service.name} stops for a moment while its data is copied, then starts again."
     )

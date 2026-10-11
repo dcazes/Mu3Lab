@@ -14,6 +14,8 @@ const weekly = {
   weekday: 6,
   time: '03:30',
   next_run_at: '2026-10-11T07:30:00+00:00',
+  service_running: true,
+  problems: [] as string[],
 };
 
 function setup(current: Record<string, unknown> = weekly) {
@@ -56,20 +58,9 @@ describe('Backup schedule', () => {
     expect(screen.queryByLabelText('Time')).toBeNull();
   });
 
-  it('reports a failed app from the last run', async () => {
-    setup({
-      ...weekly,
-      last_run: {
-        scheduled_for: '2026-10-04T07:30:00+00:00',
-        jobs: 3,
-        finished: 3,
-        failed: 1,
-        problems: ['Mealie was not backed up: disk full'],
-        skipped: ['Immich: it was being set up or changed'],
-      },
-    });
-    expect(await screen.findByText(/1 of 3 failed/)).toBeTruthy();
-    expect(screen.getByText('Mealie was not backed up: disk full')).toBeTruthy();
-    expect(screen.getByText('Skipped Immich: it was being set up or changed')).toBeTruthy();
+  it('lists backups that did not finish and says when the backup service is down', async () => {
+    setup({ ...weekly, service_running: false, problems: ['mealie: Another task is running on Mealie'] });
+    expect(await screen.findByText('The backup service is not running')).toBeTruthy();
+    expect(screen.getByText('mealie: Another task is running on Mealie')).toBeTruthy();
   });
 });

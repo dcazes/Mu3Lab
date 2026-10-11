@@ -23,6 +23,7 @@ from ctl.api.errors import (
 )
 from ctl.api.routes import (
     ai_models,
+    backup_hooks,
     calendar,
     chat,
     identity,
@@ -96,6 +97,7 @@ def create_app(dist: Path = DIST) -> FastAPI:
     app.add_exception_handler(ValidationError, response_error_handler)
     app.include_router(system.health_router)
     for module in (
+        backup_hooks,
         system,
         tool_approvals,
         identity,

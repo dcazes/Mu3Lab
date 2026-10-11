@@ -83,13 +83,13 @@ class ServiceChecks(ApiModel):
 
 
 class ServiceRecovery(ApiModel):
-    """An update or restore that could not be undone; the app waits for a person."""
+    """A restore or update that was interrupted; nothing continues until a person chooses."""
 
-    operation_id: str
-    kind: Literal["backup", "restore", "update"]
+    kind: Literal["restore", "update"]
     detail: str
-    snapshot_id: str
     since: str
+    # An interrupted update whose new release was already in place may be kept instead of undone.
+    can_keep: bool = False
 
 
 class ServiceUpdate(ApiModel):
@@ -169,6 +169,8 @@ class Service(ApiModel):
     containers: list[ServiceContainersItem] | None = None
     checks: ServiceChecks | None = None
     recovery: ServiceRecovery | None = None
+    # Kopia's backup service has stopped the app for its backup right now.
+    backing_up: bool = False
     blocking_check: Literal["process", "route", "sign_in"] | None = None
 
     display_state: DisplayState
@@ -605,11 +607,14 @@ class BackupSnapshot(ApiModel):
     id: str
     short_id: str
     time: str
-    reason: Literal["manual"] | Literal["pre-update"] | Literal["pre-restore"]
+    # "backup" for those Kopia's backup service makes; "pre-update" for an update's own.
+    # Older backups may say "manual", "scheduled", "platform" or "pre-restore".
+    reason: str
     version: str
     # The exact deployment the data belongs to; empty for backups made before release ids.
     release_id: str = ""
     paths: list[str]
+    complete: bool = True
 
 
 class BackupProtection(ApiModel):
@@ -652,26 +657,30 @@ class PlatformBackupStatus(ApiModel):
 BackupFrequency = Literal["off", "6h", "12h", "daily", "weekly"]
 
 
-class BackupScheduleRun(ApiModel):
-    """How the last scheduled run went, from its jobs."""
-
-    scheduled_for: str
-    jobs: int
-    finished: int
-    failed: int
-    problems: list[str]
-    skipped: list[str]
-
-
 class BackupSchedule(ApiModel):
-    """When scheduled backups run, in this server's local time. Weekday: Monday is 0, Sunday 6."""
+    """When Kopia's backup service runs backups, in this server's local time. Weekday: Monday is 0, Sunday 6."""
 
     ok: bool
     frequency: BackupFrequency
     weekday: int
     time: str
+    # From Kopia itself; empty while scheduled backups are off or the service is not running.
     next_run_at: str
-    last_run: BackupScheduleRun | None = None
+    service_running: bool
+    # Sources whose last backup did not finish, with why.
+    problems: list[str]
+
+
+class BackupStarted(ApiModel):
+    """Kopia's backup service was asked to back up now; progress shows on the app."""
+
+    ok: bool
+    detail: str
+
+
+class BackupHookResponse(ApiModel):
+    ok: bool
+    detail: str
 
 
 AiPrivacy = Literal["outside_allowed", "local_only"]
@@ -1001,6 +1010,10 @@ class BackupScheduleRequest(RequestModel):
     time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
+class BackupHookRequest(RequestModel):
+    source: str = Field(max_length=80)
+
+
 class CalendarResolveRequest(RequestModel):
     keep: Literal["mine", "server"]
 
@@ -1014,10 +1027,10 @@ class ServiceActionRequest(RequestModel):
         "restart",
         "uninstall",
         "uninstall_delete_data",
-        "backup",
         "restore",
         "update",
         "recover",
+        "keep_update",
     ]
     confirm: str = ""
     snapshot_id: str = ""

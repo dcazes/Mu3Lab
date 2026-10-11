@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, backup_schedule, platform_backup, recovery_sheet, self_update
+from ctl import __version__, backup_service, platform_backup, recovery_sheet, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -17,7 +17,6 @@ from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.backups import readiness as backup_readiness
 from ctl.compute import detect
 from ctl.control_state import COMPUTE_MODES, ControlState
-from ctl.jobs import JobConflict, JobStore
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
@@ -188,8 +187,8 @@ def platform_backup_status(_operator: Operator) -> models.PlatformBackupStatus:
 
 @router.get("/system/backups/schedule", response_model=models.BackupSchedule, response_model_exclude_none=True)
 def backup_schedule_status(_operator: Operator) -> models.BackupSchedule:
-    """When scheduled backups run, the next run, and how the last one went."""
-    return models.BackupSchedule.model_validate({"ok": True, **backup_schedule.status(JobStore.runtime())})
+    """When scheduled backups run, Kopia's next run, and what did not finish."""
+    return models.BackupSchedule.model_validate({"ok": True, **backup_service.status()})
 
 
 @router.put("/system/backups/schedule", response_model=models.BackupSchedule, response_model_exclude_none=True)
@@ -198,7 +197,7 @@ def update_backup_schedule(
 ) -> models.BackupSchedule:
     store = runtime.job_store()
     try:
-        chosen = backup_schedule.save(payload_model.model_dump(), str(operator["username"]))
+        chosen = backup_service.save(payload_model.model_dump(), str(operator["username"]))
     except ValueError as exc:
         raise ApiError(422, str(exc)) from exc
     store.record_audit(
@@ -206,7 +205,7 @@ def update_backup_schedule(
         event="backup.schedule_changed",
         detail=f"Scheduled backups: {chosen['frequency']}, weekday {chosen['weekday']}, {chosen['time']}.",
     )
-    return models.BackupSchedule.model_validate({"ok": True, **backup_schedule.status(store)})
+    return models.BackupSchedule.model_validate({"ok": True, **backup_service.status()})
 
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
@@ -226,37 +225,24 @@ def open_recovery_sheet(operator: OperatorMutation) -> JSONResponse:
     return JSONResponse(body, headers=_NO_STORE)
 
 
-@router.post("/system/backups/platform", response_model=models.JobResponse, response_model_exclude_none=True)
-def start_platform_backup(request: Request, operator: OperatorMutation) -> models.JobResponse:
-    """Queue a backup of Mu3Lab itself; core apps stop for a few minutes while their data is saved."""
+@router.post("/system/backups/platform", response_model=models.BackupStarted, response_model_exclude_none=True)
+def start_platform_backup(operator: OperatorMutation) -> models.BackupStarted:
+    """Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time."""
     store = runtime.job_store()
-    key = runtime.idempotency_key(request)
-    subject = runtime.mutation_subject(operator)
-    previous = store.by_idempotency_key(
-        key or "",
-        kind="backup",
-        service_id=platform_backup.SERVICE_ID,
-        action=platform_backup.ACTION,
-        actor=operator["username"],
-        actor_subject=subject,
-        namespace="system.platform_backup",
-    )
-    if previous:
-        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    found = backup_service.sources(ROOT)
+    core, _skipped = platform_backup.core_apps(load_registry(), ROOT)
+    chosen = [platform_backup.backups.PLATFORM_SOURCE, *(service.id for service in core if service.id in found)]
     try:
-        job = store.create(
-            kind="backup",
-            service_id=platform_backup.SERVICE_ID,
-            action=platform_backup.ACTION,
-            actor=operator["username"],
-            actor_subject=subject,
-            namespace="system.platform_backup",
-            detail="Operator requested a backup of Mu3Lab.",
-            idempotency_key=key,
-        )
-    except JobConflict as conflict:
-        raise ApiError(409, "A backup of Mu3Lab is already running.") from conflict
-    return models.JobResponse.model_validate({"ok": True, "job": job})
+        backup_service.trigger(chosen)
+    except OSError as exc:
+        raise ApiError(503, f"The backup service is not running, so nothing was backed up ({exc}).") from exc
+    store.record_audit(
+        actor=str(operator["username"]), event="backup.requested", detail="Back up Mu3Lab and its core apps now."
+    )
+    return models.BackupStarted(
+        ok=True,
+        detail="Mu3Lab saves its own settings first; then each core app stops for a moment while its data is copied.",
+    )
 
 
 @router.get("/provisioning", response_model=models.ProvisioningResponse, response_model_exclude_none=True)

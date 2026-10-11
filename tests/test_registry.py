@@ -13,7 +13,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl.backups import Retention
+from ctl.backups import RETENTION
 from ctl.manifest.catalog import compose_images
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
@@ -206,8 +206,7 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn(checkout, paths.root.parents)
 
     def test_backup_policy_matches_the_product_default(self):
-        policy = Retention()
-        self.assertEqual((policy.daily, policy.weekly, policy.monthly), (7, 4, 12))
+        self.assertEqual(RETENTION, {"latest": 10, "daily": 7, "weekly": 4, "monthly": 12})
 
     def test_core_compose_files_are_valid_and_pin_identity_images(self):
         root = Path(__file__).resolve().parents[1]

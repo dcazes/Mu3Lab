@@ -220,7 +220,6 @@ class RewireTests(_Paths):
             return SimpleNamespace(id=app_id, manifest=SimpleNamespace(name=app_id.title()))
 
         blocked, busy, free = app("blocked"), app("busy"), app("free")
-        journal = SimpleNamespace(needing_attention=lambda app_id: object() if app_id == "blocked" else None)
         lines: list[str] = []
         holder_inside, release = threading.Event(), threading.Event()
 
@@ -238,7 +237,7 @@ class RewireTests(_Paths):
                 patch.object(rewire, "Facts"),
                 patch.object(rewire, "tailnet_dns_name", return_value=""),
                 patch.object(rewire, "LOCK_WAIT_SECONDS", 0.3),
-                patch("ctl.operations.OperationStore.runtime", return_value=journal),
+                patch("ctl.lifecycle.in_progress.get", side_effect=lambda app_id, _paths: app_id == "blocked"),
                 patch.object(rewire, "rewire_one", return_value=True) as rewire_one,
             ):
                 restarted = rewire.rewire_consumers(app("provider"), None, lines.append, self.paths)

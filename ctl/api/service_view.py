@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from ctl import __version__, service_config
+from ctl import __version__, backup_service, service_config
 from ctl.api import models
 from ctl.api.security import IdentityData
 from ctl.control_state import ControlState
 from ctl.identity import projection as identity_projection
 from ctl.jobs import JobStore
-from ctl.operations import OperationStore
+from ctl.lifecycle import in_progress
 from ctl.registry import RegistryError, Service
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -49,7 +49,9 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
     # Active jobs first, however old, so a long-running one is never missed.
     jobs = list({job["id"]: job for job in [*store.active_jobs(), *store.jobs(limit=100)]}.values()) if store else []
     control_state = ControlState.runtime()
-    journal = OperationStore.runtime()
+    active = {str(job["id"]) for job in jobs if job["state"] in {"queued", "running", "waiting_for_confirmation"}}
+    interrupted = in_progress.all_interrupted(active)
+    held = set(records.names(backup_service.HOLDS))
     operator = bool(identity and identity["writes_enabled"])
     now = time.time()
     statuses = [
@@ -144,19 +146,21 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
             }
         if not item.get("mobile"):
             item.pop("mobile", None)
-        blocking = journal.needing_attention(service.id) if journal else None
-        if blocking:
-            # Only retrying recovery or restoring a backup may run; the Backups card offers both.
+        note = interrupted.get(service.id)
+        if note:
+            # Nothing else may run until the owner chooses; the Backups card offers the choices.
+            kind = "update" if note.get("kind") == "update" else "restore"
+            detail = f"A {kind} of {service.name} was interrupted before it finished."
             item["state"] = "needs_attention"
-            item["detail"] = blocking.detail
+            item["detail"] = detail
             item["allowed_actions"] = []
             item["recovery"] = {
-                "operation_id": blocking.id,
-                "kind": blocking.kind,
-                "detail": blocking.detail,
-                "snapshot_id": blocking.recovery_snapshot,
-                "since": blocking.updated_at,
+                "kind": kind,
+                "detail": detail,
+                "since": str(note.get("started_at") or ""),
+                "can_keep": kind == "update" and bool(note.get("applied")),
             }
+        item["backing_up"] = service.id in held
         if latest and latest["state"] in {"queued", "running"}:
             item["state"] = "queued" if latest["state"] == "queued" else "verifying"
             item["detail"] = str(latest.get("detail") or "An operation is in progress.")

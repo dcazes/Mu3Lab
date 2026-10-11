@@ -1,7 +1,8 @@
 """Persistent Mu3Lab workflow worker.
 
 The web process queues reviewed jobs; this process claims durable leases from
-SQLite and resumes abandoned work after its previous worker lease expires.
+SQLite. A job whose worker died is claimed again; restores and updates then
+fail as interrupted and wait for the owner (``ctl.lifecycle.maintenance``).
 
 Only one worker executes at a time (``resource_locks.WorkerLock``): a second
 one, or a restarted one while a paused one still lives, waits. Each job holds
@@ -16,15 +17,13 @@ import signal
 import socket
 import threading
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 from ctl import (
     access,
-    backup_schedule,
+    backup_service,
     job_guard,
     local_models,
-    platform_backup,
     rebuild,
     resource_locks,
     self_update,
@@ -61,8 +60,6 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == self_update.SERVICE_ID:
         self_update.execute_claimed(store, job, worker_id, ROOT)
-    elif job.get("service_id") == platform_backup.SERVICE_ID:
-        platform_backup.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == local_models.SERVICE_ID:
         local_models.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
@@ -129,12 +126,10 @@ def run() -> int:
     stopping = False
     waiting_for_runtime_reported = False
     next_mcp_reconcile = 0.0
-    next_operation_reconcile = 0.0
     next_chat_sync = 0.0
     next_rule_maintenance = 0.0
     next_vault_sync = 0.0
-    next_backup_schedule = 0.0
-    started = datetime.now(UTC)
+    next_backup_service = 0.0
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -173,10 +168,6 @@ def run() -> int:
 
             processes = JobProcesses(store.database)
             processes.install()
-            try:
-                platform_backup.recover(ROOT, lambda line: print(line, flush=True))
-            except Exception as exc:  # never keep the worker from starting
-                print(f"Mu3Lab could not restart apps an interrupted backup stopped: {exc}", flush=True)
             # App images download in the background, several at once, while
             # setup jobs run one at a time below.
             download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
@@ -186,7 +177,6 @@ def run() -> int:
             from ctl import backups
 
             backups.start_verification(downloads_stopping, lambda line: print(line, flush=True))
-            started = datetime.now(UTC)
         if time.monotonic() >= next_rule_maintenance:
             next_rule_maintenance = time.monotonic() + 60
             try:
@@ -201,25 +191,18 @@ def run() -> int:
                 vault_sync.run(lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab vault saving deferred safely: {exc}", flush=True)
-        if time.monotonic() >= next_backup_schedule:
-            next_backup_schedule = time.monotonic() + 60
+        if time.monotonic() >= next_backup_service:
+            next_backup_service = time.monotonic() + 60
             try:
-                backup_schedule.tick(store, ROOT, lambda line: print(line, flush=True), worker_started=started)
+                # Kopia's server runs the schedule; keep its folders, actions and policy in step.
+                backup_service.reconcile(store, ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
-                print(f"Mu3Lab scheduled backups deferred safely: {exc}", flush=True)
+                print(f"Mu3Lab backup service upkeep deferred safely: {exc}", flush=True)
             try:
                 # After a rebuild on a new computer: start the apps that were running before.
                 rebuild.resume(store, ROOT, lambda line: print(line, flush=True))
             except Exception as exc:
                 print(f"Mu3Lab could not start the restored apps yet: {exc}", flush=True)
-        if time.monotonic() >= next_operation_reconcile:
-            next_operation_reconcile = time.monotonic() + 60
-            try:
-                from ctl.lifecycle import maintenance
-
-                maintenance.reconcile(store, lambda line: print(line, flush=True))
-            except Exception as exc:
-                print(f"Mu3Lab operation recovery deferred safely: {exc}", flush=True)
         if time.monotonic() >= next_mcp_reconcile:
             next_mcp_reconcile = time.monotonic() + 60
             try:

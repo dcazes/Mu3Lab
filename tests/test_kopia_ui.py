@@ -1,4 +1,4 @@
-"""The backup browser reads backups only, and Caddy signs in to it after Authentik."""
+"""Kopia's server is the backup service, reachable on loopback only, and Caddy signs in to it after Authentik."""
 
 from __future__ import annotations
 
@@ -17,34 +17,53 @@ from ctl import backups, routes
 from ctl.manifest.catalog import load as load_catalog
 from ctl.manifest.models import AppManifest
 from ctl.registry import load
-from ctl.rules.reads_backups import ReadsBackups, ReadsBackupsParams
+from ctl.rules.runs_backups import RunsBackups, RunsBackupsParams
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class ReadOnlyTests(unittest.TestCase):
-    def test_the_repository_is_mounted_and_opened_read_only(self):
+class BackupServiceTests(unittest.TestCase):
+    def setUp(self):
         compose = yaml.safe_load((ROOT / "apps/kopia-ui/docker-compose.yml").read_text(encoding="utf-8"))
-        service = compose["services"]["kopia"]
-        self.assertIn("${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia:/repo:ro", service["volumes"])
-        command = service["command"][0]
-        self.assertIn("repository connect filesystem --path=/repo --readonly", command)
-        self.assertIn("server start --readonly", command)
-        # Only the restores folder is writable, and no app data or media is mounted.
-        writable = [volume for volume in service["volumes"] if not volume.endswith(":ro")]
-        self.assertEqual(writable, ["${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/restores:/restores"])
-        self.assertTrue(service["read_only"])
-        self.assertEqual(service["ports"], ["127.0.0.1:51515:51515"])
-        # Same engine version as Mu3Lab's own backups.
-        self.assertEqual(service["image"], backups.KOPIA_IMAGE)
-        # No secret on a command line: Kopia reads both from the environment.
-        self.assertNotIn("password", command.lower())
+        self.service = compose["services"]["kopia"]
+        self.command = self.service["command"][0]
 
-    def test_it_is_left_out_of_backups(self):
+    def test_it_listens_on_loopback_only_so_its_actions_can_reach_mu3lab(self):
+        self.assertEqual(self.service["network_mode"], "host")
+        self.assertNotIn("ports", self.service)
+        self.assertIn("--address=127.0.0.1:51515", self.command)
+
+    def test_it_runs_actions_and_keeps_its_cache_on_disk(self):
+        self.assertIn("--enable-actions", self.command.split("&&")[0])  # the connection allows actions
+        self.assertIn("server start --insecure --enable-actions", self.command)
+        self.assertIn(
+            "${MU3LAB_STATE_ROOT:?MU3LAB_STATE_ROOT is required}/kopia-server:/cache", self.service["volumes"]
+        )
+        self.assertIn("./backup-hook.sh:/hooks/backup-hook.sh:ro", self.service["volumes"])
+        self.assertIn("/etc/localtime:/etc/localtime:ro", self.service["volumes"])
+
+    def test_no_app_data_is_mounted_here_and_no_secret_is_on_a_command_line(self):
+        # App folders come from docker-compose.sources.yml, read-only, written by ctl.backup_service.
+        self.assertFalse(any(volume.startswith("/srv/mu3lab/data") for volume in self.service["volumes"]))
+        self.assertTrue(self.service["read_only"])
+        self.assertEqual(self.service["image"], backups.KOPIA_IMAGE)
+        self.assertNotIn("password", self.command.lower())
+
+    def test_the_hook_only_posts_to_mu3labs_loopback_api_with_its_token(self):
+        hook = (ROOT / "apps/kopia-ui/backup-hook.sh").read_text(encoding="utf-8")
+        self.assertIn("http://127.0.0.1:8787/api/v1/backup-hooks/${KOPIA_ACTION}", hook)
+        self.assertIn("Authorization: Bearer ${MU3LAB_BACKUP_HOOK_TOKEN}", hook)
+        self.assertTrue((ROOT / "apps/kopia-ui/backup-hook.sh").stat().st_mode & stat.S_IXUSR)
+
+    def test_it_is_left_out_of_backups_and_generates_its_own_tokens(self):
         app = load_catalog().get("kopia-ui")
         self.assertFalse(app.manifest.backup.include)
+        generated = {secret.env for secret in app.manifest.secrets}
+        self.assertEqual(
+            generated, {"KOPIA_SERVER_PASSWORD", "KOPIA_SERVER_CONTROL_PASSWORD", "MU3LAB_BACKUP_HOOK_TOKEN"}
+        )
 
 
 class UpstreamAuthTests(unittest.TestCase):
@@ -93,23 +112,27 @@ class UpstreamAuthTests(unittest.TestCase):
         self.assertEqual(set(env), {"MU3LAB_CADDYFILE", "MU3LAB_INGRESS_TOKEN", "MU3LAB_INGRESS_SECRETS"})
 
 
-class ReadsBackupsRuleTests(unittest.TestCase):
+class RunsBackupsRuleTests(unittest.TestCase):
     def test_the_app_gets_the_repository_password_and_where_backups_are(self):
         env: dict[str, str] = {}
-        ReadsBackups(ReadsBackupsParams()).prepare_env(SimpleNamespace(id="kopia-ui"), env, None)
+        RunsBackups(RunsBackupsParams()).prepare_env(SimpleNamespace(id="kopia-ui"), env, None)
         paths = RuntimePaths()
         self.assertEqual(env["KOPIA_PASSWORD"], backups.repository_password(paths))
         self.assertEqual(env["MU3LAB_BACKUPS_ROOT"], str(paths.backups))
+        self.assertEqual(env["MU3LAB_STATE_ROOT"], str(paths.state))
 
     def test_the_repository_and_restores_folder_exist_before_it_starts(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             paths.backups.mkdir(parents=True)
+            paths.state.mkdir(parents=True)
             ctx = SimpleNamespace(facts=SimpleNamespace(paths=paths), log=lambda _line: None, fail=None)
-            with patch("ctl.rules.reads_backups.backups.ensure_repository") as ensure:
-                ReadsBackups(ReadsBackupsParams()).before_start(ctx)
+            with patch("ctl.rules.runs_backups.backups.ensure_repository") as ensure:
+                RunsBackups(RunsBackupsParams()).before_start(ctx)
             ensure.assert_called_once_with(ctx.log, paths)
             self.assertTrue((paths.backups / "restores").is_dir())
+            self.assertTrue((paths.state / "kopia-server").is_dir())
+            self.assertTrue((paths.state / "platform-export").is_dir())
 
     def test_a_repository_that_cannot_be_opened_stops_the_install(self):
         failed = []
@@ -119,10 +142,10 @@ class ReadsBackupsRuleTests(unittest.TestCase):
             fail=lambda *args: failed.append(args) or (_ for _ in ()).throw(RuntimeError("stop")),
         )
         with (
-            patch("ctl.rules.reads_backups.backups.ensure_repository", side_effect=backups.BackupError("no")),
+            patch("ctl.rules.runs_backups.backups.ensure_repository", side_effect=backups.BackupError("no")),
             self.assertRaises(RuntimeError),
         ):
-            ReadsBackups(ReadsBackupsParams()).before_start(ctx)
+            RunsBackups(RunsBackupsParams()).before_start(ctx)
         self.assertEqual(failed[0][1], "backup_repository_unavailable")
 
 

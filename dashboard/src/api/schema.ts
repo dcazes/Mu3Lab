@@ -1114,7 +1114,11 @@ export interface paths {
      */
     get: operations['service_backups_api_v1_services__service_id__backups_get'];
     put?: never;
-    post?: never;
+    /**
+     * Back Up Service
+     * @description Ask Kopia's backup service to back the app up now, exactly as a scheduled run does.
+     */
+    post: operations['back_up_service_api_v1_services__service_id__backups_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1285,7 +1289,7 @@ export interface paths {
     put?: never;
     /**
      * Start Platform Backup
-     * @description Queue a backup of Mu3Lab itself; core apps stop for a few minutes while their data is saved.
+     * @description Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time.
      */
     post: operations['start_platform_backup_api_v1_system_backups_platform_post'];
     delete?: never;
@@ -1323,7 +1327,7 @@ export interface paths {
     };
     /**
      * Backup Schedule Status
-     * @description When scheduled backups run, the next run, and how the last one went.
+     * @description When scheduled backups run, Kopia's next run, and what did not finish.
      */
     get: operations['backup_schedule_status_api_v1_system_backups_schedule_get'];
     /** Update Backup Schedule */
@@ -1834,7 +1838,7 @@ export interface components {
     };
     /**
      * BackupSchedule
-     * @description When scheduled backups run, in this server's local time. Weekday: Monday is 0, Sunday 6.
+     * @description When Kopia's backup service runs backups, in this server's local time. Weekday: Monday is 0, Sunday 6.
      */
     BackupSchedule: {
       /**
@@ -1842,11 +1846,14 @@ export interface components {
        * @enum {string}
        */
       frequency: 'off' | '6h' | '12h' | 'daily' | 'weekly';
-      last_run?: components['schemas']['BackupScheduleRun'] | null;
       /** Next Run At */
       next_run_at: string;
       /** Ok */
       ok: boolean;
+      /** Problems */
+      problems: string[];
+      /** Service Running */
+      service_running: boolean;
       /** Time */
       time: string;
       /** Weekday */
@@ -1864,32 +1871,19 @@ export interface components {
       /** Weekday */
       weekday: number;
     };
-    /**
-     * BackupScheduleRun
-     * @description How the last scheduled run went, from its jobs.
-     */
-    BackupScheduleRun: {
-      /** Failed */
-      failed: number;
-      /** Finished */
-      finished: number;
-      /** Jobs */
-      jobs: number;
-      /** Problems */
-      problems: string[];
-      /** Scheduled For */
-      scheduled_for: string;
-      /** Skipped */
-      skipped: string[];
-    };
     /** BackupSnapshot */
     BackupSnapshot: {
+      /**
+       * Complete
+       * @default true
+       */
+      complete?: boolean;
       /** Id */
       id: string;
       /** Paths */
       paths: string[];
       /** Reason */
-      reason: 'manual' | 'pre-update' | 'pre-restore';
+      reason: string;
       /**
        * Release Id
        * @default
@@ -1901,6 +1895,16 @@ export interface components {
       time: string;
       /** Version */
       version: string;
+    };
+    /**
+     * BackupStarted
+     * @description Kopia's backup service was asked to back up now; progress shows on the app.
+     */
+    BackupStarted: {
+      /** Detail */
+      detail: string;
+      /** Ok */
+      ok: boolean;
     };
     /** BackupsResponse */
     BackupsResponse: {
@@ -3136,6 +3140,11 @@ export interface components {
         ('install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'uninstall' | 'uninstall_delete_data')[] | null;
       /** Auth */
       auth: 'oidc' | 'proxy' | 'trusted_header' | 'local' | 'excluded';
+      /**
+       * Backing Up
+       * @default false
+       */
+      backing_up?: boolean;
       /** Blocking Check */
       blocking_check?: ('process' | 'route' | 'sign_in') | null;
       /** Category */
@@ -3231,10 +3240,10 @@ export interface components {
         | 'restart'
         | 'uninstall'
         | 'uninstall_delete_data'
-        | 'backup'
         | 'restore'
         | 'update'
-        | 'recover';
+        | 'recover'
+        | 'keep_update';
       /**
        * Confirm
        * @default
@@ -3377,22 +3386,23 @@ export interface components {
     };
     /**
      * ServiceRecovery
-     * @description An update or restore that could not be undone; the app waits for a person.
+     * @description A restore or update that was interrupted; nothing continues until a person chooses.
      */
     ServiceRecovery: {
+      /**
+       * Can Keep
+       * @default false
+       */
+      can_keep?: boolean;
       /** Detail */
       detail: string;
       /**
        * Kind
        * @enum {string}
        */
-      kind: 'backup' | 'restore' | 'update';
-      /** Operation Id */
-      operation_id: string;
+      kind: 'restore' | 'update';
       /** Since */
       since: string;
-      /** Snapshot Id */
-      snapshot_id: string;
     };
     /** ServiceUi */
     ServiceUi: {
@@ -9803,6 +9813,91 @@ export interface operations {
       };
     };
   };
+  back_up_service_api_v1_services__service_id__backups_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        service_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupStarted'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   get_service_configuration_api_v1_services__service_id__configuration_get: {
     parameters: {
       query?: never;
@@ -10665,7 +10760,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['JobResponse'];
+          'application/json': components['schemas']['BackupStarted'];
         };
       };
       /** @description Bad Request */

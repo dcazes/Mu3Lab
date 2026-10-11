@@ -3,7 +3,6 @@ import { type FormEvent, useState } from 'react';
 import { type BackupSchedule, type BackupScheduleRequest, putJsonApi } from '../../api';
 import { Button } from '../../components/Button';
 import { Callout, Card, Facts } from '../../components/Layout';
-import { relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 
@@ -36,7 +35,7 @@ export function describe(schedule: Pick<BackupSchedule, 'frequency' | 'weekday' 
   }
 }
 
-/** How often Mu3Lab backs up everything on its own, in this server's local time. */
+/** How often Kopia's backup service backs up everything, in this server's local time. */
 export function BackupScheduleCard() {
   const { data, reload } = useApi<BackupSchedule>('/api/v1/system/backups/schedule');
   const { pending, run } = useAction();
@@ -57,15 +56,19 @@ export function BackupScheduleCard() {
       void reload();
     }
   };
-  const last = data.last_run;
   return (
     <Card
       title="Backup schedule"
-      description="Mu3Lab backs up itself and every installed app on its own. Sign-in, the password vault and chat pause for a few minutes while they are saved, so choose a quiet time."
+      description="Kopia backs up Mu3Lab and every installed app on its own, one at a time. Each app pauses for a moment while its data is copied, so choose a quiet time."
     >
       {data.frequency === 'off' && (
         <Callout tone="warning" title="Scheduled backups are off">
-          Apps are still backed up before every update and restore, but nothing else protects new data.
+          Apps are still backed up before every update, but nothing else protects new data.
+        </Callout>
+      )}
+      {!data.service_running && (
+        <Callout tone="warning" title="The backup service is not running">
+          No backup runs until Kopia backups is started again from Apps.
         </Callout>
       )}
       <form className="form schedule-form" onSubmit={(event) => void save(event)}>
@@ -123,27 +126,17 @@ export function BackupScheduleCard() {
             label: 'Next backup',
             value: data.next_run_at ? new Date(data.next_run_at).toLocaleString() : '—',
           },
-          {
-            label: 'Last scheduled backup',
-            value: last
-              ? last.finished < last.jobs
-                ? `Running: ${last.finished} of ${last.jobs} done`
-                : last.failed
-                  ? `${relativeTime(last.scheduled_for)}: ${last.failed} of ${last.jobs} failed`
-                  : `${relativeTime(last.scheduled_for)}: all ${last.jobs} saved`
-              : 'None yet',
-          },
         ]}
       />
-      {last && (last.problems.length > 0 || last.skipped.length > 0) && (
-        <ul className="muted">
-          {last.problems.map((problem) => (
-            <li key={problem}>{problem}</li>
-          ))}
-          {last.skipped.map((item) => (
-            <li key={item}>Skipped {item}</li>
-          ))}
-        </ul>
+      {data.problems.length > 0 && (
+        <>
+          <p className="warning-text">These backups did not finish last time:</p>
+          <ul className="muted">
+            {data.problems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        </>
       )}
     </Card>
   );

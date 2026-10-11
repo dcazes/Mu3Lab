@@ -54,7 +54,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 # Constants: versions, package lists, ports. Reasons inline.
 # ---------------------------------------------------------------------------
-BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg", "python3", "python3-pip", "python3-venv", "restic"]
+BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg", "python3", "python3-pip", "python3-venv"]
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"]
 # NVIDIA Container Toolkit repository (ASCII-armored key; apt reads .asc).

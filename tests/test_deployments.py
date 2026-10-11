@@ -1,4 +1,7 @@
-"""R12: rollback returns the exact previous deployment. R15: backup status is per app and truthful."""
+"""R12: rollback returns the exact previous deployment. R15: backup status is per app and truthful.
+
+Updates and restores that use these copies are tested in test_maintenance.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +9,13 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 from ctl import backups
 from ctl.app_settings import AppSettings
-from ctl.lifecycle import deployments, maintenance
+from ctl.lifecycle import deployments
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.store import records
-from tests.test_maintenance import NEW, OLD, _Workflow
 
 
 class BundleTests(unittest.TestCase):
@@ -67,67 +68,6 @@ class BundleTests(unittest.TestCase):
         removed = deployments.prune("mealie", keep={"b1"}, paths=self.paths)
         self.assertEqual(removed, [])
         self.assertEqual(sorted(deployments.prune("mealie", keep=set(), paths=self.paths)), ["b1"])
-
-
-class FullRollbackTests(_Workflow):
-    """The new release changes its Compose file and settings; a rollback puts both back."""
-
-    def setUp(self):
-        super().setUp()
-        (self.project / "docker-compose.yml").write_text("services: {old: {}}\n", encoding="utf-8")
-        self.settings = AppSettings("mealie", self.paths)
-        self.settings.set_config({"currency": "EUR"})
-
-        def new_definition(*_args):
-            (self.project / "docker-compose.yml").write_text("services: {new: {}}\n", encoding="utf-8")
-            (self.project / "docker-compose.extra.yml").write_text("services: {}\n", encoding="utf-8")
-            self.settings.set_config({"currency": "EUR", "new_field": "on"})
-
-        self.stack.enter_context(patch.object(maintenance, "_refresh_definition", side_effect=new_definition))
-
-    def update(self, starts):
-        return self.run_update(starts)
-
-    def test_a_failed_update_returns_the_previous_files_and_settings_too(self):
-        job = self.update([(False, "entrypoint changed"), (True, "")])
-        self.assertEqual(job["error_code"], "update_rolled_back")
-        self.assertEqual((self.project / "docker-compose.yml").read_text(), "services: {old: {}}\n")
-        self.assertFalse((self.project / "docker-compose.extra.yml").exists())
-        self.assertEqual(self.settings.config(), {"currency": "EUR"})
-        self.assertEqual(self.installed(), OLD)
-        self.assertEqual(self.restored, ["c" * 64])
-
-    def test_an_invalid_new_definition_stops_before_the_app_does(self):
-        invalid = maintenance._Failed("stage_definition", "definition_invalid", "unknown service key")
-        with patch.object(maintenance, "_validate_definition", side_effect=invalid):
-            job = self.update([])
-        self.assertEqual(job["error_code"], "definition_invalid")
-        self.assertIn("Nothing changed", job["detail"])
-        self.assertEqual(self.events, [])  # never stopped
-        self.assertEqual((self.project / "docker-compose.yml").read_text(), "services: {old: {}}\n")
-        self.assertEqual(self.settings.config(), {"currency": "EUR"})
-        self.snapshot.assert_not_called()
-
-    def test_a_healthy_update_keeps_the_new_files(self):
-        job = self.update([(True, "")])
-        self.assertEqual(job["state"], "succeeded", job["detail"])
-        self.assertEqual((self.project / "docker-compose.yml").read_text(), "services: {new: {}}\n")
-        self.assertEqual(self.installed(), NEW)
-
-
-class RestoreRollbackTests(_Workflow):
-    def test_restored_data_that_does_not_start_is_swapped_back_for_the_data_from_before(self):
-        listing = [{"id": "a" * 64, "time": "2026-10-01T12:00:00Z", "version": OLD.version, "paths": []}]
-        self.stack.enter_context(patch.object(maintenance.backups, "snapshots", return_value=listing))
-        self.stack.enter_context(patch.object(maintenance, "_start", side_effect=[(False, "crash"), (True, "")]))
-        job = self.store.create(
-            kind="lifecycle", service_id="mealie", action="restore", actor="owner", params={"snapshot_id": "a" * 64}
-        )
-        maintenance.execute(self.store, None, self.store.get(job["id"]), self.service, self.root)
-        record = self.store.get(job["id"])
-        self.assertEqual(record["error_code"], "restore_rolled_back")
-        self.assertEqual(self.undone, ["a" * 64])
-        self.assertIn("nothing was lost", record["detail"])
 
 
 class ProtectionTests(unittest.TestCase):

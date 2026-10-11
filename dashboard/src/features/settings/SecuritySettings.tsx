@@ -58,13 +58,6 @@ export function SecuritySettings() {
             before every app update.
           </Callout>
         )}
-        {backup.legacy_repository && (
-          <p className="muted">
-            Backups made before Mu3Lab switched to Kopia are kept, untouched, in {backup.legacy_repository}. Mu3Lab no
-            longer lists them; docs/backup-recovery.md explains how to restore from them by hand. You can delete that
-            folder yourself once your new backups are working.
-          </p>
-        )}
         {identity.is_admin && browserUrl && (
           <div className="button-row">
             <ExternalButton size="sm" icon={FolderSearch} href={browserUrl}>

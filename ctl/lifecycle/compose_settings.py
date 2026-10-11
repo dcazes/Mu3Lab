@@ -11,6 +11,9 @@ other start (a backup, a restore) brought them up wrong:
   ``docker-compose.tailnet.yml`` override; without them it starts but forgets
   that address.
 
+The backup service (Kopia) also needs the override that mounts every app's
+data folders, which Mu3Lab writes as apps come and go.
+
 Values are passed in the process environment, never on a command line or in
 a log.
 """
@@ -47,8 +50,10 @@ def _tailnet_name() -> str:
 
 def identity_env(paths: RuntimePaths | None = None, env_file: Path | None = None) -> dict[str, str]:
     """Authentik's Compose values, read from the settings file the installer generated."""
+    from ctl.platform_apps import by_capability
+
     paths = paths or RuntimePaths()
-    env_file = env_file or paths.projects / "authentik" / ".env"
+    env_file = env_file or paths.projects / by_capability("identity_provider").id / ".env"
     generated = read_runtime_env(env_file)
     if not generated.get("AUTHENTIK_POSTGRESQL__PASSWORD"):
         raise RuntimeError("Authentik's generated settings are missing; run ./install.sh to repair them.")
@@ -76,6 +81,10 @@ def settings(service: Service, project: Path, paths: RuntimePaths | None = None)
     capabilities = set(service.manifest.capabilities)
     if "identity_provider" in capabilities:
         return identity_env(paths), compose_overrides(service.id, project)
+    if "backup_service" in capabilities:
+        # The data folders the backup service reads, written by ctl.backup_service.
+        sources = project / "docker-compose.sources.yml"
+        return {}, [*([sources] if sources.is_file() else []), *compose_overrides(service.id, project)]
     if "password_store" in capabilities:
         env, extra = vault_env(project, _tailnet_name(), paths)
         return env, [*extra, *compose_overrides(service.id, project)]

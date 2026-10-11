@@ -12,7 +12,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ctl import backups
-from ctl.backups import BackupError, Retention, readiness
+from ctl.backups import BackupError, readiness
+from ctl.lifecycle import restore
 from ctl.runtime import RuntimePaths
 from ctl.store import records
 from ctl.store.secrets import SecretStore
@@ -55,18 +56,11 @@ class BackupReadinessTests(unittest.TestCase):
 
     def test_snapshot_and_integrity_metadata_are_required_for_verified(self):
         _create_repository(self.paths)
-        records.put("backup", "verification", {"snapshot_id": "abc"}, self.paths)
+        backups.record_backup("mealie", _now(), self.paths)
         # A snapshot alone is not enough: a repository check must have passed recently.
         self.assertEqual(readiness(self.paths)["state"], "local_only")
         records.put("backup", "repository", {"ok": True, "structure_checked_at": _now()}, self.paths)
         self.assertEqual(readiness(self.paths)["state"], "verified")
-
-    def test_an_older_restic_repository_is_reported_and_left_alone(self):
-        (self.paths.backups / "config").write_text("restic", encoding="utf-8")
-        result = readiness(self.paths)
-        self.assertEqual(result["legacy_repository"], str(self.paths.backups))
-        self.assertFalse(result["repository_present"])
-        self.assertEqual((self.paths.backups / "config").read_text(), "restic")
 
 
 def _snapshot_listing(folders: list[str], snapshot_id: str = SNAP, app: str = "mealie") -> str:
@@ -166,9 +160,8 @@ class KopiaTests(unittest.TestCase):
         for tag in ("app:mealie", "reason:pre-update", "version:v3.22.0", "release:0123456789abcdef"):
             self.assertIn(f"--tags={tag}", create)
         self.assertIn("--tags=folders:mealie+mealie-recipes", create)
-        self.assertEqual(
-            [self.command(argv) for argv in self.calls], ["snapshot create", "snapshot verify", "snapshot list"]
-        )
+        self.assertEqual([self.command(argv) for argv in self.calls], ["snapshot create"])
+        self.assertTrue(records.get("backup-apps", "mealie", self.paths)["completed_at"])
         self.assertEqual(readiness(self.paths)["snapshot_present"], True)
 
     def test_the_password_travels_in_a_private_env_file_never_on_the_command_line(self):
@@ -182,17 +175,15 @@ class KopiaTests(unittest.TestCase):
             self.docker({"snapshot create": (0, _created(failed=2))}),
             self.assertRaisesRegex(BackupError, "skipped 2 unreadable files"),
         ):
-            backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
+            backups.snapshot("mealie", [self.mealie], "pre-update", lambda _l: None, paths=self.paths)
 
-    def test_a_failed_integrity_check_is_not_reported_as_verified(self):
-        with (
-            self.docker({"snapshot create": (0, _created()), "snapshot verify": (1, "object not found")}),
-            self.assertRaisesRegex(BackupError, "integrity check failed"),
-        ):
-            backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
-        self.assertFalse(records.get("backup", "repository", self.paths)["ok"])
+    def test_only_an_update_makes_its_own_backup(self):
+        for reason in ("manual", "scheduled", "pre-restore"):
+            with self.subTest(reason=reason), self.assertRaises(BackupError):
+                backups.snapshot("mealie", [self.mealie], reason, lambda _l: None, paths=self.paths)
+        self.assertEqual(self.calls, [])
 
-    def test_a_new_repository_gets_mu3labs_identity_and_keeps_everything_for_mu3lab_to_prune(self):
+    def test_a_new_repository_gets_mu3labs_identity_and_kopias_retention(self):
         shutil.rmtree(self.paths.backups / "kopia")
         shutil.rmtree(self.paths.state / "kopia")
 
@@ -208,7 +199,8 @@ class KopiaTests(unittest.TestCase):
         created, policy = self.calls
         for flag in ("--override-username", "--override-hostname", "--no-persist-credentials"):
             self.assertIn(flag, created)
-        self.assertIn("--keep-latest=1000000", policy)
+        self.assertIn("--keep-latest=10", policy)
+        self.assertIn("--keep-monthly=12", policy)
         self.assertIn("--ignore-cache-dirs=false", policy)
 
     def test_a_repository_without_local_configuration_is_reconnected_not_recreated(self):
@@ -219,30 +211,60 @@ class KopiaTests(unittest.TestCase):
 
     def test_folders_outside_the_data_root_are_refused(self):
         with self.assertRaises(BackupError):
-            backups.snapshot("mealie", [Path("/etc")], "manual", lambda _l: None, paths=self.paths)
+            backups.snapshot("mealie", [Path("/etc")], "pre-update", lambda _l: None, paths=self.paths)
 
-    def test_restore_stages_beside_the_live_folder_then_swaps(self):
-        with self.docker({"snapshot list": (0, _snapshot_listing(["mealie"]))}):
-            backups.restore("mealie", SNAP, [self.mealie], lambda _l: None, paths=self.paths, tag="test-tag")
-        restore = next(argv for argv in self.calls if self.command(argv) == "snapshot restore")
-        mounts = [restore[i + 1] for i, part in enumerate(restore) if part == "-v"]
-        self.assertEqual(len(mounts), 3)  # repository, configuration, and this folder's staging place
-        self.assertEqual(mounts[-1], f"{self.paths.data}/.mealie.mu3lab-staged-test-tag:/restore")
-        self.assertEqual(restore[-2:], [f"{SNAP}/mealie", "/restore"])
-        self.assertIn("--no-ignore-permission-errors", restore)
-        self.assertEqual(sorted(path.name for path in self.mealie.iterdir()), ["new.db"])
-        # Nothing is left beside it once it is in place.
-        self.assertEqual([path.name for path in self.paths.data.iterdir()], ["mealie"])
+    def test_one_folder_is_restored_into_a_new_folder_beside_the_live_one(self):
+        staging = self.paths.data / ".mealie.restoring"
+        staging.mkdir()
+        with self.docker({}):
+            backups.restore_folder(SNAP, "mealie", staging, lambda _l: None, self.paths)
+        restore_call = self.calls[0]
+        mounts = [restore_call[i + 1] for i, part in enumerate(restore_call) if part == "-v"]
+        self.assertEqual(mounts[-1], f"{staging}:/restore")
+        self.assertEqual(restore_call[-2:], [f"{SNAP}/mealie", "/restore"])
+        self.assertIn("--no-ignore-permission-errors", restore_call)
+        self.assertEqual(sorted(path.name for path in staging.iterdir()), ["new.db"])
+        self.assertEqual(sorted(path.name for path in self.mealie.iterdir()), ["old.db"])
 
-    def test_restore_refuses_another_apps_or_layouts_backup(self):
-        for listing in (_snapshot_listing(["paperless"]), _snapshot_listing(["mealie"], app="paperless"), "[]"):
-            with (
-                self.subTest(listing=listing),
-                self.docker({"snapshot list": (0, listing)}),
-                self.assertRaises(BackupError),
-            ):
-                backups.restore("mealie", SNAP, [self.mealie], lambda _l: None, paths=self.paths)
-        self.assertFalse(any(self.command(argv) == "snapshot restore" for argv in self.calls))
+    def test_a_backup_made_by_the_backup_service_is_listed_with_the_release_noted_before_it(self):
+        backups.note_release("mealie", "0123456789abcdef", "v3.22.0", ["mealie"], self.paths)
+        noted_at = records.get("backup-releases", "mealie", self.paths)["entries"][0]["at"]
+        later = (datetime.fromisoformat(noted_at) + timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+        listing = json.dumps(
+            [
+                {
+                    "id": SNAP,
+                    "source": {"host": "mu3lab", "userName": "mu3lab", "path": "/data/mealie"},
+                    "startTime": noted_at.replace("+00:00", "Z"),
+                    "endTime": later,
+                    "stats": {"errorCount": 0},
+                },
+                {
+                    "id": NEW,
+                    "source": {"path": "/data/mealie"},
+                    "startTime": "2026-01-01T00:00:00Z",
+                    "endTime": "2026-01-01T00:00:05Z",
+                },
+            ]
+        )
+        with self.docker({"snapshot list": (0, listing)}):
+            listed = backups.snapshots("mealie", paths=self.paths)
+        newest, oldest = listed
+        self.assertEqual(
+            (newest["reason"], newest["version"], newest["release_id"], newest["paths"]),
+            ("backup", "v3.22.0", "0123456789abcdef", ["/data/mealie"]),
+        )
+        # A backup older than any note: no release, and its folders are read from the backup itself.
+        self.assertEqual((oldest["version"], oldest["paths"]), ("", []))
+
+    def test_the_folders_of_a_backup_are_read_from_the_backup(self):
+        output = (
+            "drwxrwxr-x  6 2026-10-11 23:12:20 UTC ka5bea870f3ed8614399a2cfc2400561a  mealie-recipes/\n"
+            "drwxrwxr-x  6 2026-10-11 23:12:20 UTC k7c1b3113d6554f46fdfef0b7014a7662  mealie/\n"
+            "-rw-r--r--  6 2026-10-11 23:12:20 UTC k7c1b3113d6554f46fdfef0b7014a7663  stray.txt\n"
+        )
+        with patch("ctl.backups._kopia", return_value=(0, output)):
+            self.assertEqual(backups.folders_in(SNAP, lambda _l: None, self.paths), ["mealie", "mealie-recipes"])
 
     def test_snapshots_are_listed_with_their_reason_version_release_and_folders(self):
         with self.docker({"snapshot list": (0, _snapshot_listing(["mealie", "mealie-recipes"]))}):
@@ -272,7 +294,7 @@ class KopiaTests(unittest.TestCase):
             self.docker({"snapshot create": (124, "docker: timed out")}),
             self.assertRaisesRegex(BackupError, "did not complete"),
         ):
-            backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
+            backups.snapshot("mealie", [self.mealie], "pre-update", lambda _l: None, paths=self.paths)
         name = self.calls[0][self.calls[0].index("--name") + 1]
         self.assertIn(["docker", "stop", "--time", str(backups.STOP_SECONDS), name], self.bookkeeping)
 
@@ -283,7 +305,7 @@ class KopiaTests(unittest.TestCase):
             patch("ctl.backups.SURVIVOR_WAIT_SECONDS", 0),
             self.assertRaisesRegex(BackupError, "earlier attempt is still running"),
         ):
-            backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
+            backups.snapshot("mealie", [self.mealie], "pre-update", lambda _l: None, paths=self.paths)
         self.assertEqual(self.calls, [])
 
     def test_a_finished_survivor_lets_the_data_change_continue(self):
@@ -298,77 +320,44 @@ class KopiaTests(unittest.TestCase):
 
         lines: list[str] = []
         with patch("ctl.backups.actions.docker_cmd", side_effect=run), patch("ctl.backups.time.sleep"):
-            backups.snapshot("mealie", [self.mealie], "manual", lines.append, paths=self.paths)
+            backups.snapshot("mealie", [self.mealie], "pre-update", lines.append, paths=self.paths)
         self.assertIn("still running; waiting", lines[0])
         self.assertEqual(self.command(self.calls[0]), "snapshot create")
 
 
-class RetentionTests(unittest.TestCase):
-    """Mu3Lab applies retention itself: latest 3, then one per day, week and month."""
-
-    @staticmethod
-    def listing(times: list[datetime]) -> list[dict]:
-        return [{"id": f"{index:032x}", "time": when.isoformat()} for index, when in enumerate(times)]
-
-    def test_the_newest_three_and_one_per_period_are_kept(self):
-        now = datetime(2026, 10, 8, 12, tzinfo=UTC)
-        times = [now - timedelta(hours=hours) for hours in range(0, 24 * 40, 6)]
-        listing = self.listing(times)
-        expired = set(backups.expired(listing, Retention()))
-        kept = [snap for snap in listing if snap["id"] not in expired]
-        self.assertTrue(all(snap["id"] in {item["id"] for item in kept} for snap in listing[:3]))
-        days = {snap["time"][:10] for snap in kept}
-        self.assertGreaterEqual(len(days), 7)
-        self.assertLess(len(kept), len(listing))
-
-    def test_twenty_backups_in_one_day_keep_the_newest_three(self):
-        now = datetime(2026, 10, 8, 12, tzinfo=UTC)
-        listing = self.listing([now - timedelta(minutes=minutes) for minutes in range(20)])
-        self.assertEqual(len(backups.expired(listing, Retention())), 17)
-
-    def test_an_unreadable_time_is_never_a_reason_to_delete(self):
-        listing = [*self.listing([datetime(2026, 10, 8, tzinfo=UTC)] * 4), {"id": "f" * 32, "time": "garbage"}]
-        self.assertNotIn("f" * 32, backups.expired(listing, Retention()))
-
-    def test_pruning_deletes_only_this_apps_expired_snapshots(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            paths.state.mkdir()
-            _create_repository(paths)
-            SecretStore(paths).put("platform", "backup-password", "p")
-            listing = [{"id": f"{index:032x}", "time": f"2026-10-08T12:00:0{index}Z"} for index in range(5)]
-            calls = []
-            with (
-                patch("ctl.backups.snapshots", return_value=listing),
-                patch("ctl.backups._kopia", side_effect=lambda args, *_a, **_k: calls.append(args) or (0, "")),
-            ):
-                self.assertTrue(backups.prune("mealie", lambda _l: None, paths=paths))
-        self.assertEqual(calls, [["snapshot", "delete", f"{1:032x}", f"{0:032x}", "--delete"]])
-
-
-class StagedRestoreTests(KopiaTests):
-    """R13: a restore never leaves old and new data side by side, whatever stops it."""
+class RestorePlanTests(unittest.TestCase):
+    """R13: a restore never leaves old and new data side by side."""
 
     def setUp(self):
-        super().setUp()
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.paths = RuntimePaths(Path(temp.name))
+        self.paths.data.mkdir(parents=True)
+        self.mealie = self.paths.data / "mealie"
+        self.mealie.mkdir()
         self.recipes = self.paths.data / "mealie-recipes"
-        self.plans: list[dict] = []
 
     def plan(self, saved=("/data/mealie",), directories=None):
-        with self.docker({"snapshot list": (0, _snapshot_listing([name.removeprefix("/data/") for name in saved]))}):
-            return backups.plan_restore(
-                "mealie", SNAP, directories or [self.mealie], lambda _l: None, tag="test-tag", paths=self.paths
-            )
+        return restore.plan({"paths": list(saved)}, directories or [self.mealie], self.paths)
+
+    def test_a_backup_of_another_layout_is_refused(self):
+        for saved in (("/data/paperless",), ()):
+            with self.subTest(saved=saved), self.assertRaisesRegex(restore.RestoreFailed, "different folder layout"):
+                self.plan(saved)
 
     def test_a_backup_missing_a_folder_the_app_uses_is_refused(self):
         self.recipes.mkdir()
         (self.recipes / "soup.json").write_text("{}", encoding="utf-8")
-        with self.assertRaisesRegex(BackupError, "does not include mealie-recipes"):
+        with self.assertRaisesRegex(restore.RestoreFailed, "does not include mealie-recipes"):
             self.plan(directories=[self.mealie, self.recipes])
 
-    def test_a_missing_folder_with_no_data_here_either_is_recorded_not_refused(self):
-        plan = self.plan(directories=[self.mealie, self.recipes])
-        self.assertEqual(plan["not_in_backup"], ["mealie-recipes"])
+    def test_a_missing_folder_with_no_data_here_either_is_allowed(self):
+        names, absent = self.plan(directories=[self.mealie, self.recipes])
+        self.assertEqual((names, absent), (["mealie"], []))
+
+    def test_a_folder_in_the_backup_that_does_not_exist_yet_is_noted(self):
+        names, absent = self.plan(("/data/mealie", "/data/mealie-recipes"), [self.mealie, self.recipes])
+        self.assertEqual((names, absent), (["mealie", "mealie-recipes"], ["mealie-recipes"]))
 
     def test_a_linked_data_folder_is_refused(self):
         shutil.rmtree(self.mealie)
@@ -376,22 +365,6 @@ class StagedRestoreTests(KopiaTests):
         with self.assertRaisesRegex(BackupError, "is a link"):
             self.plan()
 
-    def test_a_failed_staging_leaves_the_live_data_untouched(self):
-        plan = self.plan()
-        with self.docker({"snapshot restore": (1, "no space left on device")}), self.assertRaises(BackupError):
-            backups.stage("mealie", plan, lambda _l: None, self.plans.append, paths=self.paths)
-        self.assertEqual([path.name for path in self.mealie.iterdir()], ["old.db"])
 
-    def test_an_interrupted_swap_finishes_or_undoes_the_same_way_every_time(self):
-        plan = self.plan()
-        with self.docker({}):
-            plan = backups.stage("mealie", plan, lambda _l: None, self.plans.append, paths=self.paths)
-        # Stopped between the two renames: the live folder is aside, the new one not yet in place.
-        os.rename(self.mealie, self.paths.data / ".mealie.mu3lab-previous-test-tag")
-        swapped = backups.swap(plan, self.plans.append, paths=self.paths)
-        self.assertEqual([path.name for path in self.mealie.iterdir()], ["new.db"])
-        backups.undo(swapped, self.plans.append, paths=self.paths)
-        self.assertEqual([path.name for path in self.mealie.iterdir()], ["old.db"])
-        backups.undo(swapped, self.plans.append, paths=self.paths)  # repeating changes nothing
-        self.assertEqual([path.name for path in self.mealie.iterdir()], ["old.db"])
-        self.assertEqual(self.plans[-1]["roots"], {"mealie": "undone"})
+if __name__ == "__main__":
+    unittest.main()

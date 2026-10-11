@@ -48,7 +48,7 @@ MARKER = "rebuild.json"
 STARTED = "rebuild-started.json"
 REPOSITORY_FILE = "kopia.repository.f"
 ACTOR = "rebuild"
-# Folders inside the ``mu3lab`` backup (see platform_backup._back_up_platform).
+# Folders inside the ``mu3lab`` backup (see ctl.backup_service.sources).
 CONTROL, PROJECTS = "control", "projects"
 
 
@@ -182,13 +182,19 @@ def _kopia(args: list[str], password: str, log: Log, paths: RuntimePaths, **kwar
 
 
 def latest_backups(listing: list[dict]) -> dict[str, dict]:
-    """The newest backup of each source, by its ``app`` tag."""
+    """The newest backup of each source (``/data/<app>``).
+
+    Backups an update made carry ``app`` and ``folders`` tags; those Kopia's
+    backup service made carry none, so their folders are read from the
+    backup itself once chosen (``folders`` is then empty here).
+    """
     newest: dict[str, dict] = {}
     for item in listing:
         tags = item.get("tags") or {}
-        app = str(tags.get("tag:app") or "")
+        path = str((item.get("source") or {}).get("path") or "")
+        app = str(tags.get("tag:app") or (path.removeprefix("/data/") if path.startswith("/data/") else ""))
         folders = [name for name in str(tags.get("tag:folders") or "").split("+") if name]
-        if not app or not folders or not backups._NAME.fullmatch(app):
+        if not app or not backups._NAME.fullmatch(app) or (tags and not folders):
             continue
         entry = {"id": str(item.get("id", "")), "time": str(item.get("startTime", "")), "folders": folders}
         if app not in newest or entry["time"] > newest[app]["time"]:
@@ -209,6 +215,12 @@ def _open(password: str, paths: RuntimePaths, log: Log) -> dict[str, dict]:
         raise RebuildError(f"The backups could not be opened: {exc}") from exc
     listing = backups._json(_kopia(["snapshot", "list", "--all", "--json"], password, log, paths), list) or []
     found = latest_backups(listing)
+    for entry in found.values():
+        if not entry["folders"]:
+            try:
+                entry["folders"] = backups.folders_in(entry["id"], log, paths, password=password)
+            except backups.BackupError as exc:
+                raise RebuildError(str(exc)) from exc
     if backups.PLATFORM_SOURCE not in found:
         raise RebuildError(
             "These backups hold no backup of Mu3Lab itself, so the old settings and passwords cannot come back. "

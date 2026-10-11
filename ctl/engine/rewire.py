@@ -8,8 +8,9 @@ generated file actually changed. A consumer's failure is logged and never
 undoes the provider's own install or removal.
 
 Each consumer is re-wired under its own app lock, so it never changes while
-another job works on it, and a consumer waiting for recovery after a failed
-update or restore is left alone until a person settles it.
+another job works on it. A consumer whose restore or update was interrupted is
+left alone until a person settles it, and one stopped for its backup is left
+until the backup is done.
 """
 
 from __future__ import annotations
@@ -88,11 +89,11 @@ def rewire_consumers(provider: App, catalog: Catalog, log: Log, paths: RuntimePa
     paths = paths or RuntimePaths()
     facts = Facts(tailnet_dns_name(), paths, catalog)
     restarted: list[str] = []
-    from ctl.operations import OperationStore
+    from ctl import backup_service
+    from ctl.lifecycle import in_progress
 
-    journal = OperationStore.runtime(paths)
     for app in consumers(provider, catalog, paths):
-        if journal and journal.needing_attention(app.id):
+        if in_progress.get(app.id, paths) or backup_service.holding(app.id, paths):
             log(f"{app.manifest.name} needs attention first, so it was not updated for {provider.manifest.name}.")
             continue
         try:

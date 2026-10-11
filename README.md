@@ -285,11 +285,11 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 - [x] Encrypted local backups of catalog apps, with guided restore
 - [x] One-click updates to tested versions, with a backup first and automatic rollback
 - [x] Update Mu3Lab itself from the dashboard
-- [ ] Scheduled and off-device backups, and backups of the core platform
+- [ ] Off-device backups
 - [ ] More curated apps
 
 > [!NOTE]
-> Backups cover catalog apps and run when you ask (and before every update); they are not scheduled yet. The core platform, including your Authentik sign-in accounts, is not backed up yet, so also keep your own copy of `/srv/mu3lab/data`. Run `make pause` first and `make resume` afterwards, because a copy of a running database may not restore. They stop and start only Mu3Lab's containers.
+> Kopia backs up Mu3Lab itself, its core apps (including your Authentik sign-in accounts) and every installed app on the schedule you choose (weekly by default), into `/srv/mu3lab/backups/kopia` on this server. Backups are not copied to another computer yet, so also keep your own copy of that folder. See [docs/backup-recovery.md](docs/backup-recovery.md).
 
 ---
 

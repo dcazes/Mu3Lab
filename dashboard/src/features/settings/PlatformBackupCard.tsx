@@ -1,5 +1,5 @@
 import { Archive } from 'lucide-react';
-import { postJsonApi, type BackupProtection, type PlatformBackupStatus } from '../../api';
+import { postJsonApi, type BackupProtection, type BackupStarted, type PlatformBackupStatus } from '../../api';
 import { Button } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
 import { Card, Facts } from '../../components/Layout';
@@ -9,8 +9,6 @@ import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { RecoverySheetCard } from './RecoverySheetCard';
-
-const PLATFORM_JOB = 'mu3lab-platform';
 
 function state(protection: BackupProtection | null | undefined) {
   if (!protection) return <Badge>Not backed up</Badge>;
@@ -26,20 +24,23 @@ export function PlatformBackupCard() {
   const { data, refresh } = useDashboard();
   const { pending, run } = useAction();
   const { data: status, reload } = useApi<PlatformBackupStatus>('/api/v1/system/backups/platform');
-  const busy = data.jobs.jobs.some(
-    (job) => job.service_id === PLATFORM_JOB && ['queued', 'running'].includes(job.state),
-  );
+  // Kopia backs up one source at a time; while one core app is stopped for its backup, wait.
+  const busy = data.services.services.some((service) => service.backing_up);
   const backUp = async () => {
     if (
       !(await confirm({
         title: 'Back up Mu3Lab now?',
         description:
-          'Mu3Lab saves its own settings and secrets, then stops sign-in, the password vault and chat for a few minutes while their data is copied. They start again on their own.',
+          'Mu3Lab saves its own settings and secrets first. Then sign-in, the password vault and chat each stop for a moment while their data is copied, and start again on their own.',
         confirmLabel: 'Back up',
       }))
     )
       return;
-    await run('platform', () => postJsonApi('/api/v1/system/backups/platform', {}), 'Backing up Mu3Lab');
+    await run(
+      'platform',
+      () => postJsonApi<BackupStarted>('/api/v1/system/backups/platform', {}),
+      (result) => result.detail,
+    );
     void refresh();
     void reload();
   };

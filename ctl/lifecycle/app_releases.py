@@ -363,8 +363,15 @@ def pin(
 
 
 def download(images: dict[str, str], log: Callable[[str], None]) -> None:
-    """Pull every image of a release before anything is stopped. Raises RuntimeError."""
+    """Pull every image of a release not already here, before anything is stopped. Raises RuntimeError.
+
+    Images are pinned by digest, so one already present is exactly the one
+    needed: a restore then works offline, even after upstream removed it.
+    """
     for image in images.values():
+        present, _output = actions.docker_cmd(["docker", "image", "inspect", image], lambda _line: None, timeout=60)
+        if present == 0 and "@sha256:" in image:
+            continue
         rc, output = actions.docker_cmd(["docker", "pull", image], log, timeout=3600)
         if rc:
             raise RuntimeError(f"{image} could not be downloaded: {output[-300:]}")

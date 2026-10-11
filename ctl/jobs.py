@@ -309,6 +309,14 @@ class JobStore:
             claimed = conn.execute("SELECT * FROM jobs WHERE id = ?", (row["id"],)).fetchone()
         return dict(claimed) if claimed else None
 
+    def claims(self, job_id: str) -> int:
+        """How many times a worker claimed the job; more than one means an earlier worker died running it."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM audit WHERE job_id = ? AND event = 'job.claimed'", (job_id,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
     def heartbeat(self, job_id: str, worker_id: str, *, lease_seconds: int = 45, step_id: str = "") -> bool:
         now = _now()
         expires = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")

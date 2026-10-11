@@ -12,8 +12,13 @@ The dashboard sends authenticated, same-origin requests to `ctl/api/`. Python
 Pydantic models define requests and responses. `make api-schema` dumps OpenAPI
 and generates the dashboard's TypeScript models; CI checks both generated
 files. The API queues durable jobs rather than performing installations in a
-browser request. Jobs carry redacted progress and leased ownership so the
-worker can resume interrupted work safely.
+browser request. Jobs carry redacted progress and leased ownership. A job
+whose worker died is claimed again; a restore or update then fails as
+interrupted and the app waits for its owner (`ctl/lifecycle/in_progress.py`).
+
+Backups are made by Kopia's own server (`ctl/backup_service.py`): it runs the
+schedule and retention, and calls `/api/v1/backup-hooks/*` just before and
+after each source so the worker can stop and start that app.
 
 `ctl/engine/install.py` runs core and optional app installations through the
 same sequence: validate the plan and installing identity, render a private
@@ -65,8 +70,8 @@ Personal checklist changes merge by item on the server, so devices agree.
 ## Trust boundary
 
 The dashboard backend (`mu3lab-ctl`) and the worker (`mu3lab-worker`) are two
-processes for reliability, not for security. Jobs survive restarts, run one at
-a time and resume after a crash because the worker owns them. The split does
+processes for reliability, not for security. Jobs survive restarts and run one
+at a time because the worker owns them. The split does
 not limit what either process can do:
 
 - Both run as the same Linux user, from the same checkout, with the same

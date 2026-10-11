@@ -715,7 +715,7 @@
         "type": "object"
       },
       "BackupSchedule": {
-        "description": "When scheduled backups run, in this server's local time. Weekday: Monday is 0, Sunday 6.",
+        "description": "When Kopia's backup service runs backups, in this server's local time. Weekday: Monday is 0, Sunday 6.",
         "properties": {
           "frequency": {
             "enum": [
@@ -728,22 +728,23 @@
             "title": "Frequency",
             "type": "string"
           },
-          "last_run": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BackupScheduleRun"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "next_run_at": {
             "title": "Next Run At",
             "type": "string"
           },
           "ok": {
             "title": "Ok",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "service_running": {
+            "title": "Service Running",
             "type": "boolean"
           },
           "time": {
@@ -760,7 +761,9 @@
           "frequency",
           "weekday",
           "time",
-          "next_run_at"
+          "next_run_at",
+          "service_running",
+          "problems"
         ],
         "title": "BackupSchedule",
         "type": "object"
@@ -799,53 +802,13 @@
         "title": "BackupScheduleRequest",
         "type": "object"
       },
-      "BackupScheduleRun": {
-        "description": "How the last scheduled run went, from its jobs.",
-        "properties": {
-          "failed": {
-            "title": "Failed",
-            "type": "integer"
-          },
-          "finished": {
-            "title": "Finished",
-            "type": "integer"
-          },
-          "jobs": {
-            "title": "Jobs",
-            "type": "integer"
-          },
-          "problems": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Problems",
-            "type": "array"
-          },
-          "scheduled_for": {
-            "title": "Scheduled For",
-            "type": "string"
-          },
-          "skipped": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Skipped",
-            "type": "array"
-          }
-        },
-        "required": [
-          "scheduled_for",
-          "jobs",
-          "finished",
-          "failed",
-          "problems",
-          "skipped"
-        ],
-        "title": "BackupScheduleRun",
-        "type": "object"
-      },
       "BackupSnapshot": {
         "properties": {
+          "complete": {
+            "default": true,
+            "title": "Complete",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -858,21 +821,8 @@
             "type": "array"
           },
           "reason": {
-            "anyOf": [
-              {
-                "const": "manual",
-                "type": "string"
-              },
-              {
-                "const": "pre-update",
-                "type": "string"
-              },
-              {
-                "const": "pre-restore",
-                "type": "string"
-              }
-            ],
-            "title": "Reason"
+            "title": "Reason",
+            "type": "string"
           },
           "release_id": {
             "default": "",
@@ -901,6 +851,25 @@
           "paths"
         ],
         "title": "BackupSnapshot",
+        "type": "object"
+      },
+      "BackupStarted": {
+        "description": "Kopia's backup service was asked to back up now; progress shows on the app.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "detail"
+        ],
+        "title": "BackupStarted",
         "type": "object"
       },
       "BackupsResponse": {
@@ -4991,6 +4960,11 @@
             ],
             "title": "Auth"
           },
+          "backing_up": {
+            "default": false,
+            "title": "Backing Up",
+            "type": "boolean"
+          },
           "blocking_check": {
             "anyOf": [
               {
@@ -5354,10 +5328,10 @@
               "restart",
               "uninstall",
               "uninstall_delete_data",
-              "backup",
               "restore",
               "update",
-              "recover"
+              "recover",
+              "keep_update"
             ],
             "title": "Action",
             "type": "string"
@@ -5873,39 +5847,33 @@
         "type": "object"
       },
       "ServiceRecovery": {
-        "description": "An update or restore that could not be undone; the app waits for a person.",
+        "description": "A restore or update that was interrupted; nothing continues until a person chooses.",
         "properties": {
+          "can_keep": {
+            "default": false,
+            "title": "Can Keep",
+            "type": "boolean"
+          },
           "detail": {
             "title": "Detail",
             "type": "string"
           },
           "kind": {
             "enum": [
-              "backup",
               "restore",
               "update"
             ],
             "title": "Kind",
             "type": "string"
           },
-          "operation_id": {
-            "title": "Operation Id",
-            "type": "string"
-          },
           "since": {
             "title": "Since",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "title": "Snapshot Id",
             "type": "string"
           }
         },
         "required": [
-          "operation_id",
           "kind",
           "detail",
-          "snapshot_id",
           "since"
         ],
         "title": "ServiceRecovery",
@@ -14144,6 +14112,107 @@
         "tags": [
           "services"
         ]
+      },
+      "post": {
+        "description": "Ask Kopia's backup service to back the app up now, exactly as a scheduled run does.",
+        "operationId": "back_up_service_api_v1_services__service_id__backups_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Back Up Service",
+        "tags": [
+          "services"
+        ]
       }
     },
     "/api/v1/services/{service_id}/configuration": {
@@ -15144,14 +15213,14 @@
         ]
       },
       "post": {
-        "description": "Queue a backup of Mu3Lab itself; core apps stop for a few minutes while their data is saved.",
+        "description": "Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time.",
         "operationId": "start_platform_backup_api_v1_system_backups_platform_post",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
+                  "$ref": "#/components/schemas/BackupStarted"
                 }
               }
             },
@@ -15328,7 +15397,7 @@
     },
     "/api/v1/system/backups/schedule": {
       "get": {
-        "description": "When scheduled backups run, the next run, and how the last one went.",
+        "description": "When scheduled backups run, Kopia's next run, and what did not finish.",
         "operationId": "backup_schedule_status_api_v1_system_backups_schedule_get",
         "responses": {
           "200": {

@@ -16,7 +16,7 @@ from ctl.engine.rewire import rewire_consumers
 from ctl.jobs import JobStore
 from ctl.lifecycle import maintenance
 from ctl.lifecycle.health import wait_healthy
-from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
+from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
 from ctl.lifecycle.uninstall import uninstall_application
 from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import sync_application
@@ -35,10 +35,12 @@ SUPPORTED_ACTIONS = frozenset(
         "reset",
         "uninstall",
         "uninstall_delete_data",
-        "backup",
         "restore",
         "update",
         "recover",
+        "keep_update",
+        "backup_stop",
+        "backup_start",
     }
 )
 UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})
@@ -192,7 +194,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
     if action in UNINSTALL_ACTIONS:
         _uninstall(store, state, job, service, registry, actor, root)
         return
-    if action in MAINTENANCE_ACTIONS:
+    if action in MAINTENANCE_ACTIONS | BACKUP_ACTIONS:
         maintenance.execute(store, state, job, service, root)
         return
     if action == "reset":

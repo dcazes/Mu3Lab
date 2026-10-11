@@ -1,20 +1,36 @@
 # Backups and recovery
 
-Mu3Lab backs up each installed catalog app's data with [Kopia](https://kopia.io), into an encrypted repository on this server. You restore an app from its **Backups** card in the dashboard; Mu3Lab stops the app, unpacks the backup beside the current data, swaps it in, and puts the old data back if the app does not start.
+Mu3Lab backs up its own state and each app's data with [Kopia](https://kopia.io), into an encrypted repository on this server. Kopia's own server (the **Kopia backups** app) does the whole job: it runs the schedule, keeps old backups by its retention rules and reclaims space. Mu3Lab only stops each app just before its backup and starts it again just after, so databases are copied consistently.
 
-This page is for the cases the dashboard cannot handle: restoring by hand, and backups made before Mu3Lab switched to Kopia. It also explains the recovery sheet, the one thing you must keep somewhere other than this server.
+You restore an app from its **Backups** card in the dashboard. This page is for the cases the dashboard cannot handle, such as restoring by hand. It also explains the recovery sheet, the one thing you must keep somewhere other than this server.
 
 ## When backups run
 
-**Security & backups → Backup schedule** sets how often Mu3Lab backs up everything on its own: off, every 6 hours, every 12 hours, daily, or weekly (the default, Sunday at 03:30), in this server's local time. A run backs up Mu3Lab itself and its core apps first (sign-in, the password vault and chat pause for a few minutes), then each installed app one at a time. Apps that are being installed or changed, or whose last change needs attention, are skipped and listed. Mu3Lab also backs up an app before every update and restore, whatever the schedule.
+**Security & backups → Backup schedule** sets how often Kopia backs up everything: off, every 6 hours, every 12 hours, daily, or weekly (the default, Sunday at 03:30), in this server's local time. Mu3Lab writes the choice into Kopia's policy within a minute.
 
-If the server was off at the scheduled time, the run starts about ten minutes after it is back on. Changing the schedule never starts a backup straight away.
+A run backs up one source at a time: Mu3Lab's own settings and secrets, each core app (sign-in, the password vault, chat) and each installed app. Each app is stopped only for its own backup, usually a few seconds to a minute. An app that is busy with another task, or whose last restore or update was interrupted, is skipped that time and listed under the schedule. Mu3Lab also backs up an app itself just before every update.
 
-Home tells administrators when backups fall behind: when Mu3Lab's own newest backup is older than the schedule allows (its interval plus 12 hours; a week when scheduled backups are off), when it has never been backed up once the first scheduled run was due, or when the last scheduled run had a failed backup. Each note links to Security & backups. Mu3Lab's own backup is the measure because an app's backup cannot be restored onto a new computer without it.
+If the server was off at the scheduled time, Kopia runs the missed backup once it is back on. **Back up now** on an app's Backups card, or under *Mu3Lab itself*, asks Kopia for the same backup straight away.
+
+Kopia keeps the newest 10 backups of each source, plus one a day for a week, one a week for 4 weeks and one a month for a year. Once a week Mu3Lab also reads back 5% of the stored data to catch disk damage early.
+
+Home tells administrators when backups fall behind: when Mu3Lab's own newest backup is older than the schedule allows (its interval plus 12 hours; a week when scheduled backups are off), when it has never been backed up, or when a backup did not finish last time. Mu3Lab's own backup is the measure because an app's backup cannot be restored onto a new computer without it.
+
+## Restoring an app
+
+On the app's **Backups** card, choose **Restore…** and type the app's name.
+
+1. Kopia unpacks the backup beside the current data while the app keeps running.
+2. The app stops, its current data folder is set aside, and the restored one takes its place. A backup from an older version also brings that version back.
+3. The app starts and must pass its health check. Then the data set aside is deleted.
+
+If anything in steps 2–3 fails, Mu3Lab puts the data from before back, starts the app, and the card says **The restore did not work, so the data was put back as it was**, with **Retry**.
+
+If the computer loses power or crashes in the middle, nothing continues by itself. The app shows **Needs attention: a restore was interrupted**, and nothing else runs on it until you press **Put my original data back**. After that you can restore again. An interrupted update offers **Undo update** or, if the new version was already in place, **Keep new version**.
 
 ## Browsing backups and restoring single files
 
-Administrators can open **Security & backups → Open backups** (Kopia's own web page, behind Authentik; Mu3Lab signs in to Kopia for you). It shows every backup Mu3Lab has made. Restore a single file or folder into `/srv/mu3lab/backups/restores/`, then copy it where you need it. The page is read-only: the repository is mounted read-only and Kopia connects read-only, so it cannot change, add or remove a backup. To roll back a whole app, use that app's **Backups** card instead; it stops the app first.
+Administrators can open **Security & backups → Open backups** (Kopia's own web page, behind Authentik; Mu3Lab signs in to Kopia for you). It shows every backup. Restore a single file or folder into `/srv/mu3lab/backups/restores/`, then copy it where you need it. This is the same Kopia server that makes the backups, so an administrator can also delete a backup there; only do that on purpose. To roll back a whole app, use that app's **Backups** card instead; it stops the app first.
 
 ## The backup password and the recovery sheet
 
@@ -69,12 +85,11 @@ If the rebuild stops halfway, a plain `./install.sh` refuses to continue with ha
 | What | Where |
 |---|---|
 | Kopia repository (encrypted backups) | `/srv/mu3lab/backups/kopia/` |
-| Kopia's connection settings and cache on this server | `/srv/mu3lab/state/kopia/` |
+| Kopia's connection settings and cache on this server | `/srv/mu3lab/state/kopia/` (Mu3Lab's own commands) and `/srv/mu3lab/state/kopia-server/` (the backup service's cache) |
 | Repository password | Mu3Lab's encrypted secret store (`platform` / `backup-password`), the printed recovery sheet, and each administrator's vault |
 | Files restored from the backup browser | `/srv/mu3lab/backups/restores/` |
-| Older restic backups (before the switch) | `/srv/mu3lab/backups/` (the `config`, `data`, `index`, `keys`, `locks` and `snapshots` entries) |
 
-Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|scheduled|pre-update|pre-restore|platform>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`.
+Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab`; an app's source is `/data/<app>`, with one folder per data folder, and Mu3Lab's own is `/data/mu3lab` (`control` and `projects`). Backups an update makes are tagged `app:<id>`, `reason:pre-update`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`. Older backups may carry other reasons (`manual`, `scheduled`, `pre-restore`, `platform`).
 
 ## Restoring by hand with Kopia
 
@@ -97,19 +112,3 @@ snapshot restore <snapshot-id>/<folder> /data/.<folder>.manual-restore
 ```
 
 Kopia gives the restored folder its original owner and permissions. Rename the live folder aside, rename the restored one into place, start the app, and delete the old folder only once the app works.
-
-## Backups made before the switch (restic)
-
-Mu3Lab used restic until 2026-10-08. That repository is **never modified or deleted** by Mu3Lab, and Mu3Lab no longer lists it. The dashboard's **Security & backups** page says so while it exists. Its password is the same repository password as above.
-
-To restore from it by hand, use the restic image Mu3Lab pinned before the switch:
-
-```bash
-docker run --rm -it --network none -e RESTIC_PASSWORD \
-  -v /srv/mu3lab/backups:/repo -v /srv/mu3lab/data:/data \
-  docker.io/restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510 \
-  -r /repo snapshots --tag app:<app>
-# then: … restore <snapshot-id>:/data/<folder> --target /data/.<folder>.manual-restore
-```
-
-Once your Kopia backups are working, you may delete the restic entries in `/srv/mu3lab/backups/` yourself. Leave `backups/kopia/` alone.
