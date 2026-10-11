@@ -71,7 +71,6 @@ env:
   FEATURE_FLAGS: '-provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage'
   AUTH_DISABLE_EMAIL_PASSWORD: '1'
   OPENAI_PROXY_URL: http://litellm:4000/v1
-  OPENAI_MODEL_LIST: -all,+mu3lab-chat
   LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
 rules:
 - rule: hide_model_providers

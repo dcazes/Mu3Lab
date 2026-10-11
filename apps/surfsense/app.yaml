@@ -54,7 +54,7 @@ secrets:
 env:
   AUTH_TYPE: LOCAL
   SANDBOX_ENABLED: 'FALSE'
-  EMBEDDING_MODEL: litellm://ollama/nomic-embed-text
+  EMBEDDING_MODEL: litellm://ollama/{{embedding_model}}
   EMBEDDING_BASE_URL: http://ollama:11434
   EMBEDDING_API_BASE_URL: http://ollama:11434
   SURFSENSE_PUBLIC_URL: '{{public_url}}'
@@ -69,7 +69,8 @@ rules:
   with:
     runner: ollama
     pull_command: [ollama, pull]
-    model: nomic-embed-text
+    # SurfSense sizes its search index for one model when it is installed.
+    index_tied: true
 chat:
   assistant:
     title: SurfSense

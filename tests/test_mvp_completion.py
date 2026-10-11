@@ -59,7 +59,7 @@ class RegistryAccountTests(unittest.TestCase):
             ):
                 target = materialize(load().get("surfsense"), source)
             values = read_runtime_env(target / ".env")
-            self.assertEqual(values["EMBEDDING_MODEL"], "litellm://ollama/nomic-embed-text")
+            self.assertEqual(values["EMBEDDING_MODEL"], "litellm://ollama/bge-m3:567m")  # the default search model
             self.assertEqual(values["EMBEDDING_BASE_URL"], "http://ollama:11434")
             self.assertEqual(values["SANDBOX_ENABLED"], "FALSE")
 

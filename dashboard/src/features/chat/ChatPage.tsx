@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { postApi } from '../../api/client';
 import { ExternalButton, LinkButton } from '../../components/Button';
 import { EmptyState } from '../../components/Layout';
-import type { ChatAssistant } from '../../api/models';
+import type { AiModels, ChatAssistant } from '../../api/models';
+import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 
 function expectedMcp(): { name: string; serviceId: string } | null {
@@ -31,6 +32,22 @@ function AssistantList({ assistants }: { assistants: ChatAssistant[] }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+/** Where messages go, said before anyone types (R31). */
+function WhereChatRuns() {
+  const { data } = useApi<AiModels>('/api/v1/ai/models');
+  if (!data) return null;
+  const local = data.chat_models.find((model) => model.id === data.settings.chat_model);
+  return (
+    <div className="chat-banner" role="status">
+      {data.settings.privacy === 'local_only'
+        ? `Local only: every chat runs on this server${local ? ` with ${local.name}` : ''}.`
+        : local
+          ? `“Mu3Lab chat” sends messages to outside AI providers. Choose “${local.name} (private, on this server)” to keep a chat here.`
+          : '“Mu3Lab chat” sends messages, and anything an assistant includes, to outside AI providers.'}
+    </div>
   );
 }
 
@@ -119,6 +136,7 @@ export function ChatPage() {
           {message}
         </div>
       )}
+      <WhereChatRuns />
       <AssistantList assistants={status.assistants || []} />
       {expected && (
         <div className="chat-banner" role="status">

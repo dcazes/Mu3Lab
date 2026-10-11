@@ -11,6 +11,7 @@ import {
   type ProviderMetadata,
   type ProviderMetadataResponse,
   type ProviderSetupProgress,
+  type AiModels,
 } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton } from '../../components/Button';
@@ -24,6 +25,7 @@ import { isRunning, stateLabel } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { AiModelsCard } from './AiModelsCard';
 import { detectProvider, keyWarning } from './providerKeys';
 
 const ROUTE = [
@@ -480,6 +482,8 @@ export function AiSettings() {
   const confirm = useConfirm();
   const { run } = useAction();
   const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', { interval: 5000 });
+  const models = useApi<AiModels>('/api/v1/ai/models', { interval: 15000 });
+  const localOnly = models.data?.settings.privacy === 'local_only';
   const catalog = useApi<{ providers: ProviderCatalogItem[] }>('/api/v1/providers/catalog');
   const [dialog, setDialog] = useState<{ id: string } | null>(null);
   const list = providers.data?.providers || [];
@@ -510,12 +514,18 @@ export function AiSettings() {
   return (
     <>
       <PageHeader
-        title="AI providers"
-        description="Connect the model providers you want chat to use. Free tiers are never guaranteed."
+        title="AI"
+        description="Choose where AI runs, and connect the outside model providers chat may use. Free tiers are never guaranteed."
       />
       {!isAdmin && (
         <Callout title="Only an administrator can change AI providers">
           You can see which providers chat uses. Ask an administrator to connect or change one.
+        </Callout>
+      )}
+      <AiModelsCard readOnly={!isAdmin} />
+      {localOnly && (
+        <Callout tone="info" title="Local only is on">
+          Saved provider keys are kept but not used or checked until outside providers are allowed again.
         </Callout>
       )}
       <Card title="Connected providers" flush>

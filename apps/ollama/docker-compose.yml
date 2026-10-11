@@ -7,10 +7,12 @@ services:
     ports: ["127.0.0.1:11434:11434"]
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
-      # Ollama only serves the small embedding model; free the GPU for speech
-      # and images after ten idle minutes.
+      # The search model and, if the owner chose one, a local chat model
+      # (Settings, AI models). Both may stay loaded so search inside a chat
+      # does not reload the chat model; free the GPU for speech and images
+      # after ten idle minutes.
       OLLAMA_KEEP_ALIVE: 10m
-      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_LOADED_MODELS: "2"
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/ollama:/root/.ollama
     networks: [mu3lab_frontend, mu3lab_backend]

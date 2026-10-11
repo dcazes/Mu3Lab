@@ -22,6 +22,7 @@ from ctl.api.errors import (
     validation_error_handler,
 )
 from ctl.api.routes import (
+    ai_models,
     calendar,
     chat,
     identity,
@@ -102,6 +103,7 @@ def create_app(dist: Path = DIST) -> FastAPI:
         install_batches,
         jobs,
         providers,
+        ai_models,
         vault,
         calendar,
         mcp,

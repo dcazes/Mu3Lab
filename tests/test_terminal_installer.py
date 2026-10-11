@@ -235,13 +235,13 @@ class EmbeddingTests(unittest.TestCase):
         vector = {"data": [{"embedding": [0.1] * 768}]}
         answers = iter([(0, {}), (0, {}), (200, vector)])
         with patch.object(core_setup, "_http_json", side_effect=lambda *a, **k: next(answers)) as call:
-            self.assertTrue(core_setup._embedding_ok({}, sleep=lambda _s: None))
+            self.assertTrue(core_setup._embedding_ok({}, sleep=lambda _s: None, dimensions=768))
         self.assertEqual(call.call_count, 3)
         self.assertGreaterEqual(call.call_args.kwargs["timeout"], 60)
 
     def test_gives_up_after_its_attempts(self):
         with patch.object(core_setup, "_http_json", return_value=(500, {})):
-            self.assertFalse(core_setup._embedding_ok({}, sleep=lambda _s: None))
+            self.assertFalse(core_setup._embedding_ok({}, sleep=lambda _s: None, dimensions=768))
 
 
 class AccountQuestionTests(unittest.TestCase):

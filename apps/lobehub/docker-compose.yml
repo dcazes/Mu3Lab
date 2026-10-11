@@ -34,7 +34,8 @@ services:
       ENABLED_OPENAI: "1"
       OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
       OPENAI_PROXY_URL: http://litellm:4000/v1
-      OPENAI_MODEL_LIST: -all,+mu3lab-chat
+      # Mu3Lab chat, plus the private local model once one is chosen (hide_model_providers).
+      OPENAI_MODEL_LIST: ${OPENAI_MODEL_LIST:--all,+mu3lab-chat}
       DEFAULT_AGENT_CONFIG: model=mu3lab-chat;provider=openai
       FEATURE_FLAGS: -provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage
       ENABLE_AGENT_GATEWAY: "0"

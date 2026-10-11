@@ -19,7 +19,16 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ctl import access, backup_schedule, job_guard, platform_backup, rebuild, resource_locks, self_update
+from ctl import (
+    access,
+    backup_schedule,
+    job_guard,
+    local_models,
+    platform_backup,
+    rebuild,
+    resource_locks,
+    self_update,
+)
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.job_processes import JobProcesses
@@ -54,6 +63,8 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         self_update.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == platform_backup.SERVICE_ID:
         platform_backup.execute_claimed(store, job, worker_id, ROOT)
+    elif job.get("service_id") == local_models.SERVICE_ID:
+        local_models.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
         execute_mcp_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("provider:"):

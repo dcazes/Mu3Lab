@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions, process
+from ctl import actions, local_models, process
 from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
@@ -218,12 +218,13 @@ EMBEDDING_ATTEMPTS = 4
 EMBEDDING_TIMEOUT = 120
 
 
-def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep) -> bool:
+def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep, dimensions: int = 0) -> bool:
     """Ask for one embedding, allowing for the model's first load into memory.
 
     The first request after Ollama starts loads the model, which can take well
     over a minute on a CPU; a short timeout reported a healthy install as failed.
     """
+    dimensions = dimensions or local_models.embedding_model().dimensions
     for attempt in range(EMBEDDING_ATTEMPTS):
         status, embedding = _http_json(
             "http://127.0.0.1:4000/v1/embeddings",
@@ -238,7 +239,7 @@ def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep) -> bool:
         if (
             status == 200
             and isinstance(vector, list)
-            and len(vector) == 768
+            and len(vector) == dimensions
             and all(isinstance(value, (int, float)) for value in vector)
         ):
             return True
@@ -260,9 +261,13 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     lobehub = read_runtime_env(runtime.projects / by_capability("chat").id / ".env")
     if not all(lobehub.get(key) for key in ("AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", "APP_URL")):
         return False, "LobeChat's Authentik sign-in configuration is incomplete"
+    local = local_models.local_only(runtime)
     if not wiring["chat_configured"]:
+        if local:
+            return False, "Local only is on, but no local chat model is chosen"
         return False, "Waiting for at least one external inference-provider key"
-    if not _http_ok("http://127.0.0.1:3001/readyz"):
+    # Local only: chat goes to the local model and FreeLLMAPI holds no usable key, by design.
+    if not local and not _http_ok("http://127.0.0.1:3001/readyz"):
         return False, "FreeLLMAPI has no currently usable configured provider"
     headers = {"Authorization": f"Bearer {key}"}
     chat_payload = {
@@ -272,6 +277,11 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         "temperature": 0,
     }
     if not _chat_ok(chat_payload, headers):
+        if local:
+            return (
+                False,
+                f"The local chat model did not answer a short streamed chat through LiteLLM ({CHAT_ATTEMPTS} tries).",
+            )
         return False, (
             f"No AI provider answered a short streamed chat through LiteLLM and FreeLLMAPI ({CHAT_ATTEMPTS} tries). "
             "If your providers are working, run the check again in a few minutes."

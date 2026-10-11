@@ -7,7 +7,7 @@ group: ai
 category: ai
 tagline: Runs AI models on your server
 summary: Runs AI models and generates text embeddings on your server. Mu3Lab uses Ollama as an internal API for
-  local inference and document search; it has no browser interface.
+  document search and the optional private chat model chosen in Settings; it has no browser interface.
 version: v0.35.0
 upstream: ollama/ollama
 service:
@@ -17,7 +17,7 @@ service:
   uses_gpu: true
 sign_in:
   method: none
-  note: Internal-only embedding runner (no chat models); no browser or MCP route.
+  note: Internal-only model runner (search model and the optional local chat model); no browser or MCP route.
 ui:
   available: false
   unavailable_reason: Ollama is an internal model and embedding API; it does not ship a browser UI.
@@ -31,5 +31,4 @@ rules:
   with:
     runner: ollama
     pull_command: [ollama, pull]
-    model: nomic-embed-text
     at: after_healthy

@@ -307,7 +307,6 @@ class SpeechRoutingTests(unittest.TestCase):
             "master_key_env": "M",
             "api_base_env": "A",
             "runner_api_base_env": "R",
-            "embedding_model": "e",
             "embedding_provider": "ollama",
             "speech_url_env": "MU3LAB_SPEECH_URL",
         }

@@ -674,6 +674,49 @@ class BackupSchedule(ApiModel):
     last_run: BackupScheduleRun | None = None
 
 
+AiPrivacy = Literal["outside_allowed", "local_only"]
+
+
+class LocalModel(ApiModel):
+    """One reviewed local model. Sizes are Ollama's download sizes; memory is an estimate."""
+
+    id: str
+    name: str
+    tag: str
+    download_gb: float
+    memory_gb: float
+    note: str
+    dimensions: int
+    downloaded: bool
+
+
+class AiModelSettings(ApiModel):
+    privacy: AiPrivacy
+    chat_model: str
+    embedding_model: str
+    changed_at: str
+    changed_by: str
+
+
+class AiModels(ApiModel):
+    """Where AI requests may go, the local chat model and the search (embedding) model."""
+
+    ok: bool
+    settings: AiModelSettings
+    chat_models: list[LocalModel]
+    embedding_models: list[LocalModel]
+    runner_reachable: bool
+    # Installed apps whose search index blocks changing the embedding model.
+    embedding_locked_by: list[str]
+    active_job_id: str
+
+
+class AiModelsRequest(ApiModel):
+    privacy: AiPrivacy
+    chat_model: str = Field(default="", max_length=64)
+    embedding_model: str = Field(max_length=64)
+
+
 class RecoverySheet(ApiModel):
     """What a new computer needs to open the backups. Sent once, never cached."""
 

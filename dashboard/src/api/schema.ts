@@ -19,6 +19,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/models': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Ai Models
+     * @description Everyone may see where AI requests go; only administrators change it.
+     */
+    get: operations['ai_models_api_v1_ai_models_get'];
+    /**
+     * Change Ai Models
+     * @description Queue the change: models download and are checked before anything is switched over.
+     */
+    put: operations['change_ai_models_api_v1_ai_models_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/app-sizes': {
     parameters: {
       query?: never;
@@ -1501,6 +1525,56 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AiModelSettings */
+    AiModelSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Chat Model */
+      chat_model: string;
+      /** Embedding Model */
+      embedding_model: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
+    };
+    /**
+     * AiModels
+     * @description Where AI requests may go, the local chat model and the search (embedding) model.
+     */
+    AiModels: {
+      /** Active Job Id */
+      active_job_id: string;
+      /** Chat Models */
+      chat_models: components['schemas']['LocalModel'][];
+      /** Embedding Locked By */
+      embedding_locked_by: string[];
+      /** Embedding Models */
+      embedding_models: components['schemas']['LocalModel'][];
+      /** Ok */
+      ok: boolean;
+      /** Runner Reachable */
+      runner_reachable: boolean;
+      settings: components['schemas']['AiModelSettings'];
+    };
+    /** AiModelsRequest */
+    AiModelsRequest: {
+      /**
+       * Chat Model
+       * @default
+       */
+      chat_model?: string;
+      /** Embedding Model */
+      embedding_model: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
+    };
     /** ApiErrorResponse */
     ApiErrorResponse: {
       /** Blocking Job Id */
@@ -2397,6 +2471,28 @@ export interface components {
       ok: boolean;
     };
     JsonValue: unknown;
+    /**
+     * LocalModel
+     * @description One reviewed local model. Sizes are Ollama's download sizes; memory is an estimate.
+     */
+    LocalModel: {
+      /** Dimensions */
+      dimensions: number;
+      /** Download Gb */
+      download_gb: number;
+      /** Downloaded */
+      downloaded: boolean;
+      /** Id */
+      id: string;
+      /** Memory Gb */
+      memory_gb: number;
+      /** Name */
+      name: string;
+      /** Note */
+      note: string;
+      /** Tag */
+      tag: string;
+    };
     /** McpActivityResponse */
     McpActivityResponse: {
       /** Calls */
@@ -3646,6 +3742,176 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['Health'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  ai_models_api_v1_ai_models_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AiModels'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_ai_models_api_v1_ai_models_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiModelsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */

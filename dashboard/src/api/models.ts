@@ -1,5 +1,8 @@
 import type { components } from './schema';
 
+export type AiModelSettings = components['schemas']['AiModelSettings'];
+export type AiModels = components['schemas']['AiModels'];
+export type AiModelsRequest = components['schemas']['AiModelsRequest'];
 export type ApiErrorResponse = components['schemas']['ApiErrorResponse'];
 export type AppSize = components['schemas']['AppSize'];
 export type AppSizesResponse = components['schemas']['AppSizesResponse'];
@@ -61,6 +64,7 @@ export type JobEventsResponse = components['schemas']['JobEventsResponse'];
 export type JobResponse = components['schemas']['JobResponse'];
 export type JobsResponse = components['schemas']['JobsResponse'];
 export type JsonValue = components['schemas']['JsonValue'];
+export type LocalModel = components['schemas']['LocalModel'];
 export type McpActivityResponse = components['schemas']['McpActivityResponse'];
 export type McpCall = components['schemas']['McpCall'];
 export type McpCategory = components['schemas']['McpCategory'];

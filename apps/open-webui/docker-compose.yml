@@ -28,7 +28,7 @@ services:
       OAUTH_ADMIN_ROLES: mu3lab-operators
       OAUTH_ALLOWED_ROLES: mu3lab-users,mu3lab-operators
       DEFAULT_USER_ROLE: user
-      # Models come only from LiteLLM; Ollama holds no chat models.
+      # Models come only from LiteLLM, which also routes the local model (mu3lab-local) and local only.
       ENABLE_OLLAMA_API: "false"
       OPENAI_API_BASE_URL: http://litellm:4000/v1
       OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}

@@ -9,7 +9,7 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
-  { id: 'ai', label: 'AI providers', icon: Bot },
+  { id: 'ai', label: 'AI', icon: Bot },
   { id: 'integrations', label: 'Chat integrations', icon: Plug },
   { id: 'sign-in', label: 'Sign-in', icon: KeyRound },
   { id: 'calendar', label: 'Calendar', icon: CalendarDays },

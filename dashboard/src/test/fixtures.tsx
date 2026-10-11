@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
-import type { Service, ServiceIdentity } from '../api';
+import type { AiModels, LocalModel, Service, ServiceIdentity } from '../api';
 import { ConfirmProvider } from '../components/Dialog';
 import { type DashboardData, DashboardProvider, emptyData } from '../state/dashboard';
 
@@ -99,4 +99,39 @@ export function stubFetch(handler: Handler) {
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
+}
+
+/** The AI model settings as the server reports them: outside providers allowed, nothing local chosen. */
+export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides: Partial<AiModels> = {}): AiModels {
+  const model = (id: string, name: string, extra: Partial<LocalModel> = {}): LocalModel => ({
+    id,
+    name,
+    tag: `${id}:tag`,
+    download_gb: 3.3,
+    memory_gb: 5,
+    note: `${name} note.`,
+    dimensions: 0,
+    downloaded: false,
+    ...extra,
+  });
+  return {
+    ok: true,
+    settings: {
+      privacy: 'outside_allowed',
+      chat_model: '',
+      embedding_model: 'bge-m3',
+      changed_at: '',
+      changed_by: '',
+      ...settings,
+    },
+    chat_models: [model('qwen3.5-4b', 'Qwen 3.5 4B'), model('qwen3-8b', 'Qwen3 8B', { downloaded: true })],
+    embedding_models: [
+      model('bge-m3', 'BGE-M3', { dimensions: 1024, downloaded: true }),
+      model('nomic-embed-text', 'Nomic Embed Text', { dimensions: 768 }),
+    ],
+    runner_reachable: true,
+    embedding_locked_by: [],
+    active_job_id: '',
+    ...overrides,
+  };
 }

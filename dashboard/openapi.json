@@ -1,6 +1,124 @@
 {
   "components": {
     "schemas": {
+      "AiModelSettings": {
+        "properties": {
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "string"
+          },
+          "chat_model": {
+            "title": "Chat Model",
+            "type": "string"
+          },
+          "embedding_model": {
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "outside_allowed",
+              "local_only"
+            ],
+            "title": "Privacy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "privacy",
+          "chat_model",
+          "embedding_model",
+          "changed_at",
+          "changed_by"
+        ],
+        "title": "AiModelSettings",
+        "type": "object"
+      },
+      "AiModels": {
+        "description": "Where AI requests may go, the local chat model and the search (embedding) model.",
+        "properties": {
+          "active_job_id": {
+            "title": "Active Job Id",
+            "type": "string"
+          },
+          "chat_models": {
+            "items": {
+              "$ref": "#/components/schemas/LocalModel"
+            },
+            "title": "Chat Models",
+            "type": "array"
+          },
+          "embedding_locked_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Embedding Locked By",
+            "type": "array"
+          },
+          "embedding_models": {
+            "items": {
+              "$ref": "#/components/schemas/LocalModel"
+            },
+            "title": "Embedding Models",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "runner_reachable": {
+            "title": "Runner Reachable",
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AiModelSettings"
+          }
+        },
+        "required": [
+          "ok",
+          "settings",
+          "chat_models",
+          "embedding_models",
+          "runner_reachable",
+          "embedding_locked_by",
+          "active_job_id"
+        ],
+        "title": "AiModels",
+        "type": "object"
+      },
+      "AiModelsRequest": {
+        "properties": {
+          "chat_model": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Chat Model",
+            "type": "string"
+          },
+          "embedding_model": {
+            "maxLength": 64,
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "outside_allowed",
+              "local_only"
+            ],
+            "title": "Privacy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "privacy",
+          "embedding_model"
+        ],
+        "title": "AiModelsRequest",
+        "type": "object"
+      },
       "ApiErrorResponse": {
         "properties": {
           "blocking_job_id": {
@@ -2716,6 +2834,55 @@
         "type": "object"
       },
       "JsonValue": {},
+      "LocalModel": {
+        "description": "One reviewed local model. Sizes are Ollama's download sizes; memory is an estimate.",
+        "properties": {
+          "dimensions": {
+            "title": "Dimensions",
+            "type": "integer"
+          },
+          "download_gb": {
+            "title": "Download Gb",
+            "type": "number"
+          },
+          "downloaded": {
+            "title": "Downloaded",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "memory_gb": {
+            "title": "Memory Gb",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tag",
+          "download_gb",
+          "memory_gb",
+          "note",
+          "dimensions",
+          "downloaded"
+        ],
+        "title": "LocalModel",
+        "type": "object"
+      },
       "McpActivityResponse": {
         "properties": {
           "calls": {
@@ -6852,6 +7019,198 @@
         "summary": "Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/ai/models": {
+      "get": {
+        "description": "Everyone may see where AI requests go; only administrators change it.",
+        "operationId": "ai_models_api_v1_ai_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ai Models",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "Queue the change: models download and are checked before anything is switched over.",
+        "operationId": "change_ai_models_api_v1_ai_models_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Change Ai Models",
+        "tags": [
+          "ai"
         ]
       }
     },

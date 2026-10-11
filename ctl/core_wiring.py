@@ -10,6 +10,7 @@ from typing import Literal
 import yaml
 from pydantic import model_validator
 
+from ctl import local_models
 from ctl.app_settings import AppSettings
 from ctl.control_state import ControlState
 from ctl.manifest.catalog import App, Catalog, cached
@@ -30,7 +31,7 @@ class RoutingParams(Params):
     master_key_env: str = ""
     api_base_env: str = ""
     runner_api_base_env: str = ""
-    embedding_model: str = ""
+    # The embedding model itself is the owner's choice (ctl.local_models).
     embedding_provider: str = ""
     # Set by integrates_with when a speech app is installed; empty otherwise.
     speech_url_env: str = ""
@@ -52,7 +53,6 @@ class RoutingParams(Params):
                 "master_key_env",
                 "api_base_env",
                 "runner_api_base_env",
-                "embedding_model",
                 "embedding_provider",
             )
         )
@@ -84,8 +84,12 @@ def routing_projects(catalog: Catalog | None = None) -> list[RoutingProject]:
 
 def _provider_keys(paths: RuntimePaths) -> list[dict]:
     state = ControlState.runtime(paths)
+    # Local only: every provider key is switched off in the gateway, so nothing can go outside.
+    outside = not local_models.local_only(paths)
 
     def routable(provider_id: str) -> bool:
+        if not outside:
+            return False
         if state is None:
             return True
         connection = state.provider(provider_id)
@@ -152,25 +156,8 @@ def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog:
         AppSettings(app.id, paths).set_generated(
             {name: env[name] for name in (params.service_key_env, params.api_base_env, params.runner_api_base_env)}
         )
-        models = [
-            {
-                "model_name": name,
-                "litellm_params": {
-                    "model": model,
-                    "api_base": f"os.environ/{params.api_base_env}",
-                    "api_key": f"os.environ/{params.service_key_env}",
-                },
-            }
-            for name, model in (("mu3lab-chat", "openai/auto:smartest"), ("mu3lab-fast", "openai/auto:fastest"))
-        ]
-        models.append(
-            {
-                "model_name": "mu3lab-embed",
-                "litellm_params": {
-                    "model": f"{params.embedding_provider}/{params.embedding_model}",
-                    "api_base": f"os.environ/{params.runner_api_base_env}",
-                },
-            }
+        models = local_models.litellm_models(
+            params.api_base_env, params.service_key_env, params.runner_api_base_env, params.embedding_provider, paths
         )
         models.extend(speech_models(env, params))
         config = {
@@ -182,6 +169,8 @@ def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog:
         write_atomic(config_path, yaml.safe_dump(config, sort_keys=False).encode())
         write_atomic(env_path, runtime_env_text(env).encode())
     count = sum(1 for item in keys if item["enabled"])
+    if local_models.local_only(paths):
+        return {"provider_count": 0, "chat_configured": local_models.chat_model(paths) is not None}
     return {"provider_count": count, "chat_configured": bool(count)}
 
 

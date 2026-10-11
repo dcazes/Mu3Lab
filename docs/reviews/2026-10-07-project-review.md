@@ -198,7 +198,7 @@ Refactor incrementally around failing acceptance tests. Moving all files at once
 | [R28](#r28) | Specify transaction semantics and bound persistent history | P2 | S | M | R09 | open |
 | [R29](#r29) | Add adversarial integration, recovery, and browser gates | P1 | D | L | R01–R20 as relevant | open |
 | [R30](#r30) | Unify local/CI verification and strengthen release provenance | P2 | S | M | R25, R29 | open |
-| [R31](#r31) | Expose and enforce inference/data-destination policy | P1 | S/D | L | R03, R16 | open |
+| [R31](#r31) | Expose and enforce inference/data-destination policy | P1 | S/D | L | R03, R16 | implemented (household switch); release acceptance pending |
 | [R32](#r32) | Measure footprint and simplify first-use/recovery journeys | P2 | D | M | R14, R20, R31 | open |
 | [R33](#r33) | Reconcile documentation, promises, and expansion status | P1 | S | S | Immediate caveats; final wording follows fixes | in progress |
 | [R34](#r34) | Establish per-integration ownership and acceptance evidence | P2 | D | L | R25, R29 | open |
@@ -781,7 +781,7 @@ These should be small, independently reviewable changes. Full per-person approva
 - [x] **C2 implementation:** R06 bounded gateway and R07 revocation reconciliation ([record](2026-10-08-status-gateway-revocation-implementation.md)). Release acceptance remains pending.
 - [ ] **C3:** R14 Kopia/platform recovery/SFTP/offline recovery material ([record](2026-10-08-milestone-c3-kopia-engine.md)). Implemented as of 2026-10-09: the Kopia engine, platform and core-app backups, the recovery sheet with vault copies, the schedule setting, the read-only backup browser, and `./install.sh --restore`. Remaining: the SFTP off-site copy (deferred until the owner has a second machine), the Home "no recent backup" warning, and the new-host rebuild rehearsal (owner declined a VM for now).
 - [ ] **C4:** R17 self-update rollback (simple version done 2026-10-09). R18 remaining: correct the worker comment and document the real trust boundary; the owner deferred enforced isolation.
-- [ ] **C5:** R19 calendar sync (done 2026-10-09). R31 remaining: a single household switch between outside providers (the default) and local only, plus a reviewed list of local models. Being planned: whether Unsloth Studio is added as an optional interface or later replaces Ollama (its `/v1/embeddings` landed in main on 2026-09-06, with no tagged release confirmed yet).
+- [x] **C5 implementation:** R19 calendar sync (done 2026-10-09). R31 done 2026-10-10 as a single household switch (Settings, AI): outside providers allowed (the default) or local only. Local only leaves LiteLLM no route to the provider gateway and switches every provider key off, so chat fails rather than going outside. The local chat model and the search (embedding) model come from a reviewed list (`ctl/local_models.py`); BGE-M3 is the new default search model, and older installs keep the one their index was built with. Chat names and the chat page say where each model runs. Unsloth Studio is deferred; Ollama stays the engine. Live acceptance is pending.
 
 **Exit:** two-user isolation test, real approve/deny interaction, new-host restore, and published-release update drill pass. Product UI decisions still open in the existing expansion plan remain explicit decision items during implementation.
 

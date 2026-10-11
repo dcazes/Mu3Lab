@@ -60,6 +60,5 @@ rules:
     master_key_env: LITELLM_MASTER_KEY
     api_base_env: FREELLMAPI_API_BASE
     runner_api_base_env: OLLAMA_API_BASE
-    embedding_model: nomic-embed-text
     embedding_provider: ollama
     speech_url_env: MU3LAB_SPEECH_URL
