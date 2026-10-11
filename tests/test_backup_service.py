@@ -159,6 +159,19 @@ class HookTests(_Paths):
             backup_service.before("mealie", self.store, ROOT, self.paths)
         self.assertFalse(backup_service.holding("mealie", self.paths))
 
+    def test_a_stop_still_waiting_for_the_worker_leaves_the_start_to_the_stuck_app_check(self):
+        self.outcome = "failed"
+        real = backup_service._queue
+
+        def queue(store, source, action, detail, since):
+            if action == "backup_start":
+                raise JobConflict("resource_busy", "stop-job")
+            return real(store, source, action, detail, since)
+
+        with patch.object(backup_service, "_queue", side_effect=queue), self.assertRaises(backup_service.HookRefused):
+            backup_service.before("mealie", self.store, ROOT, self.paths)
+        self.assertTrue(backup_service.holding("mealie", self.paths))
+
     def test_unknown_sources_are_refused(self):
         for source in ("not-an-app", "kopia-ui"):
             with self.subTest(source=source), self.assertRaises(backup_service.HookRefused):

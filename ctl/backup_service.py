@@ -331,8 +331,11 @@ def before(source: str, store: JobStore, root: Path, paths: RuntimePaths | None 
                     f"Another task is running on {service.name}; its backup waits for the next run."
                 ) from None
             if job.get("state") != "succeeded":
-                _queue(store, source, "backup_start", f"Starting {service.name} again.", since)
-                records.delete(HOLDS, source, paths)
+                try:
+                    _queue(store, source, "backup_start", f"Starting {service.name} again.", since)
+                    records.delete(HOLDS, source, paths)
+                except JobConflict:
+                    pass  # the stop is still waiting for the worker; the stuck-app check starts it after
                 raise HookRefused(f"{service.name} could not be stopped for its backup: {job.get('detail', '')}")
         return f"{service.name} is ready to be saved."
     except HookRefused as refused:
@@ -352,7 +355,12 @@ def after(source: str, store: JobStore, root: Path, paths: RuntimePaths | None =
         return "Nothing to start again."
     detail = ""
     if hold.get("was_running"):
-        job = _queue(store, source, "backup_start", "Starting the app again after its backup.", str(hold["since"]))
+        try:
+            job = _queue(store, source, "backup_start", "Starting the app again after its backup.", str(hold["since"]))
+        except JobConflict:
+            # Another job holds the app; the stuck-app check starts it once that job is done.
+            _result(source, False, "It was not started again straight away; Mu3Lab retries shortly.", paths)
+            return "The app starts again shortly."
         if job.get("state") != "succeeded":
             detail = f"It did not start again: {job.get('detail', '')}"
     records.delete(HOLDS, source, paths)
