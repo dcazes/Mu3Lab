@@ -37,7 +37,7 @@ from ctl import actions, backups, job_guard
 from ctl.control_state import ControlState
 from ctl.engine.runtime import render_service
 from ctl.jobs import JobConflict, JobStore, job_params, redact
-from ctl.lifecycle import app_releases, deployments
+from ctl.lifecycle import app_releases, compose_settings, deployments
 from ctl.lifecycle.app_releases import Release
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.uninstall import data_directories
@@ -91,26 +91,28 @@ class _Run:
 
 
 def _stop(service: Service, project: Path, root: Path, log: Log) -> None:
-    from ctl.compute import compose_overrides
     from ctl.mcp_ops import sync_application
 
     if not sync_application(service.id, running=False, root=root, log=log):
         raise _Failed("stop_app", "mcp_stop_failed", f"A chat connector for {service.name} could not stop safely.")
-    rc, output = actions.compose_action(project, "stop", log, extra_files=compose_overrides(service.id, project))
+    try:
+        env, extra = compose_settings.settings(service, project)
+    except RuntimeError as exc:
+        raise _Failed("stop_app", "compose_failed", f"{service.name} could not be stopped: {exc}") from exc
+    rc, output = actions.compose_action(project, "stop", log, env=env, extra_files=extra)
     if rc:
         raise _Failed("stop_app", "compose_failed", f"{service.name} could not be stopped: {output[-300:]}")
 
 
 def _start(service: Service, project: Path, root: Path, log: Log) -> tuple[bool, str]:
-    from ctl.compute import compose_overrides
     from ctl.mcp_ops import sync_application
 
+    try:
+        env, extra = compose_settings.settings(service, project)
+    except RuntimeError as exc:
+        return False, str(exc)
     rc, output = actions.compose_up(
-        project,
-        log,
-        timeout=START_TIMEOUT + 300,
-        wait_timeout=START_TIMEOUT,
-        extra_files=compose_overrides(service.id, project),
+        project, log, timeout=START_TIMEOUT + 300, wait_timeout=START_TIMEOUT, env=env, extra_files=extra
     )
     if rc:
         return False, output[-500:]

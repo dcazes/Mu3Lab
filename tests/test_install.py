@@ -419,7 +419,10 @@ class AuthentikReadinessTests(unittest.TestCase):
             # fix_authentik imports secrets and the blueprint writer locally
             # to avoid bootstrap-time dependency cycles.
             patch("ctl.install.ensure_authentik_env", return_value=(env_file, [])),
-            patch("ctl.install.read_runtime_env", return_value={"AUTHENTIK_POSTGRESQL__PASSWORD": "test-db"}),
+            patch(
+                "ctl.lifecycle.compose_settings.read_runtime_env",
+                return_value={"AUTHENTIK_POSTGRESQL__PASSWORD": "test-db"},
+            ),
         ):
             result = install.fix_authentik({"state": "down"}, ctx)
         self.assertTrue(result["ok"])

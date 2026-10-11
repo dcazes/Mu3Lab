@@ -42,6 +42,7 @@ from ctl.bootstrap import stamps
 from ctl.engine.project import Facts, render
 from ctl.identity import gate_blueprint, sync_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError, password_hash
+from ctl.lifecycle import compose_settings
 from ctl.manifest.catalog import load as load_app_catalog
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
@@ -1127,13 +1128,8 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     )
     # Start from the rendered project, the folder the dashboard watches and controls.
     projdir = project
-    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data), "MU3LAB_VAULT_ENV_FILE": str(project / ".env")}
-    extra_files: list[Path] = []
     # Once Tailscale is joined, keep the private URL a restart or update would otherwise drop.
-    domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
-    if domain:
-        env["VAULTWARDEN_DOMAIN"] = domain
-        extra_files.append(projdir / "docker-compose.tailnet.yml")
+    env, extra_files = compose_settings.vault_env(projdir, _tailscale_dns_name_for_install())
     rc, out = actions.compose_up(projdir, log, env=env, extra_files=extra_files, on_output=compose_activity)
     log(out or f"(exit {rc})")
     if rc != 0:
@@ -1323,12 +1319,8 @@ def _authentik_compose_env(account: dict, log) -> dict[str, str]:
     )
     if added:
         log("generated Authentik runtime configuration: " + ", ".join(added))
-    generated = read_runtime_env(env_file)
-    return {
-        "AUTHENTIK_ENV_FILE": str(env_file),
-        "AUTHENTIK_POSTGRESQL__PASSWORD": generated["AUTHENTIK_POSTGRESQL__PASSWORD"],
-        "MU3LAB_DATA_ROOT": str(RuntimePaths().data),
-    }
+    # The same values every later start uses (backups, restores), so neither can drift.
+    return compose_settings.identity_env(env_file=env_file)
 
 
 def fix_authentik(check: dict, ctx: dict) -> dict:
@@ -1440,10 +1432,7 @@ def _tailscale_dns_name_for_install() -> str:
 
 def vaultwarden_tailnet_domain(dns_name: str) -> str:
     """Build Vaultwarden's final private URL, rejecting local/bare values."""
-    name = dns_name.rstrip(".")
-    if not re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name):
-        return ""
-    return f"https://{name}:{VAULTWARDEN_SERVE_PORT}"
+    return compose_settings.vault_domain(dns_name)
 
 
 def fix_authentik_setup(check: dict, ctx: dict) -> dict:
