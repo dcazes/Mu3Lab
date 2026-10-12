@@ -26,7 +26,7 @@ from ctl.engine.runtime import render_service
 from ctl.jobs import redact
 from ctl.lifecycle import app_control, app_releases, deployments, in_progress, restore
 from ctl.lifecycle.app_releases import Release
-from ctl.lifecycle.uninstall import data_directories
+from ctl.lifecycle.uninstall import backed_up, data_directories
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
@@ -117,7 +117,7 @@ def update(
             app_control.stop(service, root, log)
             saved = backups.snapshot(
                 service.id,
-                data_directories(service, root),
+                backed_up(service, data_directories(service, root)),
                 "pre-update",
                 log,
                 version=previous.version if previous else "",
@@ -168,7 +168,7 @@ def update(
 def _replace_data(service: Service, root: Path, snapshot_id: str, log: Log, paths: RuntimePaths) -> None:
     """Put the data from ``snapshot_id`` in place of the (stopped) app's data."""
     chosen = restore._chosen(service, snapshot_id, log, paths)
-    names, _absent = restore.plan(chosen, data_directories(service, root), paths)
+    names, _absent = restore.plan(chosen, backed_up(service, data_directories(service, root)), paths)
     restore._wipe(
         [restore.place(name, kind, paths) for name in names for kind in ("restoring", "original")], log, paths
     )

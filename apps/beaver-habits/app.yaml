@@ -4,7 +4,7 @@ capabilities: [habits]
 name: Beaver Habits
 tier: optional
 group: apps
-category: family
+category: home
 tagline: Daily habits and streaks
 summary: A simple daily habit tracker. Tick off habits each day, keep streaks, and see your consistency at a glance.
   Each household member has their own private list.

@@ -18,9 +18,10 @@ from ctl.engine.rewire import rewire_consumers
 from ctl.engine.runtime import render_rules
 from ctl.identity import installed, mode_for, sync_sign_in
 from ctl.image_downloads import ImageDownloadStore
+from ctl.install_batches import NAMESPACE as BATCH_NAMESPACE
 from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import app_releases
+from ctl.lifecycle import app_control, app_releases
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.signin_check import SignInError, verify_sign_in, wait_for_provider
 from ctl.lobehub_ops import sync_agents
@@ -264,10 +265,20 @@ def run_install(
         onboarding_state.mark_configured(app.id, paths)
         # Apps that work with this one (LiteLLM routing speech) pick it up now.
         rewire_consumers(app, registry.catalog, log, paths)
+        finished = f"{service.name} installed and verified."
+        if job.get("request_namespace") == BATCH_NAMESPACE:
+            # Apps chosen in Discover are set up one at a time and then wait stopped, so installing
+            # many never runs them all at once; the owner starts the ones they want.
+            failure_code = "stop_after_setup_failed"
+            stage("stop_after_setup", f"Setup finished; stopping {service.name} until you start it.")
+            app_control.stop(service, root, log)
+            if state:
+                state.set_installation(
+                    app.id, "stopped", job_id=job_id, manifest_version="3", image_digests=images, route_state="ready"
+                )
+            finished = f"{service.name} installed and verified; start it when you want to use it."
         if complete_job:
-            store.transition(
-                job_id, "succeeded", actor=actor, detail=f"{service.name} installed and verified.", step_id="finalize"
-            )
+            store.transition(job_id, "succeeded", actor=actor, detail=finished, step_id="finalize")
         return True
     except (StepFailed, AuthentikError, SignInError, OSError, ValueError, RuntimeError, yaml.YAMLError) as exc:
         failure = exc if isinstance(exc, StepFailed) else StepFailed(stage_name, failure_code, str(exc))

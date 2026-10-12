@@ -128,6 +128,9 @@ class Service(ApiModel):
     name: str
     category: str
     lifecycle: Literal["always_on"] | Literal["shared"] | Literal["optional"]
+    stop_warning: str = ""
+    # Named parts of the app (Compose service -> label), shown with their state on its page.
+    parts: dict[str, str] = Field(default_factory=dict)
     https_port: float
     private_https_port: float | None = None
     auth: Literal["oidc"] | Literal["proxy"] | Literal["trusted_header"] | Literal["local"] | Literal["excluded"]
@@ -667,6 +670,8 @@ class BackupSchedule(ApiModel):
     # From Kopia itself; empty while scheduled backups are off or the service is not running.
     next_run_at: str
     service_running: bool
+    # False until Kopia backups (the app) is installed; nothing runs on a schedule without it.
+    service_installed: bool = True
     # Sources whose last backup did not finish, with why.
     problems: list[str]
 

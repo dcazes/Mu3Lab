@@ -148,7 +148,6 @@ class IntegrationTests(unittest.TestCase):
             names = {app.id for app in rewire.consumers(catalog.get("speaches"), catalog, paths)}
             # LiteLLM is core (always present); Open WebUI is installed here; Dawarich is not.
             self.assertEqual(names, {"litellm", "open-webui"})
-            self.assertEqual(rewire.consumers(catalog.get("photon"), catalog, paths), [])
 
     def test_rewire_restarts_only_a_running_consumer_whose_files_changed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -180,9 +179,9 @@ class ConfigDefaultTests(unittest.TestCase):
             catalog = load()
             facts = Facts("box.test", paths, catalog)
             with patch.object(hostinfo, "country_code", return_value="ca"):
-                self.assertEqual(build_env(catalog.get("photon"), facts, {}, [])["PHOTON_REGION"], "ca")
+                self.assertEqual(build_env(catalog.get("dawarich"), facts, {}, [])["PHOTON_REGION"], "ca")
             with patch.object(hostinfo, "country_code", return_value="zz"):
-                self.assertNotIn("PHOTON_REGION", build_env(catalog.get("photon"), facts, {}, []))
+                self.assertNotIn("PHOTON_REGION", build_env(catalog.get("dawarich"), facts, {}, []))
 
 
 class PerPersonAccountsTests(unittest.TestCase):

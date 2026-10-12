@@ -17,6 +17,9 @@ from ctl.runtime import RuntimePaths
 from ctl.store import db
 from ctl.store import workflows as workflow_secrets
 
+# Installs queued from Apps > Discover; each one finishes its setup, then waits stopped (engine.install).
+NAMESPACE = "batch.install"
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -153,7 +156,7 @@ class InstallBatchStore:
             kind="lifecycle",
             service_id=str(item["service_id"]),
             actor_subject=str(item["owner_uid"]),
-            namespace="batch.install",
+            namespace=NAMESPACE,
             request={"batch_id": batch_id, "ordinal": ordinal},
             prepare=(lambda job_id: workflow_secrets.save_job_identity(job_id, **identity)) if identity else None,
             action="install",

@@ -2,9 +2,9 @@
 id: firecrawl
 capabilities: [web_fetch]
 name: Firecrawl
-tier: core
+tier: optional
 group: ai
-category: research
+category: knowledge
 tagline: Turns web pages into AI-ready text
 summary: Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping
   and crawling API inside the server and connects it to chat for web research.
@@ -14,7 +14,6 @@ service:
   local_port: 3002
   health:
     path: /
-  stoppable: false
 sign_in:
   method: none
   note: Internal-only web scraping API with no login; only chat's Firecrawl connector reaches it, inside the server.

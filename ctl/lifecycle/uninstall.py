@@ -73,6 +73,11 @@ def data_directories(service: Service, root: Path) -> list[Path]:
     return [data / name for name in sorted(own - others)]
 
 
+def backed_up(service: Service, folders: list[Path]) -> list[Path]:
+    """The folders a backup holds: all of them except those the manifest says are downloaded again."""
+    return [folder for folder in folders if folder.name not in service.manifest.backup.skip]
+
+
 def _cleanup_image(root: Path) -> str:
     """Borrow the always-present ingress image; its busybox `rm` runs as root."""
     document = yaml.safe_load(

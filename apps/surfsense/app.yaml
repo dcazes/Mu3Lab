@@ -4,7 +4,7 @@ capabilities: [research]
 name: SurfSense
 tier: optional
 group: apps
-category: research
+category: knowledge
 tagline: AI research with cited sources
 summary: An AI research workspace for searching documents and web sources, organizing knowledge, and asking questions
   with source citations. Mu3Lab connects this self-hosted web app to its AI gateway and local embedding service.

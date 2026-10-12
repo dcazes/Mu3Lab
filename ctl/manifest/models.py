@@ -56,6 +56,8 @@ class ServiceSpec(Model):
     health: Health = Health()
     start_timeout_seconds: int = Field(default=120, ge=10, le=3600)
     stoppable: bool = True
+    # Said in the Stop confirmation when stopping this app affects more than the app itself.
+    stop_warning: str = ""
     uses_gpu: bool = False
 
 
@@ -413,6 +415,8 @@ class BackupSpec(Model):
 
     include: bool = True
     reason: str = ""
+    # Data folders (by name) left out because they are downloaded again (a map index); still removed on uninstall.
+    skip: tuple[str, ...] = ()
 
 
 # --- Media libraries -------------------------------------------------------------------
@@ -441,6 +445,8 @@ class Ui(Model):
     label: str = "Open"  # the dashboard's button text for opening the app
     path: str = ""
     unavailable_reason: str = ""
+    # Compose services worth naming on the app's page, by service name (Dawarich's Photon).
+    parts: dict[str, str] = Field(default_factory=dict)
 
 
 # --- The manifest -----------------------------------------------------------------------
@@ -453,7 +459,8 @@ class AppManifest(Model):
     # optional: the owner installs and removes it from the dashboard.
     tier: Literal["foundation", "core", "optional"]
     group: Literal["apps", "ai", "infrastructure"]
-    category: str
+    # Where Apps > Discover lists the app; the dashboard names and orders these (lib/services.ts).
+    category: Literal["finance", "home", "media", "documents", "places", "knowledge", "ai", "system"]
     tagline: str
     summary: str
     version: str  # the maintainer-approved release; image digests live in docker-compose.yml

@@ -192,6 +192,9 @@ function Overview({ service, address, devices }: { service: Service; address: st
                   },
                 ]
               : []),
+            ...(isInstalled(service) && Object.keys(service.parts || {}).length
+              ? [{ label: 'Includes', value: <Parts service={service} /> }]
+              : []),
             ...(service.last_job
               ? [
                   {
@@ -206,6 +209,25 @@ function Overview({ service, address, devices }: { service: Service; address: st
       </Card>
       {devices && <DevicesSection service={service} address={address} />}
     </div>
+  );
+}
+
+/** Named parts that run inside the app (Dawarich's Photon), with each one's container state. */
+function Parts({ service }: { service: Service }) {
+  return (
+    <ul className="check-list">
+      {Object.entries(service.parts || {}).map(([name, label]) => {
+        const container = service.containers?.find((item) => item.service === name);
+        const running = container?.state === 'running';
+        return (
+          <li key={name} className="inline wrap">
+            <Dot tone={running ? 'green' : 'gray'} />
+            {label}
+            <span className="muted">· {running ? 'Running' : container ? humanize(container.state) : 'Stopped'}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

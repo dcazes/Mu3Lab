@@ -19,6 +19,14 @@ class ServiceOperationTests(unittest.TestCase):
         service = load().get("ingress")
         self.assertNotIn("stop", allowed_actions(service, "ready"))
 
+    def test_only_sign_in_and_the_private_proxy_are_always_on(self):
+        registry = load()
+        always_on = {service.id for service in registry.services if service.lifecycle == "always_on"}
+        self.assertEqual(always_on, {"authentik", "ingress"})
+        # Stopping the vault reaches every Bitwarden app, so its confirmation says so.
+        self.assertIn("Bitwarden", registry.get("vaultwarden").stop_warning)
+        self.assertIn("stop", allowed_actions(registry.get("firecrawl"), "ready"))
+
     def test_blocked_service_has_no_actions(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "blocked"), [])
 

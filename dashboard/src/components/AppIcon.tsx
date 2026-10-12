@@ -27,7 +27,6 @@ import {
   siMealie,
   siNextcloud,
   siOllama,
-  siOpenstreetmap,
   siOutline,
   type SimpleIcon,
   siPaperlessngx,
@@ -49,7 +48,6 @@ const brands: Record<string, SimpleIcon> = {
   tailscale: siTailscale,
   audiobookshelf: siAudiobookshelf,
   outline: siOutline,
-  photon: siOpenstreetmap,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {

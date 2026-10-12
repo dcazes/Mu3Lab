@@ -437,6 +437,8 @@ def back_up_service(service_id: str, operator: OperatorMutation) -> models.Backu
     service, store = runtime.service(service_id), runtime.job_store()
     if service.stage != "optional":
         raise ApiError(409, "Only apps installed from the catalog are backed up here.")
+    if not backup_service.installed():
+        raise ApiError(409, "Backups are off. Install Kopia backups from Apps first.", code="backup_service_missing")
     if backup_service.holding(service.id):
         raise ApiError(409, f"{service.name} is already being backed up.")
     if service.id not in backup_service.sources(ROOT):

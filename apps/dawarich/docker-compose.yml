@@ -28,7 +28,8 @@ x-dawarich: &dawarich
     OIDC_REDIRECT_URI: ${DAWARICH_OIDC_REDIRECT_URI:?DAWARICH_OIDC_REDIRECT_URI is required}
     OIDC_PROVIDER_NAME: Mu3Lab
     OIDC_AUTO_REGISTER: "true"
-    PHOTON_API_HOST: ${PHOTON_API_HOST:-}
+    # Place names come only from the Photon below, never a public map service.
+    PHOTON_API_HOST: photon:2322
     PHOTON_API_USE_HTTPS: "false"
   volumes:
     - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich/storage:/var/app/storage
@@ -101,6 +102,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 30
+
+  # Photon, the private address lookup that comes with Dawarich. Its first start
+  # downloads the map index (about 5 GB for Canada), so it has no health check:
+  # installing or starting Dawarich must not wait an hour for it.
+  photon:
+    image: rtuszik/photon-docker:2.4.0@sha256:21549c60f9e6488fff3217e40429a652c4b445f374800333fe32859e47cec293
+    restart: unless-stopped
+    environment:
+      REGION: ${PHOTON_REGION:?PHOTON_REGION is required}
+      IMPORT_MODE: db
+      # Official GraphHopper downloads, verified by their MD5 files.
+      BASE_URL: https://download1.graphhopper.com/public/
+      UPDATE_STRATEGY: PARALLEL
+      UPDATE_INTERVAL: 90d
+      LOG_LEVEL: INFO
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/dawarich-photon:/photon/data
+    # Frontend for downloading the index; internal so only Dawarich can ask it.
+    networks:
+      mu3lab_frontend: {}
+      dawarich_internal:
+        aliases: [photon]
+    security_opt: ["no-new-privileges:true"]
 
 networks:
   mu3lab_frontend: {external: true}

@@ -4,7 +4,7 @@ capabilities: [private_proxy]
 name: Caddy
 tier: foundation
 group: infrastructure
-category: infrastructure
+category: system
 tagline: Private HTTPS web server
 summary: Routes requests to Mu3Lab apps over HTTPS. Caddy provides the internal web server and reverse proxy used
   to publish private app addresses.

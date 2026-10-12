@@ -4,7 +4,7 @@ capabilities: [files_calendar]
 name: Nextcloud
 tier: optional
 group: apps
-category: productivity
+category: documents
 tagline: Files, calendars, and contacts
 summary: A self-hosted workspace for files, calendars, and contacts. Sync and share files across devices, manage
   events, and connect a Nextcloud calendar to Mu3Lab’s calendar and Home agenda.

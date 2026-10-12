@@ -31,7 +31,7 @@ from ctl import backups, job_guard
 from ctl.jobs import redact
 from ctl.lifecycle import app_control, app_releases, deployments, in_progress
 from ctl.lifecycle.app_releases import Release
-from ctl.lifecycle.uninstall import data_directories
+from ctl.lifecycle.uninstall import backed_up, data_directories
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
@@ -214,7 +214,7 @@ def restore(
         bundle = deployments.latest_for_release(service.id, target.id, paths)
         if bundle:
             storage = [paths.data / name for name in deployments.manifest(service.id, bundle, paths)["storage"]]
-    names, absent = plan(chosen, storage or data_directories(service, root), paths)
+    names, absent = plan(chosen, backed_up(service, storage or data_directories(service, root)), paths)
     when = chosen["time"][:16].replace("T", " ")
     step("stage_restore", f"Unpacking the backup from {when} UTC beside the current data.")
     _wipe([place(name, kind, paths) for name in names for kind in (RESTORING, DISCARD)], log, paths)

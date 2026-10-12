@@ -5,6 +5,8 @@ import { Button } from '../../components/Button';
 import { Dialog, useConfirm } from '../../components/Dialog';
 import { Card } from '../../components/Layout';
 import { relativeTime } from '../../lib/format';
+import { Link } from '../../lib/router';
+import { BACKUP_APP_ID, backupsOn } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useAction } from '../../lib/useAction';
 import { useDashboard } from '../../state/dashboard';
@@ -207,23 +209,32 @@ export function BackupsCard({ service }: { service: Service }) {
     );
     void refresh();
   };
+  const on = backupsOn(data.services.services);
   return (
     <Card
       title="Backups"
       description="Encrypted copies of this app's data, kept on this server by Kopia on your backup schedule. Mu3Lab also saves one before every update."
       actions={
-        <Button
-          size="sm"
-          icon={Archive}
-          loading={pending === 'backup'}
-          disabled={busy || Boolean(service.recovery)}
-          onClick={() => void backUp()}
-        >
-          Back up now
-        </Button>
+        on && (
+          <Button
+            size="sm"
+            icon={Archive}
+            loading={pending === 'backup'}
+            disabled={busy || Boolean(service.recovery)}
+            onClick={() => void backUp()}
+          >
+            Back up now
+          </Button>
+        )
       }
       flush
     >
+      {!on && (
+        <p className="warning-text card-pad">
+          Backups are off, so {service.name} is backed up only before updates.{' '}
+          <Link to={`/apps/${BACKUP_APP_ID}`}>Install Kopia backups</Link> to back it up on a schedule.
+        </p>
+      )}
       <Interrupted service={service} busy={busy} />
       <FailedRestore service={service} busy={busy} />
       {service.backing_up && <p className="muted card-pad">Backing up now; {service.name} starts again on its own.</p>}

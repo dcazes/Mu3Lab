@@ -1872,6 +1872,11 @@ export interface components {
       ok: boolean;
       /** Problems */
       problems: string[];
+      /**
+       * Service Installed
+       * @default true
+       */
+      service_installed?: boolean;
       /** Service Running */
       service_running: boolean;
       /** Time */
@@ -3239,6 +3244,10 @@ export interface components {
       name: string;
       /** Observed At */
       observed_at: string;
+      /** Parts */
+      parts?: {
+        [key: string]: string;
+      };
       /** Private Https Port */
       private_https_port?: number | null;
       /** Reason */
@@ -3258,6 +3267,11 @@ export interface components {
       setup_action: string;
       /** Stage */
       stage: 'foundation' | 'core' | 'optional';
+      /**
+       * Stop Warning
+       * @default
+       */
+      stop_warning?: string;
       ui?: components['schemas']['ServiceUi'] | null;
       update?: components['schemas']['ServiceUpdate'] | null;
       /** Url */

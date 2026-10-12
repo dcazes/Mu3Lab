@@ -95,6 +95,7 @@ class PlatformApiTests(unittest.TestCase):
         self.stack.enter_context(patch("ctl.api.security.csrf_token", return_value="bound"))
         self.client = TestClient(create_app())
         self.headers = test_maintenance.MaintenanceApiTests.headers
+        self.stack.enter_context(patch("ctl.api.routes.system.backup_service.installed", return_value=True))
 
     def test_an_operator_asks_the_backup_service_for_mu3lab_first_then_the_core_apps(self):
         with (

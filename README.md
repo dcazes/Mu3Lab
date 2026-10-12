@@ -188,7 +188,6 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🔀 | **LiteLLM** | One AI gateway for chat and embeddings |
 | 🆓 | **FreeLLMAPI** | Routes chat to free cloud AI providers, with failover |
 | 🦙 | **Ollama** | Local AI models and embeddings, on CPU, NVIDIA or AMD |
-| 🕷️ | **Firecrawl** | Turns web pages into clean text so chat can research the web |
 
 ### Add with one click
 
@@ -203,6 +202,8 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🔬 | **[SurfSense](https://github.com/MODSetter/SurfSense)** | AI research workspace with cited answers | Gated + own login | ✅ |
 | 👶 | **[Baby Buddy](https://docs.baby-buddy.net)** | Shared tracker for feeding, sleep, diapers and growth | SSO | Manual |
 | 🥫 | **[Grocy](https://grocy.info)** | Pantry stock, expiry dates, shopping lists and chores | SSO | ✅ |
+| 🕷️ | **[Firecrawl](https://www.firecrawl.dev)** | Turns web pages into clean text so chat can research the web | None (internal) | ✅ |
+| 💾 | **[Kopia backups](https://kopia.io)** | Scheduled, encrypted backups of Mu3Lab and every app; browse and restore files | Gated | — |
 
 <sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: LobeChat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
 
@@ -289,7 +290,7 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 - [ ] More curated apps
 
 > [!NOTE]
-> Kopia backs up Mu3Lab itself, its core apps (including your Authentik sign-in accounts) and every installed app on the schedule you choose (weekly by default), into `/srv/mu3lab/backups/kopia` on this server. Backups are not copied to another computer yet, so also keep your own copy of that folder. See [docs/backup-recovery.md](docs/backup-recovery.md).
+> Backups are your choice: install **Kopia backups** from Apps and it backs up Mu3Lab itself, its core apps (including your Authentik sign-in accounts) and every installed app on the schedule you choose (weekly by default), into `/srv/mu3lab/backups/kopia` on this server. Without it, Mu3Lab still saves a backup of an app before each update. Backups are not copied to another computer yet, so also keep your own copy of that folder. See [docs/backup-recovery.md](docs/backup-recovery.md).
 
 ---
 

@@ -8,6 +8,7 @@ import { Badge, StatusBadge } from '../../components/Status';
 import { bytes } from '../../lib/format';
 import { Link } from '../../lib/router';
 import {
+  CATEGORIES,
   canInstall,
   categoryLabel,
   type Group,
@@ -46,7 +47,7 @@ function useSelection() {
 }
 
 function matches(service: Service, term: string, summary = '') {
-  return !term || `${service.name} ${service.category} ${summary}`.toLowerCase().includes(term);
+  return !term || `${service.name} ${categoryLabel(service.category)} ${summary}`.toLowerCase().includes(term);
 }
 
 /** Every installed row shares one set of columns, so states line up down the page. */
@@ -204,6 +205,15 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const shown = (discover ? available : installed).filter((service) =>
     matches(service, term, catalog[service.id]?.summary),
   );
+  // Discover's sections in catalog order; an app with an unknown category still shows, last.
+  const sections = [
+    ...CATEGORIES,
+    ...[...new Set(shown.map((service) => service.category))]
+      .filter((id) => !CATEGORIES.some((item) => item.id === id))
+      .map((id) => ({ id, label: categoryLabel(id) })),
+  ]
+    .map((category) => ({ ...category, apps: shown.filter((service) => service.category === category.id) }))
+    .filter((category) => category.apps.length > 0);
   const names = (ids: string[]) => ids.map((id) => services.find((service) => service.id === id)?.name || id);
   const toggle = (id: string) =>
     setSelected(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
@@ -258,22 +268,36 @@ export function AppsPage({ discover }: { discover: boolean }) {
               : 'Open Discover to choose apps to install.'}
         </EmptyState>
       ) : discover ? (
-        <section className="group">
-          <h2 className="group-title">Available to install</h2>
-          <div className="discover-grid">
-            {shown.map((service) => (
-              <DiscoverCard
-                key={service.id}
-                service={service}
-                summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
-                size={sizes?.apps?.[service.id]}
-                selected={selected.includes(service.id)}
-                installing={queued.get(service.id)}
-                toggle={() => toggle(service.id)}
-              />
+        <>
+          <nav className="category-chips" aria-label="Categories">
+            {sections.map(({ id, label, apps }) => (
+              <a key={id} href={`#category-${id}`} className="category-chip">
+                {label}
+                <span>{apps.length}</span>
+              </a>
             ))}
-          </div>
-        </section>
+          </nav>
+          {sections.map(({ id, label, apps }) => (
+            <section key={id} className="group" id={`category-${id}`} aria-labelledby={`category-${id}-title`}>
+              <h2 className="group-title" id={`category-${id}-title`}>
+                {label}
+              </h2>
+              <div className="discover-grid">
+                {apps.map((service) => (
+                  <DiscoverCard
+                    key={service.id}
+                    service={service}
+                    summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
+                    size={sizes?.apps?.[service.id]}
+                    selected={selected.includes(service.id)}
+                    installing={queued.get(service.id)}
+                    toggle={() => toggle(service.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </>
       ) : (
         GROUP_ORDER.map((name) => {
           const group = shown.filter((service) => service.group === name);

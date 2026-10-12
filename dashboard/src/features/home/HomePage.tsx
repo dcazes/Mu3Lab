@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus } from 'lucide-react';
+import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus, X } from 'lucide-react';
 import { useState } from 'react';
 import type { Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
@@ -48,8 +48,34 @@ function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => voi
   );
 }
 
+// Reminders the owner may wave away for good on this browser; the rest stay until fixed.
+const DISMISSIBLE = new Set(['backup-service-missing']);
+const DISMISSED_KEY = 'mu3lab.dismissedAttention';
+
+function useDismissed() {
+  const [dismissed, setDismissed] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
+      return Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const dismiss = (key: string) => {
+    const next = [...dismissed, key];
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+    } catch {
+      // Storage can be unavailable; the reminder is hidden until the page reloads.
+    }
+  };
+  return [dismissed, dismiss] as const;
+}
+
 function Attention() {
   const { data } = useDashboard();
+  const [dismissed, dismiss] = useDismissed();
   const failing = data.services.services.filter(needsAttention);
   const working = data.services.services.filter(isWorking);
   const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
@@ -62,13 +88,15 @@ function Attention() {
       to: `/apps/${service.id}`,
     })),
     // Sent to administrators only, and only while backups fall behind the schedule.
-    ...(setupIncomplete ? [] : data.backup_attention || []).map((item) => ({
-      key: item.key,
-      icon: DatabaseBackup,
-      tone: 'warning',
-      text: item.message,
-      to: '/settings/security',
-    })),
+    ...(setupIncomplete ? [] : data.backup_attention || [])
+      .filter((item) => !dismissed.includes(item.key))
+      .map((item) => ({
+        key: item.key,
+        icon: DatabaseBackup,
+        tone: 'warning',
+        text: item.message,
+        to: '/settings/security',
+      })),
     ...working.map((service) => ({
       key: `working-${service.id}`,
       icon: Loader2,
@@ -81,11 +109,23 @@ function Attention() {
   return (
     <section className="attention" aria-label="Needs attention">
       {items.map(({ key, icon: Icon, tone, text, to }) => (
-        <Link key={key} to={to} className={`attention-item attention-${tone}`}>
-          <Icon className={tone === 'progress' ? 'spin' : ''} />
-          <span>{text}</span>
-          <ArrowRight className="attention-arrow" />
-        </Link>
+        <div key={key} className="attention-row">
+          <Link to={to} className={`attention-item attention-${tone}`}>
+            <Icon className={tone === 'progress' ? 'spin' : ''} />
+            <span>{text}</span>
+            <ArrowRight className="attention-arrow" />
+          </Link>
+          {DISMISSIBLE.has(key) && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm btn-icon"
+              aria-label="Dismiss this reminder"
+              onClick={() => dismiss(key)}
+            >
+              <X />
+            </button>
+          )}
+        </div>
       ))}
     </section>
   );

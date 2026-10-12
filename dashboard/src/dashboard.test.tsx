@@ -573,10 +573,24 @@ describe('Settings', () => {
   });
 
   it('shows access and backups without temporary credential handoffs', () => {
-    renderWithDashboard(<SecuritySettings />, dashboardData([]));
+    stubFetch(() => undefined);
+    const kopia = service('kopia-ui', 'Kopia backups', 'optional', { group: 'infrastructure' });
+    renderWithDashboard(<SecuritySettings />, dashboardData([kopia]));
     expect(screen.getByText('Your access')).toBeInTheDocument();
     expect(screen.getByText('Backup protection is not verified')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export credentials' })).not.toBeInTheDocument();
+  });
+
+  it('says backups are off until Kopia backups is installed', () => {
+    const kopia = service('kopia-ui', 'Kopia backups', 'optional', {
+      group: 'infrastructure',
+      installed: false,
+      display_state: 'not_installed',
+    });
+    renderWithDashboard(<SecuritySettings />, dashboardData([kopia]));
+    expect(screen.getByText('Backups are off')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Install Kopia backups' })).toHaveAttribute('href', '/apps/kopia-ui');
+    expect(screen.queryByText('Backup schedule')).not.toBeInTheDocument();
   });
 
   it('copies exactly the tailnet address', async () => {

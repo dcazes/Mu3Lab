@@ -198,9 +198,10 @@ class CoreWiringTests(unittest.TestCase):
         self.assertFalse(checked["ready"])
         self.assertEqual(checked["error"], "Docker is not ready")
 
-    def test_core_order_includes_firecrawl_and_respects_manifest_dependencies(self):
+    def test_core_order_respects_manifest_dependencies(self):
         ordered = [service.id for service in core_services()]
-        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl", "kopia-ui"})
+        # Backups (Kopia) and web research (Firecrawl) are the owner's choice, installed from Discover.
+        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "lobehub"})
         self.assertLess(ordered.index("ollama"), ordered.index("litellm"))
         self.assertLess(ordered.index("freellmapi"), ordered.index("litellm"))
         self.assertLess(ordered.index("litellm"), ordered.index("lobehub"))

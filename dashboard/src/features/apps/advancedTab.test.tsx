@@ -47,7 +47,10 @@ const backups = {
   ],
 };
 
-function setup(update = release(), app = mealie, jobs: unknown[] = []) {
+// Kopia backups installed: scheduled and on-demand backups are on.
+const kopia = service('kopia-ui', 'Kopia backups', 'optional', { group: 'infrastructure' });
+
+function setup(update = release(), app = mealie, jobs: unknown[] = [], others = [kopia]) {
   const posts: unknown[] = [];
   stubFetch((path, init) => {
     if (path.endsWith('/updates')) return update;
@@ -60,7 +63,7 @@ function setup(update = release(), app = mealie, jobs: unknown[] = []) {
   });
   renderWithDashboard(
     <AdvancedTab service={app} />,
-    dashboardData([app], { jobs: { ok: true, available: true, jobs } } as never),
+    dashboardData([app, ...others], { jobs: { ok: true, available: true, jobs } } as never),
   );
   return posts;
 }
@@ -130,6 +133,15 @@ describe('AdvancedTab backups', () => {
     expect(screen.queryByRole('button', { name: 'Keep new version' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Put my original data back' }));
     await vi.waitFor(() => expect(posts).toEqual([{ action: 'recover' }]));
+  });
+
+  it('without Kopia backups says backups are off and offers no Back up now', async () => {
+    setup(release(), mealie, [], []);
+    expect(await screen.findByText(/Backups are off, so Mealie is backed up only before updates/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Install Kopia backups' })).toHaveAttribute('href', '/apps/kopia-ui');
+    expect(screen.queryByRole('button', { name: 'Back up now' })).not.toBeInTheDocument();
+    // Earlier backups can still be restored.
+    expect(await screen.findByRole('button', { name: 'Restore…' })).toBeEnabled();
   });
 
   it('after an interrupted update offers undoing it or keeping the new version', async () => {

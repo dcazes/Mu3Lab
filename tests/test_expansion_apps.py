@@ -15,6 +15,8 @@ from ctl.manifest.catalog import load
 from ctl.runtime import RuntimePaths
 from ctl.store import onboarding as onboarding_state
 
+ROOT = Path(__file__).resolve().parents[1]
+
 OWNER = {"owner_uid": "u-owner", "username": "owner", "email": "owner@example.com", "display_name": "Owner"}
 
 
@@ -116,12 +118,21 @@ class AudiobookshelfSetupTests(unittest.TestCase):
 class ManifestContractTests(unittest.TestCase):
     def test_internal_services_have_no_screen_and_no_sign_in(self):
         catalog = load()
-        for app_id in ("speaches", "photon"):
+        for app_id in ("speaches",):
             with self.subTest(app=app_id):
                 manifest = catalog.get(app_id).manifest
                 self.assertIsNone(manifest.route)
                 self.assertFalse(manifest.ui.available)
                 self.assertEqual(manifest.sign_in.method, "none")
+
+    def test_photon_comes_inside_dawarich_and_stays_out_of_its_backups(self):
+        catalog = load()
+        self.assertNotIn("photon", {app.id for app in catalog.apps})
+        dawarich = catalog.get("dawarich").manifest
+        compose = (ROOT / "apps" / "dawarich" / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("PHOTON_API_HOST: photon:2322", compose)
+        self.assertEqual(dawarich.backup.skip, ("dawarich-photon",))
+        self.assertIn("photon", dawarich.ui.parts)
 
     def test_owner_accounts_are_created_at_install_not_on_first_sign_in(self):
         catalog = load()

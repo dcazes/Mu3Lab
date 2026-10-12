@@ -52,7 +52,7 @@ from ctl import actions, backups, platform_backup
 from ctl.control_state import ControlState
 from ctl.jobs import JobConflict, JobStore
 from ctl.lifecycle import app_control, app_releases, in_progress
-from ctl.lifecycle.uninstall import data_directories
+from ctl.lifecycle.uninstall import backed_up, data_directories
 from ctl.registry import RegistryError, load
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import write_atomic
@@ -161,7 +161,11 @@ def sources(root: Path, paths: RuntimePaths | None = None) -> dict[str, list[tup
             continue
         if service.stage == "optional" and not (paths.projects / service.id / "docker-compose.yml").is_file():
             continue
-        folders = [folder for folder in data_directories(service, root) if folder.is_dir() and not folder.is_symlink()]
+        folders = [
+            folder
+            for folder in backed_up(service, data_directories(service, root))
+            if folder.is_dir() and not folder.is_symlink()
+        ]
         if folders:
             found[service.id] = [(folder.name, folder) for folder in folders]
     return found
@@ -559,6 +563,8 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
     paths = paths or RuntimePaths()
     chosen = settings(paths)
     try:
+        if not installed(paths):
+            raise OSError("Kopia backups is not installed")
         known = source_status(paths)
         upcoming = sorted(str(item.get("nextSnapshotTime") or "") for item in known.values())
         next_run = next((stamp for stamp in upcoming if stamp), "") if chosen["frequency"] != "off" else ""
@@ -571,6 +577,7 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "time": chosen["time"],
         "next_run_at": next_run,
         "service_running": running,
+        "service_installed": installed(paths),
         "problems": problems(paths)[:5],
     }
 
@@ -604,6 +611,14 @@ def attention(paths: RuntimePaths | None = None, *, now: datetime | None = None)
     """
     paths = paths or RuntimePaths()
     now = now or _now()
+    if not installed(paths):
+        # Backups are the owner's choice: one quiet reminder, which Home lets them dismiss.
+        return [
+            {
+                "key": "backup-service-missing",
+                "message": "Backups are off. Install Kopia backups from Apps to back up on a schedule.",
+            }
+        ]
     chosen = settings(paths)
     scheduled = chosen["frequency"] != "off"
     limit = INTERVALS[chosen["frequency"]] + GRACE if scheduled else UNSCHEDULED_LIMIT

@@ -4,7 +4,7 @@ capabilities: [password_store]
 name: Vaultwarden
 tier: foundation
 group: apps
-category: infrastructure
+category: system
 tagline: Password manager for Bitwarden apps
 summary: Stores passwords, secure notes, and other vault items on your server. Vaultwarden works with Bitwarden
   clients to sync your vault and fill saved logins across devices.
@@ -14,7 +14,8 @@ service:
   local_port: 8081
   health:
     path: /alive
-  stoppable: false
+  stop_warning: While Vaultwarden is stopped, Bitwarden can't sync or save new logins on any device. It
+    still shows the logins it already has.
 route:
   https_port: 8443
   caddy_port: 19462

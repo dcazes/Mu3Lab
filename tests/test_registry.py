@@ -116,7 +116,7 @@ class RegistryTests(unittest.TestCase):
 
     def test_firecrawl_has_a_complete_private_login_free_runtime(self):
         service = load().get("firecrawl")
-        self.assertEqual(service.stage, "core")
+        self.assertEqual(service.stage, "optional")
         self.assertEqual(service.auth, "excluded")
         self.assertIsNone(service.private_https_port)
         self.assertFalse(service.ui["available"])
@@ -221,9 +221,7 @@ class RegistryTests(unittest.TestCase):
         registry = load()
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.manifest.tier == "core"]
-        self.assertEqual(
-            {service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl", "kopia-ui"}
-        )
+        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub"})
         for service in core:
             images = compose_images(service.compose_path(root) / "docker-compose.yml")
             self.assertTrue(images, service.id)
@@ -271,15 +269,13 @@ class RegistryTests(unittest.TestCase):
         from ctl.api.routes.system import catalog
 
         profile = catalog({}).model_dump()["profiles"][0]
-        self.assertEqual(
-            set(profile["services"]), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl", "kopia-ui"}
-        )
+        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "lobehub"})
 
-    def test_nextcloud_is_curated_productivity_with_unique_private_ports(self):
+    def test_nextcloud_is_a_curated_documents_app_with_unique_private_ports(self):
         registry = load()
         service = registry.get("nextcloud")
         self.assertEqual(service.stage, "optional")
-        self.assertEqual(service.category, "productivity")
+        self.assertEqual(service.category, "documents")
         self.assertEqual(service.private_https_port, 8453)
         self.assertEqual(service.proxy_port, 19470)
         self.assertEqual(service.account["mode"], "environment_bootstrap")

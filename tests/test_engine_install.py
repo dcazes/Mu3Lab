@@ -104,7 +104,7 @@ class InstallTests(unittest.TestCase):
             name="Example app",
             tier=tier,
             group="apps",
-            category="test",
+            category="home",
             tagline="Test",
             summary="Test app",
             version="1.0",
@@ -127,8 +127,10 @@ class InstallTests(unittest.TestCase):
         self.app = self.registry.catalog.get("example-app")
         self.service = self.registry.get(self.app.id)
 
-    def run_install(self):
-        job = self.store.create(kind="lifecycle", service_id=self.app.id, action="install", actor="owner")
+    def run_install(self, namespace: str = ""):
+        job = self.store.create(
+            kind="lifecycle", service_id=self.app.id, action="install", actor="owner", namespace=namespace
+        )
         claimed = self.store.claim("worker")
         install.run_install(self.store, self.state, claimed, self.service, self.registry, "owner", self.root)
         return self.store.get(job["id"])
@@ -199,6 +201,17 @@ class InstallTests(unittest.TestCase):
                 },
             },
         ]
+
+    def test_an_app_chosen_in_discover_is_set_up_then_left_stopped(self):
+        with patch("ctl.engine.install.app_control.stop") as stop:
+            job = self.run_install(namespace=install.BATCH_NAMESPACE)
+        self.assertEqual(job["state"], "succeeded")
+        stop.assert_called_once()
+        self.assertEqual(self.state.installation(self.app.id)["state"], "stopped")
+        self.assertIn("start it when you want", job["detail"])
+        with patch("ctl.engine.install.app_control.stop") as stop:
+            self.assertEqual(self.run_install()["state"], "succeeded")
+        stop.assert_not_called()
 
     def test_adventurelog_keeps_naming_its_owner_so_no_default_admin_appears(self):
         # AdventureLog creates admin/admin whenever its admin settings are missing after first start.

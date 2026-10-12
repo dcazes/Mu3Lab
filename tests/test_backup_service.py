@@ -262,6 +262,21 @@ class ReconcileTests(_Paths):
 
 
 class AttentionTests(_Paths):
+    def setUp(self):
+        super().setUp()
+        self.install_kopia()
+
+    def install_kopia(self):
+        (self.paths.projects / "kopia-ui").mkdir(exist_ok=True)
+        (self.paths.projects / "kopia-ui" / "docker-compose.yml").write_text("services: {}\n")
+
+    def test_without_kopia_backups_home_says_only_that_backups_are_off(self):
+        (self.paths.projects / "kopia-ui" / "docker-compose.yml").unlink()
+        messages = backup_service.attention(self.paths)
+        self.assertEqual([item["key"] for item in messages], ["backup-service-missing"])
+        self.assertIn("Install Kopia backups", messages[0]["message"])
+        self.assertFalse(backup_service.status(self.paths)["service_installed"])
+
     def test_a_new_install_is_asked_for_its_first_backup(self):
         keys = [item["key"] for item in backup_service.attention(self.paths)]
         self.assertEqual(keys, ["backup-missing"])
@@ -277,8 +292,6 @@ class AttentionTests(_Paths):
         self.assertEqual([item["key"] for item in backup_service.attention(self.paths)], ["backup-failed"])
 
     def test_a_stopped_backup_service_is_reported_once_it_stays_down(self):
-        (self.paths.projects / "kopia-ui").mkdir()
-        (self.paths.projects / "kopia-ui" / "docker-compose.yml").write_text("services: {}\n")
         backups.record_backup("mu3lab", datetime.now(UTC).isoformat(timespec="seconds"), self.paths)
         with (
             patch.object(backup_service, "source_status", side_effect=OSError("refused")),
@@ -357,6 +370,15 @@ class ManualBackupApiTests(unittest.TestCase):
         self.stack.enter_context(patch("ctl.api.runtime.job_store"))
         self.headers = MaintenanceApiTests.headers
         self.client = TestClient(create_app())
+        self.installed = self.stack.enter_context(
+            patch("ctl.api.routes.services.backup_service.installed", return_value=True)
+        )
+
+    def test_back_up_now_waits_for_kopia_backups_to_be_installed(self):
+        self.installed.return_value = False
+        response = self.client.post("/api/v1/services/mealie/backups", headers=self.headers, json={})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "backup_service_missing")
 
     def test_back_up_now_asks_kopia_for_exactly_that_app(self):
         with (

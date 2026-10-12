@@ -743,6 +743,11 @@
             "title": "Problems",
             "type": "array"
           },
+          "service_installed": {
+            "default": true,
+            "title": "Service Installed",
+            "type": "boolean"
+          },
           "service_running": {
             "title": "Service Running",
             "type": "boolean"
@@ -5223,6 +5228,13 @@
             "title": "Observed At",
             "type": "string"
           },
+          "parts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Parts",
+            "type": "object"
+          },
           "private_https_port": {
             "anyOf": [
               {
@@ -5295,6 +5307,11 @@
               }
             ],
             "title": "Stage"
+          },
+          "stop_warning": {
+            "default": "",
+            "title": "Stop Warning",
+            "type": "string"
           },
           "ui": {
             "anyOf": [

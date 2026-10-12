@@ -57,6 +57,16 @@
   border-color: color-mix(in srgb, var(--amber) 25%, transparent);
 }
 
+.attention-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.attention-row > .attention-item {
+  flex: 1;
+}
+
 .attention-warning > svg:first-child {
   color: var(--amber);
 }

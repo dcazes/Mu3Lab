@@ -35,7 +35,8 @@ export function useInstallBatch() {
     if (result.batch?.state === 'succeeded') {
       if (watching.current === result.batch.id) {
         const count = result.batch.items.length;
-        toast.success(`${count} app${count === 1 ? '' : 's'} installed`);
+        // Discover installs finish stopped (set up one at a time), so say what comes next.
+        toast.success(`${count} app${count === 1 ? '' : 's'} installed and ready to start`);
       }
       watching.current = null;
       setBatch(null);

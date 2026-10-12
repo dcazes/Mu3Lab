@@ -4,7 +4,7 @@ capabilities: [wiki]
 name: Outline
 tier: optional
 group: apps
-category: productivity
+category: documents
 tagline: Household wiki and notes
 summary: A fast, collaborative wiki for household notes, plans, recipes, and manuals. Shared collections for
   everyone, private documents for each person, and real-time editing together.

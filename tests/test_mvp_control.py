@@ -58,10 +58,11 @@ class RegistryV3Tests(unittest.TestCase):
                 "outline",
                 "audiobookshelf",
                 "romm",
-                "photon",
                 "dawarich",
                 "open-webui",
                 "speaches",
+                "firecrawl",
+                "kopia-ui",
             },
         )
         for service in optional:

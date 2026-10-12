@@ -16,8 +16,8 @@ browser request. Jobs carry redacted progress and leased ownership. A job
 whose worker died is claimed again; a restore or update then fails as
 interrupted and the app waits for its owner (`ctl/lifecycle/in_progress.py`).
 
-Backups are made by Kopia's own server (`ctl/backup_service.py`): it runs the
-schedule and retention, and calls `/api/v1/backup-hooks/*` just before and
+Backups are made by Kopia's own server (`ctl/backup_service.py`), an optional
+app the owner installs from Discover: it runs the schedule and retention, and calls `/api/v1/backup-hooks/*` just before and
 after each source so the worker can stop and start that app.
 
 `ctl/engine/install.py` runs core and optional app installations through the

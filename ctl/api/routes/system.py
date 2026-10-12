@@ -235,6 +235,8 @@ def open_recovery_sheet(operator: OperatorMutation) -> JSONResponse:
 @router.post("/system/backups/platform", response_model=models.BackupStarted, response_model_exclude_none=True)
 def start_platform_backup(operator: OperatorMutation) -> models.BackupStarted:
     """Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time."""
+    if not backup_service.installed():
+        raise ApiError(409, "Backups are off. Install Kopia backups from Apps first.", code="backup_service_missing")
     store = runtime.job_store()
     found = backup_service.sources(ROOT)
     core, _skipped = platform_backup.core_apps(load_registry(), ROOT)
