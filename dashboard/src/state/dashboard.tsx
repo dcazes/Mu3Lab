@@ -64,6 +64,8 @@ export const emptyData: DashboardData = {
 };
 
 const POLL_MS = 10000;
+// A refresh that has not answered by then is abandoned, so the next one can run (review R22).
+const POLL_TIMEOUT_MS = 20000;
 const DashboardContext = createContext<DashboardValue | null>(null);
 
 export function DashboardProvider({ value, children }: { value: DashboardValue; children: ReactNode }) {
@@ -85,7 +87,7 @@ const isSignedOut = (error: unknown) => error instanceof ApiError && error.kind 
 const failedConnection = (error: unknown): Connection =>
   isSignedOut(error)
     ? 'signed_out'
-    : error instanceof ApiError && error.kind === 'offline'
+    : error instanceof ApiError && (error.kind === 'offline' || error.kind === 'timeout')
       ? 'offline'
       : 'server_error';
 
@@ -102,7 +104,7 @@ export function useDashboardLoader(): DashboardValue {
     if (inFlight.current) return inFlight.current;
     const run = (async () => {
       try {
-        await api('/api/health');
+        await api('/api/health', undefined, POLL_TIMEOUT_MS);
       } catch (error) {
         if (isSignedOut(error)) setData((previous) => ({ ...previous, identity: emptyData.identity }));
         setErrorStatus(error instanceof ApiError ? error.status : undefined);
@@ -110,7 +112,7 @@ export function useDashboardLoader(): DashboardValue {
         return;
       }
       try {
-        const snapshot = await api<SnapshotResponse>('/api/v1/snapshot');
+        const snapshot = await api<SnapshotResponse>('/api/v1/snapshot', undefined, POLL_TIMEOUT_MS);
         setData(snapshot);
         setFailedSources([]);
       } catch (error) {

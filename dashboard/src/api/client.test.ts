@@ -38,3 +38,39 @@ describe('CSRF token handling', () => {
     expect(fetchMock.mock.calls.filter(([path]) => path === '/api/v1/things')).toHaveLength(1);
   });
 });
+
+describe('request deadlines (review R22)', () => {
+  // A fetch that never answers until it is aborted, as a stuck connection behaves.
+  const hanging = vi.fn(
+    (_path: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) =>
+        init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+      ),
+  );
+
+  it('gives up on a read that never answers, so the next refresh can run', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', hanging);
+      const { api } = await import('./client');
+      const pending = expect(api('/api/v1/snapshot', undefined, 20_000)).rejects.toMatchObject({
+        kind: 'timeout',
+        message: 'Mu3Lab did not answer in time.',
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a caller that stops waiting aborts the request without calling it a timeout', async () => {
+    vi.stubGlobal('fetch', hanging);
+    const { api, ApiError } = await import('./client');
+    const controller = new AbortController();
+    const pending = api('/api/v1/things', controller.signal);
+    controller.abort();
+    const error = await pending.catch((cause: unknown) => cause);
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+});

@@ -37,9 +37,11 @@ class DashboardServingTests(unittest.TestCase):
     def test_pwa_files_are_served_with_their_types(self):
         manifest = self.client.get("/manifest.webmanifest")
         self.assertEqual(manifest.headers["content-type"], "application/manifest+json")
-        worker = self.client.get("/sw.js")
-        self.assertIn("javascript", worker.headers["content-type"])
-        self.assertEqual(worker.headers["cache-control"], "no-cache")
+        # The dashboard registers it with its release in the query (review R24).
+        for path in ("/sw.js", "/sw.js?release=index-AbC123.js"):
+            worker = self.client.get(path)
+            self.assertIn("javascript", worker.headers["content-type"])
+            self.assertEqual(worker.headers["cache-control"], "no-cache")
 
     def test_files_outside_the_bundle_are_never_served(self):
         for path in ("/../secret.txt", "/%2e%2e/secret.txt"):

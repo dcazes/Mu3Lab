@@ -1,7 +1,9 @@
 // Mu3Lab service worker: makes the dashboard installable and quick to open.
 // API responses are never cached, so the dashboard never shows stale data;
 // when the server is unreachable the cached shell shows an offline screen.
-const CACHE = 'mu3lab-shell-v1';
+// One cache per release (the dashboard registers sw.js?release=<its build file>); activating
+// a new release deletes the previous release's cache.
+const CACHE = `mu3lab-shell-${new URL(self.location.href).searchParams.get('release') || 'dev'}`;
 const SHELL = ['/', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (event) => {
@@ -37,7 +39,7 @@ self.addEventListener('fetch', (event) => {
         .then((response) => {
           if (cacheable(response)) {
             const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put('/', copy));
+            event.waitUntil(caches.open(CACHE).then((cache) => cache.put('/', copy)));
           }
           return response;
         })
@@ -55,7 +57,7 @@ self.addEventListener('fetch', (event) => {
           fetch(request).then((response) => {
             if (cacheable(response)) {
               const copy = response.clone();
-              caches.open(CACHE).then((cache) => cache.put(request, copy));
+              event.waitUntil(caches.open(CACHE).then((cache) => cache.put(request, copy)));
             }
             return response;
           }),
