@@ -107,6 +107,8 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
     id,
     name,
     tag: `${id}:tag`,
+    gguf: `unsloth/${id}-GGUF`,
+    quant: 'Q4_K_M',
     download_gb: 3.3,
     memory_gb: 5,
     note: `${name} note.`,
@@ -120,6 +122,7 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
       privacy: 'outside_allowed',
       chat_model: '',
       embedding_model: 'bge-m3',
+      runner: '',
       changed_at: '',
       changed_by: '',
       ...settings,
@@ -128,6 +131,11 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
     embedding_models: [
       model('bge-m3', 'BGE-M3', { dimensions: 1024, downloaded: true }),
       model('nomic-embed-text', 'Nomic Embed Text', { dimensions: 768 }),
+    ],
+    runner: 'unsloth',
+    runners: [
+      { id: 'unsloth', name: 'Unsloth Studio', installed: true, has_ui: true },
+      { id: 'ollama', name: 'Ollama', installed: false, has_ui: false },
     ],
     runner_reachable: true,
     embedding_locked_by: [],

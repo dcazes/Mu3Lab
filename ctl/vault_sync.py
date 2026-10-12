@@ -30,7 +30,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked
 from ctl.secrets import read_runtime_env
 from ctl.store import onboarding as onboarding_state
-from ctl.store import records
+from ctl.store import person_logins, records
 from ctl.store.secrets import SecretStore
 from ctl.vault_setup import FREELLMAPI_ACCOUNT, VAULTWARDEN_LOCAL_URL
 
@@ -102,6 +102,22 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                 saved=[lambda service_id=service_id: onboarding_state.vault_saved(service_id, uid, paths)],
             )
         )
+    for service in registry.services:
+        # Personal app logins (Unsloth Studio, Navidrome's phone apps): rule per_person_logins.
+        if not any(ref.rule == "per_person_logins" for ref in service.manifest.rules):
+            continue
+        login = person_logins.get(service.id, str(person.get("username") or ""), paths)
+        if login and host:
+            items.append(
+                Item(
+                    f"login:{service.id}",
+                    service.name,
+                    str(login["login"]),
+                    str(login["password"]),
+                    _origin(host, service.private_https_port),
+                    "Created by Mu3Lab for you. Bitwarden fills this in when the app asks for its login.",
+                )
+            )
     if person.get("role") == "admin" and host:
         freellmapi = read_runtime_env(paths.projects / by_capability("provider_gateway").id / ".env").get(
             "FREELLMAPI_ADMIN_PASSWORD", ""

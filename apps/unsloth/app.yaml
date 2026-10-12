@@ -1,0 +1,62 @@
+# Unsloth Studio — see ctl/manifest/models.py for every field.
+id: unsloth
+capabilities: [model_runner]
+name: Unsloth Studio
+tier: core
+group: ai
+category: ai
+tagline: Runs and fine-tunes AI models on your server
+summary: Runs AI models on your server for private chat and document search, and lets administrators try, download,
+  and fine-tune other models in its own web app. Mu3Lab downloads the models chosen in Settings > AI through it;
+  household members chat with them in the chat app.
+version: v0.1.903-beta
+upstream: unslothai/unsloth
+model_runner:
+  engine: unsloth_studio
+service:
+  local_port: 8095
+  health:
+    path: /api/health
+  start_timeout_seconds: 900
+  uses_gpu: true
+  stop_warning: Private chat models and document search stop answering until it starts again.
+route:
+  https_port: 8473
+  caddy_port: 19490
+  access: gate
+  audience: operators
+  forwarded_host: host
+sign_in:
+  method: gate
+  note: Authentik admits administrators only. Unsloth Studio has no single sign-on, so Mu3Lab creates a Studio account
+    for each administrator and saves its login to their vault; Bitwarden fills it in.
+account:
+  # Mu3Lab's own Studio owner account: it mints the key chat and search use.
+  mode: api_bootstrap
+  needs_owner: false
+  user_action: Open Unsloth Studio; Bitwarden fills in the login Mu3Lab saved to your vault.
+secrets:
+# The Studio owner account is Mu3Lab's own; people sign in with their personal Studio accounts.
+- env: UNSLOTH_STUDIO_PASSWORD
+  length: 32
+# JupyterLab runs inside the image; nothing publishes it, and this password keeps it shut.
+- env: JUPYTER_PASSWORD
+  length: 32
+env:
+  # The search model Studio serves on /v1/embeddings: the one chosen in Settings > AI.
+  UNSLOTH_EMBEDDING_REPO: '{{embedding_gguf_repo}}'
+  UNSLOTH_EMBEDDING_QUANT: '{{embedding_gguf_quant}}'
+backup:
+  # Accounts, chats and fine-tuned models are kept; downloaded models are fetched again.
+  skip: [unsloth-models]
+rules:
+- rule: needs_embedding_model
+  with:
+    at: after_healthy
+- rule: per_person_logins
+  with:
+    audience: operators
+    purpose: Create a Studio account for each administrator
+resource_guidance: A 10 GB download that takes about 33 GB of disk once unpacked. Models are 1 to 8 GB each, and
+  fine-tuning needs a GPU with plenty of memory.
+setup_action: Install the model runner that serves private chat and document search.

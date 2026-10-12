@@ -58,9 +58,41 @@ describe('Where AI runs', () => {
     expect(screen.getByText(/downloaded first \(3.3 GB\)/)).toBeInTheDocument();
     await confirmDialog();
     await vi.waitFor(() =>
-      expect(puts).toEqual([{ privacy: 'local_only', chat_model: 'qwen3.5-4b', embedding_model: 'bge-m3' }]),
+      expect(puts).toEqual([
+        { privacy: 'local_only', chat_model: 'qwen3.5-4b', embedding_model: 'bge-m3', runner: 'unsloth' },
+      ]),
     );
     expect(await screen.findByText('Changing AI models: Download')).toBeInTheDocument();
+  });
+
+  it('offers only installed model runners and says the new one downloads first', async () => {
+    const installed = aiModels(
+      {},
+      {
+        runners: [
+          { id: 'unsloth', name: 'Unsloth Studio', installed: true, has_ui: true },
+          { id: 'ollama', name: 'Ollama', installed: true, has_ui: false },
+        ],
+      },
+    );
+    const puts = setup(installed);
+    const picker = (await screen.findByLabelText('Model runner')) as HTMLSelectElement;
+    expect(picker.value).toBe('unsloth');
+    expect(screen.getByText(/Administrators can also open it/)).toBeInTheDocument();
+    fireEvent.change(picker, { target: { value: 'ollama' } });
+    expect(screen.getByText(/It has no web app of its own/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save and apply' }));
+    expect(await screen.findByText(/Ollama downloads the chosen models first/)).toBeInTheDocument();
+    await confirmDialog();
+    await vi.waitFor(() => expect(puts).toEqual([expect.objectContaining({ runner: 'ollama' })]));
+  });
+
+  it('marks a runner that is not installed yet', async () => {
+    setup();
+    const ollama = (await screen.findByRole('option', {
+      name: /Ollama \(install it from Apps first\)/,
+    })) as HTMLOptionElement;
+    expect(ollama.disabled).toBe(true);
   });
 
   it('warns that documents are indexed again when the search model changes', async () => {

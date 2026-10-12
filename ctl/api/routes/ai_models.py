@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from ctl import local_models
+from ctl import local_models, model_runners
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -51,6 +51,11 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
     except ValueError as exc:
         raise ApiError(422, str(exc)) from exc
     current = local_models.settings(paths)
+    # Compare runners as they take effect: none chosen means the one serving now.
+    current["runner"] = local_models.runner(paths).id
+    chosen["runner"] = chosen["runner"] or current["runner"]
+    if not model_runners.installed(chosen["runner"]):
+        raise ApiError(422, "Install that model runner from Apps first.")
     if chosen["embedding_model"] != current["embedding_model"]:
         locked = local_models.index_tied(load().catalog, paths)
         if locked:

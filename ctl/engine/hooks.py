@@ -123,6 +123,13 @@ class AppHooks:
         """Finish app-specific setup once its health check passes."""
         return None
 
+    def sync_people(self, ctx: HookContext, people: list[dict[str, Any]]) -> None:
+        """Give each person with ``member`` set an account, and close everyone else's (rule per_person_logins).
+
+        Raise ``StepFailed`` or a ``RuntimeError`` with a safe sentence when the app refuses.
+        """
+        return None
+
 
 def load_app_hooks(app: App) -> AppHooks:
     """Import ``apps/<id>/hooks.py`` by path; an app without one gets the empty defaults."""

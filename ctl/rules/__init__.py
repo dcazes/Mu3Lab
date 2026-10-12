@@ -127,6 +127,7 @@ def _load_all() -> None:
         needs_embedding_model,
         password_login_off_after_setup,
         per_person_accounts,
+        per_person_logins,
         provider_routing,
         runs_backups,
         staged_first_start,

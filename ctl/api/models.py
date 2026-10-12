@@ -705,10 +705,13 @@ class LocalModel(ApiModel):
     id: str
     name: str
     tag: str
+    gguf: str
+    quant: str
     download_gb: float
     memory_gb: float
     note: str
     dimensions: int
+    # Downloaded in the model runner that serves requests now.
     downloaded: bool
 
 
@@ -716,17 +719,30 @@ class AiModelSettings(ApiModel):
     privacy: AiPrivacy
     chat_model: str
     embedding_model: str
+    # The chosen model runner's app id; empty means the default (the one the installer sets up).
+    runner: str
     changed_at: str
     changed_by: str
 
 
+class ModelRunnerOption(ApiModel):
+    id: str
+    name: str
+    installed: bool
+    # Whether it has a web app of its own (Unsloth Studio does; Ollama does not).
+    has_ui: bool
+
+
 class AiModels(ApiModel):
-    """Where AI requests may go, the local chat model and the search (embedding) model."""
+    """Where AI requests may go, the model runner, the local chat model and the search (embedding) model."""
 
     ok: bool
     settings: AiModelSettings
     chat_models: list[LocalModel]
     embedding_models: list[LocalModel]
+    # The runner that serves requests now, and every runner Mu3Lab knows.
+    runner: str
+    runners: list[ModelRunnerOption]
     runner_reachable: bool
     # Installed apps whose search index blocks changing the embedding model.
     embedding_locked_by: list[str]
@@ -737,6 +753,7 @@ class AiModelsRequest(ApiModel):
     privacy: AiPrivacy
     chat_model: str = Field(default="", max_length=64)
     embedding_model: str = Field(max_length=64)
+    runner: str = Field(default="", max_length=64)
 
 
 class RecoverySheet(ApiModel):
@@ -1201,6 +1218,8 @@ class SnapshotResponse(ApiModel):
     provisioning: ProvisioningResponse
     audit: AuditResponse
     backup_attention: list[BackupAttention] = []
+    # The app that runs local models now (Settings, AI): Unsloth Studio, or Ollama once chosen.
+    model_runner: str = ""
 
 
 class ParallelDownloadsRequest(RequestModel):

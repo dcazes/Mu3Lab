@@ -1,0 +1,42 @@
+name: mu3lab-unsloth
+
+services:
+  unsloth:
+    image: unsloth/unsloth:v0.1.903-beta@sha256:9e5b0c225b29f00f2bd1e626d2246acae526d9bae06cca7dffbf7e38db52da0c
+    restart: unless-stopped
+    # Studio only; JupyterLab (8888) and SSH stay unpublished.
+    ports: ["127.0.0.1:8095:8000"]
+    environment:
+      UNSLOTH_STUDIO_PASSWORD: ${UNSLOTH_STUDIO_PASSWORD:?UNSLOTH_STUDIO_PASSWORD is required}
+      JUPYTER_PASSWORD: ${JUPYTER_PASSWORD:?JUPYTER_PASSWORD is required}
+      # Mu3Lab set the owner password; Studio must not stop waiting for it to be changed.
+      UNSLOTH_STUDIO_BOOTSTRAP_TIMEOUT: "0"
+      # No startup lookups that tell outside services this server runs Studio.
+      UNSLOTH_STUDIO_DISABLE_PUBLIC_CHECK: "1"
+      UNSLOTH_SKIP_NOTEBOOK_SYNC: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      # Free the GPU for speech and images after ten idle minutes, as Ollama did.
+      UNSLOTH_MODEL_IDLE_TTL: "600"
+      # The search model the owner chose (Settings, AI), served on /v1/embeddings.
+      RAG_EMBEDDING_MODEL: ${UNSLOTH_EMBEDDING_REPO:?UNSLOTH_EMBEDDING_REPO is required}
+      RAG_EMBED_GGUF_VARIANT: ${UNSLOTH_EMBEDDING_QUANT:?UNSLOTH_EMBEDDING_QUANT is required}
+    # Training's data loaders share memory between processes.
+    shm_size: 8gb
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/unsloth-studio:/opt/unsloth-studio
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/unsloth-models:/workspace/.cache/huggingface
+    networks: [mu3lab_frontend, mu3lab_backend]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

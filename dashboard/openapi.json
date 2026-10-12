@@ -26,12 +26,17 @@
             ],
             "title": "Privacy",
             "type": "string"
+          },
+          "runner": {
+            "title": "Runner",
+            "type": "string"
           }
         },
         "required": [
           "privacy",
           "chat_model",
           "embedding_model",
+          "runner",
           "changed_at",
           "changed_by"
         ],
@@ -39,7 +44,7 @@
         "type": "object"
       },
       "AiModels": {
-        "description": "Where AI requests may go, the local chat model and the search (embedding) model.",
+        "description": "Where AI requests may go, the model runner, the local chat model and the search (embedding) model.",
         "properties": {
           "active_job_id": {
             "title": "Active Job Id",
@@ -70,9 +75,20 @@
             "title": "Ok",
             "type": "boolean"
           },
+          "runner": {
+            "title": "Runner",
+            "type": "string"
+          },
           "runner_reachable": {
             "title": "Runner Reachable",
             "type": "boolean"
+          },
+          "runners": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRunnerOption"
+            },
+            "title": "Runners",
+            "type": "array"
           },
           "settings": {
             "$ref": "#/components/schemas/AiModelSettings"
@@ -83,6 +99,8 @@
           "settings",
           "chat_models",
           "embedding_models",
+          "runner",
+          "runners",
           "runner_reachable",
           "embedding_locked_by",
           "active_job_id"
@@ -109,6 +127,12 @@
               "local_only"
             ],
             "title": "Privacy",
+            "type": "string"
+          },
+          "runner": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Runner",
             "type": "string"
           }
         },
@@ -2917,6 +2941,10 @@
             "title": "Downloaded",
             "type": "boolean"
           },
+          "gguf": {
+            "title": "Gguf",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -2933,6 +2961,10 @@
             "title": "Note",
             "type": "string"
           },
+          "quant": {
+            "title": "Quant",
+            "type": "string"
+          },
           "tag": {
             "title": "Tag",
             "type": "string"
@@ -2942,6 +2974,8 @@
           "id",
           "name",
           "tag",
+          "gguf",
+          "quant",
           "download_gb",
           "memory_gb",
           "note",
@@ -3820,6 +3854,34 @@
           "fallback"
         ],
         "title": "MobileClient",
+        "type": "object"
+      },
+      "ModelRunnerOption": {
+        "properties": {
+          "has_ui": {
+            "title": "Has Ui",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "installed",
+          "has_ui"
+        ],
+        "title": "ModelRunnerOption",
         "type": "object"
       },
       "Mu3LabChangelog": {
@@ -6234,6 +6296,11 @@
           },
           "jobs": {
             "$ref": "#/components/schemas/JobsResponse"
+          },
+          "model_runner": {
+            "default": "",
+            "title": "Model Runner",
+            "type": "string"
           },
           "provisioning": {
             "$ref": "#/components/schemas/ProvisioningResponse"

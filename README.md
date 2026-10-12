@@ -57,7 +57,7 @@ That's the whole install. Here is what happens:
 > [!TIP]
 > To update, open **Settings → System → Mu3Lab updates** in the dashboard. The updater offers normal release tags and verifies their assets. Development checkouts stay manual: update the checkout and re-run `./install.sh` when you intend to apply it. Finished steps are skipped and changed code is rebuilt. `make check` prints a read-only readiness report.
 
-**You need:** a desktop or laptop running Ubuntu 22.04+, Debian 12+ or a derivative such as Linux Mint (x86-64 or arm64), with at least **8 GB of RAM** and **20 GB of free disk space**, plus a free [Tailscale](https://tailscale.com) account. An NVIDIA or AMD GPU is optional; Mu3Lab detects it and uses it for local AI.
+**You need:** a desktop or laptop running Ubuntu 22.04+, Debian 12+ or a derivative such as Linux Mint (x86-64 or arm64), with at least **8 GB of RAM** and **60 GB of free disk space**, plus a free [Tailscale](https://tailscale.com) account. An NVIDIA or AMD GPU is optional; Mu3Lab detects it and uses it for local AI.
 
 ---
 
@@ -98,7 +98,7 @@ Chat (Open WebUI, or LobeChat if you prefer it) gives operators **one assistant 
 <td valign="top">
 
 ### 💸 Free AI, without the setup
-Paste free API keys from providers like Google AI Studio, Groq or NVIDIA, and Mu3Lab checks them and routes chat through them with automatic failover. Local models run on your own hardware through Ollama, on CPU or GPU. One gateway (LiteLLM) serves every app.
+Paste free API keys from providers like Google AI Studio, Groq or NVIDIA, and Mu3Lab checks them and routes chat through them with automatic failover. Local models run on your own hardware through Unsloth Studio, on CPU or GPU, where administrators can also try and fine-tune other models. One gateway (LiteLLM) serves every app.
 
 </td>
 <td valign="top">
@@ -187,7 +187,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 💬 | **Open WebUI** | Chat with an assistant for each of your apps, voice and your documents (LobeChat is available instead) |
 | 🔀 | **LiteLLM** | One AI gateway for chat and embeddings |
 | 🆓 | **FreeLLMAPI** | Routes chat to free cloud AI providers, with failover |
-| 🦙 | **Ollama** | Local AI models and embeddings, on CPU, NVIDIA or AMD |
+| 🦥 | **Unsloth Studio** | Local AI models and document search, on CPU, NVIDIA or AMD; administrators can try and fine-tune models in its web app (Ollama is available instead) |
 
 ### Add with one click
 
@@ -205,6 +205,8 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 💬 | **[LobeChat](https://lobehub.com)** | A second chat app with an assistant for each app; choose it in Settings > AI | SSO | ✅ |
 | 🕷️ | **[Firecrawl](https://www.firecrawl.dev)** | Turns web pages into clean text so chat can research the web | None (internal) | ✅ |
 | 💾 | **[Kopia backups](https://kopia.io)** | Scheduled, encrypted backups of Mu3Lab and every app; browse and restore files | Gated | — |
+| 🎵 | **[Navidrome](https://www.navidrome.org)** | Your own music streaming, like Spotify; add music through Nextcloud's shared Music folder, play it in the browser or Subsonic phone apps | SSO (phones: own login) | — |
+| 🦙 | **[Ollama](https://ollama.com)** | A second model runner with no web app; choose it in Settings > AI | None (internal) | — |
 
 <sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: chat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
 
@@ -215,7 +217,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 ## 🧩 How it works
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. Chat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Ollama or FreeLLMAPI." width="100%">
+  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. Chat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Unsloth Studio (or Ollama) or FreeLLMAPI." width="100%">
 </p>
 
 - **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
@@ -281,7 +283,7 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 
 - [x] One-command, resumable installer with a guided Tailscale step
 - [x] Authentik SSO wired into every app, plus a pre-filled Vaultwarden vault
-- [x] AI slice: Open WebUI (or LobeChat), LiteLLM, FreeLLMAPI and Ollama, with GPU detection
+- [x] AI slice: Open WebUI (or LobeChat), LiteLLM, FreeLLMAPI and Unsloth Studio (or Ollama), with GPU detection
 - [x] Operator-only app assistants through reviewed MCP connectors; durable human approval for writes
 - [x] Parallel image downloads with size estimates before install
 - [x] Encrypted local backups of catalog apps, with guided restore

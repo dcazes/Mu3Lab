@@ -10,7 +10,7 @@ from typing import Literal
 import yaml
 from pydantic import model_validator
 
-from ctl import local_models
+from ctl import local_models, model_runners
 from ctl.app_settings import AppSettings
 from ctl.control_state import ControlState
 from ctl.manifest.catalog import App, Catalog, cached
@@ -26,13 +26,12 @@ class RoutingParams(Params):
     mode: Literal["gateway", "models"]
     config_file: str
     gateway: str = ""
-    runner: str = ""
     service_key_env: str = ""
     master_key_env: str = ""
     api_base_env: str = ""
+    # Where the chosen model runner answers, and its key; both follow the owner's choice (ctl.local_models).
     runner_api_base_env: str = ""
-    # The embedding model itself is the owner's choice (ctl.local_models).
-    embedding_provider: str = ""
+    runner_api_key_env: str = ""
     # Set by integrates_with when a speech app is installed; empty otherwise.
     speech_url_env: str = ""
     admin_email_env: str = ""
@@ -48,12 +47,11 @@ class RoutingParams(Params):
             if self.mode == "gateway"
             else (
                 "gateway",
-                "runner",
                 "service_key_env",
                 "master_key_env",
                 "api_base_env",
                 "runner_api_base_env",
-                "embedding_provider",
+                "runner_api_key_env",
             )
         )
         if any(not getattr(self, key) for key in required):
@@ -144,20 +142,35 @@ def write_routing(app: App, params: RoutingParams, paths: RuntimePaths, catalog:
         write_atomic(config_path, (json.dumps(config, sort_keys=True, separators=(",", ":")) + "\n").encode())
     else:
         gateway = catalog.get(params.gateway)
-        runner = catalog.get(params.runner)
+        runner = model_runners.engine(local_models.runner(paths, catalog), paths)
         gateway_env = read_runtime_env(paths.projects / gateway.id / ".env")
         service_key = gateway_env.get(params.service_key_env, "")
         if not service_key or not env.get(params.master_key_env):
             raise ValueError("The provider gateway's internal service credential is not ready.")
         env[params.service_key_env] = service_key
         env[params.api_base_env] = f"http://{gateway.id}:{gateway.manifest.service.local_port}/v1"
-        env[params.runner_api_base_env] = f"http://{runner.id}:{runner.manifest.service.local_port}"
+        env[params.runner_api_base_env] = runner.api_base()
+        # LiteLLM's client wants a key even for a runner that needs none.
+        env[params.runner_api_key_env] = runner.api_key() or "unused"
         # Canonical first, so the next render of the model proxy keeps them.
         AppSettings(app.id, paths).set_generated(
-            {name: env[name] for name in (params.service_key_env, params.api_base_env, params.runner_api_base_env)}
+            {
+                name: env[name]
+                for name in (
+                    params.service_key_env,
+                    params.api_base_env,
+                    params.runner_api_base_env,
+                    params.runner_api_key_env,
+                )
+            }
         )
         models = local_models.litellm_models(
-            params.api_base_env, params.service_key_env, params.runner_api_base_env, params.embedding_provider, paths
+            params.api_base_env,
+            params.service_key_env,
+            params.runner_api_base_env,
+            params.runner_api_key_env,
+            paths,
+            catalog,
         )
         models.extend(speech_models(env, params))
         config = {

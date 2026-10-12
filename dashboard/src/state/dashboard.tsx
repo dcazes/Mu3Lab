@@ -28,6 +28,8 @@ export interface DashboardData {
   core: CoreSetupResponse;
   provisioning: ProvisioningResponse;
   chat: ChatStatus;
+  /** The app that runs local models now (Unsloth Studio, or Ollama once chosen). */
+  model_runner?: string;
 }
 
 export type Connection = 'connecting' | 'online' | 'offline' | 'signed_out' | 'server_error';

@@ -81,17 +81,22 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
     privacy: saved.privacy,
     chat_model: saved.chat_model,
     embedding_model: saved.embedding_model,
+    runner: data.runner,
   };
+  const chosenRunner = draft.runner || data.runner;
+  const runnerChanged = chosenRunner !== data.runner;
   const changed =
     draft.privacy !== saved.privacy ||
     draft.chat_model !== saved.chat_model ||
-    draft.embedding_model !== saved.embedding_model;
+    draft.embedding_model !== saved.embedding_model ||
+    runnerChanged;
   const embeddingChanged = draft.embedding_model !== saved.embedding_model;
   const locked = data.embedding_locked_by.length > 0;
   const busy = running || Boolean(data.active_job_id);
   const missingLocal = draft.privacy === 'local_only' && !draft.chat_model;
   const chosenChat = data.chat_models.find((model) => model.id === draft.chat_model);
   const chosenEmbedding = data.embedding_models.find((model) => model.id === draft.embedding_model);
+  const runnerName = (id: string) => data.runners.find((runner) => runner.id === id)?.name || 'the model runner';
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -102,7 +107,10 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
       embeddingChanged
         ? 'Document search in every app has to index its documents again with the new search model. Until it does, search may find nothing.'
         : '',
-      chosenChat && !chosenChat.downloaded
+      runnerChanged
+        ? `${runnerName(chosenRunner)} downloads the chosen models first; until they work, ${runnerName(data.runner)} keeps answering.`
+        : '',
+      chosenChat && !chosenChat.downloaded && !runnerChanged
         ? `${chosenChat.name} is downloaded first (${chosenChat.download_gb} GB).`
         : '',
     ].filter(Boolean);
@@ -144,8 +152,8 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
         </Callout>
       )}
       {!data.runner_reachable && (
-        <Callout tone="warning" title="Ollama is not answering">
-          Download states may be out of date until Ollama is running again.
+        <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
+          Download states may be out of date until {runnerName(data.runner)} is running again.
         </Callout>
       )}
       <form className="form" onSubmit={(event) => void save(event)}>
@@ -179,6 +187,26 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
             </span>
           </label>
         </fieldset>
+        <label className="field">
+          <span>Model runner</span>
+          <select
+            aria-label="Model runner"
+            disabled={readOnly || busy}
+            value={chosenRunner}
+            onChange={(event) => setEdits({ ...draft, runner: event.target.value })}
+          >
+            {data.runners.map((runner) => (
+              <option key={runner.id} value={runner.id} disabled={!runner.installed}>
+                {runner.installed ? runner.name : `${runner.name} (install it from Apps first)`}
+              </option>
+            ))}
+          </select>
+          <small className="muted">
+            {data.runners.find((runner) => runner.id === chosenRunner)?.has_ui
+              ? 'Runs the models below. Administrators can also open it to try and fine-tune other models.'
+              : 'Runs the models below. It has no web app of its own.'}
+          </small>
+        </label>
         <label className="field">
           <span>Local chat model</span>
           <select

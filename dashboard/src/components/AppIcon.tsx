@@ -5,6 +5,7 @@ import {
   BookOpenText,
   Bot,
   Compass,
+  Cpu,
   Flame,
   Gamepad2,
   KeyRound,
@@ -12,6 +13,7 @@ import {
   type LucideIcon,
   MapPinned,
   MessagesSquare,
+  Music,
   Network,
   Route,
   ShieldCheck,
@@ -65,6 +67,8 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   speaches: { icon: AudioLines, color: '#db2777' },
   tailnet: { icon: Network, color: '#64748b' },
   'kopia-ui': { icon: ArchiveRestore, color: '#2563eb' },
+  unsloth: { icon: Cpu, color: '#15803d' },
+  navidrome: { icon: Music, color: '#0284c7' },
 };
 
 // Near-black brand colors would vanish in dark mode; those glyphs follow the text color.

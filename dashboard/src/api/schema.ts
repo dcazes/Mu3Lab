@@ -1588,10 +1588,12 @@ export interface components {
        * @enum {string}
        */
       privacy: 'outside_allowed' | 'local_only';
+      /** Runner */
+      runner: string;
     };
     /**
      * AiModels
-     * @description Where AI requests may go, the local chat model and the search (embedding) model.
+     * @description Where AI requests may go, the model runner, the local chat model and the search (embedding) model.
      */
     AiModels: {
       /** Active Job Id */
@@ -1604,8 +1606,12 @@ export interface components {
       embedding_models: components['schemas']['LocalModel'][];
       /** Ok */
       ok: boolean;
+      /** Runner */
+      runner: string;
       /** Runner Reachable */
       runner_reachable: boolean;
+      /** Runners */
+      runners: components['schemas']['ModelRunnerOption'][];
       settings: components['schemas']['AiModelSettings'];
     };
     /** AiModelsRequest */
@@ -1622,6 +1628,11 @@ export interface components {
        * @enum {string}
        */
       privacy: 'outside_allowed' | 'local_only';
+      /**
+       * Runner
+       * @default
+       */
+      runner?: string;
     };
     /** ApiErrorResponse */
     ApiErrorResponse: {
@@ -2578,6 +2589,8 @@ export interface components {
       download_gb: number;
       /** Downloaded */
       downloaded: boolean;
+      /** Gguf */
+      gguf: string;
       /** Id */
       id: string;
       /** Memory Gb */
@@ -2586,6 +2599,8 @@ export interface components {
       name: string;
       /** Note */
       note: string;
+      /** Quant */
+      quant: string;
       /** Tag */
       tag: string;
     };
@@ -2839,6 +2854,17 @@ export interface components {
       summary: string;
       /** Support */
       support: 'official' | 'community' | 'experimental';
+    };
+    /** ModelRunnerOption */
+    ModelRunnerOption: {
+      /** Has Ui */
+      has_ui: boolean;
+      /** Id */
+      id: string;
+      /** Installed */
+      installed: boolean;
+      /** Name */
+      name: string;
     };
     /** Mu3LabChangelog */
     Mu3LabChangelog: {
@@ -3593,6 +3619,11 @@ export interface components {
       core: components['schemas']['CoreSetupResponse'];
       identity: components['schemas']['IdentityResponse'];
       jobs: components['schemas']['JobsResponse'];
+      /**
+       * Model Runner
+       * @default
+       */
+      model_runner?: string;
       provisioning: components['schemas']['ProvisioningResponse'];
       services: components['schemas']['ServicesResponse'];
       system: components['schemas']['SystemResponse'];

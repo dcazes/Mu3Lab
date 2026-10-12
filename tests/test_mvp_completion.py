@@ -59,8 +59,9 @@ class RegistryAccountTests(unittest.TestCase):
             ):
                 target = materialize(load().get("surfsense"), source)
             values = read_runtime_env(target / ".env")
-            self.assertEqual(values["EMBEDDING_MODEL"], "litellm://ollama/bge-m3:567m")  # the default search model
-            self.assertEqual(values["EMBEDDING_BASE_URL"], "http://ollama:11434")
+            # Search goes through LiteLLM, whichever model runner serves it.
+            self.assertEqual(values["EMBEDDING_MODEL"], "litellm://openai/mu3lab-embed")
+            self.assertEqual(values["EMBEDDING_BASE_URL"], "http://litellm:4000/v1")
             self.assertEqual(values["SANDBOX_ENABLED"], "FALSE")
 
 

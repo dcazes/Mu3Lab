@@ -183,8 +183,10 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
             if other not in facts.catalog:
                 return None
             return read_runtime_env(facts.paths.projects / other / ".env").get(key) or None
-        if name == "embedding_model":  # the Ollama tag of the owner's chosen search model
-            return local_models.embedding_model(facts.paths).tag
+        if name == "embedding_gguf_repo":  # the owner's chosen search model, as a GGUF repository
+            return local_models.embedding_model(facts.paths).gguf
+        if name == "embedding_gguf_quant":
+            return local_models.embedding_model(facts.paths).quant
         public = facts.public_url(app)
         known = {
             "public_url": public or None,

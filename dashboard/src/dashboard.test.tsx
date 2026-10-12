@@ -62,11 +62,11 @@ describe('Home', () => {
     const data = dashboardData([
       service('ingress', 'Caddy', 'foundation'),
       service('authentik', 'Authentik', 'foundation'),
-      service('ollama', 'Ollama', 'core', {
+      service('unsloth', 'Unsloth Studio', 'core', {
         display_state: 'needs_attention',
         detail: 'Container exited.',
         containers: [
-          { service: 'ollama', name: 'mu3lab-ollama', state: 'running', status: 'Up', health: 'unknown', image: 'x' },
+          { service: 'unsloth', name: 'mu3lab-unsloth', state: 'running', status: 'Up', health: 'unknown', image: 'x' },
         ],
       }),
       service('firecrawl', 'Firecrawl', 'optional', {
@@ -78,7 +78,7 @@ describe('Home', () => {
     data.system = {
       ...data.system,
       worker_state: 'failed',
-      container_memory: { 'mu3lab-ollama': 3.5 * GB },
+      container_memory: { 'mu3lab-unsloth': 3.5 * GB },
       memory: { total: 16 * GB, used: 10 * GB, percent: 62 },
       disk: { total: 100 * GB, used: 96 * GB, percent: 96 },
       tailscale: {
@@ -90,6 +90,8 @@ describe('Home', () => {
         serve: { state: 'available', ports: [] },
       },
     };
+    // The model runner in use leads the AI group.
+    data.model_runner = 'unsloth';
     renderWithDashboard(<HomePage />, data);
     const strip = screen.getByRole('region', { name: 'System status' });
     // Collapsed: three chips, no detail rows, real figures on hover.
@@ -111,9 +113,9 @@ describe('Home', () => {
 
     fireEvent.click(chips[1]);
     expect(chips[0]).toHaveAttribute('aria-expanded', 'false');
-    const ollama = within(strip).getByRole('link', { name: 'Ollama: Needs attention' });
-    expect(ollama).toHaveAttribute('title', '3.5 GB — Container exited.');
-    expect(ollama).toHaveTextContent('Needs attention');
+    const runner = within(strip).getByRole('link', { name: 'Unsloth Studio: Needs attention' });
+    expect(runner).toHaveAttribute('title', '3.5 GB — Container exited.');
+    expect(runner).toHaveTextContent('Needs attention');
     // Firecrawl is an optional app now; the household chat app is the fourth AI row.
     expect(within(strip).queryByRole('link', { name: /Firecrawl/ })).not.toBeInTheDocument();
 

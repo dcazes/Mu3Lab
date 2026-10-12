@@ -30,21 +30,25 @@ import { ChatAppCard } from './ChatAppCard';
 import { detectProvider, keyWarning } from './providerKeys';
 
 const ROUTE = [
-  { id: 'ollama', label: 'Ollama', role: 'Local models & embeddings' },
   { id: 'freellmapi', label: 'FreeLLMAPI', role: 'Your provider accounts' },
   { id: 'litellm', label: 'LiteLLM', role: 'One private gateway' },
 ];
 
 function ChatRoute() {
   const { data } = useDashboard();
+  const runnerName = data.services.services.find((service) => service.id === data.model_runner)?.name || 'Model runner';
   return (
     <Card
       title="How chat is routed"
       description="A route counts as ready only after streamed chat and embedding checks pass."
     >
       <ol className="route">
-        {/* The last step is whichever chat app the household uses. */}
-        {[...ROUTE, { id: data.chat.app_id || '', label: data.chat.app_name || 'Chat', role: 'Chat' }]
+        {/* The first step is the model runner in use; the last, whichever chat app the household uses. */}
+        {[
+          { id: data.model_runner || '', label: runnerName, role: 'Local models & search' },
+          ...ROUTE,
+          { id: data.chat.app_id || '', label: data.chat.app_name || 'Chat', role: 'Chat' },
+        ]
           .filter((step) => step.id)
           .map((step) => {
             const service = data.services.services.find((item) => item.id === step.id);

@@ -110,3 +110,38 @@ marked *default* were not asked; they are the obvious fix and can be changed.
 - **Toasts.** One thin toast style for passing notices across the
   dashboard. It disappears after about 4 seconds and stays while hovered or
   focused.
+
+## Follow-up: Unsloth and Navidrome (decided 2026-10-12)
+
+21. **Unsloth Studio is the default model runner, and Ollama is the alternative.**
+    It works like the chat app picker.
+    - The installer always installs Unsloth Studio, on every server. It does
+      not install Ollama. On a server without a GPU, Unsloth runs on the CPU.
+    - Ollama moves to Discover > AI & voice.
+    - Settings > AI gets a "Model runner" picker that lists the installed
+      runners.
+    - Unsloth runs both the local chat model and the search (embedding)
+      model.
+    - Switching runners downloads the chosen models again in the new runner
+      and rebuilds the search index. The picker warns about this before it
+      switches.
+    - Mu3Lab's own model picker keeps the reviewed list (local models
+      decision).
+    - **Only operators reach Studio's web app.** Authentik limits the page to
+      operators. Studio's own sign-in can't be turned off, so Mu3Lab creates
+      a Studio account for each operator and saves its password in that
+      operator's vault.
+    - Inside Studio, operators can download any model and fine-tune.
+    - Household members can't reach Studio or change models. They chat in
+      the chosen chat app with the models operators have loaded.
+    - LiteLLM reaches Studio's API with a key that Mu3Lab generates. The API
+      is not opened without a key.
+22. **Navidrome is the music app, a Spotify replacement in Discover > Media.**
+    - The household shares one music library. It lives in Navidrome's data
+      folder, so Kopia backs it up with the app.
+    - While Navidrome is installed, Nextcloud shows that folder to everyone as
+      "Music", so people add songs by dropping them there.
+    - The web page signs people in through Authentik.
+    - Phone apps use Navidrome's Subsonic API, which needs a password. Mu3Lab
+      creates each person's Navidrome account and saves that password in
+      their vault, the same as other non-SSO logins.

@@ -301,12 +301,11 @@ class SpeechRoutingTests(unittest.TestCase):
             "mode": "models",
             "config_file": "config.yaml",
             "gateway": "g",
-            "runner": "r",
             "service_key_env": "S",
             "master_key_env": "M",
             "api_base_env": "A",
             "runner_api_base_env": "R",
-            "embedding_provider": "ollama",
+            "runner_api_key_env": "RK",
             "speech_url_env": "MU3LAB_SPEECH_URL",
         }
     )

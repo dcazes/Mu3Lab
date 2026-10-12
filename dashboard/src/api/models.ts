@@ -85,6 +85,7 @@ export type McpToolsResponse = components['schemas']['McpToolsResponse'];
 export type McpUpdatesResponse = components['schemas']['McpUpdatesResponse'];
 export type Metric = components['schemas']['Metric'];
 export type MobileClient = components['schemas']['MobileClient'];
+export type ModelRunnerOption = components['schemas']['ModelRunnerOption'];
 export type Mu3LabChangelog = components['schemas']['Mu3LabChangelog'];
 export type Mu3LabRelease = components['schemas']['Mu3LabRelease'];
 export type Mu3LabUpdate = components['schemas']['Mu3LabUpdate'];

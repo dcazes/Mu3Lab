@@ -8,7 +8,6 @@ services:
     ports: ["127.0.0.1:4000:4000"]
     env_file: [".env"]
     environment:
-      OLLAMA_API_BASE: http://ollama:11434
       STORE_MODEL_IN_DB: "false"
       # Personal keys (budgets, allowed models, revocation) live here.
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?LITELLM_DB_PASSWORD is required}@db:5432/litellm

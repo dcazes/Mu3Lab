@@ -71,11 +71,21 @@ class BlockedPath(Model):
 
 
 class TokenBypass(Model):
-    """Requests carrying their own API token skip the Authentik gate (phone apps)."""
+    """Requests carrying their own API token skip the Authentik gate (phone apps).
+
+    An empty ``header`` means the app checks credentials on every request to
+    ``path`` itself (Subsonic phone apps send them in the query string).
+    """
 
     path: str
     header_prefix: str
     header: str = "Authorization"
+
+    @model_validator(mode="after")
+    def _prefix_needs_header(self) -> TokenBypass:
+        if not self.header and self.header_prefix:
+            raise ValueError("a token bypass without a header cannot have a header prefix")
+        return self
 
 
 class Redirect(Model):
@@ -292,6 +302,12 @@ class Chat(Model):
     workspace: Literal["", "lobe", "open_webui"] = ""
 
 
+class ModelRunner(Model):
+    """For a model runner (capability ``model_runner``): which API Mu3Lab drives (ctl.model_runners)."""
+
+    engine: Literal["ollama_api", "unsloth_studio"]
+
+
 class CredentialField(Model):
     key: str
     env: str
@@ -482,6 +498,7 @@ class AppManifest(Model):
     integrates_with: tuple[Integration, ...] = ()
     rules: tuple[RuleRef, ...] = ()
     chat: Chat = Chat()
+    model_runner: ModelRunner | None = None
     mobile: Mobile | None = None
     ui: Ui = Ui()
     resource_guidance: str = ""
@@ -517,6 +534,8 @@ class AppManifest(Model):
         clash = set(secret_names) & set(self.env)
         if clash:
             raise ValueError(f"env values may not overwrite generated secrets: {', '.join(sorted(clash))}")
+        if ("model_runner" in self.capabilities) != (self.model_runner is not None):
+            raise ValueError("a model runner (capability model_runner) declares model_runner.engine, and only it")
         return self
 
     @property

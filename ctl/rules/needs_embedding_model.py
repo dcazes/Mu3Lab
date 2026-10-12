@@ -1,31 +1,26 @@
 """Make sure the local embedding model the app relies on is downloaded and answers.
 
 Checked before the app starts, so an install never ends with search that
-cannot index anything. The model runner is the app named by ``runner``
-(Ollama); the model is downloaded through it when missing. The model is the
-one the owner chose for search (``ctl.local_models``). ``index_tied`` marks
-an app whose search index works only with the model it was built with, so
-that model cannot be changed while the app is installed.
+cannot index anything. The model runs in the model runner the owner chose
+(``ctl.model_runners``); it is downloaded through it when missing. The model
+is the one the owner chose for search (``ctl.local_models``). On a runner
+itself (``at: after_healthy``) the check runs only while it is the chosen one.
+``index_tied`` marks an app whose search index works only with the model it
+was built with, so that model cannot be changed while the app is installed.
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-import httpx
-
-from ctl import local_models
-from ctl.engine.compose import Compose
+from ctl import local_models, model_runners
 from ctl.engine.hooks import HookContext
-from ctl.manifest.catalog import compose_images
 from ctl.rules import Params, Rule, register
 
 
 class EmbeddingParams(Params):
     index_tied: bool = False
     at: Literal["before_start", "after_healthy"] = "before_start"
-    runner: str = ""
-    pull_command: tuple[str, ...] = ()
 
 
 @register
@@ -45,37 +40,21 @@ class NeedsEmbeddingModel(Rule):
 
     def _check(self, ctx: HookContext) -> None:
         assert ctx.facts is not None
-        runner = ctx.facts.catalog.get(self.params.runner)
-        base = f"http://127.0.0.1:{runner.manifest.service.local_port}"
-        chosen = local_models.embedding_model(ctx.facts.paths)
-        model = chosen.tag
+        paths = ctx.facts.paths
+        runner = local_models.runner(paths, ctx.facts.catalog)
+        if model_runners.CAPABILITY in ctx.app.manifest.capabilities and runner.id != ctx.app.id:
+            return  # another runner serves search; this one waits until the owner chooses it
+        chosen = local_models.embedding_model(paths)
         ctx.stage("embedding_check", "Verifying the local embedding model.")
         try:
-            tags = httpx.get(f"{base}/api/tags", timeout=10).json()
-        except (httpx.HTTPError, ValueError) as exc:
-            ctx.fail("embedding_check", "embedding_probe_failed", f"{runner.manifest.name} is not available: {exc}")
-            return
-        present = {
-            local_models.name(str(item.get("name", ""))) for item in tags.get("models", []) if isinstance(item, dict)
-        }
-        if local_models.name(model) not in present:
-            ctx.stage("embedding_model_pull", "Downloading the local embedding model.")
-            project = ctx.facts.paths.projects / runner.id
-            folder = project
-            service = next(iter(compose_images(folder / "docker-compose.yml")), runner.id)
-            rc, _ = Compose(folder).exec(service, [*self.params.pull_command, model], ctx.log, timeout=600)
-            if rc:
-                ctx.fail(
-                    "embedding_check", "embedding_probe_failed", "The local embedding model could not be downloaded."
-                )
-        try:
-            vectors = (
-                httpx.post(f"{base}/api/embed", json={"model": model, "input": "Mu3Lab readiness"}, timeout=120)
-                .json()
-                .get("embeddings")
+            engine = model_runners.engine(runner, paths)
+            if not engine.has(chosen, engine.downloaded()):
+                ctx.stage("embedding_model_pull", "Downloading the local embedding model.")
+                engine.pull(chosen, ctx.log)
+            engine.check_embedding(chosen)
+        except model_runners.ENGINE_ERRORS as exc:
+            ctx.fail(
+                "embedding_check",
+                "embedding_probe_failed",
+                f"The local embedding model is not ready in {runner.manifest.name}: {exc}",
             )
-        except (httpx.HTTPError, ValueError) as exc:
-            ctx.fail("embedding_check", "embedding_probe_failed", f"The local embedding check failed: {exc}")
-            return
-        if not (isinstance(vectors, list) and vectors and len(vectors[0]) == chosen.dimensions):
-            ctx.fail("embedding_check", "embedding_probe_failed", f"{chosen.name} returned no usable embedding.")

@@ -1,0 +1,8 @@
+services:
+  unsloth:
+    # The same Studio release built on ROCm for AMD GPUs.
+    image: unsloth/unsloth-rocm:v0.1.903-beta-studio@sha256:cb6d8ac9ddaaf09eac747072ebc4a44424313a4409966582fae17dca0511825b
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add: [video, render]
