@@ -114,7 +114,7 @@ export function BackupScheduleCard() {
           </label>
         )}
         <div className="button-row">
-          <Button type="submit" size="sm" icon={CalendarClock} loading={pending === 'schedule'} disabled={!changed}>
+          <Button type="submit" icon={CalendarClock} loading={pending === 'schedule'} disabled={!changed}>
             Save schedule
           </Button>
         </div>

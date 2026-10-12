@@ -99,7 +99,8 @@ describe('Home', () => {
     const ollama = within(strip).getByRole('link', { name: 'Ollama: Needs attention' });
     expect(ollama).toHaveAttribute('title', '3.5 GB — Container exited.');
     expect(ollama).toHaveTextContent('Needs attention');
-    expect(within(strip).getByRole('link', { name: 'Firecrawl: Not installed' })).toBeInTheDocument();
+    // Firecrawl is an optional app now; the household chat app is the fourth AI row.
+    expect(within(strip).queryByRole('link', { name: /Firecrawl/ })).not.toBeInTheDocument();
 
     fireEvent.click(chips[2]);
     expect(within(strip).getByRole('link', { name: 'Background worker: Failed' })).toBeInTheDocument();
@@ -374,7 +375,8 @@ describe('Apps', () => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/install-batch',
         expect.objectContaining({
-          body: JSON.stringify({ service_ids: ['immich', 'mealie'], parallel_downloads: 3 }),
+          // Two apps never download more than two at once.
+          body: JSON.stringify({ service_ids: ['immich', 'mealie'], parallel_downloads: 2 }),
         }),
       ),
     );
@@ -426,12 +428,13 @@ describe('Apps', () => {
     expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select Immich for installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Install Immich' }));
-    expect(screen.getByLabelText('Downloads at once')).toBeInTheDocument();
+    // One app has nothing to download alongside it.
+    expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install all selected' }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/install-batch',
-        expect.objectContaining({ body: JSON.stringify({ service_ids: ['immich'], parallel_downloads: 3 }) }),
+        expect.objectContaining({ body: JSON.stringify({ service_ids: ['immich'], parallel_downloads: 1 }) }),
       ),
     );
     expect(await screen.findByRole('button', { name: 'Queued' })).toBeDisabled();

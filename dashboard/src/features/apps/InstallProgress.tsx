@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronDown, ChevronUp, GripVertical, Pause, Play, RotateCcw, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Pause, Play, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import type { ImageDownload, InstallBatch, InstallBatchItem, InstallBatchJob, Service } from '../../api';
 import { Button } from '../../components/Button';
@@ -110,14 +110,12 @@ export function InstallProgress({
   job,
   services,
   onAction,
-  onDismiss,
   controls,
 }: {
   batch: InstallBatch;
   job: InstallBatchJob | null;
   services: Service[];
   onAction: (action: 'cancel' | 'reset') => void;
-  onDismiss: () => void;
   controls?: InstallControls;
 }) {
   const [dragging, setDragging] = useState('');
@@ -137,20 +135,6 @@ export function InstallProgress({
     next.splice(Math.max(0, Math.min(target, next.length)), 0, serviceId);
     controls?.reorder(next);
   };
-
-  if (batch.state === 'succeeded')
-    return (
-      <div className="card install-progress install-done">
-        <CheckCircle2 className="install-done-icon" />
-        <div>
-          <b>Installation complete</b>
-          <p>
-            {done} app{done === 1 ? '' : 's'} installed: {batch.items.map((item) => name(item.service_id)).join(', ')}.
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" icon={X} aria-label="Dismiss" onClick={onDismiss} />
-      </div>
-    );
 
   return (
     <section className="card install-progress" aria-live="polite" aria-label="Installation progress">

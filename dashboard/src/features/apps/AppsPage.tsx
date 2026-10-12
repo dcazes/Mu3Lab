@@ -49,11 +49,25 @@ function matches(service: Service, term: string, summary = '') {
   return !term || `${service.name} ${service.category} ${summary}`.toLowerCase().includes(term);
 }
 
+/** Every installed row shares one set of columns, so states line up down the page. */
+function InstalledHeader() {
+  return (
+    <div className="row installed-row installed-head hide-mobile" aria-hidden="true">
+      <span>App</span>
+      <span>Status</span>
+      <span>Sign-in</span>
+      <span>Update</span>
+      <span />
+      <span />
+    </div>
+  );
+}
+
 function InstalledRow({ service, summary }: { service: Service; summary: string }) {
   const target = launchTarget(service);
   const signIn = signInSummary(service);
   return (
-    <div className="row">
+    <div className="row installed-row">
       <Link to={`/apps/${service.id}`} className="row-main">
         <AppIcon id={service.id} />
         <span className="row-text">
@@ -61,27 +75,26 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
           <small>{summary || categoryLabel(service.category)}</small>
         </span>
       </Link>
-      <span className="row-meta hide-mobile">
-        {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
+      <span className="installed-cell">
+        <StatusBadge state={service.display_state} />
+      </span>
+      <span className="installed-cell hide-mobile">
         {service.identity && service.identity.mode !== 'none' && <Badge tone="gray">{signIn.label}</Badge>}
       </span>
-      <StatusBadge state={service.display_state} />
-      <span className="row-actions">
-        {target ? (
-          <ExternalButton size="sm" href={target.url}>
-            {target.label}
-          </ExternalButton>
-        ) : (
-          <span className="row-action-placeholder" />
-        )}
-        <Link
-          to={`/apps/${service.id}`}
-          className="btn btn-ghost btn-sm btn-icon"
-          aria-label={`${service.name} details`}
-        >
-          <ChevronRight />
-        </Link>
+      <span className="installed-cell hide-mobile">
+        {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
       </span>
+      <span className="installed-cell">
+        {/* Always "Open", so every button is the same width; the specific label is its tooltip. */}
+        {target && (
+          <ExternalButton size="sm" href={target.url} className="installed-open" title={target.label}>
+            Open
+          </ExternalButton>
+        )}
+      </span>
+      <Link to={`/apps/${service.id}`} className="btn btn-ghost btn-sm btn-icon" aria-label={`${service.name} details`}>
+        <ChevronRight />
+      </Link>
     </div>
   );
 }
@@ -230,7 +243,6 @@ export function AppsPage({ discover }: { discover: boolean }) {
           job={installBatch.job}
           services={services}
           onAction={(action) => void installBatch.act(action)}
-          onDismiss={installBatch.dismiss}
           controls={installBatch.controls}
         />
       )}
@@ -270,6 +282,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
             <section key={name} className="group">
               <h2 className="group-title">{groupLabel[name]}</h2>
               <div className="card card-flush rows">
+                <InstalledHeader />
                 {group.map((service) => (
                   <InstalledRow
                     key={service.id}

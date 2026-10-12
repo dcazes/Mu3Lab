@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus, Rocket } from 'lucide-react';
+import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus } from 'lucide-react';
 import type { Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
@@ -68,9 +68,6 @@ function Attention() {
       text: `${service.name}: ${stateLabel[service.display_state].toLowerCase()}`,
       to: `/apps/${service.id}`,
     })),
-    ...(setupIncomplete
-      ? [{ key: 'setup', icon: Rocket, tone: 'info', text: 'Finish setting up Mu3Lab', to: '/settings/system' }]
-      : []),
     // Sent to administrators only, and only while backups fall behind the schedule.
     ...(setupIncomplete ? [] : data.backup_attention || []).map((item) => ({
       key: item.key,

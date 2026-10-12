@@ -1481,13 +1481,17 @@ body > .recovery-sheet {
   }
 }
 
+/* How often, day and time sit side by side with Save, not one per row. */
 .schedule-form {
-  display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
   gap: 12px;
   align-items: flex-end;
-  margin-bottom: 12px;
 }
 .schedule-form .field {
-  min-width: 150px;
+  flex: 0 1 180px;
+  min-width: 140px;
+}
+.schedule-form .button-row {
+  margin: 0;
 }

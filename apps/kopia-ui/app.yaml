@@ -7,7 +7,7 @@ id: kopia-ui
 capabilities: [backup_service]
 name: Kopia backups
 tier: core
-group: apps
+group: infrastructure
 category: infrastructure
 tagline: Makes your backups; browse and restore files
 summary: Kopia's own server makes every backup on the schedule you choose and keeps them by its retention policy.

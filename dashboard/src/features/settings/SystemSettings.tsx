@@ -1,4 +1,4 @@
-import { CheckCircle2, Copy, Network, RefreshCw, Rocket } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Network, RefreshCw, Rocket } from 'lucide-react';
 import { useState } from 'react';
 import {
   api,
@@ -36,59 +36,25 @@ function Meter({ label, percent, detail }: { label: string; percent: number; det
   );
 }
 
-function Setup() {
+/** Setup normally finishes in the installer; this shows only when a setup step has failed. */
+function SetupProblem() {
   const { data, refresh } = useDashboard();
   const { provisioning, core, identity } = data;
   const confirm = useConfirm();
   const { pending, run } = useAction();
-  if (!provisioning.available) return null;
-  const progress = provisioning.progress || {
-    completed: provisioning.phases.filter((phase) => ['verified', 'skipped'].includes(phase.actual_state)).length,
-    total: provisioning.phases.length,
-  };
-  if (provisioning.complete)
-    return (
-      <Callout tone="success" icon={CheckCircle2} title="Mu3Lab is fully set up">
-        All {progress.total} setup steps are verified.
-      </Callout>
-    );
-  const phase = provisioning.waiting || provisioning.blocked;
+  const failedJob = core.current_job?.state === 'failed';
+  if (!provisioning.available || provisioning.complete || !(provisioning.blocked || failedJob)) return null;
   const next = provisioning.next_action;
   return (
-    <Card
-      title="Finish setup"
-      description={phase?.detail || core.next_action}
-      actions={
-        <span className="install-count">
-          {progress.completed}/{progress.total}
-        </span>
-      }
-    >
-      <ol className="checklist">
-        {provisioning.phases.map((item) => {
-          const done = ['verified', 'skipped'].includes(item.actual_state);
-          const failed = item.actual_state === 'failed';
-          return (
-            <li key={item.phase_id} className={done ? 'done' : failed ? 'failed' : ''}>
-              <Dot tone={done ? 'green' : failed ? 'red' : 'gray'} />
-              <span>{item.label}</span>
-              {!done && <small>{item.actual_state.replaceAll('_', ' ')}</small>}
-            </li>
-          );
-        })}
-      </ol>
-      {core.current_job && ['queued', 'running', 'failed'].includes(core.current_job.state) && (
-        <p className="muted">{core.current_job.detail}</p>
-      )}
-      <div className="button-row">
-        {next?.kind === 'link' && next.href && (
-          <LinkButton variant="primary" to={next.href}>
-            {next.label}
-          </LinkButton>
-        )}
-        {next?.kind === 'job' && next.endpoint && identity.writes_enabled && (
+    <Callout
+      tone="danger"
+      icon={AlertTriangle}
+      title="A setup step didn’t finish"
+      action={
+        next?.kind === 'link' && next.href ? (
+          <LinkButton to={next.href}>{next.label}</LinkButton>
+        ) : next?.kind === 'job' && next.endpoint && identity.writes_enabled ? (
           <Button
-            variant="primary"
             icon={Rocket}
             loading={pending === 'setup'}
             onClick={async () => {
@@ -100,14 +66,17 @@ function Setup() {
           >
             {next.label}
           </Button>
-        )}
-        {next?.kind === 'bootstrap' && (
-          <p className="muted">
-            Run <code>./install.sh</code> on the server to finish this step.
-          </p>
-        )}
-      </div>
-    </Card>
+        ) : undefined
+      }
+    >
+      {provisioning.blocked?.detail || core.current_job?.detail || core.next_action}
+      {next?.kind === 'bootstrap' && (
+        <>
+          {' '}
+          Run <code>./install.sh</code> on the server to finish it.
+        </>
+      )}
+    </Callout>
   );
 }
 
@@ -336,7 +305,7 @@ export function SystemSettings() {
         title="System"
         description="Keep Mu3Lab up to date, and monitor server health, network access, and local AI acceleration."
       />
-      <Setup />
+      <SetupProblem />
       <Card title="Server">
         <div className="meters">
           <Meter

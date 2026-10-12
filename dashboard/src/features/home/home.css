@@ -309,10 +309,10 @@
 
 .status-panel {
   display: grid;
-  /* At most 4 columns, each narrow enough to keep a name close to its figure. */
-  grid-template-columns: repeat(auto-fill, minmax(max(180px, calc((100% - 96px) / 4)), 230px));
+  /* Every group fills one row of four equal columns, so nothing wraps to a lonely second row. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: start;
-  gap: 0 32px;
+  gap: 0 28px;
   margin: 0;
   padding: 4px 14px;
   list-style: none;

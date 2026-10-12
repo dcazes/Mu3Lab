@@ -25,10 +25,10 @@ const sizes: AppSizesResponse = {
   free_bytes: 200 * 1024 ** 3,
 };
 
-function renderDialog(onInstall = vi.fn()) {
+function renderDialog(onInstall = vi.fn(), ids = ['surfsense', 'mealie', 'immich']) {
   render(
     <InstallPlanDialog
-      ids={['surfsense', 'mealie', 'immich']}
+      ids={ids}
       names={{ surfsense: 'SurfSense', mealie: 'Mealie', immich: 'Immich' }}
       sizes={sizes}
       pending={false}
@@ -58,6 +58,22 @@ describe('InstallPlanDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Install all selected' }));
     expect(onInstall).toHaveBeenCalledWith(['surfsense', 'mealie', 'immich'], 2);
     expect(localStorage.getItem('mu3lab.parallelDownloads')).toBe('2');
+  });
+
+  it('never offers more downloads at once than apps chosen', () => {
+    localStorage.setItem('mu3lab.parallelDownloads', '6');
+    const onInstall = renderDialog(vi.fn(), ['surfsense', 'mealie']);
+    const select = screen.getByLabelText<HTMLSelectElement>('Downloads at once');
+    expect([...select.options].map((option) => option.value)).toEqual(['1', '2']);
+    fireEvent.click(screen.getByRole('button', { name: 'Install all selected' }));
+    expect(onInstall).toHaveBeenCalledWith(['mealie', 'surfsense'], 2);
+    // Untouched, the owner's saved preference is kept for bigger selections.
+    expect(localStorage.getItem('mu3lab.parallelDownloads')).toBe('6');
+  });
+
+  it('hides the choice for a single app', () => {
+    renderDialog(vi.fn(), ['mealie']);
+    expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
   });
 });
 

@@ -36,7 +36,8 @@ interface Group {
 }
 
 const SECURITY = ['ingress', 'authentik', 'tailscale', 'vaultwarden'];
-const AI = ['ollama', 'litellm', 'freellmapi', 'firecrawl'];
+// The household chat app is the fourth AI row, so each group fills one row of four.
+const AI = ['ollama', 'litellm', 'freellmapi', 'lobehub'];
 const SYSTEM_PAGE = '/settings/system';
 const RANK: Record<Tone, number> = { green: 0, gray: 0, blue: 1, amber: 2, red: 3 };
 
@@ -129,15 +130,17 @@ function buildGroups(system: SystemResponse, services: Service[]): Group[] {
       status: system.docker_ready ? 'Running' : 'Not reachable',
       to: SYSTEM_PAGE,
     },
-    {
+  ];
+  // A running worker is the normal case; it earns a row only when something is wrong.
+  if (worker !== 'active')
+    systemRows.push({
       key: 'worker',
       label: 'Background worker',
       tone: workerTone,
-      status: worker === 'active' ? 'Running' : worker.charAt(0).toUpperCase() + worker.slice(1),
+      status: worker.charAt(0).toUpperCase() + worker.slice(1),
       detail: workerTone === 'red' ? 'Installs and repairs wait until it runs again.' : '',
       to: SYSTEM_PAGE,
-    },
-  ];
+    });
   const security = pick(SECURITY);
   const ai = pick(AI);
   const figures = (rows: Row[]) => rows.filter((row) => row.value).map((row) => `${row.label} ${row.value}`);

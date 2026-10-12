@@ -86,7 +86,7 @@ function Shell() {
         </div>
       </main>
       <CommandPalette open={searchOpen} setOpen={setSearchOpen} setTheme={setPreference} />
-      <Toaster position="bottom-right" closeButton theme={preference} />
+      <Toaster position="bottom-right" closeButton duration={4000} theme={preference} />
     </div>
   );
 }
