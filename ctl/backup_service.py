@@ -70,6 +70,7 @@ ACTION_TIMEOUT = "30m"
 HOOK_WAIT_SECONDS = 25 * 60
 ACTOR = "backup-service"
 STATE = ("backup", "service")
+REACHABLE = ("backup", "service-reachable")  # since when the server has not answered
 HOLDS = "backup-holds"
 RESULTS = "backup-results"
 # A held app whose source Kopia no longer backs up is started again after this long.
@@ -455,6 +456,14 @@ def _restart_stuck(store: JobStore, status: dict[str, dict] | None, log: Log, pa
         _result(source, False, "The backup did not finish; Kopia's log has the details.", paths)
 
 
+def _note_reachable(answered: bool, paths: RuntimePaths) -> None:
+    down = records.get(*REACHABLE, paths)
+    if answered and down:
+        records.delete(*REACHABLE, paths)
+    elif not answered and not down.get("since"):
+        records.put(*REACHABLE, {"since": _now().isoformat(timespec="seconds")}, paths)
+
+
 def reconcile(store: JobStore, root: Path, log: Log, paths: RuntimePaths | None = None) -> None:
     """Keep the server's folders, actions, schedule and Mu3Lab's records in step. Called about once a minute."""
     paths = paths or RuntimePaths()
@@ -467,6 +476,7 @@ def reconcile(store: JobStore, root: Path, log: Log, paths: RuntimePaths | None 
         status: dict[str, dict] | None = source_status(paths)
     except OSError:
         status = None
+    _note_reachable(status is not None, paths)
     _restart_stuck(store, status, log, paths)
     container = _container(log)
     if not container:
@@ -575,6 +585,8 @@ INTERVALS = {
 }
 # With scheduled backups off, Home asks once the newest backup is this old.
 UNSCHEDULED_LIMIT = timedelta(days=7)
+# How long the server may not answer (a restart, a restore swapping folders) before Home says so.
+DOWN_LIMIT = timedelta(minutes=10)
 
 
 def _days(age: timedelta) -> str:
@@ -598,6 +610,16 @@ def attention(paths: RuntimePaths | None = None, *, now: datetime | None = None)
     newest = str(backups.protection(backups.PLATFORM_SOURCE, paths).get("completed_at") or "")
     off = "" if scheduled else " Scheduled backups are off."
     items: list[dict] = []
+    down = str(records.get(*REACHABLE, paths).get("since") or "")
+    if down and installed(paths) and now - datetime.fromisoformat(down) > DOWN_LIMIT:
+        name = load().get(service_id()).name
+        items.append(
+            {
+                "key": "backup-service-stopped",
+                "message": f"The backup service ({name}) is not running, so no backups are being made. "
+                "Start it from its page in Apps.",
+            }
+        )
     if newest:
         try:
             age = now - datetime.fromisoformat(newest.replace("Z", "+00:00"))

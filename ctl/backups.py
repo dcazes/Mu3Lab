@@ -573,6 +573,7 @@ def snapshots(service_id: str, log: Log = lambda _line: None, paths: RuntimePath
                 "release_id": str(tags.get("tag:release") or noted.get("release_id") or ""),
                 "paths": [f"/data/{name}" for name in folders],
                 "complete": not int((item.get("stats") or {}).get("errorCount") or 0),
+                "size": int(((item.get("rootEntry") or {}).get("summ") or {}).get("size") or 0),
             }
         )
     return sorted(result, key=lambda snap: snap["time"], reverse=True)

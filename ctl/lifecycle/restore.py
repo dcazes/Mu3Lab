@@ -2,7 +2,7 @@
 
 1. Kopia unpacks the chosen backup beside the live data, into
    ``.<folder>.restoring``, while the app keeps running. A failure here
-   changes nothing.
+   changes nothing, and a disk without room for it is refused up front.
 2. Mu3Lab notes what it is about to change (``in_progress``) and stops the app.
 3. Each live folder is renamed to ``.<folder>.original`` and the restored copy
    takes its place. A backup from another release also brings back that
@@ -22,6 +22,7 @@ once it is back.
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
 RESTORING, ORIGINAL, DISCARD = "restoring", "original", "discard"
+HEADROOM = 1 << 30  # left free after unpacking, so the running apps keep room to write
 
 Log = Callable[[str], None]
 Step = Callable[[str, str], None]
@@ -99,6 +101,22 @@ def plan(chosen: dict[str, Any], folders: list[Path], paths: RuntimePaths) -> tu
             "now, and restoring it would mix old and new data."
         )
     return saved, [name for name in saved if not (paths.data / name).exists()]
+
+
+def _gigabytes(size: int) -> str:
+    return f"{max(size, 1 << 26) / (1 << 30):.1f} GB"
+
+
+def check_space(chosen: dict[str, Any], paths: RuntimePaths) -> None:
+    """Refuse a restore the data disk has no room to unpack: the backup sits beside the live data until the swap."""
+    size = int(chosen.get("size") or 0)
+    free = shutil.disk_usage(paths.data).free
+    if size and free < size + HEADROOM:
+        raise RestoreFailed(
+            f"Nothing changed: unpacking this backup needs about {_gigabytes(size + HEADROOM)} free on the data "
+            f"disk, and {_gigabytes(free)} is free. Free some space and try again.",
+            "not_enough_space",
+        )
 
 
 def _target(
@@ -188,6 +206,7 @@ def restore(
             "recovery_required",
         )
     chosen = _chosen(service, snapshot_id, log, paths)
+    check_space(chosen, paths)
     target = _target(service, chosen, root, log, step, paths)
     storage = None
     if target:

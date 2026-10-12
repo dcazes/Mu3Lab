@@ -91,6 +91,7 @@ class KopiaIntegrationTests(unittest.TestCase):
             [(snap["id"], snap["paths"], snap["version"]) for snap in listed],
             [(saved["snapshot_id"], ["/data/mealie"], "v3.22.0")],
         )
+        self.assertGreater(listed[0]["size"], 0)  # what a restore checks free space against
         # Change the live data, then restore: the change and the extra file must go.
         _as_root(self.paths, "echo changed > /r/data/mealie/recipes.db && echo junk > /r/data/mealie/extra")
         self.restore(saved["snapshot_id"])

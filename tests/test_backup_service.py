@@ -276,6 +276,29 @@ class AttentionTests(_Paths):
         backups.record_backup("mu3lab", datetime.now(UTC).isoformat(timespec="seconds"), self.paths)
         self.assertEqual([item["key"] for item in backup_service.attention(self.paths)], ["backup-failed"])
 
+    def test_a_stopped_backup_service_is_reported_once_it_stays_down(self):
+        (self.paths.projects / "kopia-ui").mkdir()
+        (self.paths.projects / "kopia-ui" / "docker-compose.yml").write_text("services: {}\n")
+        backups.record_backup("mu3lab", datetime.now(UTC).isoformat(timespec="seconds"), self.paths)
+        with (
+            patch.object(backup_service, "source_status", side_effect=OSError("refused")),
+            patch.object(backup_service, "_container", return_value={}),
+        ):
+            backup_service.reconcile(self.store, ROOT, lambda _l: None, self.paths)
+            backup_service.reconcile(self.store, ROOT, lambda _l: None, self.paths)
+        soon = datetime.now(UTC) + timedelta(minutes=5)
+        self.assertEqual(backup_service.attention(self.paths, now=soon), [])  # a restart, most likely
+        later = datetime.now(UTC) + timedelta(minutes=11)
+        messages = backup_service.attention(self.paths, now=later)
+        self.assertEqual([item["key"] for item in messages], ["backup-service-stopped"])
+        self.assertIn("no backups are being made", messages[0]["message"])
+        with (
+            patch.object(backup_service, "source_status", return_value={}),
+            patch.object(backup_service, "_container", return_value={}),
+        ):
+            backup_service.reconcile(self.store, ROOT, lambda _l: None, self.paths)
+        self.assertEqual(backup_service.attention(self.paths, now=later), [])
+
 
 class HookApiTests(unittest.TestCase):
     url: ClassVar[str] = "/api/v1/backup-hooks/before-snapshot-root"

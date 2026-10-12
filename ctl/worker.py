@@ -43,16 +43,39 @@ ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
 
 
-def _maintain_lease(store: JobStore, job: dict, worker_id: str, stop: threading.Event, lost: threading.Event) -> None:
-    while not stop.wait(10):
+LEASE_SECONDS = 45  # JobStore's default lease
+RENEW_SECONDS = 10
+
+
+def _maintain_lease(
+    store: JobStore,
+    job: dict,
+    worker_id: str,
+    stop: threading.Event,
+    lost: threading.Event,
+    *,
+    every: float = RENEW_SECONDS,
+    clock=time.monotonic,
+) -> None:
+    """Renew the job's lease; set ``lost`` once another worker could have taken the job.
+
+    A briefly locked database is retried: the lease still holds until it
+    expires, so only an error lasting until then (less a renewal's margin)
+    counts as lost. A renewal the store refuses means someone else owns the job.
+    """
+    renewed_at = clock()
+    while not stop.wait(every):
         try:
             renewed = store.heartbeat(str(job["id"]), worker_id, step_id=str(job.get("step_id") or ""))
-        except Exception:  # a locked or unreadable store cannot prove we still own the job
+        except Exception:  # a locked or unreadable store: our lease may still hold
+            if clock() - renewed_at < LEASE_SECONDS - 2 * every:
+                continue
             renewed = False
         if not renewed:
             # Another worker may reclaim the job; stop this one at its next checkpoint.
             lost.set()
             return
+        renewed_at = clock()
 
 
 def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:

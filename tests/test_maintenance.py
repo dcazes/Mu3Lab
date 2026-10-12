@@ -166,6 +166,17 @@ class RestoreTests(_Workflow):
         self.assertIn("Nothing changed", job["detail"])
         self.assertEqual((self.data(), self.events, self.leftovers()), ("live", [], []))
 
+    def test_a_disk_without_room_for_the_backup_changes_nothing(self):
+        self.backup(size=50 << 30)
+        free = shutil.disk_usage(self.paths.data)._replace(free=20 << 30)
+        with patch("ctl.lifecycle.restore.shutil.disk_usage", return_value=free):
+            job = self.job("restore", snapshot_id=BACKUP)
+        self.assertEqual(job["error_code"], "not_enough_space")
+        self.assertIn("needs about 51.0 GB free on the data disk, and 20.0 GB is free", job["detail"])
+        self.assertEqual((self.data(), self.events, self.leftovers()), ("live", [], []))
+        self.unpack.assert_not_called()
+        self.download.assert_not_called()
+
     def test_a_stopped_app_stays_stopped_and_is_not_marked_tested(self):
         self.backup()
         state = type("State", (), {"installation": lambda _self, _id: {"state": "stopped"}})()

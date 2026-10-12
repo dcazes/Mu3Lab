@@ -78,6 +78,7 @@ def _snapshot_listing(folders: list[str], snapshot_id: str = SNAP, app: str = "m
                     "tag:release": "0123456789abcdef",
                     "tag:folders": "+".join(folders),
                 },
+                "rootEntry": {"summ": {"size": 3, "files": 1}},
             }
         ],
         indent=1,
@@ -270,8 +271,9 @@ class KopiaTests(unittest.TestCase):
         with self.docker({"snapshot list": (0, _snapshot_listing(["mealie", "mealie-recipes"]))}):
             listed = backups.snapshots("mealie", paths=self.paths)
         self.assertEqual(
-            {key: listed[0][key] for key in ("reason", "version", "release_id", "short_id", "paths")},
+            {key: listed[0][key] for key in ("reason", "version", "release_id", "short_id", "paths", "size")},
             {
+                "size": 3,
                 "reason": "pre-update",
                 "version": "v3.22.0",
                 "release_id": "0123456789abcdef",
