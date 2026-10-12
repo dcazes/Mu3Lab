@@ -429,12 +429,13 @@ def ensure_repository(log: Log, paths: RuntimePaths | None = None) -> None:
     paths = paths or RuntimePaths()
     if repository_present(paths):
         _connect(log, paths)
-        return
-    rc, output = _kopia(
-        ["repository", "create", "filesystem", "--path=/repo", *IDENTITY], log, paths=paths, timeout=300
-    )
-    if rc or not repository_present(paths):
-        raise BackupError(f"The backup repository could not be created: {output[-500:]}")
+    else:
+        rc, output = _kopia(
+            ["repository", "create", "filesystem", "--path=/repo", *IDENTITY], log, paths=paths, timeout=300
+        )
+        if rc or not repository_present(paths):
+            raise BackupError(f"The backup repository could not be created: {output[-500:]}")
+    # Reassert this before every snapshot, including after interrupted creation.
     # Mu3Lab applies retention itself (``prune``), so Kopia never expires a snapshot an
     # unfinished operation still needs. Cache folders are kept: a restore must be exact.
     rc, output = _kopia(
@@ -634,7 +635,11 @@ def prune(service_id: str, log: Log, *, paths: RuntimePaths | None = None, reten
     except BackupError as exc:
         log(f"Old backups were not pruned this time: {exc}")
         return False
-    removable = expired(listing, retention)
+    from ctl.operations import OperationStore
+
+    journal = OperationStore.runtime(paths)
+    protected = journal.protected(service_id) if journal else set()
+    removable = [snapshot for snapshot in expired(listing, retention) if snapshot not in protected]
     if not removable:
         return True
     rc, output = _kopia(["snapshot", "delete", *removable, "--delete"], log, paths=paths)
@@ -796,6 +801,11 @@ def swap(plan: dict[str, Any], save: Callable[[dict[str, Any]], None], *, paths=
         live, previous = paths.data / name, _place(name, PREVIOUS, tag, paths)
         staged = _place(name, STAGED, tag, paths)
         if not staged.exists():
+            # The second rename may have committed before the journal write.
+            if state == "staged" and live.is_dir() and (previous.is_dir() or name in plan.get("absent", [])):
+                plan = {**plan, "roots": {**plan["roots"], name: "swapped"}}
+                save(plan)
+                continue
             raise BackupError(f"The restored copy of {name} is missing, so the restore cannot finish.")
         if live.exists() and not previous.exists():
             os.rename(live, previous)
@@ -818,7 +828,12 @@ def undo(plan: dict[str, Any], save: Callable[[dict[str, Any]], None], *, paths=
             if live.exists():
                 os.rename(live, discard)
             os.rename(previous, live)
-        elif name in plan.get("absent", []) and plan["roots"][name] == "swapped" and live.exists():
+        elif (
+            name in plan.get("absent", [])
+            and plan["roots"][name] in {"staged", "swapped"}
+            and not _place(name, STAGED, tag, paths).exists()
+            and live.exists()
+        ):
             os.rename(live, discard)  # the folder did not exist before the restore
         plan = {**plan, "roots": {**plan["roots"], name: "undone"}}
         save(plan)

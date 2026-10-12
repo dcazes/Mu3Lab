@@ -135,6 +135,11 @@ def route_check(
         answered, probed_at = probe
         stamp = iso(probed_at)
         if answered:
+            last_failure = epoch(prior.last_failure_at)
+            if last_failure is not None and probed_at <= last_failure:
+                return prior
+            if now - probed_at > OBSERVATION_MAX_AGE_SECONDS:
+                return replace(prior, state="stale", detail="The last successful route check is too old.")
             return Check("pass", "The private HTTPS route answered.", stamp, stamp, prior.last_failure_at, 0)
         repeated = stamp == prior.checked_at and prior.state in {"checking", "fail"}
         failed_at = stamp

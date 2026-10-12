@@ -109,8 +109,9 @@ class QueueTests(unittest.TestCase):
 
     def test_mu3lab_itself_goes_first_then_each_installed_app(self):
         result = backup_schedule.queue(self.store, Path("/repo"), local(2026, 10, 4, 3, 30), self.paths)
+        claimed = [self.store.claim("schedule-test-worker") for _ in range(3)]
         self.assertEqual(
-            self.queued(),
+            [(job["service_id"], job["action"], job["actor"]) for job in claimed],
             [
                 (platform_backup.SERVICE_ID, platform_backup.ACTION, "schedule"),
                 ("mealie", "backup", "schedule"),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -19,7 +20,7 @@ class RouteReadinessTests(unittest.TestCase):
         with (
             patch("ctl.service_state._healthy", return_value=(True, "healthy")),
             patch("ctl.service_state._compose_state", return_value="running"),
-            patch("ctl.service_state.route_probe", return_value=(answers, 1_000.0)),
+            patch("ctl.service_state.route_probe", return_value=(answers, time.time())),
         ):
             return status(service, dns, ROOT, {service.private_https_port})
 

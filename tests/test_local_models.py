@@ -34,6 +34,13 @@ class _Runtime(unittest.TestCase):
 
 
 class SettingsTests(_Runtime):
+    def test_invalid_saved_local_settings_never_enable_external_routes(self):
+        records.put(*local_models.SETTINGS, {**LOCAL, "chat_model": "removed-model"}, self.paths)
+        self.assertTrue(local_models.local_only(self.paths))
+        routes = local_models.litellm_models("EXTERNAL", "KEY", "LOCAL", "ollama", self.paths)
+        self.assertFalse(any(item["litellm_params"]["api_base"] == "os.environ/EXTERNAL" for item in routes))
+        self.assertEqual(local_models.chat_list(self.paths), "-all")
+
     def test_choices_come_only_from_the_reviewed_list(self):
         self.assertEqual(local_models.validate(LOCAL), LOCAL)
         for bad in (
@@ -57,11 +64,11 @@ class SettingsTests(_Runtime):
         with patch("ctl.platform_apps.by_capability", return_value=SimpleNamespace(id="litellm")):
             self.assertEqual(local_models.embedding_model(self.paths).id, "nomic-embed-text")
 
-    def test_a_damaged_record_falls_back_to_the_safe_defaults(self):
+    def test_a_damaged_record_denies_outside_inference(self):
         records.put(
             *local_models.SETTINGS, {"privacy": "local_only", "chat_model": "", "embedding_model": "x"}, self.paths
         )
-        self.assertEqual(local_models.settings(self.paths)["privacy"], "outside_allowed")
+        self.assertEqual(local_models.settings(self.paths)["privacy"], "local_only")
 
 
 class RoutingTests(_Runtime):

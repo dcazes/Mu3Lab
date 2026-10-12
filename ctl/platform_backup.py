@@ -105,6 +105,9 @@ def export_control_plane(paths: RuntimePaths) -> Path:
     key = paths.state / "secrets.key"
     if key.is_file():
         write_atomic(target / "secrets.key", key.read_bytes())
+    request_key = paths.state / "mu3lab.request-key"
+    if request_key.is_file():
+        write_atomic(target / request_key.name, request_key.read_bytes())
     deployments = paths.state / "deployments"
     if deployments.is_dir():
         shutil.copytree(deployments, target / "deployments", symlinks=False)
@@ -151,12 +154,14 @@ def recover(root: Path, log: Log, paths: RuntimePaths | None = None) -> None:
     except (OSError, ValueError):
         return
     registry = load()
-    services = [registry.get(service_id) for service_id in stopped]
+    # Markers record stop order; restart in the registry's dependency order.
+    services = [service for service in core_apps(registry, root)[0] if service.id in stopped]
     log("Starting the core apps an interrupted Mu3Lab backup had stopped.")
     failed = _start_all(services, root, log)
     if failed:
         log(f"These apps did not start again after an interrupted backup: {', '.join(failed)}")
-    marker.unlink(missing_ok=True)
+    if not failed:
+        marker.unlink(missing_ok=True)
 
 
 def _back_up_platform(paths: RuntimePaths, log: Log) -> dict[str, Any]:
@@ -193,8 +198,8 @@ def _back_up_core(
                 step("stop_app", f"Stopping {service.name} for its backup.")
                 # Recorded before stopping, so a crash here still restarts it.
                 _record_stopped(paths, [item.id for item in [*stopped, service]])
-                maintenance.stop_app(service, project_path(service, root), root, log)
                 stopped.append(service)
+                maintenance.stop_app(service, project_path(service, root), root, log)
             for service in services:
                 step("backup", f"Saving {service.name}'s data.")
                 try:

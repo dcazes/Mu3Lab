@@ -34,6 +34,7 @@ def main() -> int:
             **os.environ,
             "MU3LAB_DATA_ROOT": str(paths.data),
             "MU3LAB_INGRESS_TOKEN": "test-only",
+            "MU3LAB_RELAY_CONFIG": str(paths.state / "relay-test.conf"),
             "AUTHENTIK_ENV_FILE": "/dev/null",
             "MU3LAB_VAULT_ENV_FILE": "/dev/null",
             "MU3LAB_UID": str(os.getuid()),

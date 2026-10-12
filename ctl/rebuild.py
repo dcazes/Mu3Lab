@@ -246,6 +246,10 @@ def _place_control(staging: Path, paths: RuntimePaths) -> None:
     for name in ("mu3lab.db", "secrets.key"):
         os.replace(staging / name, paths.state / name)
     (paths.state / "secrets.key").chmod(0o600)
+    request_key = staging / "mu3lab.request-key"
+    if request_key.is_file():
+        os.replace(request_key, paths.state / request_key.name)
+        (paths.state / request_key.name).chmod(0o600)
     if (staging / "deployments").is_dir():
         shutil.rmtree(paths.state / "deployments", ignore_errors=True)
         os.replace(staging / "deployments", paths.state / "deployments")

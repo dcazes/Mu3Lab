@@ -46,14 +46,14 @@ def _now() -> str:
 
 
 def _release_text(release: Release | None) -> str:
-    return json.dumps({"version": release.version, "images": release.images}, sort_keys=True) if release else ""
+    return json.dumps(release.as_dict(), sort_keys=True) if release else ""
 
 
 def _release(text: str) -> Release | None:
     if not text:
         return None
     value = json.loads(text)
-    return Release(str(value.get("version") or ""), {str(k): str(v) for k, v in (value.get("images") or {}).items()})
+    return Release.from_dict(value)
 
 
 @dataclass(frozen=True)

@@ -124,7 +124,16 @@ def settings(paths: RuntimePaths | None = None) -> dict[str, str]:
     try:
         clean = validate({**defaults, **stored})
     except ValueError:
-        clean = defaults
+        # An existing invalid record cannot authorize external inference.
+        clean = {
+            "privacy": "local_only",
+            "chat_model": str(stored.get("chat_model") or "") if stored.get("chat_model") in CHAT_BY_ID else "",
+            "embedding_model": (
+                str(stored["embedding_model"])
+                if stored.get("embedding_model") in EMBEDDING_BY_ID
+                else defaults["embedding_model"]
+            ),
+        }
     return {
         **clean,
         "changed_at": str(stored.get("changed_at") or ""),
@@ -152,8 +161,8 @@ def chat_list(paths: RuntimePaths | None = None) -> str:
     """LobeChat's model list, each name saying where the model runs (R31: honest labels in chat)."""
     chosen = settings(paths)
     model = CHAT_BY_ID.get(chosen["chat_model"])
-    if chosen["privacy"] == "local_only" and model:
-        return f"-all,+mu3lab-chat={model.name} (local only, on this server)"
+    if chosen["privacy"] == "local_only":
+        return f"-all,+mu3lab-chat={model.name} (local only, on this server)" if model else "-all"
     outside = "-all,+mu3lab-chat=Mu3Lab chat (outside providers)"
     if model is None:
         return outside

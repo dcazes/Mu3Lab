@@ -158,7 +158,7 @@ class KopiaTests(unittest.TestCase):
                 paths=self.paths,
             )
         self.assertEqual((saved["snapshot_id"], saved["files"]), (NEW, 3))
-        create = self.calls[0]
+        create = next(argv for argv in self.calls if self.command(argv) == "snapshot create")
         self.assertIn(f"{self.mealie}:/data/mealie/mealie:ro", create)
         self.assertIn(f"{recipes}:/data/mealie/mealie-recipes:ro", create)
         self.assertEqual(create[create.index("--network") + 1], "none")
@@ -167,7 +167,8 @@ class KopiaTests(unittest.TestCase):
             self.assertIn(f"--tags={tag}", create)
         self.assertIn("--tags=folders:mealie+mealie-recipes", create)
         self.assertEqual(
-            [self.command(argv) for argv in self.calls], ["snapshot create", "snapshot verify", "snapshot list"]
+            [self.command(argv) for argv in self.calls],
+            ["policy set", "snapshot create", "snapshot verify", "snapshot list"],
         )
         self.assertEqual(readiness(self.paths)["snapshot_present"], True)
 
@@ -273,7 +274,8 @@ class KopiaTests(unittest.TestCase):
             self.assertRaisesRegex(BackupError, "did not complete"),
         ):
             backups.snapshot("mealie", [self.mealie], "manual", lambda _l: None, paths=self.paths)
-        name = self.calls[0][self.calls[0].index("--name") + 1]
+        create = next(argv for argv in self.calls if self.command(argv) == "snapshot create")
+        name = create[create.index("--name") + 1]
         self.assertIn(["docker", "stop", "--time", str(backups.STOP_SECONDS), name], self.bookkeeping)
 
     def test_a_surviving_backup_container_blocks_a_data_change(self):
@@ -300,7 +302,7 @@ class KopiaTests(unittest.TestCase):
         with patch("ctl.backups.actions.docker_cmd", side_effect=run), patch("ctl.backups.time.sleep"):
             backups.snapshot("mealie", [self.mealie], "manual", lines.append, paths=self.paths)
         self.assertIn("still running; waiting", lines[0])
-        self.assertEqual(self.command(self.calls[0]), "snapshot create")
+        self.assertEqual([self.command(argv) for argv in self.calls[:2]], ["policy set", "snapshot create"])
 
 
 class RetentionTests(unittest.TestCase):

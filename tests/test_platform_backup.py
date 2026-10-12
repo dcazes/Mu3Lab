@@ -189,9 +189,9 @@ class PlatformJobTests(_Job):
         stops = []
 
         def stop(service, *_args):
-            if len(stops) == 2:
-                raise job_guard.JobInterrupted(job_guard.LEASE_LOST)
             stops.append(service.id)
+            if len(stops) == 3:
+                raise job_guard.JobInterrupted(job_guard.LEASE_LOST)
             self.events.append(f"stop {service.id}")
 
         self.stack.enter_context(patch.object(platform_backup.maintenance, "stop_app", side_effect=stop))
@@ -204,8 +204,17 @@ class PlatformJobTests(_Job):
     def test_a_worker_that_died_mid_backup_starts_the_apps_again_when_it_returns(self):
         (self.paths.state / platform_backup.MARKER).write_text(json.dumps({"stopped": ["lobehub", "authentik"]}))
         platform_backup.recover(ROOT, lambda _line: None, self.paths)
-        self.assertEqual(self.events, ["start lobehub", "start authentik"])
+        self.assertEqual(self.events, ["start authentik", "start lobehub"])
         self.assertFalse((self.paths.state / platform_backup.MARKER).exists())
+
+    def test_failed_crash_recovery_keeps_the_marker_for_retry(self):
+        marker = self.paths.state / platform_backup.MARKER
+        marker.write_text(json.dumps({"stopped": ["lobehub", "authentik"]}))
+        with patch.object(platform_backup.maintenance, "start_app", return_value=(False, "not healthy")):
+            platform_backup.recover(ROOT, lambda _: None, self.paths)
+        self.assertTrue(marker.is_file())
+        platform_backup.recover(ROOT, lambda _: None, self.paths)
+        self.assertFalse(marker.exists())
 
 
 class OwnerStoppedTests(_Job):

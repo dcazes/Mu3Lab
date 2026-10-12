@@ -64,6 +64,16 @@ class RouteHistoryTests(unittest.TestCase):
         recovered = fold(failed, probe=(True, NOW))
         self.assertEqual((recovered.state, recovered.failures, recovered.last_success_at), ("pass", 0, iso(NOW)))
 
+    def test_cached_success_cannot_recover_a_failed_route(self):
+        working = fold(None, probe=(True, NOW - 5))
+        failed = fold(working, configured=False)
+        self.assertEqual(fold(failed, probe=(True, NOW - 5), now=NOW + 1).state, "fail")
+        self.assertEqual(fold(failed, probe=(True, NOW + 1), now=NOW + 1).state, "pass")
+
+    def test_cached_success_expires_even_while_observations_continue(self):
+        working = fold(None, probe=(True, NOW))
+        self.assertEqual(fold(working, probe=(True, NOW), now=NOW + 91).state, "stale")
+
     def test_missing_serve_route_fails_without_grace(self):
         working = fold(None, probe=(True, NOW - 5))
         missing = fold(working, configured=False)
@@ -192,7 +202,10 @@ class ServiceReadTests(unittest.TestCase):
         self.assertEqual(app["checks"]["route"]["state"], "stale")
 
     def test_route_grace_is_shown_as_checking_and_keeps_open(self):
-        self.write(previous={"checks": {"route": fold(None, probe=(True, time.time() - 10)).public()}}, answers=False)
+        self.write(
+            previous={"checks": {"route": fold(None, probe=(True, time.time() - 10), now=time.time()).public()}},
+            answers=False,
+        )
         self.verify_sign_in()
         app = self.mealie()
         self.assertEqual(app["display_state"], "checking")
@@ -270,7 +283,7 @@ class SignInRefreshTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.state = ControlState(db.database())
-        working = {"route": fold(None, probe=(True, time.time())).public()}
+        working = {"route": fold(None, probe=(True, time.time()), now=time.time()).public()}
         snapshots.write(
             [
                 {
@@ -287,7 +300,7 @@ class SignInRefreshTests(unittest.TestCase):
                     "detail": "",
                     "containers": [],
                     "route_ready": False,
-                    "checks": {"route": fold(None, probe=(False, time.time())).public()},
+                    "checks": {"route": fold(None, probe=(False, time.time()), now=time.time()).public()},
                 },
             ],
             iso(time.time()),
