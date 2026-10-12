@@ -158,6 +158,7 @@ def run() -> int:
     next_rule_maintenance = 0.0
     next_vault_sync = 0.0
     next_backup_service = 0.0
+    next_history_prune = 0.0
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -231,6 +232,16 @@ def run() -> int:
                 rebuild.resume(store, ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab could not start the restored apps yet: {exc}")
+        if time.monotonic() >= next_history_prune:
+            next_history_prune = time.monotonic() + 24 * 3600
+            try:
+                from ctl import history
+
+                removed = history.prune(store.database)
+                if any(removed.values()):
+                    log.info(f"Mu3Lab removed old history: {removed}")
+            except Exception as exc:
+                log.warning(f"Mu3Lab history clean-up deferred: {exc}")
         if time.monotonic() >= next_mcp_reconcile:
             next_mcp_reconcile = time.monotonic() + 60
             try:
