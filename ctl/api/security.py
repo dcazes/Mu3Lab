@@ -29,6 +29,7 @@ OPERATOR_GROUPS = frozenset({"mu3lab-operators", "authentik Admins"})
 # Household members use the dashboard and every app; administration stays with operators.
 HOUSEHOLD_GROUP = "mu3lab-household"
 MEMBER_GROUPS = OPERATOR_GROUPS | {HOUSEHOLD_GROUP}
+DEACTIVATED = "This account has been deactivated."
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -140,7 +141,7 @@ def resolve_identity(request: Request) -> IdentityData:
     detail = ""
     if held and held["kind"] == "deactivated":
         operator = member = False
-        detail = "This account has been deactivated."
+        detail = DEACTIVATED
     elif held and held["kind"] == "demoted":
         operator = False
     if operator:
@@ -183,10 +184,16 @@ def require_operator(identity: Identity) -> IdentityData:
 Operator = Annotated[IdentityData, Depends(require_operator)]
 
 
+def _not_member(identity: IdentityData) -> str:
+    if identity.get("detail") == DEACTIVATED:
+        return DEACTIVATED
+    return "Only someone in the household can do this. Sign in with your Mu3Lab account."
+
+
 def require_member(identity: Identity) -> IdentityData:
     """Anyone in the household, administrators included."""
     if not identity.get("writes_enabled"):
-        raise ApiError(403, "operator identity required")
+        raise ApiError(403, _not_member(identity), code="member_required")
     return identity
 
 
@@ -214,7 +221,7 @@ OperatorMutation = Annotated[IdentityData, Depends(require_operator_mutation)]
 def require_owner(identity: Member) -> IdentityData:
     """A household member whose Authentik subject is known, for their own resources."""
     if not identity.get("subject_id"):
-        raise ApiError(403, "operator identity required")
+        raise ApiError(403, "Mu3Lab could not tell who you are; sign in again.", code="member_required")
     return identity
 
 

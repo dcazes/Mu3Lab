@@ -98,10 +98,11 @@ class UpstreamBasicAuth(Model):
 class Route(Model):
     https_port: Port  # Tailscale Serve port on the tailnet hostname
     caddy_port: Port = Field(ge=19460, le=19499)  # loopback Caddy listener
+    # Required, so no app is published ungated by leaving it out (review A-L2).
     # open: plain proxy (the app signs people in itself, e.g. native OIDC).
     # gate: Authentik's outpost must admit the visitor first.
     # trusted_header: gate, then Caddy passes the verified username to the app.
-    access: Literal["open", "gate", "trusted_header"] = "open"
+    access: Literal["open", "gate", "trusted_header"]
     copy_identity_headers: tuple[str, ...] = ()
     trusted_header: str = "Remote-User"
     # What the trusted header carries: the Authentik username, or the email for

@@ -18,6 +18,7 @@ service:
 route:
   https_port: 8446
   caddy_port: 19460
+  access: open  # its real route is hand-reviewed in apps/ingress/Caddyfile
   generated: false
 sign_in:
   method: none

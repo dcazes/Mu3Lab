@@ -207,6 +207,25 @@ class IdentityContractTests(unittest.TestCase):
             self.assertNotIn("explicit-consent", content)
             self.assertIn("default-provider-authorization-implicit-consent", content)
 
+    def test_gated_household_apps_admit_only_the_household_and_administrators(self):
+        # Review C-L1: an Authentik account outside both groups is refused, like at the OIDC apps.
+        import re
+
+        from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
+
+        content = render_gate_blueprint(
+            "mu3lab.example.ts.net",
+            8446,
+            (GatedApp("grocy", "Grocy", 8447, "household"), GatedApp("litellm", "LiteLLM", 8454, "operators")),
+        )
+        groups: dict[str, list[str]] = {}
+        for target, group in re.findall(r"target: !KeyOf (\S+)\n.*\n.*\n.*\[name, ([^\]]+)\]", content):
+            groups.setdefault(target, []).append(group)
+        self.assertEqual(
+            groups["mu3lab-grocy-application"], ["authentik Admins", "mu3lab-operators", "mu3lab-household"]
+        )
+        self.assertEqual(groups["mu3lab-litellm-application"], ["authentik Admins", "mu3lab-operators"])
+
     def test_admitted_people_carry_the_group_names_apps_gate_on(self):
         from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint
 

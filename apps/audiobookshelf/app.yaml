@@ -22,6 +22,7 @@ service:
 route:
   https_port: 8462
   caddy_port: 19479
+  access: open
 sign_in:
   method: oidc
   oidc:

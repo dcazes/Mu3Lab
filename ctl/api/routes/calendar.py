@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -14,7 +14,7 @@ from ctl import nextcloud_calendar as calendar
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
-from ctl.api.security import Identity, IdentityData, mutation_allowed
+from ctl.api.security import Owner, OwnerMutation
 from ctl.control_state import ControlState
 from ctl.platform_apps import by_capability
 from ctl.status import snapshots
@@ -24,28 +24,12 @@ router = APIRouter(prefix="/api/v1/calendar", tags=["calendar"], route_class=Con
 _UNAVAILABLE = "calendar state is unavailable"
 
 
-def calendar_reader(identity: Identity) -> IdentityData:
-    """Calendar reads are personal: any authenticated subject may read their own."""
-    if not identity.get("subject_id"):
-        raise ApiError(403, "authenticated subject required")
-    return identity
-
-
-Reader = Annotated[IdentityData, Depends(calendar_reader)]
-
-
-def calendar_writer(request: Request, identity: Reader) -> IdentityData:
-    # Writes, including Login Flow polling that may store a credential, stay
-    # behind the operator boundary and the session-bound same-origin check.
-    if not identity.get("writes_enabled"):
-        raise ApiError(403, "operator identity required")
-    if not mutation_allowed(request):
-        # The standard code, so the dashboard refreshes its session and retries as everywhere else.
-        raise ApiError(403, "same-origin CSRF verification failed", code="csrf_failed")
-    return identity
-
-
-Writer = Annotated[IdentityData, Depends(calendar_writer)]
+# Calendars are personal: each household member reads and changes only their own,
+# and a deactivated person's surviving Authentik session reads nothing (review C-L3).
+# Writes, including Login Flow polling that may store a credential, also need the
+# session-bound same-origin check.
+Reader = Owner
+Writer = OwnerMutation
 
 
 def _state() -> ControlState:

@@ -15,7 +15,6 @@ from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import (
-    Identity,
     IdentityData,
     Member,
     MemberMutation,
@@ -54,7 +53,7 @@ router = APIRouter(prefix="/api/v1/services", tags=["services"], route_class=Con
 
 
 @router.get("", response_model=models.ServicesResponse, response_model_exclude_none=True)
-def list_services(identity: Identity) -> models.ServicesResponse:
+def list_services(identity: Member) -> models.ServicesResponse:
     return models.ServicesResponse.model_validate(service_snapshot(identity))
 
 

@@ -99,9 +99,21 @@ class IdentityBoundaryTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path, headers=HOUSEHOLD).status_code, 403)
 
-    def test_calendar_read_remains_available_to_an_authenticated_subject(self):
+    def test_calendar_read_is_for_household_members_only(self):
+        # Review C-L3: an Authentik session outside the household, or one that outlived a deactivation, reads nothing.
+        member = OPERATOR | {"x-authentik-groups": "mu3lab-household"}
+        self.assertNotEqual(self.client.get("/api/v1/calendar/connection", headers=member).status_code, 403)
         response = self.client.get("/api/v1/calendar/connection", headers=HOUSEHOLD)
-        self.assertNotEqual(response.status_code, 403)
+        self.assertEqual((response.status_code, response.json()["code"]), (403, "member_required"))
+        with patch("ctl.api.security.access.hold", return_value={"kind": "deactivated"}):
+            response = self.client.get("/api/v1/calendar/connection", headers=member)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("deactivated", response.json()["error"])
+
+    def test_the_app_list_needs_a_household_member(self):
+        # Review A-L1.
+        self.assertEqual(self.client.get("/api/v1/services").status_code, 403)
+        self.assertEqual(self.client.get("/api/v1/services", headers=HOUSEHOLD).status_code, 403)
 
     def test_calendar_read_requires_an_authenticated_subject(self):
         self.assertEqual(self.client.get("/api/v1/calendar/connection").status_code, 403)
