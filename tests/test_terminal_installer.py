@@ -7,7 +7,9 @@ import json
 import tempfile
 import unittest
 import urllib.error
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock, patch
 
 import httpx
@@ -295,3 +297,28 @@ class LogFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoreProgressTests(unittest.TestCase):
+    NAMES: ClassVar[dict[str, str]] = {"freellmapi": "FreeLLMAPI", "ollama": "Ollama", "litellm": "LiteLLM"}
+
+    def test_counts_finished_apps_and_says_what_the_current_one_is_doing(self):
+        events = [
+            {"event": "step.started", "detail": "Installing FreeLLMAPI.", "created_at": "2026-10-12T10:00:00+00:00"},
+            {"event": "stage", "detail": "verify_application: Waiting for application health."},
+            {"event": "step.verified", "detail": "freellmapi"},
+            {"event": "step.started", "detail": "Installing Ollama.", "created_at": "2026-10-12T10:01:00+00:00"},
+            {"event": "stage", "detail": "start_service: Starting application containers."},
+            {"event": "stage", "detail": "verify_application: Waiting for application health."},
+        ]
+        progress = terminal.core_progress(events, self.NAMES, datetime(2026, 10, 12, 10, 1, 42, tzinfo=UTC))
+        self.assertEqual(progress["done"], ["freellmapi"])
+        self.assertEqual(progress["current"], "ollama")
+        self.assertEqual(progress["phase"], "waiting for it to answer")
+        self.assertEqual(progress["elapsed"], 42)
+
+    def test_nothing_is_current_once_every_app_is_verified(self):
+        events = [{"event": "step.verified", "detail": service_id} for service_id in self.NAMES]
+        progress = terminal.core_progress(events, self.NAMES, datetime.now(UTC))
+        self.assertEqual(progress["current"], "")
+        self.assertEqual(len(progress["done"]), 3)

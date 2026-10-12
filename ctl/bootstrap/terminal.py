@@ -33,6 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -285,18 +286,80 @@ def wait_for_tailscale(screen: Screen, job: dict, ctx: dict) -> None:
 # --- After the foundation --------------------------------------------------------------
 
 
+# What each install stage means while an app starts, in the installer's words.
+PHASES = {
+    "validate_service": "getting ready",
+    "materialize_runtime": "preparing its settings",
+    "validate_configuration": "checking its settings",
+    "pull_images": "loading its files",
+    "resolve_digests": "checking its files",
+    "authentik_ready": "setting up its sign-in",
+    "start_service": "starting its containers",
+    "account_cleanup": "starting its containers",
+    "account_bootstrap": "creating its account",
+    "account_verified": "creating its account",
+    "verify_application": "waiting for it to answer",
+    "configure_route": "publishing its private address",
+    "verify_sign_in": "checking its sign-in",
+    "finalize": "finishing",
+}
+
+
+def core_progress(events: list[dict], names: dict[str, str], now: datetime) -> dict:
+    """Which core apps are done and what the current one is doing, from the core job's events."""
+    by_name = {name: service_id for service_id, name in names.items()}
+    done: list[str] = []
+    current, started, phase = "", None, ""
+    for event in events:
+        kind, detail = str(event.get("event") or ""), str(event.get("detail") or "")
+        if kind == "step.started" and detail.startswith("Installing "):
+            current = by_name.get(detail.removeprefix("Installing ").rstrip("."), "")
+            phase = ""
+            try:
+                started = datetime.fromisoformat(str(event.get("created_at")).replace("Z", "+00:00"))
+            except ValueError:
+                started = None
+        elif kind == "step.verified" and detail in names:
+            done.append(detail)
+            if detail == current:
+                current, started, phase = "", None, ""
+        elif kind == "stage" and current:
+            phase = PHASES.get(detail.partition(":")[0], phase)
+    elapsed = int((now - started).total_seconds()) if started else 0
+    return {"done": done, "current": current, "phase": phase, "elapsed": max(0, elapsed)}
+
+
 def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
+    from ctl.core_setup import core_services
     from ctl.jobs import JobStore
 
     store = JobStore.runtime()
     if store is None:
         return False, "The dashboard database is not available."
-    screen.start("Starting your core apps (AI chat and models)")
+    names = {service.id: service.name for service in core_services()}
+    total = len(names)
+    screen.say("    " + screen.color(DIM, "Starting " + ", ".join(names.values())))
+    label = f"Starting apps: 0 of {total}"
+    screen.start(label)
+    announced: set[str] = set()
+
+    def show(text: str) -> None:
+        # Restart the line only when its label changes; a log file gets each label once.
+        nonlocal label
+        if text != label:
+            label = text
+            screen.start(text)
+
     deadline = time.monotonic() + CORE_TIMEOUT
     while time.monotonic() < deadline:
         jobs = store.jobs_for_service("core-suite", limit=1)
         if jobs:
             latest = jobs[0]
+            progress = core_progress(store.events(latest["id"], limit=1000), names, datetime.now(UTC))
+            for service_id in progress["done"]:
+                if service_id not in announced:
+                    announced.add(service_id)
+                    screen.say(f"    {screen.color(GREEN, '✓')} {names[service_id]}")
             if latest["state"] == "succeeded":
                 return True, ""
             if latest["state"] == "waiting_for_confirmation":
@@ -304,8 +367,15 @@ def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
                 return True, "needs_provider"
             if latest["state"] in {"failed", "cancelled"}:
                 return False, str(latest.get("detail") or latest.get("error") or "")
-            screen.progress(str(latest.get("detail") or ""))
-        time.sleep(3)
+            if progress["current"]:
+                minutes, seconds = divmod(progress["elapsed"], 60)
+                show(f"Starting apps: {len(progress['done']) + 1} of {total}")
+                screen.progress(
+                    f"{names[progress['current']]} ({progress['phase'] or 'getting ready'}, {minutes}:{seconds:02d})"
+                )
+            elif len(progress["done"]) == total:
+                show("Checking that chat and AI models work together")
+        time.sleep(1)
     return False, "The core apps are taking longer than expected."
 
 
