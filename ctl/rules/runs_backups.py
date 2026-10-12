@@ -34,8 +34,11 @@ class RunsBackups(Rule):
     summary = "Runs Kopia's server as Mu3Lab's backup service, creating the repository if needed."
     params: RunsBackupsParams
 
-    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
-        paths = RuntimePaths()
+    def prepare_env(
+        self, app: App, env: dict[str, str], owner: JobIdentity | None, paths: RuntimePaths | None = None
+    ) -> None:
+        # The install's own runtime, never /srv/mu3lab by default: the Compose check renders into a temporary one.
+        paths = paths or RuntimePaths()
         env[self.params.password_env] = backups.repository_password(paths)
         env[self.params.backups_env] = str(paths.backups)
         env[self.params.state_env] = str(paths.state)

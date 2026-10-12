@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ctl.engine.hooks import HookContext, StartPlan
+from ctl.runtime import RuntimePaths
 from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
@@ -50,7 +51,9 @@ class Rule:
         """True when the rule needs the installing person's verified Authentik identity."""
         return False
 
-    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
+    def prepare_env(
+        self, app: App, env: dict[str, str], owner: JobIdentity | None, paths: RuntimePaths | None = None
+    ) -> None:
         return None
 
     def before_start(self, ctx: HookContext) -> None:

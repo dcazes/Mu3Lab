@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from ctl import local_models
 from ctl.rules import Params, Rule, RuleError, register
+from ctl.runtime import RuntimePaths
 from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
@@ -34,7 +35,9 @@ class HideModelProviders(Rule):
         if not (app.folder / self.params.providers_file).is_file():
             raise RuleError(f"{app.id}: hide_model_providers needs {self.params.providers_file}")
 
-    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
+    def prepare_env(
+        self, app: App, env: dict[str, str], owner: JobIdentity | None, paths: RuntimePaths | None = None
+    ) -> None:
         lines = (app.folder / self.params.providers_file).read_text(encoding="utf-8").splitlines()
         for provider in (line.strip() for line in lines if line.strip() and not line.startswith("#")):
             env[f"{provider.upper()}_MODEL_LIST"] = "-all"

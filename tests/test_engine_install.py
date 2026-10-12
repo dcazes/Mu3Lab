@@ -137,7 +137,7 @@ class InstallTests(unittest.TestCase):
         trace = []
 
         class TraceRule(Rule):
-            def prepare_env(self, app, env, owner):
+            def prepare_env(self, app, env, owner, paths=None):
                 trace.append("prepare")
 
             def before_start(self, ctx):

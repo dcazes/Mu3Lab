@@ -1,0 +1,5 @@
+# Reviewed 2026-10-12: test fixtures and example placeholders, not secrets (review R30).
+44ef6599fde6ff999f4e00d60d631d10d459026b:dashboard/src/features/settings/recoverySheet.test.tsx:generic-api-key:11
+f4d2bbd7cd862cf3cddbc43f9e00249e71e9767f:.github/workflows/ci.yml:generic-api-key:89
+a6a346e7234af51960985d12975b8716aaeb5425:core/ingress/.env.example:generic-api-key:10
+a6a346e7234af51960985d12975b8716aaeb5425:PLAN.md:generic-api-key:237

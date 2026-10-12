@@ -1,5 +1,10 @@
 name: CI
 
+# Runs exactly what a developer runs: `make verify` (no network) and
+# `make verify-security` (advisories, secrets, image platforms). Keep any new
+# check in the Makefile, not here; tests/test_ci_parity.py enforces it.
+# Actions are pinned to commits; Dependabot proposes updates (.github/dependabot.yml).
+
 on:
   workflow_call:
   push:
@@ -12,66 +17,20 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10.2.0
+          fetch-depth: 0 # the secret scan reads the whole history
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with: {version: '0.12.5'}
-      - uses: actions/setup-node@v7
-        with: {node-version: '24', cache: 'npm', cache-dependency-path: dashboard/package-lock.json}
-      - name: Installer scripts parse
-        run: bash -n install.sh start.sh uninstall.sh tools/toolchain.sh tools/vm/fresh-vm.sh tools/open_tailscale_login.sh
       - name: Install control-plane and developer dependencies
         run: uv sync --frozen
-      - name: Python lint and format
-        run: |
-          uv run --frozen python tools/check_no_app_ids.py
-          uv run --frozen ruff check .
-          uv run --frozen ruff format --check .
-      - name: API schema matches Python models
-        run: uv run --frozen python -m tools.api_schema --check
-      - name: Python type check
-        run: uv run --frozen mypy
-      - name: Python tests
-        run: uv run --frozen python -m unittest discover -s tests -t . -v
-      - name: Install dashboard dependencies
-        working-directory: dashboard
-        run: npm ci
-      - name: Dashboard dependency audit
-        working-directory: dashboard
-        # Fails on moderate or worse advisories; add a reviewed exception here
-        # only when an advisory cannot apply to how Mu3Lab uses the package.
-        run: npm audit --audit-level=moderate
-      - name: Dashboard lint, format, and type check
-        working-directory: dashboard
-        run: |
-          npm run check:api
-          npm run lint
-          npm run format:check
-          npm run typecheck
-      - name: Dashboard tests
-        working-directory: dashboard
-        run: npm test
-      - name: Build dashboard
-        working-directory: dashboard
-        run: npm run build
-      - name: Validate app manifests and chat connectors
-        run: uv run --frozen python -c "from ctl.manifest.catalog import load; print(len(load().apps), 'apps valid')"
-      - name: Validate Compose interpolation
-        run: uv run --frozen python -m tools.validate_compose
-      - name: Scan tracked files for accidental private environment files
-        run: |
-          ! git ls-files | grep -E '(^|/)\.env$'
-          ! git ls-files | grep -E '(^|/)(data|backups|runtime)/'
-      - name: Scan for committed secrets
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Generate Python SBOM
-        run: |
-          uv export --frozen --no-dev --format requirements.txt --output-file requirements.lock.txt
-          uvx --from cyclonedx-bom==7.5.0 cyclonedx-py requirements requirements.lock.txt --output-format JSON --output-file mu3lab-python-sbom.json
-      - uses: actions/upload-artifact@v7
+      - name: Verify (lint, types, tests, deployable contract, dashboard build)
+        run: make verify UV=uv
+      - name: Verify security (advisories, committed secrets, image platforms)
+        run: make verify-security UV=uv
+      - name: Python SBOM
+        run: make sbom UV=uv
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mu3lab-sbom
           path: mu3lab-python-sbom.json

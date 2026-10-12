@@ -304,7 +304,8 @@ use the pinned toolchain; dashboard preview, checks and builds use Docker.
 | `make ui-dev` | UI preview with automatic refresh on loopback |
 | `make api-schema` | Regenerate OpenAPI and dashboard API types after Python model changes |
 | `make test` | Python and dashboard tests, with UI checks in the Node container |
-| `make verify` | Lint, type checks, tests and production UI build |
+| `make verify` | Everything that needs no network: lint, types, tests, catalog and Compose checks, UI build |
+| `make verify-security` | Dependency advisories, committed secrets, and that every pinned image exists for x86-64 |
 | `make format` | Python and UI formatting |
 
 See [Development](docs/development.md) for isolated backend setup and release
@@ -324,7 +325,7 @@ implementation steps, acceptance criteria and a supporting evidence record.
 | [`apps/`](apps) | One folder per app: `app.yaml` (validated by `ctl/manifest/`), its Compose file, and reviewed chat connectors under `connectors/` |
 | [`platform/`](platform) | Images Mu3Lab builds itself: the chat tool gateway and the generic connector adapter |
 
-Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier, the dashboard build, generated API contract checks, YAML and Compose validation, and a secret scan.
+Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs exactly `make verify` and `make verify-security`, so a check that passes locally passes there; [`tests/test_ci_parity.py`](tests/test_ci_parity.py) keeps it that way. Its actions are pinned to commits, and Dependabot proposes their updates.
 
 ---
 

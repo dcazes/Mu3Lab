@@ -36,6 +36,7 @@ def main() -> int:
             "MU3LAB_INGRESS_TOKEN": "test-only",
             "AUTHENTIK_ENV_FILE": "/dev/null",
             "MU3LAB_VAULT_ENV_FILE": "/dev/null",
+            "MU3LAB_RELAY_CONFIG": "/dev/null",  # written by ctl.tailnet_relay when the relay starts
             "MU3LAB_UID": str(os.getuid()),
             "MU3LAB_GID": str(os.getgid()),
         }

@@ -18,7 +18,12 @@ from ctl.store.workflows import JobIdentity
 def render_rules(
     app: App, facts: Facts, rules: list[Rule], owner: JobIdentity | None, *, copy_files: bool = True
 ) -> Path:
-    return render(app, facts, hooks=[partial(rule.prepare_env, owner=owner) for rule in rules], copy_files=copy_files)
+    return render(
+        app,
+        facts,
+        hooks=[partial(rule.prepare_env, owner=owner, paths=facts.paths) for rule in rules],
+        copy_files=copy_files,
+    )
 
 
 def render_service(service: Service, root: Path) -> Path:
