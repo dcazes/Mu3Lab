@@ -348,6 +348,7 @@ def _guard_plan(
 ) -> dict[str, Any]:
     env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG"}}
     env.update({key: value for key, value in toolchain.uv_environment(root).items() if key.startswith("UV_")})
+    env["MU3LAB_RUNTIME_ROOT"] = str(paths.root)
     return {
         "root": str(root),
         "before": before,
@@ -361,6 +362,7 @@ def _guard_plan(
         "health_url": HEALTH_URL,
         "env": env,
         "reason": reason,
+        "old_worker_pid": os.getpid(),
     }
 
 
@@ -428,7 +430,12 @@ def _update(root: Path, step: Callable[[str, str], None], log: Log, job_id: str 
                 ),
             )
         if not _start_guard(root, "verify", _guard_plan(root, before, current, job_id, paths), log, paths):
-            log("The new release will not be checked after the restart.")
+            raise _Failed(
+                "verify",
+                "guard_failed",
+                "The update was installed, but its recovery guard could not start. "
+                "The automatic restart was withheld; administrator recovery is required.",
+            )
     head = _head(root)
     return (
         f"Mu3Lab updated to {head['commit']} ({head['date']}). The dashboard restarts now; reload the page. "

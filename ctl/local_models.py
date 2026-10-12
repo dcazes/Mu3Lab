@@ -422,15 +422,27 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         return
     # 3. Apps whose settings follow the models: the chat app's list, search apps' embedding model.
     facts = Facts(tailnet_dns_name(), paths, catalog)
+    incomplete = []
     for app in _followers(catalog, paths):
         try:
             with resource_locks.hold(f"app:{app.id}", timeout=LOCK_WAIT_SECONDS, paths=paths):
                 if rewire_one(app, facts, log):
                     log(f"{app.manifest.name} now uses the new settings.")
         except resource_locks.Busy:
+            incomplete.append(app.manifest.name)
             log(f"{app.manifest.name} is busy; it picks up the new settings the next time it starts.")
         except (StepFailed, OSError, ValueError, RuntimeError) as exc:
+            incomplete.append(app.manifest.name)
             log(f"{app.manifest.name} could not be updated: {redact(str(exc))}")
+    if incomplete:
+        fail(
+            "AI routing changed, but these apps still need updating: "
+            + ", ".join(incomplete)
+            + ". All previously downloaded models were retained. Retry when the apps are ready.",
+            "followers_incomplete",
+            "followers",
+        )
+        return
     # 4. Free the disk space of models nothing uses now.
     keep = {name(model.tag) for model in (chat, embed) if model}
     for model in (*CHAT, *EMBEDDING):

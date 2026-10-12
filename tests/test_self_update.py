@@ -222,7 +222,16 @@ class UpdateTests(_Checkout):
         self.assertEqual(mode, "verify")
         self.assertEqual(plan["target"], "v1.0.2")
         self.assertEqual(plan["units"], list(self_update.UNITS))
+        self.assertEqual(plan["env"]["MU3LAB_RUNTIME_ROOT"], str(self.paths.root))
         self.assertIn("goes back", job["detail"])
+
+    def test_failed_guard_launch_does_not_claim_success_or_restart(self):
+        self.commit("second")
+        with patch.object(self_update, "_start_guard", return_value=False):
+            job, _calls, restart = self.run_update({"ok": True, "unattended": [], "terminal": []})
+        self.assertEqual(job["state"], "failed")
+        self.assertEqual(job["error_code"], "guard_failed")
+        restart.assert_not_called()
 
     def test_nothing_to_do_when_already_up_to_date(self):
         job, calls, restart = self.run_update({"ok": True})

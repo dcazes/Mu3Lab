@@ -76,12 +76,27 @@ def started(plan: dict, runner: Runner, check: Callable[[str], bool], sleep: Cal
     deadline = clock() + plan.get("verify_seconds", VERIFY_SECONDS)
     steady = 0
     while clock() < deadline:
+        if _alive(plan.get("old_worker_pid")):
+            sleep(10)
+            continue
         rc, _out = runner(["systemctl", "--user", "is-active", "--quiet", *plan["units"]], timeout=30)
         steady = steady + 1 if rc == 0 and check(plan["health_url"]) else 0
         if steady >= STEADY_CHECKS:
             return True
         sleep(10)
     return False
+
+
+def _alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
 
 
 def _record(plan: dict, result: dict) -> None:
@@ -109,14 +124,84 @@ def _audit(database: Path, job_id: str, event: str, detail: str, *, job_state: s
         pass  # the result file still says what happened
 
 
+def checkpoint_safe(database: Path, checkpoint: Path, job_id: str) -> bool:
+    """Refuse to rewind any state except this update's own progress.
+
+    Stop the services before checking. Unknown schema/data changes fail closed:
+    a failed downgrade must keep later accepted jobs and completed effects.
+    """
+
+    def quote(name: str) -> str:
+        return '"' + name.replace('"', '""') + '"'
+
+    try:
+        with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as conn:
+            conn.execute("ATTACH DATABASE ? AS checkpoint", (f"file:{checkpoint}?mode=ro",))
+            tables = {}
+            for schema_name in ("main", "checkpoint"):
+                tables[schema_name] = {
+                    row[0]: row[1]
+                    for row in conn.execute(
+                        f"SELECT name, sql FROM {schema_name}.sqlite_master "
+                        "WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_version'"
+                    )
+                }
+            if set(tables["checkpoint"]) - set(tables["main"]):
+                return False
+            for table, definition in tables["main"].items():
+                name = quote(table)
+                if table not in tables["checkpoint"]:
+                    if conn.execute(f"SELECT 1 FROM main.{name} LIMIT 1").fetchone():
+                        return False
+                    continue
+                if definition != tables["checkpoint"][table]:
+                    return False
+                column = (
+                    "id" if table == "jobs" else "job_id" if table in {"audit", "job_events", "job_processes"} else ""
+                )
+                where = f" WHERE {column} IS NOT ?" if column else ""
+                args = (job_id,) if column else ()
+                queries = [f"SELECT * FROM {schema_name}.{name}{where}" for schema_name in ("main", "checkpoint")]
+                counts = [conn.execute(f"SELECT COUNT(*) FROM ({query})", args).fetchone()[0] for query in queries]
+                if counts[0] != counts[1]:
+                    return False
+                if conn.execute(f"{queries[0]} EXCEPT {queries[1]} LIMIT 1", args + args).fetchone():
+                    return False
+            return True
+    except (sqlite3.Error, OSError):
+        return False
+
+
+def _blocked(plan: dict, detail: str) -> dict[str, Any]:
+    result = {"state": "needs_attention", "at": _now(), "detail": detail, **_summary(plan)}
+    _audit(Path(plan["database"]), plan["job_id"], "platform.update_recovery_blocked", detail, job_state="failed")
+    _record(plan, result)
+    return result
+
+
 def rollback(plan: dict, reason: str, runner: Runner, check, sleep, clock) -> dict[str, Any]:
     root, database = plan["root"], Path(plan["database"])
     problems: list[str] = []
-    runner(["systemctl", "--user", "stop", *plan["units"]], timeout=120)
+    rc, _out = runner(["systemctl", "--user", "stop", *plan["units"]], timeout=120)
+    if rc:
+        return _blocked(
+            plan, "The services could not be stopped. Code and database were kept; recovery needs an administrator."
+        )
     copy = Path(plan["database_copy"])
-    upgraded = copy.is_file() and schema(database) != schema(copy)
+    if not copy.is_file() or not schema(copy) or not schema(database):
+        return _blocked(
+            plan,
+            "The database checkpoint could not be verified. Services remain stopped; both versions were kept for recovery.",
+        )
+    upgraded = schema(database) != schema(copy)
+    if upgraded and not checkpoint_safe(database, copy, plan["job_id"]):
+        return _blocked(
+            plan,
+            "The database changed after the update checkpoint. Restoring it could replay or lose work. "
+            "Services remain stopped; the current database and checkpoint were kept for administrator recovery.",
+        )
     if upgraded:
-        # The new version changed the database in a way the previous one may not read: put the copy back.
+        # No later work or unknown schema changes can be discarded by this copy.
         for suffix in ("-wal", "-shm"):
             Path(f"{database}{suffix}").unlink(missing_ok=True)
         shutil.copy2(copy, database)
@@ -133,7 +218,10 @@ def rollback(plan: dict, reason: str, runner: Runner, check, sleep, clock) -> di
         rc, out = runner([python, "-m", "ctl.self_update", "finish"], cwd=root, timeout=4 * 3600, env=plan.get("env"))
         if rc:
             problems.append(f"its dashboard and services could not be rebuilt ({out[-200:]})")
-    runner(["systemctl", "--user", "start", *plan["units"]], timeout=120)
+    if not problems:
+        rc, _out = runner(["systemctl", "--user", "start", *plan["units"]], timeout=120)
+        if rc:
+            problems.append("the previous services could not be started")
     back = not problems and started(plan, runner, check, sleep, clock)
     if back:
         detail = f"Mu3Lab {plan['target']} {reason}, so Mu3Lab went back to {plan['running']}."

@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from ctl import update_guard
 from ctl.jobs import JobStore
@@ -114,17 +115,61 @@ class GuardTests(unittest.TestCase):
         self.assertNotIn("database was put back", result["detail"])
         with closing(sqlite3.connect(self.database)) as conn, conn:
             self.assertEqual(conn.execute("SELECT count(*) FROM jobs WHERE id = ?", (later["id"],)).fetchone()[0], 1)
-        # Now the new release added a schema version the previous one does not know.
+        # A later accepted job must survive even if the schema then changes.
+        with closing(sqlite3.connect(self.database)) as conn, conn:
+            conn.execute("INSERT INTO schema_version (version) VALUES (999)")
+        system = FakeSystem()
+        result = self.guard("rollback", system, answers=True)
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertFalse(system.ran("checkout"))
+        self.assertFalse(system.ran("--user start"))
+        with closing(sqlite3.connect(self.database)) as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM jobs WHERE id=?", (later["id"],)).fetchone()[0], 1)
+        self.assertEqual(update_guard.schema(self.database), 999)
+
+    def test_schema_only_change_can_restore_the_checkpoint(self):
         with closing(sqlite3.connect(self.database)) as conn, conn:
             conn.execute("INSERT INTO schema_version (version) VALUES (999)")
         result = self.guard("rollback", FakeSystem(), answers=True)
-        self.assertIn("database was put back", result["detail"])
+        self.assertEqual(result["state"], "rolled_back", result["detail"])
         self.assertNotEqual(update_guard.schema(self.database), 999)
-        # The restored database must not bring the update job back as running. (Read afresh: the
-        # services that had the old file open were stopped before it was replaced.)
+        self.assertEqual(self.store.get(self.job["id"])["state"], "failed")
+
+    def test_completed_effect_is_not_requeued_by_schema_rollback(self):
+        effect = self.store.create(kind="lifecycle", service_id="demo", action="reset", actor="owner")
+        with closing(sqlite3.connect(self.database)) as live, closing(sqlite3.connect(self.copy)) as copy:
+            live.backup(copy)
+        self.store.transition(effect["id"], "running", actor="worker")
+        self.store.transition(effect["id"], "succeeded", actor="worker")
         with closing(sqlite3.connect(self.database)) as conn, conn:
-            state = conn.execute("SELECT state FROM jobs WHERE id = ?", (self.job["id"],)).fetchone()[0]
-        self.assertEqual(state, "failed")
+            conn.execute("INSERT INTO schema_version (version) VALUES (999)")
+        result = self.guard("rollback", FakeSystem(), answers=True)
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertEqual(self.store.get(effect["id"])["state"], "succeeded")
+
+    def test_old_healthy_worker_cannot_verify_the_new_release(self):
+        self.plan["old_worker_pid"] = 123
+        system = FakeSystem()
+        with patch.object(update_guard, "_alive", return_value=True):
+            healthy = update_guard.started(
+                self.plan,
+                system,
+                lambda _url: True,
+                lambda seconds: self.clock.__setitem__(0, self.clock[0] + seconds),
+                lambda: self.clock[0],
+            )
+        self.assertFalse(healthy)
+        self.assertFalse(system.ran("is-active"))
+
+    def test_failed_stop_never_replaces_code_or_database(self):
+        system = FakeSystem(fail="--user stop")
+        before = self.database.read_bytes()
+        result = self.guard("rollback", system, answers=True)
+        self.assertEqual(result["state"], "needs_attention")
+        self.assertFalse(system.ran("checkout"))
+        self.assertFalse(system.ran("--user start"))
+        self.assertEqual(update_guard.schema(self.database), update_guard.schema(self.copy))
+        self.assertTrue(before)
 
     def test_when_going_back_fails_the_person_is_told_exactly_what_to_run(self):
         result = self.guard("rollback", FakeSystem(fail="checkout"), answers=True)

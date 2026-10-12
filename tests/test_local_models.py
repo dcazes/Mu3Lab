@@ -168,6 +168,17 @@ class JobTests(_Runtime):
         self.assertEqual(local_models.settings(self.paths)["privacy"], "outside_allowed")
         self.assertEqual((self.applied, self.deleted), ([], []))
 
+    def test_failed_follower_keeps_models_it_may_still_use(self):
+        app = SimpleNamespace(id="demo", manifest=SimpleNamespace(name="Demo"))
+        with (
+            patch("ctl.local_models._followers", return_value=[app]),
+            patch("ctl.engine.rewire.rewire_one", side_effect=RuntimeError("restart failed")),
+        ):
+            job = self.run_job(LOCAL)
+        self.assertEqual((job["state"], job["error_code"]), ("failed", "followers_incomplete"))
+        self.assertIn("Demo", job["detail"])
+        self.assertEqual(self.deleted, [])
+
     def test_failed_routing_puts_the_earlier_settings_back(self):
         self.stack.enter_context(
             patch("ctl.local_models._probe_litellm", side_effect=RuntimeError("LiteLLM returned HTTP 500"))
