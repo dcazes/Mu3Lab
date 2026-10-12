@@ -772,6 +772,20 @@ class Mu3LabUpdate(ApiModel):
     last_update: Mu3LabUpdateResult | None = None
 
 
+class Mu3LabRelease(ApiModel):
+    """One release's changes; a development copy has no version."""
+
+    version: str
+    date: str
+    commit: str = ""
+    changes: list[str]
+
+
+class Mu3LabChangelog(ApiModel):
+    ok: bool
+    releases: list[Mu3LabRelease]
+
+
 class UpdateResponse(ApiModel):
     ok: bool
     repository: str

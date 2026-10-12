@@ -96,6 +96,23 @@ class StatusTests(_Checkout):
         self.assertIn("no release remote", self.status()["blocked_reason"])
 
 
+class HistoryTests(_Checkout):
+    def test_each_release_lists_its_own_changes_newest_first(self):
+        self.commit("Approve Mealie v3.28.0")
+        git(self.copy, "pull", "--quiet", "--tags", "origin", "main")
+        releases = self_update.history(self.copy)
+        self.assertEqual([item["version"] for item in releases], ["1.0.2", "1.0.1"])
+        self.assertEqual(releases[0]["changes"], ["Approve Mealie v3.28.0"])
+        self.assertEqual(releases[1]["changes"], ["first"])
+
+    def test_a_development_copy_shows_its_latest_changes(self):
+        git(self.copy, "tag", "--delete", "v1.0.1")
+        releases = self_update.history(self.copy)
+        self.assertEqual(len(releases), 1)
+        self.assertEqual(releases[0]["version"], "")
+        self.assertEqual(releases[0]["changes"], ["first"])
+
+
 class UpdateTests(_Checkout):
     def setUp(self):
         super().setUp()

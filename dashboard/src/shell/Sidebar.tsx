@@ -1,9 +1,10 @@
-import { Home, LayoutGrid, type LucideIcon, MessageSquare, Monitor, Moon, Search, Settings, Sun } from 'lucide-react';
+import { Home, LayoutGrid, type LucideIcon, MessageSquare, Search, Settings } from 'lucide-react';
 import { Dot } from '../components/Status';
 import { Link, usePath } from '../lib/router';
 import { needsAttention } from '../lib/services';
 import type { ThemePreference } from '../lib/theme';
 import { useDashboard } from '../state/dashboard';
+import { UserMenu } from './UserMenu';
 
 export const NAV: { label: string; to: string; icon: LucideIcon; match: (path: string) => boolean }[] = [
   { label: 'Home', to: '/', icon: Home, match: (path) => path === '/' || path === '/calendar' },
@@ -11,10 +12,6 @@ export const NAV: { label: string; to: string; icon: LucideIcon; match: (path: s
   { label: 'Chat', to: '/chat', icon: MessageSquare, match: (path) => path.startsWith('/chat') },
   { label: 'Settings', to: '/settings/ai', icon: Settings, match: (path) => path.startsWith('/settings') },
 ];
-
-const THEME_ORDER: ThemePreference[] = ['system', 'light', 'dark'];
-const THEME_ICON = { system: Monitor, light: Sun, dark: Moon };
-const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' };
 
 export function Sidebar({
   openSearch,
@@ -28,9 +25,6 @@ export function Sidebar({
   const path = usePath();
   const { data } = useDashboard();
   const issues = data.services.services.filter(needsAttention).length;
-  const ThemeIcon = THEME_ICON[theme];
-  const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
-  const user = data.identity.display_name || data.identity.username || '';
   return (
     <aside className="sidebar">
       <Link to="/" className="brand">
@@ -68,31 +62,21 @@ export function Sidebar({
           <Dot tone={issues ? 'amber' : 'green'} />
           {issues ? `${issues} app${issues === 1 ? '' : 's'} need attention` : 'All systems normal'}
         </Link>
-        <div className="sidebar-user">
-          {user && (
-            <>
-              <span className="avatar" aria-hidden="true">
-                {user.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="sidebar-user-name">{user}</span>
-            </>
-          )}
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm btn-icon theme-toggle"
-            onClick={() => setTheme(nextTheme)}
-            aria-label={`Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[nextTheme]}`}
-            title={`Theme: ${THEME_LABEL[theme]}`}
-          >
-            <ThemeIcon />
-          </button>
-        </div>
+        <UserMenu theme={theme} setTheme={setTheme} />
       </div>
     </aside>
   );
 }
 
-export function MobileBar({ openSearch }: { openSearch: () => void }) {
+export function MobileBar({
+  openSearch,
+  theme,
+  setTheme,
+}: {
+  openSearch: () => void;
+  theme: ThemePreference;
+  setTheme: (theme: ThemePreference) => void;
+}) {
   const path = usePath();
   return (
     <>
@@ -101,9 +85,12 @@ export function MobileBar({ openSearch }: { openSearch: () => void }) {
           <span className="brand-mark">μ</span>
           <b>Mu3Lab</b>
         </Link>
-        <button type="button" className="btn btn-ghost btn-md btn-icon" aria-label="Search" onClick={openSearch}>
-          <Search />
-        </button>
+        <span className="mobile-top-actions">
+          <button type="button" className="btn btn-ghost btn-md btn-icon" aria-label="Search" onClick={openSearch}>
+            <Search />
+          </button>
+          <UserMenu theme={theme} setTheme={setTheme} compact />
+        </span>
       </header>
       <nav className="mobile-tabs" aria-label="Main">
         {NAV.map(({ label, to, icon: Icon, match }) => (

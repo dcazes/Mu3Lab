@@ -1,4 +1,16 @@
-import { Bot, CalendarDays, KeyRound, type LucideIcon, Mic, Plug, ServerCog, ShieldCheck, Users } from 'lucide-react';
+import {
+  Bot,
+  CalendarDays,
+  KeyRound,
+  type LucideIcon,
+  Mic,
+  Plug,
+  Rocket,
+  ServerCog,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 
 export interface SettingsSection {
   id: string;
@@ -9,6 +21,7 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
+  { id: 'get-started', label: 'Get started', icon: Rocket },
   { id: 'ai', label: 'AI', icon: Bot },
   { id: 'integrations', label: 'Chat integrations', icon: Plug },
   { id: 'sign-in', label: 'Sign-in', icon: KeyRound },
@@ -17,6 +30,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'people', label: 'People', icon: Users, adminOnly: true },
   { id: 'security', label: 'Security & backups', icon: ShieldCheck },
   { id: 'system', label: 'System', icon: ServerCog, adminOnly: true },
+  { id: 'whats-new', label: "What's new", icon: Sparkles, adminOnly: true },
 ];
 
 export const settingsSectionsFor = (isAdmin: boolean) =>

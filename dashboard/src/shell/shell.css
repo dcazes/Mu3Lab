@@ -187,15 +187,6 @@ kbd {
   background: var(--surface-hover);
 }
 
-.sidebar-user {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 4px 0 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-
 .sidebar-user-name {
   flex: 1;
   min-width: 0;
@@ -217,8 +208,104 @@ kbd {
   font-weight: 600;
 }
 
-.theme-toggle {
+/* The person's name at the bottom of the sidebar opens the user menu (above it). */
+.user-menu {
+  position: relative;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.user-menu.is-compact {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-menu-trigger:hover,
+.user-menu-trigger[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+
+.user-menu.is-compact .user-menu-trigger {
+  width: auto;
+  padding: 8px;
+}
+
+.user-menu-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+}
+
+.user-menu-dot {
+  width: 7px;
+  height: 7px;
   margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.user-menu-trigger .user-menu-dot {
+  margin-left: 0;
+}
+
+/* Two classes, so this wins over the generic .menu-list placement below a button. */
+.user-menu .user-menu-list {
+  top: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  min-width: 210px;
+}
+
+.user-menu.is-compact .user-menu-list {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: auto;
+}
+
+.user-menu-group + .user-menu-group,
+.user-menu-theme {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.user-menu-theme {
+  display: flex;
+  gap: 4px;
+}
+
+.user-menu-list .user-menu-theme button {
+  justify-content: center;
+}
+
+.user-menu-theme button[aria-checked='true'] {
+  background: var(--surface-2);
+}
+
+.user-menu-theme button[aria-checked='true'] svg {
+  color: var(--text);
+}
+
+.mobile-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .main {

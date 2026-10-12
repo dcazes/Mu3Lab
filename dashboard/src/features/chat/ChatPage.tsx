@@ -1,9 +1,10 @@
-import { MessageSquare, X } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
+import { toast } from 'sonner';
 import { useEffect, useRef, useState } from 'react';
 import { postApi } from '../../api/client';
 import { ExternalButton, LinkButton } from '../../components/Button';
 import { EmptyState } from '../../components/Layout';
-import type { AiModels, ChatAssistant } from '../../api/models';
+import type { AiModels } from '../../api/models';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 
@@ -16,49 +17,43 @@ function expectedMcp(): { name: string; serviceId: string } | null {
   }
 }
 
-function AssistantList({ assistants }: { assistants: ChatAssistant[] }) {
-  const ready = assistants.filter((item) => item.status === 'ready');
-  if (!assistants.length || ready.length === assistants.length) return null;
-  return (
-    <details className="chat-banner chat-assistants">
-      <summary>
-        Assistants in chat: {ready.length} of {assistants.length} apps
-      </summary>
-      <ul>
-        {assistants.map((item) => (
-          <li key={item.id} data-status={item.status}>
-            <b>{item.name}</b> — {item.detail}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
-/** Where messages go, said before anyone types (R31). */
-function WhereChatRuns() {
+/** Where messages go, said as each visit opens (R31); a toast so it never shrinks the chat. */
+function useWhereChatRuns() {
   const { data } = useApi<AiModels>('/api/v1/ai/models');
-  if (!data) return null;
-  const local = data.chat_models.find((model) => model.id === data.settings.chat_model);
-  return (
-    <div className="chat-banner" role="status">
-      {data.settings.privacy === 'local_only'
+  const said = useRef(false);
+  useEffect(() => {
+    if (!data || said.current) return;
+    said.current = true;
+    const local = data.chat_models.find((model) => model.id === data.settings.chat_model);
+    toast.info(
+      data.settings.privacy === 'local_only'
         ? `Local only: every chat runs on this server${local ? ` with ${local.name}` : ''}.`
         : local
           ? `“Mu3Lab chat” sends messages to outside AI providers. Choose “${local.name} (private, on this server)” to keep a chat here.`
-          : '“Mu3Lab chat” sends messages, and anything an assistant includes, to outside AI providers.'}
-    </div>
-  );
+          : '“Mu3Lab chat” sends messages, and anything an assistant includes, to outside AI providers.',
+      { id: 'chat-privacy' },
+    );
+  }, [data]);
 }
 
 export function ChatPage() {
   const { data } = useDashboard();
   const status = data.chat;
-  const [expected, setExpected] = useState(expectedMcp);
+  const [expected] = useState(expectedMcp);
   const [connection, setConnection] = useState<{ url: string; interval: number } | null>(null);
   const [connected, setConnected] = useState(false);
-  const [message, setMessage] = useState('');
   const started = useRef(false);
+  useWhereChatRuns();
+  // An app that was just connected says so once, then the note is spent.
+  const announced = useRef(false);
+  useEffect(() => {
+    if (!expected || announced.current) return;
+    announced.current = true;
+    const item = status.assistants?.find((entry) => entry.id === expected.serviceId);
+    if (!item || item.status === 'ready') toast.success(`${expected.name} is now available in chat.`);
+    else toast.info(`${expected.name}: ${item.detail}`);
+    window.sessionStorage.removeItem('mu3lab.expectedMcp');
+  }, [expected, status.assistants]);
   const needsConnection = status.ready && !!status.url && !(status.connected || connected);
   useEffect(() => {
     if (!connection) return;
@@ -73,11 +68,11 @@ export function ChatPage() {
         if (result.state === 'connected') {
           setConnected(true);
           setConnection(null);
-          setMessage(result.detail || 'Your assistants are ready.');
+          toast.success(result.detail || 'Your assistants are ready.');
         } else timer = setTimeout(poll, (result.interval || connection!.interval) * 1000);
       } catch (error) {
         if (!stopped) {
-          setMessage(error instanceof Error ? error.message : 'Chat could not connect. Reload to try again.');
+          toast.error(error instanceof Error ? error.message : 'Chat could not connect. Reload to try again.');
           setConnection(null);
         }
       }
@@ -95,7 +90,7 @@ export function ChatPage() {
     postApi<{ verification_uri_complete: string; interval: number }>('/api/v1/chat/connect')
       .then((result) => setConnection({ url: result.verification_uri_complete, interval: result.interval }))
       .catch((error) =>
-        setMessage(error instanceof Error ? error.message : 'Chat could not connect. Reload to try again.'),
+        toast.error(error instanceof Error ? error.message : 'Chat could not connect. Reload to try again.'),
       );
   }, [needsConnection]);
   // The approval page needs a chat session, so it goes through the same silent sign-in as the chat itself.
@@ -117,48 +112,10 @@ export function ChatPage() {
     );
   return (
     <div className="chat">
-      <div className="chat-banner" role="status">
-        App connectors use shared service credentials and are operator-only. Each write requires approval of its exact
-        inputs in Mu3Lab.
-        {data.identity.is_admin && (
-          <LinkButton to="/tool-approvals" size="sm">
-            Review change requests
-          </LinkButton>
-        )}
-      </div>
+      {/* The one notice that waits for a click; everything else is a passing toast. */}
       {connection && (
         <div className="chat-banner" role="status">
           One-time step: choose <b>Authorize</b> below so Mu3Lab can add your app assistants to chat.
-        </div>
-      )}
-      {message && (
-        <div className="chat-banner" role="status">
-          {message}
-        </div>
-      )}
-      <WhereChatRuns />
-      <AssistantList assistants={status.assistants || []} />
-      {expected && (
-        <div className="chat-banner" role="status">
-          <span>
-            {/* Say "available" only when the assistant really is; otherwise say why not. */}
-            <b>{expected.name}</b>{' '}
-            {(() => {
-              const item = status.assistants?.find((entry) => entry.id === expected.serviceId);
-              return !item || item.status === 'ready' ? 'is now available in chat.' : `: ${item.detail}`;
-            })()}
-          </span>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm btn-icon"
-            aria-label="Dismiss"
-            onClick={() => {
-              window.sessionStorage.removeItem('mu3lab.expectedMcp');
-              setExpected(null);
-            }}
-          >
-            <X />
-          </button>
         </div>
       )}
       <iframe title="Mu3Lab chat" src={frameUrl} allow="clipboard-read; clipboard-write; microphone" />

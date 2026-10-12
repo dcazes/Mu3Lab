@@ -1,5 +1,6 @@
 import { ChevronRight, MessageSquare, Plug, PlugZap } from 'lucide-react';
 import type { McpServer } from '../../api';
+import type { ChatAssistant } from '../../api/models';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, LinkButton } from '../../components/Button';
 import { Card, Collapsible, EmptyState, PageHeader } from '../../components/Layout';
@@ -15,7 +16,7 @@ import {
   setsUpAutomatically,
   useMcpRegistry,
 } from '../integrations/mcp';
-import { useDashboard } from '../../state/dashboard';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
 
 function IntegrationRow({ server, reload }: { server: McpServer; reload: () => void }) {
   const { pending, run } = useAction();
@@ -74,6 +75,42 @@ function IntegrationRow({ server, reload }: { server: McpServer; reload: () => v
   );
 }
 
+/** Which installed apps have an assistant in chat, and why the others don't yet (moved from the Chat page). */
+function AssistantsCard({ assistants }: { assistants: ChatAssistant[] }) {
+  const isAdmin = useIsAdmin();
+  if (!assistants.length && !isAdmin) return null;
+  const ready = assistants.filter((item) => item.status === 'ready').length;
+  return (
+    <Card
+      title="Assistants in chat"
+      description={
+        assistants.length
+          ? `${ready} of ${assistants.length} apps have an assistant in chat. App connectors use shared service credentials, and each change an assistant asks for waits for approval of its exact inputs.`
+          : 'App connectors use shared service credentials, and each change an assistant asks for waits for approval of its exact inputs.'
+      }
+      actions={
+        isAdmin && (
+          <LinkButton size="sm" to="/tool-approvals">
+            Review change requests
+          </LinkButton>
+        )
+      }
+    >
+      {assistants.some((item) => item.status !== 'ready') && (
+        <ul className="assistant-list">
+          {assistants
+            .filter((item) => item.status !== 'ready')
+            .map((item) => (
+              <li key={item.id}>
+                <b>{item.name}</b> — {item.detail}
+              </li>
+            ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 export function IntegrationsSettings() {
   const registry = useMcpRegistry();
   const servers = primaryConnectors(registry.data?.servers || []);
@@ -81,6 +118,7 @@ export function IntegrationsSettings() {
   const manual = servers.filter((server) => !setsUpAutomatically(server));
   const live = servers.filter((server) => server.state === 'live').length;
   const reload = () => void registry.reload();
+  const { data } = useDashboard();
   return (
     <>
       <PageHeader
@@ -100,6 +138,7 @@ export function IntegrationsSettings() {
           </span>
         </div>
       )}
+      <AssistantsCard assistants={data.chat.assistants || []} />
       {!registry.data ? (
         <p className="muted">{registry.error || 'Loading integrations…'}</p>
       ) : !servers.length ? (

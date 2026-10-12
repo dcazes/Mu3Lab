@@ -17,7 +17,8 @@ export function Dialog({
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
-  size?: 'md' | 'lg';
+  /** `drawer` slides in from the right (a sheet from the bottom on phones). */
+  size?: 'md' | 'lg' | 'drawer';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {

@@ -134,6 +134,13 @@ async def mu3lab_update(_operator: Operator, refresh: bool = False) -> models.Mu
     )
 
 
+@router.get("/system/changelog", response_model=models.Mu3LabChangelog)
+async def mu3lab_changelog(_operator: Operator) -> models.Mu3LabChangelog:
+    """What changed in the installed release and the few before it (What's new)."""
+    releases = await run_in_threadpool(self_update.history, ROOT)
+    return models.Mu3LabChangelog.model_validate({"ok": True, "releases": releases})
+
+
 @router.post("/system/update", response_model=models.JobResponse, response_model_exclude_none=True)
 def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.JobResponse:
     """Queue the self-update. It restarts the dashboard and worker, so nothing else may be running."""

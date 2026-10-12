@@ -24,21 +24,36 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('launches everyday apps and routes stopped ones to their page', () => {
+  it('opens a quick panel for each everyday app, with Open and its controls', () => {
     stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
+      allowed_actions: ['stop', 'restart'],
     });
-    const mealie = service('mealie', 'Mealie', 'optional', { display_state: 'stopped', identity: identity() });
+    const mealie = service('mealie', 'Mealie', 'optional', {
+      display_state: 'stopped',
+      identity: identity(),
+      allowed_actions: ['start'],
+    });
     const ollama = service('ollama', 'Ollama', 'core');
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    expect(screen.getByRole('link', { name: 'Open Immich' })).toHaveAttribute(
+    const launcher = screen.getByRole('region', { name: 'Your apps' });
+    expect(within(launcher).queryByText('Ollama')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Immich: Running' }));
+    let panel = screen.getByRole('dialog', { name: 'Immich' });
+    expect(within(panel).getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       'https://host.ts.net:8449/auth/login?autoLaunch=1',
     );
-    expect(screen.getByRole('link', { name: 'Mealie: Stopped' })).toHaveAttribute('href', '/apps/mealie');
-    const launcher = screen.getByRole('region', { name: 'Your apps' });
-    expect(within(launcher).queryByText('Ollama')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(panel).getByRole('link', { name: 'All details' })).toHaveAttribute('href', '/apps/immich');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mealie: Stopped' }));
+    panel = screen.getByRole('dialog', { name: 'Mealie' });
+    expect(within(panel).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Start' })).toBeInTheDocument();
   });
 
   it('groups status into Security, AI and System chips that expand with real usage figures', () => {

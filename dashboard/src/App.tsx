@@ -67,7 +67,7 @@ function Shell() {
   return (
     <div className="shell">
       <Sidebar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
-      <MobileBar openSearch={() => setSearchOpen(true)} />
+      <MobileBar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
       <main className={path === '/chat' ? 'main main-full' : 'main'}>
         <div className="main-inner">
           {(statusStale || Boolean(failedSources?.length)) && (

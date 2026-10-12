@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus } from 'lucide-react';
+import { useState } from 'react';
 import type { Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
@@ -14,6 +15,7 @@ import {
   stateTone,
 } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
+import { AppQuickPanel } from './AppQuickPanel';
 import { HomeCalendar } from './HomeCalendar';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
@@ -23,11 +25,17 @@ function greeting() {
   return hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 }
 
-function LauncherTile({ service }: { service: Service }) {
-  const target = launchTarget(service);
+/** A tile opens the app's quick panel; the panel's Open button opens the app itself. */
+function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => void }) {
   const tone = stateTone(service.display_state);
-  const body = (
-    <>
+  return (
+    <button
+      type="button"
+      className={`tile${launchTarget(service) ? '' : ' tile-muted'}`}
+      aria-label={`${service.name}: ${stateLabel[service.display_state]}`}
+      aria-haspopup="dialog"
+      onClick={onOpen}
+    >
       <AppIcon id={service.id} size="lg" />
       <span className="tile-name">{service.name}</span>
       {!isRunning(service) && (
@@ -36,22 +44,7 @@ function LauncherTile({ service }: { service: Service }) {
           {stateLabel[service.display_state]}
         </span>
       )}
-    </>
-  );
-  if (target)
-    return (
-      <a className="tile" href={target.url} target="_blank" rel="noreferrer" aria-label={`Open ${service.name}`}>
-        {body}
-      </a>
-    );
-  return (
-    <Link
-      className="tile tile-muted"
-      to={`/apps/${service.id}`}
-      aria-label={`${service.name}: ${stateLabel[service.display_state]}`}
-    >
-      {body}
-    </Link>
+    </button>
   );
 }
 
@@ -103,6 +96,9 @@ export function HomePage() {
   const services = data.services.services;
   const apps = services.filter((service) => isEverydayApp(service) && isInstalled(service));
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
+  const [panel, setPanel] = useState('');
+  // Look the app up each render so the panel follows its live state.
+  const selected = services.find((service) => service.id === panel);
   return (
     <div className="home">
       <header className="home-header">
@@ -122,7 +118,7 @@ export function HomePage() {
         </div>
         <div className="launcher">
           {apps.map((service) => (
-            <LauncherTile key={service.id} service={service} />
+            <LauncherTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
           ))}
           <Link to="/apps/discover" className="tile tile-add" aria-label="Add apps">
             <span className="app-icon app-icon-lg">
@@ -133,6 +129,7 @@ export function HomePage() {
         </div>
       </section>
       <HomeCalendar nextcloud={services.find((service) => service.id === 'nextcloud')} />
+      {selected && <AppQuickPanel service={selected} onClose={() => setPanel('')} />}
     </div>
   );
 }

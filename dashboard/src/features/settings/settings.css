@@ -211,3 +211,12 @@
 .checklist .dot {
   box-shadow: none;
 }
+
+.assistant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+}

@@ -141,6 +141,32 @@ def status(root: Path, *, refresh: bool = False) -> dict[str, Any]:
     return result
 
 
+def history(root: Path, releases: int = 5, per_release: int = 30) -> list[dict[str, Any]]:
+    """What changed in each recent release up to this copy, newest first.
+
+    A development checkout with no release tags shows its latest changes as one entry.
+    """
+    _rc, values = _git(root, "tag", "--merged", "HEAD", "--list", "v*")
+    tags = sorted(
+        (
+            (tuple(int(n) for n in match.groups()), tag)
+            for tag in values.splitlines()
+            if (match := platform_releases.TAG.fullmatch(tag))
+        ),
+        reverse=True,
+    )[: releases + 1]
+    if not tags:
+        _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", str(per_release))
+        return [{"version": "", **_head(root), "changes": changes.splitlines()}] if changes else []
+    entries = []
+    for index, (_version, tag) in enumerate(tags[:releases]):
+        since = [f"{tags[index + 1][1]}..{tag}"] if index + 1 < len(tags) else [tag]
+        _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", str(per_release), *since)
+        _rc, date = _git(root, "log", "-1", "--format=%cs", tag)
+        entries.append({"version": tag.removeprefix("v"), "date": date, "changes": changes.splitlines()})
+    return entries
+
+
 def last_update(paths: RuntimePaths | None = None) -> dict[str, str] | None:
     """How the most recent update ended, as the guard recorded it."""
     from ctl.update_guard import RESULT

@@ -169,6 +169,38 @@
   cursor: pointer;
 }
 
+/* A hidden Get started list leaves this small way back. */
+.get-started-show {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 5px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.get-started-show:hover {
+  border-style: solid;
+  color: var(--text);
+}
+
+.get-started-show svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+}
+
+.get-started-list.is-compact .get-started-item {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
 .guide-steps {
   margin: 0;
   padding-left: 20px;
@@ -193,7 +225,10 @@
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+  color: inherit;
+  font: inherit;
   text-align: center;
+  cursor: pointer;
   transition:
     transform 0.14s,
     box-shadow 0.14s,
@@ -387,4 +422,15 @@
 
 .status-bar-fill.tone-red {
   background: var(--red);
+}
+
+/* Home's quick panel for one app. */
+.quick-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quick-panel-details {
+  align-self: flex-start;
 }

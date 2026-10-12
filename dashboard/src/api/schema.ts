@@ -1339,6 +1339,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/changelog': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Mu3Lab Changelog
+     * @description What changed in the installed release and the few before it (What's new).
+     */
+    get: operations['mu3lab_changelog_api_v1_system_changelog_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/config': {
     parameters: {
       query?: never;
@@ -2757,6 +2777,30 @@ export interface components {
       summary: string;
       /** Support */
       support: 'official' | 'community' | 'experimental';
+    };
+    /** Mu3LabChangelog */
+    Mu3LabChangelog: {
+      /** Ok */
+      ok: boolean;
+      /** Releases */
+      releases: components['schemas']['Mu3LabRelease'][];
+    };
+    /**
+     * Mu3LabRelease
+     * @description One release's changes; a development copy has no version.
+     */
+    Mu3LabRelease: {
+      /** Changes */
+      changes: string[];
+      /**
+       * Commit
+       * @default
+       */
+      commit?: string;
+      /** Date */
+      date: string;
+      /** Version */
+      version: string;
     };
     /** Mu3LabUpdate */
     Mu3LabUpdate: {
@@ -11014,6 +11058,89 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['BackupSchedule'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  mu3lab_changelog_api_v1_system_changelog_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Mu3LabChangelog'];
         };
       };
       /** @description Bad Request */
