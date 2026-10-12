@@ -59,7 +59,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "audiobookshelf",
                 "romm",
                 "dawarich",
-                "open-webui",
+                "lobehub",
                 "speaches",
                 "firecrawl",
                 "kopia-ui",

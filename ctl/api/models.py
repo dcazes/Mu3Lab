@@ -912,6 +912,9 @@ class ChatAssistant(ApiModel):
 class ChatStatus(ApiModel):
     assistants: list[ChatAssistant] | None = None
     connected: bool | None = None
+    # The household chat app the Chat page shows.
+    app_id: str = ""
+    app_name: str = ""
     ok: bool
     ready: bool
     url: str
@@ -919,6 +922,18 @@ class ChatStatus(ApiModel):
     mcp_enabled_count: float
     detail: str
     providers: list[ChatProvider] | None = None
+
+
+class ChatAppChoice(ApiModel):
+    id: str
+    name: str
+    installed: bool
+    selected: bool
+
+
+class ChatApps(ApiModel):
+    ok: bool
+    apps: list[ChatAppChoice]
 
 
 class SystemConfig(ApiModel):
@@ -1153,6 +1168,10 @@ class JobResponse(ApiModel):
 class SessionResponse(ApiModel):
     ok: bool
     csrf_token: str
+
+
+class ChatAppRequest(RequestModel):
+    app_id: str = Field(min_length=1, max_length=64)
 
 
 class ChecklistRequest(RequestModel):

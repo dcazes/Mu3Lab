@@ -26,13 +26,13 @@ import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { AiModelsCard } from './AiModelsCard';
+import { ChatAppCard } from './ChatAppCard';
 import { detectProvider, keyWarning } from './providerKeys';
 
 const ROUTE = [
   { id: 'ollama', label: 'Ollama', role: 'Local models & embeddings' },
   { id: 'freellmapi', label: 'FreeLLMAPI', role: 'Your provider accounts' },
   { id: 'litellm', label: 'LiteLLM', role: 'One private gateway' },
-  { id: 'lobehub', label: 'LobeChat', role: 'Chat' },
 ];
 
 function ChatRoute() {
@@ -43,25 +43,28 @@ function ChatRoute() {
       description="A route counts as ready only after streamed chat and embedding checks pass."
     >
       <ol className="route">
-        {ROUTE.map((step) => {
-          const service = data.services.services.find((item) => item.id === step.id);
-          const ready = service && isRunning(service);
-          return (
-            <li key={step.id}>
-              <Link to={`/apps/${step.id}`} className="route-step">
-                <AppIcon id={step.id} size="sm" />
-                <span>
-                  <b>{step.label}</b>
-                  <small>{step.role}</small>
-                </span>
-                <span className="route-state">
-                  <Dot tone={ready ? 'green' : 'gray'} />
-                  {service ? stateLabel[service.display_state] : 'Unavailable'}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
+        {/* The last step is whichever chat app the household uses. */}
+        {[...ROUTE, { id: data.chat.app_id || '', label: data.chat.app_name || 'Chat', role: 'Chat' }]
+          .filter((step) => step.id)
+          .map((step) => {
+            const service = data.services.services.find((item) => item.id === step.id);
+            const ready = service && isRunning(service);
+            return (
+              <li key={step.id}>
+                <Link to={`/apps/${step.id}`} className="route-step">
+                  <AppIcon id={step.id} size="sm" />
+                  <span>
+                    <b>{step.label}</b>
+                    <small>{step.role}</small>
+                  </span>
+                  <span className="route-state">
+                    <Dot tone={ready ? 'green' : 'gray'} />
+                    {service ? stateLabel[service.display_state] : 'Unavailable'}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
       </ol>
     </Card>
   );
@@ -522,6 +525,7 @@ export function AiSettings() {
           You can see which providers chat uses. Ask an administrator to connect or change one.
         </Callout>
       )}
+      <ChatAppCard readOnly={!isAdmin} />
       <AiModelsCard readOnly={!isAdmin} />
       {localOnly && (
         <Callout tone="info" title="Local only is on">

@@ -37,7 +37,7 @@ interface Group {
 
 const SECURITY = ['ingress', 'authentik', 'tailscale', 'vaultwarden'];
 // The household chat app is the fourth AI row, so each group fills one row of four.
-const AI = ['ollama', 'litellm', 'freellmapi', 'lobehub'];
+const AI = ['ollama', 'litellm', 'freellmapi'];
 const SYSTEM_PAGE = '/settings/system';
 const RANK: Record<Tone, number> = { green: 0, gray: 0, blue: 1, amber: 2, red: 3 };
 
@@ -99,7 +99,7 @@ function healthSummary(rows: Row[]): string {
   return healthy === total ? `${total}/${total} healthy` : `${healthy}/${total} running`;
 }
 
-function buildGroups(system: SystemResponse, services: Service[]): Group[] {
+function buildGroups(system: SystemResponse, services: Service[], chatApp: string): Group[] {
   const memory = system.container_memory || {};
   const pick = (ids: string[]) =>
     ids
@@ -142,7 +142,7 @@ function buildGroups(system: SystemResponse, services: Service[]): Group[] {
       to: SYSTEM_PAGE,
     });
   const security = pick(SECURITY);
-  const ai = pick(AI);
+  const ai = pick(chatApp ? [...AI, chatApp] : AI);
   const figures = (rows: Row[]) => rows.filter((row) => row.value).map((row) => `${row.label} ${row.value}`);
   return [
     {
@@ -193,7 +193,7 @@ export function SystemStatus() {
   const [open, setOpen] = useState<string | null>(null);
   const { system } = data;
   if (!system.ok) return null;
-  const groups = buildGroups(system, data.services.services);
+  const groups = buildGroups(system, data.services.services, data.chat.app_id || '');
   const expanded = groups.find((group) => group.key === open);
   return (
     <section className="status-strip" aria-label="System status">

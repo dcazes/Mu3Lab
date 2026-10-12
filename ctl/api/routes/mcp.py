@@ -13,9 +13,9 @@ from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import IdentityData, Member, Operator, OperatorMutation
 from ctl.api.service_view import service_states
+from ctl.chat_ops import set_tool_permission
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
-from ctl.lobehub_ops import set_tool_permission
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_gateway import review_for
 from ctl.mcp_ops import rebind_app

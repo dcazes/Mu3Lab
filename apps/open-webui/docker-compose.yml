@@ -45,6 +45,11 @@ services:
       AUDIO_TTS_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
       AUDIO_TTS_MODEL: ${AUDIO_TTS_MODEL:-}
       AUDIO_TTS_VOICE: ${AUDIO_TTS_VOICE:-}
+      # Mu3Lab adds each operator's app assistants with its own administrator key; each
+      # person's tool connections and assistants are private to them, administrators included.
+      ENABLE_API_KEYS: "true"
+      BYPASS_ADMIN_ACCESS_CONTROL: "false"
+      MU3LAB_ADMIN_API_KEY: ${OPEN_WEBUI_ADMIN_API_KEY:?OPEN_WEBUI_ADMIN_API_KEY is required}
       ENABLE_VERSION_UPDATE_CHECK: "false"
       ENABLE_COMMUNITY_SHARING: "false"
     volumes:

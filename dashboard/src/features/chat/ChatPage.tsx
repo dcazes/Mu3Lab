@@ -104,9 +104,11 @@ export function ChatPage() {
         <EmptyState
           icon={MessageSquare}
           title="Chat isn’t ready yet"
-          action={<LinkButton to="/apps/lobehub">Check LobeChat</LinkButton>}
+          action={
+            status.app_id && <LinkButton to={`/apps/${status.app_id}`}>Check {status.app_name || 'chat'}</LinkButton>
+          }
         >
-          {status.detail || 'LobeChat is starting or still being set up.'}
+          {status.detail || `${status.app_name || 'Chat'} is starting or still being set up.`}
         </EmptyState>
       </div>
     );

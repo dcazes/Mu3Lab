@@ -90,7 +90,7 @@ Mu3Lab installs **Vaultwarden**, a self-hosted server that works with the Bitwar
 <td valign="top">
 
 ### 🤖 A chat assistant that uses your apps
-LobeChat gives operators **one assistant per installed app** using shared application credentials. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **every enabled write requires your approval of the exact inputs in the Mu3Lab dashboard**. Household members can use chat without access to these shared connectors.
+Chat (Open WebUI, or LobeChat if you prefer it) gives operators **one assistant per installed app** using shared application credentials. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **every enabled write requires your approval of the exact inputs in the Mu3Lab dashboard**. Household members can use chat without access to these shared connectors.
 
 </td>
 </tr>
@@ -184,7 +184,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🚦 | **Caddy** | Gives each app its own private HTTPS address |
 | 🔑 | **Authentik** | One account and sign-in for the dashboard and your apps |
 | 🗝️ | **Vaultwarden** | Your password vault, compatible with every Bitwarden app |
-| 💬 | **LobeChat** | Chat workspace with an assistant for each of your apps |
+| 💬 | **Open WebUI** | Chat with an assistant for each of your apps, voice and your documents (LobeChat is available instead) |
 | 🔀 | **LiteLLM** | One AI gateway for chat and embeddings |
 | 🆓 | **FreeLLMAPI** | Routes chat to free cloud AI providers, with failover |
 | 🦙 | **Ollama** | Local AI models and embeddings, on CPU, NVIDIA or AMD |
@@ -202,10 +202,11 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🔬 | **[SurfSense](https://github.com/MODSetter/SurfSense)** | AI research workspace with cited answers | Gated + own login | ✅ |
 | 👶 | **[Baby Buddy](https://docs.baby-buddy.net)** | Shared tracker for feeding, sleep, diapers and growth | SSO | Manual |
 | 🥫 | **[Grocy](https://grocy.info)** | Pantry stock, expiry dates, shopping lists and chores | SSO | ✅ |
+| 💬 | **[LobeChat](https://lobehub.com)** | A second chat app with an assistant for each app; choose it in Settings > AI | SSO | ✅ |
 | 🕷️ | **[Firecrawl](https://www.firecrawl.dev)** | Turns web pages into clean text so chat can research the web | None (internal) | ✅ |
 | 💾 | **[Kopia backups](https://kopia.io)** | Scheduled, encrypted backups of Mu3Lab and every app; browse and restore files | Gated | — |
 
-<sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: LobeChat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
+<sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: chat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
 
 **Supported free AI providers:** Cerebras · Google AI Studio · Groq · Hugging Face · NVIDIA · OpenRouter · Mistral · Zhipu
 
@@ -214,7 +215,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 ## 🧩 How it works
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. LobeChat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Ollama or FreeLLMAPI." width="100%">
+  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. Chat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Ollama or FreeLLMAPI." width="100%">
 </p>
 
 - **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
@@ -280,7 +281,7 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 
 - [x] One-command, resumable installer with a guided Tailscale step
 - [x] Authentik SSO wired into every app, plus a pre-filled Vaultwarden vault
-- [x] AI slice: LobeChat, LiteLLM, FreeLLMAPI and Ollama, with GPU detection
+- [x] AI slice: Open WebUI (or LobeChat), LiteLLM, FreeLLMAPI and Ollama, with GPU detection
 - [x] Operator-only app assistants through reviewed MCP connectors; durable human approval for writes
 - [x] Parallel image downloads with size estimates before install
 - [x] Encrypted local backups of catalog apps, with guided restore

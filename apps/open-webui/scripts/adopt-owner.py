@@ -5,10 +5,14 @@ linked to the owner's Authentik sign-in ("oidc" provider, sub = the
 Authentik user ID), with a random password nobody uses (password sign-in is
 off). Because the owner is the first user, Open WebUI's "first user becomes
 administrator" rule can never hand that role to anyone else.
+
+It also registers Mu3Lab's administrator key on that account, so Mu3Lab can add
+each operator's app assistants through Open WebUI's own API.
 """
 
 import asyncio
 import json
+import os
 import secrets
 import sys
 
@@ -40,6 +44,11 @@ async def main(owner: dict) -> None:
         await Users.update_user_oauth_by_id(user.id, "oidc", sub)
         if user.role != "admin":
             await Users.update_user_role_by_id(user.id, "admin")
+    key = os.environ.get("MU3LAB_ADMIN_API_KEY", "")
+    if not key:
+        raise RuntimeError("Mu3Lab's administrator key is missing")
+    if await Users.get_user_api_key_by_id(user.id) != "sk-" + key:
+        await Users.update_user_api_key_by_id(user.id, "sk-" + key)
     print("MU3LAB_OPEN_WEBUI_OWNER_OK")
 
 

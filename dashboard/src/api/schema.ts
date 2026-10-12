@@ -293,6 +293,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/chat/apps': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Chat Apps
+     * @description The chat apps Mu3Lab can show on the Chat page, and which one it shows.
+     */
+    get: operations['chat_apps_api_v1_chat_apps_get'];
+    /**
+     * Choose Chat App
+     * @description Make an installed chat app the household one.
+     */
+    put: operations['choose_chat_app_api_v1_chat_apps_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/chat/connect': {
     parameters: {
       query?: never;
@@ -2141,6 +2165,29 @@ export interface components {
       /** Tagline */
       tagline?: string | null;
     };
+    /** ChatAppChoice */
+    ChatAppChoice: {
+      /** Id */
+      id: string;
+      /** Installed */
+      installed: boolean;
+      /** Name */
+      name: string;
+      /** Selected */
+      selected: boolean;
+    };
+    /** ChatAppRequest */
+    ChatAppRequest: {
+      /** App Id */
+      app_id: string;
+    };
+    /** ChatApps */
+    ChatApps: {
+      /** Apps */
+      apps: components['schemas']['ChatAppChoice'][];
+      /** Ok */
+      ok: boolean;
+    };
     /** ChatAssistant */
     ChatAssistant: {
       /** Detail */
@@ -2196,6 +2243,16 @@ export interface components {
     };
     /** ChatStatus */
     ChatStatus: {
+      /**
+       * App Id
+       * @default
+       */
+      app_id?: string;
+      /**
+       * App Name
+       * @default
+       */
+      app_name?: string;
       /** Assistants */
       assistants?: components['schemas']['ChatAssistant'][] | null;
       /** Authentication */
@@ -5537,6 +5594,176 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['CatalogResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  chat_apps_api_v1_chat_apps_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ChatApps'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  choose_chat_app_api_v1_chat_apps_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChatAppRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ChatApps'];
         };
       };
       /** @description Bad Request */

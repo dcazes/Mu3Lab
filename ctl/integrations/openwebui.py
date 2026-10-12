@@ -1,0 +1,125 @@
+"""Open WebUI's admin API, used with Mu3Lab's own administrator key.
+
+Mu3Lab keeps two things in step: the tool connections (one MCP connection per
+person and app, pointing at the tool gateway with that person's token and
+readable only by them) and the workspace models that act as each app's
+assistant. Connections and models Mu3Lab did not create are never touched:
+ours carry the ``mu3lab-app-`` id prefix. Tokens and API error bodies never reach
+logs.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+# Distinct from LiteLLM model names such as mu3lab-chat, which Open WebUI also lists.
+PREFIX = "mu3lab-app-"
+
+
+class ChatError(RuntimeError):
+    """A safe message for the dashboard or worker."""
+
+
+def user_grant(user_id: str) -> list[dict[str, str]]:
+    """Readable by exactly one Open WebUI user."""
+    return [{"principal_type": "user", "principal_id": user_id, "permission": "read"}]
+
+
+class OpenWebUI:
+    def __init__(self, origin: str, key: str, *, transport: httpx.BaseTransport | None = None) -> None:
+        self.client = httpx.Client(
+            base_url=origin.rstrip("/"),
+            timeout=30,
+            transport=transport,
+            headers={"Authorization": f"Bearer {key}"},
+        )
+
+    def __enter__(self) -> OpenWebUI:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.client.close()
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            response = self.client.request(method, path, **kwargs)
+            data = response.json() if response.content else None
+        except (httpx.HTTPError, ValueError):
+            raise ChatError("Open WebUI could not be reached.") from None
+        if not response.is_success:
+            raise ChatError(f"Open WebUI did not accept this request (HTTP {response.status_code}).")
+        return data
+
+    def users(self) -> list[dict[str, Any]]:
+        data = self.request("GET", "/api/v1/users/all")
+        return list((data or {}).get("users") or []) if isinstance(data, dict) else list(data or [])
+
+    def connections(self) -> list[dict[str, Any]]:
+        data = self.request("GET", "/api/v1/configs/tool_servers") or {}
+        return list(data.get("TOOL_SERVER_CONNECTIONS") or [])
+
+    def set_connections(self, connections: list[dict[str, Any]]) -> None:
+        self.request("POST", "/api/v1/configs/tool_servers", json={"TOOL_SERVER_CONNECTIONS": connections})
+
+    def models(self) -> list[dict[str, Any]]:
+        data = self.request("GET", "/api/v1/models/all")
+        return list(data or []) if isinstance(data, list) else list((data or {}).get("data") or [])
+
+    def save_model(self, model: dict[str, Any], *, exists: bool) -> None:
+        self.request("POST", "/api/v1/models/model/update" if exists else "/api/v1/models/create", json=model)
+
+    def delete_model(self, model_id: str) -> None:
+        self.request("POST", "/api/v1/models/model/delete", json={"id": model_id})
+
+    def ensure(self, desired: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
+        """Make Mu3Lab's connections and assistants exactly ``desired``.
+
+        ``desired`` maps an Open WebUI user ID to that person's assistants;
+        anyone left out (no longer an operator) loses theirs. Returns each
+        user ID's assistant app IDs.
+        """
+        wanted_connections: list[dict[str, Any]] = []
+        wanted_models: dict[str, dict[str, Any]] = {}
+        for user_id, assistants in desired.items():
+            for item in assistants:
+                server_id = f"{PREFIX}{item['id']}-{user_id}"
+                wanted_connections.append(
+                    {
+                        "url": item["url"],
+                        "path": "",
+                        "type": "mcp",
+                        "auth_type": "bearer",
+                        "key": item["token"],
+                        "config": {"enable": True, "access_grants": user_grant(user_id)},
+                        "info": {"id": server_id, "name": item["title"], "description": item["description"]},
+                    }
+                )
+                wanted_models[server_id] = {
+                    "id": server_id,
+                    "base_model_id": "mu3lab-chat",
+                    "name": item["title"],
+                    "meta": {
+                        "description": item["description"],
+                        "toolIds": [f"server:mcp:{server_id}"],
+                        "capabilities": {"function_calling": True},
+                    },
+                    "params": {"system": item["instructions"], "function_calling": "native"},
+                    "access_grants": user_grant(user_id),
+                    "is_active": True,
+                }
+
+        def ours(identifier: str) -> bool:
+            return identifier.startswith(PREFIX)
+
+        current = self.connections()
+        others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
+        self.set_connections([*others, *wanted_connections])
+        existing = {str(model.get("id")) for model in self.models()}
+        for model_id, model in wanted_models.items():
+            self.save_model(model, exists=model_id in existing)
+        for model_id in existing:
+            if ours(model_id) and model_id not in wanted_models:
+                self.delete_model(model_id)
+        return {user_id: [item["id"] for item in assistants] for user_id, assistants in desired.items()}

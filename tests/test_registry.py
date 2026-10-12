@@ -151,14 +151,15 @@ class RegistryTests(unittest.TestCase):
                 self.assertTrue(values[key])
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
 
-    def test_lobechat_is_required_persistent_oidc_chat(self):
+    def test_lobechat_is_an_optional_persistent_oidc_chat(self):
         from ctl.engine.runtime import render_service as materialize
         from ctl.identity import mode_for
         from ctl.secrets import read_runtime_env
 
         service = load().get("lobehub")
-        self.assertTrue(service.required)
-        self.assertEqual(service.stage, "core")
+        # Open WebUI is the chat the installer sets up; LobeChat is installed from Discover.
+        self.assertFalse(service.required)
+        self.assertEqual(service.stage, "optional")
         self.assertEqual(service.dependencies, ("litellm", "authentik"))
         self.assertEqual(mode_for(service), "native_oidc")
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
@@ -221,7 +222,7 @@ class RegistryTests(unittest.TestCase):
         registry = load()
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.manifest.tier == "core"]
-        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub"})
+        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "open-webui"})
         for service in core:
             images = compose_images(service.compose_path(root) / "docker-compose.yml")
             self.assertTrue(images, service.id)
@@ -269,7 +270,7 @@ class RegistryTests(unittest.TestCase):
         from ctl.api.routes.system import catalog
 
         profile = catalog({}).model_dump()["profiles"][0]
-        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "lobehub"})
+        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "open-webui"})
 
     def test_nextcloud_is_a_curated_documents_app_with_unique_private_ports(self):
         registry = load()

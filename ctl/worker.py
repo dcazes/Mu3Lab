@@ -30,11 +30,11 @@ from ctl import (
     resource_locks,
     self_update,
 )
+from ctl.chat_ops import sync_agents
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.job_processes import JobProcesses
 from ctl.jobs import JobStore
-from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
 from ctl.service_ops import execute_claimed as execute_service_claimed

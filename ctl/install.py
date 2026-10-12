@@ -2636,7 +2636,29 @@ def run_job(job: dict, ctx: dict) -> None:
             ]
             bootstrap_root = ctx.get("root")
             if not existing and bootstrap_root:
-                start_core_setup(store, "bootstrap", bootstrap_root)
+                from ctl.people import owner_identity
+                from ctl.store import workflows as workflow_secrets
+
+                # Core apps that create the owner's own account (Open WebUI) need to know who that is.
+                owner = owner_identity()
+                start_core_setup(
+                    store,
+                    "bootstrap",
+                    bootstrap_root,
+                    prepare=(
+                        (
+                            lambda job_id: workflow_secrets.save_job_identity(
+                                job_id,
+                                owner_uid=owner["owner_uid"],
+                                email=owner["email"],
+                                username=owner["username"],
+                                display_name=owner["display_name"],
+                            )
+                        )
+                        if owner
+                        else None
+                    ),
+                )
                 ctx["emit"]({"type": "log", "id": "_install_", "line": "started durable core-platform reconciliation"})
             elif not existing and not bootstrap_root:
                 ctx["emit"](

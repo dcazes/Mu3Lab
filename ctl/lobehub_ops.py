@@ -2,66 +2,21 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from ctl import chat_connections, mcp_gateway
+from ctl import chat_connections, chat_ops, mcp_gateway
 from ctl.control_state import ControlState
 from ctl.integrations.lobehub import AssistantSyncError, ChatError, LobeHub
 from ctl.manifest.catalog import load
 from ctl.mcp_catalog import load as load_connectors
 from ctl.people import operator_subjects
-from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.service_state import tailnet_dns_name
 
 
 def origin() -> str:
-    app = by_capability("chat")
-    route = app.manifest.route
-    host = tailnet_dns_name()
-    if not route or not host:
-        raise ChatError("Chat's private address is not available yet.")
-    return f"https://{host}:{route.https_port}"
-
-
-def desired_assistants(subject: str) -> list[dict[str, Any]]:
-    state = ControlState.runtime()
-    if state is None:
-        return []
-    live = set()
-    for connector in load_connectors(load_registry()):
-        runtime = state.mcp_server(connector.id)
-        if connector.gateway and runtime and runtime["enabled"] and runtime["state"] == "live":
-            live.add(connector.service_id)
-    result = []
-    for app in load().apps:
-        assistant = app.manifest.chat.assistant
-        installation = state.installation(app.id)
-        if (
-            not assistant
-            or app.id not in live
-            or not installation
-            or installation["state"] not in {"running", "stopped", "degraded"}
-        ):
-            continue
-        instructions = assistant.instructions
-        policy_file = mcp_gateway.project() / "policy" / "policy.json"
-        if policy_file.is_file():
-            policy = json.loads(policy_file.read_text())
-            instructions = policy.get("apps", {}).get(app.id, {}).get("instructions") or instructions
-        result.append(
-            {
-                "id": app.id,
-                "title": assistant.title,
-                "description": assistant.description,
-                "instructions": instructions,
-                "url": mcp_gateway.endpoint(app.id),
-                "token": mcp_gateway.operator_token(subject, app.id),
-            }
-        )
-    return result
+    try:
+        return chat_ops.origin(chat_ops.by_workspace("lobe"))
+    except chat_ops.ChatError as exc:
+        raise ChatError(str(exc)) from None
 
 
 def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]]:
@@ -141,7 +96,7 @@ def _sync_agents(log) -> tuple[bool, str]:
             continue
         # One person's revoked key or failed request must not stop everyone else's assistants.
         try:
-            desired = desired_assistants(uid) if uid in operators else []
+            desired = chat_ops.desired_assistants(uid) if uid in operators else []
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
             chat_connections.save(uid, {**record, "managed": managed, "error": ""}, paths)
@@ -160,19 +115,16 @@ def _sync_agents(log) -> tuple[bool, str]:
     return True, "Your assistants are ready."
 
 
-def reconcile(log) -> tuple[bool, str]:
-    return sync_agents(log)
+def revoke(subject: str) -> None:
+    """Detach every Mu3Lab assistant's tools from this person's LobeChat; conversations and agents stay."""
+    from ctl import access, resource_locks
 
-
-def sync_mcp(server, tools: list[dict], token: str, *, enabled: bool, log) -> tuple[bool, str]:
-    # Unreviewed connectors are never exposed outside the enforcing gateway.
-    return True, "Review this connector before exposing it to chat."
-
-
-def sync_gateway(service_id: str, app_name: str, tools: list[dict], *, enabled: bool, log) -> tuple[bool, str]:
-    return sync_agents(log)
-
-
-def set_tool_permission(server_id: str, tool_name: str, permission: str) -> tuple[bool, str]:
-    # The tool gateway enforces the decision; no chat database permissions exist.
-    return True, "Tool permission is enforced by the gateway."
+    # Chat synchronization rewrites the same records; never interleave with it.
+    with resource_locks.hold(access.CHAT_LOCK):
+        entry = chat_connections.records().get(subject) or {}
+        managed = entry.get("managed") or {}
+        if not entry.get("key") or not managed:
+            return
+        with LobeHub(origin(), entry["key"]) as client:
+            managed = client.ensure_assistants([], managed, installed=set(managed))
+        chat_connections.save(subject, {**entry, "managed": managed, "error": ""})

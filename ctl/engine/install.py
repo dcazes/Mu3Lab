@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from ctl import actions, image_fetch
+from ctl.chat_ops import sync_agents
 from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
@@ -24,7 +25,6 @@ from ctl.jobs import JobStore, redact
 from ctl.lifecycle import app_control, app_releases
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.signin_check import SignInError, verify_sign_in, wait_for_provider
-from ctl.lobehub_ops import sync_agents
 from ctl.manifest.catalog import App
 from ctl.mcp_ops import preenable, sync_application
 from ctl.registry import Registry, Service, load

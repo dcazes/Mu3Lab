@@ -199,3 +199,40 @@ def operator_subjects() -> set[str]:
         }
     except AuthentikError:
         raise PeopleError("Current operator membership could not be verified.") from None
+
+
+def chat_people() -> dict[str, dict[str, Any]]:
+    """Every active person by Authentik ID: their email and whether they may use shared app connectors."""
+    try:
+        held = access.holds()
+        return {
+            str(user["uid"]): {
+                "email": str(user.get("email") or "").strip().lower(),
+                "operator": _role(user) == "admin" and str(user["uid"]) not in held,
+            }
+            for user in Authentik.runtime().users()
+            if user.get("is_active") and _role(user)
+        }
+    except AuthentikError:
+        raise PeopleError("Current household membership could not be verified.") from None
+
+
+def owner_identity() -> dict[str, str] | None:
+    """The one Mu3Lab operator on a new install, for core apps that create the owner's account."""
+    try:
+        operators = [
+            user
+            for user in Authentik.runtime().users()
+            if user.get("is_active") and ADMIN_GROUP in _group_names(user) and user.get("email")
+        ]
+    except AuthentikError:
+        return None
+    if len(operators) != 1:
+        return None
+    user = operators[0]
+    return {
+        "owner_uid": str(user["uid"]),
+        "email": str(user["email"]).strip().lower(),
+        "username": str(user.get("username") or ""),
+        "display_name": str(user.get("name") or user.get("username") or ""),
+    }

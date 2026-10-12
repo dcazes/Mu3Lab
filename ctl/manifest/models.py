@@ -288,6 +288,8 @@ class Assistant(Model):
 class Chat(Model):
     assistant: Assistant | None = None
     connectors: tuple[str, ...] = ()  # folder names under apps/<id>/connectors/
+    # For a chat app (capability "chat"): how Mu3Lab adds the app assistants (ctl.chat_ops).
+    workspace: Literal["", "lobe", "open_webui"] = ""
 
 
 class CredentialField(Model):

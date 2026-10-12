@@ -38,7 +38,7 @@ class ServiceOperationTests(unittest.TestCase):
         self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "failed"))
         self.assertNotIn("uninstall", allowed_actions(load().get("nextcloud"), "planned"))
         self.assertNotIn("uninstall", allowed_actions(load().get("ollama"), "ready"))
-        self.assertNotIn("uninstall", allowed_actions(load().get("lobehub"), "stopped"))
+        self.assertNotIn("uninstall", allowed_actions(load().get("open-webui"), "stopped"))
 
     def test_core_apps_never_offer_uninstall_and_respect_stoppable(self):
         for service in load().services:
@@ -52,8 +52,8 @@ class ServiceOperationTests(unittest.TestCase):
                     if not service.manifest.service.stoppable:
                         self.assertNotIn("stop", actions)
 
-    def test_stopped_core_lobechat_starts_from_runtime_project(self):
-        service = load().get("lobehub")
+    def test_stopped_core_chat_starts_from_runtime_project(self):
+        service = load().get("open-webui")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             project = paths.projects / service.id

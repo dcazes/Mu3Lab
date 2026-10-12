@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions, local_models, process
+from ctl import actions, chat_ops, local_models, process
 from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
@@ -256,11 +256,15 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "LiteLLM did not expose its authenticated model registry"
     if not _http_ok("http://127.0.0.1:11434/api/tags"):
         return False, "Ollama model registry did not answer"
-    if not _http_ok("http://127.0.0.1:3211/__mu3lab_lobehub_health"):
-        return False, "LobeChat did not answer its private health endpoint"
-    lobehub = read_runtime_env(runtime.projects / by_capability("chat").id / ".env")
-    if not all(lobehub.get(key) for key in ("AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", "APP_URL")):
-        return False, "LobeChat's Authentik sign-in configuration is incomplete"
+    chat = chat_ops.default_app()
+    name = chat.manifest.name
+    health = load().get(chat.id).health
+    if health.get("kind") == "http" and not _http_ok(str(health["url"]), headers=health.get("headers") or {}):
+        return False, f"{name} did not answer its private health endpoint"
+    oidc = chat.manifest.sign_in.oidc
+    chat_env = read_runtime_env(runtime.projects / chat.id / ".env")
+    if oidc and not all(chat_env.get(key) for key in (oidc.env.client_id, oidc.env.client_secret)):
+        return False, f"{name}'s Authentik sign-in configuration is incomplete"
     local = local_models.local_only(runtime)
     if not wiring["chat_configured"]:
         if local:
@@ -290,13 +294,13 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "The local embedding model did not return vectors through LiteLLM"
     host = tailnet_dns_name()
     if not host:
-        return False, "The private hostname disappeared before LobeChat route verification"
-    if 8457 not in tailnet_serve_ports():
-        return False, "LobeChat's private Tailscale route is not published"
+        return False, f"The private hostname disappeared before {name} route verification"
+    if chat.manifest.route and chat.manifest.route.https_port not in tailnet_serve_ports():
+        return False, f"{name}'s private Tailscale route is not published"
     return (
         True,
-        "Private LobeChat route, streamed chat and embeddings passed live checks. Authentik sign-in is configured; "
-        "it is confirmed the first time you sign in to LobeChat.",
+        f"Private {name} route, streamed chat and embeddings passed live checks. Authentik sign-in is configured; "
+        f"it is confirmed the first time you sign in to {name}.",
     )
 
 

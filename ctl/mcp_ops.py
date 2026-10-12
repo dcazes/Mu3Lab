@@ -37,7 +37,7 @@ def _app_name(service_id: str) -> str:
 def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
     """Attach a live connector to its app's assistant, through the gateway when reviewed."""
     job_guard.checkpoint()
-    from ctl.lobehub_ops import sync_gateway, sync_mcp
+    from ctl.chat_ops import sync_gateway, sync_mcp
 
     if not server.gateway:
         token = read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", "")
@@ -57,7 +57,7 @@ def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
 def unbind(server, log) -> tuple[bool, str]:
     """Detach a connector from its app's assistant; call after its state is updated."""
     job_guard.checkpoint()
-    from ctl.lobehub_ops import sync_gateway, sync_mcp
+    from ctl.chat_ops import sync_gateway, sync_mcp
 
     if not server.gateway:
         return sync_mcp(server, [], "", enabled=False, log=log)

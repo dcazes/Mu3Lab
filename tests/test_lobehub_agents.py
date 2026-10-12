@@ -169,7 +169,7 @@ class AgentSyncTests(unittest.TestCase):
         with (
             patch.object(lobehub_ops.chat_connections, "records", return_value={"owner": {"key": "sk-lh-working"}}),
             patch.object(lobehub_ops.chat_connections, "save") as save,
-            patch.object(lobehub_ops, "desired_assistants", return_value=[]),
+            patch.object(lobehub_ops.chat_ops, "desired_assistants", return_value=[]),
             patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
@@ -206,7 +206,7 @@ class AgentSyncTests(unittest.TestCase):
         with (
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
             patch.object(lobehub_ops.chat_connections, "save") as save,
-            patch.object(lobehub_ops, "desired_assistants", return_value=[]),
+            patch.object(lobehub_ops.chat_ops, "desired_assistants", return_value=[]),
             patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),

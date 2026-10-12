@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ctl import actions, job_guard
 from ctl.app_settings import AppSettings
+from ctl.chat_ops import sync_agents
 from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
@@ -18,7 +19,6 @@ from ctl.lifecycle import app_control, compute_switch, maintenance
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
 from ctl.lifecycle.uninstall import uninstall_application
-from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import sync_application
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
@@ -329,6 +329,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             return
         if not sync_application(service.id, running=True, root=root, log=log):
             log("One enabled MCP needs attention after application start.")
+        if "chat" in service.manifest.capabilities:
+            # Open WebUI starts without Mu3Lab's tool connections; give them back now, not in five minutes.
+            sync_agents(log)
     if state:
         state.set_installation(service.id, target_state, job_id=job_id, route_state="ready")
     store.append_event(job_id, "step.completed", f"compose:{action}")
