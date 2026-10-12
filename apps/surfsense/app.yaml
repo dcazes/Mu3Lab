@@ -14,6 +14,7 @@ depends_on:
 - litellm
 - ollama
 service:
+  uses_gpu: true
   local_port: 3929
   health:
     path: /__mu3lab_surfsense_health

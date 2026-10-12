@@ -28,7 +28,7 @@ from ctl.backups import readiness as backup_readiness
 from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import app_releases, in_progress
+from ctl.lifecycle import app_releases, compute_switch, in_progress
 from ctl.lifecycle import restore as app_restore
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
 from ctl.registry import Service
@@ -171,6 +171,10 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
             raise ApiError(409, f"{service.name} has no interrupted update to keep.")
     elif action in MAINTENANCE_ACTIONS:
         params = _maintenance_params(service, action, body, _effective_state(service, control))
+    elif action == "switch_compute":
+        compute = compute_switch.info(service, ROOT)
+        if not compute or compute["running"] == compute["wanted"]:
+            raise ApiError(409, f"{service.name} already runs the version this computer's compute mode asks for.")
     else:
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):

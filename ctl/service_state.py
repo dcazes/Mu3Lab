@@ -519,8 +519,11 @@ def status(
         # Core services are pinned and move only together with Mu3Lab itself.
         else {"installed_version": approved, "approved_version": approved, "update_available": False}
     )
+    from ctl.lifecycle import compute_switch
+
     return {
         **service.public(),
+        "compute": compute_switch.info(service, root),
         "update": {"repository": str(service.update.get("repository", "")), "supporting_only": False, **release},
         "state": lifecycle_state,
         "detail": detail,

@@ -115,6 +115,7 @@ export type ServiceAccount = components['schemas']['ServiceAccount'];
 export type ServiceActionRequest = components['schemas']['ServiceActionRequest'];
 export type ServiceCheck = components['schemas']['ServiceCheck'];
 export type ServiceChecks = components['schemas']['ServiceChecks'];
+export type ServiceCompute = components['schemas']['ServiceCompute'];
 export type ServiceConfigField = components['schemas']['ServiceConfigField'];
 export type ServiceConfigResponse = components['schemas']['ServiceConfigResponse'];
 export type ServiceContainersItem = components['schemas']['ServiceContainersItem'];

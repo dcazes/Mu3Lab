@@ -175,6 +175,21 @@ describe('App page', () => {
     expect(screen.getByRole('link', { name: 'Manage providers' })).toHaveAttribute('href', '/settings/ai');
   });
 
+  it('offers the GPU version after the compute mode changes, and switches only when asked', async () => {
+    const fetchMock = stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '', job: { id: 'j' } }));
+    const immich = service('immich', 'Immich', 'optional', { compute: { running: 'cpu', wanted: 'nvidia' } });
+    renderWithDashboard(<AppDetailPage id="immich" tab="overview" />, dashboardData([immich]));
+    expect(screen.getByText('An NVIDIA GPU version is available')).toBeInTheDocument();
+    expect(screen.getByText('Runs on').nextSibling).toHaveTextContent('CPU');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to GPU version' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/immich/actions',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'switch_compute' }) }),
+      ),
+    );
+  });
+
   it('asks for confirmation before stopping an app', async () => {
     const fetchMock = stubFetch(() => ({
       ok: true,

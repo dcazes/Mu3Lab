@@ -5057,6 +5057,16 @@
             "title": "Compose Present",
             "type": "boolean"
           },
+          "compute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceCompute"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "configuration": {
             "anyOf": [
               {
@@ -5401,7 +5411,8 @@
               "restore",
               "update",
               "recover",
-              "keep_update"
+              "keep_update",
+              "switch_compute"
             ],
             "title": "Action",
             "type": "string"
@@ -5487,6 +5498,25 @@
           "sign_in"
         ],
         "title": "ServiceChecks",
+        "type": "object"
+      },
+      "ServiceCompute": {
+        "description": "For apps with a GPU build: the build that runs and the one the compute mode asks for.",
+        "properties": {
+          "running": {
+            "title": "Running",
+            "type": "string"
+          },
+          "wanted": {
+            "title": "Wanted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running",
+          "wanted"
+        ],
+        "title": "ServiceCompute",
         "type": "object"
       },
       "ServiceConfigField": {

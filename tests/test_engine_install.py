@@ -64,7 +64,7 @@ class InstallTests(unittest.TestCase):
         patches = {
             "RuntimePaths": self.paths,
             "tailnet_dns_name": "host.test",
-            "resolved_mode": "cpu",
+            "app_mode": "cpu",
             "missing_required": [],
             "workflow_secrets.job_identity": OWNER,
             "download_images": (0, ""),

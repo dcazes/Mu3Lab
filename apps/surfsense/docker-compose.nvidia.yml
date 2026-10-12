@@ -1,0 +1,24 @@
+# NVIDIA computers: SurfSense's own CUDA build reads documents (Docling) on the GPU; it needs an
+# NVIDIA driver of 570 or newer. Every service sharing the backend image moves with it, so only
+# one image is downloaded; the API and the worker do the reading and get the GPU.
+x-cuda: &cuda
+  image: ghcr.io/modsetter/surfsense-backend:0.0.40-cuda@sha256:770234eb1353c3a61fc28e46038e629e66b8ce40f429d2ec4f3d1bf62ec8a60c
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  migrations:
+    <<: *cuda
+  backend:
+    <<: [*cuda, *gpu]
+  celery_worker:
+    <<: [*cuda, *gpu]
+  celery_beat:
+    <<: *cuda

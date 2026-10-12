@@ -3201,6 +3201,7 @@ export interface components {
       checks?: components['schemas']['ServiceChecks'] | null;
       /** Compose Present */
       compose_present: boolean;
+      compute?: components['schemas']['ServiceCompute'] | null;
       /** Configuration */
       configuration?: components['schemas']['ServiceConfigField'][] | null;
       /** Containers */
@@ -3301,7 +3302,8 @@ export interface components {
         | 'restore'
         | 'update'
         | 'recover'
-        | 'keep_update';
+        | 'keep_update'
+        | 'switch_compute';
       /**
        * Confirm
        * @default
@@ -3336,6 +3338,16 @@ export interface components {
       process: components['schemas']['ServiceCheck'];
       route: components['schemas']['ServiceCheck'];
       sign_in: components['schemas']['ServiceCheck'];
+    };
+    /**
+     * ServiceCompute
+     * @description For apps with a GPU build: the build that runs and the one the compute mode asks for.
+     */
+    ServiceCompute: {
+      /** Running */
+      running: string;
+      /** Wanted */
+      wanted: string;
     };
     /** ServiceConfigField */
     ServiceConfigField: {

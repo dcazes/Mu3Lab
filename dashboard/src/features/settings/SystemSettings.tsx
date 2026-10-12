@@ -255,7 +255,8 @@ function Compute() {
     if (
       !(await confirm({
         title: `Use ${mode === 'auto' ? 'automatic' : mode.toUpperCase()} acceleration?`,
-        description: 'Restart Ollama afterwards to apply it to the running container.',
+        description:
+          'New installs use it straight away. Apps already installed keep their version until you press Switch on their page.',
       }))
     )
       return;
@@ -265,7 +266,7 @@ function Compute() {
   return (
     <Card
       title="AI acceleration"
-      description={`Used by local AI models. Automatic currently uses ${config.data?.resolved_compute_mode?.toUpperCase() || '…'}.`}
+      description={`Used by local AI models, photo recognition and document reading. Automatic currently uses ${config.data?.resolved_compute_mode?.toUpperCase() || '…'}.`}
     >
       <div className="segmented" role="radiogroup" aria-label="Compute mode">
         {modes.map((mode) => (

@@ -7,14 +7,14 @@ from pathlib import Path
 
 from ctl import actions, job_guard
 from ctl.app_settings import AppSettings
-from ctl.compute import resolved_mode
+from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
 from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
 from ctl.engine.rewire import rewire_consumers
 from ctl.jobs import JobStore
-from ctl.lifecycle import maintenance
+from ctl.lifecycle import app_control, compute_switch, maintenance
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
 from ctl.lifecycle.uninstall import uninstall_application
@@ -41,6 +41,7 @@ SUPPORTED_ACTIONS = frozenset(
         "keep_update",
         "backup_stop",
         "backup_start",
+        "switch_compute",
     }
 )
 UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})
@@ -155,6 +156,30 @@ def _uninstall(
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
 
 
+def _switch_compute(
+    store: JobStore, state: ControlState | None, job: dict, service: Service, actor: str, root: Path
+) -> None:
+    """Move the app to the CPU or GPU build the compute mode now asks for (compute_switch)."""
+    job_id = str(job["id"])
+    log = _job_log(store, job_id)
+    running = app_control.was_running(state, service)
+    store.transition(
+        job_id, "running", actor=actor, detail=f"Switching {service.name}'s version.", step_id="compute_switch"
+    )
+
+    def step(name: str, detail: str) -> None:
+        _event(store, job_id, name, detail)
+
+    try:
+        detail = compute_switch.switch(service, root, log, step, running=running)
+    except compute_switch.SwitchFailed as failure:
+        _fail(store, state, job_id, service.id, actor, "compute_switch", failure.code, str(failure))
+        return
+    if state:
+        state.set_installation(service.id, "running" if running else "stopped", job_id=job_id, route_state="ready")
+    store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
     job_id = str(job["id"])
     service_id = str(job.get("service_id") or "")
@@ -196,6 +221,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         return
     if action in MAINTENANCE_ACTIONS | BACKUP_ACTIONS:
         maintenance.execute(store, state, job, service, root)
+        return
+    if action == "switch_compute":
+        _switch_compute(store, state, job, service, actor, root)
         return
     if action == "reset":
         if service.stage != "optional":
@@ -268,7 +296,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "An enabled MCP could not stop safely.",
         )
         return
-    compose = Compose(project, gpu_mode=resolved_mode() if service.uses_gpu else "cpu")
+    compose = Compose(project, gpu_mode=app_mode(project, service.uses_gpu))
     rc, output = compose.action(action, log)
     if rc:
         _fail(

@@ -20,7 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ctl import resource_locks
-from ctl.compute import resolved_mode
+from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed
@@ -72,7 +72,7 @@ def rewire_one(app: App, facts: Facts, log: Log) -> bool:
     rules = rules_for(app.manifest)
     owner = onboarding_state.read(app.id, facts.paths).get("owner")
     render_rules(app, facts, rules, owner, copy_files=False)
-    compose = Compose(project, gpu_mode=resolved_mode() if app.manifest.service.uses_gpu else "cpu")
+    compose = Compose(project, gpu_mode=app_mode(project, app.manifest.service.uses_gpu))
     ctx = HookContext(app, project, compose, log, lambda name, detail: log(f"{name}: {detail}"), owner, facts)
     for rule in rules:
         rule.rewire(ctx)

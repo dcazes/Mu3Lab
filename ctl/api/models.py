@@ -122,6 +122,13 @@ class ServiceContainersItem(ApiModel):
     image: str
 
 
+class ServiceCompute(ApiModel):
+    """For apps with a GPU build: the build that runs and the one the compute mode asks for."""
+
+    running: str
+    wanted: str
+
+
 class Service(ApiModel):
     mobile: ServiceMobile0 | None = None
     id: str
@@ -131,6 +138,7 @@ class Service(ApiModel):
     stop_warning: str = ""
     # Named parts of the app (Compose service -> label), shown with their state on its page.
     parts: dict[str, str] = Field(default_factory=dict)
+    compute: ServiceCompute | None = None
     https_port: float
     private_https_port: float | None = None
     auth: Literal["oidc"] | Literal["proxy"] | Literal["trusted_header"] | Literal["local"] | Literal["excluded"]
@@ -1050,6 +1058,7 @@ class ServiceActionRequest(RequestModel):
         "update",
         "recover",
         "keep_update",
+        "switch_compute",
     ]
     confirm: str = ""
     snapshot_id: str = ""

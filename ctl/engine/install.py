@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from ctl import actions, image_fetch
-from ctl.compute import resolved_mode
+from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StartPlan, StepFailed, load_app_hooks
@@ -57,7 +57,7 @@ def context(
     return HookContext(
         app,
         project,
-        Compose(project, gpu_mode=resolved_mode() if app.manifest.service.uses_gpu else "cpu"),
+        Compose(project, gpu_mode=app_mode(project, app.manifest.service.uses_gpu)),
         log,
         stage,
         owner,
