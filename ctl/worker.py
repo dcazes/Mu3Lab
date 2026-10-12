@@ -12,6 +12,7 @@ earlier worker started is still running (``job_processes``).
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import socket
@@ -24,6 +25,7 @@ from ctl import (
     backup_service,
     job_guard,
     local_models,
+    logs,
     rebuild,
     resource_locks,
     self_update,
@@ -41,6 +43,7 @@ from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
 POLL_SECONDS = 2
+log = logging.getLogger("mu3lab.worker")
 
 
 LEASE_SECONDS = 45  # JobStore's default lease
@@ -124,10 +127,11 @@ def run_job(store: JobStore, job: dict, worker_id: str) -> None:
         except job_guard.JobInterrupted as interruption:
             if interruption.reason == job_guard.CANCELLED:
                 store.acknowledge_cancel(job_id, worker_id)
-                print(f"Mu3Lab job {job_id} stopped after cancellation.", flush=True)
+                log.info(f"Mu3Lab job {job_id} stopped after cancellation.")
             else:
-                print(f"Mu3Lab job {job_id} stopped: this worker no longer holds its lease.", flush=True)
+                log.warning(f"Mu3Lab job {job_id} stopped: this worker no longer holds its lease.")
         except Exception as exc:  # final containment for all future dispatchers
+            log.exception(f"Mu3Lab job {job_id} failed in the worker")
             try:
                 store.transition(
                     job_id,
@@ -145,6 +149,7 @@ def run_job(store: JobStore, job: dict, worker_id: str) -> None:
 
 
 def run() -> int:
+    logs.configure()
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     stopping = False
     waiting_for_runtime_reported = False
@@ -174,7 +179,7 @@ def run() -> int:
         store = JobStore.runtime()
         if store is None:
             if not waiting_for_runtime_reported:
-                print("Mu3Lab worker is waiting for the runtime layout", flush=True)
+                log.info("Mu3Lab worker is waiting for the runtime layout")
                 waiting_for_runtime_reported = True
             time.sleep(POLL_SECONDS)
             continue
@@ -182,7 +187,7 @@ def run() -> int:
         if not lock.held:
             if not lock.try_acquire():
                 if not waiting_for_lock_reported:
-                    print("Another Mu3Lab worker is running; this one waits until it stops.", flush=True)
+                    log.info("Another Mu3Lab worker is running; this one waits until it stops.")
                     waiting_for_lock_reported = True
                 time.sleep(POLL_SECONDS)
                 continue
@@ -193,53 +198,53 @@ def run() -> int:
             processes.install()
             # App images download in the background, several at once, while
             # setup jobs run one at a time below.
-            download_manager.start(lambda line: print(line, flush=True), downloads_stopping)
+            download_manager.start(log.info, downloads_stopping)
             status_thread = reconciler.start(downloads_stopping)
-            sign_in.start(downloads_stopping, lambda line: print(line, flush=True))
-            access.start(downloads_stopping, lambda line: print(line, flush=True))
+            sign_in.start(downloads_stopping, log.info)
+            access.start(downloads_stopping, log.info)
             from ctl import backups
 
-            backups.start_verification(downloads_stopping, lambda line: print(line, flush=True))
+            backups.start_verification(downloads_stopping, log.info)
         if time.monotonic() >= next_rule_maintenance:
             next_rule_maintenance = time.monotonic() + 60
             try:
-                run_periodic(store, ROOT, lambda line: print(line, flush=True))
+                run_periodic(store, ROOT, log.info)
             except Exception as exc:
-                print(f"Mu3Lab sign-in verification deferred safely: {exc}", flush=True)
+                log.warning(f"Mu3Lab sign-in verification deferred safely: {exc}")
         if time.monotonic() >= next_vault_sync:
             next_vault_sync = time.monotonic() + 300
             try:
                 from ctl import vault_sync
 
-                vault_sync.run(lambda line: print(line, flush=True))
+                vault_sync.run(log.info)
             except Exception as exc:
-                print(f"Mu3Lab vault saving deferred safely: {exc}", flush=True)
+                log.warning(f"Mu3Lab vault saving deferred safely: {exc}")
         if time.monotonic() >= next_backup_service:
             next_backup_service = time.monotonic() + 60
             try:
                 # Kopia's server runs the schedule; keep its folders, actions and policy in step.
-                backup_service.reconcile(store, ROOT, lambda line: print(line, flush=True))
+                backup_service.reconcile(store, ROOT, log.info)
             except Exception as exc:
-                print(f"Mu3Lab backup service upkeep deferred safely: {exc}", flush=True)
+                log.warning(f"Mu3Lab backup service upkeep deferred safely: {exc}")
             try:
                 # After a rebuild on a new computer: start the apps that were running before.
-                rebuild.resume(store, ROOT, lambda line: print(line, flush=True))
+                rebuild.resume(store, ROOT, log.info)
             except Exception as exc:
-                print(f"Mu3Lab could not start the restored apps yet: {exc}", flush=True)
+                log.warning(f"Mu3Lab could not start the restored apps yet: {exc}")
         if time.monotonic() >= next_mcp_reconcile:
             next_mcp_reconcile = time.monotonic() + 60
             try:
                 from ctl.mcp_ops import reconcile_lifecycle
 
-                reconcile_lifecycle(ROOT, lambda line: print(line, flush=True))
+                reconcile_lifecycle(ROOT, log.info)
             except Exception as exc:
-                print(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}", flush=True)
+                log.warning(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}")
         if time.monotonic() >= next_chat_sync:
             next_chat_sync = time.monotonic() + 300
             try:
-                sync_agents(lambda line: print(line, flush=True))
+                sync_agents(log.info)
             except Exception as exc:
-                print(f"Mu3Lab chat assistant synchronization deferred: {exc}", flush=True)
+                log.warning(f"Mu3Lab chat assistant synchronization deferred: {exc}")
         try:
             from ctl.install_batches import InstallBatchStore
 
@@ -247,13 +252,13 @@ def run() -> int:
             if batches:
                 batches.reconcile(store)
         except Exception as exc:
-            print(f"Mu3Lab batch reconciliation deferred safely: {exc}", flush=True)
+            log.warning(f"Mu3Lab batch reconciliation deferred safely: {exc}")
         assert processes is not None
-        leftovers = processes.settle(lambda line: print(line, flush=True))
+        leftovers = processes.settle(log.info)
         if leftovers:
             # Never start new work while an earlier worker's command may still be changing things.
             if leftovers != leftovers_reported:
-                print(f"Mu3Lab waits for an earlier worker's command to finish: {', '.join(leftovers)}", flush=True)
+                log.info(f"Mu3Lab waits for an earlier worker's command to finish: {', '.join(leftovers)}")
                 leftovers_reported = leftovers
             time.sleep(POLL_SECONDS)
             continue
@@ -275,7 +280,7 @@ def run() -> int:
                     batches.advance_for_job(str(job["id"]), store)
                 workflow_secrets.cleanup()
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
-                print(f"Mu3Lab post-job reconciliation deferred safely: {exc}", flush=True)
+                log.warning(f"Mu3Lab post-job reconciliation deferred safely: {exc}")
     downloads_stopping.set()
     signals.changed.set()
     if status_thread is not None:

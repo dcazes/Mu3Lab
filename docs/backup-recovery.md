@@ -42,10 +42,10 @@ Every backup is encrypted with one password, which Mu3Lab created when it first 
 To confirm a password you typed back from paper is right, compare its check code with the one on the sheet:
 
 ```bash
-read -rs PASSWORD && printf %s "$PASSWORD" | sha256sum | cut -c1-8 | tr a-f A-F | sed 's/..../&-/'; unset PASSWORD
+read -rs PASSWORD && printf %s "${PASSWORD// /}" | sha256sum | cut -c1-8 | tr a-f A-F | sed 's/..../&-/'; unset PASSWORD
 ```
 
-Type the password without spaces and press Enter; nothing is shown while you type. It prints a code like `AB12-CD34`.
+Type the password as it is printed, in its groups of eight (spaces between the groups are fine), and press Enter; nothing is shown while you type. It prints a code like `AB12-CD34`.
 
 ## Rebuilding on a new computer
 

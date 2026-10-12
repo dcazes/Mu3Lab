@@ -184,6 +184,30 @@ describe('App page', () => {
     );
   });
 
+  it('points a failed address at Retry setup instead of the logs', async () => {
+    const fetchMock = stubFetch(() => ({ ok: true, job: { id: 'j', state: 'queued' } }));
+    const app = service('mealie', 'Mealie', 'optional', {
+      display_state: 'needs_attention',
+      installed: true,
+      blocking_check: 'route',
+      detail: "Mealie's private route did not answer.",
+      recommended_action: 'retry_setup',
+      allowed_actions: ['retry_setup', 'stop'],
+    });
+    renderWithDashboard(<AppDetailPage id="mealie" tab="overview" />, dashboardData([app]));
+    const callout = screen.getByText(/sets up its address again; its data is kept/).closest('div')!.parentElement!;
+    expect(within(callout).queryByRole('link', { name: 'View logs' })).not.toBeInTheDocument();
+    fireEvent.click(within(callout).getByRole('button', { name: 'Retry setup' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Retry setup Mealie?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Retry setup' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/mealie/actions',
+        expect.objectContaining({ body: JSON.stringify({ action: 'retry_setup' }) }),
+      ),
+    );
+  });
+
   it('uninstalls keeping data by default and deletes data only after the name is typed', async () => {
     const fetchMock = stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '', job: { id: 'j' } }));
     const app = service('mealie', 'Mealie', 'optional', {

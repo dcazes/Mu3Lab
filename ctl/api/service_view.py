@@ -136,6 +136,9 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
             # Household members may add apps; running and removing them is administration.
             allowed = [action for action in allowed if action in {"install", "retry_setup"}]
         item["allowed_actions"] = allowed
+        if item.get("blocking_check") == "route" and "retry_setup" in allowed:
+            # Its private address did not come up: setting the app up again fixes that (review A-L5).
+            item["recommended_action"] = "retry_setup"
         item["identity"] = identity_projection(service, item, control_state)
         if item.get("blocking_check") == "sign_in":
             # The identity row may still say ready; the evidence behind it has expired or failed.

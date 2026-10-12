@@ -180,6 +180,18 @@ class SourceTests(unittest.TestCase):
             # The parent of the kopia folder works too.
             self.assertEqual(rebuild.check_source(str(folder))[0], folder / "kopia")
 
+    def test_the_password_can_be_typed_in_its_printed_groups(self):
+        # Review C-L6: the sheet prints eight groups of eight; spaces between them are dropped.
+        password = "abcdefgh" * 8
+        grouped = " ".join(password[i : i + 8] for i in range(0, 64, 8))
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            (source / rebuild.REPOSITORY_FILE).write_text("{}")
+            answers = iter([str(source), grouped, "y"])
+            with patch.object(terminal, "_ask", side_effect=lambda *_a: next(answers)):
+                asked = terminal.ask_restore(SimpleNamespace(pause=lambda: None, tty=False))
+        self.assertEqual(asked["password"], password)
+
     def test_the_newest_backup_of_each_source_is_used(self):
         newest = rebuild.latest_backups(LISTING)
         self.assertEqual(newest["mu3lab"]["id"], "aaaa1111")

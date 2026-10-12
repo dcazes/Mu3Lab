@@ -43,8 +43,11 @@ class BundleError(RuntimeError):
 
 
 def _root(service_id: str, paths: RuntimePaths) -> Path:
+    # Private at every level (review B-L3): mkdir(parents=True) would leave the parent at the umask's 0775.
     path = paths.state / "deployments" / service_id
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for folder in (path.parent, path):
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        folder.chmod(0o700)
     return path
 
 

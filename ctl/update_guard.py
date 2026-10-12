@@ -26,6 +26,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from collections.abc import Callable
@@ -86,9 +87,17 @@ def started(plan: dict, runner: Runner, check: Callable[[str], bool], sleep: Cal
 
 def _record(plan: dict, result: dict) -> None:
     target = Path(plan["state"]) / RESULT
-    temporary = target.with_suffix(".tmp")
-    temporary.write_text(json.dumps(result, indent=2), encoding="utf-8")
-    os.replace(temporary, target)
+    # A unique temporary name (review C-L7): two writers never share one half-written file.
+    descriptor, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(result, indent=2))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _audit(database: Path, job_id: str, event: str, detail: str, *, job_state: str = "") -> None:

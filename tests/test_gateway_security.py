@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import tempfile
@@ -77,6 +78,19 @@ class PolicyRevocationTests(unittest.TestCase):
             publish_fixture(path, {"apps": {}})
             os.utime(path, ns=(stamp, stamp))
             self.assertEqual(store.get()["apps"], {})
+
+    def test_the_policy_is_checked_every_time_but_acknowledged_only_when_it_changes(self):
+        # Review A-L4: acknowledging is a database write; an unchanged policy needs only the read.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.json"
+            publish_fixture(path, {"apps": {"demo": _app()}})
+            store = gateway.PolicyStore(str(path))
+            with patch.object(store.authority, "check_policy", wraps=store.authority.check_policy) as check:
+                for _ in range(3):
+                    store.get()
+                publish_fixture(path, {"apps": {}})
+                store.get()
+            self.assertEqual([call.kwargs["acknowledge"] for call in check.call_args_list], [True, False, False, True])
 
     def test_unreadable_or_invalid_tool_policy_is_not_cached_authority(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -181,6 +195,7 @@ class GatewayHttpBoundaryTests(unittest.TestCase):
                 patch.object(gateway, "AUTHORITY", authority),
                 patch.object(gateway, "CALL_LOG", str(Path(tmp) / "calls.jsonl")),
                 patch.object(gateway.CONNECTORS, "get", return_value=connector),
+                patch.object(gateway.sys, "stderr", io.StringIO()) as errors,
             ):
                 server = ThreadingHTTPServer(("127.0.0.1", 0), gateway.Handler)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -214,6 +229,11 @@ class GatewayHttpBoundaryTests(unittest.TestCase):
                     self.assertEqual(raised.exception.code, 503)
                     raised.exception.close()
                     self.assertEqual(len(connector.calls), 1)
+                    # Review A-L7: the failed request is logged, the successful ones are not.
+                    lines = errors.getvalue().splitlines()
+                    self.assertEqual(len(lines), 1, lines)
+                    self.assertTrue(lines[0].endswith("POST /apps/demo/mcp -> 503"), lines)
+                    self.assertNotIn(token, errors.getvalue())
                 finally:
                     server.shutdown()
                     server.server_close()

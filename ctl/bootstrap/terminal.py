@@ -157,7 +157,8 @@ def ask_restore(screen: Screen) -> dict[str, Any]:
             break
         print(f"  {problem}")
     while True:
-        password = _ask("  Backup password (type it without spaces; nothing is shown as you type): ", True)
+        # Typed as printed, in groups of eight; spaces between groups are dropped (review C-L6).
+        password = _ask("  Backup password (spaces between the groups are fine; nothing is shown as you type): ", True)
         password = "".join(password.split())
         if not password:
             continue

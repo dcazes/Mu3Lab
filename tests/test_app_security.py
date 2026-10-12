@@ -63,6 +63,18 @@ class IdentityBoundaryTests(unittest.TestCase):
         self.assertTrue(result["writes_enabled"])
         self.assertEqual(result["groups"], ["household", "mu3lab-operators"])
 
+    def test_an_operators_first_request_is_recorded_once_not_on_every_request(self):
+        # Review A-L3.
+        with (
+            patch("ctl.api.security._traversal_recorded", False),
+            patch("ctl.api.security.bootstrap_state.read", return_value={}),
+            patch("ctl.api.security.bootstrap_state.confirm") as confirm,
+            patch("ctl.api.security.ProvisioningStore.runtime", return_value=None),
+        ):
+            for _ in range(3):
+                resolve_identity(request(OPERATOR))
+        confirm.assert_called_once_with("dashboard_protection")
+
     def test_mutation_requires_matching_https_origin_and_csrf(self):
         headers = {"host": "host.ts.net", "origin": "https://host.ts.net", "x-mu3lab-csrf": "bound-token"}
         with patch("ctl.api.security.csrf_token", return_value="bound-token"):

@@ -157,7 +157,11 @@ class GatewayApprovalHttpTests(unittest.TestCase):
         self.assertEqual(len(self.upstream.writes), 1)
         self.assertEqual(self.execute(first)["outcome"], "succeeded")
         self.assertEqual(len(self.upstream.writes), 1)
-        self.assertNotIn("private", (self.root / "calls.jsonl").read_text())
+        log = (self.root / "calls.jsonl").read_text()
+        self.assertNotIn("private", log)
+        # Review C-L5: the second execute dispatched nothing, and the log says so.
+        outcomes = [json.loads(line)["outcome"] for line in log.splitlines() if '"approved_operation"' in line]
+        self.assertEqual(outcomes, ["succeeded", "replayed"])
 
     def test_wrong_person_member_missing_csrf_and_pending_execution_never_write(self):
         operation = self.call()["structuredContent"]["operation_id"]

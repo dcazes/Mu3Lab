@@ -65,6 +65,26 @@ class StoreTests(unittest.TestCase):
         for path in (db.database(self.paths), self.paths.state / "secrets.key"):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_an_older_database_loses_the_operation_journal_and_old_schedule_records(self):
+        # The backup simplification replaced both; nothing reads them any more.
+        older = Path(self.temporary.name) / "older-migrations"
+        older.mkdir()
+        for file in sorted(db.MIGRATIONS.glob("*.sql")):
+            if int(file.name.split("_", 1)[0]) <= 7:
+                (older / file.name).write_text(file.read_text())
+        self.paths.state.mkdir(parents=True)
+        path = db.database(self.paths)
+        with patch.object(db, "MIGRATIONS", older), db.connect(path) as connection:
+            connection.execute(
+                "INSERT INTO records VALUES ('backup', 'schedule-run', '{}', 0), ('backup', 'schedule', '{}', 0)"
+            )
+        db._ready.clear()
+        with db.connect(path) as connection:
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            kept = [tuple(row) for row in connection.execute("SELECT scope, name FROM records")]
+        self.assertFalse({"operations", "operation_steps"} & tables)
+        self.assertEqual(kept, [("backup", "schedule")])  # the schedule setting itself stays
+
     def test_expired_secrets_cannot_be_read_and_are_removed(self):
         with patch("ctl.store.secrets.time.time", return_value=100):
             self.store.put("job", "one", {"password": "hidden"}, ttl=10)

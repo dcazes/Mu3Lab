@@ -80,6 +80,8 @@ class GuardTests(unittest.TestCase):
         result = self.guard("verify", system, answers=True)
         self.assertEqual(result["state"], "verified")
         self.assertEqual(self.recorded()["to"], "v1.0.2")
+        # Written through a uniquely named temporary file that does not stay behind (review C-L7).
+        self.assertEqual([path.name for path in Path(self.plan["state"]).glob("*.tmp")], [])
         self.assertFalse(system.ran("checkout"))
         self.assertTrue(any(event["event"] == "platform.update_verified" for event in self.store.audit()))
 

@@ -205,6 +205,9 @@ class ServiceReadTests(unittest.TestCase):
         app = self.mealie()
         self.assertEqual((app["display_state"], app["blocking_check"]), ("needs_attention", "route"))
         self.assertIn("route", app["reason"])
+        # Review A-L5: the hint points at the button that fixes it.
+        self.assertIn("retry_setup", app["allowed_actions"])
+        self.assertEqual(app["recommended_action"], "retry_setup")
 
     def test_unverified_sign_in_is_checking_without_a_launch_link(self):
         self.write()

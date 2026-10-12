@@ -66,6 +66,8 @@ function HeaderActions({ service }: { service: Service }) {
 function NextSteps({ service }: { service: Service }) {
   const target = launchTarget(service);
   const identity = service.identity;
+  const { pending, perform } = useServiceActions(service);
+  const retry = service.recommended_action === 'retry_setup';
   const steps = [];
 
   if (['failed', 'needs_attention', 'degraded'].includes(service.display_state) && isInstalled(service))
@@ -75,9 +77,22 @@ function NextSteps({ service }: { service: Service }) {
         tone="danger"
         icon={AlertTriangle}
         title={`${service.name} needs attention`}
-        action={<LinkButton to={`/apps/${service.id}/advanced`}>View logs</LinkButton>}
+        action={
+          retry ? (
+            <Button
+              icon={ACTIONS.retry_setup.icon}
+              loading={pending === 'retry_setup'}
+              onClick={() => void perform('retry_setup')}
+            >
+              {ACTIONS.retry_setup.label}
+            </Button>
+          ) : (
+            <LinkButton to={`/apps/${service.id}/advanced`}>View logs</LinkButton>
+          )
+        }
       >
         {(service.last_job?.state === 'failed' && service.last_job.detail) || service.detail}
+        {retry && ' Retry setup sets up its address again; its data is kept.'}
       </Callout>,
     );
 

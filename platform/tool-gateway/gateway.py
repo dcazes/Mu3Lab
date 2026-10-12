@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -233,14 +234,14 @@ class PolicyStore:
                 policy = json.loads(payload)
                 _validate_policy(policy)
                 digest = hashlib.sha256(payload.encode()).hexdigest()
-                self.authority.check_policy(policy["revision"], digest, acknowledge=True)
+                # Checked on every request (a read); acknowledged, a write, only when it changed (review A-L4).
+                self.authority.check_policy(policy["revision"], digest, acknowledge=digest != self._digest)
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 self._policy, self._digest = {"apps": {}}, ""
                 CONNECTORS.forget()
                 if isinstance(exc, (TypeError, KeyError)):
                     raise ValueError("gateway policy is malformed") from None
                 raise
-            digest = hashlib.sha256(payload.encode()).hexdigest()
             if digest != self._digest:
                 self._policy, self._digest = policy, digest
                 CONNECTORS.forget()
@@ -685,6 +686,7 @@ def execute_operation(app_id: str, app: dict, operation: str) -> dict:
             "outcome": record["state"],
             "operation_id": operation,
             "result": {},
+            "replayed": True,  # nothing was dispatched this time
         }
     connector = CONNECTORS.get(app_id, app)
     offered = connector.list_tools().get(record["tool"])
@@ -946,7 +948,9 @@ class Handler(BaseHTTPRequestHandler):
                 result = execute_operation(app_id, app, operation)
                 record = AUTHORITY.view(operation, app["_principal"]["subject"])
                 app["_operation_id"] = operation
-                _log_call(app_id, app, record["tool"], "approved_operation", result["outcome"], started)
+                # A repeated execute dispatches nothing, so it must not read like a second write (review C-L5).
+                outcome = "replayed" if result.get("replayed") else result["outcome"]
+                _log_call(app_id, app, record["tool"], "approved_operation", outcome, started)
                 self._send(200, result)
                 return
             request_id, method, params = parse_message(self._body())
@@ -1035,8 +1039,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, _format, *_args):
-        return
+    def log_request(self, code="-", _size="-"):
+        # Every tool call is in the call log; this adds failed requests, without query strings or headers (review A-L7).
+        try:
+            status = int(code)
+        except (TypeError, ValueError):
+            return
+        if status >= 400:
+            path = (self.path or "").split("?", 1)[0][:200]
+            self.log_message("%s %s -> %d", self.command, path, status)
+
+    def log_message(self, format, *args):
+        sys.stderr.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {format % args}\n")
 
 
 class BoundedServer(ThreadingHTTPServer):

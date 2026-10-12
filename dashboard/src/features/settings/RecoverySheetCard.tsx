@@ -52,8 +52,8 @@ function SheetBody({ sheet }: { sheet: Opened }) {
           )}
         </div>
         <p className="muted">
-          Type it without the spaces, or scan the code. Check code <b>{sheet.password_check}</b>: the rebuild guide
-          shows how to confirm a typed password matches it.
+          Type it group by group, with or without spaces, or scan the code. Check code <b>{sheet.password_check}</b>:
+          the rebuild shows this code for what you typed, so you know it is right.
         </p>
       </section>
       <section>

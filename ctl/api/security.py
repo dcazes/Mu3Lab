@@ -90,15 +90,22 @@ def mutation_allowed(request: Request) -> bool:
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
 
 
-def _record_operator_traversal() -> None:
-    # An operator request is machine evidence that Tailscale, Caddy, and
-    # Authentik are all in front of the dashboard.
+_traversal_recorded = False
 
+
+def _record_operator_traversal() -> None:
+    """Note, once, that an operator reached the dashboard through Tailscale, Caddy and Authentik.
+
+    The first operator request is the machine evidence; later ones add nothing,
+    so they skip the locked file write and the store reads (review A-L3), and
+    ``confirmed_at`` keeps meaning when it was first confirmed.
+    """
+    global _traversal_recorded
+    if _traversal_recorded:
+        return
     try:
-        bootstrap_state.confirm("dashboard_protection")
-    except OSError:
-        pass
-    try:
+        if "dashboard_protection" not in bootstrap_state.read():
+            bootstrap_state.confirm("dashboard_protection")
         store = ProvisioningStore.runtime()
         if store:
             current = {item["phase_id"]: item["actual_state"] for item in store.summary()["phases"]}
@@ -108,8 +115,9 @@ def _record_operator_traversal() -> None:
                     "verified",
                     detail="Authenticated operator session verified through Authentik.",
                 )
+        _traversal_recorded = True
     except (OSError, ValueError):
-        pass
+        pass  # tried again on the next operator request
 
 
 def resolve_identity(request: Request) -> IdentityData:

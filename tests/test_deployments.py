@@ -63,7 +63,9 @@ class BundleTests(unittest.TestCase):
         deployments.capture(self.service, "b2", release_id="r1", storage=["mealie"], paths=self.paths)
         deployments.capture(self.service, "b3", release_id="r2", storage=["mealie"], paths=self.paths)
         base = self.paths.state / "deployments" / "mealie"
-        self.assertEqual((base / "b1").stat().st_mode & 0o077, 0)
+        # Private at every level, the shared parent included (review B-L3).
+        for folder in (base.parent, base, base / "b1"):
+            self.assertEqual(folder.stat().st_mode & 0o077, 0, folder)
         self.assertEqual(deployments.latest_for_release("mealie", "r1", self.paths), "b2")
         removed = deployments.prune("mealie", keep={"b1"}, paths=self.paths)
         self.assertEqual(removed, [])
