@@ -164,7 +164,7 @@ def _block(service: Service) -> str:
         lines[2:2] = [
             "\t@api_token {",
             f"\t\tpath {bypass.path}",
-            f"\t\theader {bypass.header} {json.dumps(bypass.header_prefix + '*')}",
+            *([f"\t\theader {bypass.header} {json.dumps(bypass.header_prefix + '*')}"] if bypass.header else []),
             "\t}",
         ]
         lines.append("\t\thandle @api_token {")

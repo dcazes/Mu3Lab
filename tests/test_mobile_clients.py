@@ -38,9 +38,11 @@ class MobileClientTests(unittest.TestCase):
                 "romm",
                 "dawarich",
                 "open-webui",
+                "navidrome",
             },
         )
         self.assertEqual(mobile["lobehub"]["primary"], "lobechat-pwa")
+        self.assertEqual(mobile["navidrome"]["primary"], "substreamer")
         self.assertEqual(mobile["paperless-ngx"]["primary"], "papernext")
 
     def test_unsafe_or_ambiguous_metadata_is_rejected(self):

@@ -58,12 +58,14 @@ table in your task.
 | `wyoming-bridge` | 10300 (10300, tcp health) | | none | |
 | `mosquitto` | 1883 (1883, tcp health) | | none | |
 | `photon` | 2322 (2322) | | none | |
+| `unsloth` | 8095 (8000) | | 8473 | 19490 |
+| `navidrome` | 4533 (4533) | | 8474 | 19491 |
 
 Connector `local_health` ports for new connectors: 8824 upward, in Phase 5
 order.
 
 Caddy's loopback range is 19460–19499 (`Route.caddy_port`). After this plan,
-10 slots remain (19490–19499). Note that in the PR.
+8 slots remain (19492–19499). Note that in the PR.
 
 Acceptance: tests for 1–3; `make verify`.
 

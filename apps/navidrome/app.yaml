@@ -1,0 +1,94 @@
+# Navidrome — see ctl/manifest/models.py for every field.
+id: navidrome
+capabilities: [music_library]
+name: Navidrome
+tier: optional
+group: apps
+category: media
+tagline: Your own music streaming, like Spotify
+summary: Stream the household's music library from any browser or phone, with playlists, favourites, and play
+  history for each person. Add music to the shared Music folder in Nextcloud, or copy it to the server; phone apps
+  that speak Subsonic play it anywhere on your tailnet, and can download songs for offline listening.
+version: v0.64.2
+upstream: navidrome/navidrome
+service:
+  local_port: 4533
+  health:
+    path: /ping
+route:
+  https_port: 8474
+  caddy_port: 19491
+  access: trusted_header
+  trusted_header: X-Mu3lab-User
+  # Phone apps (the Subsonic API) send each person's Navidrome login with every
+  # request and cannot complete a browser sign-in; Navidrome checks it, and the
+  # identity header is stripped.
+  token_bypass:
+    path: /rest/*
+    header: ''
+    header_prefix: ''
+sign_in:
+  method: trusted_header
+  note: Authentik protects the private address and tells Navidrome who you are. Phone apps sign in with the Navidrome
+    login Mu3Lab created for you and saved to your vault.
+account:
+  # Mu3Lab's own Navidrome administrator: it creates each person's account.
+  mode: api_bootstrap
+  needs_owner: false
+  user_action: Open Navidrome; Authentik signs you in. Phone apps use the Navidrome login saved to your vault.
+secrets:
+- env: NAVIDROME_ADMIN_PASSWORD
+  length: 32
+# Navidrome encrypts the passwords it keeps for phone apps with this.
+- env: ND_PASSWORDENCRYPTIONKEY
+  length: 48
+env:
+  NAVIDROME_PUBLIC_URL: '{{public_url}}'
+  # Where the music lives, for Nextcloud's shared Music folder (integrates_with: music_library).
+  MU3LAB_MUSIC_FOLDER: '{{data_root}}/navidrome/music'
+rules:
+- rule: per_person_logins
+  with:
+    audience: household
+    purpose: Create a Navidrome account for each household member
+mobile:
+  primary: substreamer
+  clients:
+  - id: substreamer
+    name: substreamer
+    kind: native
+    support: community
+    platforms:
+    - ios
+    - android
+    install:
+      ios: https://apps.apple.com/app/substreamer/id1012991665
+      android: https://play.google.com/store/apps/details?id=com.ghenry22.substream2
+    homepage: https://substreamer.com/
+    setup: server_url
+    summary: Stream and download your music, with playlists and offline listening.
+    caveat: Your phone must be connected to the Mu3Lab tailnet to stream; downloaded songs play offline.
+    steps:
+    - Install substreamer and connect your phone to the Mu3Lab tailnet.
+    - Add a server with the private Mu3Lab Navidrome address.
+    - Use the Navidrome username and password Mu3Lab saved to your vault (Bitwarden can fill them in).
+  - id: navidrome-web
+    name: Navidrome web player
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://www.navidrome.org/
+    setup: pwa
+    summary: Listen in the browser and add it to the home screen.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Navidrome address and sign in with Authentik.
+    - Use the browser menu to add it to the Home Screen.
+resource_guidance: Light to run. The music library is kept on the server and included in backups, so allow disk space
+  for both.
+setup_action: Install Navidrome to stream the household's music library.
