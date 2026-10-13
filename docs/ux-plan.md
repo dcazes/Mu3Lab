@@ -145,3 +145,37 @@ marked *default* were not asked; they are the obvious fix and can be changed.
     - Phone apps use Navidrome's Subsonic API, which needs a password. Mu3Lab
       creates each person's Navidrome account and saves that password in
       their vault, the same as other non-SSO logins.
+
+## Deferred: a smaller Unsloth Studio image (decided 2026-10-13)
+
+This branch still installs Unsloth's own image: a 10.7 GB download (about 33 GB
+unpacked), most of it PyTorch and fine-tuning tools Mu3Lab never uses. The next
+change replaces it; nothing below is built yet.
+
+- **Decided:**
+  - Unsloth stays the default runner, for chat and search only (no
+    fine-tuning).
+  - It runs in a container, and always on the GPU: no CPU build on NVIDIA or
+    AMD machines.
+  - Document search may be unavailable for the first minutes after install.
+- **Planned:** Mu3Lab builds its own image with Unsloth's installer in GGUF-only
+  mode (`--no-torch`), plus one GPU layer per vendor:
+  - NVIDIA: Unsloth's CUDA build of llama.cpp (0.24 GB) and NVIDIA's CUDA
+    runtime and cuBLAS libraries (0.6 GB).
+  - AMD: llama.cpp's Vulkan build (31 MB) and Mesa's Vulkan driver.
+  - Estimated downloads: about 1.5 GB on NVIDIA and under 1 GB on AMD.
+  - The installer no longer waits for it: Studio and its first models download
+    in the background.
+- **Measured (2026-10-13):**
+  - The GGUF-only install is 2.3 GB on disk. About 1.6 GB stays in an image
+    once the build-only Node.js and the download cache are dropped.
+  - Without the CUDA libraries on disk, Unsloth's installer falls back to a
+    CPU-only llama.cpp build.
+- **Context:** other apps' GPU images each carry their own CUDA libraries and
+  share no layers: Immich adds 2.3 GB, SurfSense 3.8 GB and Speaches 3.2 GB
+  over their CPU images. Only the host's GPU driver is shared.
+- **Open questions:**
+  - What should happen on a machine with no GPU at all?
+  - Is Vulkan (rather than ROCm) right for AMD?
+  - For branch installs: build the image on the machine during setup, or
+    publish a test image to GHCR?
