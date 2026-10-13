@@ -24,31 +24,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ctl import job_guard, process
+from ctl.process import group_alive, start_ticks
 from ctl.store import db
 
 # A leftover past its deadline gets this long to be stopped by its own
 # runner before a new worker stops it.
 GRACE_SECONDS = 60
-
-
-def start_ticks(pid: int) -> int | None:
-    """The kernel's start time for ``pid`` (clock ticks since boot), or None if gone."""
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        return None
-    fields = stat.rsplit(")", 1)[-1].split()
-    # fields[0] is the state (field 3); starttime is field 22.
-    if not fields or fields[0] == "Z":
-        return None
-    try:
-        return int(fields[19])
-    except (IndexError, ValueError):
-        return None
-
-
-def alive(pid: int, ticks: int) -> bool:
-    return start_ticks(pid) == ticks
 
 
 def _now() -> str:
@@ -104,13 +85,14 @@ class JobProcesses:
             mine = (row["worker_pid"], row["worker_start_ticks"]) == (self.pid, self.ticks)
             if mine and row["job_id"] == _current_job():
                 continue
-            if not alive(row["pid"], row["start_ticks"]):
+            # A command is over only when its whole process group is: a descendant can outlive its leader.
+            if not group_alive(row["pid"], row["start_ticks"]):
                 self._forget(row)
                 continue
             if now() > float(row["deadline_at"]) + GRACE_SECONDS:
                 log(f"Stopping {row['command']} left running by an earlier worker past its time limit.")
-                _stop_group(row["pid"])
-                if not alive(row["pid"], row["start_ticks"]):
+                _stop_group(row["pid"], row["start_ticks"])
+                if not group_alive(row["pid"], row["start_ticks"]):
                     self._forget(row)
                     continue
             running.append(f"{row['command']} (pid {row['pid']}, job {row['job_id'][:8]})")
@@ -128,15 +110,17 @@ def _current_job() -> str:
     return execution.job_id if execution else ""
 
 
-def _stop_group(pid: int, grace: float = 5.0) -> None:
+def _stop_group(pid: int, ticks: int, grace: float = 5.0) -> None:
     """The runner started every child in its own session: its pid is the group id."""
     for signum in (signal.SIGTERM, signal.SIGKILL):
+        if not group_alive(pid, ticks):
+            return
         try:
             os.killpg(pid, signum)
         except (ProcessLookupError, PermissionError):
             return
         deadline = time.monotonic() + grace
         while time.monotonic() < deadline:
-            if start_ticks(pid) is None:
+            if not group_alive(pid, ticks):
                 return
             time.sleep(0.1)

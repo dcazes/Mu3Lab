@@ -144,6 +144,46 @@ def _read(pipe: IO[bytes], stream: Stream, inbox: queue.Queue, stop: threading.E
         put(None)
 
 
+def start_ticks(pid: int) -> int | None:
+    """The kernel's start time for ``pid`` (clock ticks since boot), or None if gone."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    fields = stat.rsplit(")", 1)[-1].split()
+    # fields[0] is the state (field 3); starttime is field 22.
+    if not fields or fields[0] == "Z":
+        return None
+    try:
+        return int(fields[19])
+    except (IndexError, ValueError):
+        return None
+
+
+def group_alive(pid: int, ticks: int) -> bool:
+    """Whether anything is left of the process group the child ``pid`` (started at ``ticks``) leads.
+
+    A descendant can outlive the leader. While any member remains, the kernel
+    never gives the group's id to a new process, so a different process at
+    ``pid`` means the group has ended.
+    """
+    current = start_ticks(pid)
+    if current is not None:
+        return current == ticks
+    # The leader is gone; look for any member still running (an exited zombie changes nothing).
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[-1].split()
+        except OSError:
+            continue
+        # fields[0] is the state (field 3), fields[2] the process group (field 5).
+        if len(fields) > 2 and fields[2] == str(pid) and fields[0] != "Z":
+            return True
+    return False
+
+
 def _signal_group(proc: subprocess.Popen, signum: int, group: bool = True) -> None:
     if group:
         try:
@@ -157,21 +197,30 @@ def _signal_group(proc: subprocess.Popen, signum: int, group: bool = True) -> No
         pass
 
 
-def stop(proc: subprocess.Popen, grace: float = KILL_GRACE_SECONDS, *, group: bool = True) -> None:
-    """SIGTERM the process group (or only the child), then SIGKILL after ``grace``, and reap it."""
-    if proc.poll() is not None:
-        return
-    _signal_group(proc, signal.SIGTERM, group)
-    try:
-        proc.wait(timeout=grace)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    _signal_group(proc, signal.SIGKILL, group)
-    try:
-        proc.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        pass
+def finished(proc: subprocess.Popen, ticks: int | None, *, group: bool = True) -> bool:
+    """The child has been reaped and, for a group, nothing it started is left in that group."""
+    if proc.poll() is None:
+        return False
+    return not group or ticks is None or not group_alive(proc.pid, ticks)
+
+
+def stop(
+    proc: subprocess.Popen, grace: float = KILL_GRACE_SECONDS, *, group: bool = True, ticks: int | None = None
+) -> None:
+    """SIGTERM the process group (or only the child), then SIGKILL after ``grace``, and reap it.
+
+    With the leader's ``ticks``, the whole group must be gone, not just the leader:
+    a descendant that outlives it or ignores SIGTERM is stopped too.
+    """
+    for signum in (signal.SIGTERM, signal.SIGKILL):
+        if finished(proc, ticks, group=group):
+            return
+        _signal_group(proc, signum, group)
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            if finished(proc, ticks, group=group):
+                return
+            time.sleep(0.05)
 
 
 def run(
@@ -217,6 +266,7 @@ def run(
         message = f"{argv[0]}: {exc}"
         return Result("error", 126, message, "", message)
 
+    ticks = start_ticks(proc.pid) if own_session else None
     untrack = _track(proc, argv, timeout)
     inbox: queue.Queue[tuple[Stream, str] | None] = queue.Queue(maxsize=_QUEUE_LINES)
     halt = threading.Event()
@@ -294,8 +344,8 @@ def run(
                 timed_out = True
     finally:
         # Reached on timeout and on anything raised by this loop itself.
-        stop(proc, group=own_session)
-        if untrack is not None and proc.poll() is not None:
+        stop(proc, group=own_session, ticks=ticks)
+        if untrack is not None and finished(proc, ticks, group=own_session):
             try:
                 untrack()
             except Exception:

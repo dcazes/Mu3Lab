@@ -20,6 +20,13 @@ from ctl.runtime import RuntimePaths
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _kill_group(pgid: int) -> None:
+    try:
+        os.killpg(pgid, 9)
+    except ProcessLookupError:
+        pass
+
+
 def _hold_in_child(paths: RuntimePaths, code: str) -> subprocess.Popen:
     """Start a separate process that takes a lock, prints 'held', then sleeps."""
     script = (
@@ -201,6 +208,34 @@ class LeftoverCommandTests(_Paths):
         self.assertIsNotNone(child.wait(5))
         self.assertIn("past its time limit", lines[0])
         self.assertEqual(self.rows(), [])
+
+    def test_a_leader_that_exited_still_blocks_while_its_descendant_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "pid"
+            code = (
+                "import subprocess, sys\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+                "import time; time.sleep(30)\n"
+            )
+            leader = subprocess.Popen([sys.executable, "-c", code], start_new_session=True)
+            self.addCleanup(lambda: _kill_group(leader.pid))
+            while not pid_file.exists() or not pid_file.read_text():
+                time.sleep(0.05)
+            with self.store._connect() as connection:
+                connection.execute(
+                    "INSERT INTO job_processes VALUES (?,?,?,?,?,?,?,?)",
+                    (leader.pid, start_ticks(leader.pid), self.job, 999999, 1, "docker", time.time() + 600, "t"),
+                )
+            leader.kill()
+            leader.wait()
+            # Only the leader is gone; the descendant in its group may still be changing things.
+            self.assertEqual(len(self.processes.settle(lambda _line: None)), 1)
+            _kill_group(leader.pid)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and self.processes.settle(lambda _line: None):
+                time.sleep(0.05)
+            self.assertEqual(self.rows(), [])
 
     def test_a_finished_leftover_is_forgotten(self):
         child = self.leftover(600)

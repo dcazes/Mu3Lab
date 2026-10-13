@@ -64,6 +64,50 @@ class RunTests(unittest.TestCase):
                 time.sleep(0.05)
             self.assertFalse(_alive(grandchild))
 
+    def _descendant(self, directory: str, body: str, *, keep_pipes: bool = True) -> tuple[list[str], Path]:
+        """A leader that starts ``body`` as a descendant, records its pid and exits at once."""
+        pid_file = Path(directory) / "pid"
+        output = "" if keep_pipes else ", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL"
+        code = (
+            "import subprocess, sys\n"
+            f"child = subprocess.Popen([{PY!r}, '-c', {body!r}]{output})\n"
+            f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+        )
+        return python(code), pid_file
+
+    def _gone(self, pid: int, within: float = 15) -> bool:
+        deadline = time.monotonic() + within
+        while time.monotonic() < deadline and _alive(pid):
+            time.sleep(0.05)
+        return not _alive(pid)
+
+    def test_a_descendant_holding_the_pipes_after_its_leader_exits_is_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            argv, pid_file = self._descendant(directory, "import time; time.sleep(60)")
+            result = process.run(argv, timeout=2)
+            self.assertEqual(result.status, "timeout")
+            self.assertTrue(self._gone(int(pid_file.read_text())))
+
+    def test_a_descendant_left_behind_by_a_finished_command_is_stopped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            argv, pid_file = self._descendant(directory, "import time; time.sleep(60)", keep_pipes=False)
+            self.assertTrue(process.run(argv, timeout=20).ok)
+            self.assertTrue(self._gone(int(pid_file.read_text()), within=1))
+
+    def test_a_descendant_that_ignores_sigterm_is_killed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "pid"
+            body = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+            code = (
+                "import subprocess, time\n"
+                f"child = subprocess.Popen([{PY!r}, '-c', {body!r}])\n"
+                f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+                "time.sleep(60)\n"
+            )
+            result = process.run(python(code), timeout=2)
+            self.assertEqual(result.status, "timeout")
+            self.assertTrue(self._gone(int(pid_file.read_text())))
+
     def test_flood_is_kept_within_the_byte_budget_and_log_limit(self) -> None:
         lines: list[str] = []
         result = process.run(
