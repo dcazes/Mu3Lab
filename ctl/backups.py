@@ -37,6 +37,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import tempfile
 import threading
 import time
@@ -45,6 +46,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from cryptography.fernet import InvalidToken
 
 from ctl import actions, resource_locks
 from ctl.runtime import RuntimePaths
@@ -537,6 +540,18 @@ def snapshot_source(
     if release_id and _RELEASE_ID.fullmatch(release_id):
         # The exact deployment the data belongs to; the version is only its label.
         tags.append(f"release:{release_id}")
+    if service_id != PLATFORM_SOURCE:
+        from ctl.recovery_context import fingerprint
+
+        try:
+            context = fingerprint(service_id, [name for name, _path in folders], paths)
+        except (OSError, ValueError, sqlite3.Error, InvalidToken):
+            # Legacy/manual data backups stay available; they cannot be selected
+            # automatically for a new host without a proven deployment context.
+            context = ""
+            log("This data backup has no deployment compatibility proof; automatic new-host rebuild cannot select it.")
+        if context:
+            tags.append(f"rebuild-context:{context}")
     rc, output = _kopia(
         [
             "snapshot",

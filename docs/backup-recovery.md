@@ -56,13 +56,16 @@ Steps:
    ```
 
    It asks for the folder with the copied backups, then the backup password, and shows the password's check code. Compare it with the code on your recovery sheet; they must match. You do **not** create a new account: your old one comes back.
-4. **Let it run.** Setup installs the system software, then restores before anything else is created: Mu3Lab's settings, people and secrets, then sign-in, the password vault, chat and every app's data from each one's newest backup.
-   - Work that was running on the old computer is cancelled.
+4. **Let it run.** Setup installs the system software, then restores before anything else is created: Mu3Lab's settings, people and secrets, then sign-in, the password vault, chat and each app's newest backup that matches those settings and deployments.
+   - Work, unfinished recovery operations and install queues from the old computer are cancelled. Their history remains. Old tool approvals and gateway credentials are invalidated; chat/tool connections must receive fresh credentials and any write needs fresh approval. A write dispatched before the old computer failed is recorded as having an unknown outcome, rather than replayed.
+   - The whole selected set is checked before the control database or app data is placed. If an installed app has no matching backup, rebuild stops with that app's name. It may select an older matching backup instead of a newer incompatible one.
    - Setup progress starts afresh, so the dashboard reports only what has worked on this computer.
    - The normal setup then continues. Once the core apps are up, Mu3Lab starts the apps that were running before.
 5. **Check it.** Sign in to the dashboard with your old account, and open the password vault, chat and a few apps.
 
-If the rebuild stops halfway, a plain `./install.sh` refuses to continue with half the old data. Run `./install.sh --restore` again: it removes what it had restored and starts over. It never removes backups you put in `/srv/mu3lab/backups/kopia` yourself.
+New backups carry compatibility fingerprints that bind app data to its deployed files, saved app settings/secrets and data-folder layout. Backups made before this metadata was added remain available for manual recovery, but automatic new-host rebuild refuses to guess. Before relying on automatic rebuild, take a new Mu3Lab platform backup and back up every installed app with included data while keeping its settings/deployment unchanged between them. The normal scheduled platform/core/app sequence also creates these proofs.
+
+If the rebuild stops halfway, a plain `./install.sh` refuses to continue with half the old data. Run `./install.sh --restore` again with the same backup source: it checks the repository identity and its recorded paths, removes only unchanged files that the attempt owns, then starts over. Files added elsewhere are preserved. If an owned folder changed, the source was replaced, or a crash prevented a trustworthy inventory, it stops and preserves all remaining files for manual recovery. Corrupt and older start markers also require manual recovery. It never removes backups you put in `/srv/mu3lab/backups/kopia` yourself. Inventory verification reads the copied/restored files again, so large rebuilds take extra disk-read time.
 
 ## Where things are
 
@@ -74,7 +77,7 @@ If the rebuild stops halfway, a plain `./install.sh` refuses to continue with ha
 | Files restored from the backup browser | `/srv/mu3lab/backups/restores/` |
 | Older restic backups (before the switch) | `/srv/mu3lab/backups/` (the `config`, `data`, `index`, `keys`, `locks` and `snapshots` entries) |
 
-Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|scheduled|pre-update|pre-restore|platform>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`.
+Kopia runs in a container pinned in [`ctl/backups.py`](../ctl/backups.py) (`KOPIA_IMAGE`, currently Kopia 0.23.1). Every snapshot belongs to `mu3lab@mu3lab` and is tagged `app:<id>`, `reason:<manual|scheduled|pre-update|pre-restore|platform>`, `version:<label>`, `release:<release id>` and `folders:<folder+folder>`. App backups with a readable deployed configuration also carry `rebuild-context:<opaque fingerprint>`; the platform export records the expected fingerprints. Secret values are never put in these tags. Optional apps keep running during platform export, but changes to their deployment/settings wait until the export completes.
 
 ## Restoring by hand with Kopia
 

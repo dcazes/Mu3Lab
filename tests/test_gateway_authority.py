@@ -86,6 +86,25 @@ class AuthorityContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.authenticate(self.token, "other")
 
+    def test_rebuild_revokes_approvals_credentials_and_marks_dispatch_outcome_unknown(self):
+        dispatched = self.prepare()
+        self.store.decide(dispatched["id"], "operator", approve=True)
+        self.store.claim(dispatched["id"], self.principal, self.app, self.schema, self.revision)
+        approved = self.prepare()
+        self.store.decide(approved["id"], "operator", approve=True)
+        self.store.reset_after_restore()
+        self.assertEqual(self.store.view(approved["id"], "operator")["state"], "revoked")
+        self.assertEqual(self.store.view(dispatched["id"], "operator")["state"], "outcome_unknown")
+        with self.assertRaises(ValueError):
+            self.store.authenticate(self.token, "demo")
+        self.assertGreater(self.store.policy_state()["revision"], self.revision)
+        self.assertEqual(self.store.policy_state()["acknowledged"], 0)
+        self.store.grant_subject("operator", operator=True)
+        fresh = self.store.credential("operator", "demo")
+        self.assertNotEqual(fresh, self.token)
+        with self.assertRaises(ValueError):
+            self.store.authenticate(self.token, "demo")
+
     def test_credential_rotation_revokes_cached_identity_and_pending_approval(self):
         request = self.prepare()
         newer = self.store.credential("operator", "demo", rotate=True)

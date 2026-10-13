@@ -6,6 +6,7 @@ beyond ``backups.KOPIA_IMAGE``. Everything happens in a temporary runtime root.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -90,7 +91,9 @@ class KopiaIntegrationTests(unittest.TestCase):
         # The secret store already created this install's own key; the export carries it.
         self.paths.projects.mkdir()
         (self.paths.projects / "mealie").mkdir()
-        (self.paths.projects / "mealie" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        (self.paths.projects / "mealie" / "docker-compose.yml").write_text(
+            'services:\n  mealie:\n    volumes: ["${MU3LAB_DATA_ROOT}/mealie:/data"]\n', encoding="utf-8"
+        )
         with patch("ctl.platform_backup.RuntimePaths", return_value=self.paths):
             saved = platform_backup._back_up_platform(self.paths, self.lines.append)
         listed = backups.snapshots(backups.PLATFORM_SOURCE, paths=self.paths)
@@ -109,7 +112,9 @@ class KopiaIntegrationTests(unittest.TestCase):
         SecretStore(self.paths).put("app:mealie", "env:SECRET_KEY", "mealie-secret")
         self.paths.projects.mkdir()
         (self.paths.projects / "mealie").mkdir()
-        (self.paths.projects / "mealie" / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        (self.paths.projects / "mealie" / "docker-compose.yml").write_text(
+            'services:\n  mealie:\n    volumes: ["${MU3LAB_DATA_ROOT}/mealie:/data"]\n', encoding="utf-8"
+        )
         backups.snapshot("mealie", [self.mealie], "manual", self.lines.append, paths=self.paths)
         with patch("ctl.platform_backup.RuntimePaths", return_value=self.paths):
             platform_backup._back_up_platform(self.paths, self.lines.append)
@@ -132,8 +137,48 @@ class KopiaIntegrationTests(unittest.TestCase):
                 with self.assertRaises(rebuild.RebuildError):
                     fresh = RuntimePaths(Path(new_root) / "again")
                     rebuild.restore(self.paths.backups / "kopia", "wrong-password", self.lines.append, fresh)
+                retried = rebuild.restore(
+                    self.paths.backups / "kopia", "integration-test-password", self.lines.append, fresh
+                )
+                self.assertEqual(retried["apps"], ["mealie"])
             finally:
                 _as_root(new, "rm -rf /r/data /r/backups /r/state /r/projects /r/again")
+
+    def test_cleanup_inventory_reads_container_owned_files_and_deletes_only_its_own_root(self):
+        from ctl import rebuild
+
+        source = self.paths.backups / "kopia"
+        source.mkdir()
+        (source / rebuild.REPOSITORY_FILE).write_text("repository-identity")
+        rebuild._save_started(
+            self.paths,
+            {
+                "format": 1,
+                "owned": {},
+                "source": str(source),
+                "source_identity": rebuild._fingerprint(source / rebuild.REPOSITORY_FILE, self.lines.append),
+            },
+        )
+        owned = self.paths.data / "scratch"
+        rebuild._own(self.paths, owned)
+        _as_root(
+            self.paths,
+            "mkdir -p /r/data/scratch/pg; echo ours > /r/data/scratch/pg/data; chown -R 999:999 /r/data/scratch/pg; chmod 700 /r/data/scratch/pg",
+        )
+        rebuild._seal(self.paths, [owned], self.lines.append)
+        expected = json.loads((self.paths.state / rebuild.STARTED).read_text())["owned"]["data/scratch"]
+        self.assertEqual(rebuild._fingerprint(owned, self.lines.append), expected)
+        _as_root(self.paths, "echo personal > /r/data/scratch/personal")
+        with self.assertRaisesRegex(rebuild.RebuildError, "Files were preserved"):
+            rebuild._clear_partial(self.paths, self.lines.append, source)
+        self.assertEqual((owned / "personal").read_text(), "personal\n")
+        # Complete a new, explicitly recorded inventory to exercise exact removal.
+        _as_root(self.paths, "rm /r/data/scratch/personal")
+        rebuild._seal(self.paths, [owned], self.lines.append)
+        rebuild._clear_partial(self.paths, self.lines.append, source)
+        self.assertFalse(owned.exists())
+        self.assertEqual(_as_root(self.paths, "cat /r/data/mealie/pg/data"), "rows")
+        self.assertEqual((source / rebuild.REPOSITORY_FILE).read_text(), "repository-identity")
 
 
 if __name__ == "__main__":

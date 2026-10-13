@@ -1,6 +1,7 @@
 """Regression evidence for the stacked milestone merge review; disposable files only."""
 
 import copy
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,10 +9,12 @@ from unittest.mock import patch
 
 from ctl import backups, platform_backup, rebuild
 from ctl.jobs import JobStore
+from ctl.lifecycle import maintenance
 from ctl.lifecycle.app_releases import Release
 from ctl.operations import OperationStore
 from ctl.runtime import RuntimePaths
 from ctl.store.secrets import SecretStore
+from gateway_authority import Authority
 
 
 class RecoveryReviewTests(unittest.TestCase):
@@ -39,6 +42,28 @@ class RecoveryReviewTests(unittest.TestCase):
         release = Release("v1", {"db": "db@sha256:123"}, "nvidia", "definition-hash")
         journal, operation = self.operation(release)
         self.assertEqual(journal.get(operation.id).previous_release.id, release.id)
+
+    def test_new_host_retires_old_operations_and_batches_before_reconciliation(self):
+        journal, operation = self.operation()
+        journal.save_plan(operation.id, "demo", {"roots": {"demo": "swapped"}, "tag": "old-host"})
+        with sqlite3.connect(self.jobs.database) as conn:
+            conn.execute(
+                "INSERT INTO install_batches (id,actor,owner_uid,state,created_at,updated_at) VALUES ('batch','owner','owner','running','','')"
+            )
+            conn.execute(
+                "INSERT INTO install_batch_items (batch_id,service_id,ordinal,explicitly_selected,state,download_state) VALUES ('batch','mealie',0,1,'pending','ready')"
+            )
+        rebuild.prepare_database(self.jobs.database)
+        self.assertEqual(maintenance.reconcile(self.jobs, print), 0)
+        self.assertEqual(journal.get(operation.id).state, "cancelled")
+        self.assertEqual(journal.get(operation.id).restore_plans, {})
+        self.assertEqual(self.jobs.active_jobs(), [])
+        with sqlite3.connect(self.jobs.database) as conn:
+            self.assertEqual(conn.execute("SELECT state FROM install_batches").fetchone()[0], "cancelled")
+            self.assertEqual(
+                conn.execute("SELECT state,download_state FROM install_batch_items").fetchone(), ("cancelled", "")
+            )
+            self.assertTrue(conn.execute("SELECT 1 FROM operation_steps WHERE event='finished'").fetchone())
 
     def test_every_retention_caller_preserves_unfinished_recovery(self):
         self.operation()
@@ -75,6 +100,34 @@ class RecoveryReviewTests(unittest.TestCase):
         self.assertEqual((restored.state / "mu3lab.request-key").read_bytes(), original)
         again = JobStore(restored.state / "mu3lab.db")
         again.create(kind="lifecycle", service_id="demo", action="start", actor="owner", idempotency_key="request")
+
+    def test_control_export_restores_matching_gateway_key_and_retires_authority(self):
+        SecretStore(self.paths).put("platform", "backup-password", "test-only")
+        authority = Authority(self.paths.projects / "mcp-gateway" / "authority")
+        authority.grant_subject("operator", operator=True)
+        old_token = authority.credential("operator", "demo")
+        exported = platform_backup.export_control_plane(self.paths)
+        self.assertEqual((exported / "gateway-arguments.key").read_bytes(), authority.key.read_bytes())
+        restored = RuntimePaths(self.paths.root / "restored")
+        restored.state.mkdir(parents=True)
+        target = restored.projects / "mcp-gateway" / "authority"
+        target.mkdir(parents=True)
+        (target / "authority.db").write_bytes(b"inconsistent raw project copy")
+        (target / "authority.db-wal").write_bytes(b"old WAL")
+        (target / "authority.db-shm").write_bytes(b"old shared memory")
+        rebuild._place_control(exported, restored)
+        recovered = Authority(target, initialize=False)
+        self.assertEqual(recovered.key.read_bytes(), authority.key.read_bytes())
+        with self.assertRaises(ValueError):
+            recovered.authenticate(old_token, "demo")
+        self.assertFalse((target / "authority.db-wal").exists())
+
+    def test_new_host_retires_needs_attention_operations_too(self):
+        journal, operation = self.operation()
+        journal.finish(operation.id, "needs_attention", "Old host undo failed")
+        rebuild.prepare_database(self.jobs.database)
+        self.assertIsNone(journal.needing_attention("demo"))
+        self.assertEqual(journal.get(operation.id).state, "cancelled")
 
     def test_swap_recovers_crash_after_rename_before_journal_commit(self):
         for absent in (False, True):

@@ -32,6 +32,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from cryptography.fernet import InvalidToken
+
 from ctl import backups, job_guard, resource_locks
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
@@ -114,9 +116,15 @@ def export_control_plane(paths: RuntimePaths) -> Path:
     authority = paths.projects / "mcp-gateway" / "authority" / "authority.db"
     if authority.is_file():
         _sqlite_copy(authority, target / "gateway-authority.db")
+        write_atomic(target / "gateway-arguments.key", (authority.parent / "arguments.key").read_bytes())
     from ctl import __version__
+    from ctl.recovery_context import export_contexts
 
-    manifest = {"created_at": _now(), "mu3lab_version": __version__, "files": sorted(_listing(target))}
+    manifest: dict[str, Any] = {"created_at": _now(), "mu3lab_version": __version__, "files": sorted(_listing(target))}
+    try:
+        manifest["rebuild_contexts"] = export_contexts(paths, target)
+    except (OSError, ValueError, sqlite3.Error, InvalidToken) as exc:
+        raise backups.BackupError("The platform export could not prove app deployment/settings compatibility.") from exc
     write_atomic(target / "export.json", json.dumps(manifest, indent=2, sort_keys=True).encode())
     return target
 
@@ -245,7 +253,11 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         with resource_locks.hold(*(f"app:{service.id}" for service in services)):
             step("platform", "Saving Mu3Lab's own settings, secrets and deployments.")
             try:
-                platform = _back_up_platform(paths, log)
+                # Freeze optional deployment/settings changes while the matching
+                # control copy and runtime projects are captured. No extra stops.
+                optional = [service for service in registry.services if service.stage == "optional"]
+                with resource_locks.hold(*(f"app:{service.id}" for service in optional)):
+                    platform = _back_up_platform(paths, log)
             except (backups.BackupError, OSError, sqlite3.Error) as exc:
                 raise _Failed(
                     "platform", "platform_backup_failed", f"Mu3Lab's own state was not backed up: {exc}"

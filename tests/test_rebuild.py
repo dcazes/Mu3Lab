@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -11,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ctl import backups, install, rebuild
+from ctl import backups, install, rebuild, recovery_context
 from ctl.bootstrap import terminal
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore
@@ -35,11 +36,15 @@ def _old_computer(root: Path) -> RuntimePaths:
     ControlState(old.state / "mu3lab.db").set_installation("mealie", "running")
     (old.state / "deployments" / "mealie").mkdir(parents=True)
     (old.state / "deployments" / "mealie" / "bundle.json").write_text("{}")
-    (old.state / "export.json").write_text("{}")
     (old.projects / "mealie").mkdir(parents=True)
-    (old.projects / "mealie" / "docker-compose.yml").write_text("services: {}\n")
+    (old.projects / "mealie" / "docker-compose.yml").write_text(
+        'services:\n  mealie:\n    volumes: ["${MU3LAB_DATA_ROOT}/mealie:/data"]\n'
+    )
     (old.data / "mealie").mkdir(parents=True)
     (old.data / "mealie" / "recipes.db").write_text("pancakes")
+    (old.state / "export.json").write_text(
+        json.dumps({"rebuild_contexts": recovery_context.export_contexts(old, old.state)})
+    )
     return old
 
 
@@ -55,7 +60,9 @@ class FakeKopia:
     """Answers the Kopia commands a rebuild runs, restoring from the old computer's folders."""
 
     def __init__(self, old: RuntimePaths, *, password: str = PASSWORD):
-        self.old, self.password, self.calls, self.listing = old, password, [], LISTING
+        self.old, self.password, self.calls = old, password, []
+        self.listing = json.loads(json.dumps(LISTING))
+        self.listing[2]["tags"]["tag:rebuild-context"] = recovery_context.fingerprint("mealie", ["mealie"], old)
 
     def __call__(self, args, log, *, paths, password="", timeout=0, mounts=()):
         self.calls.append((args, password))
@@ -88,6 +95,19 @@ class RebuildTests(unittest.TestCase):
         self.shell = patch("ctl.rebuild._root_shell", return_value="")
         self.shell.start()
         self.addCleanup(self.shell.stop)
+        self.digest = patch("ctl.rebuild._fingerprint", side_effect=self.fingerprint)
+        self.digest.start()
+        self.addCleanup(self.digest.stop)
+
+    @staticmethod
+    def fingerprint(target, _log):
+        digest = hashlib.sha256()
+        for path in [target, *sorted(target.rglob("*"))] if target.is_dir() else [target]:
+            digest.update(str(path.relative_to(target.parent)).encode())
+            digest.update(str(path.lstat().st_mode).encode())
+            if path.is_file():
+                digest.update(path.read_bytes())
+        return digest.hexdigest()
 
     def run_rebuild(self, password: str = PASSWORD):
         with patch("ctl.rebuild.backups._kopia", self.kopia):
@@ -157,9 +177,115 @@ class RebuildTests(unittest.TestCase):
             self.run_rebuild("wrong-password")
         with patch("ctl.rebuild._root_shell") as shell:
             rebuild._clear_partial(self.new, lambda _line: None)
+        shell.assert_not_called()  # No restored paths exist after this password failure.
+        self.assertTrue(self.source.is_dir())
+
+    def test_newer_incompatible_backup_is_skipped_for_a_matching_older_one(self):
+        self.kopia.listing.append(
+            {
+                "id": "dddd1111",
+                "startTime": "2026-10-05T00:00:00Z",
+                "tags": {"tag:app": "mealie", "tag:folders": "mealie", "tag:rebuild-context": "different-release"},
+            }
+        )
+        self.run_rebuild()
+        restores = [args[3] for args, _password in self.kopia.calls if args[:2] == ["snapshot", "restore"]]
+        self.assertIn("bbbb1111/mealie", restores)
+        self.assertNotIn("dddd1111/mealie", restores)
+
+    def test_missing_compatibility_proof_refuses_before_control_or_app_data_is_placed(self):
+        self.kopia.listing[2]["tags"].pop("tag:rebuild-context")
+        with self.assertRaisesRegex(rebuild.RebuildError, "No data backup matches mealie"):
+            self.run_rebuild()
+        self.assertFalse((self.new.state / "mu3lab.db").exists())
+        self.assertFalse((self.new.data / "mealie").exists())
+
+    def test_changed_settings_in_platform_export_refuse_a_stale_manifest(self):
+        SecretStore(self.old).put("app:mealie", "env:SECRET_KEY", "rotated-key")
+        with self.assertRaisesRegex(rebuild.RebuildError, "no valid compatibility proof"):
+            self.run_rebuild()
+        self.assertFalse((self.new.state / "mu3lab.db").exists())
+
+    def test_deployment_changed_after_control_export_cannot_pair_with_old_app_data(self):
+        (self.old.projects / "mealie" / "docker-compose.release.yml").write_text(
+            "services:\n  mealie:\n    image: mealie:newer-schema\n"
+        )
+        with self.assertRaisesRegex(rebuild.RebuildError, "no valid compatibility proof"):
+            self.run_rebuild()
+        self.assertFalse((self.new.state / "mu3lab.db").exists())
+        self.assertFalse((self.new.data / "mealie").exists())
+
+    def test_legacy_platform_backup_requires_manual_recovery(self):
+        (self.old.state / "export.json").write_text("{}")
+        with self.assertRaisesRegex(rebuild.RebuildError, "recover manually"):
+            self.run_rebuild()
+
+    def test_changed_owned_files_stop_cleanup_before_any_delete(self):
+        with self.assertRaises(rebuild.RebuildError):
+            self.run_rebuild("wrong-password")
+        target = self.new.data / "mealie"
+        rebuild._own(self.new, target)
+        target.mkdir()
+        (target / "recipes.db").write_text("restored")
+        rebuild._seal(self.new, [target], print)
+        (target / "personal.txt").write_text("keep me")
+        with (
+            patch("ctl.rebuild._root_shell") as shell,
+            self.assertRaisesRegex(rebuild.RebuildError, "Files were preserved"),
+        ):
+            rebuild._clear_partial(self.new, print, self.source)
+        shell.assert_not_called()
+        self.assertEqual((target / "personal.txt").read_text(), "keep me")
+
+    def test_cleanup_names_only_owned_paths_and_preserves_unrelated_data(self):
+        with self.assertRaises(rebuild.RebuildError):
+            self.run_rebuild("wrong-password")
+        target = self.new.data / "mealie"
+        rebuild._own(self.new, target)
+        target.mkdir()
+        rebuild._seal(self.new, [target], print)
+        unrelated = self.new.data / "photos"
+        unrelated.mkdir()
+        with patch("ctl.rebuild._root_shell") as shell:
+            rebuild._clear_partial(self.new, print, self.source)
         script = shell.call_args.args[0]
-        self.assertNotIn("/backups/kopia", script)
-        self.assertIn("/state/secrets.key", script)
+        self.assertEqual(script, "rm -rf -- /runtime/data/mealie")
+        self.assertTrue(unrelated.exists())
+
+    def test_source_change_and_uninventoried_restore_never_clean_up(self):
+        with self.assertRaises(rebuild.RebuildError):
+            self.run_rebuild("wrong-password")
+        with self.assertRaisesRegex(rebuild.RebuildError, "source changed"):
+            rebuild._clear_partial(self.new, print, self.source.parent)
+        target = self.new.data / "mealie"
+        rebuild._own(self.new, target)
+        target.mkdir()
+        with self.assertRaisesRegex(rebuild.RebuildError, "ownership could be verified"):
+            rebuild._clear_partial(self.new, print, self.source)
+        self.assertTrue(target.exists())
+
+    def test_source_inside_destinations_is_refused_without_deletion(self):
+        source = self.new.data / "copied-backups"
+        source.mkdir(parents=True)
+        (source / rebuild.REPOSITORY_FILE).write_text("keep")
+        with self.assertRaisesRegex(rebuild.RebuildError, "overlaps rebuild destinations"):
+            rebuild.restore(source, PASSWORD, print, self.new)
+        self.assertEqual((source / rebuild.REPOSITORY_FILE).read_text(), "keep")
+
+    def test_replacing_repository_at_the_same_source_path_stops_cleanup(self):
+        with self.assertRaises(rebuild.RebuildError):
+            self.run_rebuild("wrong-password")
+        (self.source / rebuild.REPOSITORY_FILE).write_text("different repository")
+        with self.assertRaisesRegex(rebuild.RebuildError, "repository changed"):
+            rebuild._clear_partial(self.new, print, self.source)
+
+    def test_corrupt_legacy_and_unsafe_cleanup_markers_preserve_all_files(self):
+        self.new.state.mkdir(parents=True)
+        for contents in ("{", "{}", "[]", json.dumps({"format": 1, "owned": {"../personal": "abc"}})):
+            with self.subTest(contents=contents):
+                (self.new.state / rebuild.STARTED).write_text(contents)
+                with self.assertRaisesRegex(rebuild.RebuildError, "preserved"):
+                    rebuild._clear_partial(self.new, print)
 
     def test_running_it_again_after_it_finished_changes_nothing(self):
         first = self.run_rebuild()
