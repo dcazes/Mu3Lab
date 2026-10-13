@@ -358,6 +358,29 @@ class ResumeTests(unittest.TestCase):
             started = [job for job in store.active_jobs() if job["service_id"] == "mealie"]
             self.assertEqual([(job["action"], job["actor"]) for job in started], [("start", "rebuild")])
 
+    def test_an_app_busy_with_another_job_is_started_once_that_finishes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            paths.state.mkdir(parents=True)
+            (paths.projects / "mealie").mkdir(parents=True)
+            (paths.projects / "mealie" / "docker-compose.yml").write_text("services: {}\n")
+            store = JobStore(paths.state / "mu3lab.db")
+            ControlState(paths.state / "mu3lab.db").set_installation("mealie", "running")
+            (paths.state / rebuild.MARKER).write_text(json.dumps({"restored_at": "2026-10-09T00:00:00+00:00"}))
+            apps = SimpleNamespace(services=[SimpleNamespace(id="mealie", name="Mealie", stage="optional")])
+            core = store.create(kind="lifecycle", service_id="core-suite", action="install", actor="bootstrap")
+            store.claim("w")
+            store.transition(core["id"], "succeeded", actor="w")
+            other = store.create(kind="lifecycle", service_id="mealie", action="stop", actor="owner")
+            with patch("ctl.registry.load", return_value=apps):
+                self.assertEqual(rebuild.resume(store, Path("/repo"), print, paths), [])  # busy: not forgotten
+                self.assertFalse(rebuild.status(paths).get("apps_started"))
+                store.claim("w")
+                store.transition(other["id"], "succeeded", actor="w")
+                self.assertEqual(rebuild.resume(store, Path("/repo"), print, paths), ["mealie"])
+                self.assertEqual(rebuild.resume(store, Path("/repo"), print, paths), [])
+            self.assertTrue(rebuild.status(paths)["apps_started"])
+
 
 if __name__ == "__main__":
     unittest.main()
