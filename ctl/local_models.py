@@ -207,7 +207,17 @@ def settings(paths: RuntimePaths | None = None) -> dict[str, str]:
     try:
         clean = validate({**defaults, **stored})
     except ValueError:
-        clean = defaults
+        # An existing invalid record cannot authorize external inference.
+        clean = {
+            "privacy": "local_only",
+            "chat_model": str(stored.get("chat_model") or "") if stored.get("chat_model") in CHAT_BY_ID else "",
+            "embedding_model": (
+                str(stored["embedding_model"])
+                if stored.get("embedding_model") in EMBEDDING_BY_ID
+                else defaults["embedding_model"]
+            ),
+            "runner": defaults["runner"],
+        }
     return {
         **clean,
         "changed_at": str(stored.get("changed_at") or ""),
@@ -240,8 +250,8 @@ def chat_list(paths: RuntimePaths | None = None) -> str:
     """LobeChat's model list, each name saying where the model runs (R31: honest labels in chat)."""
     chosen = settings(paths)
     model = CHAT_BY_ID.get(chosen["chat_model"])
-    if chosen["privacy"] == "local_only" and model:
-        return f"-all,+mu3lab-chat={model.name} (local only, on this server)"
+    if chosen["privacy"] == "local_only":
+        return f"-all,+mu3lab-chat={model.name} (local only, on this server)" if model else "-all"
     outside = "-all,+mu3lab-chat=Mu3Lab chat (outside providers)"
     if model is None:
         return outside
@@ -453,18 +463,23 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
     # 3. Apps whose settings follow the models: the chat app's list, the runners' search model.
     facts = Facts(tailnet_dns_name(), paths, catalog)
 
-    def follow() -> None:
+    def follow() -> list[str]:
+        """Rewire every follower; return the names of those still on the old settings."""
+        incomplete = []
         for app in _followers(catalog, paths):
             try:
                 with resource_locks.hold(f"app:{app.id}", timeout=LOCK_WAIT_SECONDS, paths=paths):
                     if rewire_one(app, facts, log):
                         log(f"{app.manifest.name} now uses the new settings.")
             except resource_locks.Busy:
+                incomplete.append(app.manifest.name)
                 log(f"{app.manifest.name} is busy; it picks up the new settings the next time it starts.")
             except (StepFailed, OSError, ValueError, RuntimeError) as exc:
+                incomplete.append(app.manifest.name)
                 log(f"{app.manifest.name} could not be updated: {redact(str(exc))}")
+        return incomplete
 
-    follow()
+    incomplete = follow()
     if later:
         try:
             log(f"Checking {embed.name} in {target.manifest.name}.")
@@ -478,6 +493,16 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
                 log(f"Putting the earlier settings back also failed: {redact(str(undo))}")
             fail(f"The earlier settings were kept: {embed.name} did not answer ({exc}).", "model_failed", "check")
             return
+    if incomplete:
+        # An app still on the old settings may still need an old model, so nothing is deleted.
+        fail(
+            "AI routing changed, but these apps still need updating: "
+            + ", ".join(incomplete)
+            + ". All previously downloaded models were retained. Retry when the apps are ready.",
+            "followers_incomplete",
+            "followers",
+        )
+        return
     # 4. Free the disk space of models nothing uses now, in the runner that serves them.
     for model in (*CHAT, *EMBEDDING):
         if model in (chat, embed) or not engine.has(model, present):

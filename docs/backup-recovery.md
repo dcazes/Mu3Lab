@@ -73,12 +73,12 @@ Steps:
 
    It asks for the folder with the copied backups, then the backup password, and shows the password's check code. Compare it with the code on your recovery sheet; they must match. You do **not** create a new account: your old one comes back.
 4. **Let it run.** Setup installs the system software, then restores before anything else is created: Mu3Lab's settings, people and secrets, then sign-in, the password vault, chat and every app's data from each one's newest backup.
-   - Work that was running on the old computer is cancelled.
+   - Work and install queues from the old computer are cancelled. Their history remains. Old tool approvals and gateway credentials are invalidated; chat/tool connections must receive fresh credentials and any write needs fresh approval. A write dispatched before the old computer failed is recorded as having an unknown outcome, rather than replayed.
    - Setup progress starts afresh, so the dashboard reports only what has worked on this computer.
    - The normal setup then continues. Once the core apps are up, Mu3Lab starts the apps that were running before.
 5. **Check it.** Sign in to the dashboard with your old account, and open the password vault, chat and a few apps.
 
-If the rebuild stops halfway, a plain `./install.sh` refuses to continue with half the old data. Run `./install.sh --restore` again: it removes what it had restored and starts over. It never removes backups you put in `/srv/mu3lab/backups/kopia` yourself.
+If the rebuild stops halfway, a plain `./install.sh` refuses to continue with half the old data. Run `./install.sh --restore` again with the same backup source: it checks the repository identity and its recorded paths, removes only unchanged files that the attempt owns, then starts over. Files added elsewhere are preserved. If an owned folder changed, the source was replaced, or a crash prevented a trustworthy inventory, it stops and preserves all remaining files for manual recovery. Corrupt and older start markers also require manual recovery. It never removes backups you put in `/srv/mu3lab/backups/kopia` yourself. Inventory verification reads the copied/restored files again, so large rebuilds take extra disk-read time.
 
 ## Where things are
 

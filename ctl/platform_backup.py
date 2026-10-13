@@ -110,12 +110,18 @@ def export_control_plane(paths: RuntimePaths) -> Path:
     key = paths.state / "secrets.key"
     if key.is_file():
         write_atomic(target / "secrets.key", key.read_bytes())
+    request_key = paths.state / "mu3lab.request-key"
+    if request_key.is_file():
+        write_atomic(target / request_key.name, request_key.read_bytes())
     deployments = paths.state / "deployments"
     if deployments.is_dir():
         shutil.copytree(deployments, target / "deployments", symlinks=False)
     authority = paths.projects / "mcp-gateway" / "authority" / "authority.db"
     if authority.is_file():
         _sqlite_copy(authority, target / "gateway-authority.db")
+        arguments_key = authority.parent / "arguments.key"
+        if arguments_key.is_file():
+            write_atomic(target / "gateway-arguments.key", arguments_key.read_bytes())
     from ctl import __version__
 
     manifest = {"created_at": _now(), "mu3lab_version": __version__, "files": sorted(_listing(target))}

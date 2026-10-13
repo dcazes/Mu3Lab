@@ -175,6 +175,18 @@ class Authority:
             db.execute("UPDATE operations SET state='revoked',arguments=NULL WHERE state IN ('pending','approved')")
             return int(db.execute("SELECT revision FROM policy").fetchone()[0])
 
+    def reset_after_restore(self) -> None:
+        """Keep history, but never replay authority granted on the old host."""
+        with self._db(write=True) as db:
+            db.execute("UPDATE policy SET revision=revision+1,digest='',acknowledged=0 WHERE id=1")
+            db.execute("UPDATE subjects SET enabled=0,valid_until=0")
+            db.execute("UPDATE credentials SET enabled=0,version=version+1,ciphertext=X'',token_hash=''")
+            db.execute("UPDATE operations SET state='revoked',arguments=NULL WHERE state IN ('pending','approved')")
+            db.execute(
+                "UPDATE operations SET state='outcome_unknown',arguments=NULL,completed_at=? WHERE state='dispatching'",
+                (time.time(),),
+            )
+
     def publish(self, revision: int, digest: str) -> None:
         with self._db(write=True) as db:
             changed = db.execute("UPDATE policy SET digest=? WHERE revision=? AND digest=''", (digest, revision))

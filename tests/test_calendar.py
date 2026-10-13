@@ -679,9 +679,13 @@ class LocalCalendarTests(unittest.TestCase):
             local_calendar.import_from_nextcloud(
                 "owner",
                 [
-                    {"href": "phone-1.ics", "ics": PHONE_EVENT},
+                    {"href": "phone-1.ics", "ics": PHONE_EVENT, "etag": '"v1"'},
                     {"href": "weekly-1.ics", "ics": WEEKLY},
-                    {"href": "gone.ics", "ics": PHONE_EVENT.replace("phone-1", "gone").replace("Piano", "Old")},
+                    {
+                        "href": "gone.ics",
+                        "ics": PHONE_EVENT.replace("phone-1", "gone").replace("Piano", "Old"),
+                        "etag": '"v1"',
+                    },
                 ],
                 paths,
             )
@@ -740,6 +744,38 @@ class SyncSafetyTests(unittest.TestCase):
         _connect_owner("owner", paths)
         return row
 
+    def test_a_legacy_edit_without_an_etag_cannot_overwrite_nextcloud(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            row = self.copied(paths)
+            bucket = local_calendar._load("owner", paths)
+            bucket["events"][row["id"]]["etag"] = ""
+            bucket["events"][row["id"]]["modified"] = True
+            local_calendar._save("owner", bucket, paths)
+            with patch("ctl.nextcloud_calendar.httpx.request") as request:
+                report = local_calendar.push_to_nextcloud("owner", paths)
+            request.assert_not_called()
+            self.assertTrue(report["conflicts"])
+            self.assertTrue(local_calendar.has_events("owner", paths))
+
+    def test_conflict_resolution_preserves_local_edit_when_remote_changes_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            row = self.copied(paths)
+            bucket = local_calendar._load("owner", paths)
+            bucket["events"][row["id"]]["conflict"] = local_calendar.CHANGED_IN_NEXTCLOUD
+            local_calendar._save("owner", bucket, paths)
+            with (
+                patch(
+                    "ctl.nextcloud_calendar.httpx.request",
+                    side_effect=[httpx.Response(200, headers={"ETag": '"latest"'}), httpx.Response(412)],
+                ) as request,
+                self.assertRaises(CalendarError),
+            ):
+                local_calendar.resolve_conflict("owner", row["id"], "mine", paths)
+            self.assertEqual(request.call_args.kwargs["headers"]["If-Match"], '"latest"')
+            self.assertTrue(local_calendar.has_events("owner", paths))
+
     def test_the_copy_keeps_each_events_nextcloud_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
@@ -767,10 +803,13 @@ class SyncSafetyTests(unittest.TestCase):
             with patch("ctl.nextcloud_calendar.httpx.request") as request:
                 local_calendar.push_to_nextcloud("owner", paths)
             request.assert_not_called()
-            # Keep mine: replaces Nextcloud's version without a version check, then forgets the copy.
-            with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(204)) as request:
+            # Keep mine: use the current remote version, refusing a concurrent change.
+            with patch(
+                "ctl.nextcloud_calendar.httpx.request",
+                side_effect=[httpx.Response(200, headers={"ETag": '"v2"'}), httpx.Response(204)],
+            ) as request:
                 local_calendar.resolve_conflict("owner", kept["id"], "mine", paths)
-            self.assertNotIn("If-Match", request.call_args.kwargs["headers"])
+            self.assertEqual(request.call_args.kwargs["headers"]["If-Match"], '"v2"')
             self.assertIn(b"SUMMARY:Piano (moved)", request.call_args.kwargs["content"])
             self.assertFalse(local_calendar.has_events("owner", paths))
 
@@ -843,7 +882,7 @@ class SyncSafetyTests(unittest.TestCase):
                 release.set()
                 worker.join(5)
 
-    def test_older_stores_with_bare_deletions_still_sync(self):
+    def test_older_stores_with_bare_deletions_preserve_remote_events(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             from ctl.store.secrets import SecretStore
@@ -852,8 +891,9 @@ class SyncSafetyTests(unittest.TestCase):
             _connect_owner("owner", paths)
             with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(204)) as request:
                 report = local_calendar.push_to_nextcloud("owner", paths)
-            self.assertEqual(report["moved"], 1)
-            self.assertEqual(request.call_args.kwargs["headers"], {})
+            self.assertEqual(report["moved"], 0)
+            self.assertEqual(report["kept"], ["old.ics"])
+            request.assert_not_called()
 
 
 class CalendarApiTests(unittest.TestCase):

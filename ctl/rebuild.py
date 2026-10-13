@@ -17,8 +17,8 @@ secrets, a new database or new app data:
 4. Restore each app's data folders from that app's newest backup, so sign-in,
    the password vault, chat and every app start with their old data.
 5. Tidy the restored database for a new computer: jobs that were running on
-   the old one are cancelled, and setup progress starts again, so the
-   dashboard never claims a step it has not seen succeed here.
+   the old one, install batches and pending chat approvals are retired,
+   and setup progress starts again.
 
 The rest of the normal install then runs on top. Once core setup has
 succeeded, the worker starts each app that was running before
@@ -30,9 +30,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import shutil
 import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -103,26 +106,110 @@ def interrupted(paths: RuntimePaths | None = None) -> bool:
     return (paths.state / STARTED).exists() and not status(paths).get("restored_at")
 
 
-def _clear_partial(paths: RuntimePaths, log: Log) -> None:
-    """Remove what an interrupted rebuild restored; only it wrote here, since it refuses a computer with data.
-
-    The backups folder is removed only when the rebuild made it as a copy of
-    backups kept elsewhere; backups the owner put in place are never touched.
-    """
-    log("Removing what the interrupted rebuild had restored, then starting again.")
+def _started(paths: RuntimePaths) -> dict:
     try:
-        started = json.loads((paths.state / STARTED).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        started = {}
-    copy = " /backups/kopia /backups/.kopia-copy" if started.get("copied") else ""
-    _root_shell(
-        f"rm -rf /data/* /data/.[!.]* /projects/* /projects/.[!.]*{copy} "
-        "/state/mu3lab.db /state/mu3lab.db-wal /state/mu3lab.db-shm /state/secrets.key "
-        "/state/deployments /state/.rebuild-control /state/kopia",
-        [(paths.data, "/data", False), (paths.projects, "/projects", False), (paths.backups, "/backups", False),
-         (paths.state, "/state", False)],
-        log,
-    )  # fmt: skip
+        value = json.loads((paths.state / STARTED).read_text(encoding="utf-8"))
+        if value.get("format") != 1 or not isinstance(value.get("owned"), dict):
+            raise ValueError("unknown ownership record")
+        return value
+    except (OSError, ValueError, AttributeError):
+        raise RebuildError(
+            "The interrupted rebuild has no trustworthy ownership record. Files were preserved; manual recovery is required."
+        ) from None
+
+
+def _save_started(paths: RuntimePaths, value: dict) -> None:
+    write_atomic(paths.state / STARTED, json.dumps(value, sort_keys=True).encode())
+
+
+def _owned_path(paths: RuntimePaths, name: str) -> Path:
+    if not isinstance(name, str):
+        raise RebuildError("The rebuild ownership record names an unsafe path. Files were preserved.")
+    parts = Path(name).parts
+    allowed_state = {
+        ".rebuild-control",
+        "kopia",
+        "mu3lab.db",
+        "mu3lab.db-wal",
+        "mu3lab.db-shm",
+        "secrets.key",
+        "mu3lab.request-key",
+        "deployments",
+    }
+    valid = (
+        name == "projects"
+        or (len(parts) == 2 and parts[0] == "data" and bool(backups._NAME.fullmatch(parts[1])))
+        or (len(parts) == 2 and parts[0] == "state" and parts[1] in allowed_state)
+        or (len(parts) == 2 and parts[0] == "backups" and parts[1] in {"kopia", ".kopia-copy"})
+    )
+    target = paths.root / name
+    if not valid or target.is_symlink() or target.resolve() != paths.root.resolve() / name:
+        raise RebuildError("The rebuild ownership record names an unsafe path. Files were preserved.")
+    return target
+
+
+def _fingerprint(target: Path, log: Log) -> str:
+    # tar reads as root, including container-owned files, links and metadata.
+    # Only its digest leaves the container; no private file contents are logged.
+    script = (
+        "set -e; mkfifo /tmp/inventory; "
+        f"tar -cf /tmp/inventory -C /owned -- {shlex.quote(target.name)} & writer=$!; "
+        'sha256sum /tmp/inventory; wait "$writer"'
+    )
+    output = _root_shell(script, [(target.parent, "/owned", True)], log)
+    digest = output.split()[0] if output.split() else ""
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise RebuildError("Could not verify rebuild file ownership. Files were preserved.")
+    return digest
+
+
+def _own(paths: RuntimePaths, target: Path) -> None:
+    name = str(target.relative_to(paths.root))
+    target = _owned_path(paths, name)
+    value = _started(paths)
+    if name in value["owned"]:
+        return
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        raise RebuildError(f"{target} already holds files; it was preserved.")
+    value["owned"][name] = None  # crash before a completed inventory must stop cleanup
+    _save_started(paths, value)
+
+
+def _seal(paths: RuntimePaths, targets: list[Path], log: Log) -> None:
+    value = _started(paths)
+    for target in targets:
+        name = str(target.relative_to(paths.root))
+        if name in value["owned"]:
+            value["owned"][name] = _fingerprint(target, log) if target.exists() else "absent"
+    _save_started(paths, value)
+
+
+def _clear_partial(paths: RuntimePaths, log: Log, source: Path | None = None) -> None:
+    """Validate the entire ownership inventory before deleting any exact path."""
+    started = _started(paths)
+    if source is not None and started.get("source") != str(source.resolve()):
+        raise RebuildError("The backup source changed since the interrupted rebuild. Files were preserved.")
+    if source is not None and started.get("source_identity") != _fingerprint(source / REPOSITORY_FILE, log):
+        raise RebuildError("The backup repository changed since the interrupted rebuild. Files were preserved.")
+    targets = []
+    for name, expected in started["owned"].items():
+        target = _owned_path(paths, name)
+        if not target.exists():
+            continue
+        if not expected or expected == "absent" or _fingerprint(target, log) != expected:
+            raise RebuildError(
+                f"{target} changed or its restore was interrupted before ownership could be verified. Files were preserved; manual recovery is required."
+            )
+        if source is not None and (source == target or target in source.parents):
+            raise RebuildError("The backup source overlaps rebuild cleanup. Files were preserved.")
+        targets.append(name)
+    if targets:
+        log("Removing only verified files owned by the interrupted rebuild.")
+        _root_shell(
+            "rm -rf -- " + " ".join(shlex.quote("/runtime/" + name) for name in targets),
+            [(paths.root, "/runtime", False)],
+            log,
+        )
 
 
 def existing_data(paths: RuntimePaths, source: Path | None = None) -> list[str]:
@@ -168,7 +255,7 @@ def _copy_repository(source: Path, paths: RuntimePaths, log: Log) -> None:
     paths.backups.mkdir(parents=True, exist_ok=True)
     log(f"Copying the backups from {source} (this can take a while for large backups).")
     _root_shell(
-        "rm -rf /to/.kopia-copy && cp -a /from/. /to/.kopia-copy && rm -rf /to/kopia && mv /to/.kopia-copy /to/kopia",
+        "test ! -e /to/.kopia-copy && test ! -e /to/kopia && cp -a /from/. /to/.kopia-copy && mv /to/.kopia-copy /to/kopia",
         [(source, "/from", True), (paths.backups, "/to", False)],
         log,
     )
@@ -194,7 +281,12 @@ def latest_backups(listing: list[dict]) -> dict[str, dict]:
         path = str((item.get("source") or {}).get("path") or "")
         app = str(tags.get("tag:app") or (path.removeprefix("/data/") if path.startswith("/data/") else ""))
         folders = [name for name in str(tags.get("tag:folders") or "").split("+") if name]
-        if not app or not backups._NAME.fullmatch(app) or (tags and not folders):
+        if (
+            not app
+            or not backups._NAME.fullmatch(app)
+            or (tags and not folders)
+            or any(not backups._NAME.fullmatch(name) for name in folders)
+        ):
             continue
         entry = {"id": str(item.get("id", "")), "time": str(item.get("startTime", "")), "folders": folders}
         if app not in newest or entry["time"] > newest[app]["time"]:
@@ -255,25 +347,40 @@ def _place_control(staging: Path, paths: RuntimePaths) -> None:
     for name in ("mu3lab.db", "secrets.key"):
         if not (staging / name).is_file():
             raise RebuildError(f"The backup of Mu3Lab itself has no {name}; nothing was put in place.")
+    authority = staging / "gateway-authority.db"
+    target = paths.projects / "mcp-gateway" / "authority" / "authority.db"
+    if target.exists() and not authority.is_file():
+        raise RebuildError("The gateway backup has no consistent authority export. Manual recovery is required.")
+    if authority.is_file() and not (staging / "gateway-arguments.key").is_file():
+        raise RebuildError("The gateway backup has no matching encryption key. Manual recovery is required.")
     for name in ("mu3lab.db", "secrets.key"):
         os.replace(staging / name, paths.state / name)
     (paths.state / "secrets.key").chmod(0o600)
+    request_key = staging / "mu3lab.request-key"
+    if request_key.is_file():
+        os.replace(request_key, paths.state / request_key.name)
+        (paths.state / request_key.name).chmod(0o600)
     if (staging / "deployments").is_dir():
-        shutil.rmtree(paths.state / "deployments", ignore_errors=True)
         os.replace(staging / "deployments", paths.state / "deployments")
-    authority = staging / "gateway-authority.db"
     if authority.is_file():
         # The consistent copy, not whatever the projects folder caught mid-write.
-        target = paths.projects / "mcp-gateway" / "authority" / "authority.db"
         target.parent.mkdir(parents=True, exist_ok=True)
+        for suffix in ("-wal", "-shm"):
+            target.with_name(target.name + suffix).unlink(missing_ok=True)
         os.replace(authority, target)
+        key = staging / "gateway-arguments.key"
+        os.replace(key, target.parent / "arguments.key")
+        (target.parent / "arguments.key").chmod(0o600)
+        from gateway_authority import Authority
+
+        Authority(target.parent, initialize=False).reset_after_restore()
     shutil.rmtree(staging, ignore_errors=True)
 
 
 def prepare_database(database: Path) -> dict[str, int]:
     """Make the old computer's database right for this one: no leftover work, setup progress afresh."""
     now = _now()
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         active = conn.execute(
             "SELECT id FROM jobs WHERE state IN ('queued', 'running', 'waiting_for_confirmation')"
         ).fetchall()
@@ -288,6 +395,19 @@ def prepare_database(database: Path) -> dict[str, int]:
                 (job_id, ACTOR, "job.cancelled", now, "Stopped by moving Mu3Lab to a new computer."),
             )
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "install_batches" in tables:
+            conn.execute(
+                "UPDATE install_batches SET state='cancelled', updated_at=? "
+                "WHERE state IN ('queued','running','paused','resetting','reset_failed','completed_with_failures')",
+                (now,),
+            )
+            conn.execute(
+                "UPDATE install_batch_items SET state='cancelled', completed_at=?, download_state='' "
+                "WHERE state IN ('pending','queued','running','resetting','reset_pending','reset_failed','blocked_by_dependency')",
+                (now,),
+            )
+        if "write_confirmations" in tables:
+            conn.execute("DELETE FROM write_confirmations")
         reset = 0
         if "provisioning_steps" in tables:
             reset = conn.execute("DELETE FROM provisioning_steps").rowcount
@@ -303,12 +423,31 @@ def prepare_database(database: Path) -> dict[str, int]:
 def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Bring the old computer's Mu3Lab back onto this one. See the module docstring for the order."""
     paths = paths or RuntimePaths()
+    source = source.resolve()
+    if (
+        source == paths.root.resolve()
+        or source in paths.root.resolve().parents
+        or any(
+            source == folder.resolve() or folder.resolve() in source.parents
+            for folder in (paths.data, paths.projects, paths.state)
+        )
+    ):
+        raise RebuildError(
+            "The backup source overlaps rebuild destinations. Move it outside data, projects and state first."
+        )
+    repository = (paths.backups / "kopia").resolve()
+    if source != repository and source in repository.parents:
+        raise RebuildError(
+            "The backup source contains the destination repository. Move it outside the runtime root first."
+        )
     if status(paths).get("restored_at"):
         return status(paths)
     for folder in (paths.data, paths.projects, paths.state, paths.backups):
         folder.mkdir(parents=True, exist_ok=True)
     if interrupted(paths):
-        _clear_partial(paths, log)
+        _clear_partial(paths, log, source)
+        for folder in (paths.data, paths.projects, paths.state, paths.backups):
+            folder.mkdir(parents=True, exist_ok=True)
     found = existing_data(paths, source)
     if found:
         raise RebuildError(
@@ -318,29 +457,58 @@ def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = 
         )
     copied = source != (paths.backups / "kopia").resolve()
     write_atomic(
-        paths.state / STARTED, json.dumps({"started_at": _now(), "source": str(source), "copied": copied}).encode()
+        paths.state / STARTED,
+        json.dumps(
+            {
+                "format": 1,
+                "owned": {},
+                "started_at": _now(),
+                "source": str(source),
+                "source_identity": _fingerprint(source / REPOSITORY_FILE, log),
+                "copied": copied,
+            }
+        ).encode(),
     )
+    if copied:
+        _own(paths, paths.backups / ".kopia-copy")
+        _own(paths, paths.backups / "kopia")
     _copy_repository(source, paths, log)
-    snapshots = _open(password, paths, log)
+    _seal(paths, [paths.backups / ".kopia-copy", paths.backups / "kopia"], log)
+    _own(paths, paths.state / "kopia")
+    try:
+        snapshots = _open(password, paths, log)
+    finally:
+        _seal(paths, [paths.state / "kopia"], log)
     platform = snapshots.pop(backups.PLATFORM_SOURCE)
     if CONTROL not in platform["folders"]:
         raise RebuildError("The backup of Mu3Lab itself is incomplete: it has no settings folder.")
     log(f"Restoring Mu3Lab's own settings and secrets (backup {platform['id'][:8]} from {platform['time']}).")
     staging = paths.state / ".rebuild-control"
-    shutil.rmtree(staging, ignore_errors=True)
+    _own(paths, staging)
     _restore_folder(platform["id"], CONTROL, staging, password, paths, log)
+    _seal(paths, [staging], log)
     if PROJECTS in platform["folders"]:
+        _own(paths, paths.projects)
         _restore_folder(platform["id"], PROJECTS, paths.projects, password, paths, log)
+        _seal(paths, [paths.projects], log)
     try:
         old_uid = (staging / "export.json").stat().st_uid
     except OSError as exc:
         raise RebuildError("The backup of Mu3Lab itself has no export.json; it cannot be trusted.") from exc
     _owner_to_this_user([staging, paths.projects], old_uid, log)
+    _seal(paths, [staging, paths.projects], log)
+    control_targets = [
+        paths.state / name
+        for name in ("mu3lab.db", "mu3lab.db-wal", "mu3lab.db-shm", "secrets.key", "mu3lab.request-key", "deployments")
+    ]
+    for target in control_targets:
+        _own(paths, target)
     _place_control(staging, paths)
     stored = backups.repository_password(paths)
     if stored != password:
         raise RebuildError("The restored settings hold a different backup password than the one typed.")
     tidy = prepare_database(paths.state / "mu3lab.db")
+    _seal(paths, [staging, paths.projects, *control_targets], log)
     restored = []
     for app_id, snapshot in sorted(snapshots.items()):
         log(f"Restoring {app_id}'s data (backup {snapshot['id'][:8]} from {snapshot['time']}).")
@@ -348,7 +516,9 @@ def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = 
             target = paths.data / folder
             if target.exists() and any(target.iterdir()):
                 raise RebuildError(f"{target} already holds data; a rebuild never overwrites it.")
+            _own(paths, target)
             _restore_folder(snapshot["id"], folder, target, password, paths, log)
+            _seal(paths, [target], log)
         restored.append(app_id)
     result = {
         "restored_at": _now(),

@@ -369,7 +369,11 @@ def push_to_nextcloud(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> d
     changed = False
     try:
         for item in list(bucket["deleted"]):
-            headers = {"If-Match": item["etag"]} if item["etag"] else {}
+            if not item["etag"]:
+                # Legacy tombstones cannot prove which remote version was deleted.
+                report["kept"].append(item["title"] or item["href"])
+                continue
+            headers = {"If-Match": item["etag"]}
             response = nextcloud._dav("DELETE", calendar["href"] + item["href"], secret, headers=headers)
             if response.status_code == 412:
                 # Changed in Nextcloud after it was copied: theirs is newer, so it stays.
@@ -387,7 +391,10 @@ def push_to_nextcloud(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> d
             if edited_copy and record.get("etag"):
                 headers = {"If-Match": record["etag"]}
             elif edited_copy:
-                headers = {}  # copied before versions were kept: the earlier behaviour
+                record["conflict"] = CHANGED_IN_NEXTCLOUD
+                report["conflicts"].append(record["title"])
+                changed = True
+                continue
             else:
                 headers = {"If-None-Match": "*"}
             response = _put(calendar, secret, record, headers)
@@ -419,7 +426,16 @@ def resolve_conflict(owner_uid: str, event_id: str, keep: str, paths: RuntimePat
         raise CalendarError("not_found", "This event no longer needs a choice. Refresh the calendar.")
     if keep == "mine":
         _state, _metadata, secret, calendar = nextcloud._calendar_context(owner_uid, paths)
-        response = _put(calendar, secret, record, {})
+        current = nextcloud._dav("GET", calendar["href"] + record["href"], secret)
+        if current.status_code == 404:
+            headers = {"If-None-Match": "*"}
+        elif current.status_code == 200 and current.headers.get("ETag"):
+            headers = {"If-Match": current.headers["ETag"]}
+        else:
+            raise CalendarError("unavailable", "Nextcloud's current event version could not be checked.")
+        response = _put(calendar, secret, record, headers)
+        if response.status_code in {404, 412}:
+            raise CalendarError("conflict", "Nextcloud changed again. Your local edit was kept; review it again.")
         if response.status_code not in {200, 201, 204}:
             raise CalendarError("unavailable", "Nextcloud did not accept the event. Try again in a moment.")
     del bucket["events"][event_id]

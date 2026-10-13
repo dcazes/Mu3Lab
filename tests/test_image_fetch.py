@@ -140,7 +140,8 @@ class FetchTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.cache = Path(self.tmp.name)
+        self.cache = Path(self.tmp.name) / "image-cache"
+        self.cache.mkdir()
         for target, value in (
             ("ctl.image_fetch.CHUNK", CHUNK),
             ("ctl.image_fetch.host_platform", lambda: ("linux", "amd64")),

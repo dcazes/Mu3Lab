@@ -289,7 +289,7 @@ class JobStore:
                 SELECT * FROM jobs
                 WHERE state = 'queued'
                    OR (state = 'running' AND lease_expires_at != '' AND lease_expires_at < ?)
-                ORDER BY created_at ASC LIMIT 1
+                ORDER BY created_at ASC, rowid ASC LIMIT 1
             """,
                 (now,),
             ).fetchone()
