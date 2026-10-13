@@ -333,6 +333,15 @@ def import_from_nextcloud(owner_uid: str, resources: list[dict[str, str]], paths
     return copied
 
 
+def _same_ics(left: str, right: str) -> bool:
+    """The same calendar text, ignoring line endings and RFC 5545 line folding."""
+
+    def unfold(text: str) -> str:
+        return text.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "").strip()
+
+    return unfold(left) == unfold(right)
+
+
 def _put(calendar: dict, secret: dict, record: dict, headers: dict[str, str]):
     return nextcloud._dav(
         "PUT",
@@ -348,9 +357,11 @@ def push_to_nextcloud(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> d
     """Send what is kept here to the connected Nextcloud calendar, then forget it.
 
     - New events and untouched copies are created with ``If-None-Match: *``.
-      A 412 means it is already there: a copy that was never removed, or an
-      event an interrupted attempt already sent (new events' file names are
-      Mu3Lab's own UUIDs, so nothing else can hold them). Nothing is duplicated.
+      A 412 means it is already there. For an untouched copy, Nextcloud's
+      version is the real one. For a new event, an interrupted attempt already
+      sent it (its file name is Mu3Lab's own UUID), but it may have been edited
+      here since: it is forgotten only if Nextcloud holds exactly this
+      version, and otherwise stays here as a conflict. Nothing is duplicated.
     - An edited copy goes back with ``If-Match`` on the version it was copied
       from. If Nextcloud changed or deleted it since, the edit stays here as a
       conflict for the person to settle (``resolve_conflict``).
@@ -405,6 +416,17 @@ def push_to_nextcloud(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> d
                 continue
             if response.status_code not in {200, 201, 204, 412}:
                 return report
+            if response.status_code == 412 and not record["from_nextcloud"]:
+                current = nextcloud._dav("GET", calendar["href"] + record["href"], secret)
+                if current.status_code != 200:
+                    continue  # checked again on the next sync
+                if not _same_ics(current.text, record["ics"]):
+                    # The existence of the file proves which event it is, not that it holds the latest edit.
+                    record["conflict"] = CHANGED_IN_NEXTCLOUD
+                    record["etag"] = current.headers.get("ETag", "")
+                    report["conflicts"].append(record["title"])
+                    changed = True
+                    continue
             del bucket["events"][event_id]
             changed = True
             report["moved"] += 1

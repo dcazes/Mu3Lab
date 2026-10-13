@@ -626,21 +626,56 @@ class LocalCalendarTests(unittest.TestCase):
             _connect_owner("owner", paths)
             for title in ("First", "Second", "Third"):
                 local_calendar.create_event("owner", TIMED | {"title": title}, paths)
-            # One upload already landed earlier (412); the third fails and stays local.
-            responses = [httpx.Response(412), httpx.Response(201), httpx.Response(503)]
-            with patch("ctl.nextcloud_calendar.httpx.request", side_effect=responses) as request:
+            # One upload already landed earlier (412, and Nextcloud holds that exact version); the third fails.
+            responses = iter([412, 201, 503])
+            sent: list[bytes] = []
+
+            def dav(method, _url, **kwargs):
+                if method == "GET":
+                    return httpx.Response(200, content=sent[0], headers={"ETag": '"v1"'})
+                sent.append(kwargs["content"])
+                return httpx.Response(next(responses))
+
+            with patch("ctl.nextcloud_calendar.httpx.request", side_effect=dav) as request:
                 self.assertEqual(local_calendar.push_to_nextcloud("owner", paths)["moved"], 2)
             first = request.call_args_list[0]
             self.assertEqual(first.args[0], "PUT")
             self.assertIn(HREF, first.args[1])
             self.assertEqual(first.kwargs["headers"]["If-None-Match"], "*")
-            failed = request.call_args_list[2].kwargs["content"]
+            self.assertEqual(request.call_args_list[1].args[0], "GET")
+            failed = sent[2]
             remaining = local_calendar.list_events("owner", *self.RANGE, 100, paths)
             self.assertEqual(len(remaining), 1)
             self.assertIn(f"SUMMARY:{remaining[0]['title']}".encode(), failed)
             with patch("ctl.nextcloud_calendar.httpx.request", return_value=httpx.Response(201)):
                 self.assertEqual(local_calendar.push_to_nextcloud("owner", paths)["moved"], 1)
             self.assertFalse(local_calendar.has_events("owner", paths))
+
+    def test_an_edit_made_after_a_lost_upload_is_kept_as_a_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            _connect_owner("owner", paths)
+            event_id = local_calendar.create_event("owner", TIMED, paths)["id"]
+            first = local_calendar._load("owner", paths)["events"][event_id]["ics"].encode()
+            revision = local_calendar.list_events("owner", *self.RANGE, 100, paths)[0]["revision"]
+            local_calendar.update_event(
+                "owner", event_id, TIMED | {"title": "Dentist (moved)", "revision": revision}, paths
+            )
+
+            def dav(method, _url, **_kwargs):
+                # Nextcloud took the first upload, but its answer never arrived.
+                return (
+                    httpx.Response(200, content=first, headers={"ETag": '"v1"'})
+                    if method == "GET"
+                    else httpx.Response(412)
+                )
+
+            with patch("ctl.nextcloud_calendar.httpx.request", side_effect=dav):
+                report = local_calendar.push_to_nextcloud("owner", paths)
+            self.assertEqual((report["moved"], report["conflicts"]), (0, ["Dentist (moved)"]))
+            kept = local_calendar._load("owner", paths)["events"][event_id]
+            self.assertIn("SUMMARY:Dentist (moved)", kept["ics"])
+            self.assertEqual((kept["conflict"], kept["etag"]), (local_calendar.CHANGED_IN_NEXTCLOUD, '"v1"'))
 
     def test_disconnecting_copies_events_back_to_mu3lab(self):
         with tempfile.TemporaryDirectory() as tmp:
