@@ -20,6 +20,7 @@ services:
       interval: 5s
       timeout: 10s
       retries: 48
+      start_period: 600s
 
 networks:
   mu3lab_frontend: {external: true}

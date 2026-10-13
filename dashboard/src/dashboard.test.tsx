@@ -137,6 +137,27 @@ describe('Home', () => {
     expect(within(strip).getByText('Paperless-ngx: needs attention')).toBeInTheDocument();
   });
 
+  it('points to System settings when a setup step failed', () => {
+    renderWithDashboard(
+      <HomePage />,
+      dashboardData([], {
+        provisioning: { ok: true, available: true, complete: false, phases: [] },
+        core: {
+          ok: true,
+          ready_to_run: true,
+          services: [],
+          missing_manifests: [],
+          next_action: '',
+          current_job: { state: 'failed' } as never,
+        },
+      }),
+    );
+    const strip = screen.getByRole('region', { name: 'Needs attention' });
+    expect(
+      within(strip).getByRole('link', { name: 'A setup step didn’t finish. Open System settings to try again.' }),
+    ).toHaveAttribute('href', '/settings/system');
+  });
+
   it('asks for attention when backups fall behind, linking to Backups', () => {
     renderWithDashboard(
       <HomePage />,

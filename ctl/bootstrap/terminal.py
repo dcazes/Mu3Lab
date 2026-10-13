@@ -599,7 +599,7 @@ def run(restoring: bool = False) -> int:
     else:
         screen.finish(screen.color(RED, "!"), "Some core apps did not start yet")
         screen.say(
-            f"    {detail or 'See the dashboard for details.'} The dashboard shows what went wrong and a Retry button."
+            f"    {detail or 'See the dashboard for details.'} In the dashboard, Settings → System has a button to try again."
         )
 
     host = tailnet_name()

@@ -79,7 +79,20 @@ function Attention() {
   const failing = data.services.services.filter(needsAttention);
   const working = data.services.services.filter(isWorking);
   const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
+  const setupFailed = setupIncomplete && (data.provisioning.blocked || data.core.current_job?.state === 'failed');
   const items = [
+    // The button that tries again sits in System settings.
+    ...(setupFailed
+      ? [
+          {
+            key: 'setup-failed',
+            icon: AlertTriangle,
+            tone: 'warning',
+            text: 'A setup step didn’t finish. Open System settings to try again.',
+            to: '/settings/system',
+          },
+        ]
+      : []),
     ...failing.map((service) => ({
       key: service.id,
       icon: AlertTriangle,

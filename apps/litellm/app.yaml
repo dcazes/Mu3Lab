@@ -15,6 +15,7 @@ depends_on:
 - freellmapi
 service:
   local_port: 4000
+  start_timeout_seconds: 600
   health:
     path: /health/liveliness
 route:

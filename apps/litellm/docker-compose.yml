@@ -22,6 +22,7 @@ services:
       interval: 5s
       timeout: 10s
       retries: 48
+      start_period: 600s
 
   db:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -39,6 +40,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+      start_period: 600s
 
 networks:
   mu3lab_frontend: {external: true}

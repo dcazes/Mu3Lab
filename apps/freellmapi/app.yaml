@@ -12,6 +12,7 @@ version: v0.13.3
 upstream: TashfeenAhmed/FreeLLMAPI
 service:
   local_port: 3001
+  start_timeout_seconds: 600
   health:
     path: /api/ping
 route:

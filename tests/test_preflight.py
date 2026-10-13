@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ctl import preflight
+from ctl.runtime import RuntimePaths
 
 
 class TailscaleConnectionProbeTests(unittest.TestCase):
@@ -339,6 +340,28 @@ class PortTests(unittest.TestCase):
         self.assertTrue(result["owners"]["8081"]["ours"])
         self.assertEqual(result["owners"]["8081"]["process"], "mu3lab-vaultwarden-vaultwarden-1")
         self.assertIn("private HTTPS URL on port 8443", result["owners"]["8081"]["port_info"]["access"])
+
+    def test_vaultwarden_restarted_from_runtime_copy_is_ours(self):
+        ss_out = "LISTEN 0 4096 127.0.0.1:8081 0.0.0.0:*"
+
+        def fake_run(argv, timeout=10):
+            if argv[:2] == ["ss", "-tlnp"]:
+                return 0, ss_out
+            if argv[:2] == ["docker", "ps"]:
+                return 0, "mu3lab-vaultwarden-vaultwarden-1\t127.0.0.1:8081->80/tcp"
+            if argv[:2] == ["docker", "inspect"]:
+                return 0, "/srv/mu3lab/projects/vaultwarden"
+            return 1, "unexpected command"
+
+        from unittest.mock import patch as _patch
+
+        with (
+            _patch("ctl.preflight._run", side_effect=fake_run),
+            _patch("ctl.preflight.RuntimePaths", return_value=RuntimePaths(Path("/srv/mu3lab"))),
+        ):
+            result = preflight.check_ports(connect_fn=lambda port: port == 8081)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["owners"]["8081"]["ours"])
 
     def test_compose_owner_matches_the_container_publishing_that_port(self):
         ss_out = "LISTEN 0 4096 127.0.0.1:9001 0.0.0.0:*"

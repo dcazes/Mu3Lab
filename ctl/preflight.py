@@ -30,6 +30,7 @@ from pathlib import Path
 
 from ctl import process
 from ctl.platform_apps import by_capability
+from ctl.runtime import RuntimePaths
 
 # ---------------------------------------------------------------------------
 # Constants: every magic value lives here with its reason.
@@ -572,7 +573,9 @@ def _port_owner(port: int) -> dict | None:
                 label_rc, working_dir = _docker_probe(
                     ["inspect", "--format", '{{index .Config.Labels "com.docker.compose.project.working_dir"}}', name]
                 )
-                if label_rc == 0 and Path(working_dir).resolve() == (ROOT / "apps" / project).resolve():
+                # The installer starts it from the checkout; the app engine restarts it from its runtime copy.
+                homes = {(ROOT / "apps" / project).resolve(), (RuntimePaths().projects / project).resolve()}
+                if label_rc == 0 and Path(working_dir).resolve() in homes:
                     return {"pid": None, "process": name, "ours": True}
         return {"pid": None, "process": process or "unknown", "ours": False}
     ours = False
