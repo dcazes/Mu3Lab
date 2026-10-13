@@ -73,7 +73,7 @@ def _sync_agents(log) -> tuple[bool, str]:
         operators = operator_subjects()
         authority = mcp_gateway.authority()
         for uid in records:
-            authority.grant_subject(uid, operator=uid in operators)
+            mcp_gateway.grant(uid, operator=uid in operators)
         state = ControlState.runtime()
         if state is None:
             return True, "Chat synchronization waits for application state."

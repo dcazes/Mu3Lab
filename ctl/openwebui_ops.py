@@ -61,14 +61,13 @@ def revoke(subject: str) -> None:
 def _sync(log: Log) -> tuple[bool, str]:
     try:
         people = chat_people()
-        authority = mcp_gateway.authority()
         with client() as api:
             accounts = {str(user.get("email") or "").strip().lower(): str(user["id"]) for user in api.users()}
             desired: dict[str, list[dict]] = {}
             owners: dict[str, str] = {}
             for uid, person in people.items():
                 user_id = accounts.get(person["email"])
-                authority.grant_subject(uid, operator=person["operator"])
+                mcp_gateway.grant(uid, operator=person["operator"])
                 if not user_id or not person["operator"]:
                     continue
                 desired[user_id] = chat_ops.desired_assistants(uid)

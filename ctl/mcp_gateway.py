@@ -56,6 +56,18 @@ def authority() -> Authority:
     return Authority(project() / "authority")
 
 
+def grant(subject: str, *, operator: bool) -> None:
+    """Grant or withdraw operator authority, never undoing a revocation that has already completed.
+
+    Membership was read before this call and may be stale; the access hold is recorded before any
+    revocation runs, so re-checking it under the lock revocation takes closes that gap.
+    """
+    from ctl import access, resource_locks
+
+    with resource_locks.hold(access.GATEWAY_LOCK):
+        authority().grant_subject(subject, operator=operator and not access.hold(subject))
+
+
 def operator_token(subject: str, service_id: str) -> str:
     return authority().credential(subject, service_id)
 
@@ -400,7 +412,7 @@ def verify_operator(subject: str) -> None:
     except ValueError:
         store.revoke_subject(subject)
         raise ValueError("Operator membership could not be verified; connector access remains unavailable.") from None
-    store.grant_subject(subject, operator=allowed)
+    grant(subject, operator=allowed)
     if not allowed:
         raise ValueError("Shared connector credentials are available only to current operators.")
 

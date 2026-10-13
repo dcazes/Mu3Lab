@@ -43,6 +43,9 @@ RETRY_BASE_SECONDS = 30
 RETRY_MAX_SECONDS = 3600
 INTERVAL = 30
 CHAT_LOCK = "chat-assistants"
+# Every gateway grant and revocation takes this, so a grant made from an older membership read
+# can never land after a revocation has completed (mcp_gateway.grant re-checks the hold inside it).
+GATEWAY_LOCK = "gateway-authority"
 
 
 def _now() -> str:
@@ -183,11 +186,13 @@ def _authentik_role(subject: str, username: str) -> None:
 
 
 def _gateway(subject: str, _username: str) -> None:
+    from ctl import resource_locks
     from gateway_authority import Authority
 
     directory = RuntimePaths().projects / "mcp-gateway" / "authority"
     if (directory / "authority.db").is_file():
-        Authority(directory, initialize=False).revoke_subject(subject)
+        with resource_locks.hold(GATEWAY_LOCK):
+            Authority(directory, initialize=False).revoke_subject(subject)
 
 
 def _voice_key(subject: str, _username: str) -> None:
