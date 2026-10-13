@@ -91,6 +91,12 @@ class AuthentikFixture:
 
 
 class PeopleTests(AuthentikFixture, unittest.TestCase):
+    def test_new_install_owner_is_found_before_first_sign_in(self):
+        # Until the first sign-in, the owner is only in "authentik Admins".
+        owner = people.owner_identity()
+        self.assertEqual(owner and owner["owner_uid"], "uid-1")
+        self.assertEqual(owner and owner["email"], "owner@example.test")
+
     def test_listing_filters_service_users_and_outsiders(self):
         result = people.list_people()
         self.assertEqual([user["username"] for user in result], ["member", "owner"])

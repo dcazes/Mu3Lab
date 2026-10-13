@@ -223,7 +223,10 @@ def owner_identity() -> dict[str, str] | None:
         operators = [
             user
             for user in Authentik.runtime().users()
-            if user.get("is_active") and ADMIN_GROUP in _group_names(user) and user.get("email")
+            if user.get("is_active")
+            and _role(user) == "admin"
+            and user.get("email")
+            and not user["username"].startswith("ak-")
         ]
     except AuthentikError:
         return None
