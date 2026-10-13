@@ -406,6 +406,27 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
     def fail(detail: str, code: str, step: str) -> None:
         store.transition(job_id, "failed", actor=actor, detail=redact(detail), error_code=code, step_id=step)
 
+    def roll_back(reason: str, code: str, step: str, *, refollow: bool = False) -> None:
+        """Put the earlier settings back; if that fails too, never claim more privacy than may be true."""
+        save(before, before.get("changed_by") or actor, paths)
+        try:
+            _apply(paths, root, log)
+            if refollow:
+                follow()
+        except (OSError, ValueError, RuntimeError) as undo:
+            # The routing may still be the new one, so the record must not say local only when either allows outside.
+            outside = "outside_allowed" in (before["privacy"], chosen["privacy"])
+            save({**before, "privacy": "outside_allowed" if outside else "local_only"}, actor, paths)
+            where = " Outside providers may still be used." if outside else ""
+            fail(
+                f"{reason} Putting the earlier settings back also failed ({redact(str(undo))}).{where} "
+                "Choose your AI settings again to retry.",
+                "rollback_failed",
+                step,
+            )
+            return
+        fail(f"The earlier settings were kept: {reason}", code, step)
+
     catalog = load().catalog
     before = settings(paths)
     try:
@@ -453,12 +474,7 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         if chat:
             _probe_litellm(log)
     except (OSError, ValueError, RuntimeError) as exc:
-        save(before, before.get("changed_by") or actor, paths)
-        try:
-            _apply(paths, root, log)
-        except (OSError, ValueError, RuntimeError) as undo:
-            log(f"Putting the earlier settings back also failed: {redact(str(undo))}")
-        fail(f"The earlier settings were kept: {exc}", "routing_failed", "route")
+        roll_back(str(exc), "routing_failed", "route")
         return
     # 3. Apps whose settings follow the models: the chat app's list, the runners' search model.
     facts = Facts(tailnet_dns_name(), paths, catalog)
@@ -485,13 +501,7 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
             log(f"Checking {embed.name} in {target.manifest.name}.")
             engine.check_embedding(embed)
         except model_runners.ENGINE_ERRORS as exc:
-            save(before, before.get("changed_by") or actor, paths)
-            try:
-                _apply(paths, root, log)
-                follow()
-            except (OSError, ValueError, RuntimeError) as undo:
-                log(f"Putting the earlier settings back also failed: {redact(str(undo))}")
-            fail(f"The earlier settings were kept: {embed.name} did not answer ({exc}).", "model_failed", "check")
+            roll_back(f"{embed.name} did not answer ({exc}).", "model_failed", "check", refollow=True)
             return
     if incomplete:
         # An app still on the old settings may still need an old model, so nothing is deleted.

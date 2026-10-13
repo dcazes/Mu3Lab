@@ -310,6 +310,26 @@ class JobTests(_Runtime):
         self.assertEqual([item["privacy"] for item in self.applied], ["local_only", "outside_allowed"])
         self.assertEqual(self.engine.deleted, [])
 
+    def test_a_failed_undo_never_claims_local_only(self):
+        save = local_models.save
+        save(LOCAL, "owner", self.paths)
+        calls = []
+
+        def apply(paths, _root, _log):
+            calls.append(local_models.settings(paths)["privacy"])
+            if len(calls) > 1:
+                raise RuntimeError("LiteLLM did not restart")
+
+        self.stack.enter_context(patch("ctl.local_models._apply", side_effect=apply))
+        self.stack.enter_context(patch("ctl.local_models._probe_litellm", side_effect=RuntimeError("HTTP 500")))
+        job = self.run_job({**OUTSIDE, "chat_model": "qwen3.5-4b"})
+        self.assertEqual((job["state"], job["error_code"]), ("failed", "rollback_failed"))
+        self.assertEqual(calls, ["outside_allowed", "local_only"])
+        # The routing may still send requests outside, so nothing may say local only.
+        self.assertEqual(local_models.settings(self.paths)["privacy"], "outside_allowed")
+        self.assertIn("Outside providers may still be used", job["detail"])
+        self.assertNotIn("earlier settings were kept", job["detail"])
+
     def test_the_search_model_cannot_change_under_an_index_tied_app(self):
         self.stack.enter_context(patch("ctl.local_models.index_tied", return_value=["SurfSense"]))
         job = self.run_job({**OUTSIDE, "embedding_model": "nomic-embed-text"})
