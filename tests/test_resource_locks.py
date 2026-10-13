@@ -9,7 +9,9 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from ctl import job_guard, process, resource_locks, worker
@@ -153,6 +155,69 @@ class WorkerLockTests(_Paths):
             worker.run_job(store, claimed, "w")
         dispatch.assert_not_called()
         self.assertEqual(store.get(job["id"])["error_code"], "resource_busy")
+
+
+class _Stop(Exception):
+    pass
+
+
+class WorkerStartTests(_Paths):
+    """A new worker changes nothing until an earlier worker's commands and backup containers are gone."""
+
+    def test_maintenance_and_jobs_wait_for_leftovers_from_an_earlier_worker(self):
+        events: list[str] = []
+        leftovers = [["docker (pid 1, job 1)"], [], []]
+        containers = [[], ["0123456789abcdef"], []]
+        store = SimpleNamespace(database=self.paths.state / "mu3lab.db")
+
+        def claim(_worker_id):
+            events.append("claim")
+            raise _Stop
+
+        store.claim = claim
+        processes = SimpleNamespace(install=lambda: None, settle=lambda _log: leftovers.pop(0))
+        lock = SimpleNamespace(held=False, release=lambda: None)
+
+        def acquire():
+            lock.held = True
+            return True
+
+        lock.try_acquire = acquire
+
+        def record(name):
+            return lambda *_args, **_kwargs: events.append(name)
+
+        patches = {
+            "ctl.worker.JobStore.runtime": lambda: store,
+            "ctl.worker.resource_locks.WorkerLock": lambda: lock,
+            "ctl.worker.JobProcesses": lambda _database: processes,
+            "ctl.worker.time.sleep": lambda _seconds: events.append("wait"),
+            "ctl.backups._running_backups": lambda: containers.pop(0),
+            "ctl.backups.start_verification": record("verification"),
+            "ctl.worker.run_periodic": record("maintenance"),
+            "ctl.worker.backup_service.reconcile": record("backup upkeep"),
+            "ctl.worker.rebuild.resume": record("resume"),
+            "ctl.mcp_ops.reconcile_lifecycle": record("connectors"),
+            "ctl.worker.sync_agents": record("chat"),
+            "ctl.vault_sync.run": record("vault"),
+            "ctl.download_manager.start": record("downloads"),
+            "ctl.worker.reconciler.start": lambda _stopping: None,
+            "ctl.worker.sign_in.start": record("sign-in checks"),
+            "ctl.worker.access.start": record("revocation"),
+        }
+        with ExitStack() as stack:
+            for target, value in patches.items():
+                stack.enter_context(patch(target, side_effect=value))
+            with self.assertRaises(_Stop):
+                worker.run()
+        waits = [i for i, event in enumerate(events) if event == "wait"]
+        # One wait for the leftover command, one for the backup container; nothing changed before both ended.
+        self.assertEqual(len(waits), 2)
+        for change in ("verification", "maintenance", "backup upkeep", "resume", "connectors", "chat", "vault"):
+            self.assertGreater(events.index(change), waits[-1], change)
+        # Revoking access is never held up.
+        self.assertLess(events.index("revocation"), waits[0])
+        self.assertEqual(events[-1], "claim")
 
 
 class LeftoverCommandTests(_Paths):

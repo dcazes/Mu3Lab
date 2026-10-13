@@ -172,6 +172,7 @@ def run() -> int:
     waiting_for_lock_reported = False
     processes: JobProcesses | None = None
     leftovers_reported: list[str] = []
+    settled = False
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait
@@ -197,14 +198,32 @@ def run() -> int:
 
             processes = JobProcesses(store.database)
             processes.install()
-            # App images download in the background, several at once, while
-            # setup jobs run one at a time below.
+            # Reading status, downloading images and revoking access never change a running app,
+            # so they start at once. App images download in the background, several at once,
+            # while setup jobs run one at a time below.
             download_manager.start(log.info, downloads_stopping)
             status_thread = reconciler.start(downloads_stopping)
             sign_in.start(downloads_stopping, log.info)
             access.start(downloads_stopping, log.info)
-            from ctl import backups
+        from ctl import backups
 
+        assert processes is not None
+        leftovers = processes.settle(log.info)
+        if not settled:
+            # Only at start: a one-off backup container of the previous worker may still be reading
+            # an app's data. Later ones are this worker's own.
+            leftovers += [f"backup container {name[:12]}" for name in backups._running_backups()]
+        if leftovers:
+            # Never start, restart or reconfigure anything while an earlier worker's command may
+            # still be changing things: no maintenance below, and no new jobs.
+            if leftovers != leftovers_reported:
+                log.info(f"Mu3Lab waits for an earlier worker's command to finish: {', '.join(leftovers)}")
+                leftovers_reported = leftovers
+            time.sleep(POLL_SECONDS)
+            continue
+        leftovers_reported = []
+        if not settled:
+            settled = True
             backups.start_verification(downloads_stopping, log.info)
         if time.monotonic() >= next_rule_maintenance:
             next_rule_maintenance = time.monotonic() + 60
@@ -264,16 +283,6 @@ def run() -> int:
                 batches.reconcile(store)
         except Exception as exc:
             log.warning(f"Mu3Lab batch reconciliation deferred safely: {exc}")
-        assert processes is not None
-        leftovers = processes.settle(log.info)
-        if leftovers:
-            # Never start new work while an earlier worker's command may still be changing things.
-            if leftovers != leftovers_reported:
-                log.info(f"Mu3Lab waits for an earlier worker's command to finish: {', '.join(leftovers)}")
-                leftovers_reported = leftovers
-            time.sleep(POLL_SECONDS)
-            continue
-        leftovers_reported = []
         job = store.claim(worker_id)
         if job is None:
             time.sleep(POLL_SECONDS)
