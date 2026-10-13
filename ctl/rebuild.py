@@ -552,6 +552,7 @@ def resume(store, root: Path, log: Log, paths: RuntimePaths | None = None) -> li
         return []
     control = ControlState.runtime(paths)
     done = set(marker.get("started") or [])
+    waiting = set(marker.get("busy") or [])
     queued, busy = [], []
     for service in load().services:
         if service.id in done:
@@ -574,12 +575,14 @@ def resume(store, root: Path, log: Log, paths: RuntimePaths | None = None) -> li
         except JobConflict:
             # Another job for it is still waiting; try again on the next pass rather than forget it.
             busy.append(service.id)
-            log(f"{service.name} has another job waiting; it is started after the rebuild once that finishes.")
+            if service.id not in waiting:
+                log(f"{service.name} has another job waiting; it is started after the rebuild once that finishes.")
         except ValueError as exc:
             log(f"{service.name} was not started after the rebuild: {exc}")
     started = sorted(done | set(queued))
     write_atomic(
-        _marker(paths), json.dumps({**marker, "apps_started": not busy, "started": started}, indent=2).encode()
+        _marker(paths),
+        json.dumps({**marker, "apps_started": not busy, "started": started, "busy": busy}, indent=2).encode(),
     )
     if queued:
         log(f"Starting {len(queued)} apps that were running before the rebuild.")

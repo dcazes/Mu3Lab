@@ -164,10 +164,8 @@ class _Stop(Exception):
 class WorkerStartTests(_Paths):
     """A new worker changes nothing until an earlier worker's commands and backup containers are gone."""
 
-    def test_maintenance_and_jobs_wait_for_leftovers_from_an_earlier_worker(self):
+    def run_worker(self, leftovers, containers, **extra):
         events: list[str] = []
-        leftovers = [["docker (pid 1, job 1)"], [], []]
-        containers = [[], ["0123456789abcdef"], []]
         store = SimpleNamespace(database=self.paths.state / "mu3lab.db")
 
         def claim(_worker_id):
@@ -205,11 +203,16 @@ class WorkerStartTests(_Paths):
             "ctl.worker.sign_in.start": record("sign-in checks"),
             "ctl.worker.access.start": record("revocation"),
         }
+        patches |= {target: value(events) for target, value in extra.items()}
         with ExitStack() as stack:
             for target, value in patches.items():
                 stack.enter_context(patch(target, side_effect=value))
             with self.assertRaises(_Stop):
                 worker.run()
+        return events
+
+    def test_maintenance_and_jobs_wait_for_leftovers_from_an_earlier_worker(self):
+        events = self.run_worker([["docker (pid 1, job 1)"], [], []], [[], ["0123456789abcdef"], []])
         waits = [i for i, event in enumerate(events) if event == "wait"]
         # One wait for the leftover command, one for the backup container; nothing changed before both ended.
         self.assertEqual(len(waits), 2)
@@ -217,6 +220,23 @@ class WorkerStartTests(_Paths):
             self.assertGreater(events.index(change), waits[-1], change)
         # Revoking access is never held up.
         self.assertLess(events.index("revocation"), waits[0])
+        self.assertEqual(events[-1], "claim")
+
+    def test_a_backup_container_that_never_ends_is_stopped_after_the_survivor_wait(self):
+        running = ["0123456789abcdef"]
+        with patch("ctl.backups.SURVIVOR_WAIT_SECONDS", -1):
+            events = self.run_worker(
+                [[], []],
+                None,
+                **{
+                    "ctl.backups._running_backups": lambda _events: lambda: list(running),
+                    "ctl.backups._stop_container": lambda events: (
+                        lambda name, _log: (events.append(f"stop {name}"), running.clear())
+                    ),
+                },
+            )
+        self.assertIn("stop 0123456789abcdef", events)
+        self.assertEqual(events.count("wait"), 0)
         self.assertEqual(events[-1], "claim")
 
 

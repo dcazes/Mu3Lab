@@ -275,6 +275,36 @@ class JobTests(_Runtime):
         self.assertEqual([item["embedding_model"] for item in self.applied], ["nomic-embed-text", "bge-m3"])
         self.assertEqual(self.followed, 2)
 
+    def test_an_app_that_cannot_follow_the_undo_is_named(self):
+        self.engine.embedding_follows_restart = True
+        self.engine.check_embedding = lambda _model: (_ for _ in ()).throw(RuntimeError("no vectors"))
+        app = SimpleNamespace(id="open-webui", manifest=SimpleNamespace(name="Open WebUI"))
+        calls = iter([[], [app]])  # follows the change, then cannot follow the undo
+        with (
+            patch("ctl.local_models._followers", side_effect=lambda _catalog, _paths: next(calls)),
+            patch("ctl.engine.rewire.rewire_one", side_effect=RuntimeError("restart failed")),
+        ):
+            job = self.run_job({**OUTSIDE, "embedding_model": "nomic-embed-text"})
+        self.assertEqual((job["state"], job["error_code"]), ("failed", "rollback_incomplete"))
+        self.assertIn("Open WebUI", job["detail"])
+        self.assertNotIn("earlier settings were kept", job["detail"])
+
+    def test_a_failed_undo_after_the_search_check_never_claims_local_only(self):
+        local_models.save(LOCAL, "owner", self.paths)
+        self.engine.embedding_follows_restart = True
+        self.engine.check_embedding = lambda _model: (_ for _ in ()).throw(RuntimeError("no vectors"))
+        applied = []
+
+        def apply(paths, _root, _log):
+            applied.append(local_models.settings(paths)["privacy"])
+            if len(applied) > 1:
+                raise RuntimeError("LiteLLM did not restart")
+
+        self.stack.enter_context(patch("ctl.local_models._apply", side_effect=apply))
+        job = self.run_job({**OUTSIDE, "chat_model": "qwen3.5-4b", "embedding_model": "nomic-embed-text"})
+        self.assertEqual((job["state"], job["error_code"]), ("failed", "rollback_failed"))
+        self.assertEqual(local_models.settings(self.paths)["privacy"], "outside_allowed")
+
     def test_a_model_that_fails_its_check_changes_nothing(self):
         self.engine.check_chat = lambda _model: (_ for _ in ()).throw(RuntimeError("out of memory"))
         job = self.run_job(LOCAL)

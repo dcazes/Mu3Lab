@@ -94,6 +94,17 @@ class RunTests(unittest.TestCase):
             self.assertTrue(process.run(argv, timeout=20).ok)
             self.assertTrue(self._gone(int(pid_file.read_text()), within=1))
 
+    def test_a_leader_gone_before_its_start_time_is_read_still_has_its_group_stopped(self) -> None:
+        from unittest.mock import patch
+
+        real = process.start_ticks
+        calls = iter([None])  # the leader exited before run() could read its start time
+        with tempfile.TemporaryDirectory() as directory:
+            argv, pid_file = self._descendant(directory, "import time; time.sleep(60)", keep_pipes=False)
+            with patch("ctl.process.start_ticks", side_effect=lambda pid: next(calls, real(pid))):
+                self.assertTrue(process.run(argv, timeout=20).ok)
+            self.assertTrue(self._gone(int(pid_file.read_text()), within=1))
+
     def test_a_descendant_that_ignores_sigterm_is_killed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             pid_file = Path(directory) / "pid"

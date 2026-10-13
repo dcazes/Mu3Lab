@@ -46,9 +46,14 @@ _MAX_EVENTS_PER_OWNER = 5000
 # A local edit to an event Nextcloud changed since it was copied, or deleted there.
 CHANGED_IN_NEXTCLOUD = "changed_in_nextcloud"
 DELETED_IN_NEXTCLOUD = "deleted_in_nextcloud"
+UPLOAD_UNCONFIRMED = "upload_unconfirmed"
 _CONFLICT_TEXT = {
     CHANGED_IN_NEXTCLOUD: "This event was also changed in Nextcloud. Choose which version to keep.",
     DELETED_IN_NEXTCLOUD: "This event was deleted in Nextcloud. Keep your version, or let it go.",
+    UPLOAD_UNCONFIRMED: (
+        "Nextcloud has an earlier version of this event from a sync that was interrupted. "
+        "Keep your version to replace it."
+    ),
 }
 
 
@@ -334,12 +339,16 @@ def import_from_nextcloud(owner_uid: str, resources: list[dict[str, str]], paths
 
 
 def _same_ics(left: str, right: str) -> bool:
-    """The same calendar text, ignoring line endings and RFC 5545 line folding."""
+    """The same events, however the server re-serialized the text (folding, line endings, order)."""
 
-    def unfold(text: str) -> str:
-        return text.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "").strip()
+    def events(text: str) -> list:
+        calendar = Calendar.from_ical(text)
+        return sorted(sorted(component.property_items(recursive=False)) for component in calendar.walk("VEVENT"))
 
-    return unfold(left) == unfold(right)
+    try:
+        return events(left) == events(right)
+    except ValueError:
+        return False
 
 
 def _put(calendar: dict, secret: dict, record: dict, headers: dict[str, str]):
@@ -422,7 +431,7 @@ def push_to_nextcloud(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> d
                     continue  # checked again on the next sync
                 if not _same_ics(current.text, record["ics"]):
                     # The existence of the file proves which event it is, not that it holds the latest edit.
-                    record["conflict"] = CHANGED_IN_NEXTCLOUD
+                    record["conflict"] = UPLOAD_UNCONFIRMED
                     record["etag"] = current.headers.get("ETag", "")
                     report["conflicts"].append(record["title"])
                     changed = True

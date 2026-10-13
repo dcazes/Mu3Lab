@@ -411,8 +411,7 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         save(before, before.get("changed_by") or actor, paths)
         try:
             _apply(paths, root, log)
-            if refollow:
-                follow()
+            unreverted = follow() if refollow else []
         except (OSError, ValueError, RuntimeError) as undo:
             # The routing may still be the new one, so the record must not say local only when either allows outside.
             outside = "outside_allowed" in (before["privacy"], chosen["privacy"])
@@ -422,6 +421,14 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
                 f"{reason} Putting the earlier settings back also failed ({redact(str(undo))}).{where} "
                 "Choose your AI settings again to retry.",
                 "rollback_failed",
+                step,
+            )
+            return
+        if unreverted:
+            fail(
+                f"{reason} The earlier routing is back, but these apps still use the new settings: "
+                f"{', '.join(unreverted)}. Choose your AI settings again to retry.",
+                "rollback_incomplete",
                 step,
             )
             return

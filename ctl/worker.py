@@ -173,6 +173,7 @@ def run() -> int:
     processes: JobProcesses | None = None
     leftovers_reported: list[str] = []
     settled = False
+    survivors_since = 0.0
     while not stopping:
         # The unit can be installed before the privileged runtime-layout step
         # finishes.  That is an expected bootstrap state, not a crash: wait
@@ -211,8 +212,16 @@ def run() -> int:
         leftovers = processes.settle(log.info)
         if not settled:
             # Only at start: a one-off backup container of the previous worker may still be reading
-            # an app's data. Later ones are this worker's own.
-            leftovers += [f"backup container {name[:12]}" for name in backups._running_backups()]
+            # an app's data. Later ones are this worker's own. Like the backups' own survivor check,
+            # it gets a bounded wait, then is stopped (Kopia exits cleanly on SIGTERM).
+            survivors = backups._running_backups()
+            survivors_since = (survivors_since or time.monotonic()) if survivors else 0.0
+            if survivors and time.monotonic() - survivors_since > backups.SURVIVOR_WAIT_SECONDS:
+                for name in survivors:
+                    log.info(f"Stopping backup container {name[:12]} left running by an earlier worker.")
+                    backups._stop_container(name, log.info)
+                survivors = backups._running_backups()
+            leftovers += [f"backup container {name[:12]}" for name in survivors]
         if leftovers:
             # Never start, restart or reconfigure anything while an earlier worker's command may
             # still be changing things: no maintenance below, and no new jobs.

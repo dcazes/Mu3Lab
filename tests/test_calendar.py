@@ -675,7 +675,7 @@ class LocalCalendarTests(unittest.TestCase):
             self.assertEqual((report["moved"], report["conflicts"]), (0, ["Dentist (moved)"]))
             kept = local_calendar._load("owner", paths)["events"][event_id]
             self.assertIn("SUMMARY:Dentist (moved)", kept["ics"])
-            self.assertEqual((kept["conflict"], kept["etag"]), (local_calendar.CHANGED_IN_NEXTCLOUD, '"v1"'))
+            self.assertEqual((kept["conflict"], kept["etag"]), (local_calendar.UPLOAD_UNCONFIRMED, '"v1"'))
 
     def test_disconnecting_copies_events_back_to_mu3lab(self):
         with tempfile.TemporaryDirectory() as tmp:

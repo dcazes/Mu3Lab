@@ -56,6 +56,8 @@ FORWARD_LINE_CHARS = 2000
 KILL_GRACE_SECONDS = 5.0
 _QUEUE_LINES = 32
 _POLL_SECONDS = 0.5
+# Start time recorded for a leader that exited before it could be read; matches no live process.
+LEADER_GONE = -1
 
 # Called with (process, argv, timeout) after a child starts; returns a callable
 # run once the child has been reaped, or None when it does not track this one.
@@ -170,7 +172,13 @@ def group_alive(pid: int, ticks: int) -> bool:
     current = start_ticks(pid)
     if current is not None:
         return current == ticks
-    # The leader is gone; look for any member still running (an exited zombie changes nothing).
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return False  # no member at all, the common case once a command ends
+    except PermissionError:
+        pass
+    # Some member is left; it counts unless every one is an exited zombie, which changes nothing.
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
@@ -266,7 +274,9 @@ def run(
         message = f"{argv[0]}: {exc}"
         return Result("error", 126, message, "", message)
 
-    ticks = start_ticks(proc.pid) if own_session else None
+    # A leader that has already exited (its zombie still holds the pid) is recorded as LEADER_GONE,
+    # so the group it may have left behind is still waited for.
+    ticks = (start_ticks(proc.pid) or LEADER_GONE) if own_session else None
     untrack = _track(proc, argv, timeout)
     inbox: queue.Queue[tuple[Stream, str] | None] = queue.Queue(maxsize=_QUEUE_LINES)
     halt = threading.Event()
