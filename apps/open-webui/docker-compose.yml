@@ -58,10 +58,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
-      interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 60s
+      start_period: 510s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

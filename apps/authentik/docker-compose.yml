@@ -15,9 +15,11 @@ services:
     networks: [mu3lab_backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"]
-      interval: 10s
       timeout: 5s
-      retries: 10
+      start_period: 100s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   server:
     image: ghcr.io/goauthentik/server:2026.8.3@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849
@@ -38,9 +40,11 @@ services:
       postgresql: {condition: service_healthy}
     healthcheck:
       test: ["CMD-SHELL", "ak healthcheck"]
-      interval: 15s
       timeout: 10s
-      retries: 12
+      start_period: 180s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   worker:
     image: ghcr.io/goauthentik/server:2026.8.3@sha256:ab9b4e8cc4ab3f8d1198d2db6aeea66bafea1963b3f2843589e0d163f97d9849
@@ -60,9 +64,11 @@ services:
       postgresql: {condition: service_healthy}
     healthcheck:
       test: ["CMD-SHELL", "ak healthcheck"]
-      interval: 15s
       timeout: 10s
-      retries: 12
+      start_period: 180s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

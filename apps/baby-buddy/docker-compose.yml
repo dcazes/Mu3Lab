@@ -23,10 +23,11 @@ services:
       - ./90-mu3lab-auth:/custom-cont-init.d/90-mu3lab-auth:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/ >/dev/null || exit 1"]
-      interval: 15s
       timeout: 5s
-      retries: 12
-      start_period: 45s
+      start_period: 225s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]

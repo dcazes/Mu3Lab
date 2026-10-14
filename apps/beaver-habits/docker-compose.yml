@@ -20,10 +20,11 @@ services:
     cap_drop: ["ALL"]
     healthcheck:
       test: ["CMD", "python", "healthcheck.py"]
-      interval: 15s
       timeout: 5s
-      retries: 12
-      start_period: 20s
+      start_period: 200s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   # The image runs as "nobody"; a folder Docker creates belongs to root.
   data-init:

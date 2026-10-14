@@ -10,6 +10,7 @@ from ctl.api.contracts import ContractRoute
 from ctl.api.routes import chat, jobs, system
 from ctl.api.security import Member
 from ctl.api.service_view import service_snapshot
+from ctl.status import signals
 from ctl.store import db
 
 router = APIRouter(prefix="/api/v1", tags=["snapshot"], route_class=ContractRoute)
@@ -17,6 +18,9 @@ router = APIRouter(prefix="/api/v1", tags=["snapshot"], route_class=ContractRout
 
 @router.get("/snapshot", response_model=models.SnapshotResponse, response_model_exclude_none=True)
 def snapshot(person: Member) -> models.SnapshotResponse:
+    # Someone is looking: the worker keeps statuses fresh while this continues.
+    signals.viewed()
+
     def read() -> dict:
         return {
             "services": service_snapshot(person),

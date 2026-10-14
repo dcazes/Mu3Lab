@@ -10,6 +10,7 @@ from ctl import access
 from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked
+from ctl.status import signals
 
 ADMIN_GROUP = "mu3lab-operators"
 MEMBER_GROUP = "mu3lab-household"
@@ -101,6 +102,8 @@ def add_person(name: str, email: str, role: str, authentik_origin: str) -> dict[
         raise PeopleError("Enter a valid email address.")
     if role not in ROLES:
         raise PeopleError("Choose member or admin.")
+    # The worker matches app accounts and vault logins to the household sooner after this.
+    signals.household_changed()
     try:
         with locked(RuntimePaths().runtime / "people.lock"):
             client = Authentik.runtime()
@@ -132,6 +135,7 @@ def change(username: str, action: str, authentik_origin: str, role: str = "", ac
         raise PeopleError("Unsupported change.")
     if action == "role" and role not in ROLES:
         raise PeopleError("Choose member or admin.")
+    signals.household_changed()
     try:
         with locked(RuntimePaths().runtime / "people.lock"):
             client = Authentik.runtime()

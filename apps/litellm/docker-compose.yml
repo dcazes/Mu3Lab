@@ -19,10 +19,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
-      interval: 5s
       timeout: 10s
-      retries: 48
-      start_period: 600s
+      start_period: 840s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
 
   db:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -37,10 +38,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
-      interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 600s
+      start_period: 750s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

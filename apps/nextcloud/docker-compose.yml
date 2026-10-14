@@ -14,9 +14,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud"]
-      interval: 10s
       timeout: 5s
-      retries: 20
+      start_period: 200s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   redis:
     image: redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0
@@ -26,9 +28,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDISCLI_AUTH ping | grep PONG"]
-      interval: 10s
       timeout: 5s
-      retries: 20
+      start_period: 200s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     environment:
       REDISCLI_AUTH: ${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}
 
@@ -69,10 +73,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/status.php | grep -q '\"installed\":true'"]
-      interval: 15s
       timeout: 8s
-      retries: 40
-      start_period: 90s
+      start_period: 690s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   cron:
     image: nextcloud:35.0.1-apache@sha256:b1ae671e9815401b0e837b19b9c778e89887721d67f0c8f9d34aa1d27a9a208f

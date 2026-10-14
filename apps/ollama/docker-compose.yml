@@ -19,9 +19,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "ollama", "list"]
-      interval: 20s
       timeout: 10s
-      retries: 10
+      start_period: 200s
+      start_interval: 20s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

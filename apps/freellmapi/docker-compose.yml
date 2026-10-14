@@ -17,10 +17,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/ping').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
-      interval: 5s
       timeout: 10s
-      retries: 48
-      start_period: 600s
+      start_period: 840s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

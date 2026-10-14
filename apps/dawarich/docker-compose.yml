@@ -49,10 +49,11 @@ services:
     networks: [mu3lab_frontend, mu3lab_backend, dawarich_internal]
     healthcheck:
       test: ["CMD-SHELL", "wget --header='X-Forwarded-Proto: https' -qO- http://127.0.0.1:3000/api/v1/health | grep -q '\"ok\"'"]
-      interval: 15s
       timeout: 10s
-      retries: 30
-      start_period: 120s
+      start_period: 570s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   sidekiq:
     <<: *dawarich
@@ -66,10 +67,11 @@ services:
     networks: [mu3lab_frontend, mu3lab_backend, dawarich_internal]
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f sidekiq"]
-      interval: 15s
       timeout: 10s
-      retries: 30
-      start_period: 60s
+      start_period: 510s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   db:
     image: postgis/postgis:17-3.5-alpine@sha256:894f570c0cf0664ed5576a8fd5d5bfb8fb1b19d592885b686c3a88c8bd90c41f
@@ -85,9 +87,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dawarich -d dawarich"]
-      interval: 10s
       timeout: 5s
-      retries: 30
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   redis:
     image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
@@ -99,9 +103,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
       timeout: 5s
-      retries: 30
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   # Photon, the private address lookup that comes with Dawarich. Its first start
   # downloads the map index (about 5 GB for Canada), so it has no health check:
@@ -125,6 +131,7 @@ services:
       dawarich_internal:
         aliases: [photon]
     security_opt: ["no-new-privileges:true"]
+    healthcheck: {disable: true}  # the image ships one; see above
 
 networks:
   mu3lab_frontend: {external: true}

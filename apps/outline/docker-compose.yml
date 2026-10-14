@@ -40,10 +40,11 @@ services:
     cap_drop: ["ALL"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/_health | grep -q OK || exit 1"]
-      interval: 15s
       timeout: 5s
-      retries: 20
-      start_period: 60s
+      start_period: 360s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
@@ -58,9 +59,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U outline -d outline"]
-      interval: 10s
       timeout: 5s
-      retries: 30
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   redis:
     image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
@@ -69,9 +72,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
       timeout: 5s
-      retries: 30
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   # Outline runs as nodejs (1001); a folder Docker creates belongs to root.
   files-init:

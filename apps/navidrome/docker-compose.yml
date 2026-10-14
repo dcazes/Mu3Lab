@@ -25,10 +25,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4533/ping"]
-      interval: 15s
       timeout: 5s
-      retries: 12
-      start_period: 20s
+      start_period: 200s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
 networks:
   navidrome: {}

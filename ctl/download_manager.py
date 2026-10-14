@@ -25,10 +25,12 @@ from ctl.jobs import JobStore
 from ctl.registry import ROOT, RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+from ctl.status import signals
 
 Log = Callable[[str], None]
 TICK_SECONDS = 1.0
-SIZES_EVERY = 600.0
+SIZES_EVERY = 600.0  # while someone uses Mu3Lab
+SIZES_EVERY_IDLE = 6 * 3600.0
 
 
 def declared_images(compose_file: Path) -> list[str]:
@@ -155,16 +157,17 @@ class DownloadManager:
 
     def run(self, stopping: threading.Event) -> None:
         sizes: threading.Thread | None = None
-        next_sizes = 0.0
+        last_sizes: float | None = None
         while not stopping.is_set():
             try:
                 self.tick()
             except Exception as exc:  # keep the manager alive; the next tick retries
                 self.log(f"Mu3Lab download manager deferred: {exc}")
             idle = sizes is None or not sizes.is_alive()
-            if idle and (self.sizes_stale.is_set() or time.monotonic() >= next_sizes):
+            every = signals.every(SIZES_EVERY, SIZES_EVERY_IDLE)
+            if idle and (self.sizes_stale.is_set() or last_sizes is None or time.monotonic() - last_sizes >= every):
                 self.sizes_stale.clear()
-                next_sizes = time.monotonic() + SIZES_EVERY
+                last_sizes = time.monotonic()
                 sizes = threading.Thread(target=self.measure_sizes, name="mu3lab-sizes", daemon=True)
                 sizes.start()
             stopping.wait(TICK_SECONDS)

@@ -12,6 +12,10 @@ services:
     ports: ["127.0.0.1:8815:8626"]
     networks: [mu3lab_backend, mu3lab_mcp_upstream]
     security_opt: [no-new-privileges:true]
+    healthcheck:  # the image's own /health check
+      start_period: 60s
+      start_interval: 5s
+      interval: 5m
 networks:
   mu3lab_backend: {external: true}
   mu3lab_mcp_upstream: {external: true}

@@ -153,12 +153,17 @@ def run() -> int:
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     stopping = False
     waiting_for_runtime_reported = False
-    next_mcp_reconcile = 0.0
-    next_chat_sync = 0.0
-    next_rule_maintenance = 0.0
-    next_vault_sync = 0.0
-    next_backup_service = 0.0
-    next_history_prune = 0.0
+    # Upkeep runs at its usual pace while someone uses Mu3Lab (``signals.active``), and
+    # rarely while nobody does, so an idle Mu3Lab barely touches Authentik, Vaultwarden or Docker.
+    last_run: dict[str, float] = {}
+    vault_sync_soon = 0.0
+
+    def due(task: str, fast: float, slow: float) -> bool:
+        now = time.monotonic()
+        if task in last_run and now - last_run[task] < signals.every(fast, slow):
+            return False
+        last_run[task] = now
+        return True
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -234,22 +239,21 @@ def run() -> int:
         if not settled:
             settled = True
             backups.start_verification(downloads_stopping, log.info)
-        if time.monotonic() >= next_rule_maintenance:
-            next_rule_maintenance = time.monotonic() + 60
+        if due("rules", 60, 900):
             try:
                 run_periodic(store, ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab sign-in verification deferred safely: {exc}")
-        if time.monotonic() >= next_vault_sync:
-            next_vault_sync = time.monotonic() + 300
+        if due("vault", 300, 3600) or (vault_sync_soon and time.monotonic() >= vault_sync_soon):
+            vault_sync_soon = 0.0
+            last_run["vault"] = time.monotonic()
             try:
                 from ctl import vault_sync
 
                 vault_sync.run(log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab vault saving deferred safely: {exc}")
-        if time.monotonic() >= next_backup_service:
-            next_backup_service = time.monotonic() + 60
+        if due("backup", 60, 900):
             try:
                 # Kopia's server runs the schedule; keep its folders, actions and policy in step.
                 backup_service.reconcile(store, ROOT, log.info)
@@ -260,8 +264,7 @@ def run() -> int:
                 rebuild.resume(store, ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab could not start the restored apps yet: {exc}")
-        if time.monotonic() >= next_history_prune:
-            next_history_prune = time.monotonic() + 24 * 3600
+        if due("history", 24 * 3600, 24 * 3600):
             try:
                 from ctl import history
 
@@ -270,16 +273,14 @@ def run() -> int:
                     log.info(f"Mu3Lab removed old history: {removed}")
             except Exception as exc:
                 log.warning(f"Mu3Lab history clean-up deferred: {exc}")
-        if time.monotonic() >= next_mcp_reconcile:
-            next_mcp_reconcile = time.monotonic() + 60
+        if due("mcp", 60, 900):
             try:
                 from ctl.mcp_ops import reconcile_lifecycle
 
                 reconcile_lifecycle(ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}")
-        if time.monotonic() >= next_chat_sync:
-            next_chat_sync = time.monotonic() + 300
+        if due("chat", 300, 3600):
             try:
                 sync_agents(log.info)
             except Exception as exc:
@@ -299,7 +300,7 @@ def run() -> int:
         try:
             run_job(store, job, worker_id)
             # A finished install may have created logins; save them within a minute.
-            next_vault_sync = min(next_vault_sync, time.monotonic() + 30)
+            vault_sync_soon = vault_sync_soon or time.monotonic() + 30
         finally:
             try:
                 from ctl.install_batches import InstallBatchStore
