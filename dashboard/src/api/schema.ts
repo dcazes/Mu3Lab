@@ -2589,8 +2589,6 @@ export interface components {
       download_gb: number;
       /** Downloaded */
       downloaded: boolean;
-      /** Gguf */
-      gguf: string;
       /** Id */
       id: string;
       /** Memory Gb */
@@ -2599,8 +2597,6 @@ export interface components {
       name: string;
       /** Note */
       note: string;
-      /** Quant */
-      quant: string;
       /** Tag */
       tag: string;
     };

@@ -1,11 +1,10 @@
 """Logins Mu3Lab created for each person in an app without single sign-on.
 
-Apps such as Unsloth Studio and Navidrome keep their own passwords: Studio for
-its web app, Navidrome for phone apps. Mu3Lab creates each person's account
+Apps such as Navidrome keep their own passwords, for its phone apps. Mu3Lab creates each person's account
 with a generated password, keeps it here encrypted, and saves it to that
 person's vault (``ctl.vault_sync``), where Bitwarden fills it in. The copy
 stays while the account is open, so the vault can be filled again later and a
-closed account (Unsloth Studio) can reopen with the same password.
+closed account can reopen with the same password.
 """
 
 from __future__ import annotations

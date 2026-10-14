@@ -25,9 +25,8 @@ LOCAL = {"privacy": "local_only", "chat_model": "qwen3.5-4b", "embedding_model":
 class FakeEngine:
     """A runner that keeps its downloads in a set, by model id."""
 
-    def __init__(self, name: str = "Unsloth Studio", *, follows_restart: bool = False) -> None:
+    def __init__(self, name: str = "Ollama") -> None:
         self.app = SimpleNamespace(id=name.split()[0].lower(), manifest=SimpleNamespace(name=name))
-        self.embedding_follows_restart = follows_restart
         self.present = {"bge-m3", "nomic-embed-text", "qwen3-8b"}
         self.deleted: list[str] = []
         self.checked: list[str] = []
@@ -98,11 +97,10 @@ class SettingsTests(_Runtime):
         with patch("ctl.platform_apps.by_capability", return_value=SimpleNamespace(id="litellm")):
             self.assertEqual(local_models.embedding_model(self.paths).id, "nomic-embed-text")
 
-    def test_every_reviewed_model_can_run_in_unsloth_studio(self):
+    def test_every_reviewed_model_is_pinned_to_an_exact_ollama_tag(self):
         for model in (*local_models.CHAT, *local_models.EMBEDDING):
             with self.subTest(model=model.id):
-                self.assertRegex(model.gguf, r"^[\w.-]+/[\w.-]+-GGUF$")
-                self.assertTrue(model.quant)
+                self.assertRegex(model.tag, r"^[\w.-]+:[\w.-]+$")
 
     def test_a_damaged_record_denies_outside_inference(self):
         records.put(
@@ -112,7 +110,7 @@ class SettingsTests(_Runtime):
 
 
 class RoutingTests(_Runtime):
-    def routes(self, runner: str = "unsloth") -> dict[str, dict]:
+    def routes(self, runner: str = "ollama") -> dict[str, dict]:
         app = model_runners.find(runner)
         assert app is not None
         with patch("ctl.local_models.runner", return_value=app):
@@ -123,24 +121,17 @@ class RoutingTests(_Runtime):
         routes = self.routes()
         self.assertEqual(routes["mu3lab-chat"]["api_base"], "os.environ/GATEWAY")
         self.assertNotIn(local_models.LOCAL_ALIAS, routes)
-        # Unsloth Studio serves its search model under the GGUF repository's name.
-        self.assertEqual(routes["mu3lab-embed"]["model"], "openai/gpustack/bge-m3-GGUF")
-        self.assertEqual(self.routes("ollama")["mu3lab-embed"]["model"], "ollama/bge-m3:567m")
+        self.assertEqual(routes["mu3lab-embed"]["model"], "ollama/bge-m3:567m")
         self.assertEqual(local_models.chat_list(self.paths), "-all,+mu3lab-chat=Mu3Lab chat (outside providers)")
 
-    def test_a_runner_with_a_key_gets_it_and_one_without_does_not(self):
-        project = self.paths.projects / "unsloth"
-        project.mkdir(parents=True)
-        (project / ".env").write_text("UNSLOTH_API_KEY=sk-unsloth-test\n")
-        self.assertEqual(self.routes()["mu3lab-embed"]["api_key"], "os.environ/RUNNER_KEY")
-        self.assertNotIn("api_key", self.routes("ollama")["mu3lab-embed"])
+    def test_ollama_needs_no_key(self):
+        self.assertNotIn("api_key", self.routes()["mu3lab-embed"])
 
     def test_a_chosen_local_model_is_a_private_choice_beside_outside_chat(self):
         self.store({**LOCAL, "privacy": "outside_allowed"})
         routes = self.routes()
         self.assertEqual(routes["mu3lab-chat"]["api_base"], "os.environ/GATEWAY")
-        self.assertEqual(routes[local_models.LOCAL_ALIAS]["model"], "openai/unsloth/Qwen3.5-4B-GGUF:Q4_K_M")
-        self.assertEqual(self.routes("ollama")[local_models.LOCAL_ALIAS]["model"], "ollama_chat/qwen3.5:4b-q4_K_M")
+        self.assertEqual(routes[local_models.LOCAL_ALIAS]["model"], "ollama_chat/qwen3.5:4b-q4_K_M")
         self.assertEqual(
             local_models.chat_list(self.paths),
             "-all,+mu3lab-chat=Mu3Lab chat (outside providers),+mu3lab-local=Qwen 3.5 4B (private, on this server)",
@@ -168,31 +159,32 @@ class RoutingTests(_Runtime):
             self.assertFalse(core_wiring._provider_keys(self.paths)[0]["enabled"])
 
 
+def _runner(app_id: str, name: str, tier: str = "optional") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=app_id, manifest=SimpleNamespace(name=name, tier=tier, ui=SimpleNamespace(available=False))
+    )
+
+
 class RunnerChoiceTests(unittest.TestCase):
+    def test_ollama_is_the_one_core_model_runner(self):
+        self.assertEqual(model_runners.default_app().id, "ollama")
+        self.assertEqual({app.id: app.manifest.tier for app in model_runners.runners()}, {"ollama": "core"})
+
     def test_the_owners_choice_counts_only_while_it_is_installed(self):
+        apps = [_runner("ollama", "Ollama", "core"), _runner("other", "Other runner")]
         cases = (
-            ({"unsloth", "ollama"}, "ollama", "ollama"),
-            ({"unsloth"}, "ollama", "unsloth"),  # Ollama was removed: back to the default
-            ({"ollama"}, "", "ollama"),  # an older install with only Ollama keeps working
-            (set(), "", "unsloth"),
+            ({"ollama", "other"}, "other", "other"),
+            ({"ollama"}, "other", "ollama"),  # the other runner was removed: back to the default
+            (set(), "", "ollama"),
         )
         for present, chosen, expected in cases:
             with (
                 self.subTest(present=present, chosen=chosen),
+                patch("ctl.model_runners.runners", return_value=apps),
                 patch("ctl.model_runners.installed", side_effect=lambda app_id, _state=None, p=present: app_id in p),
                 patch("ctl.model_runners.ControlState.runtime", return_value=None),
             ):
                 self.assertEqual(model_runners.effective(chosen).id, expected)
-
-    def test_unsloth_studio_is_the_default_and_ollama_is_optional(self):
-        self.assertEqual(model_runners.default_app().id, "unsloth")
-        self.assertEqual(
-            {app.id: app.manifest.tier for app in model_runners.runners()},
-            {
-                "ollama": "optional",
-                "unsloth": "core",
-            },
-        )
 
 
 class JobTests(_Runtime):
@@ -205,8 +197,8 @@ class JobTests(_Runtime):
         self.addCleanup(self.stack.close)
         self.applied: list[dict] = []
         self.followed = 0
-        self.engines = {"unsloth": FakeEngine(), "ollama": FakeEngine("Ollama")}
-        self.engine = self.engines["unsloth"]
+        self.engines = {"ollama": FakeEngine(), "other": FakeEngine("Other runner")}
+        self.engine = self.engines["ollama"]
 
         def follow(_catalog, _paths):
             self.followed += 1
@@ -223,6 +215,12 @@ class JobTests(_Runtime):
             self.stack.enter_context(patch(f"ctl.local_models.{name}", side_effect=value))
         self.stack.enter_context(
             patch("ctl.model_runners.engine", side_effect=lambda app, _paths=None: self.engines[app.id])
+        )
+        self.stack.enter_context(
+            patch(
+                "ctl.model_runners.runners",
+                return_value=[_runner("ollama", "Ollama", "core"), _runner("other", "Other runner")],
+            )
         )
         self.stack.enter_context(patch("ctl.model_runners.installed", return_value=True))
         self.stack.enter_context(patch("ctl.model_runners.ControlState.runtime", return_value=None))
@@ -241,69 +239,22 @@ class JobTests(_Runtime):
     def test_a_working_model_is_switched_to_and_unused_models_are_deleted(self):
         job = self.run_job(LOCAL)
         self.assertEqual(job["state"], "succeeded", job["detail"])
-        self.assertIn("only on this server, in Unsloth Studio", job["detail"])
+        self.assertIn("only on this server, in Ollama", job["detail"])
         self.assertIn("qwen3.5-4b", self.engine.present)
         self.assertEqual(local_models.settings(self.paths)["privacy"], "local_only")
-        self.assertEqual(local_models.settings(self.paths)["runner"], "unsloth")
+        self.assertEqual(local_models.settings(self.paths)["runner"], "ollama")
         self.assertEqual(sorted(self.engine.deleted), ["nomic-embed-text", "qwen3-8b"])
 
     def test_switching_runners_downloads_into_the_new_one_and_leaves_the_old_one_alone(self):
-        ollama = self.engines["ollama"]
-        ollama.present = set()
-        job = self.run_job({**LOCAL, "runner": "ollama"})
+        other = self.engines["other"]
+        other.present = set()
+        job = self.run_job({**LOCAL, "runner": "other"})
         self.assertEqual(job["state"], "succeeded", job["detail"])
-        self.assertEqual(ollama.present, {"qwen3.5-4b", "bge-m3"})
-        self.assertEqual(ollama.checked, ["qwen3.5-4b", "bge-m3"])
+        self.assertEqual(other.present, {"qwen3.5-4b", "bge-m3"})
+        self.assertEqual(other.checked, ["qwen3.5-4b", "bge-m3"])
         # The earlier runner keeps its models, so switching back is quick.
         self.assertEqual(self.engine.deleted, [])
-        self.assertEqual(local_models.settings(self.paths)["runner"], "ollama")
-
-    def test_a_runner_that_restarts_for_a_new_search_model_is_checked_after_it_follows(self):
-        self.engine.embedding_follows_restart = True
-        checked_after: list[int] = []
-        self.engine.check_embedding = lambda _model: checked_after.append(self.followed)
-        job = self.run_job({**OUTSIDE, "embedding_model": "nomic-embed-text"})
-        self.assertEqual(job["state"], "succeeded", job["detail"])
-        self.assertEqual(checked_after, [1])
-
-    def test_a_search_model_that_fails_after_the_restart_puts_everything_back(self):
-        self.engine.embedding_follows_restart = True
-        self.engine.check_embedding = lambda _model: (_ for _ in ()).throw(RuntimeError("no vectors"))
-        job = self.run_job({**OUTSIDE, "embedding_model": "nomic-embed-text"})
-        self.assertEqual((job["state"], job["error_code"]), ("failed", "model_failed"))
-        self.assertEqual(local_models.settings(self.paths)["embedding_model"], "bge-m3")
-        self.assertEqual([item["embedding_model"] for item in self.applied], ["nomic-embed-text", "bge-m3"])
-        self.assertEqual(self.followed, 2)
-
-    def test_an_app_that_cannot_follow_the_undo_is_named(self):
-        self.engine.embedding_follows_restart = True
-        self.engine.check_embedding = lambda _model: (_ for _ in ()).throw(RuntimeError("no vectors"))
-        app = SimpleNamespace(id="open-webui", manifest=SimpleNamespace(name="Open WebUI"))
-        calls = iter([[], [app]])  # follows the change, then cannot follow the undo
-        with (
-            patch("ctl.local_models._followers", side_effect=lambda _catalog, _paths: next(calls)),
-            patch("ctl.engine.rewire.rewire_one", side_effect=RuntimeError("restart failed")),
-        ):
-            job = self.run_job({**OUTSIDE, "embedding_model": "nomic-embed-text"})
-        self.assertEqual((job["state"], job["error_code"]), ("failed", "rollback_incomplete"))
-        self.assertIn("Open WebUI", job["detail"])
-        self.assertNotIn("earlier settings were kept", job["detail"])
-
-    def test_a_failed_undo_after_the_search_check_never_claims_local_only(self):
-        local_models.save(LOCAL, "owner", self.paths)
-        self.engine.embedding_follows_restart = True
-        self.engine.check_embedding = lambda _model: (_ for _ in ()).throw(RuntimeError("no vectors"))
-        applied = []
-
-        def apply(paths, _root, _log):
-            applied.append(local_models.settings(paths)["privacy"])
-            if len(applied) > 1:
-                raise RuntimeError("LiteLLM did not restart")
-
-        self.stack.enter_context(patch("ctl.local_models._apply", side_effect=apply))
-        job = self.run_job({**OUTSIDE, "chat_model": "qwen3.5-4b", "embedding_model": "nomic-embed-text"})
-        self.assertEqual((job["state"], job["error_code"]), ("failed", "rollback_failed"))
-        self.assertEqual(local_models.settings(self.paths)["privacy"], "outside_allowed")
+        self.assertEqual(local_models.settings(self.paths)["runner"], "other")
 
     def test_a_model_that_fails_its_check_changes_nothing(self):
         self.engine.check_chat = lambda _model: (_ for _ in ()).throw(RuntimeError("out of memory"))
@@ -315,7 +266,7 @@ class JobTests(_Runtime):
 
     def test_a_runner_that_is_not_installed_is_refused(self):
         with patch("ctl.model_runners.installed", return_value=False):
-            job = self.run_job({**LOCAL, "runner": "ollama"})
+            job = self.run_job({**LOCAL, "runner": "other"})
         self.assertEqual((job["state"], job["error_code"]), ("failed", "runner_missing"))
 
     def test_failed_follower_keeps_models_it_may_still_use(self):
@@ -376,6 +327,12 @@ class ApiTests(unittest.TestCase):
         unreachable = FakeEngine()
         unreachable.downloaded = lambda: (_ for _ in ()).throw(OSError("no runner"))  # type: ignore[method-assign]
         self.stack.enter_context(patch("ctl.model_runners.engine", return_value=unreachable))
+        self.stack.enter_context(
+            patch(
+                "ctl.model_runners.runners",
+                return_value=[_runner("ollama", "Ollama", "core"), _runner("other", "Other runner")],
+            )
+        )
         self.stack.enter_context(patch("ctl.model_runners.installed", return_value=True))
         self.stack.enter_context(patch("ctl.local_models.index_tied", return_value=[]))
         self.client = TestClient(create_app())
@@ -388,7 +345,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["settings"]["privacy"], "outside_allowed")
         self.assertEqual([model["id"] for model in body["chat_models"]], [model.id for model in local_models.CHAT])
         self.assertFalse(body["runner_reachable"])
-        self.assertEqual({runner["id"] for runner in body["runners"]}, {"unsloth", "ollama"})
+        self.assertEqual({runner["id"] for runner in body["runners"]}, {"ollama", "other"})
 
     def test_a_change_is_queued_as_a_job(self):
         response = self.client.put("/api/v1/ai/models", headers=self.headers, json=LOCAL)

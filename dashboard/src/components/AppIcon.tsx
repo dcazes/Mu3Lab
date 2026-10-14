@@ -5,7 +5,6 @@ import {
   BookOpenText,
   Bot,
   Compass,
-  Cpu,
   Flame,
   Gamepad2,
   KeyRound,
@@ -67,7 +66,6 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   speaches: { icon: AudioLines, color: '#db2777' },
   tailnet: { icon: Network, color: '#64748b' },
   'kopia-ui': { icon: ArchiveRestore, color: '#2563eb' },
-  unsloth: { icon: Cpu, color: '#15803d' },
   navidrome: { icon: Music, color: '#0284c7' },
 };
 

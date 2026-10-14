@@ -223,7 +223,7 @@ class RegistryTests(unittest.TestCase):
         registry = load()
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.manifest.tier == "core"]
-        self.assertEqual({service.id for service in core}, {"unsloth", "freellmapi", "litellm", "open-webui"})
+        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "open-webui"})
         for service in core:
             images = compose_images(service.compose_path(root) / "docker-compose.yml")
             self.assertTrue(images, service.id)
@@ -271,7 +271,7 @@ class RegistryTests(unittest.TestCase):
         from ctl.api.routes.system import catalog
 
         profile = catalog({}).model_dump()["profiles"][0]
-        self.assertEqual(set(profile["services"]), {"unsloth", "freellmapi", "litellm", "open-webui"})
+        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "open-webui"})
 
     def test_nextcloud_is_a_curated_documents_app_with_unique_private_ports(self):
         registry = load()

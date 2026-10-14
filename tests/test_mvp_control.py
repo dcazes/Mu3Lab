@@ -63,7 +63,6 @@ class RegistryV3Tests(unittest.TestCase):
                 "speaches",
                 "firecrawl",
                 "kopia-ui",
-                "ollama",
                 "navidrome",
             },
         )

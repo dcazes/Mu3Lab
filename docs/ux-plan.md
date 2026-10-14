@@ -113,6 +113,12 @@ marked *default* were not asked; they are the obvious fix and can be changed.
 
 ## Follow-up: Unsloth and Navidrome (decided 2026-10-12)
 
+> **Reversed on 2026-10-14:** Unsloth Studio was removed. It was too big
+> (about 33 GB unpacked) and a poor fit for what Mu3Lab needs from a model
+> runner. Ollama is again the core runner that the installer sets up, and the
+> install needs 20 GB of free disk again. Item 21 and the deferred smaller-image
+> plan below are kept only as a record.
+
 21. **Unsloth Studio is the default model runner, and Ollama is the alternative.**
     It works like the chat app picker.
     - The installer always installs Unsloth Studio, on every server. It does

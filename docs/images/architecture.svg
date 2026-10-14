@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="t d">
   <title id="t">How Mu3Lab fits together</title>
-  <desc id="d">Your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. LobeChat talks to your apps through reviewed MCP connectors and to AI models through LiteLLM, which routes to local models in Unsloth Studio or free cloud providers via FreeLLMAPI.</desc>
+  <desc id="d">Your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. LobeChat talks to your apps through reviewed MCP connectors and to AI models through LiteLLM, which routes to local Ollama or free cloud providers via FreeLLMAPI.</desc>
   <style>
     .bg { fill: #ffffff; }
     .card { fill: #f7f7f9; stroke: #dedee6; }
@@ -134,7 +134,7 @@
   <text x="798" y="447" class="s">for every app</text>
 
   <rect x="966" y="376" width="174" height="52" rx="12" class="card"/>
-  <text x="984" y="400" class="h">Unsloth Studio</text>
+  <text x="984" y="400" class="h">Ollama</text>
   <text x="984" y="418" class="s">Local models, CPU/GPU</text>
 
   <rect x="966" y="440" width="174" height="52" rx="12" class="card"/>

@@ -705,8 +705,6 @@ class LocalModel(ApiModel):
     id: str
     name: str
     tag: str
-    gguf: str
-    quant: str
     download_gb: float
     memory_gb: float
     note: str
@@ -729,7 +727,7 @@ class ModelRunnerOption(ApiModel):
     id: str
     name: str
     installed: bool
-    # Whether it has a web app of its own (Unsloth Studio does; Ollama does not).
+    # Whether it has a web app of its own (Ollama does not).
     has_ui: bool
 
 
@@ -1218,7 +1216,7 @@ class SnapshotResponse(ApiModel):
     provisioning: ProvisioningResponse
     audit: AuditResponse
     backup_attention: list[BackupAttention] = []
-    # The app that runs local models now (Settings, AI): Unsloth Studio, or Ollama once chosen.
+    # The app that runs local models now (Settings, AI): Ollama.
     model_runner: str = ""
 
 

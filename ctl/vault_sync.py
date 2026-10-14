@@ -103,7 +103,7 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
             )
         )
     for service in registry.services:
-        # Personal app logins (Unsloth Studio, Navidrome's phone apps): rule per_person_logins.
+        # Personal app logins (Navidrome's phone apps): rule per_person_logins.
         if not any(ref.rule == "per_person_logins" for ref in service.manifest.rules):
             continue
         login = person_logins.get(service.id, str(person.get("username") or ""), paths)

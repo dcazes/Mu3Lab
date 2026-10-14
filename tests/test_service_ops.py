@@ -37,8 +37,7 @@ class ServiceOperationTests(unittest.TestCase):
         self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "ready"))
         self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "failed"))
         self.assertNotIn("uninstall", allowed_actions(load().get("nextcloud"), "planned"))
-        self.assertNotIn("uninstall", allowed_actions(load().get("unsloth"), "ready"))
-        self.assertIn("uninstall", allowed_actions(load().get("ollama"), "ready"))
+        self.assertNotIn("uninstall", allowed_actions(load().get("ollama"), "ready"))
         self.assertNotIn("uninstall", allowed_actions(load().get("open-webui"), "stopped"))
 
     def test_core_apps_never_offer_uninstall_and_respect_stoppable(self):

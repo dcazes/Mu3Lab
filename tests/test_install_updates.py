@@ -103,15 +103,14 @@ class NvidiaTests(unittest.TestCase):
 class CoreImageTests(unittest.TestCase):
     def test_core_images_cover_the_always_on_platform_only(self):
         names = {name for name, _image in install.core_images()}
-        self.assertTrue({"Authentik", "Vaultwarden", "Unsloth Studio", "LiteLLM", "FreeLLMAPI", "Open WebUI"} <= names)
-        self.assertNotIn("Ollama", names)  # a second runner, installed from Discover
+        self.assertTrue({"Authentik", "Vaultwarden", "Ollama", "LiteLLM", "FreeLLMAPI", "Open WebUI"} <= names)
         self.assertNotIn("Immich", names)
 
     def test_check_lists_what_is_still_downloading(self):
-        with patch.object(install, "_image_present", side_effect=lambda image: "unsloth" not in image):
+        with patch.object(install, "_image_present", side_effect=lambda image: "ollama" not in image):
             check = install._core_images_check({"root": install.ROOT})
         self.assertEqual(check["state"], "missing")
-        self.assertIn("Unsloth Studio", check["detail"])
+        self.assertIn("Ollama", check["detail"])
 
     def test_failed_downloads_are_named(self):
         ctx = {"root": install.ROOT, "log_fn": lambda _s: lambda _l: None}

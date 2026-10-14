@@ -2,8 +2,8 @@
 
 The owner chooses from a reviewed list, never from everything a runner offers:
 
-* the model runner that serves them (``ctl.model_runners``): Unsloth Studio,
-  which the installer sets up, or Ollama once it is installed;
+* the model runner that serves them (``ctl.model_runners``): Ollama, which
+  the installer sets up;
 * one local chat model (or none). Once downloaded it is always offered in
   chat as a private choice, ``mu3lab-local``;
 * the embedding model that document search uses (``mu3lab-embed``);
@@ -57,9 +57,6 @@ class Model:
     memory_gb: float
     note: str
     dimensions: int = 0  # embedding models only
-    # The same model for Unsloth Studio: a Hugging Face GGUF repository and the file's quantization.
-    gguf: str = ""
-    quant: str = "Q4_K_M"
 
 
 # Reviewed by the owner on 2026-10-10. Sizes are Ollama's published download sizes.
@@ -71,7 +68,6 @@ CHAT: tuple[Model, ...] = (
         1.9,
         3,
         "Fastest. Good for short answers and summaries.",
-        gguf="unsloth/Qwen3.5-2B-GGUF",
     ),
     Model(
         "phi4-mini",
@@ -80,7 +76,6 @@ CHAT: tuple[Model, ...] = (
         2.5,
         4,
         "Small and quick; English-first.",
-        gguf="unsloth/Phi-4-mini-instruct-GGUF",
     ),
     Model(
         "qwen3.5-4b",
@@ -89,7 +84,6 @@ CHAT: tuple[Model, ...] = (
         3.3,
         5,
         "A good balance on most home servers.",
-        gguf="unsloth/Qwen3.5-4B-GGUF",
     ),
     Model(
         "qwen3-8b",
@@ -98,7 +92,6 @@ CHAT: tuple[Model, ...] = (
         5.2,
         7,
         "Stronger reasoning; slower without a GPU.",
-        gguf="unsloth/Qwen3-8B-GGUF",
     ),
     Model(
         "gemma4-e4b",
@@ -107,7 +100,6 @@ CHAT: tuple[Model, ...] = (
         6.6,
         8,
         "Also understands images and audio.",
-        gguf="unsloth/gemma-4-E4B-it-GGUF",
     ),
     Model(
         "qwen3.5-9b",
@@ -116,7 +108,6 @@ CHAT: tuple[Model, ...] = (
         6.6,
         8,
         "Strongest Qwen here; best with a GPU.",
-        gguf="unsloth/Qwen3.5-9B-GGUF",
     ),
     Model(
         "gemma4-12b",
@@ -125,11 +116,9 @@ CHAT: tuple[Model, ...] = (
         8.0,
         10,
         "The largest choice; needs a GPU to be quick.",
-        gguf="unsloth/gemma-4-12b-it-GGUF",
     ),
 )
 EMBEDDING: tuple[Model, ...] = (
-    # Unsloth publishes no BGE-M3 GGUF; GPUStack's conversion is the widely used one.
     Model(
         "bge-m3",
         "BGE-M3",
@@ -138,8 +127,6 @@ EMBEDDING: tuple[Model, ...] = (
         2,
         "Many languages; long documents.",
         dimensions=1024,
-        gguf="gpustack/bge-m3-GGUF",
-        quant="Q8_0",
     ),
     Model(
         "nomic-embed-text",
@@ -149,8 +136,6 @@ EMBEDDING: tuple[Model, ...] = (
         1,
         "The earlier default; English-first and very light.",
         dimensions=768,
-        gguf="nomic-ai/nomic-embed-text-v1.5-GGUF",
-        quant="Q8_0",
     ),
 )
 DEFAULT_EMBEDDING = "bge-m3"
@@ -406,12 +391,11 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
     def fail(detail: str, code: str, step: str) -> None:
         store.transition(job_id, "failed", actor=actor, detail=redact(detail), error_code=code, step_id=step)
 
-    def roll_back(reason: str, code: str, step: str, *, refollow: bool = False) -> None:
+    def roll_back(reason: str, code: str, step: str) -> None:
         """Put the earlier settings back; if that fails too, never claim more privacy than may be true."""
         save(before, before.get("changed_by") or actor, paths)
         try:
             _apply(paths, root, log)
-            unreverted = follow() if refollow else []
         except (OSError, ValueError, RuntimeError) as undo:
             # The routing may still be the new one, so the record must not say local only when either allows outside.
             outside = "outside_allowed" in (before["privacy"], chosen["privacy"])
@@ -421,14 +405,6 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
                 f"{reason} Putting the earlier settings back also failed ({redact(str(undo))}).{where} "
                 "Choose your AI settings again to retry.",
                 "rollback_failed",
-                step,
-            )
-            return
-        if unreverted:
-            fail(
-                f"{reason} The earlier routing is back, but these apps still use the new settings: "
-                f"{', '.join(unreverted)}. Choose your AI settings again to retry.",
-                "rollback_incomplete",
                 step,
             )
             return
@@ -452,8 +428,6 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         return
     chosen["runner"] = target.id
     engine = model_runners.engine(target, paths)
-    # A runner that serves search from its own settings (Unsloth Studio) restarts with a new search model first.
-    later = engine.embedding_follows_restart and embed.id != before["embedding_model"]
     # 1. Download and check the models first: until this succeeds nothing has changed.
     try:
         present = engine.downloaded()
@@ -463,8 +437,6 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
             if not engine.has(model, present):
                 log(f"Downloading {model.name} into {target.manifest.name} ({model.download_gb} GB).")
                 engine.pull(model, log)
-            if model is embed and later:
-                continue
             log(f"Checking {model.name} in {target.manifest.name}.")
             check(model)
     except model_runners.ENGINE_ERRORS as exc:
@@ -483,7 +455,7 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
     except (OSError, ValueError, RuntimeError) as exc:
         roll_back(str(exc), "routing_failed", "route")
         return
-    # 3. Apps whose settings follow the models: the chat app's list, the runners' search model.
+    # 3. Apps whose settings follow the models: the chat app's list and the search apps.
     facts = Facts(tailnet_dns_name(), paths, catalog)
 
     def follow() -> list[str]:
@@ -503,13 +475,6 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         return incomplete
 
     incomplete = follow()
-    if later:
-        try:
-            log(f"Checking {embed.name} in {target.manifest.name}.")
-            engine.check_embedding(embed)
-        except model_runners.ENGINE_ERRORS as exc:
-            roll_back(f"{embed.name} did not answer ({exc}).", "model_failed", "check", refollow=True)
-            return
     if incomplete:
         # An app still on the old settings may still need an old model, so nothing is deleted.
         fail(

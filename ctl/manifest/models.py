@@ -305,7 +305,7 @@ class Chat(Model):
 class ModelRunner(Model):
     """For a model runner (capability ``model_runner``): which API Mu3Lab drives (ctl.model_runners)."""
 
-    engine: Literal["ollama_api", "unsloth_studio"]
+    engine: Literal["ollama_api"]
 
 
 class CredentialField(Model):

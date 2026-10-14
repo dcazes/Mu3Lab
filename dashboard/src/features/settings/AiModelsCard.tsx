@@ -187,26 +187,25 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
             </span>
           </label>
         </fieldset>
-        <label className="field">
-          <span>Model runner</span>
-          <select
-            aria-label="Model runner"
-            disabled={readOnly || busy}
-            value={chosenRunner}
-            onChange={(event) => setEdits({ ...draft, runner: event.target.value })}
-          >
-            {data.runners.map((runner) => (
-              <option key={runner.id} value={runner.id} disabled={!runner.installed}>
-                {runner.installed ? runner.name : `${runner.name} (install it from Apps first)`}
-              </option>
-            ))}
-          </select>
-          <small className="muted">
-            {data.runners.find((runner) => runner.id === chosenRunner)?.has_ui
-              ? 'Runs the models below. Administrators can also open it to try and fine-tune other models.'
-              : 'Runs the models below. It has no web app of its own.'}
-          </small>
-        </label>
+        {/* Only worth a choice when more than one model runner exists. */}
+        {data.runners.length > 1 && (
+          <label className="field">
+            <span>Model runner</span>
+            <select
+              aria-label="Model runner"
+              disabled={readOnly || busy}
+              value={chosenRunner}
+              onChange={(event) => setEdits({ ...draft, runner: event.target.value })}
+            >
+              {data.runners.map((runner) => (
+                <option key={runner.id} value={runner.id} disabled={!runner.installed}>
+                  {runner.installed ? runner.name : `${runner.name} (install it from Apps first)`}
+                </option>
+              ))}
+            </select>
+            <small className="muted">Runs the models below.</small>
+          </label>
+        )}
         <label className="field">
           <span>Local chat model</span>
           <select

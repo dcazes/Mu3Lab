@@ -2941,10 +2941,6 @@
             "title": "Downloaded",
             "type": "boolean"
           },
-          "gguf": {
-            "title": "Gguf",
-            "type": "string"
-          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -2961,10 +2957,6 @@
             "title": "Note",
             "type": "string"
           },
-          "quant": {
-            "title": "Quant",
-            "type": "string"
-          },
           "tag": {
             "title": "Tag",
             "type": "string"
@@ -2974,8 +2966,6 @@
           "id",
           "name",
           "tag",
-          "gguf",
-          "quant",
           "download_gb",
           "memory_gb",
           "note",

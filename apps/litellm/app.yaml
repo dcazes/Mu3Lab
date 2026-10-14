@@ -11,7 +11,7 @@ summary: Provides a unified API for local and external AI models. Mu3Lab uses Li
 version: v1.103.2
 upstream: BerriAI/litellm
 depends_on:
-- unsloth
+- ollama
 - freellmapi
 service:
   local_port: 4000

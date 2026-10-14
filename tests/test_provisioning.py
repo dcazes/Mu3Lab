@@ -95,7 +95,7 @@ class CoreWiringTests(unittest.TestCase):
             render_core_projects(paths)
             self.assertEqual(read_runtime_env(paths.projects / "freellmapi" / ".env")["ENCRYPTION_KEY"], encryption)
             self.assertEqual(len(bytes.fromhex(encryption)), 32)
-            self.assertTrue((paths.projects / "unsloth" / "docker-compose.yml").is_file())
+            self.assertTrue((paths.projects / "ollama" / "docker-compose.yml").is_file())
 
     def test_provider_key_reaches_only_private_generated_adapter_config(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -201,8 +201,8 @@ class CoreWiringTests(unittest.TestCase):
     def test_core_order_respects_manifest_dependencies(self):
         ordered = [service.id for service in core_services()]
         # Backups (Kopia) and web research (Firecrawl) are the owner's choice, installed from Discover.
-        self.assertEqual(set(ordered), {"unsloth", "freellmapi", "litellm", "open-webui"})
-        self.assertLess(ordered.index("unsloth"), ordered.index("litellm"))
+        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "open-webui"})
+        self.assertLess(ordered.index("ollama"), ordered.index("litellm"))
         self.assertLess(ordered.index("freellmapi"), ordered.index("litellm"))
         self.assertLess(ordered.index("litellm"), ordered.index("open-webui"))
 

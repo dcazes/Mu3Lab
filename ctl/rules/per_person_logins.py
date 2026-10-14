@@ -1,8 +1,7 @@
 """Give each person an account and a generated password in an app without single sign-on.
 
 Unlike ``per_person_accounts`` (an app that trusts Mu3Lab's identity header),
-these apps also need a password: Unsloth Studio for its own web app, Navidrome
-for phone apps. The app's ``hooks.py`` (``sync_people``) creates what is
+these apps also need a password, such as Navidrome for phone apps. The app's ``hooks.py`` (``sync_people``) creates what is
 missing through the app's own API and keeps each password in
 ``ctl.store.person_logins``; Mu3Lab then saves it to that person's vault.
 It runs once the app is healthy, and again whenever the household changes.

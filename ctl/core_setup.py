@@ -52,9 +52,8 @@ def capacity() -> dict:
     reasons: list[str] = []
     if platform.machine().lower() not in {"x86_64", "amd64"}:
         reasons.append("the first supported release requires x86-64")
-    # Unsloth Studio's image alone is about 33 GiB unpacked; the rest of the core apps and a first model fit in the rest.
-    if disk.free < 60 * 1024**3:
-        reasons.append("at least 60 GiB free disk is required for the supported AI slice")
+    if disk.free < 20 * 1024**3:
+        reasons.append("at least 20 GiB free disk is required for the supported AI slice")
     if memory_total and memory_total < 8 * 1024**3:
         reasons.append("at least 8 GiB memory is required for the supported AI slice")
     if not docker_ready:

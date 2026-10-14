@@ -31,9 +31,8 @@ class CoreAppTests(unittest.TestCase):
         self.assertIn("authentik", ids)
         self.assertIn("vaultwarden", ids)
         self.assertNotIn("ingress", ids)  # no data of its own
-        # Unsloth Studio keeps accounts and fine-tuned models; only its downloaded models are left out.
-        self.assertIn("unsloth", ids)
-        self.assertEqual(skipped, [])
+        self.assertEqual([service.id for service, _reason in skipped], ["ollama"])
+        self.assertIn("downloaded AI models", skipped[0][1])
         for position, service in enumerate(included):
             for dependency in service.dependencies:
                 if dependency in ids:
@@ -112,7 +111,7 @@ class PlatformApiTests(unittest.TestCase):
         self.assertIn("not running", down.text)
         status = self.client.get("/api/v1/system/backups/platform", headers=self.headers).json()
         self.assertEqual(status["platform"]["state"], "missing")
-        self.assertTrue(any(app["id"] == "unsloth" and app["included"] for app in status["core_apps"]))
+        self.assertTrue(any(app["id"] == "ollama" and not app["included"] for app in status["core_apps"]))
 
     def test_the_recovery_sheet_is_for_administrators_never_cached_and_audited(self):
         store = JobStore.runtime()
