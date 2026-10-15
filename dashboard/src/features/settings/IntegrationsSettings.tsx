@@ -6,6 +6,7 @@ import { Button, LinkButton } from '../../components/Button';
 import { Card, Collapsible, EmptyState, PageHeader } from '../../components/Layout';
 import { Badge, Dot } from '../../components/Status';
 import { Link } from '../../lib/router';
+import { isEverydayApp, isInstalled } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import {
   mcpSummary,
@@ -72,6 +73,37 @@ function IntegrationRow({ server, reload }: { server: McpServer; reload: () => v
         </Link>
       </span>
     </div>
+  );
+}
+
+/** Installed apps Mu3Lab has no chat integration for yet, so every app is accounted for. */
+function WithoutIntegration({ servers }: { servers: McpServer[] }) {
+  const { data } = useDashboard();
+  const covered = new Set(servers.map((server) => server.service_id));
+  const apps = data.services.services.filter(
+    (service) => isEverydayApp(service) && isInstalled(service) && !covered.has(service.id),
+  );
+  if (!apps.length) return null;
+  return (
+    <Card
+      title="No integration yet"
+      description="Mu3Lab doesn’t offer a reviewed chat integration for these apps yet. Each one is added only after its code is checked."
+      flush
+    >
+      <section className="rows" aria-label="Apps without an integration">
+        {apps.map((service) => (
+          <div className="row" key={service.id}>
+            <Link to={`/apps/${service.id}`} className="row-main">
+              <AppIcon id={service.id} />
+              <span className="row-text">
+                <b>{service.name}</b>
+                <small>Not available in chat yet</small>
+              </span>
+            </Link>
+          </div>
+        ))}
+      </section>
+    </Card>
   );
 }
 
@@ -142,13 +174,16 @@ export function IntegrationsSettings() {
       {!registry.data ? (
         <p className="muted">{registry.error || 'Loading integrations…'}</p>
       ) : !servers.length ? (
-        <EmptyState
-          icon={Plug}
-          title="No integrations yet"
-          action={<LinkButton to="/apps/discover">Discover apps</LinkButton>}
-        >
-          Integrations appear here for installed apps that support chat.
-        </EmptyState>
+        <>
+          <WithoutIntegration servers={servers} />
+          <EmptyState
+            icon={Plug}
+            title="No integrations yet"
+            action={<LinkButton to="/apps/discover">Discover apps</LinkButton>}
+          >
+            Integrations appear here for installed apps that support chat.
+          </EmptyState>
+        </>
       ) : (
         <>
           <Card
@@ -177,6 +212,7 @@ export function IntegrationsSettings() {
               </section>
             </Card>
           )}
+          <WithoutIntegration servers={servers} />
           <Collapsible title="How integrations are secured">
             <ul className="bullets">
               <li>Credentials are scoped to one app, stored encrypted, and never shown again.</li>

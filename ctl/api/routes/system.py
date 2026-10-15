@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, backup_service, platform_backup, recovery_sheet, self_update
+from ctl import __version__, backup_service, disk_cleanup, platform_backup, recovery_sheet, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -173,6 +173,41 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
         actor_subject=runtime.mutation_subject(operator),
         namespace="system.update",
         detail="Owner requested a Mu3Lab update.",
+        idempotency_key=key,
+    )
+    return models.JobResponse.model_validate({"ok": True, "job": job})
+
+
+@router.post("/system/cleanup", response_model=models.JobResponse, response_model_exclude_none=True)
+def free_up_space(payload: models.CleanupRequest, request: Request, operator: OperatorMutation) -> models.JobResponse:
+    """Remove removed apps' leftovers and old app versions; their data only when asked."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    params = {"delete_data": "true" if payload.delete_data else "false"}
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="lifecycle",
+        service_id=disk_cleanup.SERVICE_ID,
+        action="cleanup",
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.cleanup",
+        request=params,
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    if store.active_jobs():
+        raise ApiError(409, "Wait for the running tasks to finish first.")
+    job = store.create(
+        kind="lifecycle",
+        service_id=disk_cleanup.SERVICE_ID,
+        action="cleanup",
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.cleanup",
+        request=params,
+        params=params,
+        detail="Owner asked to free up space.",
         idempotency_key=key,
     )
     return models.JobResponse.model_validate({"ok": True, "job": job})

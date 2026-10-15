@@ -84,17 +84,20 @@
   margin-bottom: 16px;
 }
 
-.calendar-compact .fc .fc-daygrid-day-frame {
-  min-height: 64px;
+.calendar-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.calendar-note {
-  margin: 12px 0 0;
-  color: var(--text-2);
-  font-size: 13px;
+.calendar-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.calendar-note a {
-  color: var(--accent-text);
-  font-weight: 500;
+.calendar-settings-head h3 {
+  font-size: 14px;
+  font-weight: 600;
 }

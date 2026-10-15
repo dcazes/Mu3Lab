@@ -69,7 +69,13 @@ def validation_error_handler(_request: Request, exc: Exception) -> JSONResponse:
 
 def response_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, (ResponseValidationError, ValidationError))
-    logging.getLogger(__name__).error("API response failed its contract: %s", _request.url.path)
+    # Field locations and error kinds only: values may be private.
+    fields = sorted(
+        {".".join(str(part) for part in error.get("loc", ())) + f" ({error.get('type', '')})" for error in exc.errors()}
+    )
+    logging.getLogger(__name__).error(
+        "API response failed its contract: %s: %s", _request.url.path, "; ".join(fields[:10])
+    )
     # Pydantic diagnostics include payloads; expose neither those values nor a traceback.
     message = "Mu3Lab returned incomplete information. Refresh and check the worker logs."
     return JSONResponse(

@@ -1383,6 +1383,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/cleanup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Free Up Space
+     * @description Remove removed apps' leftovers and old app versions; their data only when asked.
+     */
+    post: operations['free_up_space_api_v1_system_cleanup_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/config': {
     parameters: {
       query?: never;
@@ -2299,6 +2319,14 @@ export interface components {
       /** Ok */
       ok: boolean;
     };
+    /** CleanupRequest */
+    CleanupRequest: {
+      /**
+       * Delete Data
+       * @default false
+       */
+      delete_data?: boolean;
+    };
     /** ComputeRequest */
     ComputeRequest: {
       /**
@@ -2359,6 +2387,24 @@ export interface components {
       ok: boolean;
       /** Reasons */
       reasons?: string[] | null;
+    };
+    /** DiskShare */
+    DiskShare: {
+      /** Data */
+      data: number;
+      /** Program */
+      program: number;
+    };
+    /** DiskUsage */
+    DiskUsage: {
+      /** Measured At */
+      measured_at: string;
+      /** Owners */
+      owners: {
+        [key: string]: components['schemas']['DiskShare'];
+      };
+      /** Removed Folders */
+      removed_folders?: string[];
     };
     /** Health */
     Health: {
@@ -3492,7 +3538,7 @@ export interface components {
       /** Mode */
       mode: 'native_oidc' | 'trusted_header' | 'proxy_gate' | 'local' | 'none';
       /** State */
-      state: 'unconfigured' | 'configuring' | 'migration_required' | 'ready' | 'degraded' | 'unsupported';
+      state: 'unconfigured' | 'configuring' | 'migration_required' | 'ready' | 'degraded' | 'off' | 'unsupported';
     };
     /** ServiceInitialization */
     ServiceInitialization: {
@@ -3649,9 +3695,14 @@ export interface components {
       /** Cpu Percent */
       cpu_percent: number;
       disk: components['schemas']['Metric'];
+      disk_usage?: components['schemas']['DiskUsage'] | null;
       /** Docker Ready */
       docker_ready: boolean;
       memory: components['schemas']['Metric'];
+      /** Memory By Owner */
+      memory_by_owner?: {
+        [key: string]: number;
+      } | null;
       /**
        * Observed At
        * @default
@@ -11421,6 +11472,93 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['Mu3LabChangelog'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  free_up_space_api_v1_system_cleanup_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CleanupRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */

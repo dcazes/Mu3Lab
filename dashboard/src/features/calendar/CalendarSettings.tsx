@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { type CalendarAuthorization, type CalendarConnection, deleteApi, postApi, putJsonApi } from '../../api';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
-import { Callout, Card, EmptyState, Facts, PageHeader } from '../../components/Layout';
+import { Callout, EmptyState, Facts } from '../../components/Layout';
 import { StateBadge } from '../../components/Status';
 import { errorText } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
@@ -11,6 +11,7 @@ import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { toast } from 'sonner';
 
+/** Connecting a Nextcloud calendar; shown in a side panel on the Calendar page. */
 export function CalendarSettings() {
   const { data } = useDashboard();
   const nextcloud = data.services.services.find((service) => service.id === 'nextcloud');
@@ -77,10 +78,6 @@ export function CalendarSettings() {
 
   return (
     <>
-      <PageHeader
-        title="Calendar"
-        description="Connect a Nextcloud calendar to your Home agenda and manage its events in Mu3Lab."
-      />
       {!installed ? (
         <EmptyState
           icon={CalendarDays}
@@ -90,11 +87,15 @@ export function CalendarSettings() {
           Your calendar lives in Nextcloud.
         </EmptyState>
       ) : (
-        <Card
-          title="Nextcloud calendar"
-          description="Choose one Nextcloud calendar to display and edit. Mu3Lab stores an encrypted app credential for calendar access; you do not need to enter your Nextcloud password."
-          actions={connection.data && <StateBadge state={state === 'connected' ? 'connected' : state || 'unknown'} />}
-        >
+        <div className="calendar-settings">
+          <div className="calendar-settings-head">
+            <h3>Nextcloud calendar</h3>
+            {connection.data && <StateBadge state={state === 'connected' ? 'connected' : state || 'unknown'} />}
+          </div>
+          <p className="muted">
+            Choose one Nextcloud calendar to show and edit here. Mu3Lab keeps an encrypted app credential for it; you
+            don’t need to enter your Nextcloud password.
+          </p>
           {state === 'service_stopped' && (
             <Callout
               tone="warning"
@@ -202,7 +203,7 @@ export function CalendarSettings() {
             )}
             {openUrl && <ExternalButton href={openUrl}>Open in Nextcloud</ExternalButton>}
           </div>
-        </Card>
+        </div>
       )}
     </>
   );

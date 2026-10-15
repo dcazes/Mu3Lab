@@ -2,7 +2,13 @@ import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiModels } from '../../api';
 import { aiModels, dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
+import { useApi } from '../../lib/useApi';
 import { AiModelsCard, whereChatRuns } from './AiModelsCard';
+
+/** The AI page loads the models once and hands them to the card. */
+function ModelsCard() {
+  return <AiModelsCard models={useApi<AiModels>('/api/v1/ai/models')} />;
+}
 
 afterEach(() => {
   cleanup();
@@ -23,7 +29,7 @@ function setup(current: AiModels = aiModels()) {
       return { ok: true, job: { id: 'job1', state: 'running', step_id: 'download', detail: '' }, events: [] };
     return undefined;
   });
-  renderWithDashboard(<AiModelsCard />, dashboardData([]));
+  renderWithDashboard(<ModelsCard />, dashboardData([]));
   return puts;
 }
 
@@ -65,15 +71,24 @@ describe('Where AI runs', () => {
     expect(await screen.findByText('Changing AI models: Download')).toBeInTheDocument();
   });
 
-  it('offers no runner choice while Ollama is the only model runner', async () => {
+  it('asks only for the search model while outside providers are allowed', async () => {
     setup();
+    await screen.findByLabelText('Search model');
+    expect(screen.queryByLabelText('Local chat model')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Model runner')).not.toBeInTheDocument();
+    expect(screen.queryByText('Last changed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Changed by')).not.toBeInTheDocument();
+  });
+
+  it('offers no runner choice while Ollama is the only model runner', async () => {
+    setup(aiModels({ privacy: 'local_only', chat_model: 'qwen3.5-4b' }));
     await screen.findByLabelText('Local chat model');
     expect(screen.queryByLabelText('Model runner')).not.toBeInTheDocument();
   });
 
   it('offers only installed model runners and says the new one downloads first', async () => {
     const installed = aiModels(
-      {},
+      { privacy: 'local_only', chat_model: 'qwen3.5-4b' },
       {
         runners: [
           { id: 'ollama', name: 'Ollama', installed: true, has_ui: false },
@@ -118,7 +133,7 @@ describe('Where AI runs', () => {
             }
           : undefined,
     );
-    renderWithDashboard(<AiModelsCard />, dashboardData([]));
+    renderWithDashboard(<ModelsCard />, dashboardData([]));
     expect(await screen.findByText('Nothing was changed: out of memory.')).toBeInTheDocument();
   });
 });

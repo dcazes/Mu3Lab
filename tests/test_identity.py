@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 
@@ -50,6 +51,16 @@ class IdentityContractTests(unittest.TestCase):
             None,
         )
         self.assertEqual(identity["launch_url"], "https://host.example:8453/index.php/apps/user_oidc/login/1")
+
+    def test_a_turned_off_app_is_off_not_degraded(self):
+        service = load().get("audiobookshelf")
+        state = SimpleNamespace(service_identity=lambda _id: {"state": "ready", "detail": ""})
+        stopped = {"state": "stopped", "route_ready": False, "health_state": "unknown"}
+        identity = projection(service, stopped, state)
+        self.assertEqual(identity["state"], "off")
+        # Running but unreachable is still a real problem.
+        running = {**stopped, "state": "running"}
+        self.assertEqual(projection(service, running, state)["state"], "degraded")
 
     def test_identity_provider_projection_remains_ready_without_an_app_id_branch(self):
         source = load().get("authentik")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from ctl import chat_connections, chat_ops, mcp_gateway
 from ctl.control_state import ControlState
 from ctl.integrations.lobehub import AssistantSyncError, ChatError, LobeHub
-from ctl.manifest.catalog import load
+from ctl.manifest.catalog import cached
 from ctl.mcp_catalog import load as load_connectors
 from ctl.people import operator_subjects
 from ctl.registry import load as load_registry
@@ -27,7 +27,7 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
     record = chat_connections.records().get(uid, {})
     connectors = load_connectors(load_registry())
     report = []
-    for app in load().apps:
+    for app in cached().apps:
         installation = state.installation(app.id)
         if not app.manifest.chat.assistant or not installation or installation["state"] == "not_installed":
             continue
@@ -79,7 +79,7 @@ def _sync_agents(log) -> tuple[bool, str]:
             return True, "Chat synchronization waits for application state."
         installed = {
             app.id
-            for app in load().apps
+            for app in cached().apps
             if (record := state.installation(app.id))
             and record.get("installed_at")
             and record["state"] != "not_installed"

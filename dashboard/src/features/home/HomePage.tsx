@@ -16,7 +16,6 @@ import {
 } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { AppQuickPanel } from './AppQuickPanel';
-import { HomeCalendar } from './HomeCalendar';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
 
@@ -181,7 +180,6 @@ export function HomePage() {
           </Link>
         </div>
       </section>
-      <HomeCalendar nextcloud={services.find((service) => service.id === 'nextcloud')} />
       {selected && <AppQuickPanel service={selected} onClose={() => setPanel('')} />}
     </div>
   );

@@ -1,4 +1,4 @@
-import { Home, LayoutGrid, type LucideIcon, MessageSquare, Search, Settings } from 'lucide-react';
+import { CalendarDays, Home, LayoutGrid, type LucideIcon, MessageSquare, Search, Settings } from 'lucide-react';
 import { Dot } from '../components/Status';
 import { Link, usePath } from '../lib/router';
 import { needsAttention } from '../lib/services';
@@ -7,8 +7,9 @@ import { useDashboard } from '../state/dashboard';
 import { UserMenu } from './UserMenu';
 
 export const NAV: { label: string; to: string; icon: LucideIcon; match: (path: string) => boolean }[] = [
-  { label: 'Home', to: '/', icon: Home, match: (path) => path === '/' || path === '/calendar' },
+  { label: 'Home', to: '/', icon: Home, match: (path) => path === '/' },
   { label: 'Apps', to: '/apps', icon: LayoutGrid, match: (path) => path.startsWith('/apps') },
+  { label: 'Calendar', to: '/calendar', icon: CalendarDays, match: (path) => path === '/calendar' },
   { label: 'Chat', to: '/chat', icon: MessageSquare, match: (path) => path.startsWith('/chat') },
   { label: 'Settings', to: '/settings/ai', icon: Settings, match: (path) => path.startsWith('/settings') },
 ];

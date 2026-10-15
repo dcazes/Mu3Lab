@@ -14,11 +14,12 @@ import { copyText } from '../../components/CopyField';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Facts, PageHeader } from '../../components/Layout';
 import { Badge, Dot, StateBadge } from '../../components/Status';
-import { bytes, duration } from '../../lib/format';
+import { duration } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { JobDialog, JobRow } from '../activity/JobDialog';
+import { ResourceCharts } from '../home/ResourceCharts';
 
 function Meter({ label, percent, detail }: { label: string; percent: number; detail: string }) {
   const tone = percent > 90 ? 'red' : percent > 75 ? 'amber' : 'green';
@@ -314,17 +315,8 @@ export function SystemSettings() {
             percent={system.cpu_percent}
             detail={`Up ${duration(system.uptime_seconds ?? undefined)}`}
           />
-          <Meter
-            label="Memory"
-            percent={system.memory.percent}
-            detail={`${bytes(system.memory.used)} of ${bytes(system.memory.total)}`}
-          />
-          <Meter
-            label="Disk"
-            percent={system.disk.percent}
-            detail={`${bytes(system.disk.total - system.disk.used)} free`}
-          />
         </div>
+        <ResourceCharts detailed />
         <Facts
           items={[
             {
@@ -338,7 +330,13 @@ export function SystemSettings() {
       <Mu3LabUpdates />
       <Tailnet status={tailscale} />
       <Compute />
-      <Card title="Activity" description="Recent installation, maintenance, and configuration jobs." flush>
+      <Card
+        title="Activity"
+        description="Recent installation, maintenance, and configuration jobs."
+        flush
+        collapsible
+        defaultOpen={false}
+      >
         {data.jobs.jobs.length ? (
           <div className="rows">
             {data.jobs.jobs.slice(0, 15).map((job) => (

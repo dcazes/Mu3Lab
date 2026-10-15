@@ -10,6 +10,9 @@ import { isInstalled, launchTarget, signInSummary } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { VaultSetupCard } from './VaultSetup';
 
+/** Working, or turned off on purpose: nothing to look at. */
+const settled = (service: Service) => ['ready', 'off', 'unsupported'].includes(service.identity!.state);
+
 function SignInRow({ service }: { service: Service }) {
   const summary = signInSummary(service);
   const identity = service.identity!;
@@ -40,6 +43,7 @@ export function SignInSettings() {
   const authentik = data.services.services.find((service) => service.id === 'authentik');
   const authentikTarget = authentik && launchTarget(authentik);
   const working = sso.filter((service) => service.identity!.state === 'ready').length;
+  const off = sso.filter((service) => service.identity!.state === 'off').length;
   return (
     <>
       <PageHeader
@@ -56,8 +60,12 @@ export function SignInSettings() {
         <>
           <Card
             title="Single sign-on"
-            description={`${working} of ${sso.length} app${sso.length === 1 ? '' : 's'} use your Authentik login.`}
+            description={`${working} of ${sso.length} app${sso.length === 1 ? '' : 's'} use your Authentik login${
+              off ? `; ${off} ${off === 1 ? 'is' : 'are'} turned off` : ''
+            }.`}
             flush
+            collapsible
+            defaultOpen={!sso.every(settled)}
           >
             <div className="rows">
               {sso.map((service) => (
@@ -70,6 +78,8 @@ export function SignInSettings() {
               title="Separate logins"
               description="These apps keep their own login. Mu3Lab saves it to your vault, so Bitwarden fills it in when you open the app."
               flush
+              collapsible
+              defaultOpen={!other.every(settled)}
             >
               <div className="rows">
                 {other.map((service) => (

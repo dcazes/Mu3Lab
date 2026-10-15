@@ -248,6 +248,24 @@ def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep, dimensions: int 
     return False
 
 
+def _stopped_service(runtime: RuntimePaths, service_ids: list[str]) -> str:
+    """Name the first checked service someone stopped from the dashboard, if any."""
+    control = ControlState.runtime(runtime)
+    if not control:
+        return ""
+    registry = load()
+    for service_id in service_ids:
+        if (control.installation(service_id) or {}).get("state") == "stopped":
+            return registry.get(service_id).name
+    return ""
+
+
+def _turned_off(runtime: RuntimePaths) -> str:
+    """Name a service the checks need that someone turned off from the dashboard."""
+    checked = [by_capability(name).id for name in ("model_proxy", "model_runner", "provider_gateway")]
+    return _stopped_service(runtime, [*checked, chat_ops.default_app().id])
+
+
 def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     """Check application-level contracts after container health has passed."""
     litellm_env = read_runtime_env(runtime.projects / by_capability("model_proxy").id / ".env")
@@ -428,6 +446,15 @@ def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
     store.transition(job_id, "running", actor=actor, detail="Live platform verification started.", step_id="verify")
     try:
         runtime = RuntimePaths()
+        # Turning an app off is a choice, not a broken setup: note it without raising a warning.
+        stopped = _turned_off(runtime)
+        if stopped:
+            detail = f"{stopped} is turned off. Start it from Apps to run these checks."
+            if provisioning:
+                provisioning.update("verification", "running", detail=detail)
+                provisioning.update("verification", "waiting_for_user", detail=detail)
+            store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+            return
         wiring = configure_wiring(runtime)
         ok, detail = _verify_platform(runtime, wiring)
         if not ok:

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from ctl import chat_ops, mcp_gateway
 from ctl.control_state import ControlState
 from ctl.integrations.openwebui import ChatError, OpenWebUI
-from ctl.manifest.catalog import App, load
+from ctl.manifest.catalog import App, cached
 from ctl.mcp_catalog import load as load_connectors
 from ctl.people import PeopleError, chat_people
 from ctl.registry import load as load_registry
@@ -93,7 +93,7 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
     record = records.get(SCOPE, uid, RuntimePaths())
     connectors = load_connectors(load_registry())
     report = []
-    for app in load().apps:
+    for app in cached().apps:
         installation = state.installation(app.id)
         if not app.manifest.chat.assistant or not installation or installation["state"] == "not_installed":
             continue

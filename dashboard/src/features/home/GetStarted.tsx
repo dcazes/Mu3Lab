@@ -18,7 +18,7 @@ const STORAGE_KEY = 'mu3lab.getStarted';
 type Guide = 'extension' | 'devices';
 
 export function useGetStartedChecklist() {
-  const { data: checklist, reload } = useApi<ChecklistResponse>('/api/v1/me/checklist', { interval: 10000 });
+  const { data: checklist, reload } = useApi<ChecklistResponse>('/api/v1/me/checklist');
   const migrating = useRef(false);
   useEffect(() => {
     if (!checklist || migrating.current) return;
@@ -149,8 +149,8 @@ function DevicesGuide({ onClose, onDone }: { onClose: () => void; onDone: () => 
 function useGetStarted() {
   const { data } = useDashboard();
   const operator = data.identity.writes_enabled;
-  const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
-  const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
+  const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null);
+  const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null);
   const [manual, mark, setItem] = useGetStartedChecklist();
   const [checking, setChecking] = useState(false);
   const checkExtension = async () => {

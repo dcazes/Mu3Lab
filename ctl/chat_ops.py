@@ -15,7 +15,7 @@ from types import ModuleType
 from typing import Any
 
 from ctl.control_state import ControlState
-from ctl.manifest.catalog import App, Catalog, load
+from ctl.manifest.catalog import App, Catalog, cached
 from ctl.service_state import tailnet_dns_name
 
 CAPABILITY = "chat"
@@ -27,7 +27,7 @@ class ChatError(RuntimeError):
 
 
 def chat_apps(catalog: Catalog | None = None) -> list[App]:
-    return [app for app in (catalog or load()).apps if CAPABILITY in app.manifest.capabilities]
+    return [app for app in (catalog or cached()).apps if CAPABILITY in app.manifest.capabilities]
 
 
 def by_workspace(workspace: str, catalog: Catalog | None = None) -> App:
@@ -106,7 +106,7 @@ def desired_assistants(subject: str) -> list[dict[str, Any]]:
         if connector.gateway and runtime and runtime["enabled"] and runtime["state"] == "live":
             live.add(connector.service_id)
     result = []
-    for app in load().apps:
+    for app in cached().apps:
         assistant = app.manifest.chat.assistant
         installation = state.installation(app.id)
         if (

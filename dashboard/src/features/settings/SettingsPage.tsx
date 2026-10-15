@@ -2,7 +2,6 @@ import { EmptyState } from '../../components/Layout';
 import { GetStartedSettings } from '../home/GetStarted';
 import { Link } from '../../lib/router';
 import { AiSettings } from './AiSettings';
-import { CalendarSettings } from './CalendarSettings';
 import { IntegrationsSettings } from './IntegrationsSettings';
 import { useIsAdmin } from '../../state/dashboard';
 import { PeopleSettings } from './PeopleSettings';
@@ -18,7 +17,6 @@ const PAGES: Record<string, () => JSX.Element> = {
   ai: AiSettings,
   integrations: IntegrationsSettings,
   'sign-in': SignInSettings,
-  calendar: CalendarSettings,
   voice: VoiceSettings,
   people: PeopleSettings,
   security: SecuritySettings,

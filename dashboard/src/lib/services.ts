@@ -128,7 +128,7 @@ export function signInSummary(service: Service) {
       ? 'green'
       : identity.state === 'degraded'
         ? 'red'
-        : identity.state === 'unsupported'
+        : identity.state === 'unsupported' || identity.state === 'off'
           ? 'gray'
           : 'amber';
   return { label: signInLabel[identity.mode] || identity.mode, tone };

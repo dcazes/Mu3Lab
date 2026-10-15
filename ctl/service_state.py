@@ -296,50 +296,6 @@ def compose_states(run=process.completed) -> dict[str, str]:
     }
 
 
-_MEM_UNITS = {"b": 1, "kib": 1024, "mib": 1024**2, "gib": 1024**3, "tib": 1024**4}
-_MEMORY_TTL = 15.0
-_memory_cache: tuple[float, dict[str, int]] = (0.0, {})
-
-
-def _memory_bytes(text: str) -> int | None:
-    """Parse the "used" half of Docker's "3.2GiB / 15GiB" memory column."""
-    match = re.match(r"\s*([\d.]+)\s*([KMGT]?i?B)\b", text, re.IGNORECASE)
-    if not match:
-        return None
-    return int(float(match.group(1)) * _MEM_UNITS.get(match.group(2).lower(), 1))
-
-
-def container_memory(run=process.completed, now=time.monotonic) -> dict[str, int]:
-    """Memory in bytes used by each running container, keyed by container name.
-
-    ``docker stats`` samples for about a second and the dashboard polls every
-    few seconds, so the answer is cached briefly.
-    """
-    global _memory_cache
-    stamp, cached = _memory_cache
-    if stamp and now() - stamp < _MEMORY_TTL:
-        return cached
-    try:
-        proc = run(
-            docker_argv(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}"]),
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return cached
-    if proc.returncode != 0:
-        return cached
-    usage: dict[str, int] = {}
-    for line in proc.stdout.splitlines():
-        name, separator, used = line.partition("\t")
-        amount = _memory_bytes(used) if separator else None
-        if amount is not None:
-            usage[name] = amount
-    _memory_cache = (now(), usage)
-    return usage
-
-
 def compose_snapshot(run=process.completed) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
     """Inspect all Compose projects and safe container fields in one Docker call."""
     try:

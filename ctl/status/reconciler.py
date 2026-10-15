@@ -23,7 +23,7 @@ from ctl.store import db, records
 ROOT = Path(__file__).resolve().parents[2]
 INTERVAL = 5  # while someone has the dashboard open
 IDLE_INTERVAL = 300  # nobody is looking: Docker, Tailscale and every route are checked rarely
-VIEWING_SECONDS = 60  # the dashboard refreshes every 10 seconds while it is visible
+VIEWING_SECONDS = 60  # the dashboard refreshes every 3 s while something is in progress, else every 5 min
 
 
 def reconcile(paths: RuntimePaths = RuntimePaths()) -> None:
@@ -51,7 +51,7 @@ def reconcile(paths: RuntimePaths = RuntimePaths()) -> None:
     for service, projection in zip(registry.services, projections, strict=True):
         projection["containers"] = containers.get(str(project_path(service, ROOT).resolve()), [])
     core = core_plan(ROOT)
-    system = observe_system()
+    system = observe_system(registry, ROOT)
     observed_at = datetime.now(UTC).isoformat(timespec="seconds")
     with db.connect(db.database(paths)) as connection:
         connection.execute("BEGIN IMMEDIATE")

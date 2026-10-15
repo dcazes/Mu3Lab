@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ctl import mcp_config
 from ctl.engine.compose import Compose
-from ctl.manifest.catalog import load
+from ctl.manifest.catalog import cached
 from ctl.mcp_registry import missing_credentials
 from ctl.runtime import RuntimePaths
 from ctl.store import onboarding as onboarding_state
@@ -13,7 +13,7 @@ from ctl.store import onboarding as onboarding_state
 def ensure(server, log) -> tuple[bool, str]:
     if not missing_credentials(server):
         return True, "MCP credentials are already registered."
-    app, connector = load().connector(server.id)
+    app, connector = cached().connector(server.id)
     provision = connector.provision
     if provision is None:
         return False, connector.provision_note or "This application requires manual MCP credentials."

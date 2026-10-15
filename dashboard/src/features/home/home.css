@@ -444,3 +444,198 @@
 .quick-panel-details {
   align-self: flex-start;
 }
+
+/* ---------- Memory and disk per app ---------- */
+.status-panel-system {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
+  gap: 16px 32px;
+  padding: 16px;
+}
+
+.status-side {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resources {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.donuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px 40px;
+}
+
+.donut {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.donut svg {
+  display: block;
+}
+
+.donut-slice {
+  transition: opacity 0.12s;
+}
+
+.donut-slice.dim {
+  opacity: 0.35;
+}
+
+.donut-link {
+  cursor: pointer;
+}
+
+.donut-centre {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  height: 120px;
+  padding: 0 22px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.donut-centre b {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.donut-centre small {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--text-3);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.donut figcaption {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.resources-caption {
+  min-height: 18px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.resource-legend {
+  width: 100%;
+  max-width: 460px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.resource-legend th,
+.resource-legend td {
+  padding: 4px 0;
+  font-weight: 400;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.resource-legend thead th {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.resource-legend tbody th {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  text-align: left;
+}
+
+.resource-legend tbody th a {
+  color: inherit;
+}
+
+.resource-legend tbody th a:hover {
+  text-decoration: underline;
+}
+
+.resource-legend td {
+  width: 96px;
+  vertical-align: top;
+}
+
+.resource-legend tr.active th,
+.resource-legend tr.active td {
+  color: var(--text);
+}
+
+.legend-split {
+  display: block;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.legend-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.legend-swatch.track {
+  background: var(--chart-track);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.legend-swatch.hatched {
+  background: repeating-linear-gradient(45deg, var(--chart-core) 0 2px, var(--chart-track) 2px 4px);
+}
+
+.resources-free {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  max-width: 460px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.resources-free b {
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .status-panel-system {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .resource-legend td {
+    width: 76px;
+  }
+}

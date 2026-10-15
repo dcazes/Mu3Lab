@@ -1536,3 +1536,93 @@ body > .recovery-sheet {
 .schedule-form .button-row {
   margin: 0;
 }
+
+/* A card whose header opens and closes it. */
+.card-toggle {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-toggle > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+
+.card-toggle[aria-expanded='true'] > svg {
+  transform: rotate(90deg);
+}
+
+.card-toggle:hover h2 {
+  text-decoration: underline;
+}
+
+.card-flush.card-closed > .card-header {
+  padding-bottom: 16px;
+}
+
+/* A button that reads as an inline link. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+/* A card's body while its data loads, roughly the size it will be, so the page doesn't jump. */
+.card-loading {
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+  margin: 0;
+}
+
+.card-loading-tall {
+  min-height: 240px;
+}
+
+/* A titled part of a card, set off from what comes before it. */
+.card-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.card-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.card-section > p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.plain-fieldset {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

@@ -7,6 +7,7 @@ import { humanize, relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
 
 /** A readable subject for a job: the app's name, or its chat integration. */
 export function useJobSubject() {
@@ -37,7 +38,9 @@ export function JobRow({ job, onOpen, showService = true }: { job: Job; onOpen: 
 }
 
 export function JobDialog({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
-  const detail = useApi<JobDetailResponse>(jobId ? `/api/v1/jobs/${jobId}` : null, { interval: 3000 });
+  const detail = useApi<JobDetailResponse>(jobId ? `/api/v1/jobs/${jobId}` : null, {
+    interval: (data) => (jobActive(data?.job.state) ? JOB_POLL_MS : 0),
+  });
   const { pending, run } = useAction();
   const subject = useJobSubject();
   const job = detail.data?.job;

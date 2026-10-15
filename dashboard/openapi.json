@@ -1952,6 +1952,17 @@
         "title": "ChecklistResponse",
         "type": "object"
       },
+      "CleanupRequest": {
+        "properties": {
+          "delete_data": {
+            "default": false,
+            "title": "Delete Data",
+            "type": "boolean"
+          }
+        },
+        "title": "CleanupRequest",
+        "type": "object"
+      },
       "ComputeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2175,6 +2186,52 @@
           "ok"
         ],
         "title": "CoreSetupResponseCapacity",
+        "type": "object"
+      },
+      "DiskShare": {
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "number"
+          },
+          "program": {
+            "title": "Program",
+            "type": "number"
+          }
+        },
+        "required": [
+          "data",
+          "program"
+        ],
+        "title": "DiskShare",
+        "type": "object"
+      },
+      "DiskUsage": {
+        "properties": {
+          "measured_at": {
+            "title": "Measured At",
+            "type": "string"
+          },
+          "owners": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DiskShare"
+            },
+            "title": "Owners",
+            "type": "object"
+          },
+          "removed_folders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Folders",
+            "type": "array"
+          }
+        },
+        "required": [
+          "measured_at",
+          "owners"
+        ],
+        "title": "DiskUsage",
         "type": "object"
       },
       "Health": {
@@ -5932,6 +5989,10 @@
                 "type": "string"
               },
               {
+                "const": "off",
+                "type": "string"
+              },
+              {
                 "const": "unsupported",
                 "type": "string"
               }
@@ -6413,12 +6474,36 @@
           "disk": {
             "$ref": "#/components/schemas/Metric"
           },
+          "disk_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "docker_ready": {
             "title": "Docker Ready",
             "type": "boolean"
           },
           "memory": {
             "$ref": "#/components/schemas/Metric"
+          },
+          "memory_by_owner": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory By Owner"
           },
           "observed_at": {
             "default": "",
@@ -16097,6 +16182,108 @@
           }
         },
         "summary": "Mu3Lab Changelog",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/cleanup": {
+      "post": {
+        "description": "Remove removed apps' leftovers and old app versions; their data only when asked.",
+        "operationId": "free_up_space_api_v1_system_cleanup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Free Up Space",
         "tags": [
           "system"
         ]

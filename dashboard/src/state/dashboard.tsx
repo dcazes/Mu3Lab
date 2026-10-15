@@ -1,4 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { jobActive } from '../lib/jobs';
+import { isWorking } from '../lib/services';
 import {
   api,
   ApiError,
@@ -65,9 +67,38 @@ export const emptyData: DashboardData = {
   chat: { ok: false, ready: false, url: '', authentication: '', mcp_enabled_count: 0, detail: '' },
 };
 
-const POLL_MS = 10000;
+// The page refreshes quickly only while something is in progress (an install, a backup, an app
+// starting); otherwise a slow heartbeat still shows a crash or a change made on another device.
+// Coming back to the tab, or any action, refreshes at once.
+const BUSY_POLL_MS = 3000;
+const IDLE_POLL_MS = 300000;
+// After a quiet spell the worker checks everything again once someone looks; ask once more shortly.
+const SETTLE_MS = 4000;
+const SETTLE_AFTER_MS = 30000;
 // A refresh that has not answered by then is abandoned, so the next one can run (review R22).
 const POLL_TIMEOUT_MS = 20000;
+// Once loaded, the page stays up (marked out of date) for this long through failed refreshes, retrying
+// meanwhile, before the full-screen error: an app starting or stopping can briefly slow one refresh.
+const RETRY_MS = 5000;
+const ERROR_GRACE_MS = 30000;
+
+/** Something is installing, starting, stopping or backing up: its progress shows as it happens. */
+export function busy(data: DashboardData): boolean {
+  return (
+    data.jobs.jobs.some((job) => jobActive(job.state)) ||
+    data.services.services.some((service) => isWorking(service) || service.backing_up) ||
+    (data.provisioning.available && !data.provisioning.complete && !data.provisioning.blocked)
+  );
+}
+
+/** How long until the next refresh. */
+export function nextRefresh(data: DashboardData, retrying: boolean, settled: boolean): number {
+  if (retrying) return RETRY_MS;
+  if (busy(data)) return BUSY_POLL_MS;
+  const observed = Date.parse(data.services.observed_at || '');
+  if (!settled && Number.isFinite(observed) && Date.now() - observed > SETTLE_AFTER_MS) return SETTLE_MS;
+  return IDLE_POLL_MS;
+}
 const DashboardContext = createContext<DashboardValue | null>(null);
 
 export function DashboardProvider({ value, children }: { value: DashboardValue; children: ReactNode }) {
@@ -101,6 +132,22 @@ export function useDashboardLoader(): DashboardValue {
   // Sources whose last refresh failed; their data on screen is from an earlier refresh.
   const [failedSources, setFailedSources] = useState<string[]>([]);
   const inFlight = useRef<Promise<void> | null>(null);
+  const loaded = useRef(false);
+  const failingSince = useRef(0);
+  const [retrying, setRetrying] = useState(false);
+  // The observation already asked about once after a quiet spell, so it is asked about only once.
+  const [settledFor, setSettledFor] = useState('');
+  // Counts finished refreshes, so each one schedules the next even when nothing changed.
+  const [refreshes, setRefreshes] = useState(0);
+
+  /** Keep the last good page (marked out of date) through a brief failure; otherwise show the error screen. */
+  const failed = useCallback((error: unknown, source: string) => {
+    setErrorStatus(error instanceof ApiError ? error.status : undefined);
+    setFailedSources([source]);
+    failingSince.current ||= Date.now();
+    setRetrying(true);
+    if (!loaded.current || Date.now() - failingSince.current >= ERROR_GRACE_MS) setConnection(failedConnection(error));
+  }, []);
 
   const load = useCallback(() => {
     if (inFlight.current) return inFlight.current;
@@ -108,9 +155,12 @@ export function useDashboardLoader(): DashboardValue {
       try {
         await api('/api/health', undefined, POLL_TIMEOUT_MS);
       } catch (error) {
-        if (isSignedOut(error)) setData((previous) => ({ ...previous, identity: emptyData.identity }));
-        setErrorStatus(error instanceof ApiError ? error.status : undefined);
-        setConnection(failedConnection(error));
+        if (isSignedOut(error)) {
+          setData((previous) => ({ ...previous, identity: emptyData.identity }));
+          setConnection('signed_out');
+          return;
+        }
+        failed(error, 'health');
         return;
       }
       try {
@@ -118,41 +168,55 @@ export function useDashboardLoader(): DashboardValue {
         setData(snapshot);
         setFailedSources([]);
       } catch (error) {
-        setErrorStatus(error instanceof ApiError ? error.status : undefined);
         if (isSignedOut(error)) {
+          setErrorStatus(error instanceof ApiError ? error.status : undefined);
           setData((previous) => ({ ...previous, identity: emptyData.identity }));
           setConnection('signed_out');
           return;
         }
-        setFailedSources(['snapshot']);
-        setConnection(failedConnection(error));
+        failed(error, 'snapshot');
         return;
       }
+      loaded.current = true;
+      failingSince.current = 0;
+      setRetrying(false);
       setConnection('online');
       setErrorStatus(undefined);
     })().finally(() => {
       inFlight.current = null;
+      setRefreshes((count) => count + 1);
     });
     inFlight.current = run;
     return run;
-  }, []);
+  }, [failed]);
 
   useEffect(() => {
     const stop = onSignedOut(() => setConnection('signed_out'));
     void load();
-    const timer = window.setInterval(() => {
+    const resume = () => {
       if (document.visibilityState === 'visible') void load();
-    }, POLL_MS);
-    const resume = () => void load();
+    };
     window.addEventListener('online', resume);
     window.addEventListener('focus', resume);
+    document.addEventListener('visibilitychange', resume);
     return () => {
       stop();
-      window.clearInterval(timer);
       window.removeEventListener('online', resume);
       window.removeEventListener('focus', resume);
+      document.removeEventListener('visibilitychange', resume);
     };
   }, [load]);
+
+  const observedAt = data.services.observed_at || '';
+  const delay = nextRefresh(data, retrying, settledFor === observedAt);
+  useEffect(() => {
+    // A hidden tab asks nothing; showing it again refreshes at once (above).
+    const timer = window.setTimeout(() => {
+      if (delay === SETTLE_MS) setSettledFor(observedAt);
+      if (document.visibilityState === 'visible') void load();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, observedAt, load, refreshes]);
 
   return { data, connection, errorStatus, failedSources, refresh: load };
 }

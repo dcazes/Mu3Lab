@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
-import { groups, RecoverySheetCard } from './RecoverySheetCard';
+import { groups, RecoverySheetSection } from './RecoverySheet';
 
 afterEach(() => {
   cleanup();
@@ -31,7 +31,7 @@ function setup(status: { opened_at: string; opened_by: string } | null = null) {
     return undefined;
   });
   const onOpened = vi.fn();
-  renderWithDashboard(<RecoverySheetCard status={status} onOpened={onOpened} />, dashboardData([]));
+  renderWithDashboard(<RecoverySheetSection status={status} onOpened={onOpened} />, dashboardData([]));
   return { posts, onOpened };
 }
 

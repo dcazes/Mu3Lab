@@ -18,7 +18,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ctl.control_state import ControlState
-from ctl.manifest.catalog import App, Catalog, load
+from ctl.manifest.catalog import App, Catalog, cached
 from ctl.runtime import RuntimePaths
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ class RunnerError(RuntimeError):
 
 
 def runners(catalog: Catalog | None = None) -> list[App]:
-    return [app for app in (catalog or load()).apps if CAPABILITY in app.manifest.capabilities]
+    return [app for app in (catalog or cached()).apps if CAPABILITY in app.manifest.capabilities]
 
 
 def default_app(catalog: Catalog | None = None) -> App:

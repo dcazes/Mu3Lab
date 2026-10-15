@@ -28,6 +28,7 @@ import { useDashboard } from '../../state/dashboard';
 import { AiModelsCard } from './AiModelsCard';
 import { ChatAppCard } from './ChatAppCard';
 import { detectProvider, keyWarning } from './providerKeys';
+import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
 
 const ROUTE = [
   { id: 'freellmapi', label: 'FreeLLMAPI', role: 'Your provider accounts' },
@@ -75,7 +76,9 @@ function ChatRoute() {
 }
 
 function VerificationJob({ id }: { id: string }) {
-  const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, { interval: 4000 });
+  const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, {
+    interval: (data) => (jobActive(data?.job.state) ? JOB_POLL_MS : 0),
+  });
   if (!job.data) return null;
   return (
     <Collapsible title={`Verification: ${humanize(job.data.job.step_id || job.data.job.state)}`}>
@@ -410,13 +413,20 @@ function ProviderChecklist({
   setup,
   saved,
 }: {
-  catalog: ProviderCatalogItem[];
+  /** Null while it loads. */
+  catalog: ProviderCatalogItem[] | null;
   providers: ProviderMetadata[];
   setup?: ProviderSetupProgress;
   saved: () => void;
 }) {
   const [awaiting, setAwaiting] = useState('');
   const clearAwaiting = useCallback(() => setAwaiting(''), []);
+  if (!catalog)
+    return (
+      <Card title={setup?.recommendation_met ? 'More free providers' : 'Get free AI capacity'}>
+        <p className="muted card-loading">Loading…</p>
+      </Card>
+    );
   if (!catalog.length) return null;
   const minimum = setup?.recommended_minimum ?? 2;
   const done = setup?.recommended_verified.length ?? 0;
@@ -488,8 +498,11 @@ export function AiSettings() {
   const isAdmin = useIsAdmin();
   const confirm = useConfirm();
   const { run } = useAction();
-  const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', { interval: 5000 });
-  const models = useApi<AiModels>('/api/v1/ai/models', { interval: 15000 });
+  // Only while a key is being checked does the list change on its own.
+  const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', {
+    interval: (data) => (data?.providers?.some((provider) => provider.state === 'verifying') ? 3000 : 0),
+  });
+  const models = useApi<AiModels>('/api/v1/ai/models');
   const localOnly = models.data?.settings.privacy === 'local_only';
   const catalog = useApi<{ providers: ProviderCatalogItem[] }>('/api/v1/providers/catalog');
   const [dialog, setDialog] = useState<{ id: string } | null>(null);
@@ -530,7 +543,7 @@ export function AiSettings() {
         </Callout>
       )}
       <ChatAppCard readOnly={!isAdmin} />
-      <AiModelsCard readOnly={!isAdmin} />
+      <AiModelsCard models={models} readOnly={!isAdmin} />
       {localOnly && (
         <Callout tone="info" title="Local only is on">
           Saved provider keys are kept but not used or checked until outside providers are allowed again.
@@ -539,6 +552,8 @@ export function AiSettings() {
       <Card title="Connected providers" flush>
         {providers.error ? (
           <p className="error-text card-pad">Could not load providers: {providers.error}</p>
+        ) : !providers.data ? (
+          <p className="muted card-pad card-loading">Loading…</p>
         ) : list.length ? (
           <div className="rows">
             {list.map((provider) => (
@@ -559,7 +574,7 @@ export function AiSettings() {
       </Card>
       {isAdmin && (
         <ProviderChecklist
-          catalog={catalog.data?.providers || []}
+          catalog={catalog.data ? catalog.data.providers : catalog.error ? [] : null}
           providers={list}
           setup={providers.data?.setup || undefined}
           saved={() => void reload()}

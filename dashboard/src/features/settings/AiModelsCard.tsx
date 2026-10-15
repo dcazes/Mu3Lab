@@ -10,11 +10,12 @@ import {
 } from '../../api';
 import { Button } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
-import { Callout, Card, Collapsible, Facts } from '../../components/Layout';
+import { Callout, Card, Collapsible } from '../../components/Layout';
 import { Badge } from '../../components/Status';
-import { humanize, relativeTime } from '../../lib/format';
+import { humanize } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
-import { useApi } from '../../lib/useApi';
+import { type ApiState, useApi } from '../../lib/useApi';
+import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
 
 function option(model: LocalModel): string {
   return `${model.name} · ${model.download_gb} GB download, about ${model.memory_gb} GB memory`;
@@ -31,7 +32,9 @@ export function whereChatRuns(data: Pick<AiModels, 'settings' | 'chat_models'>):
 }
 
 function JobLog({ id, finished }: { id: string; finished: () => void }) {
-  const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, { interval: 3000 });
+  const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, {
+    interval: (data) => (jobActive(data?.job.state) ? JOB_POLL_MS : 0),
+  });
   const state = job.data?.job.state;
   const running = !state || ['queued', 'running'].includes(state);
   useEffect(() => {
@@ -58,8 +61,8 @@ function JobLog({ id, finished }: { id: string; finished: () => void }) {
 }
 
 /** The household switch for outside AI providers, the local chat model and the search model (R31). */
-export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
-  const { data, error, reload } = useApi<AiModels>('/api/v1/ai/models', { interval: 15000 });
+export function AiModelsCard({ models, readOnly = false }: { models: ApiState<AiModels>; readOnly?: boolean }) {
+  const { data, error, reload } = models;
   const confirm = useConfirm();
   const { pending, run } = useAction();
   const [edits, setEdits] = useState<AiModelsRequest | null>(null);
@@ -69,13 +72,19 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
     setRunning(false);
     void reload();
   }, [reload]);
-  if (error)
+  const title = 'Where AI runs';
+  const description =
+    'Choose whether chat may use outside AI providers, and which models run on this server. Only models reviewed for Mu3Lab are offered.';
+  if (!data)
     return (
-      <Card title="Where AI runs">
-        <p className="error-text">Could not load: {error}</p>
+      <Card title={title} description={description}>
+        {error ? (
+          <p className="error-text">Could not load: {error}</p>
+        ) : (
+          <p className="muted card-loading card-loading-tall">Loading…</p>
+        )}
       </Card>
     );
-  if (!data) return null;
   const saved = data.settings;
   const draft = edits ?? {
     privacy: saved.privacy,
@@ -137,10 +146,7 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   return (
-    <Card
-      title="Where AI runs"
-      description="Choose whether chat may use outside AI providers, and which models run on this server. Only models reviewed for Mu3Lab are offered."
-    >
+    <Card title={title} description={description}>
       {saved.privacy === 'local_only' ? (
         <Callout tone="success" icon={ShieldCheck} title="Local only">
           {whereChatRuns(data)}
@@ -168,7 +174,7 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
             />
             <span>
               <strong>Outside providers allowed</strong>
-              <small>Chat uses the providers you connect below; the local model stays a private choice.</small>
+              <small>Chat uses the providers you connect below.</small>
             </span>
           </label>
           <label className="choice">
@@ -187,8 +193,9 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
             </span>
           </label>
         </fieldset>
-        {/* Only worth a choice when more than one model runner exists. */}
-        {data.runners.length > 1 && (
+        {/* The runner and the local chat model matter only while chat stays on this server. */}
+        {/* The runner is only worth a choice when more than one exists. */}
+        {draft.privacy === 'local_only' && data.runners.length > 1 && (
           <label className="field">
             <span>Model runner</span>
             <select
@@ -206,27 +213,29 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
             <small className="muted">Runs the models below.</small>
           </label>
         )}
-        <label className="field">
-          <span>Local chat model</span>
-          <select
-            aria-label="Local chat model"
-            disabled={readOnly || busy}
-            value={draft.chat_model}
-            onChange={(event) => setEdits({ ...draft, chat_model: event.target.value })}
-          >
-            <option value="">None</option>
-            {data.chat_models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {option(model)}
-              </option>
-            ))}
-          </select>
-          {chosenChat && (
-            <small className="muted">
-              {chosenChat.note} {chosenChat.downloaded ? <Badge tone="green">Downloaded</Badge> : null}
-            </small>
-          )}
-        </label>
+        {draft.privacy === 'local_only' && (
+          <label className="field">
+            <span>Local chat model</span>
+            <select
+              aria-label="Local chat model"
+              disabled={readOnly || busy}
+              value={draft.chat_model}
+              onChange={(event) => setEdits({ ...draft, chat_model: event.target.value })}
+            >
+              <option value="">None</option>
+              {data.chat_models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {option(model)}
+                </option>
+              ))}
+            </select>
+            {chosenChat && (
+              <small className="muted">
+                {chosenChat.note} {chosenChat.downloaded ? <Badge tone="green">Downloaded</Badge> : null}
+              </small>
+            )}
+          </label>
+        )}
         <label className="field">
           <span>Search model</span>
           <select
@@ -264,12 +273,6 @@ export function AiModelsCard({ readOnly = false }: { readOnly?: boolean }) {
         )}
       </form>
       {(jobId || data.active_job_id) && <JobLog id={jobId || data.active_job_id} finished={finished} />}
-      <Facts
-        items={[
-          { label: 'Last changed', value: saved.changed_at ? relativeTime(saved.changed_at) : 'Never' },
-          { label: 'Changed by', value: saved.changed_by || '—' },
-        ]}
-      />
     </Card>
   );
 }

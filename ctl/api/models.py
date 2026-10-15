@@ -200,6 +200,7 @@ class ServiceIdentity(ApiModel):
         | Literal["migration_required"]
         | Literal["ready"]
         | Literal["degraded"]
+        | Literal["off"]
         | Literal["unsupported"]
     )
     launch_url: str
@@ -295,6 +296,23 @@ class TailscaleStatus(ApiModel):
     serve: TailscaleServeStatus
 
 
+class DiskShare(ApiModel):
+    data: float
+    program: float
+
+
+class DiskUsage(ApiModel):
+    measured_at: str
+    # By owner: an app's id, "core", "removed" (apps no longer offered) or "unused" (images nothing runs).
+    owners: dict[str, DiskShare]
+    # Data folders removed apps left behind; "Free up space" deletes them only when asked.
+    removed_folders: list[str] = Field(default_factory=list)
+
+
+class CleanupRequest(ApiModel):
+    delete_data: bool = False
+
+
 class SystemResponse(ApiModel):
     observed_at: str = ""
     ok: bool
@@ -303,6 +321,9 @@ class SystemResponse(ApiModel):
     docker_ready: bool
     worker_state: str | None = None
     container_memory: dict[str, float] | None = None
+    # By owner: an app's id, "core" or "removed" (apps no longer offered).
+    memory_by_owner: dict[str, float] | None = None
+    disk_usage: DiskUsage | None = None
     tailnet_dns_name: str
     tailscale: TailscaleStatus | None = None
     runtime_root: str

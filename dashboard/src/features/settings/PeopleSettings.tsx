@@ -138,7 +138,7 @@ export function PeopleSettings() {
   const { run } = useAction();
   const [revoking, setRevoking] = useState(false);
   // Poll quickly while a revocation is still running so its progress is visible.
-  const people = useApi<{ people: Person[] }>('/api/v1/people', { interval: revoking ? 5000 : 30000 });
+  const people = useApi<{ people: Person[] }>('/api/v1/people', { interval: revoking ? 5000 : 0 });
   const [adding, setAdding] = useState(false);
   const [invite, setInvite] = useState<{ invite: Invite; name: string } | null>(null);
   const list = people.data?.people || [];

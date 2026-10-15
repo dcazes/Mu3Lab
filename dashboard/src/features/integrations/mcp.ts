@@ -65,7 +65,8 @@ export function mcpSummary(server: McpServer, appName: string): { label: string;
 export function useMcpRegistry() {
   const { data } = useDashboard();
   return useApi<McpRegistryResponse>(data.identity.writes_enabled ? '/api/v1/mcp/servers' : null, {
-    interval: 5000,
+    // Only a connection that is starting changes on its own.
+    interval: (registry) => (registry?.servers?.some((server) => server.state === 'starting') ? 3000 : 0),
   });
 }
 

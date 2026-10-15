@@ -53,6 +53,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     """Return browser-safe identity truth without deriving native SSO from YAML alone."""
     mode = mode_for(service)
     saved = state.service_identity(service.id) if state else None
+    failed_setup = False
     route_ready = bool(item.get("route_ready"))
     healthy = item.get("health_state") == "healthy"
     # The additive identity projection must remain compatible with older
@@ -71,7 +72,7 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
             job_store = JobStore.runtime()
             job = job_store.get(str(saved.get("last_job_id") or "")) if job_store else None
             if job and str(job.get("state")) in {"failed", "cancelled"}:
-                current = "degraded"
+                current, failed_setup = "degraded", True
                 detail = str(job.get("detail") or "Sign-in setup failed.")
         if current == "ready" and (not route_ready or not healthy):
             current = "degraded"
@@ -103,6 +104,9 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
             "unconfigured",
             "Authentik sign-in is checked when the app is installed.",
         )
+    if item.get("state") == "stopped" and current in {"ready", "degraded"} and not failed_setup:
+        # Turned off is a choice, not a sign-in problem: the check answers again once it starts.
+        current, detail = "off", "Turned off. Sign-in works again once the app is started."
     return {
         "mode": mode,
         "state": current,

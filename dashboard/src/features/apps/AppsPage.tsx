@@ -197,10 +197,10 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const selected = stored.filter((id) =>
     available.some((service) => service.id === id && canInstall(service) && !queued.has(id)),
   );
-  // Sizes are measured in the background by the worker; re-read them now and then.
   const sizes = useApi<AppSizesResponse>(
     discover ? `/api/v1/app-sizes?ids=${encodeURIComponent(selected.join(','))}` : null,
-    { interval: 30000 },
+    // The worker measures sizes in the background; ask again only until it has.
+    { interval: (data) => (data && data.measured ? 0 : 10000) },
   ).data;
   const shown = (discover ? available : installed).filter((service) =>
     matches(service, term, catalog[service.id]?.summary),

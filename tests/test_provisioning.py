@@ -315,6 +315,29 @@ class CoreWiringTests(unittest.TestCase):
         # FreeLLMAPI's fastest pick, never a named model that could be retired.
         self.assertEqual(sent[0]["model"], "mu3lab-fast")
 
+    def test_an_app_turned_off_leaves_setup_waiting_not_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "control.sqlite3")
+            provisioning = ProvisioningStore(Path(tmp) / "provisioning.sqlite3")
+            provisioning.update("verification", "failed", error="LiteLLM did not answer")
+            control = Mock()
+            control.installation.side_effect = lambda sid: {"state": "stopped" if sid == "litellm" else "running"}
+            store.create(kind="verification", service_id="core-suite", action="verify", actor="owner")
+            claimed = store.claim("worker")
+            with (
+                patch("ctl.core_setup.ProvisioningStore.runtime", return_value=provisioning),
+                patch("ctl.core_setup.ControlState.runtime", return_value=control),
+                patch("ctl.core_setup._verify_platform") as verify,
+            ):
+                execute_claimed(store, claimed, "worker", Path(tmp))
+            verify.assert_not_called()
+            self.assertEqual(store.get(claimed["id"])["state"], "succeeded")
+            summary = provisioning.summary()
+            self.assertIsNone(summary["blocked"])
+            self.assertEqual(
+                summary["waiting"]["detail"], "LiteLLM is turned off. Start it from Apps to run these checks."
+            )
+
     def test_a_brief_provider_outage_is_retried_before_the_check_fails(self):
         answers = iter([False, True])
         sleep = Mock()

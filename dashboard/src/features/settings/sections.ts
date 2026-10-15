@@ -1,6 +1,5 @@
 import {
   Bot,
-  CalendarDays,
   KeyRound,
   type LucideIcon,
   Mic,
@@ -24,12 +23,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'get-started', label: 'Get started', icon: Rocket },
   { id: 'ai', label: 'AI', icon: Bot },
   { id: 'integrations', label: 'Chat integrations', icon: Plug },
-  { id: 'sign-in', label: 'Sign-in', icon: KeyRound },
-  { id: 'calendar', label: 'Calendar', icon: CalendarDays },
   { id: 'voice', label: 'Voice key', icon: Mic },
   { id: 'people', label: 'People', icon: Users, adminOnly: true },
   { id: 'security', label: 'Security & backups', icon: ShieldCheck },
   { id: 'system', label: 'System', icon: ServerCog, adminOnly: true },
+  // Rarely needed once set up, so it sits near the end.
+  { id: 'sign-in', label: 'Sign-in', icon: KeyRound },
   { id: 'whats-new', label: "What's new", icon: Sparkles, adminOnly: true },
 ];
 

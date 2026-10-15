@@ -253,7 +253,7 @@ class AgentSyncTests(unittest.TestCase):
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
             patch.object(lobehub_ops, "load_connectors", return_value=connectors),
             patch.object(lobehub_ops, "load_registry"),
-            patch.object(lobehub_ops, "load", return_value=Mock(apps=apps)),
+            patch.object(lobehub_ops, "cached", return_value=Mock(apps=apps)),
         ):
             report = {item["id"]: item["status"] for item in lobehub_ops.assistant_report("me", operator=True)}
             stranger = {

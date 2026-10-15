@@ -23,11 +23,13 @@ from pathlib import Path
 from ctl import (
     access,
     backup_service,
+    disk_cleanup,
     job_guard,
     local_models,
     logs,
     rebuild,
     resource_locks,
+    resource_usage,
     self_update,
 )
 from ctl.chat_ops import sync_agents
@@ -86,6 +88,8 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == self_update.SERVICE_ID:
         self_update.execute_claimed(store, job, worker_id, ROOT)
+    elif job.get("service_id") == disk_cleanup.SERVICE_ID:
+        disk_cleanup.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == local_models.SERVICE_ID:
         local_models.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
@@ -209,6 +213,7 @@ def run() -> int:
             # while setup jobs run one at a time below.
             download_manager.start(log.info, downloads_stopping)
             status_thread = reconciler.start(downloads_stopping)
+            resource_usage.start(downloads_stopping, ROOT, log.info)
             sign_in.start(downloads_stopping, log.info)
             access.start(downloads_stopping, log.info)
         from ctl import backups
@@ -299,6 +304,8 @@ def run() -> int:
             continue
         try:
             run_job(store, job, worker_id)
+            if resource_usage.touches_disk(job):
+                resource_usage.disk_stale.set()
             # A finished install may have created logins; save them within a minute.
             vault_sync_soon = vault_sync_soon or time.monotonic() + 30
         finally:

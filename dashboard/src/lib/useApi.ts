@@ -17,13 +17,20 @@ interface Loaded<T> {
 }
 
 /**
- * Fetch a JSON resource, optionally re-polling while the tab is visible.
+ * Fetch a JSON resource, and again whenever the tab comes back into view.
+ *
+ * ``interval`` re-polls while the tab is visible. Give a function to poll only
+ * while something is in progress: it receives the latest data and returns the
+ * delay, or 0 to stop until the data changes again.
  *
  * What it returns always belongs to the current path: switching from one app
  * to another never shows the first app's data as the second's, and a request
  * for a path no longer shown is aborted (review R22).
  */
-export function useApi<T>(path: string | null, { interval = 0 }: { interval?: number } = {}): ApiState<T> {
+export function useApi<T>(
+  path: string | null,
+  { interval = 0 }: { interval?: number | ((data: T | null) => number) } = {},
+): ApiState<T> {
   const [loaded, setLoaded] = useState<Loaded<T>>({ path, data: null, error: '', loading: Boolean(path) });
   // Only the newest request may update state, so a slow old response never wins.
   const latest = useRef(0);
@@ -55,18 +62,28 @@ export function useApi<T>(path: string | null, { interval = 0 }: { interval?: nu
     if (!path) return;
     // Loading a resource is synchronization with an external system.
     void reload();
-    const timer = interval
-      ? window.setInterval(() => {
-          if (document.visibilityState === 'visible') void reload();
-        }, interval)
-      : 0;
+    // Coming back to the tab shows what changed meanwhile, without polling while it was hidden.
+    const shown = () => {
+      if (document.visibilityState === 'visible') void reload();
+    };
+    document.addEventListener('visibilitychange', shown);
     return () => {
-      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', shown);
       // Whatever is still on its way belongs to a path no longer shown.
       latest.current += 1;
       running.current?.abort();
     };
-  }, [path, interval, reload]);
+  }, [path, reload]);
+
+  const current = loaded.path === path ? loaded.data : null;
+  const delay = typeof interval === 'function' ? interval(current) : interval;
+  useEffect(() => {
+    if (!path || !delay) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void reload();
+    }, delay);
+    return () => window.clearInterval(timer);
+  }, [path, delay, reload]);
 
   if (loaded.path !== path) return { data: null, error: '', loading: Boolean(path), reload };
   return { data: loaded.data, error: loaded.error, loading: loaded.loading, reload };

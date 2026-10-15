@@ -6,6 +6,7 @@ import { bytes, duration } from '../../lib/format';
 import { Link } from '../../lib/router';
 import { stateLabel, stateTone, type Tone } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
+import { ResourceCharts } from './ResourceCharts';
 
 interface Row {
   key: string;
@@ -221,12 +222,26 @@ export function SystemStatus() {
           <span className="status-meta">Up {duration(system.uptime_seconds ?? undefined)}</span>
         )}
       </div>
-      {expanded && (
-        <ul className="status-panel" id={`status-panel-${expanded.key}`} aria-label={`${expanded.label} details`}>
-          {expanded.rows.map((row) => (
-            <DetailRow key={row.key} row={row} />
-          ))}
-        </ul>
+      {expanded?.key === 'system' ? (
+        // Memory and disk become the donuts; CPU, Docker and the worker stay as rows beside them.
+        <div className="status-panel status-panel-system" id="status-panel-system">
+          <ResourceCharts />
+          <ul className="status-side" aria-label="System details">
+            {expanded.rows
+              .filter((row) => row.key !== 'memory' && row.key !== 'disk')
+              .map((row) => (
+                <DetailRow key={row.key} row={row} />
+              ))}
+          </ul>
+        </div>
+      ) : (
+        expanded && (
+          <ul className="status-panel" id={`status-panel-${expanded.key}`} aria-label={`${expanded.label} details`}>
+            {expanded.rows.map((row) => (
+              <DetailRow key={row.key} row={row} />
+            ))}
+          </ul>
+        )
       )}
     </section>
   );

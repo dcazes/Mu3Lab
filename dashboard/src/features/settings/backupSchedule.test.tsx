@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
-import { BackupScheduleCard, describe as describeSchedule } from './BackupScheduleCard';
+import { BackupScheduleSection, describe as describeSchedule } from './BackupSchedule';
 
 afterEach(() => {
   cleanup();
@@ -29,7 +29,7 @@ function setup(current: Record<string, unknown> = weekly) {
     }
     return current;
   });
-  renderWithDashboard(<BackupScheduleCard />, dashboardData([]));
+  renderWithDashboard(<BackupScheduleSection />, dashboardData([]));
   return puts;
 }
 

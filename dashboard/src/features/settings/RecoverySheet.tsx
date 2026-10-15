@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { postJsonApi, type RecoverySheet, type RecoverySheetStatus } from '../../api';
 import { Button } from '../../components/Button';
 import { Dialog, useConfirm } from '../../components/Dialog';
-import { Callout, Card, Facts } from '../../components/Layout';
+import { Callout } from '../../components/Layout';
 import { relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 
@@ -101,8 +101,17 @@ function SheetBody({ sheet }: { sheet: Opened }) {
   );
 }
 
-/** The backup password on paper and in administrators' vaults: what rebuilding on a new computer needs. */
-export function RecoverySheetCard({ status, onOpened }: { status?: RecoverySheetStatus | null; onOpened: () => void }) {
+/**
+ * The backup password on paper and in administrators' vaults: what rebuilding on a new computer needs.
+ * A section of the Backups card.
+ */
+export function RecoverySheetSection({
+  status,
+  onOpened,
+}: {
+  status?: RecoverySheetStatus | null;
+  onOpened: () => void;
+}) {
   const confirm = useConfirm();
   const { pending, run } = useAction();
   const [sheet, setSheet] = useState<Opened | null>(null);
@@ -144,28 +153,25 @@ export function RecoverySheetCard({ status, onOpened }: { status?: RecoverySheet
   const close = () => setSheet(null);
 
   return (
-    <Card
-      title="Recovery sheet"
-      description="The backup password and where the backups are. A new computer needs both to open your backups."
-      actions={
-        <Button size="sm" icon={FileKey} loading={pending === 'sheet'} onClick={() => void open()}>
-          Open recovery sheet
-        </Button>
-      }
-    >
+    <section className="card-section" aria-labelledby="recovery-sheet">
+      <h3 id="recovery-sheet">Recovery sheet</h3>
       {status ? (
-        <Facts
-          items={[
-            { label: 'Last opened', value: `${relativeTime(status.opened_at)} by ${status.opened_by}` },
-            { label: 'Vault copy', value: 'In every administrator’s Bitwarden, as “Mu3Lab backup password”' },
-          ]}
-        />
+        <p className="muted">
+          The backup password and where the backups are; a new computer needs both. Last opened{' '}
+          {relativeTime(status.opened_at)} by {status.opened_by}. Every administrator’s Bitwarden also keeps it as
+          “Mu3Lab backup password”.
+        </p>
       ) : (
         <Callout tone="warning" icon={ShieldAlert} title="Print your recovery sheet">
           Mu3Lab keeps the backup password on this server. If the server is lost, you need the printed sheet or your
           Bitwarden copy to open the backups.
         </Callout>
       )}
+      <div className="button-row">
+        <Button size="sm" icon={FileKey} loading={pending === 'sheet'} onClick={() => void open()}>
+          Open recovery sheet
+        </Button>
+      </div>
       <Dialog
         open={Boolean(sheet)}
         onClose={close}
@@ -185,6 +191,6 @@ export function RecoverySheetCard({ status, onOpened }: { status?: RecoverySheet
         {sheet && <SheetBody sheet={sheet} />}
       </Dialog>
       {sheet && printing && createPortal(<SheetBody sheet={sheet} />, document.body)}
-    </Card>
+    </section>
   );
 }

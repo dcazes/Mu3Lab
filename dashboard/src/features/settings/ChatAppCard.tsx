@@ -8,11 +8,28 @@ import { useDashboard } from '../../state/dashboard';
 
 /** Which installed chat app the Chat page shows for the whole household. */
 export function ChatAppCard({ readOnly }: { readOnly: boolean }) {
-  const { data, reload } = useApi<ChatApps>('/api/v1/chat/apps');
+  const { data, error, reload } = useApi<ChatApps>('/api/v1/chat/apps');
   const { refresh } = useDashboard();
   const { pending, run } = useAction();
+  const title = (
+    <>
+      <MessageSquare className="inline-icon" /> Chat app
+    </>
+  );
+  const description =
+    'The chat the household sees on the Chat page. Each one keeps its own conversations; the other stays installed until you remove it.';
+  if (!data)
+    return (
+      <Card title={title} description={description}>
+        {error ? (
+          <p className="error-text card-loading">Could not load: {error}</p>
+        ) : (
+          <p className="muted card-loading">Loading…</p>
+        )}
+      </Card>
+    );
   // An older control plane, mid-update, may not answer this yet.
-  const apps = data?.apps ?? [];
+  const apps = data.apps ?? [];
   if (!apps.length) return null;
   const choose = async (id: string, name: string) => {
     const saved = await run(
@@ -27,14 +44,7 @@ export function ChatAppCard({ readOnly }: { readOnly: boolean }) {
   };
   const missing = apps.filter((app) => !app.installed);
   return (
-    <Card
-      title={
-        <>
-          <MessageSquare className="inline-icon" /> Chat app
-        </>
-      }
-      description="The chat the household sees on the Chat page. Each one keeps its own conversations; the other stays installed until you remove it."
-    >
+    <Card title={title} description={description}>
       <div className="segmented" role="radiogroup" aria-label="Chat app">
         {apps
           .filter((app) => app.installed)

@@ -4,7 +4,6 @@ import App from './App';
 import { AppDetailPage } from './features/apps/AppDetailPage';
 import { AppsPage } from './features/apps/AppsPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
-import { HomeCalendar } from './features/home/HomeCalendar';
 import { HomePage } from './features/home/HomePage';
 import { IntegrationsSettings } from './features/settings/IntegrationsSettings';
 import { SecuritySettings } from './features/settings/SecuritySettings';
@@ -79,6 +78,12 @@ describe('Home', () => {
       ...data.system,
       worker_state: 'failed',
       container_memory: { 'mu3lab-ollama': 3.5 * GB },
+      memory_by_owner: { ollama: 3.5 * GB, core: 1 * GB },
+      disk_usage: {
+        measured_at: new Date().toISOString(),
+        owners: { ollama: { data: 20 * GB, program: 2 * GB }, unused: { data: 0, program: 4 * GB } },
+        removed_folders: [],
+      },
       memory: { total: 16 * GB, used: 10 * GB, percent: 62 },
       disk: { total: 100 * GB, used: 96 * GB, percent: 96 },
       tailscale: {
@@ -122,10 +127,18 @@ describe('Home', () => {
     fireEvent.click(chips[2]);
     expect(within(strip).getByRole('link', { name: 'Background worker: Failed' })).toBeInTheDocument();
     expect(within(strip).getByRole('link', { name: 'Docker: Running' })).toBeInTheDocument();
-    const memory = within(strip).getByRole('link', { name: 'Memory: 62%' });
-    expect(memory).toHaveAttribute('title', '10.0 GB of 16.0 GB');
-    expect(memory).toHaveTextContent('Memory62% of 16.0 GB');
-    expect(within(strip).getByRole('link', { name: 'Disk: 96%' })).toBeInTheDocument();
+    // Memory and disk become two donuts with one legend: each app, core, what can be freed, the rest, free.
+    expect(within(strip).getByRole('img', { name: 'Memory: 10.0 GB of 16.0 GB used' })).toBeInTheDocument();
+    expect(within(strip).getByRole('img', { name: 'Disk: 96.0 GB of 100.0 GB used' })).toBeInTheDocument();
+    const legend = within(strip).getByRole('table');
+    const row = (name: string) =>
+      within(legend).getByRole('rowheader', { name }).closest('tr')!.textContent?.replace(/\s+/g, ' ');
+    expect(row('Ollama')).toBe('Ollama3.5 GB22.0 GB');
+    expect(within(legend).getByRole('link', { name: 'Ollama' })).toHaveAttribute('href', '/apps/ollama');
+    expect(row('Mu3Lab core')).toBe('Mu3Lab core1.0 GB—');
+    expect(row('Can be freed')).toBe('Can be freed—4.0 GB');
+    expect(row('Other (not Mu3Lab)')).toBe('Other (not Mu3Lab)5.5 GB70.0 GB');
+    expect(row('Free')).toBe('Free6.0 GB4.0 GB');
   });
 
   it('surfaces app problems in the attention strip', () => {
@@ -599,8 +612,18 @@ describe('Settings', () => {
           }
         : undefined,
     );
-    renderWithDashboard(<IntegrationsSettings />, dashboardData([]));
+    const apps = [
+      service('actual-budget', 'Actual Budget', 'optional', { group: 'apps' }),
+      service('navidrome', 'Navidrome', 'optional', { group: 'apps' }),
+      service('romm', 'RomM', 'optional', { group: 'apps', installed: false, display_state: 'not_installed' }),
+    ];
+    renderWithDashboard(<IntegrationsSettings />, dashboardData(apps));
     const automatic = await screen.findByRole('region', { name: 'Set up automatically' });
+    // Every installed app is accounted for, including those with no integration yet.
+    const without = screen.getByRole('region', { name: 'Apps without an integration' });
+    expect(without).toHaveTextContent('Navidrome');
+    expect(without).not.toHaveTextContent('Actual Budget');
+    expect(without).not.toHaveTextContent('RomM');
     const manual = screen.getByRole('region', { name: 'Manual integration' });
     expect(automatic).toHaveTextContent('Firecrawl MCP');
     expect(manual).toHaveTextContent('Actual Budget MCP');
@@ -626,9 +649,12 @@ describe('Settings', () => {
       display_state: 'not_installed',
     });
     renderWithDashboard(<SecuritySettings />, dashboardData([kopia]));
-    expect(screen.getByText('Backups are off')).toBeInTheDocument();
+    // One folded card: the reason and the way to install it; the schedule waits inside.
+    const toggle = screen.getByRole('button', { name: /Backups are off: Kopia backups isn’t installed/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('link', { name: 'Install Kopia backups' })).toHaveAttribute('href', '/apps/kopia-ui');
-    expect(screen.queryByText('Backup schedule')).not.toBeInTheDocument();
+    expect(screen.queryByText('Schedule')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mu3Lab itself')).not.toBeInTheDocument();
   });
 
   it('copies exactly the tailnet address', async () => {
@@ -690,13 +716,24 @@ describe('Calendar', () => {
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     expect(screen.getByRole('dialog', { name: 'New event' })).toBeInTheDocument();
   });
+  it('opens calendar settings from the Calendar page, not Settings', async () => {
+    stubFetch((path) =>
+      path.startsWith('/api/v1/calendar/events')
+        ? { ok: true, state: 'local', calendar: { id: 'local', name: 'Calendar' }, events: [] }
+        : { ok: true, state: 'not_connected', calendars: [], selected_calendar_id: '' },
+    );
+    renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Nextcloud' }));
+    const panel = screen.getByRole('dialog', { name: 'Calendar settings' });
+    expect(within(panel).getByText('Nextcloud calendar')).toBeInTheDocument();
+  });
   it('works as a local calendar before Nextcloud is installed', async () => {
     const fetchMock = stubFetch((path) =>
       path.startsWith('/api/v1/calendar/events')
         ? { ok: true, state: 'local', calendar: { id: 'local', name: 'Calendar' }, events: [] }
         : { ok: true, id: 'local-1' },
     );
-    renderWithDashboard(<HomeCalendar />, dashboardData([]));
+    renderWithDashboard(<CalendarPage />, dashboardData([]));
     expect(await screen.findByText(/Saved on Mu3Lab/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Install Nextcloud' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
