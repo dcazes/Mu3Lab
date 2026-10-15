@@ -29,7 +29,8 @@ from ctl.store import db
 Kind = Literal["deactivated", "demoted"]
 TARGETS: dict[str, tuple[str, ...]] = {
     "deactivated": ("authentik_account", "authentik_sessions", "gateway", "voice_key", "chat"),
-    "demoted": ("authentik_role", "gateway", "chat"),
+    # Everyone in the household has the same app tools, so a demotion only takes the administrator group.
+    "demoted": ("authentik_role",),
 }
 TARGET_LABELS = {
     "authentik_account": "Authentik sign-in",
@@ -43,9 +44,6 @@ RETRY_BASE_SECONDS = 30
 RETRY_MAX_SECONDS = 3600
 INTERVAL = 30
 CHAT_LOCK = "chat-assistants"
-# Every gateway grant and revocation takes this, so a grant made from an older membership read
-# can never land after a revocation has completed (mcp_gateway.grant re-checks the hold inside it).
-GATEWAY_LOCK = "gateway-authority"
 
 
 def _now() -> str:
@@ -185,14 +183,19 @@ def _authentik_role(subject: str, username: str) -> None:
         client.remove_from_group(group, user["pk"])
 
 
-def _gateway(subject: str, _username: str) -> None:
-    from ctl import resource_locks
-    from gateway_authority import Authority
+def _gateway(subject: str, username: str) -> None:
+    """Withdraw this person's ContextForge keys (LobeChat).
 
-    directory = RuntimePaths().projects / "mcp-gateway" / "authority"
-    if (directory / "authority.db").is_file():
-        with resource_locks.hold(GATEWAY_LOCK):
-            Authority(directory, initialize=False).revoke_subject(subject)
+    Open WebUI's tool calls carry their Authentik sign-in, which ends with their account.
+    """
+    from ctl import contextforge, contextforge_ops, resource_locks
+
+    if not (RuntimePaths().projects / contextforge.app().id / ".env").is_file():
+        return
+    _client, user = _authentik_user(subject, username)
+    email = str((user or {}).get("email") or "").strip().lower()
+    with resource_locks.hold(CHAT_LOCK):
+        contextforge_ops.revoke_person(subject, email)
 
 
 def _voice_key(subject: str, _username: str) -> None:

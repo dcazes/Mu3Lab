@@ -117,13 +117,13 @@ function AssistantsCard({ assistants }: { assistants: ChatAssistant[] }) {
       title="Assistants in chat"
       description={
         assistants.length
-          ? `${ready} of ${assistants.length} apps have an assistant in chat. App connectors use shared service credentials, and each change an assistant asks for waits for approval of its exact inputs.`
-          : 'App connectors use shared service credentials, and each change an assistant asks for waits for approval of its exact inputs.'
+          ? `${ready} of ${assistants.length} apps have an assistant in chat, the same for everyone. ContextForge chooses each assistant's tools and logs every call.`
+          : "Everyone gets the same assistant for each app. ContextForge chooses each assistant's tools and logs every call."
       }
       actions={
         isAdmin && (
-          <LinkButton size="sm" to="/tool-approvals">
-            Review change requests
+          <LinkButton size="sm" to="/apps/contextforge">
+            Manage tools
           </LinkButton>
         )
       }
@@ -155,7 +155,7 @@ export function IntegrationsSettings() {
     <>
       <PageHeader
         title="Chat integrations"
-        description="Connect supported apps to chat and control which tools can run or require approval."
+        description="Connect supported apps to chat. ContextForge chooses which of their tools chat can use."
       />
       {registry.data && servers.length > 0 && (
         <div className="stat-row" aria-label="Integration summary">
@@ -217,7 +217,8 @@ export function IntegrationsSettings() {
             <ul className="bullets">
               <li>Credentials are scoped to one app, stored encrypted, and never shown again.</li>
               <li>Tools become available only after the connection is verified.</li>
-              <li>Actions that change data ask for your approval by default.</li>
+              <li>Chat reaches apps only through ContextForge, which checks who is asking and logs every call.</li>
+              <li>Tools that change data run without asking; switch off any you don't want in ContextForge.</li>
               <li>Vaultwarden and infrastructure services are never exposed to chat.</li>
             </ul>
             {registry.data.policy && <p className="muted">{registry.data.policy}</p>}

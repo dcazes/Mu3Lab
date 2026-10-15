@@ -21,7 +21,8 @@ services:
       OAUTH_CLIENT_SECRET: ${OPEN_WEBUI_OIDC_CLIENT_SECRET:?OPEN_WEBUI_OIDC_CLIENT_SECRET is required}
       OPENID_PROVIDER_URL: ${OPEN_WEBUI_OIDC_DISCOVERY_URL:?OPEN_WEBUI_OIDC_DISCOVERY_URL is required}
       OAUTH_PROVIDER_NAME: Mu3Lab
-      OAUTH_SCOPES: openid email profile
+      # offline_access: a refresh token, so app tools keep acting as the signed-in person (ContextForge).
+      OAUTH_SCOPES: openid email profile offline_access
       # Mu3Lab operators are administrators; everyone else in the household is a user.
       ENABLE_OAUTH_ROLE_MANAGEMENT: "true"
       OAUTH_ROLES_CLAIM: groups
@@ -54,7 +55,8 @@ services:
       ENABLE_COMMUNITY_SHARING: "false"
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/open-webui:/app/backend/data
-    networks: [mu3lab_frontend, mu3lab_backend]
+    # mu3lab_mcp: app tools, through ContextForge.
+    networks: [mu3lab_frontend, mu3lab_backend, mu3lab_mcp]
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
@@ -67,3 +69,4 @@ services:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

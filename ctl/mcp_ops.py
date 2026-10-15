@@ -11,11 +11,10 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard, mcp_gateway, platform_releases
+from ctl import actions, job_guard, platform_releases
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
@@ -35,56 +34,27 @@ def _app_name(service_id: str) -> str:
 
 
 def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
-    """Attach a live connector to its app's assistant, through the gateway when reviewed."""
+    """Register a live connector in ContextForge, then give everyone its app's assistant."""
     job_guard.checkpoint()
-    from ctl.chat_ops import sync_gateway, sync_mcp
+    from ctl import contextforge_ops
+    from ctl.chat_ops import sync_agents
 
-    if not server.gateway:
-        token = read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", "")
-        return sync_mcp(server, tools, token, enabled=True, log=log)
-    from ctl import mcp_gateway
-
-    ok, detail = mcp_gateway.refresh(log)
+    ok, detail = contextforge_ops.connect(server, _app_name(server.service_id), log)
     if not ok:
         return False, detail
-    try:
-        surface = mcp_gateway.surface(server.service_id)
-    except (OSError, ValueError, KeyError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        return False, f"The tool gateway did not list {server.name}'s tools: {redact(str(exc))}"
-    return sync_gateway(server.service_id, _app_name(server.service_id), surface, enabled=True, log=log)
+    return sync_agents(log)
 
 
 def unbind(server, log) -> tuple[bool, str]:
-    """Detach a connector from its app's assistant; call after its state is updated."""
+    """Switch a connector off in ContextForge and take its assistant out of chat; call after its state is updated."""
     job_guard.checkpoint()
-    from ctl.chat_ops import sync_gateway, sync_mcp
+    from ctl import contextforge_ops
+    from ctl.chat_ops import sync_agents
 
-    if not server.gateway:
-        return sync_mcp(server, [], "", enabled=False, log=log)
-    from ctl import mcp_gateway
-
-    try:
-        mcp_gateway.write_policy()
-    except (OSError, ValueError) as exc:
-        log(f"Tool gateway policy could not be written: {exc}")
-    return sync_gateway(server.service_id, _app_name(server.service_id), [], enabled=False, log=log)
-
-
-def rebind_app(service_id: str, log) -> tuple[bool, str]:
-    """Apply changed switches: new policy, new tool list, new category map."""
-    state = ControlState.runtime()
-    for server in load_catalog(load_registry()):
-        runtime = state.mcp_server(server.id) if state else None
-        if server.service_id == service_id and runtime and runtime["enabled"] and runtime["state"] == "live":
-            return bind(server, runtime.get("tool_snapshot") or [], log)
-    if state:
-        from ctl import mcp_gateway
-
-        try:
-            mcp_gateway.write_policy()
-        except (OSError, ValueError) as exc:
-            return False, str(exc)
-    return True, "No live connector; the switches apply when it connects."
+    ok, detail = contextforge_ops.disconnect(server, log)
+    if not ok:
+        return False, detail
+    return sync_agents(log)
 
 
 def _siblings(server, state: ControlState) -> list:
@@ -100,15 +70,13 @@ def _siblings(server, state: ControlState) -> list:
 
 
 def _stop_connector(server, state: ControlState, log) -> tuple[bool, str]:
-    with mcp_gateway.policy_change() if server.gateway else nullcontext():
-        project = credential_path(server.id).parent
-        if (project / "docker-compose.yml").is_file():
-            rc, output = actions.compose_action(project, "stop", log)
-            if rc:
-                return False, redact(output)
-        state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-        ok, detail = unbind(server, log)
-        return ok, detail
+    project = credential_path(server.id).parent
+    if (project / "docker-compose.yml").is_file():
+        rc, output = actions.compose_action(project, "stop", log)
+        if rc:
+            return False, redact(output)
+    state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+    return unbind(server, log)
 
 
 def _materialize(server, root: Path) -> Path:
@@ -445,6 +413,9 @@ def reconcile_lifecycle(root: Path, log) -> None:
     state = ControlState.runtime()
     if state is None:
         return
+    from ctl import contextforge_ops
+
+    contextforge_ops.retire_old_gateway(log)
     registry = load_registry()
     from ctl.service_state import _healthy
 
@@ -658,34 +629,33 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             )
         return
     if action == "disable":
-        with mcp_gateway.policy_change() if server.gateway else nullcontext():
-            project = credential_path(server.id).parent
-            if (project / "docker-compose.yml").is_file():
-                rc, output = actions.compose_action(project, "stop", log)
-                if rc:
-                    store.transition(
-                        job_id,
-                        "failed",
-                        actor=actor,
-                        detail=redact(output),
-                        error_code="mcp_stop_failed",
-                        step_id="stop",
-                    )
-                    return
-            state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-            linked, link_detail = unbind(server, log)
-            if not linked:
+        project = credential_path(server.id).parent
+        if (project / "docker-compose.yml").is_file():
+            rc, output = actions.compose_action(project, "stop", log)
+            if rc:
                 store.transition(
                     job_id,
                     "failed",
                     actor=actor,
-                    detail=link_detail,
-                    error_code="lobehub_registration_failed",
-                    step_id="register",
+                    detail=redact(output),
+                    error_code="mcp_stop_failed",
+                    step_id="stop",
                 )
                 return
-            store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
+        state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+        linked, link_detail = unbind(server, log)
+        if not linked:
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=link_detail,
+                error_code="contextforge_registration_failed",
+                step_id="register",
+            )
             return
+        store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
+        return
     for other in others:
         log(f"Switching off {other.name}.")
         stopped, stop_detail = _stop_connector(other, state, log)
@@ -782,7 +752,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "failed",
             actor=actor,
             detail=link_detail,
-            error_code="lobehub_registration_failed",
+            error_code="contextforge_registration_failed",
             step_id="register_lobehub",
         )
         return

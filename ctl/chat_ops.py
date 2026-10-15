@@ -9,7 +9,6 @@ its backend: ``ctl.openwebui_ops`` or ``ctl.lobehub_ops``.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from types import ModuleType
 from typing import Any
@@ -91,20 +90,29 @@ def needs_connect(app: App) -> bool:
     return app.manifest.chat.workspace == "lobe"
 
 
-def desired_assistants(subject: str) -> list[dict[str, Any]]:
-    """The assistants an operator should have: one per installed app whose reviewed connector is live."""
-    from ctl import mcp_gateway
+def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
+    """Everyone's assistants: one per installed app whose connector is live, reaching its ContextForge virtual server.
+
+    With ``uid`` and ``email`` (LobeChat), each carries that person's own ContextForge key;
+    Open WebUI passes each person's Authentik sign-in instead.
+    """
+    from ctl import contextforge, contextforge_ops
     from ctl.mcp_catalog import load as load_connectors
     from ctl.registry import load as load_registry
 
     state = ControlState.runtime()
     if state is None:
         return []
-    live = set()
+    live: dict[str, str] = {}
     for connector in load_connectors(load_registry()):
         runtime = state.mcp_server(connector.id)
-        if connector.gateway and runtime and runtime["enabled"] and runtime["state"] == "live":
-            live.add(connector.service_id)
+        if (
+            runtime
+            and runtime["enabled"]
+            and runtime["state"] == "live"
+            and contextforge_ops.virtual_server(connector.id)
+        ):
+            live[connector.service_id] = connector.id
     result = []
     for app in cached().apps:
         assistant = app.manifest.chat.assistant
@@ -116,21 +124,17 @@ def desired_assistants(subject: str) -> list[dict[str, Any]]:
             or installation["state"] not in {"running", "stopped", "degraded"}
         ):
             continue
-        instructions = assistant.instructions
-        policy_file = mcp_gateway.project() / "policy" / "policy.json"
-        if policy_file.is_file():
-            policy = json.loads(policy_file.read_text())
-            instructions = policy.get("apps", {}).get(app.id, {}).get("instructions") or instructions
-        result.append(
-            {
-                "id": app.id,
-                "title": assistant.title,
-                "description": assistant.description,
-                "instructions": instructions,
-                "url": mcp_gateway.endpoint(app.id),
-                "token": mcp_gateway.operator_token(subject, app.id),
-            }
-        )
+        server_id = contextforge_ops.virtual_server(live[app.id])
+        item = {
+            "id": app.id,
+            "title": assistant.title,
+            "description": assistant.description,
+            "instructions": assistant.instructions,
+            "url": contextforge.endpoint(server_id),
+        }
+        if uid and email:
+            item["token"] = contextforge_ops.person_key(uid, email, live[app.id], server_id)
+        result.append(item)
     return result
 
 
@@ -156,17 +160,3 @@ def revoke(subject: str) -> None:
     for app in chat_apps():
         if installed(app.id):
             backend(app).revoke(subject)
-
-
-# The connector hooks mcp_ops calls; the gateway enforces tool switches, so only assistants change.
-def sync_gateway(service_id: str, app_name: str, tools: list[dict[str, Any]], *, enabled: bool, log: Log):
-    return sync_agents(log)
-
-
-def sync_mcp(server: Any, tools: list[dict[str, Any]], token: str, *, enabled: bool, log: Log):
-    # Unreviewed connectors are never exposed outside the enforcing gateway.
-    return True, "Review this connector before exposing it to chat."
-
-
-def set_tool_permission(server_id: str, tool_name: str, permission: str) -> tuple[bool, str]:
-    return True, "Tool permission is enforced by the gateway."

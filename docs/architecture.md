@@ -35,21 +35,14 @@ Hooks handle exceptions to shared rules; they do not duplicate the engine.
 REST API with a machine credential. LobeHub uses its device approval flow and
 per-person API keys. Vaultwarden uses its registration/organization interfaces
 for bootstrap and invitations, and the pinned Bitwarden CLI for routine vault
-operations. Each CLI session has a disposable private cache. Chat talks to
-app connectors through a tool gateway with person/provider/app/version credentials.
-Current shared application connectors are operator-only; household members have
-ordinary chat without connector access. Direct/helper writes and console writes
-create an immutable operation in the isolated gateway authority store. A human
-approves the exact stored inputs through the authenticated dashboard, and the
-gateway atomically claims one dispatch attempt after rechecking current policy.
-Lost replies and interrupted dispatches remain unknown and are never resent.
-
-`gateway_authority.py` owns the dedicated gateway SQLite database and encryption
-key under `projects/mcp-gateway/authority/`. Only this directory, read-only policy
-and metadata logs are mounted into the gateway. Policy revisions and committed
-hashes invalidate old grants before permission changes; health confirms gateway
-acknowledgement. Back up this database with its matching key as well as the
-control-plane store. See [the authority implementation and recovery record](reviews/2026-10-08-gateway-authority-implementation.md).
+operations. Each CLI session has a disposable private cache. Chat reaches app
+connectors only through IBM ContextForge (`apps/contextforge`, `ctl/contextforge.py`):
+each live connector is registered there and gets one virtual server, whose tools
+operators choose in ContextForge's own screens. Open WebUI passes each person's
+Authentik sign-in with their tool calls; LobeChat uses a ContextForge key Mu3Lab
+creates per person and virtual server. Everyone in the household has the same
+assistants, and tools that change data run without a separate approval;
+ContextForge logs every call. See [chat connectors](chat-connectors.md).
 
 `ctl/store/` owns one SQLite database, `/srv/mu3lab/state/mu3lab.db`, and numbered
 SQL migrations. One private `secrets.key` encrypts scoped credential rows.
@@ -87,8 +80,9 @@ only on the tailnet (Tailscale), never from the public internet. Caddy sends
 every request through Authentik first and strips any identity headers a caller
 sends. The API checks the caller's role and a CSRF token on every change, and
 accepts only allowlisted job kinds and actions; it never takes a command,
-path or image from the browser. Chat tools pass through the separate tool
-gateway, whose approval records live in their own authority store.
+path or image from the browser. Chat tools pass through ContextForge, which
+checks who is calling and logs every call; connectors share a network with
+ContextForge only.
 
 So a bug that lets someone run code inside the backend gives them the whole
 server. Keep dependencies pinned, keep the dashboard off the public internet,

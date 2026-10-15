@@ -15,7 +15,6 @@ from ctl.api import create_app
 from ctl.api.security import resolve_identity
 from ctl.integrations.authentik import Authentik, AuthentikError
 from ctl.runtime import RuntimePaths
-from gateway_authority import Authority
 from tests.test_app_security import OPERATOR, PROXY_TOKEN, request
 from tests.test_people import AuthentikFixture
 
@@ -23,7 +22,7 @@ ORIGIN = "https://mu3lab.example.ts.net"
 
 
 class AccessCase(AuthentikFixture, unittest.TestCase):
-    """The people tests' Authentik fixture, with an isolated access store and gateway authority."""
+    """The people tests' Authentik fixture, with an isolated access store and ContextForge keys."""
 
     def setUp(self):
         super().setUp()
@@ -43,7 +42,15 @@ class AccessCase(AuthentikFixture, unittest.TestCase):
             patcher = patch(f"{module}.RuntimePaths", return_value=self.paths)
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.authority = Authority(self.paths.projects / "mcp-gateway" / "authority")
+        # ContextForge is installed; its keys are withdrawn through contextforge_ops.
+        (self.paths.projects / "contextforge").mkdir(parents=True)
+        (self.paths.projects / "contextforge" / ".env").write_text("")
+        self.withdrawn: list[tuple[str, str]] = []
+        patcher = patch(
+            "ctl.contextforge_ops.revoke_person", side_effect=lambda uid, email: self.withdrawn.append((uid, email))
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.outages: set[str] = set()
         self.revoked: list[tuple[str, str]] = []
 
@@ -69,8 +76,6 @@ class DeactivationTests(AccessCase):
     def setUp(self):
         super().setUp()
         people.change("member", "role", ORIGIN, "admin")
-        self.authority.grant_subject("uid-1", operator=True)
-        self.token = self.authority.credential("uid-1", "demo")
 
     def test_deactivation_while_voice_and_chat_are_down_completes_after_recovery(self):
         self.outages = {"voice_key", "chat"}
@@ -83,8 +88,7 @@ class DeactivationTests(AccessCase):
         self.assertIn("deactivated", identity["detail"])
         # Chat tool access ends before anything that needs another service.
         access.run(lambda _line: None, subject="uid-1", targets=("gateway",))
-        with self.assertRaises(ValueError):
-            self.authority.authenticate(self.token, "demo")
+        self.assertEqual([uid for uid, _email in self.withdrawn], ["uid-1"])
 
         remaining = access.run(lambda _line: None, subject="uid-1")
         self.assertEqual(remaining, 2)
@@ -163,22 +167,8 @@ class DemotionTests(AccessCase):
         self.assertFalse(identity["is_admin"])
         self.assertTrue(identity["writes_enabled"])
         self.assertEqual(identity["role"], "member")
-        self.assertEqual(self.pending(), ["authentik_role", "chat", "gateway"])
-
-    def test_a_sync_that_read_membership_before_demotion_cannot_regrant_access(self):
-        from ctl import mcp_gateway
-
-        self.authority.grant_subject("uid-1", operator=True)
-        operators = people.operator_subjects()  # a chat sync reads membership: still an operator
-        self.assertIn("uid-1", operators)
-        people.change("owner", "role", ORIGIN, "member")
-        access.run(lambda _line: None, subject="uid-1", targets=("gateway",))
-        self.assertNotIn("gateway", self.pending())
-        # The sync carries on with its older read, after the revocation has completed.
-        with patch("ctl.mcp_gateway.RuntimePaths", return_value=self.paths):
-            mcp_gateway.grant("uid-1", operator="uid-1" in operators)
-        with self.assertRaises(ValueError):
-            self.authority.credential("uid-1", "demo")
+        # Everyone has the same app tools, so only the administrator group goes.
+        self.assertEqual(self.pending(), ["authentik_role"])
 
     def test_failed_group_change_is_retried_and_listed_as_member(self):
         with patch.object(Authentik, "remove_from_group", side_effect=AuthentikError("Authentik could not be reached")):

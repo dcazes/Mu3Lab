@@ -167,6 +167,7 @@ def _oidc_settings(app: App, paths: RuntimePaths) -> OidcApp | None:
         (oidc.role_claim.claim, oidc.role_claim.admin, oidc.role_claim.user, oidc.role_claim.multi)
         if oidc.role_claim
         else None,
+        manifest.route.audience,
     )
 
 

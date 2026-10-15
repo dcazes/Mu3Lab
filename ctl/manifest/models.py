@@ -124,7 +124,7 @@ class Route(Model):
     blocked_paths: tuple[BlockedPath, ...] = ()
     redirects: tuple[Redirect, ...] = ()
     forwarded_host: Literal["host", "hostport"] = "hostport"
-    # Who Authentik admits through a gate: everyone in the household, or administrators only.
+    # Who Authentik admits, through a gate or to an OIDC app: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"
     upstream_basic_auth: UpstreamBasicAuth | None = None
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
@@ -358,7 +358,7 @@ class Connector(Model):
     secrets: tuple[Secret, ...] = ()
     # Shared Mu3Lab files copied into the connector's project, e.g. the generic adapter.
     include: tuple[str, ...] = ()
-    reviewed: bool = False  # a review.yaml sits next to it; served through the tool gateway
+    reviewed: bool = False  # a review.yaml sits next to it: the tools ContextForge starts it with
     reviewed_update: ReviewedUpdate | None = None
 
     @property

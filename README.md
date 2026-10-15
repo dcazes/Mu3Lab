@@ -186,6 +186,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🗝️ | **Vaultwarden** | Your password vault, compatible with every Bitwarden app |
 | 💬 | **Open WebUI** | Chat with an assistant for each of your apps, voice and your documents (LobeChat is available instead) |
 | 🔀 | **LiteLLM** | One AI gateway for chat and embeddings |
+| 🧰 | **ContextForge** | Every app's chat tools in one place: choose them, see who used them |
 | 🆓 | **FreeLLMAPI** | Routes chat to free cloud AI providers, with failover |
 | 🦙 | **Ollama** | Local AI models and embeddings, on CPU, NVIDIA or AMD |
 
@@ -221,7 +222,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 
 - **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
 - **One folder per app.** `apps/<app>/app.yaml` declares everything about an app: its address, sign-in method, generated settings, chat assistant and connectors, and the shared rules it follows. Image versions live only in that folder's `docker-compose.yml`. The dashboard's copy and state come from it, so the UI can't drift from reality.
-- **One private state store.** Numbered migrations manage `state/mu3lab.db`; a single private encryption key protects scoped credentials. App ownership, jobs and personal checklist progress share this store. Gateway credentials and approvals use a separate private authority database/key pair. Preserve each database with its matching key.
+- **One private state store.** Numbered migrations manage `state/mu3lab.db`; a single private encryption key protects scoped credentials. App ownership, jobs and personal checklist progress share this store.
 - **Shared status.** The worker observes apps and the host; page loads read its saved snapshot. Phone and laptop see the same app health, and the dashboard warns when observations are old.
 - **Durable jobs.** The FastAPI control plane queues every action as a leased, resumable SQLite job. A background worker runs it, reclaims interrupted work after a reboot and redacts secrets from logs.
 - **Typed interfaces.** Python API models generate the dashboard types, and CI catches mismatches. App setup uses shared rules and supported external interfaces. See [Architecture](docs/architecture.md).
@@ -233,7 +234,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 
 - **No public exposure.** Apps are reachable only from devices on your Tailscale network. Reusable Tailscale auth keys are never accepted.
 - **Forged identities are ignored.** The control plane trusts Authentik identity headers only when they arrive with a shared proxy token, and every change needs a same-origin request and a CSRF token bound to your session.
-- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and the gateway permits enabled writes only after a current operator approves the exact stored request. Shared application connectors are operator-only.
+- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools. Every app tool goes through ContextForge, where operators choose which tools each app's assistant gets and see every call.
 - **Pinned supply chain.** Every image is pinned to an immutable digest. Apps move only to versions the maintainer has tested and approved, and only when you choose to update, with a backup first. See [App updates](docs/app-updates.md).
 - **Data outside Git.** Everything lives under `/srv/mu3lab`. The repository holds definitions and safe defaults, never app data, backups or unencrypted secrets.
 
@@ -326,7 +327,7 @@ implementation steps, acceptance criteria and a supporting evidence record.
 | [`ctl/service_ops.py`](ctl/service_ops.py), [`ctl/lifecycle/`](ctl/lifecycle) | Lifecycle jobs run by the worker, and the steps they sequence |
 | [`dashboard/src/`](dashboard/src) | React + TypeScript dashboard: `api/`, `components/`, `features/<area>/`, `shell/` |
 | [`apps/`](apps) | One folder per app: `app.yaml` (validated by `ctl/manifest/`), its Compose file, and reviewed chat connectors under `connectors/` |
-| [`platform/`](platform) | Images Mu3Lab builds itself: the chat tool gateway and the generic connector adapter |
+| [`platform/`](platform) | Images Mu3Lab builds itself: the generic connector adapter and the tailnet relay |
 
 Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs exactly `make verify` and `make verify-security`, so a check that passes locally passes there; [`tests/test_ci_parity.py`](tests/test_ci_parity.py) keeps it that way. Its actions are pinned to commits, and Dependabot proposes their updates.
 

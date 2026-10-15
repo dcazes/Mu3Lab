@@ -11,7 +11,7 @@ program (its Docker images and containers). A layer two images share is
 counted once, split between the apps by how much of it each one uses.
 
 Usage belongs to an owner: an app's id, ``core`` (sign-in, the proxy, the
-password vault, the tool gateway, the private-network relay and Mu3Lab's own
+password vault, the private-network relay and Mu3Lab's own
 services) or ``removed`` (projects of apps no longer in the catalog). Images no
 container uses are ``unused``.
 """
@@ -37,8 +37,8 @@ from ctl.runtime import RuntimePaths
 CORE = "core"
 REMOVED = "removed"
 UNUSED = "unused"
-# Platform pieces that are not catalog apps: the tool gateway and the private-network relay.
-PLATFORM_PROJECTS = {"mcp-gateway", "tailnet-relay"}
+# Platform pieces that are not catalog apps: the private-network relay.
+PLATFORM_PROJECTS = {"tailnet-relay"}
 # Measured once a day, and again right after an install, update or removal.
 DISK_EVERY = 24 * 3600
 DISK_RECORD = ("status", "disk-usage")
