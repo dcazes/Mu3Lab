@@ -24,6 +24,7 @@ services:
       PLATFORM_ADMIN_EMAIL: mu3lab@contextforge.example.com
       PLATFORM_ADMIN_PASSWORD: ${CONTEXTFORGE_ADMIN_PASSWORD:?CONTEXTFORGE_ADMIN_PASSWORD is required}
       PLATFORM_ADMIN_FULL_NAME: Mu3Lab
+      DEFAULT_USER_PASSWORD: ${CONTEXTFORGE_DEFAULT_USER_PASSWORD:?CONTEXTFORGE_DEFAULT_USER_PASSWORD is required}
       # Every call, including chat's MCP connections, needs a signed-in person or a key.
       AUTH_REQUIRED: "true"
       MCP_CLIENT_AUTH_ENABLED: "true"

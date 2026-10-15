@@ -52,6 +52,9 @@ secrets:
 # Required by ContextForge whenever its screens are on; nobody signs in with it.
 - env: CONTEXTFORGE_BASIC_AUTH_PASSWORD
   length: 40
+# ContextForge refuses to start on its weak built-in default; SSO users never use it.
+- env: CONTEXTFORGE_DEFAULT_USER_PASSWORD
+  length: 40
 env:
   CONTEXTFORGE_URL: '{{public_url}}'
   CONTEXTFORGE_ORIGINS: '["{{public_url}}"]'
