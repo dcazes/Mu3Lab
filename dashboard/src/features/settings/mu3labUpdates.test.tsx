@@ -77,4 +77,21 @@ describe('Mu3Lab updates', () => {
     setup(status(), [job({ state: 'failed', detail: 'This update needs administrator access for: Docker.' })]);
     expect(await screen.findByText('This update needs administrator access for: Docker.')).toBeInTheDocument();
   });
+
+  it('says when an update was undone because the new version did not start', async () => {
+    setup(
+      status({
+        available: false,
+        last_update: {
+          state: 'rolled_back',
+          at: '2026-10-09T20:00:00+00:00',
+          detail: 'Mu3Lab v1.0.2 did not start after the restart, so Mu3Lab went back to v1.0.1.',
+          from: 'v1.0.1',
+          to: 'v1.0.2',
+        },
+      }),
+    );
+    expect(await screen.findByText('Mu3Lab went back to v1.0.1')).toBeTruthy();
+    expect(screen.getByText(/did not start after the restart/)).toBeTruthy();
+  });
 });

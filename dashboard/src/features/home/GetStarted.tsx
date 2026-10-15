@@ -5,6 +5,7 @@ import { putJsonApi, type ChecklistResponse, type ProviderMetadataResponse, type
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
+import { Card, PageHeader } from '../../components/Layout';
 import { Link } from '../../lib/router';
 import { isInstalled, launchTarget } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
@@ -17,7 +18,7 @@ const STORAGE_KEY = 'mu3lab.getStarted';
 type Guide = 'extension' | 'devices';
 
 export function useGetStartedChecklist() {
-  const { data: checklist, reload } = useApi<ChecklistResponse>('/api/v1/me/checklist', { interval: 10000 });
+  const { data: checklist, reload } = useApi<ChecklistResponse>('/api/v1/me/checklist');
   const migrating = useRef(false);
   useEffect(() => {
     if (!checklist || migrating.current) return;
@@ -46,12 +47,12 @@ export function useGetStartedChecklist() {
         migrating.current = false;
       });
   }, [checklist, reload]);
-  const mark = (key: string) => {
-    void putJsonApi('/api/v1/me/checklist', { items: { [key]: true } })
+  const setItem = (key: string, value: boolean) => {
+    void putJsonApi('/api/v1/me/checklist', { items: { [key]: value } })
       .then(() => reload())
       .catch(() => toast.error('Could not save checklist progress. Try again.'));
   };
-  return [checklist?.items || {}, mark] as const;
+  return [checklist?.items || {}, (key: string) => setItem(key, true), setItem] as const;
 }
 
 function ExtensionGuide({ browsers, onClose }: { browsers: string[]; onClose: () => void }) {
@@ -144,12 +145,13 @@ function DevicesGuide({ onClose, onDone }: { onClose: () => void; onDone: () => 
   );
 }
 
-export function GetStarted() {
+/** The steps for this person, or null while they load (or for people who can't act on them). */
+function useGetStarted() {
   const { data } = useDashboard();
   const operator = data.identity.writes_enabled;
-  const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null, { interval: 60000 });
-  const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null, { interval: 60000 });
-  const [manual, markDone] = useGetStartedChecklist();
+  const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null);
+  const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null);
+  const [manual, mark, setItem] = useGetStartedChecklist();
   const [checking, setChecking] = useState(false);
   const checkExtension = async () => {
     setChecking(true);
@@ -164,16 +166,15 @@ export function GetStarted() {
       setChecking(false);
     }
   };
-  const [guide, setGuide] = useState<Guide | null>(null);
   const setup = providers.data?.setup;
-  if (!operator || !setup || !vault.data || manual.hidden) return null;
+  if (!operator || !setup || !vault.data) return null;
   // Only apps the owner chose count; setup installs the core ones by itself.
   const hasApp = data.services.services.some(
     (service) => service.group === 'apps' && service.stage === 'optional' && isInstalled(service),
   );
   const extension = vault.data.browser_extension;
   const preinstalled = Boolean(extension?.browsers.length);
-  const steps = [
+  const steps: Step[] = [
     {
       key: 'extension',
       text: preinstalled
@@ -183,7 +184,7 @@ export function GetStarted() {
         ? 'Click the shield icon next to the address bar, then sign in with your Mu3Lab email and password.'
         : '',
       done: Boolean(extension?.signed_in),
-      guide: 'extension' as const,
+      guide: 'extension',
     },
     // Mu3Lab saves generated logins to the vault by itself; only a stalled save needs the owner.
     ...(vault.data.automatic?.error
@@ -194,33 +195,52 @@ export function GetStarted() {
       ? [{ key: 'provider', text: 'Connect an AI provider for chat', done: setup.complete, to: '/settings/ai' }]
       : []),
     { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
-    {
-      key: 'devices',
-      text: 'Use Mu3Lab on your phone or laptop',
-      done: Boolean(manual.devices),
-      guide: 'devices' as const,
-    },
-    { key: 'chat', text: 'Start chatting with your AI in LobeChat', done: Boolean(manual.chat), to: '/chat' },
+    { key: 'devices', text: 'Use Mu3Lab on your phone or laptop', done: Boolean(manual.devices), guide: 'devices' },
+    { key: 'chat', text: 'Start chatting with your AI', done: Boolean(manual.chat), to: '/chat' },
   ];
   const finished = steps.filter((step) => step.done).length;
-  if (finished === steps.length) return null;
+  return {
+    steps,
+    finished,
+    complete: finished === steps.length,
+    hidden: Boolean(manual.hidden),
+    setHidden: (hidden: boolean) => setItem('hidden', hidden),
+    markDone: mark,
+    checking,
+    checkExtension,
+    browsers: extension?.browsers || [],
+  };
+}
+
+interface Step {
+  key: string;
+  text: string;
+  hint?: string;
+  done: boolean;
+  guide?: Guide;
+  to?: string;
+}
+
+function StepList({
+  state,
+  compact = false,
+}: {
+  state: NonNullable<ReturnType<typeof useGetStarted>>;
+  compact?: boolean;
+}) {
+  const [guide, setGuide] = useState<Guide | null>(null);
+  const { steps, markDone, checking, checkExtension } = state;
   const next = steps.find((step) => !step.done)?.key;
   return (
-    <section className="get-started" aria-labelledby="get-started-heading">
-      <div className="section-title">
-        <h2 id="get-started-heading">Get started</h2>
-        <span className="get-started-count">
-          {finished} of {steps.length} complete
-        </span>
-      </div>
-      <ol className="get-started-list">
+    <>
+      <ol className={`get-started-list${compact ? ' is-compact' : ''}`}>
         {steps.map((step, index) => {
           const content = (
             <>
               {step.done ? <CheckCircle2 className="get-started-done" /> : <Circle />}
               <span>
                 {index + 1}. {step.text}
-                {!step.done && 'hint' in step && step.hint && <small className="get-started-hint">{step.hint}</small>}
+                {!step.done && !compact && step.hint && <small className="get-started-hint">{step.hint}</small>}
               </span>
               {!step.done && <ArrowRight className="attention-arrow" />}
             </>
@@ -240,7 +260,7 @@ export function GetStarted() {
                   </Button>
                 </div>
               ) : step.guide ? (
-                <button type="button" className={className} onClick={() => setGuide(step.guide)}>
+                <button type="button" className={className} onClick={() => setGuide(step.guide!)}>
                   {content}
                 </button>
               ) : (
@@ -256,11 +276,66 @@ export function GetStarted() {
           );
         })}
       </ol>
-      <button type="button" className="get-started-hide" onClick={() => markDone('hidden')}>
+      {guide === 'extension' && <ExtensionGuide browsers={state.browsers} onClose={() => setGuide(null)} />}
+      {guide === 'devices' && <DevicesGuide onClose={() => setGuide(null)} onDone={() => markDone('devices')} />}
+    </>
+  );
+}
+
+/** Home's checklist; once hidden it leaves a small button to bring it back. */
+export function GetStarted() {
+  const state = useGetStarted();
+  if (!state || state.complete) return null;
+  if (state.hidden)
+    return (
+      <button type="button" className="get-started-show" onClick={() => state.setHidden(false)}>
+        <Circle />
+        Show Get started · {state.finished} of {state.steps.length} complete
+      </button>
+    );
+  return (
+    <section className="get-started" aria-labelledby="get-started-heading">
+      <div className="section-title">
+        <h2 id="get-started-heading">Get started</h2>
+        <span className="get-started-count">
+          {state.finished} of {state.steps.length} complete
+        </span>
+      </div>
+      <StepList state={state} />
+      <button type="button" className="get-started-hide" onClick={() => state.setHidden(true)}>
         Hide this list
       </button>
-      {guide === 'extension' && <ExtensionGuide browsers={extension?.browsers || []} onClose={() => setGuide(null)} />}
-      {guide === 'devices' && <DevicesGuide onClose={() => setGuide(null)} onDone={() => markDone('devices')} />}
     </section>
+  );
+}
+
+/** Settings > Get started: the same steps, compact, with the Home switch. */
+export function GetStartedSettings() {
+  const state = useGetStarted();
+  return (
+    <>
+      <PageHeader title="Get started" description="The first steps for using Mu3Lab, and whether Home shows them." />
+      {!state ? (
+        <p className="muted">Checking your progress…</p>
+      ) : (
+        <Card
+          title={state.complete ? 'All done' : `${state.finished} of ${state.steps.length} complete`}
+          description={state.complete ? 'Every step is complete, so Home no longer shows this list.' : undefined}
+        >
+          <StepList state={state} compact />
+          {!state.complete && (
+            <label className="switch-field">
+              <span>Show on Home</span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={!state.hidden}
+                onChange={(event) => state.setHidden(!event.target.checked)}
+              />
+            </label>
+          )}
+        </Card>
+      )}
+    </>
   );
 }

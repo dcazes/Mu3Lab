@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from ctl.engine.launch import caddy_handler
 from ctl.platform_apps import by_capability
 from ctl.registry import Registry, Service
 from ctl.runtime import RuntimePaths
-from ctl.secrets import platform_values
+from ctl.secret_file import write_atomic
+from ctl.secrets import platform_values, read_runtime_env
 from ctl.service_state import status as service_status
 from ctl.service_state import tailnet_dns_name
 
@@ -19,6 +21,47 @@ START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
 # The Authentik outpost header that carries each kind of trusted identity.
 IDENTITY_HEADERS = {"username": "X-Authentik-Username", "email": "X-Authentik-Email"}
+
+
+# App logins Caddy adds after Authentik admits someone (``route.upstream_basic_auth``).
+UPSTREAM_AUTH_FILE = "upstream-auth.env"
+
+
+def upstream_auth_name(service_id: str) -> str:
+    """The environment value Caddy reads an app's login header from."""
+    return "MU3LAB_UPSTREAM_AUTH_" + service_id.upper().replace("-", "_")
+
+
+def write_upstream_auth(registry: Registry, paths: RuntimePaths | None = None) -> Path:
+    """Write each installed app's login header for Caddy into a private file, and return it."""
+    paths = paths or RuntimePaths()
+    lines = []
+    for service in registry.services:
+        route = service.manifest.route
+        auth = route.upstream_basic_auth if route else None
+        if auth is None:
+            continue
+        env = read_runtime_env(paths.projects / service.id / ".env")
+        user, password = env.get(auth.user_env, ""), env.get(auth.password_env, "")
+        if user and password:
+            token = base64.b64encode(f"{user}:{password}".encode()).decode()
+            lines.append(f"{upstream_auth_name(service.id)}={token}\n")
+    target = paths.projects / by_capability("private_proxy").id / UPSTREAM_AUTH_FILE
+    target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    write_atomic(target, "".join(lines).encode())  # private (0600) from its first byte
+    return target
+
+
+def ingress_env(caddyfile: Path, ingress_token: str, registry: Registry | None = None) -> dict[str, str]:
+    """Everything Caddy's Compose project needs; every start of Caddy uses this."""
+    from ctl.registry import load
+
+    secrets_file = write_upstream_auth(registry or load())
+    return {
+        "MU3LAB_CADDYFILE": str(caddyfile),
+        "MU3LAB_INGRESS_TOKEN": ingress_token,
+        "MU3LAB_INGRESS_SECRETS": str(secrets_file),
+    }
 
 
 def _generated_services(registry: Registry, root: Path, exclude: frozenset[str] = frozenset()) -> list[Service]:
@@ -67,7 +110,7 @@ def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token
     rc, output = actions.compose_up(
         ingress,
         log,
-        env={"MU3LAB_CADDYFILE": str(candidate), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        env=ingress_env(candidate, ingress_token),
         recreate=True,
     )
     if rc:
@@ -77,7 +120,7 @@ def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token
     rc, output = actions.compose_up(
         ingress,
         log,
-        env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        env=ingress_env(target, ingress_token),
         recreate=True,
     )
     if rc:
@@ -105,6 +148,9 @@ def _block(service: Service) -> str:
                     f"{indent}\theader_up {route.trusted_header} {{http.request.header.{identity}}}",
                 ]
             )
+        if route.upstream_basic_auth:
+            # Replaces anything the visitor sent; the value reaches Caddy as an environment value.
+            lines.append(f'{indent}\theader_up Authorization "Basic {{env.{upstream_auth_name(service.id)}}}"')
         lines.extend(
             [
                 f"{indent}\theader_up X-Forwarded-Proto https",
@@ -118,7 +164,7 @@ def _block(service: Service) -> str:
         lines[2:2] = [
             "\t@api_token {",
             f"\t\tpath {bypass.path}",
-            f"\t\theader {bypass.header} {json.dumps(bypass.header_prefix + '*')}",
+            *([f"\t\theader {bypass.header} {json.dumps(bypass.header_prefix + '*')}"] if bypass.header else []),
             "\t}",
         ]
         lines.append("\t\thandle @api_token {")

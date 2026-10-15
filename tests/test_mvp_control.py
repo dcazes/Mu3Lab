@@ -58,10 +58,12 @@ class RegistryV3Tests(unittest.TestCase):
                 "outline",
                 "audiobookshelf",
                 "romm",
-                "photon",
                 "dawarich",
-                "open-webui",
+                "lobehub",
                 "speaches",
+                "firecrawl",
+                "kopia-ui",
+                "navidrome",
             },
         )
         for service in optional:
@@ -131,11 +133,11 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn("forward_auth 127.0.0.1:9001", block)
         self.assertIn("reverse_proxy 127.0.0.1:3929", block)
 
-    def test_firecrawl_route_is_private_without_authentik_gate(self):
-        block = render("{\n  admin off\n}\n", [load().get("firecrawl")])
-        self.assertIn(":19473 {", block)
-        self.assertIn("reverse_proxy 127.0.0.1:3002", block)
-        self.assertNotIn("forward_auth", block)
+    def test_firecrawl_has_no_tailnet_route(self):
+        # Its API has no login, so no tailnet device may reach it (review A-M1); chat's connector uses Docker's network.
+        service = load().get("firecrawl")
+        self.assertIsNone(service.manifest.route)
+        self.assertIsNone(service.private_https_port)
 
     def test_baby_buddy_route_uses_authentik_verified_remote_user(self):
         block = render("{\n  admin off\n}\n", [load().get("baby-buddy")])

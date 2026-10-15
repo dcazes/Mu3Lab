@@ -23,16 +23,21 @@ fail() {
 
 usage() {
   cat <<'EOF'
-Usage: ./install.sh
+Usage: ./install.sh [--restore]
 
 Installs Mu3Lab, or finishes/updates an existing installation. Finished steps
 are skipped, so it is always safe to run again (for example after `git pull`).
 To remove Mu3Lab, run ./uninstall.sh.
+
+  --restore   Rebuild Mu3Lab on a new computer from a copy of its backups.
+              You need the recovery sheet's backup password and a copy of
+              the old computer's /srv/mu3lab/backups/kopia folder.
 EOF
 }
 
 case "${1:-}" in
   "") ;;
+  --restore) ;;
   -h|--help) usage; exit 0 ;;
   *) fail "Unknown option '$1'." "Run ./install.sh --help" ;;
 esac
@@ -70,7 +75,7 @@ mu3lab_ensure_bw || fail "Bitwarden could not be installed." "Check the internet
 # --- 4. Install ---------------------------------------------------------------------
 cd "$ROOT"
 set +e
-"$ROOT/.venv/bin/python" -m ctl.bootstrap.terminal
+"$ROOT/.venv/bin/python" -m ctl.bootstrap.terminal "$@"
 status=$?
 set -e
 exit "$status"

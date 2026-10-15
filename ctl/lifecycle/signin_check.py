@@ -236,11 +236,12 @@ def verify_oidc(
     client_secret: str,
     redirect_paths: tuple[str, ...],
     log: Log,
+    patience: float = 180,
 ) -> str:
     """Raise ``SignInError`` unless a browser could sign in to this app through Authentik."""
     origin = f"https://{host}:{port}"
     authentik = f"https://{host}"
-    document = wait_for_provider(host, service_id)
+    document = wait_for_provider(host, service_id, timeout=patience)
     log("Authentik publishes this app's sign-in.")
     with _client() as client:
         try:
@@ -293,8 +294,12 @@ def verify_gate(*, host: str, port: int, log: Log, timeout: float = 360, sleep=t
             sleep(5)
 
 
-def verify_sign_in(service_id: str, host: str, log: Log) -> str:
-    """Check whichever kind of Authentik sign-in this installed app uses."""
+def verify_sign_in(service_id: str, host: str, log: Log, *, patience: float | None = None) -> str:
+    """Check whichever kind of Authentik sign-in this installed app uses.
+
+    Installation waits for Authentik to publish a new app. A periodic
+    re-check passes ``patience=0`` so each step is tried once.
+    """
     service = load().get(service_id)
     if service.manifest.sign_in.method == "none":
         return "This app does not use Authentik sign-in."
@@ -304,8 +309,11 @@ def verify_sign_in(service_id: str, host: str, log: Log) -> str:
     if service.manifest.sign_in.method in {"gate", "trusted_header"}:
         # The outpost can keep serving an app Authentik has already deleted;
         # ask Authentik itself first.
-        wait_for_provider(host, service_id)
-        return verify_gate(host=host, port=port, log=log)
+        if patience is None:
+            wait_for_provider(host, service_id)
+            return verify_gate(host=host, port=port, log=log)
+        wait_for_provider(host, service_id, timeout=patience)
+        return verify_gate(host=host, port=port, log=log, timeout=patience)
     contract = service.manifest.sign_in.oidc
     if contract is None:
         return "This app does not use Authentik sign-in."
@@ -319,4 +327,5 @@ def verify_sign_in(service_id: str, host: str, log: Log) -> str:
         client_secret=values.get(contract.env.client_secret, ""),
         redirect_paths=contract.redirect_paths,
         log=log,
+        **({} if patience is None else {"patience": patience}),
     )

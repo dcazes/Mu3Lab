@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl.backups import Retention
+from ctl.backups import RETENTION
 from ctl.manifest.catalog import compose_images
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
@@ -116,10 +117,10 @@ class RegistryTests(unittest.TestCase):
 
     def test_firecrawl_has_a_complete_private_login_free_runtime(self):
         service = load().get("firecrawl")
-        self.assertEqual(service.stage, "core")
+        self.assertEqual(service.stage, "optional")
         self.assertEqual(service.auth, "excluded")
-        self.assertEqual(service.private_https_port, 8456)
-        self.assertEqual(service.proxy_port, 19473)
+        self.assertIsNone(service.private_https_port)
+        self.assertFalse(service.ui["available"])
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
         self.assertEqual(set(compose["services"]), {"api", "playwright-service", "redis", "rabbitmq", "nuq-postgres"})
         self.assertTrue(all("@sha256:" in contract["image"] for contract in compose["services"].values()))
@@ -151,14 +152,15 @@ class RegistryTests(unittest.TestCase):
                 self.assertTrue(values[key])
             self.assertEqual((project / ".env").stat().st_mode & 0o777, 0o600)
 
-    def test_lobechat_is_required_persistent_oidc_chat(self):
+    def test_lobechat_is_an_optional_persistent_oidc_chat(self):
         from ctl.engine.runtime import render_service as materialize
         from ctl.identity import mode_for
         from ctl.secrets import read_runtime_env
 
         service = load().get("lobehub")
-        self.assertTrue(service.required)
-        self.assertEqual(service.stage, "core")
+        # Open WebUI is the chat the installer sets up; LobeChat is installed from Discover.
+        self.assertFalse(service.required)
+        self.assertEqual(service.stage, "optional")
         self.assertEqual(service.dependencies, ("litellm", "authentik"))
         self.assertEqual(mode_for(service), "native_oidc")
         compose = yaml.safe_load((ROOT / service.compose_dir / "docker-compose.yml").read_text(encoding="utf-8"))
@@ -206,7 +208,7 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn(checkout, paths.root.parents)
 
     def test_backup_policy_matches_the_product_default(self):
-        self.assertEqual(Retention().restic_args(), ["--keep-daily", "7", "--keep-weekly", "4", "--keep-monthly", "12"])
+        self.assertEqual(RETENTION, {"latest": 10, "daily": 7, "weekly": 4, "monthly": 12})
 
     def test_core_compose_files_are_valid_and_pin_identity_images(self):
         root = Path(__file__).resolve().parents[1]
@@ -221,7 +223,7 @@ class RegistryTests(unittest.TestCase):
         registry = load()
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.manifest.tier == "core"]
-        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
+        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "open-webui"})
         for service in core:
             images = compose_images(service.compose_path(root) / "docker-compose.yml")
             self.assertTrue(images, service.id)
@@ -232,7 +234,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn(":19460 {", caddyfile)
         self.assertIn("bind 127.0.0.1", caddyfile)
         self.assertNotIn("http://127.0.0.1:19460 {", caddyfile)
-        self.assertIn("X-Mu3Lab-Proxy-Token", caddyfile)
+        self.assertNotIn("header_up X-Mu3Lab-Proxy-Token", caddyfile)
 
     def test_ingress_health_uses_dedicated_caddy_endpoint(self):
         self.assertTrue(load().get("ingress").health["url"].endswith("/__mu3lab_caddy_health"))
@@ -269,13 +271,13 @@ class RegistryTests(unittest.TestCase):
         from ctl.api.routes.system import catalog
 
         profile = catalog({}).model_dump()["profiles"][0]
-        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
+        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "open-webui"})
 
-    def test_nextcloud_is_curated_productivity_with_unique_private_ports(self):
+    def test_nextcloud_is_a_curated_documents_app_with_unique_private_ports(self):
         registry = load()
         service = registry.get("nextcloud")
         self.assertEqual(service.stage, "optional")
-        self.assertEqual(service.category, "productivity")
+        self.assertEqual(service.category, "documents")
         self.assertEqual(service.private_https_port, 8453)
         self.assertEqual(service.proxy_port, 19470)
         self.assertEqual(service.account["mode"], "environment_bootstrap")
@@ -357,6 +359,7 @@ class RegistryTests(unittest.TestCase):
                 patch("ctl.service_state.RuntimePaths", return_value=paths),
                 patch("ctl.service_state._compose_state", return_value="running") as compose,
                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+                patch("ctl.service_state.route_probe", return_value=(True, time.time())),
             ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8457})
         self.assertEqual(compose.call_args.args[0], project / "docker-compose.yml")
@@ -375,6 +378,7 @@ class RegistryTests(unittest.TestCase):
             with (
                 patch("ctl.service_state.RuntimePaths", return_value=paths),
                 patch("ctl.service_state._healthy", return_value=(True, "HTTP 200")),
+                patch("ctl.service_state.route_probe", return_value=(True, time.time())),
             ):
                 state = service_status(service, "mu3lab.example.ts.net", ROOT, {8443}, {source: "running"})
         self.assertEqual(state["lifecycle_state"], "ready")

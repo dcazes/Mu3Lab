@@ -8,6 +8,7 @@ import { Badge, StatusBadge } from '../../components/Status';
 import { bytes } from '../../lib/format';
 import { Link } from '../../lib/router';
 import {
+  CATEGORIES,
   canInstall,
   categoryLabel,
   type Group,
@@ -46,14 +47,28 @@ function useSelection() {
 }
 
 function matches(service: Service, term: string, summary = '') {
-  return !term || `${service.name} ${service.category} ${summary}`.toLowerCase().includes(term);
+  return !term || `${service.name} ${categoryLabel(service.category)} ${summary}`.toLowerCase().includes(term);
+}
+
+/** Every installed row shares one set of columns, so states line up down the page. */
+function InstalledHeader() {
+  return (
+    <div className="row installed-row installed-head hide-mobile" aria-hidden="true">
+      <span>App</span>
+      <span>Status</span>
+      <span>Sign-in</span>
+      <span>Update</span>
+      <span />
+      <span />
+    </div>
+  );
 }
 
 function InstalledRow({ service, summary }: { service: Service; summary: string }) {
   const target = launchTarget(service);
   const signIn = signInSummary(service);
   return (
-    <div className="row">
+    <div className="row installed-row">
       <Link to={`/apps/${service.id}`} className="row-main">
         <AppIcon id={service.id} />
         <span className="row-text">
@@ -61,27 +76,26 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
           <small>{summary || categoryLabel(service.category)}</small>
         </span>
       </Link>
-      <span className="row-meta hide-mobile">
-        {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
+      <span className="installed-cell">
+        <StatusBadge state={service.display_state} />
+      </span>
+      <span className="installed-cell hide-mobile">
         {service.identity && service.identity.mode !== 'none' && <Badge tone="gray">{signIn.label}</Badge>}
       </span>
-      <StatusBadge state={service.display_state} />
-      <span className="row-actions">
-        {target ? (
-          <ExternalButton size="sm" href={target.url}>
-            {target.label}
-          </ExternalButton>
-        ) : (
-          <span className="row-action-placeholder" />
-        )}
-        <Link
-          to={`/apps/${service.id}`}
-          className="btn btn-ghost btn-sm btn-icon"
-          aria-label={`${service.name} details`}
-        >
-          <ChevronRight />
-        </Link>
+      <span className="installed-cell hide-mobile">
+        {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
       </span>
+      <span className="installed-cell">
+        {/* Always "Open", so every button is the same width; the specific label is its tooltip. */}
+        {target && (
+          <ExternalButton size="sm" href={target.url} className="installed-open" title={target.label}>
+            Open
+          </ExternalButton>
+        )}
+      </span>
+      <Link to={`/apps/${service.id}`} className="btn btn-ghost btn-sm btn-icon" aria-label={`${service.name} details`}>
+        <ChevronRight />
+      </Link>
     </div>
   );
 }
@@ -183,14 +197,23 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const selected = stored.filter((id) =>
     available.some((service) => service.id === id && canInstall(service) && !queued.has(id)),
   );
-  // Sizes are measured in the background by the worker; re-read them now and then.
   const sizes = useApi<AppSizesResponse>(
     discover ? `/api/v1/app-sizes?ids=${encodeURIComponent(selected.join(','))}` : null,
-    { interval: 30000 },
+    // The worker measures sizes in the background; ask again only until it has.
+    { interval: (data) => (data && data.measured ? 0 : 10000) },
   ).data;
   const shown = (discover ? available : installed).filter((service) =>
     matches(service, term, catalog[service.id]?.summary),
   );
+  // Discover's sections in catalog order; an app with an unknown category still shows, last.
+  const sections = [
+    ...CATEGORIES,
+    ...[...new Set(shown.map((service) => service.category))]
+      .filter((id) => !CATEGORIES.some((item) => item.id === id))
+      .map((id) => ({ id, label: categoryLabel(id) })),
+  ]
+    .map((category) => ({ ...category, apps: shown.filter((service) => service.category === category.id) }))
+    .filter((category) => category.apps.length > 0);
   const names = (ids: string[]) => ids.map((id) => services.find((service) => service.id === id)?.name || id);
   const toggle = (id: string) =>
     setSelected(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
@@ -230,7 +253,6 @@ export function AppsPage({ discover }: { discover: boolean }) {
           job={installBatch.job}
           services={services}
           onAction={(action) => void installBatch.act(action)}
-          onDismiss={installBatch.dismiss}
           controls={installBatch.controls}
         />
       )}
@@ -246,22 +268,36 @@ export function AppsPage({ discover }: { discover: boolean }) {
               : 'Open Discover to choose apps to install.'}
         </EmptyState>
       ) : discover ? (
-        <section className="group">
-          <h2 className="group-title">Available to install</h2>
-          <div className="discover-grid">
-            {shown.map((service) => (
-              <DiscoverCard
-                key={service.id}
-                service={service}
-                summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
-                size={sizes?.apps?.[service.id]}
-                selected={selected.includes(service.id)}
-                installing={queued.get(service.id)}
-                toggle={() => toggle(service.id)}
-              />
+        <>
+          <nav className="category-chips" aria-label="Categories">
+            {sections.map(({ id, label, apps }) => (
+              <a key={id} href={`#category-${id}`} className="category-chip">
+                {label}
+                <span>{apps.length}</span>
+              </a>
             ))}
-          </div>
-        </section>
+          </nav>
+          {sections.map(({ id, label, apps }) => (
+            <section key={id} className="group" id={`category-${id}`} aria-labelledby={`category-${id}-title`}>
+              <h2 className="group-title" id={`category-${id}-title`}>
+                {label}
+              </h2>
+              <div className="discover-grid">
+                {apps.map((service) => (
+                  <DiscoverCard
+                    key={service.id}
+                    service={service}
+                    summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || service.detail}
+                    size={sizes?.apps?.[service.id]}
+                    selected={selected.includes(service.id)}
+                    installing={queued.get(service.id)}
+                    toggle={() => toggle(service.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </>
       ) : (
         GROUP_ORDER.map((name) => {
           const group = shown.filter((service) => service.group === name);
@@ -270,6 +306,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
             <section key={name} className="group">
               <h2 className="group-title">{groupLabel[name]}</h2>
               <div className="card card-flush rows">
+                <InstalledHeader />
                 {group.map((service) => (
                   <InstalledRow
                     key={service.id}

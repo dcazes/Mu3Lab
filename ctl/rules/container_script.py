@@ -5,15 +5,21 @@ configuration: registering Authentik as a Django sign-in provider, adopting
 a seeded administrator, configuring Nextcloud apps through ``occ``. The script
 reaches the container on standard input; ``MU3LAB_OUTPUT key=value`` lines it
 prints are saved to the app's private settings.
+
+``rerun_when`` names settings the script depends on, such as a mount another
+app provides: when one of them changes (that app came or went, and this one
+restarted with it), the worker runs the script again within a minute.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
+from ctl.control_state import ControlState
 from ctl.engine import template
 from ctl.engine.hooks import HookContext
 from ctl.engine.project import lookup_for
@@ -36,6 +42,8 @@ class ContainerScriptParams(Params):
     needs_owner: bool = False
     purpose: str
     timeout_seconds: int = Field(default=300, ge=10, le=1800)
+    # Settings (env names) whose change makes the worker run the script again.
+    rerun_when: tuple[str, ...] = ()
 
 
 @register
@@ -76,8 +84,30 @@ class ContainerScript(Rule):
                 f"{ctx.app.manifest.name} setup step failed: {params.purpose}. {result.error}".strip(),
             )
         outputs = {key: value for key, value in result.outputs.items() if key.isupper()}
+        if self.params.rerun_when:
+            outputs[self._ran_key] = self._inputs(ctx)
         if outputs:
             ctx.set_env(outputs)
+
+    @property
+    def _ran_key(self) -> str:
+        """Where the settings the script last ran with are remembered, one key per script."""
+        return "MU3LAB_RAN_" + hashlib.sha256(self.params.script.encode()).hexdigest()[:12].upper()
+
+    def _inputs(self, ctx: HookContext) -> str:
+        env = ctx.env()
+        values = {name: env.get(name, "") for name in self.params.rerun_when}
+        return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+    def periodic(self, ctx: HookContext) -> str:
+        if not self.params.rerun_when or ctx.env().get(self._ran_key) == self._inputs(ctx):
+            return ""
+        state = ControlState.runtime(ctx.facts.paths) if ctx.facts else ControlState.runtime()
+        installation = state.installation(ctx.app.id) if state else None
+        if not installation or installation["state"] != "running":
+            return ""  # it runs once the app is running with the new settings
+        self._run(ctx)
+        return f"{ctx.app.manifest.name}: {self.params.purpose.lower()} again for its new settings."
 
     @staticmethod
     def _fact(ctx: HookContext, arg: str) -> str:

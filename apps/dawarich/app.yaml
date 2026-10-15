@@ -4,10 +4,11 @@ capabilities: [location_history]
 name: Dawarich
 tier: optional
 group: apps
-category: family
+category: places
 tagline: Your private location history
 summary: A private replacement for Google Timeline. Phones record where you go, and you browse trips, visits, and
-  places you have been on a map. Each person's history is private to them.
+  places you have been on a map. Each person's history is private to them. Place names come from Photon, a map
+  lookup that runs inside Dawarich, so your locations never go to a public map service.
 version: 1.15.3
 upstream: Freika/dawarich
 service:
@@ -20,6 +21,7 @@ service:
 route:
   https_port: 8465
   caddy_port: 19482
+  access: open
 sign_in:
   method: oidc
   oidc:
@@ -48,12 +50,22 @@ env:
   DAWARICH_HOST: '{{dns_name}}'
   DAWARICH_OIDC_ISSUER: 'https://{{dns_name}}/application/o/mu3lab-dawarich/'
   DAWARICH_OIDC_REDIRECT_URI: '{{public_url}}/users/auth/openid_connect/callback'
-integrates_with:
-# Place names come only from Mu3Lab's own Photon; without it Dawarich shows none
-# rather than sending locations to a public service.
-- capability: geocoder
-  env:
-    PHOTON_API_HOST: '{{provider:MU3LAB_GEOCODER_HOST}}'
+configuration:
+- key: region
+  env: PHOTON_REGION
+  type: enum
+  label: Map region for place names
+  # The country of this computer's time zone, when a ready-made index exists for it.
+  default: '{{country_code}}'
+  required: true
+  options: [ca, us, mx, ar, de, fr, es, nl, at, dk, lu, ad, sk, ru, in, jp, europe, north-america, south-america,
+    asia, africa, australia-oceania]
+backup:
+  # Photon's map index is downloaded again on demand; your location history is backed up.
+  skip: [dawarich-photon]
+ui:
+  parts:
+    photon: Address lookup (Photon)
 rules:
 # Before anyone can sign in, the owner's administrator account is created already
 # linked to their Authentik sign-in, and Dawarich's demo administrator is deleted.
@@ -128,5 +140,8 @@ mobile:
     steps:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private Dawarich address and sign in with Authentik.
-resource_guidance: Moderate; imports of long Google Timeline histories use several GB of memory for a while.
-setup_action: Install Dawarich to keep your location history on your own server. Install Photon too for place names.
+resource_guidance: Moderate; imports of long Google Timeline histories use several GB of memory for a while. Photon's
+  map index needs disk space (about 15 GB unpacked for Canada; continents are far larger) and a few GB of memory; its
+  first start downloads it and can take up to an hour, while Dawarich already works.
+setup_action: Install Dawarich and its private address lookup (Photon) to keep your location history on your own
+  server.

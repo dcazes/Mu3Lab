@@ -1,0 +1,12 @@
+# NVIDIA computers: Immich's own CUDA build runs face recognition and smart search on the GPU
+# (docs.immich.app/features/ml-hardware-acceleration). Chosen by the compute mode (ctl/compute.py).
+services:
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v3.2.4-cuda@sha256:b9fdebfe7f07ff71f77e9d67d509d83c5e055da486a07c12080669c82a80c65e
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

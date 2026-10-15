@@ -59,15 +59,24 @@ def _data_names(compose_files: list[Path]) -> set[str]:
     return names
 
 
-def data_directories(service: Service, root: Path) -> list[Path]:
+def data_directories(service: Service, root: Path, *, paths: RuntimePaths | None = None) -> list[Path]:
     """The app's top-level folders under the data root, never one another stack also mounts."""
     own_dir = service.compose_path(root)
-    own = _data_names(sorted(own_dir.glob("docker-compose*.yml")))
+    paths = paths or RuntimePaths()
+    # The installed deployment decides, not whatever the checkout now declares (R13).
+    installed = paths.projects / service.id
+    deployed = sorted(installed.glob("docker-compose*.yml")) if installed.is_dir() else []
+    own = _data_names(deployed or sorted(own_dir.glob("docker-compose*.yml")))
     others = _data_names(
         [path for base in (root / "apps",) for path in base.rglob("docker-compose*.yml") if path.parent != own_dir]
     )
-    data = RuntimePaths().data
+    data = paths.data
     return [data / name for name in sorted(own - others)]
+
+
+def backed_up(service: Service, folders: list[Path]) -> list[Path]:
+    """The folders a backup holds: all of them except those the manifest says are downloaded again."""
+    return [folder for folder in folders if folder.name not in service.manifest.backup.skip]
 
 
 def _cleanup_image(root: Path) -> str:

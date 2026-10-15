@@ -15,26 +15,43 @@ from ctl.jobs import redact
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import project_path
-from ctl.service_state import compose_snapshot, status, tailnet_dns_name, tailnet_serve_ports
+from ctl.service_state import compose_snapshot, status, tailnet_dns_name, tailnet_serve_status
 from ctl.status import signals, snapshots
 from ctl.status.host import observe_system
 from ctl.store import db, records
 
 ROOT = Path(__file__).resolve().parents[2]
-INTERVAL = 5
+INTERVAL = 5  # while someone has the dashboard open
+IDLE_INTERVAL = 300  # nobody is looking: Docker, Tailscale and every route are checked rarely
+VIEWING_SECONDS = 60  # the dashboard refreshes every 3 s while something is in progress, else every 5 min
 
 
 def reconcile(paths: RuntimePaths = RuntimePaths()) -> None:
     registry = load()
     dns_name = tailnet_dns_name()
-    ports = tailnet_serve_ports()
+    serve = tailnet_serve_status()
+    ports = {int(port) for port in serve["ports"]} if isinstance(serve["ports"], list) else set()
     states, containers = compose_snapshot()
+    # Route history (last success, consecutive misses) carries across cycles.
+    previous = snapshots.read(paths)
+
+    def observe(service):
+        return status(
+            service,
+            dns_name,
+            ROOT,
+            ports,
+            states,
+            serve_readable=serve["state"] == "available",
+            previous=previous.get(service.id),
+        )
+
     with ThreadPoolExecutor(max_workers=min(4, len(registry.services))) as pool:
-        projections = list(pool.map(lambda service: status(service, dns_name, ROOT, ports, states), registry.services))
+        projections = list(pool.map(observe, registry.services))
     for service, projection in zip(registry.services, projections, strict=True):
         projection["containers"] = containers.get(str(project_path(service, ROOT).resolve()), [])
     core = core_plan(ROOT)
-    system = observe_system()
+    system = observe_system(registry, ROOT)
     observed_at = datetime.now(UTC).isoformat(timespec="seconds")
     with db.connect(db.database(paths)) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -46,16 +63,19 @@ def reconcile(paths: RuntimePaths = RuntimePaths()) -> None:
 
 def start(stopping: threading.Event) -> threading.Thread:
     def observe() -> None:
-        next_due = 0.0
+        last_run: float | None = None
         while not stopping.is_set():
-            if RuntimePaths().state.is_dir() and (signals.changed.is_set() or time.monotonic() >= next_due):
+            # Opening the dashboard after a quiet spell refreshes at once, since the short interval applies.
+            interval = INTERVAL if signals.viewed_within(VIEWING_SECONDS) else IDLE_INTERVAL
+            due = last_run is None or time.monotonic() - last_run >= interval
+            if RuntimePaths().state.is_dir() and (signals.changed.is_set() or due):
                 signals.changed.clear()
                 try:
                     reconcile()
                 except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
                     logging.getLogger(__name__).warning("Status observation deferred: %s", redact(str(exc)))
-                next_due = time.monotonic() + INTERVAL
-            signals.changed.wait(timeout=0.5)
+                last_run = time.monotonic()
+            signals.changed.wait(timeout=1)
 
     thread = threading.Thread(target=observe, name="mu3lab-status", daemon=True)
     thread.start()

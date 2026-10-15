@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import os
 import shlex
-import subprocess
 from collections.abc import Callable
 
-from ctl import job_guard
+from ctl import job_guard, process
 
 SESSION_EXPIRED = (
     "Mu3Lab no longer has administrator access. Go back to the terminal window, "
@@ -34,18 +33,15 @@ def _exec(argv: list[str], timeout: int = 300, env: dict | None = None) -> tuple
     """Run argv, return (rc, merged output). Never raises, never uses shell.
 
     `env` merges over os.environ (used for DOCKER_CONFIG isolation); None
-    inherits the environment unchanged.
+    inherits the environment unchanged. sudo stays in the caller's session:
+    the password ``install.sh`` asked for is cached per terminal, and a new
+    session has no terminal, so sudo would ask again (or refuse with -n).
     """
     job_guard.checkpoint()
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env={**os.environ, **(env or {})})
-        return proc.returncode, (proc.stdout + proc.stderr).strip()
-    except FileNotFoundError:
-        return 127, f"{argv[0]}: command not found"
-    except subprocess.TimeoutExpired:
+    result = process.run(argv, timeout=timeout, env={**os.environ, **(env or {})}, own_session=argv[:1] != ["sudo"])
+    if result.status == "timeout":
         return 124, f"{argv[0]}: timed out"
-    except OSError as exc:
-        return 126, f"{argv[0]}: {exc}"
+    return result.returncode, result.output
 
 
 def has_fresh_sudo(_exec=_exec) -> bool:

@@ -26,10 +26,11 @@ services:
       # cache-reset redirect; the unauthenticated API call absorbs it here so
       # no person or chat tool receives it. Any HTTP answer is fine for that call.
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/img/logo.svg >/dev/null && curl -sS -o /dev/null http://127.0.0.1:80/api/system/info || exit 1"]
-      interval: 15s
       timeout: 5s
-      retries: 12
-      start_period: 30s
+      start_period: 210s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]

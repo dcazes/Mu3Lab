@@ -67,6 +67,20 @@ svg {
   color: var(--red);
 }
 
+.warning-text {
+  color: var(--amber);
+}
+
+.recovery {
+  border-bottom: 1px solid var(--border);
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .danger-text {
   color: var(--red) !important;
 }

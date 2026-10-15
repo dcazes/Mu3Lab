@@ -103,7 +103,7 @@ class NvidiaTests(unittest.TestCase):
 class CoreImageTests(unittest.TestCase):
     def test_core_images_cover_the_always_on_platform_only(self):
         names = {name for name, _image in install.core_images()}
-        self.assertTrue({"Authentik", "Vaultwarden", "Ollama", "LiteLLM", "FreeLLMAPI", "LobeChat"} <= names)
+        self.assertTrue({"Authentik", "Vaultwarden", "Ollama", "LiteLLM", "FreeLLMAPI", "Open WebUI"} <= names)
         self.assertNotIn("Immich", names)
 
     def test_check_lists_what_is_still_downloading(self):

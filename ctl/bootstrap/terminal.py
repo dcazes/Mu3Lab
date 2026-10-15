@@ -33,6 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,8 @@ SIGN_IN_REMINDER = 5 * 60
 NO_SKIP_NOTE = frozenset({"host_supported", "dashboard_src", "nvidia_toolkit", "browser_extension"})
 # After this step finishes, nothing needs the owner until the final sign-in.
 LAST_QUESTION_STEP = "tailscale_join"
+# Shown only when rebuilding from backups (./install.sh --restore).
+RESTORE_STEP = "restore_backup"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 BOLD, DIM, GREEN, RED, BLUE, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[34m", "\033[0m"
@@ -139,6 +142,34 @@ def _ask(prompt: str, secret: bool = False) -> str:
         raise SystemExit(
             "\nThe installer needs a terminal to ask questions. Run ./install.sh in a terminal window."
         ) from None
+
+
+def ask_restore(screen: Screen) -> dict[str, Any]:
+    """Where the copied backups are and their password, checked against the recovery sheet's code."""
+    from ctl import rebuild
+
+    screen.pause()
+    print(f"\n{BOLD}Rebuild from your backups{RESET}" if screen.tty else "\nRebuild from your backups")
+    print("  You need your recovery sheet (or the 'Mu3Lab backup password' in Bitwarden)")
+    print("  and a copy of the old computer's backups folder, /srv/mu3lab/backups/kopia.\n")
+    while True:
+        source, problem = rebuild.check_source(_ask("  Folder with the copied backups: "))
+        if source:
+            break
+        print(f"  {problem}")
+    while True:
+        # Typed as printed, in groups of eight; spaces between groups are dropped (review C-L6).
+        password = _ask("  Backup password (spaces between the groups are fine; nothing is shown as you type): ", True)
+        password = "".join(password.split())
+        if not password:
+            continue
+        code = rebuild.describe_password(password)
+        answer = _ask(f"  Check code {code}. Is that the code on your recovery sheet? [y/n] ").lower()
+        if answer.startswith("y"):
+            break
+        print("  Then a character was mistyped. Let's try again.")
+    print()
+    return {"source": source, "password": password}
 
 
 def ask_new_account(screen: Screen) -> dict[str, str]:
@@ -255,18 +286,80 @@ def wait_for_tailscale(screen: Screen, job: dict, ctx: dict) -> None:
 # --- After the foundation --------------------------------------------------------------
 
 
+# What each install stage means while an app starts, in the installer's words.
+PHASES = {
+    "validate_service": "getting ready",
+    "materialize_runtime": "preparing its settings",
+    "validate_configuration": "checking its settings",
+    "pull_images": "loading its files",
+    "resolve_digests": "checking its files",
+    "authentik_ready": "setting up its sign-in",
+    "start_service": "starting its containers",
+    "account_cleanup": "starting its containers",
+    "account_bootstrap": "creating its account",
+    "account_verified": "creating its account",
+    "verify_application": "waiting for it to answer",
+    "configure_route": "publishing its private address",
+    "verify_sign_in": "checking its sign-in",
+    "finalize": "finishing",
+}
+
+
+def core_progress(events: list[dict], names: dict[str, str], now: datetime) -> dict:
+    """Which core apps are done and what the current one is doing, from the core job's events."""
+    by_name = {name: service_id for service_id, name in names.items()}
+    done: list[str] = []
+    current, started, phase = "", None, ""
+    for event in events:
+        kind, detail = str(event.get("event") or ""), str(event.get("detail") or "")
+        if kind == "step.started" and detail.startswith("Installing "):
+            current = by_name.get(detail.removeprefix("Installing ").rstrip("."), "")
+            phase = ""
+            try:
+                started = datetime.fromisoformat(str(event.get("created_at")).replace("Z", "+00:00"))
+            except ValueError:
+                started = None
+        elif kind == "step.verified" and detail in names:
+            done.append(detail)
+            if detail == current:
+                current, started, phase = "", None, ""
+        elif kind == "stage" and current:
+            phase = PHASES.get(detail.partition(":")[0], phase)
+    elapsed = int((now - started).total_seconds()) if started else 0
+    return {"done": done, "current": current, "phase": phase, "elapsed": max(0, elapsed)}
+
+
 def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
+    from ctl.core_setup import core_services
     from ctl.jobs import JobStore
 
     store = JobStore.runtime()
     if store is None:
         return False, "The dashboard database is not available."
-    screen.start("Starting your core apps (AI chat and models)")
+    names = {service.id: service.name for service in core_services()}
+    total = len(names)
+    screen.say("    " + screen.color(DIM, "Starting " + ", ".join(names.values())))
+    label = f"Starting apps: 0 of {total}"
+    screen.start(label)
+    announced: set[str] = set()
+
+    def show(text: str) -> None:
+        # Restart the line only when its label changes; a log file gets each label once.
+        nonlocal label
+        if text != label:
+            label = text
+            screen.start(text)
+
     deadline = time.monotonic() + CORE_TIMEOUT
     while time.monotonic() < deadline:
         jobs = store.jobs_for_service("core-suite", limit=1)
         if jobs:
             latest = jobs[0]
+            progress = core_progress(store.events(latest["id"], limit=1000), names, datetime.now(UTC))
+            for service_id in progress["done"]:
+                if service_id not in announced:
+                    announced.add(service_id)
+                    screen.say(f"    {screen.color(GREEN, '✓')} {names[service_id]}")
             if latest["state"] == "succeeded":
                 return True, ""
             if latest["state"] == "waiting_for_confirmation":
@@ -274,8 +367,15 @@ def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
                 return True, "needs_provider"
             if latest["state"] in {"failed", "cancelled"}:
                 return False, str(latest.get("detail") or latest.get("error") or "")
-            screen.progress(str(latest.get("detail") or ""))
-        time.sleep(3)
+            if progress["current"]:
+                minutes, seconds = divmod(progress["elapsed"], 60)
+                show(f"Starting apps: {len(progress['done']) + 1} of {total}")
+                screen.progress(
+                    f"{names[progress['current']]} ({progress['phase'] or 'getting ready'}, {minutes}:{seconds:02d})"
+                )
+            elif len(progress["done"]) == total:
+                show("Checking that chat and AI models work together")
+        time.sleep(1)
     return False, "The core apps are taking longer than expected."
 
 
@@ -396,7 +496,7 @@ def verify_dashboard(screen: Screen, host: str, stopped, timeout: float | None =
 # --- Main --------------------------------------------------------------------------------
 
 
-def run() -> int:
+def run(restoring: bool = False) -> int:
     if not sys.stdin.isatty():
         print("Run ./install.sh in a terminal window; it needs to ask you a few questions.")
         return 1
@@ -407,11 +507,17 @@ def run() -> int:
     stop = threading.Event()
     account: dict[str, str] = {}
     verified = True
-    fresh = not install._vaultwarden_account_exists()
+    # A rebuild brings back the old vault account, so no new one is created.
+    fresh = not restoring and not install._vaultwarden_account_exists()
     # Every question is asked here, before anything is downloaded, so the
     # owner can walk away once Tailscale (the first step that needs them) is
     # connected.
     print_intro(screen, fresh)
+    restore: dict[str, Any] = ask_restore(screen) if restoring else {}
+    from ctl import rebuild
+
+    # Shown when rebuilding, or to explain that an earlier rebuild did not finish.
+    show_restore = restoring or rebuild.interrupted()
     if fresh:
         account.update(ask_new_account(screen))
     elif sign_in_needs_owner({"root": ROOT}):
@@ -439,6 +545,8 @@ def run() -> int:
 
     def emit(event: dict) -> None:
         step_id = str(event.get("id", ""))
+        if step_id == RESTORE_STEP and not show_restore:
+            return  # an ordinary install never shows the rebuild step
         if event.get("type") == "step" and step_id in labels:
             status = event.get("status")
             if status == "installing":
@@ -475,6 +583,7 @@ def run() -> int:
         "emit": emit,
         "progress": progress,
         "account": get_account,
+        "restore": restore,
     }
 
     install.run_job(job, ctx)
@@ -490,7 +599,7 @@ def run() -> int:
     else:
         screen.finish(screen.color(RED, "!"), "Some core apps did not start yet")
         screen.say(
-            f"    {detail or 'See the dashboard for details.'} The dashboard shows what went wrong and a Retry button."
+            f"    {detail or 'See the dashboard for details.'} In the dashboard, Settings → System has a button to try again."
         )
 
     host = tailnet_name()
@@ -548,10 +657,11 @@ def report_failure(screen: Screen, job: dict, log_path: Path) -> int:
             print(f"  Run this in a terminal:\n    {prompt['terminal_command']}")
         print("  Then run ./install.sh again. Finished steps are skipped.")
         return 1
-    print(f"Setup stopped at: {failed['label'] if failed else 'an unknown step'}")
+    print(f"Setup stopped at: {failed['label']}" if failed else "Setup stopped before its first step.")
     message = (failed or {}).get("error") or job.get("error") or ""
     if message:
         print(f"  Reason: {message}")
+        screen.log(failed["id"] if failed else "install", message)
     print("  Nothing that was already installed has been undone.")
     print("  Fix the reason above if it names one, then run ./install.sh again;")
     print("  it continues where it stopped.")
@@ -585,9 +695,10 @@ def report_success(screen: Screen, dashboard: str, needs_provider: bool) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
     try:
-        return run()
+        return run(restoring="--restore" in args)
     except KeyboardInterrupt:
         print("\n\nStopped. Nothing is broken; run ./install.sh to continue where you left off.")
         return 130

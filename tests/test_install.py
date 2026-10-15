@@ -306,6 +306,9 @@ class CaddyFixTests(unittest.TestCase):
         projdir = root / "apps" / "ingress"
         projdir.mkdir(parents=True)
         (projdir / "docker-compose.yml").touch()
+        source = Path(__file__).resolve().parents[1] / "apps/ingress"
+        for name in ("Caddyfile", "Caddyfile.authenticated"):
+            (projdir / name).write_text((source / name).read_text())
         from ctl.secrets import ensure_platform_tokens
 
         ensure_platform_tokens(token_factory=lambda: "test-only-token")
@@ -416,7 +419,10 @@ class AuthentikReadinessTests(unittest.TestCase):
             # fix_authentik imports secrets and the blueprint writer locally
             # to avoid bootstrap-time dependency cycles.
             patch("ctl.install.ensure_authentik_env", return_value=(env_file, [])),
-            patch("ctl.install.read_runtime_env", return_value={"AUTHENTIK_POSTGRESQL__PASSWORD": "test-db"}),
+            patch(
+                "ctl.lifecycle.compose_settings.read_runtime_env",
+                return_value={"AUTHENTIK_POSTGRESQL__PASSWORD": "test-db"},
+            ),
         ):
             result = install.fix_authentik({"state": "down"}, ctx)
         self.assertTrue(result["ok"])
@@ -563,7 +569,7 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertLess(ids.index("tailscale_join"), ids.index("vaultwarden_serve"))
         self.assertLess(ids.index("vaultwarden_serve"), ids.index("authentik"))
         self.assertLess(ids.index("authentik_setup"), ids.index("dashboard_protection"))
-        self.assertLess(ids.index("serve"), ids.index("dashboard_protection"))
+        self.assertLess(ids.index("dashboard_protection"), ids.index("serve"))
 
     def test_pkg_verify_tolerates_unjoined(self):
         # Installing must not flunk itself on the NEXT step's job.
@@ -596,9 +602,9 @@ class WorkspaceStepTests(unittest.TestCase):
         ):
             result = install.fix_tailscale_join({"state": "unjoined"}, self._ctx(Path("/nonexistent")))
         run.assert_called_once_with(
-            ["tailscale", "up", "--hostname=mu3lab", "--operator=dak", "--timeout=120s"],
+            ["tailscale", "up", "--hostname=mu3lab", "--operator=dak", "--timeout=1200s"],
             unittest.mock.ANY,
-            timeout=130,
+            timeout=1260,
         )
         opened.assert_called_once_with("https://login.tailscale.com/a/abc123", new=2)
         self.assertTrue(result["waiting"])
@@ -762,6 +768,8 @@ class DockerSessionTests(unittest.TestCase):
             "browser_extension": ["missing", "no_address", "not_needed", "ready"],
             "authentik": ["down", "ready"],
             "authentik_serve": ["unshared", "ready"],
+            "tailnet_relay": ["missing", "ready"],
+            "restore_backup": ["not_requested", "interrupted", "missing", "ready"],
             "lobehub_serve": ["unshared", "ready"],
             "authentik_setup": ["needs_user", "ready"],
             "dashboard_protection": ["needs_apply", "needs_attention", "ready"],

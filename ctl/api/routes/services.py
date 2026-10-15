@@ -10,12 +10,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import actions, service_config
+from ctl import actions, backup_service, service_config
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import (
-    Identity,
     IdentityData,
     Member,
     MemberMutation,
@@ -24,11 +23,13 @@ from ctl.api.security import (
 )
 from ctl.api.service_view import ACTIVE_WORKFLOW_STATES, INSTALLED_STATES, service_snapshot
 from ctl.backups import BackupError
+from ctl.backups import protection as backup_protection
 from ctl.backups import readiness as backup_readiness
 from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import app_releases
+from ctl.lifecycle import app_releases, compute_switch, in_progress
+from ctl.lifecycle import restore as app_restore
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
 from ctl.registry import Service
 from ctl.rules import rules_for
@@ -44,13 +45,15 @@ MANUAL_INITIALIZATION_MODES = frozenset(
 
 # An app must be installed (running or stopped) to be backed up, restored or updated.
 MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped"})
+# While an app's earlier restore or update was interrupted, only these may run.
+RECOVERY_ACTIONS = frozenset({"recover", "keep_update"})
 SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
 
 router = APIRouter(prefix="/api/v1/services", tags=["services"], route_class=ContractRoute)
 
 
 @router.get("", response_model=models.ServicesResponse, response_model_exclude_none=True)
-def list_services(identity: Identity) -> models.ServicesResponse:
+def list_services(identity: Member) -> models.ServicesResponse:
     return models.ServicesResponse.model_validate(service_snapshot(identity))
 
 
@@ -89,6 +92,46 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
     if action not in SUPPORTED_ACTIONS:
         raise ApiError(400, "unsupported service action")
     service = runtime.service(service_id)
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    subject = runtime.mutation_subject(operator)
+    active = {str(job["id"]) for job in store.active_jobs()}
+    note = in_progress.interrupted(service.id, active)
+    blocking = bool(note) or bool(app_restore.leftovers(service, ROOT))
+    if blocking and action not in RECOVERY_ACTIONS:
+        raise ApiError(
+            409,
+            {
+                "code": "recovery_required",
+                "stage": "recovery",
+                "message": f"A restore or update of {service.name} was interrupted; choose what happens first.",
+                "retryable": False,
+                "recommended_action": "Put the app back as it was, from its Backups card.",
+            },
+        )
+    if backup_service.holding(service.id):
+        raise ApiError(
+            409,
+            {
+                "code": "backup_running",
+                "stage": "backup",
+                "message": f"{service.name} is being backed up; try again in a few minutes.",
+                "retryable": True,
+                "recommended_action": "Wait for the backup to finish.",
+            },
+        )
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="lifecycle",
+        service_id=service.id,
+        action=action,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="services.actions",
+        request=body,
+    )
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
     # Deleting data cannot be undone: the request must repeat the app's name,
     # so a replayed or scripted "uninstall" can never escalate to it.
     if action == "uninstall_delete_data" and str(body.get("confirm", "")).strip().casefold() != service.name.casefold():
@@ -121,23 +164,37 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         raise ApiError(409, "service manifest is not deployable")
     control = ControlState.runtime()
     params: dict[str, str] = {}
-    if action in MAINTENANCE_ACTIONS:
+    if action in RECOVERY_ACTIONS:
+        if not blocking:
+            raise ApiError(409, f"{service.name} has nothing to put back.")
+        if action == "keep_update" and not (note.get("kind") == "update" and note.get("applied")):
+            raise ApiError(409, f"{service.name} has no interrupted update to keep.")
+    elif action in MAINTENANCE_ACTIONS:
         params = _maintenance_params(service, action, body, _effective_state(service, control))
+    elif action == "switch_compute":
+        compute = compute_switch.info(service, ROOT)
+        if not compute or compute["running"] == compute["wanted"]:
+            raise ApiError(409, f"{service.name} already runs the version this computer's compute mode asks for.")
     else:
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):
             raise ApiError(409, "action is not valid for the current service state")
-    store = runtime.job_store()
-    key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
-    if previous:
-        return {"ok": True, "duplicate": True, "job": previous}
     try:
         job = store.create(
             kind="lifecycle",
             service_id=service.id,
             action=action,
             actor=operator["username"],
+            actor_subject=subject,
+            namespace="services.actions",
+            request=body,
+            commit_state=(
+                lambda job_id: control.set_installation(
+                    service.id, "uninstalling" if action in UNINSTALL_ACTIONS else "queued", job_id=job_id
+                )
+            )
+            if control and action not in MAINTENANCE_ACTIONS
+            else None,
             detail=f"Operator requested {action} for {service.name}.",
             idempotency_key=key,
             prepare=runtime.identity_for_job(operator)
@@ -147,22 +204,15 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         )
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
-    if action in MAINTENANCE_ACTIONS:
-        return {"ok": True, "job": job}
-    if control and job.get("state") == "queued":
-        queued_state = "uninstalling" if action in UNINSTALL_ACTIONS else "queued"
-        control.set_installation(service.id, queued_state, job_id=str(job["id"]))
     return {"ok": True, "job": job}
 
 
 def _maintenance_params(service: Service, action: str, body: dict, state: str) -> dict[str, str]:
-    """Check a backup, restore or update request before it is queued."""
+    """Check a restore or update request before it is queued."""
     if service.stage != "optional":
-        raise ApiError(409, "Only apps installed from the catalog can be backed up, restored or updated here.")
+        raise ApiError(409, "Only apps installed from the catalog can be restored or updated here.")
     if state not in MAINTENANCE_STATES:
         raise ApiError(409, "Finish setting up the app first.")
-    if action == "backup":
-        return {}
     if action == "restore":
         # Restoring replaces the app's current data: repeat its name, as for deleting data.
         if str(body.get("confirm", "")).strip() != service.name:
@@ -243,7 +293,9 @@ def confirm_service_initialization(service_id: str, operator: OperatorMutation) 
 
 
 def _managed_keys(service: Service) -> set[str]:
-    return {str(field["key"]) for field in service.configuration if field.get("managed")}
+    return service_config.managed_keys(service) | {
+        str(field["key"]) for field in service.configuration if field.get("managed")
+    }
 
 
 @router.get(
@@ -257,6 +309,7 @@ def get_service_configuration(service_id: str, _operator: Member) -> models.Serv
             "ok": True,
             "service_id": service.id,
             "fields": [field for field in service_config.read(service) if str(field["key"]) not in managed],
+            "revision": service_config.revision(service),
         }
     )
 
@@ -267,23 +320,42 @@ def get_service_configuration(service_id: str, _operator: Member) -> models.Serv
 async def put_service_configuration(
     payload_model: models.ConfigurationRequest, service_id: str, request: Request, operator: OperatorMutation
 ) -> models.ServiceConfigResponse:
-    values = (payload_model.model_dump()).get("values", {})
+    body = payload_model.model_dump()
     return models.ServiceConfigResponse.model_validate(
-        await run_in_threadpool(_write_service_configuration, service_id, values, operator)
+        await run_in_threadpool(
+            _write_service_configuration, service_id, body.get("values", {}), operator, body.get("expected_revision")
+        )
     )
 
 
 def _write_service_configuration(
-    service_id: str, values: dict[str, str | bool | int | None], operator: IdentityData
+    service_id: str,
+    values: dict[str, str | bool | int | None],
+    operator: IdentityData,
+    expected_revision: int | None = None,
 ) -> dict[str, object]:
     service = runtime.service(service_id)
     managed = _managed_keys(service)
     if isinstance(values, dict) and set(values).intersection(managed):
         raise ApiError(422, "managed account fields cannot be changed here")
     try:
-        fields = [field for field in service_config.write(service, values) if str(field["key"]) not in managed]
+        written = service_config.write(service, values, expected_revision=expected_revision)
+    except service_config.RevisionConflict as conflict:
+        raise ApiError(
+            409,
+            {
+                "code": "configuration_changed",
+                "stage": "configuration",
+                "message": str(conflict),
+                "retryable": True,
+                "recommended_action": "Reload the settings and make your change again.",
+            },
+        ) from conflict
+    except service_config.ConfigurationBusy as busy:
+        raise ApiError(409, str(busy)) from busy
     except (ValueError, TypeError, AttributeError, OSError) as exc:
         raise ApiError(422, str(exc)) from exc
+    fields = [field for field in written if str(field["key"]) not in managed]
     store = JobStore.runtime()
     if store:
         store.record_audit(
@@ -295,6 +367,7 @@ def _write_service_configuration(
         "ok": True,
         "service_id": service.id,
         "fields": fields,
+        "revision": service_config.revision(service),
         "restart_required": (RuntimePaths().projects / service.id / "docker-compose.yml").is_file(),
     }
 
@@ -350,5 +423,35 @@ def service_backups(service_id: str, _operator: Operator) -> models.BackupsRespo
     except BackupError as exc:
         raise ApiError(503, str(exc)) from exc
     return models.BackupsResponse.model_validate(
-        {"ok": True, "service_id": service.id, "backups": snapshots, "readiness": backup_readiness()}
+        {
+            "ok": True,
+            "service_id": service.id,
+            "backups": snapshots,
+            "readiness": backup_readiness(),
+            "protection": backup_protection(service.id),
+        }
+    )
+
+
+@router.post("/{service_id}/backups", response_model=models.BackupStarted, response_model_exclude_none=True)
+def back_up_service(service_id: str, operator: OperatorMutation) -> models.BackupStarted:
+    """Ask Kopia's backup service to back the app up now, exactly as a scheduled run does."""
+    if not operator.get("is_admin"):
+        raise ApiError(403, "Only a Mu3Lab administrator can do this.", code="admin_required")
+    service, store = runtime.service(service_id), runtime.job_store()
+    if service.stage != "optional":
+        raise ApiError(409, "Only apps installed from the catalog are backed up here.")
+    if not backup_service.installed():
+        raise ApiError(409, "Backups are off. Install Kopia backups from Apps first.", code="backup_service_missing")
+    if backup_service.holding(service.id):
+        raise ApiError(409, f"{service.name} is already being backed up.")
+    if service.id not in backup_service.sources(ROOT):
+        raise ApiError(409, f"{service.name} has no data on this server to back up yet.")
+    try:
+        backup_service.trigger([service.id])
+    except OSError as exc:
+        raise ApiError(503, f"The backup service is not running, so nothing was backed up ({exc}).") from exc
+    store.record_audit(actor=str(operator["username"]), event="backup.requested", detail=f"Back up {service.name} now.")
+    return models.BackupStarted(
+        ok=True, detail=f"{service.name} stops for a moment while its data is copied, then starts again."
     )

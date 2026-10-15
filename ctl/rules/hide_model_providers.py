@@ -2,14 +2,17 @@
 
 The provider list is data in the app's folder (one provider id per line).
 Each listed provider gets ``<ID>_MODEL_LIST=-all`` and ``ENABLED_<ID>=0``; the
-kept provider is enabled with only Mu3Lab's own model.
+kept provider is enabled with only Mu3Lab's own models: Mu3Lab chat, plus the
+private local model when the owner has chosen one (``ctl.local_models``).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ctl import local_models
 from ctl.rules import Params, Rule, RuleError, register
+from ctl.runtime import RuntimePaths
 from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
@@ -19,7 +22,6 @@ if TYPE_CHECKING:
 class HideProvidersParams(Params):
     providers_file: str  # one provider id per line, in the app folder
     keep: str = "openai"
-    keep_models: str = "-all,+mu3lab-chat"
 
 
 @register
@@ -33,11 +35,13 @@ class HideModelProviders(Rule):
         if not (app.folder / self.params.providers_file).is_file():
             raise RuleError(f"{app.id}: hide_model_providers needs {self.params.providers_file}")
 
-    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
+    def prepare_env(
+        self, app: App, env: dict[str, str], owner: JobIdentity | None, paths: RuntimePaths | None = None
+    ) -> None:
         lines = (app.folder / self.params.providers_file).read_text(encoding="utf-8").splitlines()
         for provider in (line.strip() for line in lines if line.strip() and not line.startswith("#")):
             env[f"{provider.upper()}_MODEL_LIST"] = "-all"
             env[f"ENABLED_{provider.upper()}"] = "0"
         keep = self.params.keep.upper()
         env[f"ENABLED_{keep}"] = "1"
-        env[f"{keep}_MODEL_LIST"] = self.params.keep_models
+        env[f"{keep}_MODEL_LIST"] = local_models.chat_list()

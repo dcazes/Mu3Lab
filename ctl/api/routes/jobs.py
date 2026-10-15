@@ -81,6 +81,7 @@ def retry_job(job_id: str, request: Request, operator: OperatorMutation) -> mode
         job = store.retry(
             job_id,
             actor=operator["username"],
+            actor_subject=runtime.mutation_subject(operator),
             idempotency_key=runtime.idempotency_key(request),
             prepare=runtime.identity_for_job(operator) if needs_identity else None,
         )
@@ -158,6 +159,19 @@ def core_setup(_member: Member) -> models.CoreSetupResponse:
 @router.post("/jobs/core-install", response_model=models.JobResponse, response_model_exclude_none=True)
 def start_core(request: Request, operator: OperatorMutation) -> models.JobResponse:
     """Start the one guided core-suite job for an Authentik operator."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="lifecycle",
+        service_id="core-suite",
+        action="install",
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="core.install",
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     execution = records.get("status", "core") or {
         "ready": False,
         "services": [service.id for service in load_registry().services if service.stage == "core"],
@@ -166,24 +180,17 @@ def start_core(request: Request, operator: OperatorMutation) -> models.JobRespon
     }
     if not execution["ready"]:
         raise ApiError(409, execution["error"], missing_manifests=execution["missing"])
-    store = runtime.job_store()
-    key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
-    if previous:
-        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     active = _active_core_job(store)
     if active:
         raise ApiError(409, "core setup is already running", job=active)
-    job = start_core_setup(store, operator["username"], ROOT, idempotency_key=key)
-    if operator.get("subject_id") and operator.get("email"):
-        runtime.hand_identity_to_job(
-            store,
-            job,
-            operator,
-            detail="Encrypted account-bootstrap storage is unavailable.",
-            error_code="bootstrap_contract_unavailable",
-            step_id="account_preflight",
-        )
+    job = start_core_setup(
+        store,
+        operator["username"],
+        ROOT,
+        idempotency_key=key,
+        actor_subject=runtime.mutation_subject(operator),
+        prepare=runtime.identity_for_job(operator) if operator.get("email") else None,
+    )
     return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
@@ -191,9 +198,28 @@ def start_core(request: Request, operator: OperatorMutation) -> models.JobRespon
 def verify_core(request: Request, operator: OperatorMutation) -> models.JobResponse:
     """Queue live contract checks without reinstalling healthy services."""
     store = runtime.job_store()
+    previous = store.by_idempotency_key(
+        runtime.idempotency_key(request) or "",
+        kind="verification",
+        service_id="core-suite",
+        action="verify",
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="core.verify",
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     active = _active_core_job(store)
     if active:
         raise ApiError(409, "core work is already running", job=active)
     return models.JobResponse.model_validate(
-        {"ok": True, "job": start_verify(store, operator["username"], runtime.idempotency_key(request))}
+        {
+            "ok": True,
+            "job": start_verify(
+                store,
+                operator["username"],
+                runtime.idempotency_key(request),
+                actor_subject=runtime.mutation_subject(operator),
+            ),
+        }
     )

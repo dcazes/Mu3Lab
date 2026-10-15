@@ -4,12 +4,13 @@
 # WHY:   One canonical spelling per task so docs and muscle memory agree.
 # DEBUG: `make -n <target>` prints the commands without running them.
 
-UV := .tools/bin/uv
+# CI passes UV=uv (its own pinned uv); locally the toolchain's copy.
+UV ?= .tools/bin/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_CACHE_DIR := $(CURDIR)/.tools/cache
 RUN := $(UV) run --frozen
 
-.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck verify check vm-test dry-run clean nuke ui-dev
+.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck contract verify verify-security sbom check vm-test dry-run clean nuke ui-dev
 
 install:
 	./install.sh
@@ -42,9 +43,31 @@ typecheck:
 	$(RUN) python -m tools.api_schema --check
 	$(RUN) mypy
 
-# verify: everything CI runs, in one command.
-verify: lint typecheck test
+# contract: the catalog, Compose files and scripts are deployable; nothing private is tracked.
+contract:
+	git ls-files -z '*.sh' | xargs -0 -n1 bash -n
+	$(RUN) python -c "from ctl.manifest.catalog import load; print(len(load().apps), 'apps valid')"
+	$(RUN) python -m tools.validate_compose
+	@! git ls-files | grep -E '(^|/)\.env$$' || { echo 'A private .env file is tracked.'; exit 1; }
+	@! git ls-files | grep -E '(^|/)(data|backups|runtime)/' || { echo 'Runtime data is tracked.'; exit 1; }
+
+# verify: every check that needs no network. CI runs exactly this and verify-security
+# (tests/test_ci_parity.py keeps them from drifting apart).
+verify: lint typecheck test contract
 	$(RUN) python -m tools.dashboard build
+
+# verify-security: checks that ask the network: dependency advisories (Python, dashboard,
+# connectors), committed secrets, and that every pinned image exists for x86-64.
+verify-security:
+	$(UV) export --frozen --no-dev --no-hashes --format requirements.txt --output-file .tools/requirements.lock.txt
+	$(UV) tool run --from pip-audit==2.9.0 pip-audit --disable-pip --no-deps -r .tools/requirements.lock.txt
+	$(RUN) python -m tools.audit
+	$(RUN) python -m tools.check_images
+
+# sbom: the Python dependency inventory published with CI runs.
+sbom:
+	$(UV) export --frozen --no-dev --format requirements.txt --output-file .tools/requirements.lock.txt
+	$(UV) tool run --from cyclonedx-bom==7.5.0 cyclonedx-py requirements .tools/requirements.lock.txt --output-format JSON --output-file mu3lab-python-sbom.json
 
 # check-updates / approve: the maintainer's release review. See tools/approve_release.py.
 check-updates:

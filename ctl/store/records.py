@@ -26,3 +26,20 @@ def put(scope: str, name: str, value: dict[str, Any], paths: RuntimePaths = Runt
             "value_json=excluded.value_json, updated_at=excluded.updated_at",
             (scope, name, json.dumps(value), time.time()),
         )
+
+
+def names(scope: str, paths: RuntimePaths = RuntimePaths()) -> list[str]:
+    path = db.database(paths)
+    if not path.is_file():
+        return []
+    with db.connect(path, readonly=True) as connection:
+        rows = connection.execute("SELECT name FROM records WHERE scope=? ORDER BY name", (scope,)).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def delete(scope: str, name: str, paths: RuntimePaths = RuntimePaths()) -> None:
+    path = db.database(paths)
+    if not path.is_file():
+        return
+    with db.connect(path) as connection:
+        connection.execute("DELETE FROM records WHERE scope=? AND name=?", (scope, name))

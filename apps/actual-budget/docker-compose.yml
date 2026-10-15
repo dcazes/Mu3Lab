@@ -3,6 +3,7 @@ name: mu3lab-actual-budget
 services:
   actual-server:
     image: docker.io/actualbudget/actual-server:26.9.0@sha256:552beab3dec8c93d46b8b9245612d63c3f123b8a45063a474f53e229b17621d3
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     ports: ["127.0.0.1:5006:5006"]
     environment:
@@ -23,10 +24,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5006/health').then(r=>{if(!r.ok)process.exit(1)})"]
-      interval: 15s
       timeout: 8s
-      retries: 20
-      start_period: 20s
+      start_period: 320s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

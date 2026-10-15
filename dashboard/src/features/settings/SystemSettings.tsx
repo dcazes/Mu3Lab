@@ -1,4 +1,4 @@
-import { CheckCircle2, Copy, Network, RefreshCw, Rocket } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Network, RefreshCw, Rocket } from 'lucide-react';
 import { useState } from 'react';
 import {
   api,
@@ -14,11 +14,12 @@ import { copyText } from '../../components/CopyField';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Facts, PageHeader } from '../../components/Layout';
 import { Badge, Dot, StateBadge } from '../../components/Status';
-import { bytes, duration } from '../../lib/format';
+import { duration } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { JobDialog, JobRow } from '../activity/JobDialog';
+import { ResourceCharts } from '../home/ResourceCharts';
 
 function Meter({ label, percent, detail }: { label: string; percent: number; detail: string }) {
   const tone = percent > 90 ? 'red' : percent > 75 ? 'amber' : 'green';
@@ -36,59 +37,25 @@ function Meter({ label, percent, detail }: { label: string; percent: number; det
   );
 }
 
-function Setup() {
+/** Setup normally finishes in the installer; this shows only when a setup step has failed. */
+function SetupProblem() {
   const { data, refresh } = useDashboard();
   const { provisioning, core, identity } = data;
   const confirm = useConfirm();
   const { pending, run } = useAction();
-  if (!provisioning.available) return null;
-  const progress = provisioning.progress || {
-    completed: provisioning.phases.filter((phase) => ['verified', 'skipped'].includes(phase.actual_state)).length,
-    total: provisioning.phases.length,
-  };
-  if (provisioning.complete)
-    return (
-      <Callout tone="success" icon={CheckCircle2} title="Mu3Lab is fully set up">
-        All {progress.total} setup steps are verified.
-      </Callout>
-    );
-  const phase = provisioning.waiting || provisioning.blocked;
+  const failedJob = core.current_job?.state === 'failed';
+  if (!provisioning.available || provisioning.complete || !(provisioning.blocked || failedJob)) return null;
   const next = provisioning.next_action;
   return (
-    <Card
-      title="Finish setup"
-      description={phase?.detail || core.next_action}
-      actions={
-        <span className="install-count">
-          {progress.completed}/{progress.total}
-        </span>
-      }
-    >
-      <ol className="checklist">
-        {provisioning.phases.map((item) => {
-          const done = ['verified', 'skipped'].includes(item.actual_state);
-          const failed = item.actual_state === 'failed';
-          return (
-            <li key={item.phase_id} className={done ? 'done' : failed ? 'failed' : ''}>
-              <Dot tone={done ? 'green' : failed ? 'red' : 'gray'} />
-              <span>{item.label}</span>
-              {!done && <small>{item.actual_state.replaceAll('_', ' ')}</small>}
-            </li>
-          );
-        })}
-      </ol>
-      {core.current_job && ['queued', 'running', 'failed'].includes(core.current_job.state) && (
-        <p className="muted">{core.current_job.detail}</p>
-      )}
-      <div className="button-row">
-        {next?.kind === 'link' && next.href && (
-          <LinkButton variant="primary" to={next.href}>
-            {next.label}
-          </LinkButton>
-        )}
-        {next?.kind === 'job' && next.endpoint && identity.writes_enabled && (
+    <Callout
+      tone="danger"
+      icon={AlertTriangle}
+      title="A setup step didn’t finish"
+      action={
+        next?.kind === 'link' && next.href ? (
+          <LinkButton to={next.href}>{next.label}</LinkButton>
+        ) : next?.kind === 'job' && next.endpoint && identity.writes_enabled ? (
           <Button
-            variant="primary"
             icon={Rocket}
             loading={pending === 'setup'}
             onClick={async () => {
@@ -100,14 +67,17 @@ function Setup() {
           >
             {next.label}
           </Button>
-        )}
-        {next?.kind === 'bootstrap' && (
-          <p className="muted">
-            Run <code>./install.sh</code> on the server to finish this step.
-          </p>
-        )}
-      </div>
-    </Card>
+        ) : undefined
+      }
+    >
+      {provisioning.blocked?.detail || core.current_job?.detail || core.next_action}
+      {next?.kind === 'bootstrap' && (
+        <>
+          {' '}
+          Run <code>./install.sh</code> on the server to finish it.
+        </>
+      )}
+    </Callout>
   );
 }
 
@@ -235,6 +205,16 @@ export function Mu3LabUpdates() {
         loaded.error && <p className="muted">{loaded.error}</p>
       ) : (
         <div className="stack">
+          {update.last_update?.state === 'rolled_back' && (
+            <Callout tone="warning" title={`Mu3Lab went back to ${update.last_update.from || 'the previous version'}`}>
+              {update.last_update.detail} Nothing else needs doing; you can try the update again later.
+            </Callout>
+          )}
+          {update.last_update?.state === 'needs_attention' && (
+            <Callout tone="danger" title="The last update needs your attention">
+              {update.last_update.detail}
+            </Callout>
+          )}
           {job?.state === 'failed' && (
             <Callout tone="warning" title="The last update didn’t finish">
               {job.detail}
@@ -276,7 +256,8 @@ function Compute() {
     if (
       !(await confirm({
         title: `Use ${mode === 'auto' ? 'automatic' : mode.toUpperCase()} acceleration?`,
-        description: 'Restart Ollama afterwards to apply it to the running container.',
+        description:
+          'New installs use it straight away. Apps already installed keep their version until you press Switch on their page.',
       }))
     )
       return;
@@ -286,7 +267,7 @@ function Compute() {
   return (
     <Card
       title="AI acceleration"
-      description={`Used by local AI models. Automatic currently uses ${config.data?.resolved_compute_mode?.toUpperCase() || '…'}.`}
+      description={`Used by local AI models, photo recognition and document reading. Automatic currently uses ${config.data?.resolved_compute_mode?.toUpperCase() || '…'}.`}
     >
       <div className="segmented" role="radiogroup" aria-label="Compute mode">
         {modes.map((mode) => (
@@ -326,7 +307,7 @@ export function SystemSettings() {
         title="System"
         description="Keep Mu3Lab up to date, and monitor server health, network access, and local AI acceleration."
       />
-      <Setup />
+      <SetupProblem />
       <Card title="Server">
         <div className="meters">
           <Meter
@@ -334,17 +315,8 @@ export function SystemSettings() {
             percent={system.cpu_percent}
             detail={`Up ${duration(system.uptime_seconds ?? undefined)}`}
           />
-          <Meter
-            label="Memory"
-            percent={system.memory.percent}
-            detail={`${bytes(system.memory.used)} of ${bytes(system.memory.total)}`}
-          />
-          <Meter
-            label="Disk"
-            percent={system.disk.percent}
-            detail={`${bytes(system.disk.total - system.disk.used)} free`}
-          />
         </div>
+        <ResourceCharts detailed />
         <Facts
           items={[
             {
@@ -358,7 +330,13 @@ export function SystemSettings() {
       <Mu3LabUpdates />
       <Tailnet status={tailscale} />
       <Compute />
-      <Card title="Activity" description="Recent installation, maintenance, and configuration jobs." flush>
+      <Card
+        title="Activity"
+        description="Recent installation, maintenance, and configuration jobs."
+        flush
+        collapsible
+        defaultOpen={false}
+      >
         {data.jobs.jobs.length ? (
           <div className="rows">
             {data.jobs.jobs.slice(0, 15).map((job) => (

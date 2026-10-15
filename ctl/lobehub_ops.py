@@ -2,68 +2,24 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-from ctl import chat_connections, mcp_gateway
+from ctl import chat_connections, chat_ops, mcp_gateway
 from ctl.control_state import ControlState
 from ctl.integrations.lobehub import AssistantSyncError, ChatError, LobeHub
-from ctl.manifest.catalog import load
+from ctl.manifest.catalog import cached
 from ctl.mcp_catalog import load as load_connectors
-from ctl.platform_apps import by_capability
+from ctl.people import operator_subjects
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.service_state import tailnet_dns_name
 
 
 def origin() -> str:
-    app = by_capability("chat")
-    route = app.manifest.route
-    host = tailnet_dns_name()
-    if not route or not host:
-        raise ChatError("Chat's private address is not available yet.")
-    return f"https://{host}:{route.https_port}"
+    try:
+        return chat_ops.origin(chat_ops.by_workspace("lobe"))
+    except chat_ops.ChatError as exc:
+        raise ChatError(str(exc)) from None
 
 
-def desired_assistants() -> list[dict[str, Any]]:
-    state = ControlState.runtime()
-    if state is None:
-        return []
-    live = set()
-    for connector in load_connectors(load_registry()):
-        runtime = state.mcp_server(connector.id)
-        if connector.gateway and runtime and runtime["enabled"] and runtime["state"] == "live":
-            live.add(connector.service_id)
-    result = []
-    for app in load().apps:
-        assistant = app.manifest.chat.assistant
-        installation = state.installation(app.id)
-        if (
-            not assistant
-            or app.id not in live
-            or not installation
-            or installation["state"] not in {"running", "stopped", "degraded"}
-        ):
-            continue
-        instructions = assistant.instructions
-        policy_file = mcp_gateway.project() / "policy" / "policy.json"
-        if policy_file.is_file():
-            policy = json.loads(policy_file.read_text())
-            instructions = policy.get("apps", {}).get(app.id, {}).get("instructions") or instructions
-        result.append(
-            {
-                "id": app.id,
-                "title": assistant.title,
-                "description": assistant.description,
-                "instructions": instructions,
-                "url": mcp_gateway.endpoint(app.id),
-                "token": mcp_gateway.app_token(app.id),
-            }
-        )
-    return result
-
-
-def assistant_report(uid: str) -> list[dict[str, str]]:
+def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]]:
     """Why each installed app does or does not have an assistant in this person's chat."""
     state = ControlState.runtime()
     if state is None:
@@ -71,14 +27,19 @@ def assistant_report(uid: str) -> list[dict[str, str]]:
     record = chat_connections.records().get(uid, {})
     connectors = load_connectors(load_registry())
     report = []
-    for app in load().apps:
+    for app in cached().apps:
         installation = state.installation(app.id)
         if not app.manifest.chat.assistant or not installation or installation["state"] == "not_installed":
             continue
         reviewed = [connector for connector in connectors if connector.service_id == app.id and connector.gateway]
         runtimes = [state.mcp_server(connector.id) for connector in reviewed]
         live = any(runtime and runtime["enabled"] and runtime["state"] == "live" for runtime in runtimes)
-        if not reviewed:
+        if not operator:
+            status, detail = (
+                "operator_only",
+                "This connector uses shared service credentials and is available only to operators.",
+            )
+        elif not reviewed:
             status, detail = "needs_review", "Its connector's tools have not been reviewed for chat yet."
         elif not live:
             current = next((runtime["state"] for runtime in runtimes if runtime), "not started")
@@ -96,24 +57,37 @@ def assistant_report(uid: str) -> list[dict[str, str]]:
 
 
 def sync_agents(log) -> tuple[bool, str]:
+    from ctl import access, resource_locks
+
+    # Revocation rewrites the same per-person records; never interleave with it.
+    with resource_locks.hold(access.CHAT_LOCK):
+        return _sync_agents(log)
+
+
+def _sync_agents(log) -> tuple[bool, str]:
     paths = RuntimePaths()
     records = chat_connections.records(paths)
     if not any(record.get("key") for record in records.values()):
         return True, "Assistants will be prepared when each person connects chat."
     try:
-        desired = desired_assistants()
+        operators = operator_subjects()
+        authority = mcp_gateway.authority()
+        for uid in records:
+            mcp_gateway.grant(uid, operator=uid in operators)
         state = ControlState.runtime()
         if state is None:
             return True, "Chat synchronization waits for application state."
         installed = {
             app.id
-            for app in load().apps
+            for app in cached().apps
             if (record := state.installation(app.id))
             and record.get("installed_at")
             and record["state"] != "not_installed"
         }
         address = origin()
     except (ChatError, OSError, ValueError) as exc:
+        for uid in records:
+            mcp_gateway.authority().revoke_subject(uid)
         log(str(exc))
         return False, str(exc)
     failures = []
@@ -122,6 +96,7 @@ def sync_agents(log) -> tuple[bool, str]:
             continue
         # One person's revoked key or failed request must not stop everyone else's assistants.
         try:
+            desired = chat_ops.desired_assistants(uid) if uid in operators else []
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
             chat_connections.save(uid, {**record, "managed": managed, "error": ""}, paths)
@@ -129,6 +104,7 @@ def sync_agents(log) -> tuple[bool, str]:
             chat_connections.save(uid, {**record, "managed": exc.managed, "error": str(exc)}, paths)
             failures.append(str(exc))
         except (ChatError, OSError, ValueError) as exc:
+            authority.revoke_subject(uid)
             # Keep the reason with the person so the dashboard can show it, not just the worker log.
             chat_connections.save(uid, {**record, "error": str(exc)}, paths)
             failures.append(str(exc))
@@ -139,19 +115,16 @@ def sync_agents(log) -> tuple[bool, str]:
     return True, "Your assistants are ready."
 
 
-def reconcile(log) -> tuple[bool, str]:
-    return sync_agents(log)
+def revoke(subject: str) -> None:
+    """Detach every Mu3Lab assistant's tools from this person's LobeChat; conversations and agents stay."""
+    from ctl import access, resource_locks
 
-
-def sync_mcp(server, tools: list[dict], token: str, *, enabled: bool, log) -> tuple[bool, str]:
-    # Unreviewed connectors are never exposed outside the enforcing gateway.
-    return True, "Review this connector before exposing it to chat."
-
-
-def sync_gateway(service_id: str, app_name: str, tools: list[dict], *, enabled: bool, log) -> tuple[bool, str]:
-    return sync_agents(log)
-
-
-def set_tool_permission(server_id: str, tool_name: str, permission: str) -> tuple[bool, str]:
-    # The tool gateway enforces the decision; no chat database permissions exist.
-    return True, "Tool permission is enforced by the gateway."
+    # Chat synchronization rewrites the same records; never interleave with it.
+    with resource_locks.hold(access.CHAT_LOCK):
+        entry = chat_connections.records().get(subject) or {}
+        managed = entry.get("managed") or {}
+        if not entry.get("key") or not managed:
+            return
+        with LobeHub(origin(), entry["key"]) as client:
+            managed = client.ensure_assistants([], managed, installed=set(managed))
+        chat_connections.save(subject, {**entry, "managed": managed, "error": ""})

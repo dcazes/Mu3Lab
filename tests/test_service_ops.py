@@ -19,6 +19,14 @@ class ServiceOperationTests(unittest.TestCase):
         service = load().get("ingress")
         self.assertNotIn("stop", allowed_actions(service, "ready"))
 
+    def test_only_sign_in_and_the_private_proxy_are_always_on(self):
+        registry = load()
+        always_on = {service.id for service in registry.services if service.lifecycle == "always_on"}
+        self.assertEqual(always_on, {"authentik", "ingress"})
+        # Stopping the vault reaches every Bitwarden app, so its confirmation says so.
+        self.assertIn("Bitwarden", registry.get("vaultwarden").stop_warning)
+        self.assertIn("stop", allowed_actions(registry.get("firecrawl"), "ready"))
+
     def test_blocked_service_has_no_actions(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "blocked"), [])
 
@@ -30,7 +38,7 @@ class ServiceOperationTests(unittest.TestCase):
         self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "failed"))
         self.assertNotIn("uninstall", allowed_actions(load().get("nextcloud"), "planned"))
         self.assertNotIn("uninstall", allowed_actions(load().get("ollama"), "ready"))
-        self.assertNotIn("uninstall", allowed_actions(load().get("lobehub"), "stopped"))
+        self.assertNotIn("uninstall", allowed_actions(load().get("open-webui"), "stopped"))
 
     def test_core_apps_never_offer_uninstall_and_respect_stoppable(self):
         for service in load().services:
@@ -44,8 +52,8 @@ class ServiceOperationTests(unittest.TestCase):
                     if not service.manifest.service.stoppable:
                         self.assertNotIn("stop", actions)
 
-    def test_stopped_core_lobechat_starts_from_runtime_project(self):
-        service = load().get("lobehub")
+    def test_stopped_core_chat_starts_from_runtime_project(self):
+        service = load().get("open-webui")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             project = paths.projects / service.id

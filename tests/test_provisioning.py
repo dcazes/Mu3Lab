@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ctl import mcp_ops
+from ctl import core_setup, mcp_ops
 from ctl.control_state import ControlState
 from ctl.core_setup import core_services, execute_claimed, plan
 from ctl.core_wiring import configure
@@ -21,6 +21,7 @@ from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
 from ctl.engine.project import Facts
 from ctl.jobs import JobStore
+from ctl.provider_ops import PROBE_MAX_TOKENS
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import load
 from ctl.rules import rules_for
@@ -197,12 +198,13 @@ class CoreWiringTests(unittest.TestCase):
         self.assertFalse(checked["ready"])
         self.assertEqual(checked["error"], "Docker is not ready")
 
-    def test_core_order_includes_firecrawl_and_respects_manifest_dependencies(self):
+    def test_core_order_respects_manifest_dependencies(self):
         ordered = [service.id for service in core_services()]
-        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "lobehub", "firecrawl"})
+        # Backups (Kopia) and web research (Firecrawl) are the owner's choice, installed from Discover.
+        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "open-webui"})
         self.assertLess(ordered.index("ollama"), ordered.index("litellm"))
         self.assertLess(ordered.index("freellmapi"), ordered.index("litellm"))
-        self.assertLess(ordered.index("litellm"), ordered.index("lobehub"))
+        self.assertLess(ordered.index("litellm"), ordered.index("open-webui"))
 
     def test_core_parent_waits_for_all_apps_and_stops_at_an_app_failure(self):
         ordered = [service.id for service in core_services()]
@@ -270,6 +272,81 @@ class CoreWiringTests(unittest.TestCase):
                 mcp_ops.preenable("firecrawl", Path(tmp))
             materialize.assert_called_once()
             self.assertFalse(state.mcp_server("firecrawl-official")["enabled"])
+
+    def test_a_passing_recheck_after_a_failed_one_is_recorded_as_verified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "control.sqlite3")
+            provisioning = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
+            for outcome in ((False, "A provider answered with nothing"), (True, "verified")):
+                store.create(kind="verification", service_id="core-suite", action="verify", actor="owner")
+                claimed = store.claim("worker")
+                with (
+                    patch("ctl.core_setup.ProvisioningStore.runtime", return_value=provisioning),
+                    patch("ctl.core_setup.configure_wiring", return_value={}),
+                    patch("ctl.core_setup._verify_platform", return_value=outcome),
+                ):
+                    execute_claimed(store, claimed, "worker", Path(tmp))
+            self.assertEqual(store.get(claimed["id"])["state"], "succeeded")
+            phases = {phase["phase_id"]: phase for phase in provisioning.summary()["phases"]}
+            self.assertEqual(phases["verification"]["actual_state"], "verified")
+            self.assertEqual(phases["core"]["actual_state"], "verified")
+
+    def test_the_chat_check_leaves_reasoning_models_room_to_answer(self):
+        sent = []
+        with (
+            patch("ctl.core_setup._http_ok", return_value=True),
+            patch(
+                "ctl.core_setup.read_runtime_env",
+                return_value={
+                    "LITELLM_MASTER_KEY": "k",
+                    "OPEN_WEBUI_OIDC_CLIENT_ID": "a",
+                    "OPEN_WEBUI_OIDC_CLIENT_SECRET": "b",
+                },
+            ),
+            patch(
+                "ctl.core_setup._stream_chat_ok", side_effect=lambda _url, payload, _headers: not sent.append(payload)
+            ),
+            patch("ctl.core_setup._embedding_ok", return_value=False),
+        ):
+            core_setup._verify_platform(
+                RuntimePaths(Path("/nonexistent")), {"chat_configured": True, "gateway_key": "k"}
+            )
+        self.assertGreaterEqual(sent[0]["max_tokens"], PROBE_MAX_TOKENS)
+        # FreeLLMAPI's fastest pick, never a named model that could be retired.
+        self.assertEqual(sent[0]["model"], "mu3lab-fast")
+
+    def test_an_app_turned_off_leaves_setup_waiting_not_failed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp) / "control.sqlite3")
+            provisioning = ProvisioningStore(Path(tmp) / "provisioning.sqlite3")
+            provisioning.update("verification", "failed", error="LiteLLM did not answer")
+            control = Mock()
+            control.installation.side_effect = lambda sid: {"state": "stopped" if sid == "litellm" else "running"}
+            store.create(kind="verification", service_id="core-suite", action="verify", actor="owner")
+            claimed = store.claim("worker")
+            with (
+                patch("ctl.core_setup.ProvisioningStore.runtime", return_value=provisioning),
+                patch("ctl.core_setup.ControlState.runtime", return_value=control),
+                patch("ctl.core_setup._verify_platform") as verify,
+            ):
+                execute_claimed(store, claimed, "worker", Path(tmp))
+            verify.assert_not_called()
+            self.assertEqual(store.get(claimed["id"])["state"], "succeeded")
+            summary = provisioning.summary()
+            self.assertIsNone(summary["blocked"])
+            self.assertEqual(
+                summary["waiting"]["detail"], "LiteLLM is turned off. Start it from Apps to run these checks."
+            )
+
+    def test_a_brief_provider_outage_is_retried_before_the_check_fails(self):
+        answers = iter([False, True])
+        sleep = Mock()
+        with patch("ctl.core_setup._stream_chat_ok", side_effect=lambda *_args: next(answers)):
+            self.assertTrue(core_setup._chat_ok({}, {}, sleep=sleep))
+        sleep.assert_called_once()
+        with patch("ctl.core_setup._stream_chat_ok", return_value=False) as stream:
+            self.assertFalse(core_setup._chat_ok({}, {}, sleep=sleep))
+        self.assertEqual(stream.call_count, core_setup.CHAT_ATTEMPTS)
 
     def test_verification_only_job_never_pulls_or_recreates_services(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -3,8 +3,9 @@
 Mu3Lab's service account owns the shared "Mu3Lab" organization in Vaultwarden.
 Every active person in Mu3Lab whose Authentik email has a Vaultwarden account
 is a member with one private collection. Logins Mu3Lab generates for them
-(app accounts, and for administrators the AI gateway admin pages) are written
-there with the app's private address, so their Bitwarden app fills them in.
+(app accounts, and for administrators the AI gateway admin pages and the
+backup password) are written there with the app's private address, so their
+Bitwarden app fills them in.
 
 The run is idempotent and safe to repeat: items are matched by their
 ``mu3lab_id`` field, passwords change only when Mu3Lab's copy changed, and a
@@ -19,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ctl import backups, recovery_sheet
 from ctl.identity import authentik_only
 from ctl.integrations.vaultwarden import MATCH_HOST, VaultError, register
 from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, OrgSession
@@ -28,7 +30,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked
 from ctl.secrets import read_runtime_env
 from ctl.store import onboarding as onboarding_state
-from ctl.store import records
+from ctl.store import person_logins, records
 from ctl.store.secrets import SecretStore
 from ctl.vault_setup import FREELLMAPI_ACCOUNT, VAULTWARDEN_LOCAL_URL
 
@@ -100,6 +102,22 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                 saved=[lambda service_id=service_id: onboarding_state.vault_saved(service_id, uid, paths)],
             )
         )
+    for service in registry.services:
+        # Personal app logins (Navidrome's phone apps): rule per_person_logins.
+        if not any(ref.rule == "per_person_logins" for ref in service.manifest.rules):
+            continue
+        login = person_logins.get(service.id, str(person.get("username") or ""), paths)
+        if login and host:
+            items.append(
+                Item(
+                    f"login:{service.id}",
+                    service.name,
+                    str(login["login"]),
+                    str(login["password"]),
+                    _origin(host, service.private_https_port),
+                    "Created by Mu3Lab for you. Bitwarden fills this in when the app asks for its login.",
+                )
+            )
     if person.get("role") == "admin" and host:
         freellmapi = read_runtime_env(paths.projects / by_capability("provider_gateway").id / ".env").get(
             "FREELLMAPI_ADMIN_PASSWORD", ""
@@ -129,7 +147,44 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
                     "Created by Mu3Lab. Authentik guards this page; this login unlocks it.",
                 )
             )
+        for service in registry.services:
+            # Caddy signs in to these after Authentik; the login is kept in case that ever fails.
+            route = service.manifest.route
+            auth = route.upstream_basic_auth if route else None
+            env = read_runtime_env(paths.projects / service.id / ".env") if auth else {}
+            if auth and env.get(auth.password_env):
+                items.append(
+                    Item(
+                        f"service:{service.id}",
+                        service.name,
+                        env.get(auth.user_env, ""),
+                        env[auth.password_env],
+                        _origin(host, service.private_https_port),
+                        "Created by Mu3Lab. Authentik guards this page and signs you in; this login is a fallback.",
+                    )
+                )
+        backup_password = _backup_password(paths)
+        if backup_password:
+            items.append(
+                Item(
+                    "platform:backup-password",
+                    recovery_sheet.VAULT_ITEM_NAME,
+                    "mu3lab-backups",
+                    backup_password,
+                    "",
+                    recovery_sheet.vault_notes(host, paths),
+                )
+            )
     return [item for item in items if item.password]
+
+
+def _backup_password(paths: RuntimePaths) -> str:
+    """The backups' password, created now if no backup has needed it yet, so it is saved before it is needed."""
+    try:
+        return backups.repository_password(paths)
+    except backups.BackupError:
+        # The repository exists without its password; there is nothing safe to save.
+        return ""
 
 
 def _saved_personally(person: dict[str, Any], paths: RuntimePaths) -> bool:

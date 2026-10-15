@@ -11,12 +11,14 @@ summary: Manages your photo and video library on your server. Upload media from 
 version: v3.2.4
 upstream: immich-app/immich
 service:
+  uses_gpu: true
   local_port: 2283
   health:
     path: /api/server/ping
 route:
   https_port: 8449
   caddy_port: 19466
+  access: open
 sign_in:
   method: oidc
   oidc:

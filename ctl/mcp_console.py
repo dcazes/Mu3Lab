@@ -9,13 +9,12 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from ctl import mcp_gateway
 from ctl.control_state import ControlState
 from ctl.mcp_activity import McpActivity
 from ctl.mcp_catalog import load as load_catalog
-from ctl.mcp_ops import _local_endpoint, _rpc_notification, _rpc_request
-from ctl.mcp_registry import credential_path
+from ctl.mcp_ops import _rpc_notification, _rpc_request
 from ctl.registry import load as load_registry
-from ctl.secrets import read_runtime_env
 
 
 def _resolve(server_id: str, tool_name: str):
@@ -48,10 +47,9 @@ def _resolve(server_id: str, tool_name: str):
         if not states["categories"][reviewed.category] or not states["tools"][tool_name]:
             raise ValueError("tool is switched off")
         return server, tool | {"risk": reviewed.access}, "auto" if reviewed.access == "read" else "needs_approval"
-    permission = McpActivity().permission(server_id, tool_name, str(tool.get("risk", "write")))
-    if permission == "disabled":
-        raise ValueError("tool is disabled")
-    return server, tool, permission
+    raise ValueError(
+        "This connector needs a tool review and gateway approval enforcement before console calls are available."
+    )
 
 
 def _validate(tool: dict, arguments: Any) -> dict:
@@ -72,8 +70,29 @@ def _validate(tool: dict, arguments: Any) -> dict:
 def prepare(server_id: str, tool_name: str, arguments: Any, actor: str) -> dict:
     _server, tool, permission = _resolve(server_id, tool_name)
     payload = _validate(tool, arguments)
+    mcp_gateway.verify_operator(actor)
     needs_confirmation = tool.get("risk") != "read" or permission == "needs_approval"
-    nonce = McpActivity().prepare(server_id, tool_name, actor, payload) if needs_confirmation else ""
+    nonce = ""
+    if needs_confirmation:
+        if not _server.gateway:
+            raise ValueError("Unreviewed connector writes are unavailable; use an approved gateway connector.")
+        policy = mcp_gateway.current_policy()
+        app = policy["apps"].get(_server.service_id)
+        if not app:
+            raise ValueError("This connector is not available for approval.")
+        token = mcp_gateway.operator_token(actor, _server.service_id)
+        authority = mcp_gateway.authority()
+        principal = authority.authenticate(token, _server.service_id)
+        operation = authority.prepare(
+            principal,
+            _server.service_id,
+            app,
+            tool_name,
+            payload,
+            tool.get("parameters") or {"type": "object"},
+            policy["revision"],
+        )
+        nonce = operation["id"]
     return {
         "ok": True,
         "server_id": server_id,
@@ -91,30 +110,47 @@ def execute(
 ) -> dict:
     server, tool, permission = _resolve(server_id, tool_name)
     payload = _validate(tool, arguments)
+    mcp_gateway.verify_operator(actor)
     needs_confirmation = tool.get("risk") != "read" or permission == "needs_approval"
     activity = McpActivity()
-    if needs_confirmation and not activity.consume(nonce, server_id, tool_name, actor, payload, idempotency_key):
-        raise ValueError("confirmation expired, changed, or already used")
+    if needs_confirmation:
+        if not server.gateway:
+            raise ValueError("Unreviewed connector writes are unavailable; use an approved gateway connector.")
+        authority = mcp_gateway.authority()
+        operation = authority.view(nonce, actor, arguments=True)
+        if (
+            operation["server"] != server_id
+            or operation["tool"] != tool_name
+            or not authority.matches_arguments(nonce, actor, payload)
+        ):
+            raise ValueError("Confirmation does not match these tool arguments.")
+        if operation["state"] == "pending":
+            authority.decide(nonce, actor, approve=True)
+        return mcp_gateway.dispatch_operation(nonce, actor)
     if server.transport != "streamable-http":
         raise ValueError("tool console requires a Streamable HTTP MCP connection")
-    endpoint = _local_endpoint(server)
-    if not endpoint:
-        raise ValueError("MCP endpoint is unavailable")
-    values = read_runtime_env(credential_path(server.id))
-    token = values.get("MCP_AUTH_TOKEN", "")
+    endpoint = f"http://127.0.0.1:{mcp_gateway.PORT}/apps/{server.service_id}/mcp"
+    token = mcp_gateway.operator_token(actor, server.service_id)
     started = time.monotonic()
     try:
         _, session = _rpc_request(endpoint, "initialize", 1, token=token)
         _rpc_notification(endpoint, "notifications/initialized", token=token, session_id=session)
         result, _ = _rpc_request(
-            endpoint, "tools/call", 2, token=token, session_id=session, params={"name": tool_name, "arguments": payload}
+            endpoint,
+            "tools/call",
+            2,
+            token=token,
+            session_id=session,
+            params={"name": "use_tool", "arguments": {"tool": tool_name, "arguments": payload}},
         )
         outcome = (
             "tool_error" if isinstance(result.get("result"), dict) and result["result"].get("isError") else "succeeded"
         )
         activity.record(server_id, tool_name, "dashboard", actor, outcome, int((time.monotonic() - started) * 1000))
         return {"ok": outcome == "succeeded", "result": result.get("result", {}), "outcome": outcome}
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        if isinstance(exc, urllib.error.HTTPError):
+            exc.close()
         activity.record(
             server_id,
             tool_name,

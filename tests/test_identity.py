@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 
@@ -50,6 +51,16 @@ class IdentityContractTests(unittest.TestCase):
             None,
         )
         self.assertEqual(identity["launch_url"], "https://host.example:8453/index.php/apps/user_oidc/login/1")
+
+    def test_a_turned_off_app_is_off_not_degraded(self):
+        service = load().get("audiobookshelf")
+        state = SimpleNamespace(service_identity=lambda _id: {"state": "ready", "detail": ""})
+        stopped = {"state": "stopped", "route_ready": False, "health_state": "unknown"}
+        identity = projection(service, stopped, state)
+        self.assertEqual(identity["state"], "off")
+        # Running but unreachable is still a real problem.
+        running = {**stopped, "state": "running"}
+        self.assertEqual(projection(service, running, state)["state"], "degraded")
 
     def test_identity_provider_projection_remains_ready_without_an_app_id_branch(self):
         source = load().get("authentik")
@@ -180,6 +191,9 @@ class IdentityContractTests(unittest.TestCase):
 
     def _client(self, bodies):
         def send(request):
+            if request.method == "GET" and request.url.path == "/api/v3/core/brands/":
+                # The duplicate-brand cleanup that runs before the dashboard's sign-in.
+                return httpx.Response(200, json={"results": [], "pagination": {"next": 0}})
             self.assertEqual(request.method, "POST")
             self.assertEqual(request.url.path, "/api/v3/managed/blueprints/import/")
             self.assertEqual(request.headers["authorization"], "Bearer test-token")
@@ -203,6 +217,25 @@ class IdentityContractTests(unittest.TestCase):
         for content in (gated, oidc):
             self.assertNotIn("explicit-consent", content)
             self.assertIn("default-provider-authorization-implicit-consent", content)
+
+    def test_gated_household_apps_admit_only_the_household_and_administrators(self):
+        # Review C-L1: an Authentik account outside both groups is refused, like at the OIDC apps.
+        import re
+
+        from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
+
+        content = render_gate_blueprint(
+            "mu3lab.example.ts.net",
+            8446,
+            (GatedApp("grocy", "Grocy", 8447, "household"), GatedApp("litellm", "LiteLLM", 8454, "operators")),
+        )
+        groups: dict[str, list[str]] = {}
+        for target, group in re.findall(r"target: !KeyOf (\S+)\n.*\n.*\n.*\[name, ([^\]]+)\]", content):
+            groups.setdefault(target, []).append(group)
+        self.assertEqual(
+            groups["mu3lab-grocy-application"], ["authentik Admins", "mu3lab-operators", "mu3lab-household"]
+        )
+        self.assertEqual(groups["mu3lab-litellm-application"], ["authentik Admins", "mu3lab-operators"])
 
     def test_admitted_people_carry_the_group_names_apps_gate_on(self):
         from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint

@@ -1,6 +1,6 @@
 import { cleanup, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
+import { aiModels, dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
 import { AiSettings } from './AiSettings';
 import { SettingsPage } from './SettingsPage';
 
@@ -21,7 +21,7 @@ describe('household member', () => {
     const nav = screen.getByRole('navigation', { name: 'Settings' });
     expect(nav).not.toHaveTextContent('System');
     expect(nav).not.toHaveTextContent('People');
-    expect(nav).toHaveTextContent('AI providers');
+    expect(nav).toHaveTextContent('AI');
     expect(screen.getByText('Settings page not found')).toBeInTheDocument();
   });
 
@@ -45,11 +45,15 @@ describe('household member', () => {
             ],
             setup: { complete: true },
           }
-        : { ok: true, providers: [] },
+        : path === '/api/v1/ai/models'
+          ? aiModels()
+          : { ok: true, providers: [] },
     );
     renderWithDashboard(<AiSettings />, member());
     expect(await screen.findByText('Only an administrator can change AI providers')).toBeInTheDocument();
     expect(await screen.findByText('Groq')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Groq actions' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Outside providers allowed', { selector: 'b' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save and apply' })).not.toBeInTheDocument();
   });
 });

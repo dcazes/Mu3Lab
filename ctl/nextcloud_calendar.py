@@ -484,13 +484,13 @@ _RESOURCE_NAME = re.compile(r"^[A-Za-z0-9@._~-]{1,255}$")
 
 
 def export_events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
-    """Every event in the selected calendar as ``{"href": file name, "ics": text}``.
+    """Every event in the selected calendar as ``{"href": file name, "ics": text, "etag": version}``.
 
     Used only to copy the calendar into Mu3Lab before it is disconnected, so
     the household keeps its events when Nextcloud is disconnected or removed.
     """
     _state, _metadata, secret, calendar = _calendar_context(owner_uid, paths)
-    body = """<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"/></c:comp-filter></c:filter></c:calendar-query>"""
+    body = """<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"/></c:comp-filter></c:filter></c:calendar-query>"""
     response = _dav(
         "REPORT",
         calendar["href"],
@@ -515,7 +515,9 @@ def export_events(owner_uid: str, paths: RuntimePaths = RuntimePaths()) -> list[
         # Only plain resource names inside the selected calendar are kept.
         if path != calendar["href"] + name or not _RESOURCE_NAME.fullmatch(name):
             continue
-        resources.append({"href": name, "ics": data.text})
+        etag = node.find(f".//{{{DAV}}}getetag")
+        # The version an edit made while disconnected must still match when it goes back.
+        resources.append({"href": name, "ics": data.text, "etag": str(etag.text or "") if etag is not None else ""})
     return resources
 
 

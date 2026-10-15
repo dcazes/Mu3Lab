@@ -12,6 +12,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from ctl import process
+
 
 def uv_environment(root: Path) -> dict[str, str]:
     """The same uv settings ``tools/toolchain.sh`` exports."""
@@ -29,14 +31,8 @@ def sync_python(root: Path, timeout: int = 1800) -> tuple[int, str]:
     if not uv.is_file():
         return 1, "The uv toolchain is missing; run ./install.sh once."
     try:
-        proc = subprocess.run(
-            [str(uv), "sync", "--frozen", "--no-dev", "--quiet"],
-            cwd=root,
-            env=uv_environment(root),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+        proc = process.completed(
+            [str(uv), "sync", "--frozen", "--no-dev", "--quiet"], cwd=root, env=uv_environment(root), timeout=timeout
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, str(exc)

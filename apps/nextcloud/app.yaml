@@ -4,7 +4,7 @@ capabilities: [files_calendar]
 name: Nextcloud
 tier: optional
 group: apps
-category: productivity
+category: documents
 tagline: Files, calendars, and contacts
 summary: A self-hosted workspace for files, calendars, and contacts. Sync and share files across devices, manage
   events, and connect a Nextcloud calendar to Mu3Lab’s calendar and Home agenda.
@@ -18,6 +18,7 @@ service:
 route:
   https_port: 8453
   caddy_port: 19470
+  access: open
 sign_in:
   method: oidc
   oidc:
@@ -38,6 +39,16 @@ secrets:
 - env: NEXTCLOUD_OIDC_PROVIDER_ID
   kind: fixed
   value: '1'
+integrates_with:
+# Navidrome's music library appears in everyone's files as Music (scripts/music.sh).
+- capability: music_library
+  env:
+    MU3LAB_MUSIC_FOLDER: '{{provider:MU3LAB_MUSIC_FOLDER}}'
+    MU3LAB_MUSIC_SHARED: '1'
+  absent_env:
+    # An empty stand-in inside Nextcloud's own folder, so the mount always has a source.
+    MU3LAB_MUSIC_FOLDER: '{{data_root}}/nextcloud/no-music'
+    MU3LAB_MUSIC_SHARED: '0'
 env:
   NEXTCLOUD_TRUSTED_DOMAINS: '{{dns_name}} localhost 127.0.0.1'
   NEXTCLOUD_TRUSTED_PROXIES: 127.0.0.1
@@ -74,6 +85,16 @@ rules:
     script: scripts/configure.sh
     interpreter: [sh, -s]
     purpose: Enable Calendar and Authentik sign-in in Nextcloud
+- rule: container_script
+  with:
+    at: after_healthy
+    service: app
+    script: scripts/music.sh
+    interpreter: [sh, -s]
+    expect: MU3LAB_MUSIC_OK
+    purpose: Share the music library as everyone's Music folder
+    # Again whenever a music app (Navidrome) is installed or removed.
+    rerun_when: [MU3LAB_MUSIC_SHARED]
 chat:
   assistant:
     title: Nextcloud

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   api,
@@ -21,6 +21,8 @@ export function useInstallBatch() {
   const [batch, setBatch] = useState<InstallBatch | null>(null);
   const [job, setJob] = useState<InstallBatchJob | null>(null);
   const [pending, setPending] = useState(false);
+  // The batch this page watched while it ran; only its finish is announced.
+  const watching = useRef<string | null>(null);
 
   const apply = useCallback((result: InstallBatchResponse) => {
     if (result.batch?.state === 'reset') {
@@ -29,6 +31,19 @@ export function useInstallBatch() {
       toast.success(RESET_DONE);
       return;
     }
+    // A finished install is a passing notice, not a card: announce it once and never show it again.
+    if (result.batch?.state === 'succeeded') {
+      if (watching.current === result.batch.id) {
+        const count = result.batch.items.length;
+        // Discover installs finish stopped (set up one at a time), so say what comes next.
+        toast.success(`${count} app${count === 1 ? '' : 's'} installed and ready to start`);
+      }
+      watching.current = null;
+      setBatch(null);
+      setJob(null);
+      return;
+    }
+    if (result.batch && !FINISHED.includes(result.batch.state)) watching.current = result.batch.id;
     setBatch(result.batch);
     setJob(result.current_job || null);
   }, []);
@@ -59,6 +74,7 @@ export function useInstallBatch() {
         service_ids: serviceIds,
         parallel_downloads: parallelDownloads,
       });
+      watching.current = result.batch.id;
       setBatch(result.batch);
       setJob(null);
       toast.success('Installation started');
@@ -144,5 +160,5 @@ export function useInstallBatch() {
     setParallel: (count: number) => control('parallel-downloads', { parallel_downloads: count }),
   };
 
-  return { batch, job, pending, install, act, controls, dismiss: () => setBatch(null) };
+  return { batch, job, pending, install, act, controls };
 }

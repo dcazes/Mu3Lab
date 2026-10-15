@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ctl import process
+
 DEFAULT_TIMEZONE = "UTC"
 
 
@@ -17,7 +19,7 @@ def _valid(name: str) -> bool:
     return True
 
 
-def timezone(etc: Path = Path("/etc"), run=subprocess.run) -> str:
+def timezone(etc: Path = Path("/etc"), run=process.completed) -> str:
     """The computer's IANA timezone (for example ``Europe/Paris``), else UTC."""
     candidates: list[str] = []
     try:

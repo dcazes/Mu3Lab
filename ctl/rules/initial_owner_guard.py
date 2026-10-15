@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from ctl.engine.hooks import HookContext
 from ctl.rules import Params, Rule, register
+from ctl.runtime import RuntimePaths
 from ctl.store.workflows import JobIdentity
 
 if TYPE_CHECKING:
@@ -42,7 +43,9 @@ class InitialOwnerGuard(Rule):
     def needs_owner(self) -> bool:
         return True
 
-    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
+    def prepare_env(
+        self, app: App, env: dict[str, str], owner: JobIdentity | None, paths: RuntimePaths | None = None
+    ) -> None:
         # Set once on the first install; "" afterwards means the guard was lifted.
         if self.params.env not in env and owner:
             env[self.params.env] = owner["username"]

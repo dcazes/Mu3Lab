@@ -4,16 +4,17 @@ capabilities: [research]
 name: SurfSense
 tier: optional
 group: apps
-category: research
+category: knowledge
 tagline: AI research with cited sources
 summary: An AI research workspace for searching documents and web sources, organizing knowledge, and asking questions
-  with source citations. Mu3Lab connects this self-hosted web app to its AI gateway and local embedding service.
+  with source citations. Mu3Lab connects this self-hosted web app to its AI gateway, which also serves the local
+  search model.
 version: v2.0.3
 upstream: MODSetter/SurfSense
 depends_on:
 - litellm
-- ollama
 service:
+  uses_gpu: true
   local_port: 3929
   health:
     path: /__mu3lab_surfsense_health
@@ -54,9 +55,10 @@ secrets:
 env:
   AUTH_TYPE: LOCAL
   SANDBOX_ENABLED: 'FALSE'
-  EMBEDDING_MODEL: litellm://ollama/nomic-embed-text
-  EMBEDDING_BASE_URL: http://ollama:11434
-  EMBEDDING_API_BASE_URL: http://ollama:11434
+  # The local search model, through LiteLLM, whichever model runner serves it (Settings, AI).
+  EMBEDDING_MODEL: litellm://openai/mu3lab-embed
+  EMBEDDING_BASE_URL: http://litellm:4000/v1
+  OPENAI_API_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
   SURFSENSE_PUBLIC_URL: '{{public_url}}'
 configuration:
 - key: registration_enabled
@@ -67,9 +69,8 @@ configuration:
 rules:
 - rule: needs_embedding_model
   with:
-    runner: ollama
-    pull_command: [ollama, pull]
-    model: nomic-embed-text
+    # SurfSense sizes its search index for one model when it is installed.
+    index_tied: true
 chat:
   assistant:
     title: SurfSense

@@ -15,6 +15,7 @@ depends_on:
 - freellmapi
 service:
   local_port: 4000
+  start_timeout_seconds: 600
   health:
     path: /health/liveliness
 route:
@@ -35,7 +36,7 @@ sign_in:
 ui:
   path: /ui/
 resource_guidance: Low host overhead; provider and model choice determines usage.
-setup_action: Connect Ollama and optional provider routes, then run a test request.
+setup_action: Connect the model runner and optional provider routes, then run a test request.
 secrets:
 - env: LITELLM_MASTER_KEY
   kind: hex
@@ -55,11 +56,9 @@ rules:
     mode: models
     config_file: config.yaml
     gateway: freellmapi
-    runner: ollama
     service_key_env: FREELLMAPI_SERVICE_KEY
     master_key_env: LITELLM_MASTER_KEY
     api_base_env: FREELLMAPI_API_BASE
-    runner_api_base_env: OLLAMA_API_BASE
-    embedding_model: nomic-embed-text
-    embedding_provider: ollama
+    runner_api_base_env: MU3LAB_RUNNER_API_BASE
+    runner_api_key_env: MU3LAB_RUNNER_API_KEY
     speech_url_env: MU3LAB_SPEECH_URL

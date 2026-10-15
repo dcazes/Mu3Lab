@@ -1213,6 +1213,47 @@ a.row-main:hover b,
   width: 680px;
 }
 
+.dialog-drawer {
+  width: 400px;
+  max-width: 100vw;
+  height: 100%;
+  max-height: 100%;
+  margin: 0 0 0 auto;
+}
+
+.dialog-drawer[open] {
+  animation: slide-in 0.18s ease-out;
+}
+
+.dialog-drawer .dialog-panel {
+  height: 100%;
+  overflow-y: auto;
+  border-radius: 0;
+  border-width: 0 0 0 1px;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .dialog-drawer {
+    width: 100vw;
+    height: auto;
+    max-height: 85vh;
+    margin: auto 0 0;
+  }
+
+  .dialog-drawer .dialog-panel {
+    border-width: 1px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 .dialog::backdrop {
   background: var(--overlay);
   backdrop-filter: blur(2px);
@@ -1404,4 +1445,184 @@ a.row-main:hover b,
   padding: 24px;
   text-align: center;
   color: var(--text-3);
+}
+
+/* Recovery sheet: shown in a dialog on screen, printed on its own. */
+.recovery-sheet h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+.recovery-sheet header p,
+.recovery-sheet section > p {
+  margin: 4px 0;
+}
+.recovery-sheet section {
+  margin-top: 16px;
+}
+.recovery-sheet h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.recovery-sheet code {
+  overflow-wrap: anywhere;
+}
+.recovery-warning {
+  padding: 8px 12px;
+  border: 1px solid var(--amber, #b7791f);
+  border-radius: 6px;
+}
+.recovery-password {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  margin: 8px 0;
+}
+.recovery-groups {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: ui-monospace, 'DejaVu Sans Mono', Menlo, Consolas, monospace;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+}
+.recovery-password .qr {
+  width: 132px;
+  height: 132px;
+  flex: none;
+  background: #fff;
+}
+.recovery-password .qr svg {
+  width: 100%;
+  height: 100%;
+}
+body > .recovery-sheet {
+  display: none;
+}
+@media (max-width: 520px) {
+  .recovery-groups {
+    grid-template-columns: repeat(2, auto);
+  }
+}
+@media print {
+  body.printing-recovery-sheet > *:not(.recovery-sheet) {
+    display: none !important;
+  }
+  body.printing-recovery-sheet > .recovery-sheet {
+    display: block;
+    color: #000;
+    background: #fff;
+    font-size: 12pt;
+  }
+  body.printing-recovery-sheet {
+    background: #fff;
+  }
+}
+
+/* How often, day and time sit side by side with Save, not one per row. */
+.schedule-form {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.schedule-form .field {
+  flex: 0 1 180px;
+  min-width: 140px;
+}
+.schedule-form .button-row {
+  margin: 0;
+}
+
+/* A card whose header opens and closes it. */
+.card-toggle {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-toggle > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+
+.card-toggle[aria-expanded='true'] > svg {
+  transform: rotate(90deg);
+}
+
+.card-toggle:hover h2 {
+  text-decoration: underline;
+}
+
+.card-flush.card-closed > .card-header {
+  padding-bottom: 16px;
+}
+
+/* A button that reads as an inline link. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+/* A card's body while its data loads, roughly the size it will be, so the page doesn't jump. */
+.card-loading {
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+  margin: 0;
+}
+
+.card-loading-tall {
+  min-height: 240px;
+}
+
+/* A titled part of a card, set off from what comes before it. */
+.card-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.card-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.card-section > p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.plain-fieldset {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }

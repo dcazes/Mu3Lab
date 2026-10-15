@@ -42,10 +42,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
-      interval: 20s
       timeout: 10s
-      retries: 30
-      start_period: 90s
+      start_period: 690s
+      start_interval: 20s
+      interval: 5m
+      retries: 3
     logging: &default-logging
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
@@ -80,9 +81,11 @@ services:
     networks: [mu3lab_backend]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
       timeout: 5s
-      retries: 10
+      start_period: 100s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     security_opt: [no-new-privileges:true]
     logging: *default-logging
 
@@ -97,9 +100,11 @@ services:
     networks: [mu3lab_backend]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
       timeout: 5s
-      retries: 20
+      start_period: 200s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     security_opt: [no-new-privileges:true]
     logging: *default-logging
 
@@ -115,9 +120,11 @@ services:
     networks: [mu3lab_backend]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      interval: 10s
       timeout: 5s
-      retries: 20
+      start_period: 200s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     security_opt: [no-new-privileges:true]
     logging: *default-logging
 

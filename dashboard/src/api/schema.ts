@@ -19,6 +19,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/models': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Ai Models
+     * @description Everyone may see where AI requests go; only administrators change it.
+     */
+    get: operations['ai_models_api_v1_ai_models_get'];
+    /**
+     * Change Ai Models
+     * @description Queue the change: models download and are checked before anything is switched over.
+     */
+    put: operations['change_ai_models_api_v1_ai_models_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/app-sizes': {
     parameters: {
       query?: never;
@@ -209,6 +233,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/calendar/events/{event_id}/resolve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resolve Conflict
+     * @description Keep this version (replacing Nextcloud's) or Nextcloud's (dropping the local edit).
+     */
+    post: operations['resolve_conflict_api_v1_calendar_events__event_id__resolve_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/calendar/sync': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sync
+     * @description Send events kept on Mu3Lab to the connected Nextcloud calendar, never overwriting its changes.
+     */
+    post: operations['sync_api_v1_calendar_sync_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/catalog': {
     parameters: {
       query?: never;
@@ -222,6 +286,30 @@ export interface paths {
      */
     get: operations['catalog_api_v1_catalog_get'];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/chat/apps': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Chat Apps
+     * @description The chat apps Mu3Lab can show on the Chat page, and which one it shows.
+     */
+    get: operations['chat_apps_api_v1_chat_apps_get'];
+    /**
+     * Choose Chat App
+     * @description Make an installed chat app the household one.
+     */
+    put: operations['choose_chat_app_api_v1_chat_apps_put'];
     post?: never;
     delete?: never;
     options?: never;
@@ -1050,7 +1138,11 @@ export interface paths {
      */
     get: operations['service_backups_api_v1_services__service_id__backups_get'];
     put?: never;
-    post?: never;
+    /**
+     * Back Up Service
+     * @description Ask Kopia's backup service to back the app up now, exactly as a scheduled run does.
+     */
+    post: operations['back_up_service_api_v1_services__service_id__backups_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1206,6 +1298,111 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/backups/platform': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Platform Backup Status
+     * @description Mu3Lab's own backup and each core app's, from their own evidence.
+     */
+    get: operations['platform_backup_status_api_v1_system_backups_platform_get'];
+    put?: never;
+    /**
+     * Start Platform Backup
+     * @description Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time.
+     */
+    post: operations['start_platform_backup_api_v1_system_backups_platform_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/system/backups/recovery-sheet': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open Recovery Sheet
+     * @description The backup password and where the backups are, for printing. Each opening is audited.
+     */
+    post: operations['open_recovery_sheet_api_v1_system_backups_recovery_sheet_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/system/backups/schedule': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Backup Schedule Status
+     * @description When scheduled backups run, Kopia's next run, and what did not finish.
+     */
+    get: operations['backup_schedule_status_api_v1_system_backups_schedule_get'];
+    /** Update Backup Schedule */
+    put: operations['update_backup_schedule_api_v1_system_backups_schedule_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/system/changelog': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Mu3Lab Changelog
+     * @description What changed in the installed release and the few before it (What's new).
+     */
+    get: operations['mu3lab_changelog_api_v1_system_changelog_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/system/cleanup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Free Up Space
+     * @description Remove removed apps' leftovers and old app versions; their data only when asked.
+     */
+    post: operations['free_up_space_api_v1_system_cleanup_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/config': {
     parameters: {
       query?: never;
@@ -1242,6 +1439,74 @@ export interface paths {
      * @description Queue the self-update. It restarts the dashboard and worker, so nothing else may be running.
      */
     post: operations['start_mu3lab_update_api_v1_system_update_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tool-approvals': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Approvals */
+    get: operations['approvals_api_v1_tool_approvals_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tool-approvals/{operation_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Approval */
+    get: operations['approval_api_v1_tool_approvals__operation_id__get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tool-approvals/{operation_id}/decision': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Decide */
+    post: operations['decide_api_v1_tool_approvals__operation_id__decision_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tool-approvals/{operation_id}/execute': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Execute */
+    post: operations['execute_api_v1_tool_approvals__operation_id__execute_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1328,8 +1593,71 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AiModelSettings */
+    AiModelSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Chat Model */
+      chat_model: string;
+      /** Embedding Model */
+      embedding_model: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
+      /** Runner */
+      runner: string;
+    };
+    /**
+     * AiModels
+     * @description Where AI requests may go, the model runner, the local chat model and the search (embedding) model.
+     */
+    AiModels: {
+      /** Active Job Id */
+      active_job_id: string;
+      /** Chat Models */
+      chat_models: components['schemas']['LocalModel'][];
+      /** Embedding Locked By */
+      embedding_locked_by: string[];
+      /** Embedding Models */
+      embedding_models: components['schemas']['LocalModel'][];
+      /** Ok */
+      ok: boolean;
+      /** Runner */
+      runner: string;
+      /** Runner Reachable */
+      runner_reachable: boolean;
+      /** Runners */
+      runners: components['schemas']['ModelRunnerOption'][];
+      settings: components['schemas']['AiModelSettings'];
+    };
+    /** AiModelsRequest */
+    AiModelsRequest: {
+      /**
+       * Chat Model
+       * @default
+       */
+      chat_model?: string;
+      /** Embedding Model */
+      embedding_model: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
+      /**
+       * Runner
+       * @default
+       */
+      runner?: string;
+    };
     /** ApiErrorResponse */
     ApiErrorResponse: {
+      /** Blocking Job Id */
+      blocking_job_id?: string | null;
       /** Code */
       code: string;
       /** Error */
@@ -1392,6 +1720,78 @@ export interface components {
       /** Updated At */
       updated_at: string;
     };
+    /** ApprovalDecisionRequest */
+    ApprovalDecisionRequest: {
+      /**
+       * Decision
+       * @enum {string}
+       */
+      decision: 'approve' | 'reject';
+    };
+    /** ApprovalOperation */
+    ApprovalOperation: {
+      /** App */
+      app: string;
+      /** Arguments */
+      arguments?: {
+        [key: string]: components['schemas']['JsonValue'];
+      } | null;
+      /** Completed At */
+      completed_at: number;
+      /** Connector Revision */
+      connector_revision: string;
+      /** Created At */
+      created_at: number;
+      /** Credential Version */
+      credential_version: number;
+      /** Dispatch At */
+      dispatch_at: number;
+      /** Expires At */
+      expires_at: number;
+      /** Id */
+      id: string;
+      /** Policy Revision */
+      policy_revision: number;
+      /** Provider */
+      provider: string;
+      /** Server */
+      server: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state:
+        | 'pending'
+        | 'approved'
+        | 'dispatching'
+        | 'succeeded'
+        | 'failed'
+        | 'outcome_unknown'
+        | 'rejected'
+        | 'revoked'
+        | 'expired';
+      /** Subject */
+      subject: string;
+      /** Tool */
+      tool: string;
+    };
+    /** ApprovalResponse */
+    ApprovalResponse: {
+      /** Execution */
+      execution?: {
+        [key: string]: components['schemas']['JsonValue'];
+      } | null;
+      /** Ok */
+      ok: boolean;
+      operation: components['schemas']['ApprovalOperation'];
+    };
+    /** ApprovalsResponse */
+    ApprovalsResponse: {
+      /** Ok */
+      ok: boolean;
+      /** Operations */
+      operations: components['schemas']['ApprovalOperation'][];
+    };
     /** AuditEvent */
     AuditEvent: {
       /** Actor */
@@ -1416,6 +1816,58 @@ export interface components {
       /** Ok */
       ok: boolean;
     };
+    /**
+     * BackupAttention
+     * @description One backup problem Home shows administrators; empty while backups keep up with the schedule.
+     */
+    BackupAttention: {
+      /** Key */
+      key: string;
+      /** Message */
+      message: string;
+    };
+    /**
+     * BackupProtection
+     * @description One app's backup evidence; never inferred from another app's backups.
+     */
+    BackupProtection: {
+      /**
+       * Completed At
+       * @default
+       */
+      completed_at?: string;
+      /**
+       * Detail
+       * @default
+       */
+      detail?: string;
+      /**
+       * Off Device
+       * @default false
+       */
+      off_device?: boolean;
+      /**
+       * Restore Tested At
+       * @default
+       */
+      restore_tested_at?: string;
+      /**
+       * Snapshot Id
+       * @default
+       */
+      snapshot_id?: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'missing' | 'stale' | 'unchecked' | 'checked';
+      /**
+       * Verification
+       * @default none
+       * @enum {string}
+       */
+      verification?: 'none' | 'structure' | 'data';
+    };
     /** BackupReadiness */
     BackupReadiness: {
       /**
@@ -1427,13 +1879,15 @@ export interface components {
       detail?: string | null;
       /**
        * Engine
-       * @default restic
+       * @default kopia
        */
       engine?: string;
       /** Integrity Verified */
       integrity_verified?: boolean | null;
       /** Last Verified At */
       last_verified_at?: string | null;
+      /** Legacy Repository */
+      legacy_repository?: string | null;
       /** Off Device */
       off_device?: boolean | null;
       /**
@@ -1457,14 +1911,64 @@ export interface components {
       /** State */
       state?: string | null;
     };
+    /**
+     * BackupSchedule
+     * @description When Kopia's backup service runs backups, in this server's local time. Weekday: Monday is 0, Sunday 6.
+     */
+    BackupSchedule: {
+      /**
+       * Frequency
+       * @enum {string}
+       */
+      frequency: 'off' | '6h' | '12h' | 'daily' | 'weekly';
+      /** Next Run At */
+      next_run_at: string;
+      /** Ok */
+      ok: boolean;
+      /** Problems */
+      problems: string[];
+      /**
+       * Service Installed
+       * @default true
+       */
+      service_installed?: boolean;
+      /** Service Running */
+      service_running: boolean;
+      /** Time */
+      time: string;
+      /** Weekday */
+      weekday: number;
+    };
+    /** BackupScheduleRequest */
+    BackupScheduleRequest: {
+      /**
+       * Frequency
+       * @enum {string}
+       */
+      frequency: 'off' | '6h' | '12h' | 'daily' | 'weekly';
+      /** Time */
+      time: string;
+      /** Weekday */
+      weekday: number;
+    };
     /** BackupSnapshot */
     BackupSnapshot: {
+      /**
+       * Complete
+       * @default true
+       */
+      complete?: boolean;
       /** Id */
       id: string;
       /** Paths */
       paths: string[];
       /** Reason */
-      reason: 'manual' | 'pre-update' | 'pre-restore';
+      reason: string;
+      /**
+       * Release Id
+       * @default
+       */
+      release_id?: string;
       /** Short Id */
       short_id: string;
       /** Time */
@@ -1472,12 +1976,23 @@ export interface components {
       /** Version */
       version: string;
     };
+    /**
+     * BackupStarted
+     * @description Kopia's backup service was asked to back up now; progress shows on the app.
+     */
+    BackupStarted: {
+      /** Detail */
+      detail: string;
+      /** Ok */
+      ok: boolean;
+    };
     /** BackupsResponse */
     BackupsResponse: {
       /** Backups */
       backups: components['schemas']['BackupSnapshot'][];
       /** Ok */
       ok: boolean;
+      protection?: components['schemas']['BackupProtection'] | null;
       readiness: components['schemas']['BackupReadiness'];
       /** Service Id */
       service_id: string;
@@ -1556,6 +2071,8 @@ export interface components {
     CalendarEvent: {
       /** All Day */
       all_day: boolean;
+      /** Conflict */
+      conflict?: string | null;
       /** Editable */
       editable?: boolean | null;
       /** End */
@@ -1603,6 +2120,8 @@ export interface components {
       nextcloud_ready?: boolean | null;
       /** Ok */
       ok: boolean;
+      /** Pending Upload */
+      pending_upload?: boolean | null;
       /** State */
       state: string;
     };
@@ -1613,10 +2132,32 @@ export interface components {
       /** Name */
       name: string;
     };
+    /** CalendarResolveRequest */
+    CalendarResolveRequest: {
+      /**
+       * Keep
+       * @enum {string}
+       */
+      keep: 'mine' | 'server';
+    };
     /** CalendarSelectRequest */
     CalendarSelectRequest: {
       /** Calendar Id */
       calendar_id: string;
+    };
+    /**
+     * CalendarSync
+     * @description What one sync sent, and what it could not send without asking.
+     */
+    CalendarSync: {
+      /** Conflicts */
+      conflicts: string[];
+      /** Kept */
+      kept: string[];
+      /** Moved */
+      moved: number;
+      /** Ok */
+      ok: boolean;
     };
     /** CatalogProfile */
     CatalogProfile: {
@@ -1655,6 +2196,29 @@ export interface components {
       /** Tagline */
       tagline?: string | null;
     };
+    /** ChatAppChoice */
+    ChatAppChoice: {
+      /** Id */
+      id: string;
+      /** Installed */
+      installed: boolean;
+      /** Name */
+      name: string;
+      /** Selected */
+      selected: boolean;
+    };
+    /** ChatAppRequest */
+    ChatAppRequest: {
+      /** App Id */
+      app_id: string;
+    };
+    /** ChatApps */
+    ChatApps: {
+      /** Apps */
+      apps: components['schemas']['ChatAppChoice'][];
+      /** Ok */
+      ok: boolean;
+    };
     /** ChatAssistant */
     ChatAssistant: {
       /** Detail */
@@ -1667,7 +2231,7 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: 'ready' | 'pending' | 'failed' | 'not_connected' | 'connector_down' | 'needs_review';
+      status: 'ready' | 'pending' | 'failed' | 'not_connected' | 'connector_down' | 'needs_review' | 'operator_only';
     };
     /** ChatConnectResponse */
     ChatConnectResponse: {
@@ -1710,6 +2274,16 @@ export interface components {
     };
     /** ChatStatus */
     ChatStatus: {
+      /**
+       * App Id
+       * @default
+       */
+      app_id?: string;
+      /**
+       * App Name
+       * @default
+       */
+      app_name?: string;
       /** Assistants */
       assistants?: components['schemas']['ChatAssistant'][] | null;
       /** Authentication */
@@ -1745,6 +2319,14 @@ export interface components {
       /** Ok */
       ok: boolean;
     };
+    /** CleanupRequest */
+    CleanupRequest: {
+      /**
+       * Delete Data
+       * @default false
+       */
+      delete_data?: boolean;
+    };
     /** ComputeRequest */
     ComputeRequest: {
       /**
@@ -1755,10 +2337,27 @@ export interface components {
     };
     /** ConfigurationRequest */
     ConfigurationRequest: {
+      /** Expected Revision */
+      expected_revision?: number | null;
       /** Values */
       values?: {
         [key: string]: string | boolean | number | null;
       };
+    };
+    /** CoreAppBackup */
+    CoreAppBackup: {
+      /** Id */
+      id: string;
+      /** Included */
+      included: boolean;
+      /** Name */
+      name: string;
+      protection?: components['schemas']['BackupProtection'] | null;
+      /**
+       * Reason
+       * @default
+       */
+      reason?: string;
     };
     /** CoreSetupResponse */
     CoreSetupResponse: {
@@ -1788,6 +2387,24 @@ export interface components {
       ok: boolean;
       /** Reasons */
       reasons?: string[] | null;
+    };
+    /** DiskShare */
+    DiskShare: {
+      /** Data */
+      data: number;
+      /** Program */
+      program: number;
+    };
+    /** DiskUsage */
+    DiskUsage: {
+      /** Measured At */
+      measured_at: string;
+      /** Owners */
+      owners: {
+        [key: string]: components['schemas']['DiskShare'];
+      };
+      /** Removed Folders */
+      removed_folders?: string[];
     };
     /** Health */
     Health: {
@@ -2007,6 +2624,28 @@ export interface components {
       ok: boolean;
     };
     JsonValue: unknown;
+    /**
+     * LocalModel
+     * @description One reviewed local model. Sizes are Ollama's download sizes; memory is an estimate.
+     */
+    LocalModel: {
+      /** Dimensions */
+      dimensions: number;
+      /** Download Gb */
+      download_gb: number;
+      /** Downloaded */
+      downloaded: boolean;
+      /** Id */
+      id: string;
+      /** Memory Gb */
+      memory_gb: number;
+      /** Name */
+      name: string;
+      /** Note */
+      note: string;
+      /** Tag */
+      tag: string;
+    };
     /** McpActivityResponse */
     McpActivityResponse: {
       /** Calls */
@@ -2258,6 +2897,41 @@ export interface components {
       /** Support */
       support: 'official' | 'community' | 'experimental';
     };
+    /** ModelRunnerOption */
+    ModelRunnerOption: {
+      /** Has Ui */
+      has_ui: boolean;
+      /** Id */
+      id: string;
+      /** Installed */
+      installed: boolean;
+      /** Name */
+      name: string;
+    };
+    /** Mu3LabChangelog */
+    Mu3LabChangelog: {
+      /** Ok */
+      ok: boolean;
+      /** Releases */
+      releases: components['schemas']['Mu3LabRelease'][];
+    };
+    /**
+     * Mu3LabRelease
+     * @description One release's changes; a development copy has no version.
+     */
+    Mu3LabRelease: {
+      /** Changes */
+      changes: string[];
+      /**
+       * Commit
+       * @default
+       */
+      commit?: string;
+      /** Date */
+      date: string;
+      /** Version */
+      version: string;
+    };
     /** Mu3LabUpdate */
     Mu3LabUpdate: {
       /** Available */
@@ -2274,10 +2948,33 @@ export interface components {
       commit: string;
       /** Date */
       date: string;
+      last_update?: components['schemas']['Mu3LabUpdateResult'] | null;
       /** Ok */
       ok: boolean;
       /** Version */
       version: string;
+    };
+    /**
+     * Mu3LabUpdateResult
+     * @description How the last update ended: verified, rolled_back or needs_attention.
+     */
+    Mu3LabUpdateResult: {
+      /** At */
+      at: string;
+      /** Detail */
+      detail: string;
+      /**
+       * From
+       * @default
+       */
+      from?: string;
+      /** State */
+      state: string;
+      /**
+       * To
+       * @default
+       */
+      to?: string;
     };
     /** OkResponse */
     OkResponse: {
@@ -2304,6 +3001,7 @@ export interface components {
     };
     /** Person */
     Person: {
+      access?: components['schemas']['PersonAccess'] | null;
       /** Active */
       active: boolean;
       /** Email */
@@ -2321,6 +3019,27 @@ export interface components {
       uid: string;
       /** Username */
       username: string;
+    };
+    /** PersonAccess */
+    PersonAccess: {
+      /** Detail */
+      detail: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'deactivated' | 'demoted';
+      /** Pending */
+      pending: number;
+      /** Pending Targets */
+      pending_targets: string[];
+      /** Since */
+      since: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'pending' | 'complete';
     };
     /** PersonChangeRequest */
     PersonChangeRequest: {
@@ -2357,6 +3076,18 @@ export interface components {
       /** Ok */
       ok: boolean;
       person: components['schemas']['Person'];
+    };
+    /**
+     * PlatformBackupStatus
+     * @description Mu3Lab's own state and each core app, each from its own backup evidence.
+     */
+    PlatformBackupStatus: {
+      /** Core Apps */
+      core_apps: components['schemas']['CoreAppBackup'][];
+      /** Ok */
+      ok: boolean;
+      platform: components['schemas']['BackupProtection'];
+      recovery_sheet?: components['schemas']['RecoverySheetStatus'] | null;
     };
     /** ProviderCatalogItem */
     ProviderCatalogItem: {
@@ -2541,6 +3272,40 @@ export interface components {
       /** State */
       state: string;
     };
+    /**
+     * RecoverySheet
+     * @description What a new computer needs to open the backups. Sent once, never cached.
+     */
+    RecoverySheet: {
+      /** Copies */
+      copies: string[];
+      /** Generated At */
+      generated_at: string;
+      /** Kopia Image */
+      kopia_image: string;
+      /** Ok */
+      ok: boolean;
+      /** Password */
+      password: string;
+      /** Password Check */
+      password_check: string;
+      /** Repository */
+      repository: string;
+      /** Server */
+      server: string;
+      /** Version */
+      version: string;
+    };
+    /**
+     * RecoverySheetStatus
+     * @description When an administrator last opened the recovery sheet; never its contents.
+     */
+    RecoverySheetStatus: {
+      /** Opened At */
+      opened_at: string;
+      /** Opened By */
+      opened_by: string;
+    };
     /** Service */
     Service: {
       account?: components['schemas']['ServiceAccount'] | null;
@@ -2549,10 +3314,19 @@ export interface components {
         ('install' | 'retry_setup' | 'start' | 'stop' | 'restart' | 'uninstall' | 'uninstall_delete_data')[] | null;
       /** Auth */
       auth: 'oidc' | 'proxy' | 'trusted_header' | 'local' | 'excluded';
+      /**
+       * Backing Up
+       * @default false
+       */
+      backing_up?: boolean;
+      /** Blocking Check */
+      blocking_check?: ('process' | 'route' | 'sign_in') | null;
       /** Category */
       category: string;
+      checks?: components['schemas']['ServiceChecks'] | null;
       /** Compose Present */
       compose_present: boolean;
+      compute?: components['schemas']['ServiceCompute'] | null;
       /** Configuration */
       configuration?: components['schemas']['ServiceConfigField'][] | null;
       /** Containers */
@@ -2565,7 +3339,7 @@ export interface components {
        * Display State
        * @enum {string}
        */
-      display_state: 'running' | 'stopped' | 'working' | 'not_installed' | 'needs_attention';
+      display_state: 'running' | 'stopped' | 'working' | 'checking' | 'not_installed' | 'needs_attention';
       /** Group */
       group: 'apps' | 'ai' | 'infrastructure';
       /** Health State */
@@ -2596,12 +3370,17 @@ export interface components {
       name: string;
       /** Observed At */
       observed_at: string;
+      /** Parts */
+      parts?: {
+        [key: string]: string;
+      };
       /** Private Https Port */
       private_https_port?: number | null;
       /** Reason */
       reason: string;
       /** Recommended Action */
       recommended_action?: string | null;
+      recovery?: components['schemas']['ServiceRecovery'] | null;
       /** Required */
       required: boolean;
       /** Resource Guidance */
@@ -2614,6 +3393,11 @@ export interface components {
       setup_action: string;
       /** Stage */
       stage: 'foundation' | 'core' | 'optional';
+      /**
+       * Stop Warning
+       * @default
+       */
+      stop_warning?: string;
       ui?: components['schemas']['ServiceUi'] | null;
       update?: components['schemas']['ServiceUpdate'] | null;
       /** Url */
@@ -2640,9 +3424,11 @@ export interface components {
         | 'restart'
         | 'uninstall'
         | 'uninstall_delete_data'
-        | 'backup'
         | 'restore'
-        | 'update';
+        | 'update'
+        | 'recover'
+        | 'keep_update'
+        | 'switch_compute';
       /**
        * Confirm
        * @default
@@ -2653,6 +3439,40 @@ export interface components {
        * @default
        */
       snapshot_id?: string;
+    };
+    /** ServiceCheck */
+    ServiceCheck: {
+      /** Checked At */
+      checked_at: string;
+      /** Detail */
+      detail: string;
+      /** Failures */
+      failures: number;
+      /** Last Failure At */
+      last_failure_at: string;
+      /** Last Success At */
+      last_success_at: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'pass' | 'checking' | 'fail' | 'pending' | 'stale' | 'not_required';
+    };
+    /** ServiceChecks */
+    ServiceChecks: {
+      process: components['schemas']['ServiceCheck'];
+      route: components['schemas']['ServiceCheck'];
+      sign_in: components['schemas']['ServiceCheck'];
+    };
+    /**
+     * ServiceCompute
+     * @description For apps with a GPU build: the build that runs and the one the compute mode asks for.
+     */
+    ServiceCompute: {
+      /** Running */
+      running: string;
+      /** Wanted */
+      wanted: string;
     };
     /** ServiceConfigField */
     ServiceConfigField: {
@@ -2681,6 +3501,8 @@ export interface components {
       ok: boolean;
       /** Restart Required */
       restart_required?: boolean | null;
+      /** Revision */
+      revision?: number | null;
       /** Service Id */
       service_id: string;
     };
@@ -2716,7 +3538,7 @@ export interface components {
       /** Mode */
       mode: 'native_oidc' | 'trusted_header' | 'proxy_gate' | 'local' | 'none';
       /** State */
-      state: 'unconfigured' | 'configuring' | 'migration_required' | 'ready' | 'degraded' | 'unsupported';
+      state: 'unconfigured' | 'configuring' | 'migration_required' | 'ready' | 'degraded' | 'off' | 'unsupported';
     };
     /** ServiceInitialization */
     ServiceInitialization: {
@@ -2756,6 +3578,26 @@ export interface components {
       clients: components['schemas']['MobileClient'][];
       /** Primary */
       primary: string;
+    };
+    /**
+     * ServiceRecovery
+     * @description A restore or update that was interrupted; nothing continues until a person chooses.
+     */
+    ServiceRecovery: {
+      /**
+       * Can Keep
+       * @default false
+       */
+      can_keep?: boolean;
+      /** Detail */
+      detail: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'restore' | 'update';
+      /** Since */
+      since: string;
     };
     /** ServiceUi */
     ServiceUi: {
@@ -2809,11 +3651,21 @@ export interface components {
     /** SnapshotResponse */
     SnapshotResponse: {
       audit: components['schemas']['AuditResponse'];
+      /**
+       * Backup Attention
+       * @default []
+       */
+      backup_attention?: components['schemas']['BackupAttention'][];
       catalog: components['schemas']['CatalogResponse'];
       chat: components['schemas']['ChatStatus'];
       core: components['schemas']['CoreSetupResponse'];
       identity: components['schemas']['IdentityResponse'];
       jobs: components['schemas']['JobsResponse'];
+      /**
+       * Model Runner
+       * @default
+       */
+      model_runner?: string;
       provisioning: components['schemas']['ProvisioningResponse'];
       services: components['schemas']['ServicesResponse'];
       system: components['schemas']['SystemResponse'];
@@ -2843,9 +3695,14 @@ export interface components {
       /** Cpu Percent */
       cpu_percent: number;
       disk: components['schemas']['Metric'];
+      disk_usage?: components['schemas']['DiskUsage'] | null;
       /** Docker Ready */
       docker_ready: boolean;
       memory: components['schemas']['Metric'];
+      /** Memory By Owner */
+      memory_by_owner?: {
+        [key: string]: number;
+      } | null;
       /**
        * Observed At
        * @default
@@ -2952,6 +3809,8 @@ export interface components {
     };
     /** UpdateResponse */
     UpdateResponse: {
+      /** Added Services */
+      added_services?: string[];
       /** Approved Version */
       approved_version: string;
       /** Blocked Reason */
@@ -2962,6 +3821,8 @@ export interface components {
       ok: boolean;
       /** Release Url */
       release_url: string;
+      /** Removed Services */
+      removed_services?: string[];
       /** Repository */
       repository: string;
       /** Supporting Only */
@@ -3111,6 +3972,176 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['Health'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  ai_models_api_v1_ai_models_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AiModels'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_ai_models_api_v1_ai_models_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiModelsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */
@@ -4453,6 +5484,178 @@ export interface operations {
       };
     };
   };
+  resolve_conflict_api_v1_calendar_events__event_id__resolve_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CalendarResolveRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  sync_api_v1_calendar_sync_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CalendarSync'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   catalog_api_v1_catalog_get: {
     parameters: {
       query?: never;
@@ -4469,6 +5672,176 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['CatalogResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  chat_apps_api_v1_chat_apps_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ChatApps'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  choose_chat_app_api_v1_chat_apps_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChatAppRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ChatApps'];
         };
       };
       /** @description Bad Request */
@@ -8815,6 +10188,91 @@ export interface operations {
       };
     };
   };
+  back_up_service_api_v1_services__service_id__backups_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        service_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupStarted'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   get_service_configuration_api_v1_services__service_id__configuration_get: {
     parameters: {
       query?: never;
@@ -9579,6 +11037,595 @@ export interface operations {
       };
     };
   };
+  platform_backup_status_api_v1_system_backups_platform_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlatformBackupStatus'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  start_platform_backup_api_v1_system_backups_platform_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupStarted'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  open_recovery_sheet_api_v1_system_backups_recovery_sheet_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RecoverySheet'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  backup_schedule_status_api_v1_system_backups_schedule_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupSchedule'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  update_backup_schedule_api_v1_system_backups_schedule_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BackupScheduleRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupSchedule'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  mu3lab_changelog_api_v1_system_changelog_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Mu3LabChangelog'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  free_up_space_api_v1_system_cleanup_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CleanupRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   system_config_api_v1_system_config_get: {
     parameters: {
       query?: never;
@@ -9850,6 +11897,348 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  approvals_api_v1_tool_approvals_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApprovalsResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  approval_api_v1_tool_approvals__operation_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        operation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApprovalResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  decide_api_v1_tool_approvals__operation_id__decision_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        operation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ApprovalDecisionRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApprovalResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  execute_api_v1_tool_approvals__operation_id__execute_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        operation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApprovalResponse'];
         };
       };
       /** @description Bad Request */

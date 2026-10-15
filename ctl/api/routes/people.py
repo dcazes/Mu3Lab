@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import threading
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ctl import people, voice_keys
+from ctl import access, people
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Operator, OperatorMutation
-from ctl.integrations.litellm import LiteLLMError
 from ctl.jobs import JobStore
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
@@ -28,6 +29,10 @@ def _authentik_origin() -> str:
     if not host or not port:
         raise ApiError(503, "Authentik's private address is not ready yet.")
     return f"https://{host}" if port == 443 else f"https://{host}:{port}"
+
+
+def _audit_log(admin):
+    return lambda line: _audit(str(admin["username"]), line)
 
 
 def _audit(actor: str, detail: str) -> None:
@@ -72,18 +77,26 @@ async def change_person(
         raise ApiError(409, "You cannot remove yourself.", headers=_NO_STORE)
     try:
         result = await run_in_threadpool(
-            people.change, username, action, _authentik_origin(), str(body.get("role", ""))
+            people.change,
+            username,
+            action,
+            _authentik_origin(),
+            str(body.get("role", "")),
+            str(admin["subject_id"] or admin["username"]),
         )
     except people.PeopleError as exc:
         raise ApiError(409, str(exc), headers=_NO_STORE) from exc
     _audit(str(admin["username"]), f"{action} for {username}.")
-    uid = str((result.get("person") or {}).get("uid") or "")
-    if action == "deactivate" and uid:
-        # A removed person's devices must stop reaching Mu3Lab's speech at once.
-        try:
-            await run_in_threadpool(voice_keys.revoke, uid)
-        except LiteLLMError as exc:
-            _audit(str(admin["username"]), f"Voice key for {username} could not be revoked yet: {exc}")
+    person = result.get("person") or {}
+    uid = str(person.get("uid") or "")
+    if uid and person.get("access", {}).get("state") == "pending":
+        # Chat tool access is local and ends before this answer; everything that
+        # calls another service is retried by the worker until it succeeds.
+        await run_in_threadpool(access.run, _audit_log(admin), subject=uid, targets=("gateway",))
+        threading.Thread(target=access.run, args=(_audit_log(admin),), kwargs={"subject": uid}, daemon=True).start()
+        result["person"] = next(
+            (item for item in await run_in_threadpool(people.list_people) if item["uid"] == uid), person
+        )
     return JSONResponse(
         models.PersonResponse.model_validate({"ok": True, **result}).model_dump(mode="json", exclude_none=True),
         headers=_NO_STORE,

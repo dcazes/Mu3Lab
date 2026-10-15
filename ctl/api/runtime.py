@@ -53,7 +53,10 @@ def mcp_server(server_id: str, reg: Registry | None = None) -> McpServer:
 
 
 def idempotency_key(request: Request) -> str | None:
-    return request.headers.get("idempotency-key") or None
+    key = request.headers.get("idempotency-key") or None
+    if key is not None and (not key.strip() or len(key) > 128):
+        raise ApiError(400, "The request key must contain 1–128 characters.", code="invalid_request_key")
+    return key
 
 
 def identity_for_job(identity: IdentityData) -> Callable[[str], None]:
@@ -84,3 +87,10 @@ def hand_identity_to_job(
             step_id=step_id,
         )
         raise ApiError(503, str(exc)) from exc
+
+
+def mutation_subject(identity: IdentityData) -> str:
+    subject = str(identity.get("subject_id") or "")
+    if not subject:
+        raise ApiError(403, "Verified subject identity is required.", code="subject_required")
+    return subject

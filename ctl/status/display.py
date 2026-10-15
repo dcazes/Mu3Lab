@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-DisplayState = Literal["running", "stopped", "working", "not_installed", "needs_attention"]
+DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_attention"]
 WORKING = frozenset({"queued", "installing", "starting", "verifying", "uninstalling", "updating"})
 
 
@@ -15,6 +15,8 @@ def projection(item: dict) -> dict:
         display: DisplayState = "working"
     elif state in {"ready", "running"}:
         display = "running"
+    elif state in {"checking", "unknown"}:
+        display = "checking"
     elif state == "stopped":
         display = "stopped"
     elif state in {"planned", "not_installed"}:
@@ -24,6 +26,6 @@ def projection(item: dict) -> dict:
     reason = str(item.get("detail") or "")
     if state == "config_required":
         reason = "Complete this app's settings before installing it."
-    elif state == "needs_setup":
+    elif state == "needs_setup" and not (item.get("blocking_check") and reason):
         reason = "Finish this app's setup or sign-in before using it."
     return {"display_state": display, "reason": reason, "installed": bool(installed)}

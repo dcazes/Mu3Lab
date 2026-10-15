@@ -14,9 +14,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nextcloud -d nextcloud"]
-      interval: 10s
       timeout: 5s
-      retries: 20
+      start_period: 200s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
 
   redis:
     image: redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0
@@ -26,14 +28,17 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDISCLI_AUTH ping | grep PONG"]
-      interval: 10s
       timeout: 5s
-      retries: 20
+      start_period: 200s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     environment:
       REDISCLI_AUTH: ${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}
 
   app:
     image: nextcloud:35.0.1-apache@sha256:b1ae671e9815401b0e837b19b9c778e89887721d67f0c8f9d34aa1d27a9a208f
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     depends_on:
       db: {condition: service_healthy}
@@ -55,8 +60,11 @@ services:
       MU3LAB_OIDC_CLIENT_ID: ${NEXTCLOUD_OIDC_CLIENT_ID:-}
       MU3LAB_OIDC_CLIENT_SECRET: ${NEXTCLOUD_OIDC_CLIENT_SECRET:-}
       MU3LAB_OIDC_DISCOVERY_URL: ${NEXTCLOUD_OIDC_DISCOVERY_URL:-}
+      # 1 while a music app is installed: scripts/music.sh shares its library as Music.
+      MU3LAB_MUSIC_SHARED: ${MU3LAB_MUSIC_SHARED:-0}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
+      - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/mnt/mu3lab-music
     networks:
       mu3lab_frontend: {}
       mu3lab_backend:
@@ -65,13 +73,15 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/status.php | grep -q '\"installed\":true'"]
-      interval: 15s
       timeout: 8s
-      retries: 40
-      start_period: 90s
+      start_period: 690s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
   cron:
     image: nextcloud:35.0.1-apache@sha256:b1ae671e9815401b0e837b19b9c778e89887721d67f0c8f9d34aa1d27a9a208f
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     entrypoint: /cron.sh
     depends_on:
@@ -79,6 +89,8 @@ services:
     environment: *nextcloud_environment
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
+      # Background jobs scan external storage too.
+      - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/mnt/mu3lab-music
     networks: [nextcloud_internal]
     security_opt: [no-new-privileges:true]
 

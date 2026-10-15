@@ -143,6 +143,12 @@ function Updates({ service }: { service: Service }) {
               ? `A tested update is ready: ${target}.`
               : `You’re on the latest tested version (${update.installed_version}).`}
           </p>
+          {update.update_available && (update.removed_services?.length ?? 0) > 0 && (
+            <p className="muted">This update removes: {update.removed_services?.join(', ')}.</p>
+          )}
+          {update.update_available && (update.added_services?.length ?? 0) > 0 && (
+            <p className="muted">This update adds: {update.added_services?.join(', ')}.</p>
+          )}
           {update.update_available && !update.update_enabled && update.blocked_reason && (
             <p className="muted">{update.blocked_reason}</p>
           )}

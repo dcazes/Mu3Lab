@@ -4,7 +4,6 @@ import App from './App';
 import { AppDetailPage } from './features/apps/AppDetailPage';
 import { AppsPage } from './features/apps/AppsPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
-import { HomeCalendar } from './features/home/HomeCalendar';
 import { HomePage } from './features/home/HomePage';
 import { IntegrationsSettings } from './features/settings/IntegrationsSettings';
 import { SecuritySettings } from './features/settings/SecuritySettings';
@@ -24,21 +23,36 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('launches everyday apps and routes stopped ones to their page', () => {
+  it('opens a quick panel for each everyday app, with Open and its controls', () => {
     stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
+      allowed_actions: ['stop', 'restart'],
     });
-    const mealie = service('mealie', 'Mealie', 'optional', { display_state: 'stopped', identity: identity() });
+    const mealie = service('mealie', 'Mealie', 'optional', {
+      display_state: 'stopped',
+      identity: identity(),
+      allowed_actions: ['start'],
+    });
     const ollama = service('ollama', 'Ollama', 'core');
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    expect(screen.getByRole('link', { name: 'Open Immich' })).toHaveAttribute(
+    const launcher = screen.getByRole('region', { name: 'Your apps' });
+    expect(within(launcher).queryByText('Ollama')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Immich: Running' }));
+    let panel = screen.getByRole('dialog', { name: 'Immich' });
+    expect(within(panel).getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       'https://host.ts.net:8449/auth/login?autoLaunch=1',
     );
-    expect(screen.getByRole('link', { name: 'Mealie: Stopped' })).toHaveAttribute('href', '/apps/mealie');
-    const launcher = screen.getByRole('region', { name: 'Your apps' });
-    expect(within(launcher).queryByText('Ollama')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(panel).getByRole('link', { name: 'All details' })).toHaveAttribute('href', '/apps/immich');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mealie: Stopped' }));
+    panel = screen.getByRole('dialog', { name: 'Mealie' });
+    expect(within(panel).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Start' })).toBeInTheDocument();
   });
 
   it('groups status into Security, AI and System chips that expand with real usage figures', () => {
@@ -64,6 +78,12 @@ describe('Home', () => {
       ...data.system,
       worker_state: 'failed',
       container_memory: { 'mu3lab-ollama': 3.5 * GB },
+      memory_by_owner: { ollama: 3.5 * GB, core: 1 * GB },
+      disk_usage: {
+        measured_at: new Date().toISOString(),
+        owners: { ollama: { data: 20 * GB, program: 2 * GB }, unused: { data: 0, program: 4 * GB } },
+        removed_folders: [],
+      },
       memory: { total: 16 * GB, used: 10 * GB, percent: 62 },
       disk: { total: 100 * GB, used: 96 * GB, percent: 96 },
       tailscale: {
@@ -75,6 +95,8 @@ describe('Home', () => {
         serve: { state: 'available', ports: [] },
       },
     };
+    // The model runner in use leads the AI group.
+    data.model_runner = 'ollama';
     renderWithDashboard(<HomePage />, data);
     const strip = screen.getByRole('region', { name: 'System status' });
     // Collapsed: three chips, no detail rows, real figures on hover.
@@ -96,18 +118,27 @@ describe('Home', () => {
 
     fireEvent.click(chips[1]);
     expect(chips[0]).toHaveAttribute('aria-expanded', 'false');
-    const ollama = within(strip).getByRole('link', { name: 'Ollama: Needs attention' });
-    expect(ollama).toHaveAttribute('title', '3.5 GB — Container exited.');
-    expect(ollama).toHaveTextContent('Needs attention');
-    expect(within(strip).getByRole('link', { name: 'Firecrawl: Not installed' })).toBeInTheDocument();
+    const runner = within(strip).getByRole('link', { name: 'Ollama: Needs attention' });
+    expect(runner).toHaveAttribute('title', '3.5 GB — Container exited.');
+    expect(runner).toHaveTextContent('Needs attention');
+    // Firecrawl is an optional app now; the household chat app is the fourth AI row.
+    expect(within(strip).queryByRole('link', { name: /Firecrawl/ })).not.toBeInTheDocument();
 
     fireEvent.click(chips[2]);
     expect(within(strip).getByRole('link', { name: 'Background worker: Failed' })).toBeInTheDocument();
     expect(within(strip).getByRole('link', { name: 'Docker: Running' })).toBeInTheDocument();
-    const memory = within(strip).getByRole('link', { name: 'Memory: 62%' });
-    expect(memory).toHaveAttribute('title', '10.0 GB of 16.0 GB');
-    expect(memory).toHaveTextContent('Memory62% of 16.0 GB');
-    expect(within(strip).getByRole('link', { name: 'Disk: 96%' })).toBeInTheDocument();
+    // Memory and disk become two donuts with one legend: each app, core, what can be freed, the rest, free.
+    expect(within(strip).getByRole('img', { name: 'Memory: 10.0 GB of 16.0 GB used' })).toBeInTheDocument();
+    expect(within(strip).getByRole('img', { name: 'Disk: 96.0 GB of 100.0 GB used' })).toBeInTheDocument();
+    const legend = within(strip).getByRole('table');
+    const row = (name: string) =>
+      within(legend).getByRole('rowheader', { name }).closest('tr')!.textContent?.replace(/\s+/g, ' ');
+    expect(row('Ollama')).toBe('Ollama3.5 GB22.0 GB');
+    expect(within(legend).getByRole('link', { name: 'Ollama' })).toHaveAttribute('href', '/apps/ollama');
+    expect(row('Mu3Lab core')).toBe('Mu3Lab core1.0 GB—');
+    expect(row('Can be freed')).toBe('Can be freed—4.0 GB');
+    expect(row('Other (not Mu3Lab)')).toBe('Other (not Mu3Lab)5.5 GB70.0 GB');
+    expect(row('Free')).toBe('Free6.0 GB4.0 GB');
   });
 
   it('surfaces app problems in the attention strip', () => {
@@ -117,6 +148,41 @@ describe('Home', () => {
     );
     const strip = screen.getByRole('region', { name: 'Needs attention' });
     expect(within(strip).getByText('Paperless-ngx: needs attention')).toBeInTheDocument();
+  });
+
+  it('points to System settings when a setup step failed', () => {
+    renderWithDashboard(
+      <HomePage />,
+      dashboardData([], {
+        provisioning: { ok: true, available: true, complete: false, phases: [] },
+        core: {
+          ok: true,
+          ready_to_run: true,
+          services: [],
+          missing_manifests: [],
+          next_action: '',
+          current_job: { state: 'failed' } as never,
+        },
+      }),
+    );
+    const strip = screen.getByRole('region', { name: 'Needs attention' });
+    expect(
+      within(strip).getByRole('link', { name: 'A setup step didn’t finish. Open System settings to try again.' }),
+    ).toHaveAttribute('href', '/settings/system');
+  });
+
+  it('asks for attention when backups fall behind, linking to Backups', () => {
+    renderWithDashboard(
+      <HomePage />,
+      dashboardData([], {
+        backup_attention: [{ key: 'backup-overdue', message: "Mu3Lab's last backup was 9 days ago." }],
+      }),
+    );
+    const strip = screen.getByRole('region', { name: 'Needs attention' });
+    expect(within(strip).getByRole('link', { name: "Mu3Lab's last backup was 9 days ago." })).toHaveAttribute(
+      'href',
+      '/settings/security',
+    );
   });
 });
 
@@ -145,6 +211,21 @@ describe('App page', () => {
     expect(screen.getByRole('link', { name: 'Manage providers' })).toHaveAttribute('href', '/settings/ai');
   });
 
+  it('offers the GPU version after the compute mode changes, and switches only when asked', async () => {
+    const fetchMock = stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '', job: { id: 'j' } }));
+    const immich = service('immich', 'Immich', 'optional', { compute: { running: 'cpu', wanted: 'nvidia' } });
+    renderWithDashboard(<AppDetailPage id="immich" tab="overview" />, dashboardData([immich]));
+    expect(screen.getByText('An NVIDIA GPU version is available')).toBeInTheDocument();
+    expect(screen.getByText('Runs on').nextSibling).toHaveTextContent('CPU');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to GPU version' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/immich/actions',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'switch_compute' }) }),
+      ),
+    );
+  });
+
   it('asks for confirmation before stopping an app', async () => {
     const fetchMock = stubFetch(() => ({
       ok: true,
@@ -166,6 +247,30 @@ describe('App page', () => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/mealie/actions',
         expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'stop' }) }),
+      ),
+    );
+  });
+
+  it('points a failed address at Retry setup instead of the logs', async () => {
+    const fetchMock = stubFetch(() => ({ ok: true, job: { id: 'j', state: 'queued' } }));
+    const app = service('mealie', 'Mealie', 'optional', {
+      display_state: 'needs_attention',
+      installed: true,
+      blocking_check: 'route',
+      detail: "Mealie's private route did not answer.",
+      recommended_action: 'retry_setup',
+      allowed_actions: ['retry_setup', 'stop'],
+    });
+    renderWithDashboard(<AppDetailPage id="mealie" tab="overview" />, dashboardData([app]));
+    const callout = screen.getByText(/sets up its address again; its data is kept/).closest('div')!.parentElement!;
+    expect(within(callout).queryByRole('link', { name: 'View logs' })).not.toBeInTheDocument();
+    fireEvent.click(within(callout).getByRole('button', { name: 'Retry setup' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Retry setup Mealie?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Retry setup' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/services/mealie/actions',
+        expect.objectContaining({ body: JSON.stringify({ action: 'retry_setup' }) }),
       ),
     );
   });
@@ -336,7 +441,8 @@ describe('Apps', () => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/install-batch',
         expect.objectContaining({
-          body: JSON.stringify({ service_ids: ['immich', 'mealie'], parallel_downloads: 3 }),
+          // Two apps never download more than two at once.
+          body: JSON.stringify({ service_ids: ['immich', 'mealie'], parallel_downloads: 2 }),
         }),
       ),
     );
@@ -388,12 +494,13 @@ describe('Apps', () => {
     expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select Immich for installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Install Immich' }));
-    expect(screen.getByLabelText('Downloads at once')).toBeInTheDocument();
+    // One app has nothing to download alongside it.
+    expect(screen.queryByLabelText('Downloads at once')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install all selected' }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/install-batch',
-        expect.objectContaining({ body: JSON.stringify({ service_ids: ['immich'], parallel_downloads: 3 }) }),
+        expect.objectContaining({ body: JSON.stringify({ service_ids: ['immich'], parallel_downloads: 1 }) }),
       ),
     );
     expect(await screen.findByRole('button', { name: 'Queued' })).toBeDisabled();
@@ -505,8 +612,18 @@ describe('Settings', () => {
           }
         : undefined,
     );
-    renderWithDashboard(<IntegrationsSettings />, dashboardData([]));
+    const apps = [
+      service('actual-budget', 'Actual Budget', 'optional', { group: 'apps' }),
+      service('navidrome', 'Navidrome', 'optional', { group: 'apps' }),
+      service('romm', 'RomM', 'optional', { group: 'apps', installed: false, display_state: 'not_installed' }),
+    ];
+    renderWithDashboard(<IntegrationsSettings />, dashboardData(apps));
     const automatic = await screen.findByRole('region', { name: 'Set up automatically' });
+    // Every installed app is accounted for, including those with no integration yet.
+    const without = screen.getByRole('region', { name: 'Apps without an integration' });
+    expect(without).toHaveTextContent('Navidrome');
+    expect(without).not.toHaveTextContent('Actual Budget');
+    expect(without).not.toHaveTextContent('RomM');
     const manual = screen.getByRole('region', { name: 'Manual integration' });
     expect(automatic).toHaveTextContent('Firecrawl MCP');
     expect(manual).toHaveTextContent('Actual Budget MCP');
@@ -517,10 +634,27 @@ describe('Settings', () => {
   });
 
   it('shows access and backups without temporary credential handoffs', () => {
-    renderWithDashboard(<SecuritySettings />, dashboardData([]));
+    stubFetch(() => undefined);
+    const kopia = service('kopia-ui', 'Kopia backups', 'optional', { group: 'infrastructure' });
+    renderWithDashboard(<SecuritySettings />, dashboardData([kopia]));
     expect(screen.getByText('Your access')).toBeInTheDocument();
     expect(screen.getByText('Backup protection is not verified')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export credentials' })).not.toBeInTheDocument();
+  });
+
+  it('says backups are off until Kopia backups is installed', () => {
+    const kopia = service('kopia-ui', 'Kopia backups', 'optional', {
+      group: 'infrastructure',
+      installed: false,
+      display_state: 'not_installed',
+    });
+    renderWithDashboard(<SecuritySettings />, dashboardData([kopia]));
+    // One folded card: the reason and the way to install it; the schedule waits inside.
+    const toggle = screen.getByRole('button', { name: /Backups are off: Kopia backups isn’t installed/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('link', { name: 'Install Kopia backups' })).toHaveAttribute('href', '/apps/kopia-ui');
+    expect(screen.queryByText('Schedule')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mu3Lab itself')).not.toBeInTheDocument();
   });
 
   it('copies exactly the tailnet address', async () => {
@@ -582,13 +716,24 @@ describe('Calendar', () => {
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     expect(screen.getByRole('dialog', { name: 'New event' })).toBeInTheDocument();
   });
+  it('opens calendar settings from the Calendar page, not Settings', async () => {
+    stubFetch((path) =>
+      path.startsWith('/api/v1/calendar/events')
+        ? { ok: true, state: 'local', calendar: { id: 'local', name: 'Calendar' }, events: [] }
+        : { ok: true, state: 'not_connected', calendars: [], selected_calendar_id: '' },
+    );
+    renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Nextcloud' }));
+    const panel = screen.getByRole('dialog', { name: 'Calendar settings' });
+    expect(within(panel).getByText('Nextcloud calendar')).toBeInTheDocument();
+  });
   it('works as a local calendar before Nextcloud is installed', async () => {
     const fetchMock = stubFetch((path) =>
       path.startsWith('/api/v1/calendar/events')
         ? { ok: true, state: 'local', calendar: { id: 'local', name: 'Calendar' }, events: [] }
         : { ok: true, id: 'local-1' },
     );
-    renderWithDashboard(<HomeCalendar />, dashboardData([]));
+    renderWithDashboard(<CalendarPage />, dashboardData([]));
     expect(await screen.findByText(/Saved on Mu3Lab/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Install Nextcloud' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
@@ -602,6 +747,64 @@ describe('Calendar', () => {
       ),
     );
     expect(fetchMock).not.toHaveBeenCalledWith('/api/v1/calendar/auto-connect', expect.anything());
+  });
+});
+
+describe('Calendar sync', () => {
+  const event = (overrides = {}) => ({
+    id: 'local-1',
+    title: 'Piano',
+    start: new Date().toISOString(),
+    end: new Date(Date.now() + 3600000).toISOString(),
+    all_day: false,
+    editable: true,
+    revision: 'r',
+    local: true,
+    ...overrides,
+  });
+
+  it('sends waiting events with an explicit sync, never by reading', async () => {
+    let pending = true;
+    const fetchMock = stubFetch((path, init) => {
+      if (path === '/api/v1/calendar/sync' && init?.method === 'POST') {
+        pending = false;
+        return { ok: true, moved: 1, conflicts: [], kept: [] };
+      }
+      if (path.startsWith('/api/v1/calendar/events'))
+        return { ok: true, state: 'connected', pending_upload: pending, events: pending ? [event()] : [] };
+      return undefined;
+    });
+    renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/calendar/sync', expect.objectContaining({ method: 'POST' })),
+    );
+    const reads = fetchMock.mock.calls.filter(([path]) => String(path).startsWith('/api/v1/calendar/events'));
+    expect(reads.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    await waitFor(() => expect(reads.length).toBeGreaterThanOrEqual(1));
+  });
+
+  it('offers both versions of an event that also changed in Nextcloud', async () => {
+    const fetchMock = stubFetch((path) => {
+      if (path.endsWith('/resolve')) return { ok: true };
+      if (path.startsWith('/api/v1/calendar/events'))
+        return {
+          ok: true,
+          state: 'connected',
+          events: [event({ conflict: 'This event was also changed in Nextcloud. Choose which version to keep.' })],
+        };
+      return undefined;
+    });
+    renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
+    fireEvent.click(await screen.findByText('⚠ Piano'));
+    const dialog = screen.getByRole('dialog', { name: 'Edit event' });
+    expect(within(dialog).getByText('Two versions of this event')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep mine' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/calendar/events/local-1/resolve',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ keep: 'mine' }) }),
+      ),
+    );
   });
 });
 

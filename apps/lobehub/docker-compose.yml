@@ -34,7 +34,8 @@ services:
       ENABLED_OPENAI: "1"
       OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
       OPENAI_PROXY_URL: http://litellm:4000/v1
-      OPENAI_MODEL_LIST: -all,+mu3lab-chat
+      # Mu3Lab chat, plus the private local model once one is chosen (hide_model_providers).
+      OPENAI_MODEL_LIST: ${OPENAI_MODEL_LIST:--all,+mu3lab-chat}
       DEFAULT_AGENT_CONFIG: model=mu3lab-chat;provider=openai
       FEATURE_FLAGS: -provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage
       ENABLE_AGENT_GATEWAY: "0"
@@ -44,14 +45,15 @@ services:
       rustfs: {condition: service_healthy}
       rustfs-init: {condition: service_completed_successfully}
     networks: [mu3lab_frontend, mu3lab_mcp, lobehub_internal]
-    extra_hosts: ["host.docker.internal:host-gateway"]
+    extra_hosts: ["host.docker.internal:host-gateway", "${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3210/',{redirect:'manual'}).then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 20s
       timeout: 10s
-      retries: 30
-      start_period: 120s
+      start_period: 720s
+      start_interval: 20s
+      interval: 5m
+      retries: 3
     logging: *default-logging
 
   edge:
@@ -79,10 +81,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1 -d lobehub"]
-      interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 60s
+      start_period: 260s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     logging: *default-logging
 
   redis:
@@ -94,9 +97,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
       timeout: 5s
-      retries: 12
+      start_period: 120s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     logging: *default-logging
 
   rustfs:
@@ -112,9 +117,11 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1 || exit 1"]
-      interval: 10s
       timeout: 5s
-      retries: 30
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
     logging: *default-logging
 
   storage-init:

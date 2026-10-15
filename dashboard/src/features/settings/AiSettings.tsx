@@ -11,6 +11,7 @@ import {
   type ProviderMetadata,
   type ProviderMetadataResponse,
   type ProviderSetupProgress,
+  type AiModels,
 } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton } from '../../components/Button';
@@ -24,49 +25,60 @@ import { isRunning, stateLabel } from '../../lib/services';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { AiModelsCard } from './AiModelsCard';
+import { ChatAppCard } from './ChatAppCard';
 import { detectProvider, keyWarning } from './providerKeys';
+import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
 
 const ROUTE = [
-  { id: 'ollama', label: 'Ollama', role: 'Local models & embeddings' },
   { id: 'freellmapi', label: 'FreeLLMAPI', role: 'Your provider accounts' },
   { id: 'litellm', label: 'LiteLLM', role: 'One private gateway' },
-  { id: 'lobehub', label: 'LobeChat', role: 'Chat' },
 ];
 
 function ChatRoute() {
   const { data } = useDashboard();
+  const runnerName = data.services.services.find((service) => service.id === data.model_runner)?.name || 'Model runner';
   return (
     <Card
       title="How chat is routed"
       description="A route counts as ready only after streamed chat and embedding checks pass."
     >
       <ol className="route">
-        {ROUTE.map((step) => {
-          const service = data.services.services.find((item) => item.id === step.id);
-          const ready = service && isRunning(service);
-          return (
-            <li key={step.id}>
-              <Link to={`/apps/${step.id}`} className="route-step">
-                <AppIcon id={step.id} size="sm" />
-                <span>
-                  <b>{step.label}</b>
-                  <small>{step.role}</small>
-                </span>
-                <span className="route-state">
-                  <Dot tone={ready ? 'green' : 'gray'} />
-                  {service ? stateLabel[service.display_state] : 'Unavailable'}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
+        {/* The first step is the model runner in use; the last, whichever chat app the household uses. */}
+        {[
+          { id: data.model_runner || '', label: runnerName, role: 'Local models & search' },
+          ...ROUTE,
+          { id: data.chat.app_id || '', label: data.chat.app_name || 'Chat', role: 'Chat' },
+        ]
+          .filter((step) => step.id)
+          .map((step) => {
+            const service = data.services.services.find((item) => item.id === step.id);
+            const ready = service && isRunning(service);
+            return (
+              <li key={step.id}>
+                <Link to={`/apps/${step.id}`} className="route-step">
+                  <AppIcon id={step.id} size="sm" />
+                  <span>
+                    <b>{step.label}</b>
+                    <small>{step.role}</small>
+                  </span>
+                  <span className="route-state">
+                    <Dot tone={ready ? 'green' : 'gray'} />
+                    {service ? stateLabel[service.display_state] : 'Unavailable'}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
       </ol>
     </Card>
   );
 }
 
 function VerificationJob({ id }: { id: string }) {
-  const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, { interval: 4000 });
+  const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, {
+    interval: (data) => (jobActive(data?.job.state) ? JOB_POLL_MS : 0),
+  });
   if (!job.data) return null;
   return (
     <Collapsible title={`Verification: ${humanize(job.data.job.step_id || job.data.job.state)}`}>
@@ -401,13 +413,20 @@ function ProviderChecklist({
   setup,
   saved,
 }: {
-  catalog: ProviderCatalogItem[];
+  /** Null while it loads. */
+  catalog: ProviderCatalogItem[] | null;
   providers: ProviderMetadata[];
   setup?: ProviderSetupProgress;
   saved: () => void;
 }) {
   const [awaiting, setAwaiting] = useState('');
   const clearAwaiting = useCallback(() => setAwaiting(''), []);
+  if (!catalog)
+    return (
+      <Card title={setup?.recommendation_met ? 'More free providers' : 'Get free AI capacity'}>
+        <p className="muted card-loading">Loading…</p>
+      </Card>
+    );
   if (!catalog.length) return null;
   const minimum = setup?.recommended_minimum ?? 2;
   const done = setup?.recommended_verified.length ?? 0;
@@ -479,7 +498,12 @@ export function AiSettings() {
   const isAdmin = useIsAdmin();
   const confirm = useConfirm();
   const { run } = useAction();
-  const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', { interval: 5000 });
+  // Only while a key is being checked does the list change on its own.
+  const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', {
+    interval: (data) => (data?.providers?.some((provider) => provider.state === 'verifying') ? 3000 : 0),
+  });
+  const models = useApi<AiModels>('/api/v1/ai/models');
+  const localOnly = models.data?.settings.privacy === 'local_only';
   const catalog = useApi<{ providers: ProviderCatalogItem[] }>('/api/v1/providers/catalog');
   const [dialog, setDialog] = useState<{ id: string } | null>(null);
   const list = providers.data?.providers || [];
@@ -510,17 +534,26 @@ export function AiSettings() {
   return (
     <>
       <PageHeader
-        title="AI providers"
-        description="Connect the model providers you want chat to use. Free tiers are never guaranteed."
+        title="AI"
+        description="Choose where AI runs, and connect the outside model providers chat may use. Free tiers are never guaranteed."
       />
       {!isAdmin && (
         <Callout title="Only an administrator can change AI providers">
           You can see which providers chat uses. Ask an administrator to connect or change one.
         </Callout>
       )}
+      <ChatAppCard readOnly={!isAdmin} />
+      <AiModelsCard models={models} readOnly={!isAdmin} />
+      {localOnly && (
+        <Callout tone="info" title="Local only is on">
+          Saved provider keys are kept but not used or checked until outside providers are allowed again.
+        </Callout>
+      )}
       <Card title="Connected providers" flush>
         {providers.error ? (
           <p className="error-text card-pad">Could not load providers: {providers.error}</p>
+        ) : !providers.data ? (
+          <p className="muted card-pad card-loading">Loading…</p>
         ) : list.length ? (
           <div className="rows">
             {list.map((provider) => (
@@ -541,7 +574,7 @@ export function AiSettings() {
       </Card>
       {isAdmin && (
         <ProviderChecklist
-          catalog={catalog.data?.providers || []}
+          catalog={catalog.data ? catalog.data.providers : catalog.error ? [] : null}
           providers={list}
           setup={providers.data?.setup || undefined}
           saved={() => void reload()}

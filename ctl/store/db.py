@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import functools
+import inspect
 import os
 import sqlite3
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from ctl.runtime import RuntimePaths
@@ -101,3 +104,23 @@ def connect(path: Path | str, *, timeout: float = 15, readonly: bool = False) ->
             connection.close()
             raise
     return connection
+
+
+def transactional[**P, R](function: Callable[P, R]) -> Callable[P, R]:
+    """Serialize a store's read/modify/write inside its shared SQLite transaction.
+
+    Nested job preparation joins the caller's transaction, so ciphertext and
+    metadata commit together without acquiring a file lock after a SQL lock.
+    """
+    signature = inspect.signature(function)
+    default = signature.parameters["paths"].default
+
+    @functools.wraps(function)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        paths = signature.bind_partial(*args, **kwargs).arguments.get("paths", default)
+        with connect(database(paths)) as connection:
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
+            return function(*args, **kwargs)
+
+    return wrapper

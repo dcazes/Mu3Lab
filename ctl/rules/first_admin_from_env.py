@@ -26,6 +26,7 @@ from pydantic import Field
 from ctl.engine.hooks import HookContext, StartPlan
 from ctl.engine.project import token
 from ctl.rules import Params, Rule, RuleError, register
+from ctl.runtime import RuntimePaths
 
 if TYPE_CHECKING:
     from ctl.manifest.catalog import App
@@ -111,7 +112,9 @@ class FirstAdminFromEnv(Rule):
             return owner["username"]
         return account_username(owner["username"], owner["email"])
 
-    def prepare_env(self, app: App, env: dict[str, str], owner: JobIdentity | None) -> None:
+    def prepare_env(
+        self, app: App, env: dict[str, str], owner: JobIdentity | None, paths: RuntimePaths | None = None
+    ) -> None:
         # Saved once, so later restarts name the same administrator the first start created.
         if self.params.keep_owner and owner and "MU3LAB_OWNER_USERNAME" not in env:
             env["MU3LAB_OWNER_USERNAME"] = self._username(owner)

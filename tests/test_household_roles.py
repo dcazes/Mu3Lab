@@ -36,6 +36,10 @@ ADMIN_ONLY = [
     ("GET", "/api/v1/people"),
     ("POST", "/api/v1/people"),
     ("POST", "/api/v1/people/owner/deactivate"),
+    ("POST", "/api/v1/system/backups/recovery-sheet"),
+    ("GET", "/api/v1/system/backups/platform"),
+    ("GET", "/api/v1/system/backups/schedule"),
+    ("PUT", "/api/v1/system/backups/schedule"),
 ]
 
 

@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, self_update
+from ctl import __version__, backup_service, disk_cleanup, platform_backup, recovery_sheet, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -20,6 +21,7 @@ from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+from ctl.service_state import tailnet_dns_name
 from ctl.store import records
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -132,12 +134,27 @@ async def mu3lab_update(_operator: Operator, refresh: bool = False) -> models.Mu
     )
 
 
+@router.get("/system/changelog", response_model=models.Mu3LabChangelog)
+async def mu3lab_changelog(_operator: Operator) -> models.Mu3LabChangelog:
+    """What changed in the installed release and the few before it (What's new)."""
+    releases = await run_in_threadpool(self_update.history, ROOT)
+    return models.Mu3LabChangelog.model_validate({"ok": True, "releases": releases})
+
+
 @router.post("/system/update", response_model=models.JobResponse, response_model_exclude_none=True)
 def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.JobResponse:
     """Queue the self-update. It restarts the dashboard and worker, so nothing else may be running."""
     store = runtime.job_store()
     key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="update",
+        service_id=self_update.SERVICE_ID,
+        action=self_update.ACTION,
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.update",
+    )
     if previous:
         return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     current = self_update.status(ROOT)
@@ -153,7 +170,44 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
         service_id=self_update.SERVICE_ID,
         action=self_update.ACTION,
         actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.update",
         detail="Owner requested a Mu3Lab update.",
+        idempotency_key=key,
+    )
+    return models.JobResponse.model_validate({"ok": True, "job": job})
+
+
+@router.post("/system/cleanup", response_model=models.JobResponse, response_model_exclude_none=True)
+def free_up_space(payload: models.CleanupRequest, request: Request, operator: OperatorMutation) -> models.JobResponse:
+    """Remove removed apps' leftovers and old app versions; their data only when asked."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    params = {"delete_data": "true" if payload.delete_data else "false"}
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="lifecycle",
+        service_id=disk_cleanup.SERVICE_ID,
+        action="cleanup",
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.cleanup",
+        request=params,
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    if store.active_jobs():
+        raise ApiError(409, "Wait for the running tasks to finish first.")
+    job = store.create(
+        kind="lifecycle",
+        service_id=disk_cleanup.SERVICE_ID,
+        action="cleanup",
+        actor=operator["username"],
+        actor_subject=runtime.mutation_subject(operator),
+        namespace="system.cleanup",
+        request=params,
+        params=params,
+        detail="Owner asked to free up space.",
         idempotency_key=key,
     )
     return models.JobResponse.model_validate({"ok": True, "job": job})
@@ -163,6 +217,76 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
 def backups(_member: Member) -> models.BackupReadiness:
     """Local encrypted-backup readiness; execution needs an authenticated job."""
     return models.BackupReadiness.model_validate({"ok": True, **backup_readiness()})
+
+
+@router.get("/system/backups/platform", response_model=models.PlatformBackupStatus, response_model_exclude_none=True)
+def platform_backup_status(_operator: Operator) -> models.PlatformBackupStatus:
+    """Mu3Lab's own backup and each core app's, from their own evidence."""
+    return models.PlatformBackupStatus.model_validate(
+        {"ok": True, **platform_backup.status(ROOT), "recovery_sheet": recovery_sheet.status(RuntimePaths())}
+    )
+
+
+@router.get("/system/backups/schedule", response_model=models.BackupSchedule, response_model_exclude_none=True)
+def backup_schedule_status(_operator: Operator) -> models.BackupSchedule:
+    """When scheduled backups run, Kopia's next run, and what did not finish."""
+    return models.BackupSchedule.model_validate({"ok": True, **backup_service.status()})
+
+
+@router.put("/system/backups/schedule", response_model=models.BackupSchedule, response_model_exclude_none=True)
+def update_backup_schedule(
+    payload_model: models.BackupScheduleRequest, operator: OperatorMutation
+) -> models.BackupSchedule:
+    store = runtime.job_store()
+    try:
+        chosen = backup_service.save(payload_model.model_dump(), str(operator["username"]))
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    store.record_audit(
+        actor=str(operator["username"]),
+        event="backup.schedule_changed",
+        detail=f"Scheduled backups: {chosen['frequency']}, weekday {chosen['weekday']}, {chosen['time']}.",
+    )
+    return models.BackupSchedule.model_validate({"ok": True, **backup_service.status()})
+
+
+_NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
+
+
+@router.post("/system/backups/recovery-sheet", response_model=models.RecoverySheet)
+def open_recovery_sheet(operator: OperatorMutation) -> JSONResponse:
+    """The backup password and where the backups are, for printing. Each opening is audited."""
+    store = runtime.job_store()  # no audit log, no sheet
+    sheet = recovery_sheet.contents(tailnet_dns_name(), str(operator["username"]), RuntimePaths())
+    store.record_audit(
+        actor=str(operator["username"]),
+        event="backup.recovery_sheet_opened",
+        detail="Opened the recovery sheet, which shows the backup password.",
+    )
+    body = models.RecoverySheet.model_validate({"ok": True, **sheet}).model_dump(mode="json")
+    return JSONResponse(body, headers=_NO_STORE)
+
+
+@router.post("/system/backups/platform", response_model=models.BackupStarted, response_model_exclude_none=True)
+def start_platform_backup(operator: OperatorMutation) -> models.BackupStarted:
+    """Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time."""
+    if not backup_service.installed():
+        raise ApiError(409, "Backups are off. Install Kopia backups from Apps first.", code="backup_service_missing")
+    store = runtime.job_store()
+    found = backup_service.sources(ROOT)
+    core, _skipped = platform_backup.core_apps(load_registry(), ROOT)
+    chosen = [platform_backup.backups.PLATFORM_SOURCE, *(service.id for service in core if service.id in found)]
+    try:
+        backup_service.trigger(chosen)
+    except OSError as exc:
+        raise ApiError(503, f"The backup service is not running, so nothing was backed up ({exc}).") from exc
+    store.record_audit(
+        actor=str(operator["username"]), event="backup.requested", detail="Back up Mu3Lab and its core apps now."
+    )
+    return models.BackupStarted(
+        ok=True,
+        detail="Mu3Lab saves its own settings first; then each core app stops for a moment while its data is copied.",
+    )
 
 
 @router.get("/provisioning", response_model=models.ProvisioningResponse, response_model_exclude_none=True)

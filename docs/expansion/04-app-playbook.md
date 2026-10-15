@@ -145,7 +145,8 @@ apps/<id>/
 
 ### 3.2 `app.yaml` checklist
 
-- [ ] `id`, `name`, `tier: optional`, `group`, `category`, `tagline`,
+- [ ] `id`, `name`, `tier: optional`, `group`, `category` (one of finance, home, media, documents,
+  places, knowledge, ai, system: the Discover section), `tagline`,
       `summary` in plain words.
 - [ ] `version` matches the image tag; `upstream` is `owner/repo`.
 - [ ] `service.local_port`, `service.health.path`, `start_timeout_seconds`

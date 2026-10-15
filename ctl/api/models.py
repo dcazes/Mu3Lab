@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-DisplayState = Literal["running", "stopped", "working", "not_installed", "needs_attention"]
+DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_attention"]
 
 
 class ApiModel(BaseModel):
@@ -19,6 +19,7 @@ class ApiErrorResponse(ApiModel):
     message: str
     recommended_action: str
     error: str | dict[str, JsonValue]
+    blocking_job_id: str | None = None
 
 
 TailscaleConnectionState = Literal["connected"] | Literal["disconnected"] | Literal["unavailable"]
@@ -66,6 +67,31 @@ class ServiceUi(ApiModel):
     launch_label: str | None = None
 
 
+class ServiceCheck(ApiModel):
+    state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
+    detail: str
+    checked_at: str
+    last_success_at: str
+    last_failure_at: str
+    failures: int
+
+
+class ServiceChecks(ApiModel):
+    process: ServiceCheck
+    route: ServiceCheck
+    sign_in: ServiceCheck
+
+
+class ServiceRecovery(ApiModel):
+    """A restore or update that was interrupted; nothing continues until a person chooses."""
+
+    kind: Literal["restore", "update"]
+    detail: str
+    since: str
+    # An interrupted update whose new release was already in place may be kept instead of undone.
+    can_keep: bool = False
+
+
 class ServiceUpdate(ApiModel):
     repository: str
     installed_version: str
@@ -96,12 +122,23 @@ class ServiceContainersItem(ApiModel):
     image: str
 
 
+class ServiceCompute(ApiModel):
+    """For apps with a GPU build: the build that runs and the one the compute mode asks for."""
+
+    running: str
+    wanted: str
+
+
 class Service(ApiModel):
     mobile: ServiceMobile0 | None = None
     id: str
     name: str
     category: str
     lifecycle: Literal["always_on"] | Literal["shared"] | Literal["optional"]
+    stop_warning: str = ""
+    # Named parts of the app (Compose service -> label), shown with their state on its page.
+    parts: dict[str, str] = Field(default_factory=dict)
+    compute: ServiceCompute | None = None
     https_port: float
     private_https_port: float | None = None
     auth: Literal["oidc"] | Literal["proxy"] | Literal["trusted_header"] | Literal["local"] | Literal["excluded"]
@@ -141,6 +178,11 @@ class Service(ApiModel):
     initialization: ServiceInitialization | None = None
     identity: ServiceIdentity | None = None
     containers: list[ServiceContainersItem] | None = None
+    checks: ServiceChecks | None = None
+    recovery: ServiceRecovery | None = None
+    # Kopia's backup service has stopped the app for its backup right now.
+    backing_up: bool = False
+    blocking_check: Literal["process", "route", "sign_in"] | None = None
 
     display_state: DisplayState
     reason: str
@@ -158,6 +200,7 @@ class ServiceIdentity(ApiModel):
         | Literal["migration_required"]
         | Literal["ready"]
         | Literal["degraded"]
+        | Literal["off"]
         | Literal["unsupported"]
     )
     launch_url: str
@@ -182,6 +225,8 @@ class ServiceConfigResponse(ApiModel):
     ok: bool
     service_id: str
     fields: list[ServiceConfigField]
+    # Send back as ``expected_revision`` so a stale form cannot overwrite a newer change.
+    revision: int | None = None
     restart_required: bool | None = None
 
 
@@ -222,7 +267,7 @@ class Metric(ApiModel):
 
 class BackupReadiness(ApiModel):
     ok: bool = True
-    engine: str = "restic"
+    engine: str = "kopia"
     available: bool = False
     repository_path: str = ""
     retention: dict[str, int] = Field(default_factory=dict)
@@ -233,6 +278,8 @@ class BackupReadiness(ApiModel):
     snapshot_present: bool | None = None
     off_device: bool | None = None
     last_verified_at: str | None = None
+    # Folder of an older restic repository Mu3Lab no longer uses; kept untouched.
+    legacy_repository: str | None = None
 
 
 class TailscaleServeStatus(ApiModel):
@@ -249,6 +296,23 @@ class TailscaleStatus(ApiModel):
     serve: TailscaleServeStatus
 
 
+class DiskShare(ApiModel):
+    data: float
+    program: float
+
+
+class DiskUsage(ApiModel):
+    measured_at: str
+    # By owner: an app's id, "core", "removed" (apps no longer offered) or "unused" (images nothing runs).
+    owners: dict[str, DiskShare]
+    # Data folders removed apps left behind; "Free up space" deletes them only when asked.
+    removed_folders: list[str] = Field(default_factory=list)
+
+
+class CleanupRequest(ApiModel):
+    delete_data: bool = False
+
+
 class SystemResponse(ApiModel):
     observed_at: str = ""
     ok: bool
@@ -257,6 +321,9 @@ class SystemResponse(ApiModel):
     docker_ready: bool
     worker_state: str | None = None
     container_memory: dict[str, float] | None = None
+    # By owner: an app's id, "core" or "removed" (apps no longer offered).
+    memory_by_owner: dict[str, float] | None = None
+    disk_usage: DiskUsage | None = None
     tailnet_dns_name: str
     tailscale: TailscaleStatus | None = None
     runtime_root: str
@@ -484,6 +551,8 @@ class CalendarEvent(ApiModel):
     editable: bool | None = None
     revision: str | None = None
     local: bool | None = None
+    # Set when a local edit met a change made in Nextcloud; the person chooses which to keep.
+    conflict: str | None = None
 
 
 class CalendarEventsCalendar(ApiModel):
@@ -497,8 +566,19 @@ class CalendarEvents(ApiModel):
     calendar: CalendarEventsCalendar | None = None
     fetched_at: str | None = None
     nextcloud_ready: bool | None = None
+    # Events kept on Mu3Lab are waiting to be sent; POST /calendar/sync sends them.
+    pending_upload: bool | None = None
     events: list[CalendarEvent]
     error: str | None = None
+
+
+class CalendarSync(ApiModel):
+    """What one sync sent, and what it could not send without asking."""
+
+    ok: bool
+    moved: int
+    conflicts: list[str]
+    kept: list[str]
 
 
 class ProviderMetadataResponse(ApiModel):
@@ -559,16 +639,173 @@ class BackupSnapshot(ApiModel):
     id: str
     short_id: str
     time: str
-    reason: Literal["manual"] | Literal["pre-update"] | Literal["pre-restore"]
+    # "backup" for those Kopia's backup service makes; "pre-update" for an update's own.
+    # Older backups may say "manual", "scheduled", "platform" or "pre-restore".
+    reason: str
     version: str
+    # The exact deployment the data belongs to; empty for backups made before release ids.
+    release_id: str = ""
     paths: list[str]
+    complete: bool = True
+
+
+class BackupProtection(ApiModel):
+    """One app's backup evidence; never inferred from another app's backups."""
+
+    state: Literal["missing", "stale", "unchecked", "checked"]
+    snapshot_id: str = ""
+    completed_at: str = ""
+    verification: Literal["none", "structure", "data"] = "none"
+    restore_tested_at: str = ""
+    off_device: bool = False
+    detail: str = ""
+
+
+class CoreAppBackup(ApiModel):
+    id: str
+    name: str
+    included: bool
+    # Why an app is left out (its data can be fetched again).
+    reason: str = ""
+    protection: BackupProtection | None = None
+
+
+class RecoverySheetStatus(ApiModel):
+    """When an administrator last opened the recovery sheet; never its contents."""
+
+    opened_at: str
+    opened_by: str
+
+
+class PlatformBackupStatus(ApiModel):
+    """Mu3Lab's own state and each core app, each from its own backup evidence."""
+
+    ok: bool
+    platform: BackupProtection
+    core_apps: list[CoreAppBackup]
+    recovery_sheet: RecoverySheetStatus | None = None
+
+
+BackupFrequency = Literal["off", "6h", "12h", "daily", "weekly"]
+
+
+class BackupSchedule(ApiModel):
+    """When Kopia's backup service runs backups, in this server's local time. Weekday: Monday is 0, Sunday 6."""
+
+    ok: bool
+    frequency: BackupFrequency
+    weekday: int
+    time: str
+    # From Kopia itself; empty while scheduled backups are off or the service is not running.
+    next_run_at: str
+    service_running: bool
+    # False until Kopia backups (the app) is installed; nothing runs on a schedule without it.
+    service_installed: bool = True
+    # Sources whose last backup did not finish, with why.
+    problems: list[str]
+
+
+class BackupStarted(ApiModel):
+    """Kopia's backup service was asked to back up now; progress shows on the app."""
+
+    ok: bool
+    detail: str
+
+
+class BackupHookResponse(ApiModel):
+    ok: bool
+    detail: str
+
+
+AiPrivacy = Literal["outside_allowed", "local_only"]
+
+
+class LocalModel(ApiModel):
+    """One reviewed local model. Sizes are Ollama's download sizes; memory is an estimate."""
+
+    id: str
+    name: str
+    tag: str
+    download_gb: float
+    memory_gb: float
+    note: str
+    dimensions: int
+    # Downloaded in the model runner that serves requests now.
+    downloaded: bool
+
+
+class AiModelSettings(ApiModel):
+    privacy: AiPrivacy
+    chat_model: str
+    embedding_model: str
+    # The chosen model runner's app id; empty means the default (the one the installer sets up).
+    runner: str
+    changed_at: str
+    changed_by: str
+
+
+class ModelRunnerOption(ApiModel):
+    id: str
+    name: str
+    installed: bool
+    # Whether it has a web app of its own (Ollama does not).
+    has_ui: bool
+
+
+class AiModels(ApiModel):
+    """Where AI requests may go, the model runner, the local chat model and the search (embedding) model."""
+
+    ok: bool
+    settings: AiModelSettings
+    chat_models: list[LocalModel]
+    embedding_models: list[LocalModel]
+    # The runner that serves requests now, and every runner Mu3Lab knows.
+    runner: str
+    runners: list[ModelRunnerOption]
+    runner_reachable: bool
+    # Installed apps whose search index blocks changing the embedding model.
+    embedding_locked_by: list[str]
+    active_job_id: str
+
+
+class AiModelsRequest(ApiModel):
+    privacy: AiPrivacy
+    chat_model: str = Field(default="", max_length=64)
+    embedding_model: str = Field(max_length=64)
+    runner: str = Field(default="", max_length=64)
+
+
+class RecoverySheet(ApiModel):
+    """What a new computer needs to open the backups. Sent once, never cached."""
+
+    ok: bool
+    server: str
+    generated_at: str
+    version: str
+    password: str
+    password_check: str
+    repository: str
+    kopia_image: str
+    copies: list[str]
 
 
 class BackupsResponse(ApiModel):
     ok: bool
     service_id: str
     backups: list[BackupSnapshot]
+    protection: BackupProtection | None = None
     readiness: BackupReadiness
+
+
+class Mu3LabUpdateResult(ApiModel):
+    """How the last update ended: verified, rolled_back or needs_attention."""
+
+    state: str
+    at: str
+    detail: str
+    # Release names, deliberately not called from/to (a Python keyword).
+    from_: str = Field("", alias="from")
+    to: str = ""
 
 
 class Mu3LabUpdate(ApiModel):
@@ -581,6 +818,21 @@ class Mu3LabUpdate(ApiModel):
     changes: list[str]
     blocked_reason: str
     checked_at: float
+    last_update: Mu3LabUpdateResult | None = None
+
+
+class Mu3LabRelease(ApiModel):
+    """One release's changes; a development copy has no version."""
+
+    version: str
+    date: str
+    commit: str = ""
+    changes: list[str]
+
+
+class Mu3LabChangelog(ApiModel):
+    ok: bool
+    releases: list[Mu3LabRelease]
 
 
 class UpdateResponse(ApiModel):
@@ -593,6 +845,8 @@ class UpdateResponse(ApiModel):
     supporting_only: bool
     update_enabled: bool
     blocked_reason: str
+    added_services: list[str] = Field(default_factory=list)
+    removed_services: list[str] = Field(default_factory=list)
 
 
 class McpServerAuth(ApiModel):
@@ -687,13 +941,16 @@ class ChatProvider(ApiModel):
 class ChatAssistant(ApiModel):
     id: str
     name: str
-    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review"]
+    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"]
     detail: str
 
 
 class ChatStatus(ApiModel):
     assistants: list[ChatAssistant] | None = None
     connected: bool | None = None
+    # The household chat app the Chat page shows.
+    app_id: str = ""
+    app_name: str = ""
     ok: bool
     ready: bool
     url: str
@@ -701,6 +958,18 @@ class ChatStatus(ApiModel):
     mcp_enabled_count: float
     detail: str
     providers: list[ChatProvider] | None = None
+
+
+class ChatAppChoice(ApiModel):
+    id: str
+    name: str
+    installed: bool
+    selected: bool
+
+
+class ChatApps(ApiModel):
+    ok: bool
+    apps: list[ChatAppChoice]
 
 
 class SystemConfig(ApiModel):
@@ -813,6 +1082,20 @@ class RequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class BackupScheduleRequest(RequestModel):
+    frequency: BackupFrequency
+    weekday: int = Field(ge=0, le=6)
+    time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+class BackupHookRequest(RequestModel):
+    source: str = Field(max_length=80)
+
+
+class CalendarResolveRequest(RequestModel):
+    keep: Literal["mine", "server"]
+
+
 class ServiceActionRequest(RequestModel):
     action: Literal[
         "install",
@@ -822,9 +1105,11 @@ class ServiceActionRequest(RequestModel):
         "restart",
         "uninstall",
         "uninstall_delete_data",
-        "backup",
         "restore",
         "update",
+        "recover",
+        "keep_update",
+        "switch_compute",
     ]
     confirm: str = ""
     snapshot_id: str = ""
@@ -832,6 +1117,7 @@ class ServiceActionRequest(RequestModel):
 
 class ConfigurationRequest(RequestModel):
     values: dict[str, str | bool | int | None] = Field(default_factory=dict)
+    expected_revision: int | None = None
 
 
 class ComputeRequest(RequestModel):
@@ -920,6 +1206,10 @@ class SessionResponse(ApiModel):
     csrf_token: str
 
 
+class ChatAppRequest(RequestModel):
+    app_id: str = Field(min_length=1, max_length=64)
+
+
 class ChecklistRequest(RequestModel):
     items: dict[Literal["devices", "extension", "chat", "hidden"], bool] = Field(default_factory=dict)
 
@@ -927,6 +1217,13 @@ class ChecklistRequest(RequestModel):
 class ChecklistResponse(ApiModel):
     ok: bool
     items: dict[str, bool]
+
+
+class BackupAttention(ApiModel):
+    """One backup problem Home shows administrators; empty while backups keep up with the schedule."""
+
+    key: str
+    message: str
 
 
 class SnapshotResponse(ApiModel):
@@ -939,6 +1236,9 @@ class SnapshotResponse(ApiModel):
     core: CoreSetupResponse
     provisioning: ProvisioningResponse
     audit: AuditResponse
+    backup_attention: list[BackupAttention] = []
+    # The app that runs local models now (Settings, AI): Ollama.
+    model_runner: str = ""
 
 
 class ParallelDownloadsRequest(RequestModel):
@@ -952,6 +1252,15 @@ class OkResponse(ApiModel):
     id: str | None = None
 
 
+class PersonAccess(ApiModel):
+    kind: Literal["deactivated", "demoted"]
+    state: Literal["pending", "complete"]
+    pending: int
+    pending_targets: list[str]
+    detail: str
+    since: str
+
+
 class Person(ApiModel):
     username: str
     uid: str
@@ -960,6 +1269,7 @@ class Person(ApiModel):
     role: Literal["admin", "member", ""]
     active: bool
     last_login: str
+    access: PersonAccess | None = None
 
 
 class PeopleResponse(ApiModel):
@@ -1109,3 +1419,38 @@ class PersonInvite(ApiModel):
 
 
 PersonResponse.model_rebuild()
+
+
+class ApprovalOperation(ApiModel):
+    id: str
+    subject: str
+    provider: str
+    credential_version: int
+    app: str
+    server: str
+    tool: str
+    connector_revision: str
+    policy_revision: int
+    state: Literal[
+        "pending", "approved", "dispatching", "succeeded", "failed", "outcome_unknown", "rejected", "revoked", "expired"
+    ]
+    created_at: float
+    expires_at: float
+    dispatch_at: float
+    completed_at: float
+    arguments: dict[str, JsonValue] | None = None
+
+
+class ApprovalResponse(ApiModel):
+    ok: bool
+    operation: ApprovalOperation
+    execution: dict[str, JsonValue] | None = None
+
+
+class ApprovalsResponse(ApiModel):
+    ok: bool
+    operations: list[ApprovalOperation]
+
+
+class ApprovalDecisionRequest(RequestModel):
+    decision: Literal["approve", "reject"]

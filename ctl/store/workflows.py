@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import serialized
+from ctl.store import db
 from ctl.store.secrets import SecretError as WorkflowSecretError
 from ctl.store.secrets import SecretStore
 
@@ -61,7 +61,7 @@ class JobIdentity(TypedDict):
     display_name: str
 
 
-@serialized("workflow-secrets.lock")
+@db.transactional
 def save_job_identity(
     job_id: str, *, owner_uid: str, email: str, username: str, display_name: str, paths: RuntimePaths = RuntimePaths()
 ) -> None:
@@ -87,7 +87,7 @@ def save_job_identity(
     _write(records, paths)
 
 
-@serialized("workflow-secrets.lock")
+@db.transactional
 def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> JobIdentity | None:
     cleanup(paths)
     for item in _read(paths):
@@ -101,7 +101,7 @@ def job_identity(job_id: str, paths: RuntimePaths = RuntimePaths()) -> JobIdenti
     return None
 
 
-@serialized("workflow-secrets.lock")
+@db.transactional
 def delete_by_job(job_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     records = _read(paths)
     retained = [item for item in records if item.get("job_id") != job_id]
@@ -111,7 +111,7 @@ def delete_by_job(job_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     return True
 
 
-@serialized("workflow-secrets.lock")
+@db.transactional
 def cleanup(paths: RuntimePaths = RuntimePaths()) -> list[str]:
     now = _now()
     records = _read(paths)

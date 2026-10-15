@@ -6,6 +6,11 @@ or uninstalled, each installed consumer's project is rendered again, its
 rules refresh anything they generate, and its containers restart only if a
 generated file actually changed. A consumer's failure is logged and never
 undoes the provider's own install or removal.
+
+Each consumer is re-wired under its own app lock, so it never changes while
+another job works on it. A consumer whose restore or update was interrupted is
+left alone until a person settles it, and one stopped for its backup is left
+until the backup is done.
 """
 
 from __future__ import annotations
@@ -14,7 +19,8 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl.compute import resolved_mode
+from ctl import resource_locks
+from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed
@@ -28,6 +34,8 @@ from ctl.service_state import tailnet_dns_name
 from ctl.store import onboarding as onboarding_state
 
 Log = Callable[[str], None]
+# How long re-wiring waits for a consumer that another job holds.
+LOCK_WAIT_SECONDS = 600
 
 
 def consumers(provider: App, catalog: Catalog, paths: RuntimePaths) -> list[App]:
@@ -63,8 +71,8 @@ def rewire_one(app: App, facts: Facts, log: Log) -> bool:
     before = _fingerprint(project)
     rules = rules_for(app.manifest)
     owner = onboarding_state.read(app.id, facts.paths).get("owner")
-    render_rules(app, facts, rules, owner)
-    compose = Compose(project, gpu_mode=resolved_mode() if app.manifest.service.uses_gpu else "cpu")
+    render_rules(app, facts, rules, owner, copy_files=False)
+    compose = Compose(project, gpu_mode=app_mode(project, app.manifest.service.uses_gpu))
     ctx = HookContext(app, project, compose, log, lambda name, detail: log(f"{name}: {detail}"), owner, facts)
     for rule in rules:
         rule.rewire(ctx)
@@ -81,11 +89,20 @@ def rewire_consumers(provider: App, catalog: Catalog, log: Log, paths: RuntimePa
     paths = paths or RuntimePaths()
     facts = Facts(tailnet_dns_name(), paths, catalog)
     restarted: list[str] = []
+    from ctl import backup_service
+    from ctl.lifecycle import in_progress
+
     for app in consumers(provider, catalog, paths):
+        if in_progress.get(app.id, paths) or backup_service.holding(app.id, paths):
+            log(f"{app.manifest.name} needs attention first, so it was not updated for {provider.manifest.name}.")
+            continue
         try:
-            if rewire_one(app, facts, log):
-                restarted.append(app.manifest.name)
-                log(f"{app.manifest.name} now reflects {provider.manifest.name}.")
+            with resource_locks.hold(f"app:{app.id}", timeout=LOCK_WAIT_SECONDS, paths=paths):
+                if rewire_one(app, facts, log):
+                    restarted.append(app.manifest.name)
+                    log(f"{app.manifest.name} now reflects {provider.manifest.name}.")
+        except resource_locks.Busy:
+            log(f"{app.manifest.name} is busy with other work, so it was not updated for {provider.manifest.name}.")
         except (StepFailed, OSError, ValueError, RuntimeError) as exc:
             log(f"{app.manifest.name} could not be updated for {provider.manifest.name}: {redact(str(exc))}")
     return restarted

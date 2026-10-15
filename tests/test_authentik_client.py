@@ -26,15 +26,51 @@ class AuthentikClientTests(unittest.TestCase):
 
         def send(request):
             calls.append(request)
-            key = "slug" if "flows" in request.url.path else "name"
+            path = request.url.path
+            key = "slug" if "flows" in path else "domain" if "brands" in path else "name"
             results = [] if len(calls) == 1 else [{key: request.url.params[key]}]
             return httpx.Response(200, json={"results": results})
 
         with patch("ctl.integrations.authentik.time.sleep") as sleep:
             Authentik("token", transport=httpx.MockTransport(send)).wait_for_defaults()
         sleep.assert_called_once()
-        self.assertEqual(len(calls), 5)
-        self.assertEqual(calls[-1].url.params["name"], "authentik Self-signed Certificate")
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(calls[-2].url.params["name"], "authentik Self-signed Certificate")
+        # Authentik's own default brand must exist before Mu3Lab sets its recovery flow.
+        self.assertEqual(calls[-1].url.params["domain"], "authentik-default")
+
+    def test_a_duplicate_default_brand_is_removed_and_authentiks_own_is_kept(self):
+        deleted = []
+        brands = [
+            {"brand_uuid": "ours", "domain": "authentik-default", "default": False},
+            {"brand_uuid": "authentik", "domain": "authentik-default", "default": True},
+        ]
+
+        def send(request):
+            if request.method == "DELETE":
+                deleted.append(request.url.path)
+                return httpx.Response(204)
+            return httpx.Response(200, json={"results": brands, "pagination": {"next": 0}})
+
+        client = Authentik("token", transport=httpx.MockTransport(send))
+        self.assertEqual(client.remove_duplicate_default_brands(), 1)
+        self.assertEqual(deleted, ["/api/v3/core/brands/ours/"])
+        # Without Authentik's own default brand, nothing is deleted.
+        brands[:] = [{"brand_uuid": "ours", "domain": "authentik-default", "default": False}]
+        deleted.clear()
+        self.assertEqual(client.remove_duplicate_default_brands(), 0)
+        self.assertEqual(deleted, [])
+
+    def test_the_recovery_flow_is_set_on_authentiks_own_default_brand(self):
+        import yaml
+
+        from ctl.authentik_blueprints import render_gate_blueprint
+
+        document = yaml.safe_load(
+            render_gate_blueprint("mu3lab.example.ts.net", 8443).replace("!KeyOf", "").replace("!Find", "")
+        )
+        brand = next(entry for entry in document["entries"] if entry["model"] == "authentik_brands.brand")
+        self.assertEqual(brand["identifiers"], {"domain": "authentik-default", "default": True})
 
     def test_missing_defaults_and_network_failure_time_out(self):
         for response in (httpx.Response(200, json={"results": []}), httpx.Response(503)):

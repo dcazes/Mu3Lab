@@ -72,14 +72,7 @@ const services = ['mealie', 'surfsense', 'immich'].map((id) => ({
 function renderProgress(items: InstallBatchItem[]) {
   const controls = { pause: vi.fn(), resume: vi.fn(), reorder: vi.fn(), setParallel: vi.fn() };
   render(
-    <InstallProgress
-      batch={batch(items)}
-      job={null}
-      services={services}
-      onAction={vi.fn()}
-      onDismiss={vi.fn()}
-      controls={controls}
-    />,
+    <InstallProgress batch={batch(items)} job={null} services={services} onAction={vi.fn()} controls={controls} />,
   );
   return controls;
 }

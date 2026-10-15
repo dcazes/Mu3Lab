@@ -7,10 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ctl import vault_sync
+from ctl import backups, vault_sync
 from ctl.integrations.vaultwarden.org import STATUS_ACCEPTED, STATUS_CONFIRMED, Member, OrgLogin
 from ctl.runtime import RuntimePaths
 from ctl.store import onboarding as onboarding_state
+from ctl.store.secrets import SecretStore
 
 KEY = None
 
@@ -69,7 +70,7 @@ class FakeOrg:
                 uris=[uri for uri, _ in item["uris"]],
                 fields=item["fields"],
                 collection_ids=[collection],
-                raw={"login": {"password": item["password"]}},
+                raw={"login": {"password": item["password"]}, "notes": item.get("notes", "")},
             )
         )
         return self.items[-1].id
@@ -172,6 +173,34 @@ class VaultSyncTests(unittest.TestCase):
         with patch("ctl.vault_sync._state", return_value={"collections": {OWNER["uid"]: "c0"}}):
             self.sync(org, [OWNER])
         self.assertEqual(org.collections_by_id, {"c0": "Mu3Lab app logins"})
+
+    def test_every_administrator_gets_the_backup_password_and_members_never_do(self):
+        org = FakeOrg({"owner@example.test": STATUS_CONFIRMED})
+        self.sync(org, [OWNER])
+        saved = next(item for item in org.items if item.name == "Mu3Lab backup password")
+        stored = SecretStore(self.paths).get("platform", "backup-password")
+        self.assertEqual(vault_sync.session_password(saved, KEY), stored)
+        self.assertIn("docs/backup-recovery.md", saved.raw["notes"])
+        ids = [item.mu3lab_id for item in vault_sync.items_for(PARTNER, "host.ts.net", self.paths)]
+        self.assertNotIn("platform:backup-password", ids)
+
+    def test_administrators_get_logins_caddy_supplies_as_a_fallback(self):
+        (self.paths.projects / "kopia-ui").mkdir(parents=True)
+        (self.paths.projects / "kopia-ui" / ".env").write_text(
+            "KOPIA_SERVER_USERNAME=mu3lab-ui\nKOPIA_SERVER_PASSWORD=ui-secret\n"
+        )
+        items = {item.mu3lab_id: item for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)}
+        login = items["service:kopia-ui"]
+        self.assertEqual(
+            (login.username, login.password, login.url), ("mu3lab-ui", "ui-secret", "https://host.ts.net:8470")
+        )
+        partner = [item.mu3lab_id for item in vault_sync.items_for(PARTNER, "host.ts.net", self.paths)]
+        self.assertNotIn("service:kopia-ui", partner)
+
+    def test_no_backup_password_is_saved_when_the_repository_lost_it(self):
+        with patch("ctl.vault_sync.backups.repository_password", side_effect=backups.BackupError("missing")):
+            ids = [item.mu3lab_id for item in vault_sync.items_for(OWNER, "host.ts.net", self.paths)]
+        self.assertNotIn("platform:backup-password", ids)
 
     def test_members_never_receive_administrator_logins(self):
         items = vault_sync.items_for(PARTNER, "host.ts.net", self.paths)

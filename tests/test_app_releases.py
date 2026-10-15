@@ -118,6 +118,8 @@ class ApprovalTests(_Machine):
                 "approved_version": "v3.23.0",
                 "update_available": True,
                 "supporting_only": False,
+                "added_services": [],
+                "removed_services": [],
             },
         )
 
@@ -189,3 +191,56 @@ class RecordTests(_Machine):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReleaseIdentityTests(_Machine):
+    """R11: the deployment, not its version label, is what history and backups name."""
+
+    PG_A = "postgres:16@sha256:aaa"
+    PG_B = "postgres:16@sha256:bbb"
+
+    def test_same_version_with_different_supporting_images_are_two_releases(self):
+        first = Release("v3.22.0", {"mealie": OLD, "postgres": self.PG_A})
+        second = Release("v3.22.0", {"mealie": OLD, "postgres": self.PG_B})
+        self.assertNotEqual(first.id, second.id)
+        app_releases.write("mealie", first)
+        app_releases.write("mealie", second)
+        self.assertEqual(app_releases.from_history("mealie", release_id=first.id), first)
+        self.assertEqual(app_releases.from_history("mealie", release_id=second.id), second)
+        with self.assertRaises(app_releases.AmbiguousRelease):
+            app_releases.from_history("mealie", "v3.22.0")
+
+    def test_the_variant_and_definition_are_part_of_the_identity(self):
+        cpu = Release("v1", {"app": OLD})
+        self.assertNotEqual(cpu.id, Release("v1", {"app": OLD}, variant="nvidia").id)
+        self.assertNotEqual(cpu.id, Release("v1", {"app": OLD}, definition="changed").id)
+        self.assertEqual(cpu.id, Release("v2-label-only", {"app": OLD}).id)
+
+    def test_a_gpu_install_records_its_override_images_and_variant(self):
+        self.approve("v3.22.0", {"mealie": OLD})
+        gpu = {"services": {"mealie": {"image": "ghcr.io/mealie-recipes/mealie:v3.22.0-cuda@sha256:gpu"}}}
+        for directory in (self.root / "apps" / "mealie", self.project):
+            (directory / "docker-compose.nvidia.yml").write_text(yaml.safe_dump(gpu), encoding="utf-8")
+        self.copy_definition()
+        app_releases.pin(self.service, self.root, lambda _line: None, gpu_mode="nvidia")
+        installed = app_releases.installed(self.service, self.root)
+        self.assertEqual(installed.variant, "nvidia")
+        self.assertEqual(installed.images["mealie"], gpu["services"]["mealie"]["image"])
+        # The approved release for that variant is the same deployment, so nothing is offered.
+        self.assertEqual(app_releases.approved(self.service, self.root, "nvidia").id, installed.id)
+        self.assertFalse(self.status()["update_available"])
+
+    def test_an_update_that_drops_a_service_says_so(self):
+        app_releases.write("mealie", Release("v3.22.0", {"mealie": OLD, "redis": "redis:7@sha256:r"}))
+        self.approve("v3.23.0", {"mealie": NEW})
+        status = self.status()
+        self.assertTrue(status["update_available"])
+        self.assertEqual(status["removed_services"], ["redis"])
+
+    def test_history_written_before_release_ids_is_still_read(self):
+        from ctl.store import records
+
+        records.put("app-releases", "mealie", {"v3.21.0": {"mealie": OLD}}, self.paths)
+        legacy = app_releases.from_history("mealie", "v3.21.0")
+        self.assertEqual(legacy, Release("v3.21.0", {"mealie": OLD}))
+        self.assertEqual(app_releases.from_history("mealie", release_id=legacy.id), legacy)

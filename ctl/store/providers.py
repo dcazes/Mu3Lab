@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from ctl.provider_catalog import get
 from ctl.runtime import RuntimePaths
-from ctl.secret_file import serialized
+from ctl.store import db
 from ctl.store.secrets import SecretError as ProviderSecretError
 from ctl.store.secrets import SecretStore
 
@@ -28,7 +28,7 @@ def _write(records: list[dict[str, str]], paths: RuntimePaths) -> None:
         store.put("provider", str(record.get("job_id") or record["id"]), record)
 
 
-@serialized("provider-secrets.lock")
+@db.transactional
 def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = RuntimePaths()) -> dict[str, str]:
     """Upsert one credential and return metadata only."""
     provider = get(provider_id)
@@ -53,7 +53,7 @@ def save(provider_id: str, label: str, api_key: str, paths: RuntimePaths = Runti
     return {"id": provider_id, "label": label, "updated_at": record["updated_at"]}
 
 
-@serialized("provider-secrets.lock")
+@db.transactional
 def delete(provider_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     """Delete one credential atomically without exposing any other record."""
     records = _read(paths)
@@ -64,7 +64,7 @@ def delete(provider_id: str, paths: RuntimePaths = RuntimePaths()) -> bool:
     return True
 
 
-@serialized("provider-secrets.lock")
+@db.transactional
 def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     """Return provider ids and labels only; never return encrypted values."""
     return [
@@ -74,7 +74,7 @@ def metadata(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     ]
 
 
-@serialized("provider-secrets.lock")
+@db.transactional
 def records(paths: RuntimePaths = RuntimePaths()) -> list[dict[str, str]]:
     """Return private records for Mu3Lab's internal configuration renderer.
 

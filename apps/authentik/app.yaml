@@ -4,7 +4,7 @@ capabilities: [identity_provider]
 name: Authentik
 tier: foundation
 group: infrastructure
-category: infrastructure
+category: system
 tagline: Single sign-on for your apps
 summary: Manages user accounts and access to Mu3Lab. Authentik provides a shared sign-in for compatible apps and
   an additional sign-in gate for selected services.
@@ -19,6 +19,7 @@ service:
 route:
   https_port: 443
   caddy_port: 19461
+  access: open  # its real route is hand-reviewed in apps/ingress/Caddyfile
   generated: false
 sign_in:
   method: local

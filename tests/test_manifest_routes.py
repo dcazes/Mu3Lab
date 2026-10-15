@@ -22,10 +22,32 @@ FIXTURES = Path(__file__).parent / "fixtures/routes"
 
 class ManifestRoutesTests(unittest.TestCase):
     def test_reviewed_routes_match_golden_files(self):
-        apps = ("mealie", "surfsense", "baby-buddy", "actual-budget", "litellm", "grocy", "beaver-habits", "dawarich")
+        apps = (
+            "mealie",
+            "surfsense",
+            "baby-buddy",
+            "actual-budget",
+            "litellm",
+            "grocy",
+            "beaver-habits",
+            "dawarich",
+            "kopia-ui",
+        )
         for app_id in apps:
             with self.subTest(app=app_id):
                 self.assertEqual(_block(load().get(app_id)) + "\n", (FIXTURES / (app_id + ".caddy")).read_text())
+
+    def test_a_route_must_say_who_may_open_it(self):
+        # Review A-L2: leaving access out no longer publishes the app ungated.
+        from pydantic import ValidationError
+
+        from ctl.manifest.models import Route
+
+        with self.assertRaises(ValidationError):
+            Route.model_validate({"https_port": 8450, "caddy_port": 19467})
+        self.assertEqual(
+            Route.model_validate({"https_port": 8450, "caddy_port": 19467, "access": "gate"}).access, "gate"
+        )
 
     def test_shared_code_has_no_app_id_literals(self):
         self.assertEqual(violations(), [])

@@ -76,3 +76,16 @@ class RunPrivilegedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SudoSessionTests(unittest.TestCase):
+    def test_sudo_runs_in_the_terminals_session_and_other_commands_do_not(self):
+        from unittest.mock import patch
+
+        from ctl import privilege
+
+        with patch.object(privilege.process, "run", return_value=privilege.process.Result("ok", 0, "", "", "")) as run:
+            privilege._exec(["sudo", "-n", "true"])
+            self.assertFalse(run.call_args.kwargs["own_session"])
+            privilege._exec(["docker", "ps"])
+            self.assertTrue(run.call_args.kwargs["own_session"])

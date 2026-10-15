@@ -1,0 +1,35 @@
+name: mu3lab-navidrome
+
+services:
+  navidrome:
+    image: deluan/navidrome:0.64.2@sha256:38dc2727bfcfd5ede290f8ada114fc90368146f265ae4701ddddbcbe2a44ee52
+    restart: unless-stopped
+    ports: ["127.0.0.1:4533:4533"]
+    environment:
+      ND_BASEURL: ""
+      ND_PASSWORDENCRYPTIONKEY: ${ND_PASSWORDENCRYPTIONKEY:?ND_PASSWORDENCRYPTIONKEY is required}
+      # Caddy passes the person Authentik admitted. Navidrome sits on a network of
+      # its own, so only Caddy (through the loopback port) can send this header.
+      ND_EXTAUTH_USERHEADER: X-Mu3lab-User
+      ND_EXTAUTH_TRUSTEDSOURCES: 0.0.0.0/0,::/0
+      ND_EXTAUTH_LOGOUTURL: ${NAVIDROME_PUBLIC_URL:?NAVIDROME_PUBLIC_URL is required}/outpost.goauthentik.io/sign_out
+      # No anonymous usage reports to Navidrome's developers.
+      ND_ENABLEINSIGHTSCOLLECTOR: "false"
+      # Files added through Nextcloud appear within seconds; a full scan runs hourly as well.
+      ND_SCANNER_SCHEDULE: "@every 1h"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/navidrome/data:/data
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/navidrome/music:/music:ro
+    networks: [navidrome]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4533/ping"]
+      timeout: 5s
+      start_period: 200s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
+
+networks:
+  navidrome: {}

@@ -79,12 +79,27 @@ def write_atomic(path: Path, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+        _sync_directory(path.parent)
     except BaseException:
         try:
             os.unlink(temporary)
         except FileNotFoundError:
             pass
         raise
+
+
+def _sync_directory(directory: Path) -> None:
+    """Make the rename itself survive a power cut."""
+    try:
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
 
 
 P = ParamSpec("P")

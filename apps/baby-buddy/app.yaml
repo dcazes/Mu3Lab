@@ -4,7 +4,7 @@ capabilities: [care]
 name: Baby Buddy
 tier: optional
 group: apps
-category: family
+category: home
 tagline: Baby feeding, sleep, and diaper tracker
 summary: A shared baby-care tracker for feedings, sleep, diaper changes, pumping, and growth. Caregivers can record
   daily routines and review trends from a common activity history.

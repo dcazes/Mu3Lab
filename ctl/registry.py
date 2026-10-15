@@ -55,6 +55,7 @@ class Service:
     ui: dict[str, Any]
     mobile: dict[str, Any]
     uses_gpu: bool
+    stop_warning: str = ""
 
     @property
     def route(self) -> str:
@@ -77,6 +78,8 @@ class Service:
             "category": self.category,
             "group": self.group,
             "lifecycle": self.lifecycle,
+            "stop_warning": self.stop_warning,
+            "parts": {str(key): str(value) for key, value in dict(self.ui.get("parts") or {}).items()},
             "https_port": self.https_port,
             "private_https_port": self.private_https_port,
             "proxy_port": self.proxy_port,
@@ -110,9 +113,10 @@ class Service:
 
 
 def _lifecycle(manifest: AppManifest) -> str:
-    if not manifest.service.stoppable or manifest.tier == "foundation":
+    # Only what the manifest marks unstoppable (the sign-in and the private proxy) stays always on.
+    if not manifest.service.stoppable:
         return "always_on"
-    return "shared" if manifest.tier == "core" else "optional"
+    return "optional" if manifest.tier == "optional" else "shared"
 
 
 def _health(manifest: AppManifest) -> dict[str, Any]:
@@ -152,6 +156,7 @@ def service_from(manifest: AppManifest) -> Service:
         ui={**manifest.ui.model_dump(), "authentication": _AUTH[manifest.sign_in.method]},
         mobile=manifest.mobile.model_dump(mode="json") if manifest.mobile else {},
         uses_gpu=manifest.service.uses_gpu,
+        stop_warning=manifest.service.stop_warning,
     )
 
 

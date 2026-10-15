@@ -6,6 +6,7 @@ import { bytes, duration } from '../../lib/format';
 import { Link } from '../../lib/router';
 import { stateLabel, stateTone, type Tone } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
+import { ResourceCharts } from './ResourceCharts';
 
 interface Row {
   key: string;
@@ -36,7 +37,8 @@ interface Group {
 }
 
 const SECURITY = ['ingress', 'authentik', 'tailscale', 'vaultwarden'];
-const AI = ['ollama', 'litellm', 'freellmapi', 'firecrawl'];
+// The model runner leads and the household chat app is the fourth AI row, so each group fills one row of four.
+const AI = ['litellm', 'freellmapi'];
 const SYSTEM_PAGE = '/settings/system';
 const RANK: Record<Tone, number> = { green: 0, gray: 0, blue: 1, amber: 2, red: 3 };
 
@@ -98,7 +100,7 @@ function healthSummary(rows: Row[]): string {
   return healthy === total ? `${total}/${total} healthy` : `${healthy}/${total} running`;
 }
 
-function buildGroups(system: SystemResponse, services: Service[]): Group[] {
+function buildGroups(system: SystemResponse, services: Service[], runner: string, chatApp: string): Group[] {
   const memory = system.container_memory || {};
   const pick = (ids: string[]) =>
     ids
@@ -129,17 +131,19 @@ function buildGroups(system: SystemResponse, services: Service[]): Group[] {
       status: system.docker_ready ? 'Running' : 'Not reachable',
       to: SYSTEM_PAGE,
     },
-    {
+  ];
+  // A running worker is the normal case; it earns a row only when something is wrong.
+  if (worker !== 'active')
+    systemRows.push({
       key: 'worker',
       label: 'Background worker',
       tone: workerTone,
-      status: worker === 'active' ? 'Running' : worker.charAt(0).toUpperCase() + worker.slice(1),
+      status: worker.charAt(0).toUpperCase() + worker.slice(1),
       detail: workerTone === 'red' ? 'Installs and repairs wait until it runs again.' : '',
       to: SYSTEM_PAGE,
-    },
-  ];
+    });
   const security = pick(SECURITY);
-  const ai = pick(AI);
+  const ai = pick([runner, ...AI, chatApp].filter(Boolean));
   const figures = (rows: Row[]) => rows.filter((row) => row.value).map((row) => `${row.label} ${row.value}`);
   return [
     {
@@ -190,7 +194,7 @@ export function SystemStatus() {
   const [open, setOpen] = useState<string | null>(null);
   const { system } = data;
   if (!system.ok) return null;
-  const groups = buildGroups(system, data.services.services);
+  const groups = buildGroups(system, data.services.services, data.model_runner || '', data.chat.app_id || '');
   const expanded = groups.find((group) => group.key === open);
   return (
     <section className="status-strip" aria-label="System status">
@@ -218,12 +222,26 @@ export function SystemStatus() {
           <span className="status-meta">Up {duration(system.uptime_seconds ?? undefined)}</span>
         )}
       </div>
-      {expanded && (
-        <ul className="status-panel" id={`status-panel-${expanded.key}`} aria-label={`${expanded.label} details`}>
-          {expanded.rows.map((row) => (
-            <DetailRow key={row.key} row={row} />
-          ))}
-        </ul>
+      {expanded?.key === 'system' ? (
+        // Memory and disk become the donuts; CPU, Docker and the worker stay as rows beside them.
+        <div className="status-panel status-panel-system" id="status-panel-system">
+          <ResourceCharts />
+          <ul className="status-side" aria-label="System details">
+            {expanded.rows
+              .filter((row) => row.key !== 'memory' && row.key !== 'disk')
+              .map((row) => (
+                <DetailRow key={row.key} row={row} />
+              ))}
+          </ul>
+        </div>
+      ) : (
+        expanded && (
+          <ul className="status-panel" id={`status-panel-${expanded.key}`} aria-label={`${expanded.label} details`}>
+            {expanded.rows.map((row) => (
+              <DetailRow key={row.key} row={row} />
+            ))}
+          </ul>
+        )
       )}
     </section>
   );

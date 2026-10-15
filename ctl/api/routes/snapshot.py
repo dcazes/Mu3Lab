@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ctl import bootstrap_state
+from ctl import backup_service, bootstrap_state, local_models
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.routes import chat, jobs, system
 from ctl.api.security import Member
 from ctl.api.service_view import service_snapshot
+from ctl.status import signals
 from ctl.store import db
 
 router = APIRouter(prefix="/api/v1", tags=["snapshot"], route_class=ContractRoute)
@@ -17,6 +18,9 @@ router = APIRouter(prefix="/api/v1", tags=["snapshot"], route_class=ContractRout
 
 @router.get("/snapshot", response_model=models.SnapshotResponse, response_model_exclude_none=True)
 def snapshot(person: Member) -> models.SnapshotResponse:
+    # Someone is looking: the worker keeps statuses fresh while this continues.
+    signals.viewed()
+
     def read() -> dict:
         return {
             "services": service_snapshot(person),
@@ -28,6 +32,8 @@ def snapshot(person: Member) -> models.SnapshotResponse:
             "core": jobs.core_setup(person),
             "provisioning": system.provisioning(person),
             "audit": jobs.audit(person) if person.get("is_admin") else {"ok": True, "available": False, "events": []},
+            "backup_attention": backup_service.attention() if person.get("is_admin") else [],
+            "model_runner": local_models.runner().id,
         }
 
     path = db.database()

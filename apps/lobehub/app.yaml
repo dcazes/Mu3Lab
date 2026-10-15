@@ -1,13 +1,14 @@
 # LobeChat — see ctl/manifest/models.py for every field.
 id: lobehub
 name: LobeChat
-tier: core
+tier: optional
 capabilities: [chat]
 group: ai
 category: ai
-tagline: Chat with your AI models
+tagline: A second chat app, with app assistants
 summary: An AI chat workspace for conversations, assistants, and connected tools. Mu3Lab connects LobeChat to configured
-  models through LiteLLM and stores conversation history on your server.
+  models through LiteLLM and stores conversation history on your server. Choose it as the household chat in Settings >
+  AI instead of Open WebUI.
 version: v2.2.18
 upstream: lobehub/lobehub
 depends_on:
@@ -71,7 +72,6 @@ env:
   FEATURE_FLAGS: '-provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage'
   AUTH_DISABLE_EMAIL_PASSWORD: '1'
   OPENAI_PROXY_URL: http://litellm:4000/v1
-  OPENAI_MODEL_LIST: -all,+mu3lab-chat
   LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
 rules:
 - rule: hide_model_providers
@@ -95,6 +95,8 @@ mobile:
     steps:
     - Open the private LobeChat URL on the phone and sign in with Authentik.
     - Use the browser menu to add LobeChat to the Home Screen or install the web app.
+chat:
+  workspace: lobe
 resource_guidance: Runs LobeChat, PostgreSQL, Redis, and private object storage. Expect moderate memory and disk
   use.
 setup_action: Connect LobeChat to LiteLLM and sign in with Authentik.

@@ -97,26 +97,52 @@ def _save_key(provider_id: str, label: str, api_key: str, operator: IdentityData
         definition = get_provider(provider_id) if provider_id else detect_provider(api_key)
         if definition is None:
             raise ValueError("Mu3Lab could not tell which provider this key is for. Choose the provider and try again.")
-        result = save(definition.id, label.strip() or definition.name, api_key)
     except (ValueError, TypeError) as exc:
         raise ApiError(400, str(exc)) from exc
-    warning = prefix_warning(definition.id, api_key)
-    control = ControlState.runtime()
-    if control:
-        control.set_provider(result["id"], result["label"], enabled=True, state="verifying")
     store = runtime.job_store()
-    job = store.create(
+    subject = runtime.mutation_subject(operator)
+    command = {"provider_id": provider_id, "label": label, "api_key": api_key}
+    previous = store.by_idempotency_key(
+        key or "",
         kind="wiring",
-        service_id=f"provider:{result['id']}",
+        service_id=f"provider:{definition.id}",
         action="save",
         actor=operator["username"],
-        detail=f"provider:{result['id']}",
-        idempotency_key=key,
+        actor_subject=subject,
+        namespace="providers.save",
+        request=command,
     )
-    if control:
-        control.set_provider(
-            result["id"], result["label"], enabled=True, state="verifying", attempted=True, job_id=str(job["id"])
-        )
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
+    warning = prefix_warning(definition.id, api_key)
+    control = ControlState.runtime()
+    result = {}
+
+    def prepare(_job_id: str) -> None:
+        result.update(save(definition.id, label.strip() or definition.name, api_key))
+
+    def commit_state(job_id: str) -> None:
+        if control:
+            control.set_provider(
+                result["id"], result["label"], enabled=True, state="verifying", attempted=True, job_id=job_id
+            )
+
+    job = store.create(
+        kind="wiring",
+        service_id=f"provider:{definition.id}",
+        action="save",
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="providers.save",
+        request=command,
+        detail=f"provider:{definition.id}",
+        idempotency_key=key,
+        prepare=prepare,
+        commit_state=commit_state,
+    )
+    if not result:
+        # Another equivalent request won between replay lookup and insertion.
+        return {"ok": True, "duplicate": True, "job": job}
     return {
         "ok": True,
         "provider": result,
@@ -137,11 +163,7 @@ async def save_provider(
     """Accept one provider key without ever echoing or logging its value.
 
     ``provider_id`` is optional: without it the provider is detected from the key."""
-    store = runtime.job_store()
     key = runtime.idempotency_key(request)
-    previous = store.by_idempotency_key(key or "")
-    if previous:
-        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
     payload = payload_model.model_dump()
     return models.JobResponse.model_validate(
         await run_in_threadpool(
@@ -173,24 +195,38 @@ def provider_models(provider_id: str, _operator: Member) -> models.ProviderModel
 def _queue_provider_action(
     provider_id: str, action: str, request: Request, operator: IdentityData
 ) -> dict[str, object]:
+    store = runtime.job_store()
+    subject = runtime.mutation_subject(operator)
+    key = runtime.idempotency_key(request)
     state = ControlState.runtime()
+    unsupported = False
     try:
         resolved_id = get_provider(provider_id).id
-    except ValueError as exc:
-        # Unsupported legacy rows can only be removed.
-        legacy = state.provider(provider_id) if state else None
-        if action != "remove" or not legacy or legacy.get("state") != "unsupported_legacy":
-            raise ApiError(404, str(exc)) from exc
+    except ValueError:
+        unsupported = True
         resolved_id = provider_id
-    if state is None or not state.provider(resolved_id):
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="wiring",
+        service_id=f"provider:{resolved_id}",
+        action=action,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="providers.actions",
+    )
+    if previous:
+        return {"ok": True, "duplicate": True, "job": previous}
+    connection = state.provider(resolved_id) if state else None
+    if connection is None or (unsupported and (action != "remove" or connection.get("state") != "unsupported_legacy")):
         raise ApiError(404, "provider connection does not exist")
-    store = runtime.job_store()
     try:
         job = store.create(
             kind="wiring",
             service_id=f"provider:{resolved_id}",
             action=action,
             actor=operator["username"],
+            actor_subject=subject,
+            namespace="providers.actions",
             detail=f"Operator requested provider {action}.",
             idempotency_key=runtime.idempotency_key(request),
         )

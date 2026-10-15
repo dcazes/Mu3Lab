@@ -56,6 +56,8 @@ class ServiceSpec(Model):
     health: Health = Health()
     start_timeout_seconds: int = Field(default=120, ge=10, le=3600)
     stoppable: bool = True
+    # Said in the Stop confirmation when stopping this app affects more than the app itself.
+    stop_warning: str = ""
     uses_gpu: bool = False
 
 
@@ -69,11 +71,21 @@ class BlockedPath(Model):
 
 
 class TokenBypass(Model):
-    """Requests carrying their own API token skip the Authentik gate (phone apps)."""
+    """Requests carrying their own API token skip the Authentik gate (phone apps).
+
+    An empty ``header`` means the app checks credentials on every request to
+    ``path`` itself (Subsonic phone apps send them in the query string).
+    """
 
     path: str
     header_prefix: str
     header: str = "Authorization"
+
+    @model_validator(mode="after")
+    def _prefix_needs_header(self) -> TokenBypass:
+        if not self.header and self.header_prefix:
+            raise ValueError("a token bypass without a header cannot have a header prefix")
+        return self
 
 
 class Redirect(Model):
@@ -84,13 +96,25 @@ class Redirect(Model):
     status: Literal[301, 302, 307, 308] = 302
 
 
+class UpstreamBasicAuth(Model):
+    """Caddy signs in to the app with its own login once Authentik has admitted the visitor.
+
+    Both values are the app's generated settings. The header is built when Caddy
+    starts and reaches it as an environment value, never written into the Caddyfile.
+    """
+
+    user_env: str
+    password_env: str
+
+
 class Route(Model):
     https_port: Port  # Tailscale Serve port on the tailnet hostname
     caddy_port: Port = Field(ge=19460, le=19499)  # loopback Caddy listener
+    # Required, so no app is published ungated by leaving it out (review A-L2).
     # open: plain proxy (the app signs people in itself, e.g. native OIDC).
     # gate: Authentik's outpost must admit the visitor first.
     # trusted_header: gate, then Caddy passes the verified username to the app.
-    access: Literal["open", "gate", "trusted_header"] = "open"
+    access: Literal["open", "gate", "trusted_header"]
     copy_identity_headers: tuple[str, ...] = ()
     trusted_header: str = "Remote-User"
     # What the trusted header carries: the Authentik username, or the email for
@@ -102,6 +126,7 @@ class Route(Model):
     forwarded_host: Literal["host", "hostport"] = "hostport"
     # Who Authentik admits through a gate: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"
+    upstream_basic_auth: UpstreamBasicAuth | None = None
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
     # apps/ingress/Caddyfile; every other route is generated from its manifest.
     generated: bool = True
@@ -273,6 +298,14 @@ class Assistant(Model):
 class Chat(Model):
     assistant: Assistant | None = None
     connectors: tuple[str, ...] = ()  # folder names under apps/<id>/connectors/
+    # For a chat app (capability "chat"): how Mu3Lab adds the app assistants (ctl.chat_ops).
+    workspace: Literal["", "lobe", "open_webui"] = ""
+
+
+class ModelRunner(Model):
+    """For a model runner (capability ``model_runner``): which API Mu3Lab drives (ctl.model_runners)."""
+
+    engine: Literal["ollama_api"]
 
 
 class CredentialField(Model):
@@ -388,6 +421,22 @@ class Integration(Model):
         return value
 
 
+# --- Backups ---------------------------------------------------------------------------
+
+
+class BackupSpec(Model):
+    """Whether the app's data folders are backed up.
+
+    Leave an app out only when its data can be fetched again and holds nothing
+    people made (downloaded AI models, caches); ``reason`` is shown to them.
+    """
+
+    include: bool = True
+    reason: str = ""
+    # Data folders (by name) left out because they are downloaded again (a map index); still removed on uninstall.
+    skip: tuple[str, ...] = ()
+
+
 # --- Media libraries -------------------------------------------------------------------
 
 
@@ -414,6 +463,8 @@ class Ui(Model):
     label: str = "Open"  # the dashboard's button text for opening the app
     path: str = ""
     unavailable_reason: str = ""
+    # Compose services worth naming on the app's page, by service name (Dawarich's Photon).
+    parts: dict[str, str] = Field(default_factory=dict)
 
 
 # --- The manifest -----------------------------------------------------------------------
@@ -426,7 +477,8 @@ class AppManifest(Model):
     # optional: the owner installs and removes it from the dashboard.
     tier: Literal["foundation", "core", "optional"]
     group: Literal["apps", "ai", "infrastructure"]
-    category: str
+    # Where Apps > Discover lists the app; the dashboard names and orders these (lib/services.ts).
+    category: Literal["finance", "home", "media", "documents", "places", "knowledge", "ai", "system"]
     tagline: str
     summary: str
     version: str  # the maintainer-approved release; image digests live in docker-compose.yml
@@ -435,6 +487,7 @@ class AppManifest(Model):
     depends_on: tuple[str, ...] = ()
     data_dir: str = ""  # folder under /srv/mu3lab/data; defaults to the app id
     media: tuple[MediaFolder, ...] = ()
+    backup: BackupSpec = BackupSpec()
     service: ServiceSpec
     route: Route | None = None
     sign_in: SignIn
@@ -445,6 +498,7 @@ class AppManifest(Model):
     integrates_with: tuple[Integration, ...] = ()
     rules: tuple[RuleRef, ...] = ()
     chat: Chat = Chat()
+    model_runner: ModelRunner | None = None
     mobile: Mobile | None = None
     ui: Ui = Ui()
     resource_guidance: str = ""
@@ -471,12 +525,17 @@ class AppManifest(Model):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":
             raise ValueError("a trusted_header route needs trusted_header sign-in")
+        if self.route and self.route.upstream_basic_auth and self.route.access == "open":
+            # The login it adds would be handed to anyone who reached the address.
+            raise ValueError("upstream_basic_auth needs a route Authentik guards")
         secret_names = [secret.env for secret in self.secrets]
         if len(secret_names) != len(set(secret_names)):
             raise ValueError("secret env names must be unique")
         clash = set(secret_names) & set(self.env)
         if clash:
             raise ValueError(f"env values may not overwrite generated secrets: {', '.join(sorted(clash))}")
+        if ("model_runner" in self.capabilities) != (self.model_runner is not None):
+            raise ValueError("a model runner (capability model_runner) declares model_runner.engine, and only it")
         return self
 
     @property

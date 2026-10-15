@@ -16,6 +16,7 @@ import { type CalendarRange, useCalendarEvents } from './useCalendarEvents';
 interface Draft {
   id?: string;
   revision?: string;
+  conflict?: string;
   title: string;
   start: string;
   end: string;
@@ -56,12 +57,13 @@ function nextcloudInstalled(nextcloud?: Service) {
  */
 export function CalendarView({
   nextcloud,
-  compact = false,
   header,
+  openSettings,
 }: {
   nextcloud?: Service;
-  compact?: boolean;
   header?: (controls: CalendarControls) => ReactNode;
+  /** Opens calendar settings (connecting Nextcloud). */
+  openSettings: () => void;
 }) {
   const [range, setRange] = useState<CalendarRange>(monthRange);
   const { result, state, loading, reload } = useCalendarEvents(range, nextcloud);
@@ -94,6 +96,7 @@ export function CalendarView({
     setDraft({
       id: event.id,
       revision: event.revision || undefined,
+      conflict: event.conflict || undefined,
       title: event.title,
       start: inputTime(event.start, event.all_day),
       end: inputTime(event.end, event.all_day),
@@ -138,9 +141,23 @@ export function CalendarView({
       setSaving(false);
     }
   };
+  const resolve = async (keep: 'mine' | 'server') => {
+    if (!draft?.id) return;
+    setSaving(true);
+    try {
+      await postJsonApi(`/api/v1/calendar/events/${draft.id}/resolve`, { keep });
+      setDraft(null);
+      toast.success(keep === 'mine' ? 'Your version is now in Nextcloud' : 'Kept the Nextcloud version');
+      await reload();
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      setSaving(false);
+    }
+  };
   const events: EventInput[] = (result?.events || []).map((event) => ({
     id: event.id,
-    title: event.title,
+    title: event.conflict ? `⚠ ${event.title}` : event.title,
     start: event.start,
     end: event.end,
     allDay: event.all_day,
@@ -150,7 +167,10 @@ export function CalendarView({
 
   const syncHint = nextcloudInstalled(nextcloud) ? (
     <>
-      <Link to="/settings/calendar">Connect Nextcloud</Link> to sync it to your phone.
+      <button type="button" className="link-button" onClick={openSettings}>
+        Connect Nextcloud
+      </button>{' '}
+      to sync it to your phone.
     </>
   ) : (
     <>
@@ -165,9 +185,15 @@ export function CalendarView({
         icon={CalendarDays}
         title={state === 'service_stopped' ? 'Nextcloud is stopped' : 'Reconnect your calendar'}
         action={
-          <LinkButton variant="primary" to={state === 'service_stopped' ? '/apps/nextcloud' : '/settings/calendar'}>
-            {state === 'service_stopped' ? 'Start Nextcloud' : 'Connect calendar'}
-          </LinkButton>
+          state === 'service_stopped' ? (
+            <LinkButton variant="primary" to="/apps/nextcloud">
+              Start Nextcloud
+            </LinkButton>
+          ) : (
+            <Button variant="primary" onClick={openSettings}>
+              Connect calendar
+            </Button>
+          )
         }
       >
         {state === 'authentication_expired'
@@ -179,13 +205,13 @@ export function CalendarView({
     );
   else
     content = (
-      <div className={`card calendar-card${compact ? ' calendar-compact' : ''}`}>
+      <div className="card calendar-card">
         {stale && (
           <Callout tone="warning" title="Showing your last sync">
             Nextcloud is temporarily unavailable.
           </Callout>
         )}
-        {local && !compact && (
+        {local && (
           <Callout title="Saved on Mu3Lab">
             Your events are kept here for now. {syncHint} Everything you add moves over automatically.
           </Callout>
@@ -200,7 +226,7 @@ export function CalendarView({
           customButtons={{ newEvent: { text: 'New event', click: () => draftAt(new Date()) } }}
           height="auto"
           fixedWeekCount={false}
-          dayMaxEvents={compact ? 2 : 3}
+          dayMaxEvents={3}
           events={events}
           datesSet={(info: DatesSetArg) => setRange({ start: info.startStr, end: info.endStr })}
           dateClick={(info: DateClickArg) => ready && draftAt(info.date)}
@@ -209,7 +235,6 @@ export function CalendarView({
             if (event) openEvent(event);
           }}
         />
-        {local && compact && <p className="calendar-note">Saved on Mu3Lab. {syncHint}</p>}
       </div>
     );
 
@@ -220,6 +245,24 @@ export function CalendarView({
       <Dialog open={Boolean(draft)} onClose={() => setDraft(null)} title={draft?.id ? 'Edit event' : 'New event'}>
         {draft && (
           <form className="form" onSubmit={save}>
+            {draft.conflict && (
+              <Callout
+                tone="warning"
+                title="Two versions of this event"
+                action={
+                  <div className="button-row">
+                    <Button size="sm" disabled={saving} onClick={() => void resolve('mine')}>
+                      Keep mine
+                    </Button>
+                    <Button size="sm" disabled={saving} onClick={() => void resolve('server')}>
+                      Use Nextcloud’s
+                    </Button>
+                  </div>
+                }
+              >
+                {draft.conflict} This one is yours, from Mu3Lab.
+              </Callout>
+            )}
             <label className="field">
               <span>Title</span>
               <input

@@ -27,6 +27,7 @@ from ctl.secrets import read_runtime_env
 
 TOKEN_ENV = "AUTHENTIK_BOOTSTRAP_TOKEN"
 DEFAULT_URL = "http://127.0.0.1:9001"
+DEFAULT_BRAND = "authentik-default"
 # An import is one synchronous transaction that took up to ~45s on a loaded
 # server. Abandoning it does not cancel it: it keeps its locks and the next
 # import queues behind it, so waiting is the only way to get a true answer.
@@ -152,6 +153,7 @@ class Authentik:
             ("/flows/instances/", "slug", "default-provider-authorization-implicit-consent"),
             ("/flows/instances/", "slug", "default-provider-invalidation-flow"),
             ("/crypto/certificatekeypairs/", "name", "authentik Self-signed Certificate"),
+            ("/core/brands/", "domain", DEFAULT_BRAND),
         )
         deadline = time.monotonic() + timeout
         while True:
@@ -174,6 +176,22 @@ class Authentik:
                 )
             time.sleep(min(2, remaining))
 
+    def remove_duplicate_default_brands(self) -> int:
+        """Delete extra brands named like Authentik's default; return how many.
+
+        Earlier Mu3Lab versions could create one before Authentik made its own,
+        and two brands with the same domain make every later import fail.
+        """
+        brands = list(self._all("/core/brands/", {"domain": DEFAULT_BRAND}))
+        if not any(brand.get("default") for brand in brands):
+            return 0
+        removed = 0
+        for brand in brands:
+            if brand.get("domain") == DEFAULT_BRAND and not brand.get("default"):
+                self.request("DELETE", f"/core/brands/{brand['brand_uuid']}/")
+                removed += 1
+        return removed
+
     # --- People ----------------------------------------------------------------
 
     def users(self, **filters: Any) -> list[dict[str, Any]]:
@@ -195,6 +213,26 @@ class Authentik:
     def recovery_link(self, pk: int, hours: int) -> str:
         data = self.request("POST", f"/core/users/{pk}/recovery/", json={"token_duration": f"hours={hours}"})
         return str(data["link"])
+
+    def end_sessions(self, username: str) -> int:
+        """Delete a person's Authentik browser sessions and their API/app-password tokens."""
+
+        def owned(item: dict[str, Any], field: str) -> bool:
+            # The filter is authoritative; an embedded owner, when present, must agree.
+            owner = item.get(field)
+            return not isinstance(owner, dict) or owner.get("username") == username
+
+        ended = 0
+        params = {"user__username": username}
+        for session in list(self._all("/core/authenticated_sessions/", params)):
+            if owned(session, "user"):
+                self.request("DELETE", f"/core/authenticated_sessions/{session['uuid']}/")
+                ended += 1
+        for token in list(self._all("/core/tokens/", params)):
+            if owned(token, "user_obj"):
+                self.request("DELETE", f"/core/tokens/{token['identifier']}/")
+                ended += 1
+        return ended
 
     def group(self, name: str, *, create: bool = True) -> dict[str, Any] | None:
         found = next((item for item in self._all("/core/groups/", {"name": name}) if item["name"] == name), None)

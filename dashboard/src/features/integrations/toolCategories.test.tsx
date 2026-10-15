@@ -60,20 +60,18 @@ describe('ToolCategories', () => {
     });
   });
 
-  it('asks for approval when a tool that changes data is switched on', async () => {
+  it('offers enabled writes only as requests requiring human approval', () => {
     const trashOn = server({
       categories: server().categories!.map((category) => ({ ...category, enabled: true })),
+      tools: server().tools.map((tool) => ({ ...tool, enabled: true })),
     });
     render(<ToolCategories server={trashOn} reload={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Trash/ }));
-    expect(screen.getByText('Asks you first')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('switch', { name: 'Delete assets' }));
-    await waitFor(() =>
-      expect(putJsonApi).toHaveBeenCalledWith(
-        '/api/v1/mcp/servers/immich-photo-manager/tools/delete_assets/permission',
-        { permission: 'needs_approval' },
-      ),
-    );
+    expect(screen.getByText('Requires approval')).toBeInTheDocument();
+    const writeSwitch = screen.getByRole('switch', { name: 'Delete assets' });
+    expect(writeSwitch).not.toBeDisabled();
+    expect(writeSwitch).toBeChecked();
+    expect(putJsonApi).not.toHaveBeenCalled();
   });
 
   it('keeps tools in a switched-off category from being switched on', () => {

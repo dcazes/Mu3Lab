@@ -6,8 +6,8 @@ tiny request per layer gives an exact figure without downloading anything.
 Docker's image store keeps both the compressed layer and its unpacked copy,
 so the space an app uses is close to the sum of the two.
 
-The worker measures sizes in the background (the web process never talks to
-Docker) and stores, per app, each layer and whether this server already has
+The worker measures sizes in the background, so a page load never waits on a
+registry, and stores, per app, each layer and whether this server already has
 it; the dashboard adds up any selection from that without double counting
 layers that apps share.
 """

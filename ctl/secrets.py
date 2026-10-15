@@ -50,7 +50,10 @@ def ensure_authentik_env(
                 if not values.get(key):
                     values[key] = value
                     added.append(key)
+                    # Canonical too, so a render before first start keeps it.
+                    store.put(scope, "env:" + key, value)
         values.pop("AUTHENTIK_TAG", None)
+        store.delete(scope, "env:AUTHENTIK_TAG")
         write_atomic(target, runtime_env_text(values).encode())
     return target, added
 
@@ -59,8 +62,10 @@ def clear_authentik_bootstrap(root: Path) -> None:
     target = root / "projects" / by_capability("identity_provider").id / ".env"
     with locked(target.with_suffix(".lock")):
         values = read_runtime_env(target)
-        values.pop("AUTHENTIK_BOOTSTRAP_EMAIL", None)
-        values.pop("AUTHENTIK_BOOTSTRAP_PASSWORD_HASH", None)
+        store = SecretStore(RuntimePaths(root))
+        for key in ("AUTHENTIK_BOOTSTRAP_EMAIL", "AUTHENTIK_BOOTSTRAP_PASSWORD_HASH"):
+            values.pop(key, None)
+            store.delete("app:" + by_capability("identity_provider").id, "env:" + key)
         write_atomic(target, runtime_env_text(values).encode())
 
 

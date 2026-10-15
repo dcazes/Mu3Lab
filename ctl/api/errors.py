@@ -9,6 +9,8 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse
 from pydantic import JsonValue, ValidationError
 
+from ctl.jobs import JobConflict
+
 
 class ApiError(Exception):
     """Raised by handlers and dependencies; rendered as `{"ok": false, "error": ...}`."""
@@ -67,7 +69,13 @@ def validation_error_handler(_request: Request, exc: Exception) -> JSONResponse:
 
 def response_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, (ResponseValidationError, ValidationError))
-    logging.getLogger(__name__).error("API response failed its contract: %s", _request.url.path)
+    # Field locations and error kinds only: values may be private.
+    fields = sorted(
+        {".".join(str(part) for part in error.get("loc", ())) + f" ({error.get('type', '')})" for error in exc.errors()}
+    )
+    logging.getLogger(__name__).error(
+        "API response failed its contract: %s: %s", _request.url.path, "; ".join(fields[:10])
+    )
     # Pydantic diagnostics include payloads; expose neither those values nor a traceback.
     message = "Mu3Lab returned incomplete information. Refresh and check the worker logs."
     return JSONResponse(
@@ -80,4 +88,26 @@ def response_error_handler(_request: Request, exc: Exception) -> JSONResponse:
         },
         status_code=500,
         headers={"Cache-Control": "no-store"},
+    )
+
+
+def job_conflict_handler(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, JobConflict)
+    message = (
+        "This request key was already used for a different request."
+        if exc.code == "idempotency_conflict"
+        else "Another operation is active for this resource."
+    )
+    recommendation = (
+        "Use a new key only for a new operation; retry the original request unchanged."
+        if exc.code == "idempotency_conflict"
+        else "Wait for the blocking job to finish or cancel it before requesting another operation."
+    )
+    return api_error_handler(
+        request,
+        ApiError(
+            409,
+            {"message": message, "code": exc.code, "recommended_action": recommendation},
+            blocking_job_id=exc.job_id,
+        ),
     )

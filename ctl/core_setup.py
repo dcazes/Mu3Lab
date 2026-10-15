@@ -19,12 +19,13 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions
+from ctl import actions, chat_ops, local_models, process
 from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
 from ctl.jobs import JobStore, redact
 from ctl.platform_apps import by_capability
+from ctl.provider_ops import CHECK_MODEL, PROBE_MAX_TOKENS
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
@@ -44,7 +45,7 @@ def capacity() -> dict:
         pass
     try:
         docker_ready = (
-            subprocess.run(actions.docker_argv(["docker", "info"]), capture_output=True, timeout=5).returncode == 0
+            process.completed(actions.docker_argv(["docker", "info"]), capture_output=True, timeout=5).returncode == 0
         )
     except (OSError, subprocess.SubprocessError):
         docker_ready = False
@@ -196,16 +197,34 @@ def _stream_chat_ok(url: str, payload: dict, headers: dict[str, str]) -> bool:
     return False
 
 
+CHAT_ATTEMPTS = 3
+
+
+def _chat_ok(payload: dict, headers: dict[str, str], *, sleep=time.sleep) -> bool:
+    """Stream one short chat, retrying a moment later if the providers stumble.
+
+    FreeLLMAPI already falls through its ranked models, so a failure here means
+    every model it tried failed at once, usually a brief outage at a provider.
+    """
+    for attempt in range(CHAT_ATTEMPTS):
+        if _stream_chat_ok("http://127.0.0.1:4000/v1/chat/completions", payload, headers):
+            return True
+        if attempt + 1 < CHAT_ATTEMPTS:
+            sleep(20)
+    return False
+
+
 EMBEDDING_ATTEMPTS = 4
 EMBEDDING_TIMEOUT = 120
 
 
-def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep) -> bool:
+def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep, dimensions: int = 0) -> bool:
     """Ask for one embedding, allowing for the model's first load into memory.
 
     The first request after Ollama starts loads the model, which can take well
     over a minute on a CPU; a short timeout reported a healthy install as failed.
     """
+    dimensions = dimensions or local_models.embedding_model().dimensions
     for attempt in range(EMBEDDING_ATTEMPTS):
         status, embedding = _http_json(
             "http://127.0.0.1:4000/v1/embeddings",
@@ -220,13 +239,31 @@ def _embedding_ok(headers: dict[str, str], *, sleep=time.sleep) -> bool:
         if (
             status == 200
             and isinstance(vector, list)
-            and len(vector) == 768
+            and len(vector) == dimensions
             and all(isinstance(value, (int, float)) for value in vector)
         ):
             return True
         if attempt + 1 < EMBEDDING_ATTEMPTS:
             sleep(10)
     return False
+
+
+def _stopped_service(runtime: RuntimePaths, service_ids: list[str]) -> str:
+    """Name the first checked service someone stopped from the dashboard, if any."""
+    control = ControlState.runtime(runtime)
+    if not control:
+        return ""
+    registry = load()
+    for service_id in service_ids:
+        if (control.installation(service_id) or {}).get("state") == "stopped":
+            return registry.get(service_id).name
+    return ""
+
+
+def _turned_off(runtime: RuntimePaths) -> str:
+    """Name a service the checks need that someone turned off from the dashboard."""
+    checked = [by_capability(name).id for name in ("model_proxy", "model_runner", "provider_gateway")]
+    return _stopped_service(runtime, [*checked, chat_ops.default_app().id])
 
 
 def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
@@ -237,35 +274,51 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
         return False, "LiteLLM did not expose its authenticated model registry"
     if not _http_ok("http://127.0.0.1:11434/api/tags"):
         return False, "Ollama model registry did not answer"
-    if not _http_ok("http://127.0.0.1:3211/__mu3lab_lobehub_health"):
-        return False, "LobeChat did not answer its private health endpoint"
-    lobehub = read_runtime_env(runtime.projects / by_capability("chat").id / ".env")
-    if not all(lobehub.get(key) for key in ("AUTH_AUTHENTIK_ID", "AUTH_AUTHENTIK_SECRET", "APP_URL")):
-        return False, "LobeChat's Authentik sign-in configuration is incomplete"
+    chat = chat_ops.default_app()
+    name = chat.manifest.name
+    health = load().get(chat.id).health
+    if health.get("kind") == "http" and not _http_ok(str(health["url"]), headers=health.get("headers") or {}):
+        return False, f"{name} did not answer its private health endpoint"
+    oidc = chat.manifest.sign_in.oidc
+    chat_env = read_runtime_env(runtime.projects / chat.id / ".env")
+    if oidc and not all(chat_env.get(key) for key in (oidc.env.client_id, oidc.env.client_secret)):
+        return False, f"{name}'s Authentik sign-in configuration is incomplete"
+    local = local_models.local_only(runtime)
     if not wiring["chat_configured"]:
+        if local:
+            return False, "Local only is on, but no local chat model is chosen"
         return False, "Waiting for at least one external inference-provider key"
-    if not _http_ok("http://127.0.0.1:3001/readyz"):
+    # Local only: chat goes to the local model and FreeLLMAPI holds no usable key, by design.
+    if not local and not _http_ok("http://127.0.0.1:3001/readyz"):
         return False, "FreeLLMAPI has no currently usable configured provider"
     headers = {"Authorization": f"Bearer {key}"}
     chat_payload = {
-        "model": "mu3lab-chat",
+        "model": CHECK_MODEL,
         "messages": [{"role": "user", "content": "Reply with OK."}],
-        "max_tokens": 4,
+        "max_tokens": PROBE_MAX_TOKENS,  # reasoning models think first; 4 tokens left them empty
         "temperature": 0,
     }
-    if not _stream_chat_ok("http://127.0.0.1:4000/v1/chat/completions", chat_payload, headers):
-        return False, "A streamed FreeLLMAPI chat request did not complete through LiteLLM"
+    if not _chat_ok(chat_payload, headers):
+        if local:
+            return (
+                False,
+                f"The local chat model did not answer a short streamed chat through LiteLLM ({CHAT_ATTEMPTS} tries).",
+            )
+        return False, (
+            f"No AI provider answered a short streamed chat through LiteLLM and FreeLLMAPI ({CHAT_ATTEMPTS} tries). "
+            "If your providers are working, run the check again in a few minutes."
+        )
     if not _embedding_ok(headers):
         return False, "The local embedding model did not return vectors through LiteLLM"
     host = tailnet_dns_name()
     if not host:
-        return False, "The private hostname disappeared before LobeChat route verification"
-    if 8457 not in tailnet_serve_ports():
-        return False, "LobeChat's private Tailscale route is not published"
+        return False, f"The private hostname disappeared before {name} route verification"
+    if chat.manifest.route and chat.manifest.route.https_port not in tailnet_serve_ports():
+        return False, f"{name}'s private Tailscale route is not published"
     return (
         True,
-        "Private LobeChat route, streamed chat and embeddings passed live checks. Authentik sign-in is configured; "
-        "it is confirmed the first time you sign in to LobeChat.",
+        f"Private {name} route, streamed chat and embeddings passed live checks. Authentik sign-in is configured; "
+        f"it is confirmed the first time you sign in to {name}.",
     )
 
 
@@ -320,8 +373,8 @@ def _run(
                     provisioning.update("core", "failed", detail=detail, error=detail)
             return
         if provisioning:
-            provisioning.update("core", "verified", detail="Core services and private integration checks passed.")
-            provisioning.update("verification", "verified", detail=detail)
+            _mark_verified(provisioning, "core", "Core services and private integration checks passed.")
+            _mark_verified(provisioning, "verification", detail)
         store.transition(
             job_id, "succeeded", actor=actor, detail="Core suite installed and passed application-level checks."
         )
@@ -338,7 +391,15 @@ def _run(
             provisioning.update("core", "failed", error="Core installation failed; see the core job for details.")
 
 
-def start(store: JobStore, actor: str, root: Path, idempotency_key: str | None = None) -> dict[str, str]:
+def start(
+    store: JobStore,
+    actor: str,
+    root: Path,
+    idempotency_key: str | None = None,
+    *,
+    actor_subject: str = "",
+    prepare=None,
+) -> dict[str, str]:
     """Queue core reconciliation; the persistent worker owns execution."""
     del root  # retained in the public call shape while release layout is migrated
     return store.create(
@@ -346,21 +407,38 @@ def start(store: JobStore, actor: str, root: Path, idempotency_key: str | None =
         service_id="core-suite",
         action="install",
         actor=actor,
+        actor_subject=actor_subject,
+        namespace="core.install",
+        prepare=prepare,
         detail="Reconcile the reviewed core platform",
         idempotency_key=idempotency_key,
     )
 
 
-def start_verify(store: JobStore, actor: str, idempotency_key: str | None = None) -> dict[str, str]:
+def start_verify(
+    store: JobStore, actor: str, idempotency_key: str | None = None, *, actor_subject: str = ""
+) -> dict[str, str]:
     """Queue contract verification without pulling or recreating services."""
     return store.create(
         kind="verification",
         service_id="core-suite",
         action="verify",
         actor=actor,
+        actor_subject=actor_subject,
+        namespace="core.verify",
         detail="Verify live core platform contracts",
         idempotency_key=idempotency_key,
     )
+
+
+def _mark_verified(provisioning: ProvisioningStore, phase_id: str, detail: str) -> None:
+    """Record a passing check, even when an earlier check of this phase failed.
+
+    A failed phase may only move on by being run again, so a passing re-check
+    is recorded as a run that then verified, never a jump from failed.
+    """
+    provisioning.update(phase_id, "running", detail=detail)
+    provisioning.update(phase_id, "verified", detail=detail)
 
 
 def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
@@ -368,6 +446,15 @@ def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
     store.transition(job_id, "running", actor=actor, detail="Live platform verification started.", step_id="verify")
     try:
         runtime = RuntimePaths()
+        # Turning an app off is a choice, not a broken setup: note it without raising a warning.
+        stopped = _turned_off(runtime)
+        if stopped:
+            detail = f"{stopped} is turned off. Start it from Apps to run these checks."
+            if provisioning:
+                provisioning.update("verification", "running", detail=detail)
+                provisioning.update("verification", "waiting_for_user", detail=detail)
+            store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+            return
         wiring = configure_wiring(runtime)
         ok, detail = _verify_platform(runtime, wiring)
         if not ok:
@@ -383,8 +470,8 @@ def _run_verify(store: JobStore, job_id: str, actor: str) -> None:
             )
             return
         if provisioning:
-            provisioning.update("core", "verified", detail="Core services remain configured and reachable.")
-            provisioning.update("verification", "verified", detail=detail)
+            _mark_verified(provisioning, "core", "Core services remain configured and reachable.")
+            _mark_verified(provisioning, "verification", detail)
         store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
     except (OSError, ValueError, RuntimeError) as exc:
         detail = "Platform verification failed safely: " + redact(str(exc))

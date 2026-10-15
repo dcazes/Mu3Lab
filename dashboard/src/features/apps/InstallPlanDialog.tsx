@@ -52,7 +52,11 @@ export function InstallPlanDialog({
   // Smallest first follows the sizes as they arrive, until the owner reorders by hand.
   const [manual, setManual] = useState<string[] | null>(null);
   const order = manual ?? smallestFirst(ids, sizes);
-  const [parallel, setParallel] = useState(savedParallel);
+  // The saved choice is a preference; it never offers more downloads at once than apps chosen.
+  const [preferred, setPreferred] = useState(savedParallel);
+  const [touched, setTouched] = useState(false);
+  const limit = Math.min(MAX_PARALLEL, order.length);
+  const parallel = Math.min(preferred, limit);
   const [dragging, setDragging] = useState('');
   const selection = sizes?.selection;
   const tooBig = !!selection && !!sizes?.free_bytes && selection.needed_disk_bytes > sizes.free_bytes;
@@ -63,7 +67,7 @@ export function InstallPlanDialog({
   };
   const install = () => {
     try {
-      localStorage.setItem(PARALLEL_KEY, String(parallel));
+      if (touched) localStorage.setItem(PARALLEL_KEY, String(parallel));
     } catch {
       /* the choice still applies to this install */
     }
@@ -126,16 +130,24 @@ export function InstallPlanDialog({
             ? `${bytes(selection.needed_bytes)} to download · about ${bytes(selection.needed_disk_bytes)} of disk space · ${bytes(sizes.free_bytes)} free`
             : 'Checking download sizes…'}
         </p>
-        <label className="install-parallel">
-          <span>Downloads at once</span>
-          <select value={parallel} onChange={(event) => setParallel(Number(event.target.value))}>
-            {Array.from({ length: MAX_PARALLEL }, (_, index) => index + 1).map((count) => (
-              <option key={count} value={count}>
-                {count}
-              </option>
-            ))}
-          </select>
-        </label>
+        {limit > 1 && (
+          <label className="install-parallel">
+            <span>Downloads at once</span>
+            <select
+              value={parallel}
+              onChange={(event) => {
+                setPreferred(Number(event.target.value));
+                setTouched(true);
+              }}
+            >
+              {Array.from({ length: limit }, (_, index) => index + 1).map((count) => (
+                <option key={count} value={count}>
+                  {count}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       {tooBig && (
         <Callout tone="danger" icon={AlertTriangle} title="Not enough free disk space">

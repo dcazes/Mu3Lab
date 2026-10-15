@@ -15,7 +15,9 @@ from ctl.integrations.authentik import Authentik
 from ctl.runtime import RuntimePaths
 
 
-class PeopleTests(unittest.TestCase):
+class AuthentikFixture:
+    """A fake Authentik REST API holding a small household."""
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -33,9 +35,10 @@ class PeopleTests(unittest.TestCase):
         runtime = patch("ctl.people.Authentik.runtime", return_value=client)
         runtime.start()
         self.addCleanup(runtime.stop)
-        paths = patch("ctl.people.RuntimePaths", return_value=RuntimePaths(Path(temporary.name)))
-        paths.start()
-        self.addCleanup(paths.stop)
+        for module in ("ctl.people", "ctl.access"):
+            paths = patch(f"{module}.RuntimePaths", return_value=RuntimePaths(Path(temporary.name)))
+            paths.start()
+            self.addCleanup(paths.stop)
 
     def _user(self, pk, username, groups):
         return {
@@ -85,6 +88,14 @@ class PeopleTests(unittest.TestCase):
             user.update(body)
             return httpx.Response(200, json=user)
         self.fail(f"Unexpected REST request: {request.method} {path}")
+
+
+class PeopleTests(AuthentikFixture, unittest.TestCase):
+    def test_new_install_owner_is_found_before_first_sign_in(self):
+        # Until the first sign-in, the owner is only in "authentik Admins".
+        owner = people.owner_identity()
+        self.assertEqual(owner and owner["owner_uid"], "uid-1")
+        self.assertEqual(owner and owner["email"], "owner@example.test")
 
     def test_listing_filters_service_users_and_outsiders(self):
         result = people.list_people()

@@ -3,6 +3,7 @@ name: mu3lab-open-webui
 services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.11.4@sha256:9591b13f13843c7721c2b8eaf7382846c81b3ffe126526d1888d1fed50c6a33f
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     ports: ["127.0.0.1:3212:8080"]
     environment:
@@ -27,7 +28,7 @@ services:
       OAUTH_ADMIN_ROLES: mu3lab-operators
       OAUTH_ALLOWED_ROLES: mu3lab-users,mu3lab-operators
       DEFAULT_USER_ROLE: user
-      # Models come only from LiteLLM; Ollama holds no chat models.
+      # Models come only from LiteLLM, which also routes the local model (mu3lab-local) and local only.
       ENABLE_OLLAMA_API: "false"
       OPENAI_API_BASE_URL: http://litellm:4000/v1
       OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
@@ -44,6 +45,11 @@ services:
       AUDIO_TTS_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
       AUDIO_TTS_MODEL: ${AUDIO_TTS_MODEL:-}
       AUDIO_TTS_VOICE: ${AUDIO_TTS_VOICE:-}
+      # Mu3Lab adds each operator's app assistants with its own administrator key; each
+      # person's tool connections and assistants are private to them, administrators included.
+      ENABLE_API_KEYS: "true"
+      BYPASS_ADMIN_ACCESS_CONTROL: "false"
+      MU3LAB_ADMIN_API_KEY: ${OPEN_WEBUI_ADMIN_API_KEY:?OPEN_WEBUI_ADMIN_API_KEY is required}
       ENABLE_VERSION_UPDATE_CHECK: "false"
       ENABLE_COMMUNITY_SHARING: "false"
     volumes:
@@ -52,10 +58,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
-      interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 60s
+      start_period: 510s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

@@ -14,9 +14,31 @@ import { MobileBar, Sidebar } from './shell/Sidebar';
 import { LoadingScreen, OfflineScreen, ServerErrorScreen, SignedOutScreen } from './shell/StatusScreens';
 import { DashboardProvider, useDashboard, useDashboardLoader } from './state/dashboard';
 
-// Heavier pages load on first visit so Home opens quickly.
-const CalendarPage = lazy(() => import('./features/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })));
-const SettingsPage = lazy(() => import('./features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+// The worker re-checks every five minutes while idle; allow for one late check.
+const STATUS_STALE_MS = 7 * 60 * 1000;
+
+// Heavier pages load after Home so it opens quickly; preloadPages fetches them soon after.
+const loadCalendar = () => import('./features/calendar/CalendarPage');
+const loadSettings = () => import('./features/settings/SettingsPage');
+const CalendarPage = lazy(() => loadCalendar().then((m) => ({ default: m.CalendarPage })));
+const SettingsPage = lazy(() => loadSettings().then((m) => ({ default: m.SettingsPage })));
+
+/** Fetch the lazy pages' code in the background, so opening one never flashes an empty page. */
+function preloadPages() {
+  const timer = window.setTimeout(() => {
+    void loadCalendar();
+    void loadSettings();
+  }, 2000);
+  return () => window.clearTimeout(timer);
+}
+
+const ToolApprovalPage = lazy(() =>
+  import('./features/approvals/ToolApprovalPage').then((m) => ({ default: m.ToolApprovalPage })),
+);
+
+const ToolApprovalsPage = lazy(() =>
+  import('./features/approvals/ToolApprovalPage').then((m) => ({ default: m.ToolApprovalsPage })),
+);
 
 export function Routes() {
   const path = usePath();
@@ -26,6 +48,9 @@ export function Routes() {
   const app = path.match(/^\/apps\/([^/]+)(?:\/([^/]+))?$/);
   if (app && data.services.services.some((service) => service.id === app[1]))
     return <AppDetailPage id={app[1]} tab={app[2] || 'overview'} />;
+  if (path === '/tool-approvals') return <ToolApprovalsPage />;
+  const approval = path.match(/^\/tool-approvals\/([0-9a-f]{32})$/);
+  if (approval) return <ToolApprovalPage id={approval[1]} />;
   if (path === '/chat') return <ChatPage />;
   if (path === '/calendar') return <CalendarPage />;
   const settings = path.match(/^\/settings\/([^/]+)$/);
@@ -39,13 +64,15 @@ export function Routes() {
 
 function Shell() {
   const { data, connection, errorStatus, failedSources, refresh } = useDashboard();
+  useEffect(preloadPages, []);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
   const observed = Date.parse(data.services.observed_at || '');
-  const statusStale = !Number.isFinite(observed) || now - observed > 30000;
+  // While nobody is busy the worker checks every five minutes, so only older than that is out of date.
+  const statusStale = !Number.isFinite(observed) || now - observed > STATUS_STALE_MS;
   const { preference, setPreference } = useTheme();
   const [searchOpen, setSearchOpen] = useState(false);
   const path = usePath();
@@ -56,7 +83,7 @@ function Shell() {
   return (
     <div className="shell">
       <Sidebar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
-      <MobileBar openSearch={() => setSearchOpen(true)} />
+      <MobileBar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
       <main className={path === '/chat' ? 'main main-full' : 'main'}>
         <div className="main-inner">
           {(statusStale || Boolean(failedSources?.length)) && (
@@ -75,7 +102,7 @@ function Shell() {
         </div>
       </main>
       <CommandPalette open={searchOpen} setOpen={setSearchOpen} setTheme={setPreference} />
-      <Toaster position="bottom-right" closeButton theme={preference} />
+      <Toaster position="bottom-right" closeButton duration={4000} theme={preference} />
     </div>
   );
 }

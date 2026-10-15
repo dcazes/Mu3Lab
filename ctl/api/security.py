@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
 
-from ctl import bootstrap_state
+from ctl import access, bootstrap_state
 from ctl.api.errors import ApiError
 from ctl.provisioning import ProvisioningStore
 from ctl.secrets import platform_values
@@ -29,6 +29,7 @@ OPERATOR_GROUPS = frozenset({"mu3lab-operators", "authentik Admins"})
 # Household members use the dashboard and every app; administration stays with operators.
 HOUSEHOLD_GROUP = "mu3lab-household"
 MEMBER_GROUPS = OPERATOR_GROUPS | {HOUSEHOLD_GROUP}
+DEACTIVATED = "This account has been deactivated."
 _EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -89,15 +90,22 @@ def mutation_allowed(request: Request) -> bool:
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
 
 
-def _record_operator_traversal() -> None:
-    # An operator request is machine evidence that Tailscale, Caddy, and
-    # Authentik are all in front of the dashboard.
+_traversal_recorded = False
 
+
+def _record_operator_traversal() -> None:
+    """Note, once, that an operator reached the dashboard through Tailscale, Caddy and Authentik.
+
+    The first operator request is the machine evidence; later ones add nothing,
+    so they skip the locked file write and the store reads (review A-L3), and
+    ``confirmed_at`` keeps meaning when it was first confirmed.
+    """
+    global _traversal_recorded
+    if _traversal_recorded:
+        return
     try:
-        bootstrap_state.confirm("dashboard_protection")
-    except OSError:
-        pass
-    try:
+        if "dashboard_protection" not in bootstrap_state.read():
+            bootstrap_state.confirm("dashboard_protection")
         store = ProvisioningStore.runtime()
         if store:
             current = {item["phase_id"]: item["actual_state"] for item in store.summary()["phases"]}
@@ -107,8 +115,9 @@ def _record_operator_traversal() -> None:
                     "verified",
                     detail="Authenticated operator session verified through Authentik.",
                 )
+        _traversal_recorded = True
     except (OSError, ValueError):
-        pass
+        pass  # tried again on the next operator request
 
 
 def resolve_identity(request: Request) -> IdentityData:
@@ -134,6 +143,15 @@ def resolve_identity(request: Request) -> IdentityData:
     authenticated = bool(username)
     operator = authenticated and bool(OPERATOR_GROUPS.intersection(groups))
     member = authenticated and bool(MEMBER_GROUPS.intersection(groups))
+    # An Authentik session can outlive a deactivation or demotion; Mu3Lab's own
+    # record of that change wins over whatever the session still claims.
+    held = access.hold(subject_id) if authenticated and subject_id else None
+    detail = ""
+    if held and held["kind"] == "deactivated":
+        operator = member = False
+        detail = DEACTIVATED
+    elif held and held["kind"] == "demoted":
+        operator = False
     if operator:
         _record_operator_traversal()
     return {
@@ -144,7 +162,8 @@ def resolve_identity(request: Request) -> IdentityData:
         "email": email,
         "display_name": display_name,
         "groups": list(groups),
-        "detail": (
+        "detail": detail
+        or (
             "Authenticated through Authentik."
             if member
             else "Tailnet access is private, but Authentik protection and operator role mapping are not configured yet."
@@ -173,10 +192,16 @@ def require_operator(identity: Identity) -> IdentityData:
 Operator = Annotated[IdentityData, Depends(require_operator)]
 
 
+def _not_member(identity: IdentityData) -> str:
+    if identity.get("detail") == DEACTIVATED:
+        return DEACTIVATED
+    return "Only someone in the household can do this. Sign in with your Mu3Lab account."
+
+
 def require_member(identity: Identity) -> IdentityData:
     """Anyone in the household, administrators included."""
     if not identity.get("writes_enabled"):
-        raise ApiError(403, "operator identity required")
+        raise ApiError(403, _not_member(identity), code="member_required")
     return identity
 
 
@@ -204,7 +229,7 @@ OperatorMutation = Annotated[IdentityData, Depends(require_operator_mutation)]
 def require_owner(identity: Member) -> IdentityData:
     """A household member whose Authentik subject is known, for their own resources."""
     if not identity.get("subject_id"):
-        raise ApiError(403, "operator identity required")
+        raise ApiError(403, "Mu3Lab could not tell who you are; sign in again.", code="member_required")
     return identity
 
 

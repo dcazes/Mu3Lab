@@ -22,7 +22,7 @@ interface Updates {
   reviewed_update: { version: string; release_url: string; notes?: string } | null;
 }
 
-/** Operator tools for testing a connection by hand; inputs and results are never stored. */
+/** Operator tools for testing a connection by hand; write inputs are encrypted until the approval reaches an outcome. */
 export function ToolConsole({ server }: { server: McpServer }) {
   const confirm = useConfirm();
   const { pending, run } = useAction();

@@ -25,11 +25,16 @@ def inventory(root: Path = ROOT) -> list[dict[str, str]]:
         for name, service in yaml.safe_load(path.read_text())["services"].items():
             if "build" not in service:
                 continue
+            build = service["build"]
+            context = build.get("context", ".") if isinstance(build, dict) else build
+            dockerfile = build.get("dockerfile", "Dockerfile") if isinstance(build, dict) else "Dockerfile"
+            context_path = (path.parent / context).resolve().relative_to(root.resolve()).as_posix()
             entries.append(
                 {
                     "name": path.parent.name,
                     "service": name,
-                    "context": path.parent.relative_to(root).as_posix(),
+                    "context": context_path,
+                    "dockerfile": str(Path(context_path) / dockerfile),
                     "compose": path.relative_to(root).as_posix(),
                     "image": "ghcr.io/dcazes/mu3lab-" + path.parent.name,
                 }

@@ -164,7 +164,7 @@ export function VaultSetupCard({ onSaved }: { onSaved?: () => void }) {
   const { data } = useDashboard();
   const [open, setOpen] = useState(false);
   const { pending, run } = useAction();
-  const status = useApi<VaultStatus>('/api/v1/vault/status', { interval: 30000 });
+  const status = useApi<VaultStatus>('/api/v1/vault/status');
   const automatic = status.data?.automatic;
   const people = automatic?.people || [];
   const saveNow = async () => {

@@ -4,7 +4,7 @@ capabilities: [travel]
 name: AdventureLog
 tier: optional
 group: apps
-category: travel
+category: places
 tagline: Travel journal and trip planner
 summary: A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations
   into collections, plan upcoming trips, and explore your travels on a map.
@@ -17,6 +17,7 @@ service:
 route:
   https_port: 8451
   caddy_port: 19468
+  access: open
 sign_in:
   method: oidc
   oidc:

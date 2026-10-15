@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from ctl import self_update
 from ctl.api import create_app
 from ctl.jobs import JobStore
+from ctl.runtime import RuntimePaths
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -95,7 +96,41 @@ class StatusTests(_Checkout):
         self.assertIn("no release remote", self.status()["blocked_reason"])
 
 
+class HistoryTests(_Checkout):
+    def test_each_release_lists_its_own_changes_newest_first(self):
+        self.commit("Approve Mealie v3.28.0")
+        git(self.copy, "pull", "--quiet", "--tags", "origin", "main")
+        releases = self_update.history(self.copy)
+        self.assertEqual([item["version"] for item in releases], ["1.0.2", "1.0.1"])
+        self.assertEqual(releases[0]["changes"], ["Approve Mealie v3.28.0"])
+        self.assertEqual(releases[1]["changes"], ["first"])
+
+    def test_a_development_copy_shows_its_latest_changes(self):
+        git(self.copy, "tag", "--delete", "v1.0.1")
+        releases = self_update.history(self.copy)
+        self.assertEqual(len(releases), 1)
+        self.assertEqual(releases[0]["version"], "")
+        self.assertEqual(releases[0]["changes"], ["first"])
+
+
 class UpdateTests(_Checkout):
+    def setUp(self):
+        super().setUp()
+        self.paths = RuntimePaths(Path(self.temp.name) / "runtime")
+        self.paths.state.mkdir(parents=True)
+        JobStore(self.paths.state / "mu3lab.db").jobs()  # creates the live control database
+        self.guards: list[tuple[str, dict]] = []
+        for target, value in (
+            ("ctl.self_update.RuntimePaths", {"return_value": self.paths}),
+            (
+                "ctl.self_update._start_guard",
+                {"side_effect": lambda _root, mode, plan, _log, _paths: self.guards.append((mode, plan)) or True},
+            ),
+        ):
+            patcher = patch(target, **value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def run_update(self, plan: dict, finish: dict | None = None, packages=None):
         calls: list[str] = []
         self.package_syncs: list[str] = []
@@ -165,13 +200,54 @@ class UpdateTests(_Checkout):
         self.assertEqual(calls, ["plan"])
         restart.assert_not_called()
 
-    def test_an_install_step_that_fails_points_to_the_terminal_without_restarting(self):
+    def test_an_install_step_that_fails_goes_back_to_the_running_version_by_itself(self):
+        before = git(self.copy, "rev-parse", "HEAD")
         self.commit("second")
         job, _calls, restart = self.run_update(
             {"ok": True, "unattended": [], "terminal": []}, {"ok": False, "error": "npm failed"}
         )
         self.assertEqual(job["error_code"], "install_failed")
         self.assertIn("npm failed", job["detail"])
+        self.assertIn("going back", job["detail"])
+        restart.assert_not_called()  # the guard stops, restores and starts the services itself
+        mode, plan = self.guards[0]
+        self.assertEqual((mode, plan["before"], plan["job_id"]), ("rollback", before, job["id"]))
+
+    def test_the_database_is_copied_before_anything_changes(self):
+        self.commit("second")
+        job, _calls, _restart = self.run_update({"ok": True, "unattended": ["service"], "terminal": []})
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        copy = self.paths.state / self_update.DATABASE_COPY
+        self.assertTrue(copy.is_file())
+        self.assertEqual(oct(copy.stat().st_mode & 0o777), "0o600")
+
+    def test_a_database_that_cannot_be_copied_stops_the_update_unchanged(self):
+        before = git(self.copy, "rev-parse", "HEAD")
+        self.commit("second")
+        (self.paths.state / "mu3lab.db").unlink()
+        job, calls, restart = self.run_update({"ok": True, "unattended": [], "terminal": []})
+        self.assertEqual(job["error_code"], "update_blocked")
+        self.assertEqual(git(self.copy, "rev-parse", "HEAD"), before)
+        self.assertEqual(calls, [])
+        restart.assert_not_called()
+
+    def test_a_finished_update_is_checked_after_the_restart(self):
+        self.commit("second")
+        job, _calls, restart = self.run_update({"ok": True, "unattended": ["service"], "terminal": []})
+        restart.assert_called_once()
+        mode, plan = self.guards[0]
+        self.assertEqual(mode, "verify")
+        self.assertEqual(plan["target"], "v1.0.2")
+        self.assertEqual(plan["units"], list(self_update.UNITS))
+        self.assertEqual(plan["env"]["MU3LAB_RUNTIME_ROOT"], str(self.paths.root))
+        self.assertIn("goes back", job["detail"])
+
+    def test_failed_guard_launch_does_not_claim_success_or_restart(self):
+        self.commit("second")
+        with patch.object(self_update, "_start_guard", return_value=False):
+            job, _calls, restart = self.run_update({"ok": True, "unattended": [], "terminal": []})
+        self.assertEqual(job["state"], "failed")
+        self.assertEqual(job["error_code"], "guard_failed")
         restart.assert_not_called()
 
     def test_nothing_to_do_when_already_up_to_date(self):

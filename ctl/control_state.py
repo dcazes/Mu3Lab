@@ -78,6 +78,14 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+class RevisionConflict(ValueError):
+    """The configuration changed since the caller read it."""
+
+    def __init__(self, current: int) -> None:
+        super().__init__("This configuration was changed by someone else; reload it and try again.")
+        self.current = current
+
+
 class ControlState:
     """SQLite-backed settings, service installation, and MCP runtime state."""
 
@@ -128,6 +136,30 @@ class ControlState:
                 (json.dumps(mode), now, actor),
             )
         return {"compute_mode": mode, "updated_at": now, "updated_by": actor}
+
+    def chat_app(self) -> str:
+        """The household chat app the owner chose; empty means the default (ctl.chat_ops)."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT value_json FROM system_config WHERE key = 'chat_app'").fetchone()
+        try:
+            value = json.loads(row["value_json"]) if row else ""
+        except (TypeError, ValueError):
+            value = ""
+        return value if isinstance(value, str) else ""
+
+    def set_chat_app(self, app_id: str, actor: str) -> None:
+        if not app_id or not actor:
+            raise ValueError("a chat app and an actor are required")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO system_config (key, value_json, updated_at, updated_by)
+                VALUES ('chat_app', ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
+                    updated_at = excluded.updated_at, updated_by = excluded.updated_by
+            """,
+                (json.dumps(app_id), _now(), actor),
+            )
 
     def vault_seeded(self) -> dict[str, Any]:
         """When the owner last saved Mu3Lab logins to Vaultwarden, if ever."""
@@ -491,10 +523,20 @@ class ControlState:
             )
         return self.initialization(service_id) or {}
 
-    def bump_config_revision(self, service_id: str) -> int:
+    def bump_config_revision(self, service_id: str, *, expected: int | None = None) -> int:
+        """Count one configuration change; with ``expected``, only if nobody else changed it first."""
         job_guard.checkpoint()
         now = _now()
         with self._connect() as conn:
+            if expected is not None:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT config_revision FROM service_installations WHERE service_id = ?", (service_id,)
+                ).fetchone()
+                current = int(row[0]) if row else 0
+                if current != expected:
+                    raise RevisionConflict(current)
             conn.execute(
                 """
                 INSERT INTO service_installations (service_id, state, config_revision, updated_at)

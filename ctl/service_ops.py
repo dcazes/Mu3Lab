@@ -2,26 +2,27 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 
 from ctl import actions, job_guard
-from ctl.compute import resolved_mode
+from ctl.app_settings import AppSettings
+from ctl.chat_ops import sync_agents
+from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
 from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
 from ctl.engine.rewire import rewire_consumers
 from ctl.jobs import JobStore
-from ctl.lifecycle import maintenance
+from ctl.lifecycle import app_control, compute_switch, maintenance
 from ctl.lifecycle.health import wait_healthy
-from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
+from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
 from ctl.lifecycle.uninstall import uninstall_application
-from ctl.lobehub_ops import sync_agents
 from ctl.mcp_ops import sync_application
 from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
+from ctl.secret_file import write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
 
 SUPPORTED_ACTIONS = frozenset(
@@ -34,9 +35,13 @@ SUPPORTED_ACTIONS = frozenset(
         "reset",
         "uninstall",
         "uninstall_delete_data",
-        "backup",
         "restore",
         "update",
+        "recover",
+        "keep_update",
+        "backup_stop",
+        "backup_start",
+        "switch_compute",
     }
 )
 UNINSTALL_ACTIONS = frozenset({"uninstall", "uninstall_delete_data"})
@@ -74,11 +79,12 @@ def reset_failed_application(service: Service, root: Path, log) -> tuple[bool, s
         except OSError as exc:
             return False, f"Temporary setup file could not be removed: {exc}"
     env_path = project / ".env"
+    settings = AppSettings(service.id)
+    settings.remove_generated(name for name in settings.generated() if name.startswith("MU3LAB_BOOTSTRAP_"))
     if env_path.is_file():
         values = read_runtime_env(env_path)
         values = {key: value for key, value in values.items() if not key.startswith("MU3LAB_BOOTSTRAP_")}
-        env_path.write_text(runtime_env_text(values), encoding="utf-8")
-        os.chmod(env_path, 0o600)
+        write_atomic(env_path, runtime_env_text(values).encode())
     return True, "Failed containers and temporary setup files removed; persistent data preserved."
 
 
@@ -91,7 +97,7 @@ def allowed_actions(service: Service, state: str) -> list[str]:
         return ["restart"] if service.stage != "optional" else ["retry_setup", "restart", *uninstall]
     if state == "stopped":
         return ["start", *uninstall]
-    if state in {"ready", "running", "starting", "configured", "installed"}:
+    if state in {"ready", "running", "starting", "configured", "installed", "checking", "stale"}:
         result = ["restart"]
         if service.lifecycle != "always_on":
             result.insert(0, "stop")
@@ -150,6 +156,30 @@ def _uninstall(
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
 
 
+def _switch_compute(
+    store: JobStore, state: ControlState | None, job: dict, service: Service, actor: str, root: Path
+) -> None:
+    """Move the app to the CPU or GPU build the compute mode now asks for (compute_switch)."""
+    job_id = str(job["id"])
+    log = _job_log(store, job_id)
+    running = app_control.was_running(state, service)
+    store.transition(
+        job_id, "running", actor=actor, detail=f"Switching {service.name}'s version.", step_id="compute_switch"
+    )
+
+    def step(name: str, detail: str) -> None:
+        _event(store, job_id, name, detail)
+
+    try:
+        detail = compute_switch.switch(service, root, log, step, running=running)
+    except compute_switch.SwitchFailed as failure:
+        _fail(store, state, job_id, service.id, actor, "compute_switch", failure.code, str(failure))
+        return
+    if state:
+        state.set_installation(service.id, "running" if running else "stopped", job_id=job_id, route_state="ready")
+    store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
     job_id = str(job["id"])
     service_id = str(job.get("service_id") or "")
@@ -189,8 +219,11 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
     if action in UNINSTALL_ACTIONS:
         _uninstall(store, state, job, service, registry, actor, root)
         return
-    if action in MAINTENANCE_ACTIONS:
+    if action in MAINTENANCE_ACTIONS | BACKUP_ACTIONS:
         maintenance.execute(store, state, job, service, root)
+        return
+    if action == "switch_compute":
+        _switch_compute(store, state, job, service, actor, root)
         return
     if action == "reset":
         if service.stage != "optional":
@@ -263,7 +296,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "An enabled MCP could not stop safely.",
         )
         return
-    compose = Compose(project, gpu_mode=resolved_mode() if service.uses_gpu else "cpu")
+    compose = Compose(project, gpu_mode=app_mode(project, service.uses_gpu))
     rc, output = compose.action(action, log)
     if rc:
         _fail(
@@ -296,6 +329,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             return
         if not sync_application(service.id, running=True, root=root, log=log):
             log("One enabled MCP needs attention after application start.")
+        if "chat" in service.manifest.capabilities:
+            # Open WebUI starts without Mu3Lab's tool connections; give them back now, not in five minutes.
+            sync_agents(log)
     if state:
         state.set_installation(service.id, target_state, job_id=job_id, route_state="ready")
     store.append_event(job_id, "step.completed", f"compose:{action}")

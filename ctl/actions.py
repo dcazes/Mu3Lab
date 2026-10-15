@@ -18,17 +18,14 @@ from __future__ import annotations
 
 import json as _json
 import os as _os
-import queue as _queue
 import shlex as _shlex
 import subprocess as _subprocess
-import threading as _threading
-import time as _time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import IO
 
-from ctl import job_guard, privilege
+from ctl import job_guard, privilege, process
 
 
 def _ok(log_lines: list[str], changed: bool = True, **extra) -> dict:
@@ -96,18 +93,10 @@ def docker_cmd_stdin(argv: list[str], data: str, log: Callable[[str], None], tim
     command = _docker_invocation(argv)
     if command is None:
         return 1, "docker unavailable: no live group and no DB membership"
-    try:
-        proc = _subprocess.run(
-            command,
-            input=data,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            env={**_os.environ, **_docker_config_env()},
-        )
-        return proc.returncode, (proc.stdout + proc.stderr).strip()
-    except (_subprocess.TimeoutExpired, OSError) as exc:
-        return 1, str(exc)
+    result = process.run(command, timeout=timeout, input=data, env={**_os.environ, **_docker_config_env()})
+    if result.status in {"timeout", "not_found", "error"}:
+        return 1, result.output
+    return result.returncode, result.output
 
 
 def _docker_invocation(argv: list[str]) -> list[str] | None:
@@ -166,57 +155,19 @@ def docker_cmd_stream(
     command_env = _docker_config_env()
     if env:
         command_env.update(env)
-    try:
-        proc = _subprocess.Popen(
-            command,
-            stdout=_subprocess.PIPE,
-            stderr=_subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env={**_os.environ, **command_env},
-        )
-    except OSError as exc:
-        return 126, f"{command[0]}: {exc}"
-    assert proc.stdout is not None
-    lines: list[str] = []
-    inbox: _queue.Queue[str | None] = _queue.Queue()
 
-    def read_output() -> None:
-        try:
-            for line in proc.stdout or ():
-                inbox.put(line.rstrip())
-        finally:
-            inbox.put(None)
-
-    reader = _threading.Thread(target=read_output, daemon=True)
-    reader.start()
-    deadline = _time.monotonic() + timeout
-    finished = False
-    while not finished:
-        remaining = deadline - _time.monotonic()
-        if remaining <= 0:
-            proc.kill()
-            proc.wait()
-            return 124, "docker compose timed out"
-        try:
-            line = inbox.get(timeout=min(1.0, remaining))
-        except _queue.Empty:
-            if proc.poll() is not None:
-                finished = True
-            continue
-        if line is None:
-            finished = True
-            continue
-        # Docker progress can be extremely verbose.  The complete command
-        # output remains diagnostic material, while a caller receives each
-        # bounded line promptly for a useful current-activity indicator.
-        line = line[:2000]
-        lines.append(line)
+    def forward(line: str) -> None:
+        # Docker progress can be extremely verbose. The runner caps each line
+        # and the number logged; the caller gets each line promptly for a
+        # useful current-activity indicator.
         log(line)
         if on_output:
             on_output(line)
-    rc = proc.wait()
-    return rc, "\n".join(lines).strip()
+
+    result = process.run(command, timeout=timeout, env={**_os.environ, **command_env}, on_line=forward)
+    if result.status == "timeout":
+        return 124, "docker compose timed out"
+    return result.returncode, result.output
 
 
 def docker_cmd_with_stdin(
@@ -236,25 +187,13 @@ def docker_cmd_with_stdin(
         return 1, (
             "docker unavailable: no live group and no DB membership (installer should have added you — report this)"
         )
-    try:
-        proc = _subprocess.Popen(
-            command,
-            stdin=_subprocess.PIPE,
-            stdout=_subprocess.PIPE,
-            stderr=_subprocess.STDOUT,
-            text=True,
-            env={**_os.environ, **_docker_config_env()},
-        )
-        output, _ = proc.communicate(stdin_data, timeout=timeout)
-    except _subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    result = process.run(command, timeout=timeout, input=stdin_data, env={**_os.environ, **_docker_config_env()})
+    if result.status == "timeout":
         return 124, "docker command timed out"
-    except OSError as exc:
-        return 126, f"{command[0]}: {exc}"
     # Callers provide secrets through stdin.  Do not let an unexpected child
     # echo turn a diagnostic into a credential leak.
-    return proc.returncode, output.replace(stdin_data, "[redacted]").strip()
+    output = result.output.replace(stdin_data, "[redacted]") if stdin_data else result.output
+    return result.returncode, output
 
 
 def _compose_project_command(projdir: Path, extra_files: list[Path] | None = None) -> list[str]:
@@ -529,36 +468,12 @@ def docker_load_stream(
     command = _docker_invocation(["docker", "load"])
     if command is None:
         return 1, "docker unavailable: no live group and no DB membership"
-    try:
-        proc = _subprocess.Popen(
-            command,
-            stdin=_subprocess.PIPE,
-            stdout=_subprocess.PIPE,
-            stderr=_subprocess.STDOUT,
-            env={**_os.environ, **_docker_config_env()},
-        )
-    except OSError as exc:
-        return 126, f"{command[0]}: {exc}"
-    chunks: list[bytes] = []
-    reader = _threading.Thread(target=lambda: chunks.append(proc.stdout.read() if proc.stdout else b""), daemon=True)
-    reader.start()
-    assert proc.stdin is not None
-    try:
-        write(proc.stdin)
-        proc.stdin.close()
-    except (BrokenPipeError, OSError):
-        pass
-    try:
-        rc = proc.wait(timeout=timeout)
-    except _subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    result = process.run(command, timeout=timeout, feed=write, env={**_os.environ, **_docker_config_env()})
+    if result.status == "timeout":
         return 124, "docker load timed out"
-    reader.join(timeout=10)
-    output = b"".join(chunks).decode("utf-8", "replace").strip()
-    for line in output.splitlines()[-5:]:
+    for line in result.output.splitlines()[-5:]:
         log(line[:500])
-    return rc, output
+    return result.returncode, result.output
 
 
 def docker_image_digest(image: str) -> tuple[int, str]:
@@ -657,7 +572,7 @@ def write_root_bytes(path: str, data: bytes, log: Callable[[str], None], mode: s
         gnupg_home = tmpdir / "gnupg"
         gnupg_home.mkdir(mode=0o700)
         try:
-            proc = _subprocess.run(
+            proc = process.completed(
                 ["gpg", "--batch", "--yes", "--dearmor", "--output", str(binary), str(armored)],
                 capture_output=True,
                 text=True,
@@ -800,7 +715,7 @@ def _tailscale_serve(
     # (`tailscale set --operator=<user>`). Try that supported unprivileged path
     # first so a background worker does not invoke a polkit dialog needlessly.
     try:
-        direct = _subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        direct = process.completed(argv, capture_output=True, text=True, timeout=60)
         direct_output = (direct.stdout + direct.stderr).strip()
         # Removing a port that is already gone is the goal, not a failure.
         if direct.returncode == 0 or (absent_ok and "does not exist" in direct_output.lower()):

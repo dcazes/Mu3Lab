@@ -1,4 +1,6 @@
 schema_version: 1
+data_scope: operator_only
+delegation: none
 server: nextcloud-context-agent
 revision: nextcloud-33-webdav
 reviewed_at: '2026-10-06'

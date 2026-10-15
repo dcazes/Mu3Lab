@@ -1,13 +1,13 @@
 # Open WebUI — see ctl/manifest/models.py for every field.
 id: open-webui
-capabilities: [web_chat]
+capabilities: [chat]
 name: Open WebUI
-tier: optional
+tier: core
 group: ai
 category: ai
-tagline: AI chat with voice and your documents
-summary: A full-featured AI chat workspace. Chat with Mu3Lab's models, talk and listen with local voice when Speech
-  is installed, and ask questions about your own documents.
+tagline: AI chat with your apps, voice and documents
+summary: Mu3Lab's chat. Chat with Mu3Lab's models, use an assistant for each of your apps, talk and listen with
+  local voice when Speech is installed, and ask questions about your own documents.
 version: v0.11.4
 upstream: open-webui/open-webui
 depends_on:
@@ -20,6 +20,7 @@ service:
 route:
   https_port: 8471
   caddy_port: 19488
+  access: open
 sign_in:
   method: oidc
   oidc:
@@ -36,6 +37,9 @@ account:
   user_action: Open Open WebUI; Authentik signs you in as its administrator.
 secrets:
 - env: OPEN_WEBUI_SECRET_KEY
+  length: 48
+# Mu3Lab's own administrator key: it adds each operator's app assistants (ctl/openwebui_ops.py).
+- env: OPEN_WEBUI_ADMIN_API_KEY
   length: 48
 env:
   OPEN_WEBUI_URL: '{{public_url}}'
@@ -67,7 +71,7 @@ rules:
     - '{{owner_json}}'
     expect: MU3LAB_OPEN_WEBUI_OWNER_OK
     needs_owner: true
-    purpose: Make your Authentik account Open WebUI's administrator
+    purpose: Make your Authentik account Open WebUI's administrator and register Mu3Lab's assistant key
 mobile:
   primary: open-webui-pwa
   clients:
@@ -90,5 +94,7 @@ mobile:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private Open WebUI address; Authentik signs you in.
     - Use the browser's share or menu button and choose Add to Home Screen.
+chat:
+  workspace: open_webui
 resource_guidance: Moderate; a few hundred MB of memory. Models run through LiteLLM, voice through Speech.
-setup_action: Install Open WebUI for a chat workspace with voice and document questions.
+setup_action: Connect Open WebUI to LiteLLM, sign in with Authentik, and add an assistant for each app.

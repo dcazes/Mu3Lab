@@ -33,7 +33,9 @@ export function useServiceActions(service: Service) {
       meta.confirm &&
       !(await confirm({
         title: `${meta.label} ${service.name}?`,
-        description: meta.confirm,
+        // Some apps reach further than themselves when stopped (Vaultwarden and Bitwarden).
+        description:
+          action === 'stop' && service.stop_warning ? `${meta.confirm} ${service.stop_warning}` : meta.confirm,
         confirmLabel: meta.label,
         tone: meta.danger ? 'danger' : 'primary',
       }))

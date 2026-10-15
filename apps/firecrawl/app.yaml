@@ -2,28 +2,21 @@
 id: firecrawl
 capabilities: [web_fetch]
 name: Firecrawl
-tier: core
+tier: optional
 group: ai
-category: research
+category: knowledge
 tagline: Turns web pages into AI-ready text
 summary: Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping
-  and crawling API and connects it to chat for web research.
+  and crawling API inside the server and connects it to chat for web research.
 version: v2.11.450
 upstream: firecrawl/firecrawl
 service:
   local_port: 3002
   health:
     path: /
-  stoppable: false
-route:
-  https_port: 8456
-  caddy_port: 19473
-  access: open
 sign_in:
   method: none
-  note: Firecrawl is an API service with no application login. Its route remains private to the tailnet.
-account:
-  user_action: No login is required on the private Firecrawl API route.
+  note: Internal-only web scraping API with no login; only chat's Firecrawl connector reaches it, inside the server.
 secrets:
 - env: POSTGRES_PASSWORD
 - env: RABBITMQ_DEFAULT_PASS
@@ -37,7 +30,8 @@ chat:
   connectors:
   - firecrawl-official
 ui:
-  label: Open API
+  available: false
+  unavailable_reason: Firecrawl is an internal API for chat's web research; it has no browser interface.
 resource_guidance: Runs Firecrawl workers, Playwright, RabbitMQ, PostgreSQL, and Redis. Browser crawls can use substantial
   memory; concurrency defaults are intentionally conservative.
 setup_action: Install the private Firecrawl API, queue workers, Playwright browser service, and durable data services.

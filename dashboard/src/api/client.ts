@@ -1,4 +1,4 @@
-export type ApiErrorKind = 'http' | 'signed_out' | 'offline';
+export type ApiErrorKind = 'http' | 'signed_out' | 'offline' | 'timeout';
 
 export class ApiError extends Error {
   constructor(
@@ -25,14 +25,35 @@ function forgetSession() {
   csrfToken = null;
 }
 
-async function request(path: string, init: RequestInit): Promise<Response> {
+// No request waits forever: a stuck one would otherwise hold the dashboard's refresh (review R22).
+export const READ_TIMEOUT_MS = 60_000;
+// Changes get longer, and a timed-out change may still finish; its idempotency key stops a repeat acting twice.
+export const CHANGE_TIMEOUT_MS = 300_000;
+
+async function request(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const deadline = new AbortController();
+  // Never cleared: it stays armed until the body is read too, then fires harmlessly.
+  setTimeout(() => deadline.abort(), timeoutMs);
+  const caller = init.signal;
+  const forward = () => deadline.abort();
+  caller?.addEventListener('abort', forward);
+  if (caller?.aborted) deadline.abort();
   let res: Response;
   try {
     // A manual redirect exposes Authentik's login redirect instead of an opaque CORS failure.
-    res = await fetch(path, { ...init, redirect: 'manual' });
+    res = await fetch(path, { ...init, signal: deadline.signal, redirect: 'manual' });
   } catch (cause) {
-    if (init.signal?.aborted) throw cause;
+    if (caller?.aborted) throw cause;
+    if (deadline.signal.aborted)
+      throw new ApiError(
+        init.method && init.method !== 'GET'
+          ? 'Mu3Lab did not answer in time. Check whether the change happened before trying again.'
+          : 'Mu3Lab did not answer in time.',
+        'timeout',
+      );
     throw new ApiError('Mu3Lab is unreachable.', 'offline');
+  } finally {
+    caller?.removeEventListener('abort', forward);
   }
   if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
     forgetSession();
@@ -59,8 +80,8 @@ async function failure(res: Response, method: string, path: string): Promise<Api
   return new ApiError(message, 'http', res.status, body);
 }
 
-export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await request(path, { headers: { Accept: 'application/json' }, signal });
+export async function api<T>(path: string, signal?: AbortSignal, timeoutMs = READ_TIMEOUT_MS): Promise<T> {
+  const res = await request(path, { headers: { Accept: 'application/json' }, signal }, timeoutMs);
   if (!res.ok) throw await failure(res, 'GET', path);
   return res.json() as Promise<T>;
 }
@@ -92,7 +113,11 @@ async function mutate<T>(method: string, path: string, body?: unknown, idempoten
     const headers: Record<string, string> = { Accept: 'application/json', 'X-Mu3Lab-CSRF': await csrf() };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-    return request(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    return request(
+      path,
+      { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
+      CHANGE_TIMEOUT_MS,
+    );
   };
   let res = await send();
   if (res.status === 403) {

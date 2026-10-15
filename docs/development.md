@@ -14,7 +14,8 @@ From an isolated development checkout:
 | `.venv/bin/python -m tools.dashboard check` | UI lint, formatting, type checks and tests |
 | `.venv/bin/python -m tools.dashboard build` | Build `dashboard/dist` for this checkout |
 | `make format` | Format Python and UI sources |
-| `make verify` | Run Python/UI checks and build the UI |
+| `make verify` | Every check that needs no network, then build the UI; CI runs exactly this |
+| `make verify-security` | Advisories (Python, dashboard, connectors), committed secrets, pinned images exist for x86-64; CI runs this too |
 
 The preview container uses the Linux host network, binds only loopback, and
 forwards API requests to the backend at `127.0.0.1:8787`. Run an isolated backend
@@ -26,6 +27,8 @@ Normal releases use `vMAJOR.MINOR.PATCH` tags. The release workflow first runs
 CI, builds all seven local connector/gateway images for amd64 and arm64, and
 publishes them to GHCR. It then builds the dashboard in the pinned container
 and publishes the dashboard archive, `release-images.json` and `SHA256SUMS`.
+Each published file and image carries a signed GitHub build record; check one
+with `gh attestation verify <file> --repo dcazes/Mu3Lab`.
 The immutable image manifest records each Compose service's published digest.
 Tagged runtime projects use those digests and remove local image builds.
 

@@ -1,6 +1,6 @@
-import { AlertTriangle, KeyRound, Plug, UserPlus } from 'lucide-react';
+import { AlertTriangle, Cpu, KeyRound, Plug, UserPlus } from 'lucide-react';
 import { useState } from 'react';
-import type { Service } from '../../api';
+import { postJsonApi, type Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { Callout, Card, Facts, PageHeader, Tabs } from '../../components/Layout';
@@ -8,8 +8,9 @@ import { Menu } from '../../components/Menu';
 import { Badge, Dot, StatusBadge } from '../../components/Status';
 import { CopyField } from '../../components/CopyField';
 import { humanize, relativeTime } from '../../lib/format';
+import { useAction } from '../../lib/useAction';
 import { Link } from '../../lib/router';
-import { isInstalled, isRunning, launchTarget, signInSummary } from '../../lib/services';
+import { isInstalled, isRunning, launchTarget, requiredChecks, signInSummary } from '../../lib/services';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
 import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
@@ -18,6 +19,8 @@ import { ConfigurationForm } from './ConfigurationForm';
 import { DevicesSection } from './DevicesSection';
 import { UninstallDialog } from './UninstallDialog';
 import { ACTIONS, type ServiceAction, useServiceActions } from './useServiceActions';
+
+const COMPUTE_LABEL: Record<string, string> = { cpu: 'CPU', nvidia: 'NVIDIA GPU', amd: 'AMD GPU' };
 
 function HeaderActions({ service }: { service: Service }) {
   const { pending, perform, actions } = useServiceActions(service);
@@ -66,6 +69,19 @@ function HeaderActions({ service }: { service: Service }) {
 function NextSteps({ service }: { service: Service }) {
   const target = launchTarget(service);
   const identity = service.identity;
+  const { pending, perform } = useServiceActions(service);
+  const retry = service.recommended_action === 'retry_setup';
+  const isAdmin = useIsAdmin();
+  const { refresh } = useDashboard();
+  const { pending: switching, run } = useAction();
+  const switchCompute = async () => {
+    await run(
+      'switch',
+      () => postJsonApi(`/api/v1/services/${service.id}/actions`, { action: 'switch_compute' }),
+      `Switching ${service.name}'s version`,
+    );
+    void refresh();
+  };
   const steps = [];
 
   if (['failed', 'needs_attention', 'degraded'].includes(service.display_state) && isInstalled(service))
@@ -75,9 +91,22 @@ function NextSteps({ service }: { service: Service }) {
         tone="danger"
         icon={AlertTriangle}
         title={`${service.name} needs attention`}
-        action={<LinkButton to={`/apps/${service.id}/advanced`}>View logs</LinkButton>}
+        action={
+          retry ? (
+            <Button
+              icon={ACTIONS.retry_setup.icon}
+              loading={pending === 'retry_setup'}
+              onClick={() => void perform('retry_setup')}
+            >
+              {ACTIONS.retry_setup.label}
+            </Button>
+          ) : (
+            <LinkButton to={`/apps/${service.id}/advanced`}>View logs</LinkButton>
+          )
+        }
       >
         {(service.last_job?.state === 'failed' && service.last_job.detail) || service.detail}
+        {retry && ' Retry setup sets up its address again; its data is kept.'}
       </Callout>,
     );
 
@@ -108,6 +137,26 @@ function NextSteps({ service }: { service: Service }) {
       >
         {service.account?.user_action ||
           `Open ${service.name} to finish signing in. Mu3Lab checks setup automatically.`}
+      </Callout>,
+    );
+
+  const compute = service.compute;
+  if (compute && compute.running !== compute.wanted && isAdmin)
+    steps.push(
+      <Callout
+        key="compute"
+        tone="info"
+        icon={Cpu}
+        title={`${compute.wanted === 'cpu' ? 'A' : 'An'} ${COMPUTE_LABEL[compute.wanted] || compute.wanted} version is available`}
+        action={
+          <Button loading={switching === 'switch'} onClick={() => void switchCompute()}>
+            Switch to {compute.wanted === 'cpu' ? 'CPU' : 'GPU'} version
+          </Button>
+        }
+      >
+        {service.name} runs its {COMPUTE_LABEL[compute.running] || compute.running} version, but this computer is set to
+        use {COMPUTE_LABEL[compute.wanted] || compute.wanted}. Switching downloads the other version and restarts{' '}
+        {service.name}; its data stays as it is.
       </Callout>,
     );
 
@@ -153,6 +202,9 @@ function Overview({ service, address, devices }: { service: Service; address: st
                 </span>
               ),
             },
+            ...(isInstalled(service) && requiredChecks(service).length
+              ? [{ label: 'Checks', value: <Checks service={service} /> }]
+              : []),
             // With a devices section below, its server address card carries the address.
             ...(address && !devices
               ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }]
@@ -174,6 +226,12 @@ function Overview({ service, address, devices }: { service: Service; address: st
                   },
                 ]
               : []),
+            ...(service.compute
+              ? [{ label: 'Runs on', value: COMPUTE_LABEL[service.compute.running] || service.compute.running }]
+              : []),
+            ...(isInstalled(service) && Object.keys(service.parts || {}).length
+              ? [{ label: 'Includes', value: <Parts service={service} /> }]
+              : []),
             ...(service.last_job
               ? [
                   {
@@ -188,6 +246,42 @@ function Overview({ service, address, devices }: { service: Service; address: st
       </Card>
       {devices && <DevicesSection service={service} address={address} />}
     </div>
+  );
+}
+
+/** Named parts that run inside the app (Dawarich's Photon), with each one's container state. */
+function Parts({ service }: { service: Service }) {
+  return (
+    <ul className="check-list">
+      {Object.entries(service.parts || {}).map(([name, label]) => {
+        const container = service.containers?.find((item) => item.service === name);
+        const running = container?.state === 'running';
+        return (
+          <li key={name} className="inline wrap">
+            <Dot tone={running ? 'green' : 'gray'} />
+            {label}
+            <span className="muted">· {running ? 'Running' : container ? humanize(container.state) : 'Stopped'}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function Checks({ service }: { service: Service }) {
+  return (
+    <ul className="check-list">
+      {requiredChecks(service).map((check) => (
+        <li key={check.name} className="inline wrap">
+          <Dot tone={check.tone} />
+          {check.label}
+          <span className="muted">
+            · {humanize(check.state === 'pass' ? 'OK' : check.state)}
+            {check.state !== 'pass' && check.last_success_at && `, last OK ${relativeTime(check.last_success_at)}`}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

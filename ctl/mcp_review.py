@@ -45,6 +45,8 @@ class Review:
     categories: tuple[Category, ...]
     tools: dict[str, ReviewedTool]
     blocked: dict[str, str]
+    data_scope: str = "operator_only"
+    delegation: str = "none"
 
     def category(self, category_id: str) -> Category | None:
         return next((item for item in self.categories if item.id == category_id), None)
@@ -61,6 +63,8 @@ def load(server_id: str, relative: str, root: Path = ROOT) -> Review:
     raw = yaml.safe_load(path_for(relative, root).read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or raw.get("schema_version") != 1 or raw.get("server") != server_id:
         raise ValueError(f"review for {server_id} has the wrong server or schema_version")
+    if raw.get("data_scope", "operator_only") != "operator_only" or raw.get("delegation", "none") != "none":
+        raise ValueError(f"review for {server_id} uses a delegation scope not yet supported")
     categories: list[Category] = []
     for item in raw.get("categories") or []:
         if not isinstance(item, dict) or not _ID.fullmatch(str(item.get("id", ""))):

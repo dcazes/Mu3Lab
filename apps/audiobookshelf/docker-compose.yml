@@ -3,6 +3,7 @@ name: mu3lab-audiobookshelf
 services:
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:2.37.1@sha256:581d68b2a6fc7ebf58d81c878a9f387cbbc0d88ac9d37b298b9cee10168af85b
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     ports: ["127.0.0.1:13378:80"]
     environment:
@@ -16,10 +17,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/healthcheck >/dev/null || exit 1"]
-      interval: 15s
       timeout: 5s
-      retries: 20
-      start_period: 30s
+      start_period: 330s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
 
 networks:
   mu3lab_frontend: {external: true}

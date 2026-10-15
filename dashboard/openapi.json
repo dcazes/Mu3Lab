@@ -1,8 +1,161 @@
 {
   "components": {
     "schemas": {
+      "AiModelSettings": {
+        "properties": {
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "string"
+          },
+          "chat_model": {
+            "title": "Chat Model",
+            "type": "string"
+          },
+          "embedding_model": {
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "outside_allowed",
+              "local_only"
+            ],
+            "title": "Privacy",
+            "type": "string"
+          },
+          "runner": {
+            "title": "Runner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "privacy",
+          "chat_model",
+          "embedding_model",
+          "runner",
+          "changed_at",
+          "changed_by"
+        ],
+        "title": "AiModelSettings",
+        "type": "object"
+      },
+      "AiModels": {
+        "description": "Where AI requests may go, the model runner, the local chat model and the search (embedding) model.",
+        "properties": {
+          "active_job_id": {
+            "title": "Active Job Id",
+            "type": "string"
+          },
+          "chat_models": {
+            "items": {
+              "$ref": "#/components/schemas/LocalModel"
+            },
+            "title": "Chat Models",
+            "type": "array"
+          },
+          "embedding_locked_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Embedding Locked By",
+            "type": "array"
+          },
+          "embedding_models": {
+            "items": {
+              "$ref": "#/components/schemas/LocalModel"
+            },
+            "title": "Embedding Models",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "runner": {
+            "title": "Runner",
+            "type": "string"
+          },
+          "runner_reachable": {
+            "title": "Runner Reachable",
+            "type": "boolean"
+          },
+          "runners": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRunnerOption"
+            },
+            "title": "Runners",
+            "type": "array"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AiModelSettings"
+          }
+        },
+        "required": [
+          "ok",
+          "settings",
+          "chat_models",
+          "embedding_models",
+          "runner",
+          "runners",
+          "runner_reachable",
+          "embedding_locked_by",
+          "active_job_id"
+        ],
+        "title": "AiModels",
+        "type": "object"
+      },
+      "AiModelsRequest": {
+        "properties": {
+          "chat_model": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Chat Model",
+            "type": "string"
+          },
+          "embedding_model": {
+            "maxLength": 64,
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "outside_allowed",
+              "local_only"
+            ],
+            "title": "Privacy",
+            "type": "string"
+          },
+          "runner": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Runner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "privacy",
+          "embedding_model"
+        ],
+        "title": "AiModelsRequest",
+        "type": "object"
+      },
       "ApiErrorResponse": {
         "properties": {
+          "blocking_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Job Id"
+          },
           "code": {
             "title": "Code",
             "type": "string"
@@ -146,6 +299,179 @@
         "title": "AppSizesResponseAppsValue",
         "type": "object"
       },
+      "ApprovalDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalDecisionRequest",
+        "type": "object"
+      },
+      "ApprovalOperation": {
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments"
+          },
+          "completed_at": {
+            "title": "Completed At",
+            "type": "number"
+          },
+          "connector_revision": {
+            "title": "Connector Revision",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "credential_version": {
+            "title": "Credential Version",
+            "type": "integer"
+          },
+          "dispatch_at": {
+            "title": "Dispatch At",
+            "type": "number"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "policy_revision": {
+            "title": "Policy Revision",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "approved",
+              "dispatching",
+              "succeeded",
+              "failed",
+              "outcome_unknown",
+              "rejected",
+              "revoked",
+              "expired"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "provider",
+          "credential_version",
+          "app",
+          "server",
+          "tool",
+          "connector_revision",
+          "policy_revision",
+          "state",
+          "created_at",
+          "expires_at",
+          "dispatch_at",
+          "completed_at"
+        ],
+        "title": "ApprovalOperation",
+        "type": "object"
+      },
+      "ApprovalResponse": {
+        "properties": {
+          "execution": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ApprovalOperation"
+          }
+        },
+        "required": [
+          "ok",
+          "operation"
+        ],
+        "title": "ApprovalResponse",
+        "type": "object"
+      },
+      "ApprovalsResponse": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalOperation"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "operations"
+        ],
+        "title": "ApprovalsResponse",
+        "type": "object"
+      },
       "AuditEvent": {
         "properties": {
           "actor": {
@@ -217,6 +543,80 @@
         "title": "AuditResponse",
         "type": "object"
       },
+      "BackupAttention": {
+        "description": "One backup problem Home shows administrators; empty while backups keep up with the schedule.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "message"
+        ],
+        "title": "BackupAttention",
+        "type": "object"
+      },
+      "BackupProtection": {
+        "description": "One app's backup evidence; never inferred from another app's backups.",
+        "properties": {
+          "completed_at": {
+            "default": "",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "off_device": {
+            "default": false,
+            "title": "Off Device",
+            "type": "boolean"
+          },
+          "restore_tested_at": {
+            "default": "",
+            "title": "Restore Tested At",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "default": "",
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "missing",
+              "stale",
+              "unchecked",
+              "checked"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "verification": {
+            "default": "none",
+            "enum": [
+              "none",
+              "structure",
+              "data"
+            ],
+            "title": "Verification",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "BackupProtection",
+        "type": "object"
+      },
       "BackupReadiness": {
         "properties": {
           "available": {
@@ -236,7 +636,7 @@
             "title": "Detail"
           },
           "engine": {
-            "default": "restic",
+            "default": "kopia",
             "title": "Engine",
             "type": "string"
           },
@@ -261,6 +661,17 @@
               }
             ],
             "title": "Last Verified At"
+          },
+          "legacy_repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Repository"
           },
           "off_device": {
             "anyOf": [
@@ -327,8 +738,106 @@
         "title": "BackupReadiness",
         "type": "object"
       },
+      "BackupSchedule": {
+        "description": "When Kopia's backup service runs backups, in this server's local time. Weekday: Monday is 0, Sunday 6.",
+        "properties": {
+          "frequency": {
+            "enum": [
+              "off",
+              "6h",
+              "12h",
+              "daily",
+              "weekly"
+            ],
+            "title": "Frequency",
+            "type": "string"
+          },
+          "next_run_at": {
+            "title": "Next Run At",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "service_installed": {
+            "default": true,
+            "title": "Service Installed",
+            "type": "boolean"
+          },
+          "service_running": {
+            "title": "Service Running",
+            "type": "boolean"
+          },
+          "time": {
+            "title": "Time",
+            "type": "string"
+          },
+          "weekday": {
+            "title": "Weekday",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "frequency",
+          "weekday",
+          "time",
+          "next_run_at",
+          "service_running",
+          "problems"
+        ],
+        "title": "BackupSchedule",
+        "type": "object"
+      },
+      "BackupScheduleRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "frequency": {
+            "enum": [
+              "off",
+              "6h",
+              "12h",
+              "daily",
+              "weekly"
+            ],
+            "title": "Frequency",
+            "type": "string"
+          },
+          "time": {
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Time",
+            "type": "string"
+          },
+          "weekday": {
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Weekday",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "frequency",
+          "weekday",
+          "time"
+        ],
+        "title": "BackupScheduleRequest",
+        "type": "object"
+      },
       "BackupSnapshot": {
         "properties": {
+          "complete": {
+            "default": true,
+            "title": "Complete",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -341,21 +850,13 @@
             "type": "array"
           },
           "reason": {
-            "anyOf": [
-              {
-                "const": "manual",
-                "type": "string"
-              },
-              {
-                "const": "pre-update",
-                "type": "string"
-              },
-              {
-                "const": "pre-restore",
-                "type": "string"
-              }
-            ],
-            "title": "Reason"
+            "title": "Reason",
+            "type": "string"
+          },
+          "release_id": {
+            "default": "",
+            "title": "Release Id",
+            "type": "string"
           },
           "short_id": {
             "title": "Short Id",
@@ -381,6 +882,25 @@
         "title": "BackupSnapshot",
         "type": "object"
       },
+      "BackupStarted": {
+        "description": "Kopia's backup service was asked to back up now; progress shows on the app.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "detail"
+        ],
+        "title": "BackupStarted",
+        "type": "object"
+      },
       "BackupsResponse": {
         "properties": {
           "backups": {
@@ -393,6 +913,16 @@
           "ok": {
             "title": "Ok",
             "type": "boolean"
+          },
+          "protection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupProtection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "readiness": {
             "$ref": "#/components/schemas/BackupReadiness"
@@ -670,6 +1200,17 @@
             "title": "All Day",
             "type": "boolean"
           },
+          "conflict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict"
+          },
           "editable": {
             "anyOf": [
               {
@@ -822,6 +1363,17 @@
             "title": "Ok",
             "type": "boolean"
           },
+          "pending_upload": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Upload"
+          },
           "state": {
             "title": "State",
             "type": "string"
@@ -853,6 +1405,24 @@
         "title": "CalendarEventsCalendar",
         "type": "object"
       },
+      "CalendarResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "keep": {
+            "enum": [
+              "mine",
+              "server"
+            ],
+            "title": "Keep",
+            "type": "string"
+          }
+        },
+        "required": [
+          "keep"
+        ],
+        "title": "CalendarResolveRequest",
+        "type": "object"
+      },
       "CalendarSelectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -865,6 +1435,41 @@
           "calendar_id"
         ],
         "title": "CalendarSelectRequest",
+        "type": "object"
+      },
+      "CalendarSync": {
+        "description": "What one sync sent, and what it could not send without asking.",
+        "properties": {
+          "conflicts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "kept": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "moved": {
+            "title": "Moved",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "moved",
+          "conflicts",
+          "kept"
+        ],
+        "title": "CalendarSync",
         "type": "object"
       },
       "CatalogProfile": {
@@ -998,6 +1603,71 @@
         "title": "CatalogService",
         "type": "object"
       },
+      "ChatAppChoice": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "installed",
+          "selected"
+        ],
+        "title": "ChatAppChoice",
+        "type": "object"
+      },
+      "ChatAppRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "App Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id"
+        ],
+        "title": "ChatAppRequest",
+        "type": "object"
+      },
+      "ChatApps": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/ChatAppChoice"
+            },
+            "title": "Apps",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "apps"
+        ],
+        "title": "ChatApps",
+        "type": "object"
+      },
       "ChatAssistant": {
         "properties": {
           "detail": {
@@ -1019,7 +1689,8 @@
               "failed",
               "not_connected",
               "connector_down",
-              "needs_review"
+              "needs_review",
+              "operator_only"
             ],
             "title": "Status",
             "type": "string"
@@ -1153,6 +1824,16 @@
       },
       "ChatStatus": {
         "properties": {
+          "app_id": {
+            "default": "",
+            "title": "App Id",
+            "type": "string"
+          },
+          "app_name": {
+            "default": "",
+            "title": "App Name",
+            "type": "string"
+          },
           "assistants": {
             "anyOf": [
               {
@@ -1271,6 +1952,17 @@
         "title": "ChecklistResponse",
         "type": "object"
       },
+      "CleanupRequest": {
+        "properties": {
+          "delete_data": {
+            "default": false,
+            "title": "Delete Data",
+            "type": "boolean"
+          }
+        },
+        "title": "CleanupRequest",
+        "type": "object"
+      },
       "ComputeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1294,6 +1986,17 @@
       "ConfigurationRequest": {
         "additionalProperties": false,
         "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
           "values": {
             "additionalProperties": {
               "anyOf": [
@@ -1316,6 +2019,44 @@
           }
         },
         "title": "ConfigurationRequest",
+        "type": "object"
+      },
+      "CoreAppBackup": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "included": {
+            "title": "Included",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "protection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupProtection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "included"
+        ],
+        "title": "CoreAppBackup",
         "type": "object"
       },
       "CoreSetupResponse": {
@@ -1445,6 +2186,52 @@
           "ok"
         ],
         "title": "CoreSetupResponseCapacity",
+        "type": "object"
+      },
+      "DiskShare": {
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "number"
+          },
+          "program": {
+            "title": "Program",
+            "type": "number"
+          }
+        },
+        "required": [
+          "data",
+          "program"
+        ],
+        "title": "DiskShare",
+        "type": "object"
+      },
+      "DiskUsage": {
+        "properties": {
+          "measured_at": {
+            "title": "Measured At",
+            "type": "string"
+          },
+          "owners": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DiskShare"
+            },
+            "title": "Owners",
+            "type": "object"
+          },
+          "removed_folders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Folders",
+            "type": "array"
+          }
+        },
+        "required": [
+          "measured_at",
+          "owners"
+        ],
+        "title": "DiskUsage",
         "type": "object"
       },
       "Health": {
@@ -2196,6 +2983,55 @@
         "type": "object"
       },
       "JsonValue": {},
+      "LocalModel": {
+        "description": "One reviewed local model. Sizes are Ollama's download sizes; memory is an estimate.",
+        "properties": {
+          "dimensions": {
+            "title": "Dimensions",
+            "type": "integer"
+          },
+          "download_gb": {
+            "title": "Download Gb",
+            "type": "number"
+          },
+          "downloaded": {
+            "title": "Downloaded",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "memory_gb": {
+            "title": "Memory Gb",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tag",
+          "download_gb",
+          "memory_gb",
+          "note",
+          "dimensions",
+          "downloaded"
+        ],
+        "title": "LocalModel",
+        "type": "object"
+      },
       "McpActivityResponse": {
         "properties": {
           "calls": {
@@ -3067,6 +3903,87 @@
         "title": "MobileClient",
         "type": "object"
       },
+      "ModelRunnerOption": {
+        "properties": {
+          "has_ui": {
+            "title": "Has Ui",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "installed": {
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "installed",
+          "has_ui"
+        ],
+        "title": "ModelRunnerOption",
+        "type": "object"
+      },
+      "Mu3LabChangelog": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/Mu3LabRelease"
+            },
+            "title": "Releases",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "releases"
+        ],
+        "title": "Mu3LabChangelog",
+        "type": "object"
+      },
+      "Mu3LabRelease": {
+        "description": "One release's changes; a development copy has no version.",
+        "properties": {
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "commit": {
+            "default": "",
+            "title": "Commit",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "date",
+          "changes"
+        ],
+        "title": "Mu3LabRelease",
+        "type": "object"
+      },
       "Mu3LabUpdate": {
         "properties": {
           "available": {
@@ -3100,6 +4017,16 @@
             "title": "Date",
             "type": "string"
           },
+          "last_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mu3LabUpdateResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ok": {
             "title": "Ok",
             "type": "boolean"
@@ -3121,6 +4048,40 @@
           "checked_at"
         ],
         "title": "Mu3LabUpdate",
+        "type": "object"
+      },
+      "Mu3LabUpdateResult": {
+        "description": "How the last update ended: verified, rolled_back or needs_attention.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "from": {
+            "default": "",
+            "title": "From",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "to": {
+            "default": "",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "at",
+          "detail"
+        ],
+        "title": "Mu3LabUpdateResult",
         "type": "object"
       },
       "OkResponse": {
@@ -3208,6 +4169,16 @@
       },
       "Person": {
         "properties": {
+          "access": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonAccess"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "active": {
             "title": "Active",
             "type": "boolean"
@@ -3252,6 +4223,55 @@
           "last_login"
         ],
         "title": "Person",
+        "type": "object"
+      },
+      "PersonAccess": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "deactivated",
+              "demoted"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "pending_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Targets",
+            "type": "array"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "complete"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "state",
+          "pending",
+          "pending_targets",
+          "detail",
+          "since"
+        ],
+        "title": "PersonAccess",
         "type": "object"
       },
       "PersonChangeRequest": {
@@ -3346,6 +4366,42 @@
           "person"
         ],
         "title": "PersonResponse",
+        "type": "object"
+      },
+      "PlatformBackupStatus": {
+        "description": "Mu3Lab's own state and each core app, each from its own backup evidence.",
+        "properties": {
+          "core_apps": {
+            "items": {
+              "$ref": "#/components/schemas/CoreAppBackup"
+            },
+            "title": "Core Apps",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/BackupProtection"
+          },
+          "recovery_sheet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecoverySheetStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "platform",
+          "core_apps"
+        ],
+        "title": "PlatformBackupStatus",
         "type": "object"
       },
       "ProviderCatalogItem": {
@@ -3990,6 +5046,82 @@
         "title": "QueuedJob",
         "type": "object"
       },
+      "RecoverySheet": {
+        "description": "What a new computer needs to open the backups. Sent once, never cached.",
+        "properties": {
+          "copies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Copies",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "kopia_image": {
+            "title": "Kopia Image",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "password_check": {
+            "title": "Password Check",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "server",
+          "generated_at",
+          "version",
+          "password",
+          "password_check",
+          "repository",
+          "kopia_image",
+          "copies"
+        ],
+        "title": "RecoverySheet",
+        "type": "object"
+      },
+      "RecoverySheetStatus": {
+        "description": "When an administrator last opened the recovery sheet; never its contents.",
+        "properties": {
+          "opened_at": {
+            "title": "Opened At",
+            "type": "string"
+          },
+          "opened_by": {
+            "title": "Opened By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opened_at",
+          "opened_by"
+        ],
+        "title": "RecoverySheetStatus",
+        "type": "object"
+      },
       "Service": {
         "properties": {
           "account": {
@@ -4070,13 +5202,54 @@
             ],
             "title": "Auth"
           },
+          "backing_up": {
+            "default": false,
+            "title": "Backing Up",
+            "type": "boolean"
+          },
+          "blocking_check": {
+            "anyOf": [
+              {
+                "enum": [
+                  "process",
+                  "route",
+                  "sign_in"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocking Check"
+          },
           "category": {
             "title": "Category",
             "type": "string"
           },
+          "checks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceChecks"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "compose_present": {
             "title": "Compose Present",
             "type": "boolean"
+          },
+          "compute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceCompute"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "configuration": {
             "anyOf": [
@@ -4122,6 +5295,7 @@
               "running",
               "stopped",
               "working",
+              "checking",
               "not_installed",
               "needs_attention"
             ],
@@ -4248,6 +5422,13 @@
             "title": "Observed At",
             "type": "string"
           },
+          "parts": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Parts",
+            "type": "object"
+          },
           "private_https_port": {
             "anyOf": [
               {
@@ -4273,6 +5454,16 @@
               }
             ],
             "title": "Recommended Action"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "required": {
             "title": "Required",
@@ -4310,6 +5501,11 @@
               }
             ],
             "title": "Stage"
+          },
+          "stop_warning": {
+            "default": "",
+            "title": "Stop Warning",
+            "type": "string"
           },
           "ui": {
             "anyOf": [
@@ -4396,9 +5592,11 @@
               "restart",
               "uninstall",
               "uninstall_delete_data",
-              "backup",
               "restore",
-              "update"
+              "update",
+              "recover",
+              "keep_update",
+              "switch_compute"
             ],
             "title": "Action",
             "type": "string"
@@ -4418,6 +5616,91 @@
           "action"
         ],
         "title": "ServiceActionRequest",
+        "type": "object"
+      },
+      "ServiceCheck": {
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "last_failure_at": {
+            "title": "Last Failure At",
+            "type": "string"
+          },
+          "last_success_at": {
+            "title": "Last Success At",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pass",
+              "checking",
+              "fail",
+              "pending",
+              "stale",
+              "not_required"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "detail",
+          "checked_at",
+          "last_success_at",
+          "last_failure_at",
+          "failures"
+        ],
+        "title": "ServiceCheck",
+        "type": "object"
+      },
+      "ServiceChecks": {
+        "properties": {
+          "process": {
+            "$ref": "#/components/schemas/ServiceCheck"
+          },
+          "route": {
+            "$ref": "#/components/schemas/ServiceCheck"
+          },
+          "sign_in": {
+            "$ref": "#/components/schemas/ServiceCheck"
+          }
+        },
+        "required": [
+          "process",
+          "route",
+          "sign_in"
+        ],
+        "title": "ServiceChecks",
+        "type": "object"
+      },
+      "ServiceCompute": {
+        "description": "For apps with a GPU build: the build that runs and the one the compute mode asks for.",
+        "properties": {
+          "running": {
+            "title": "Running",
+            "type": "string"
+          },
+          "wanted": {
+            "title": "Wanted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running",
+          "wanted"
+        ],
+        "title": "ServiceCompute",
         "type": "object"
       },
       "ServiceConfigField": {
@@ -4564,6 +5847,17 @@
             ],
             "title": "Restart Required"
           },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
           "service_id": {
             "title": "Service Id",
             "type": "string"
@@ -4692,6 +5986,10 @@
               },
               {
                 "const": "degraded",
+                "type": "string"
+              },
+              {
+                "const": "off",
                 "type": "string"
               },
               {
@@ -4834,6 +6132,39 @@
           "clients"
         ],
         "title": "ServiceMobile0",
+        "type": "object"
+      },
+      "ServiceRecovery": {
+        "description": "A restore or update that was interrupted; nothing continues until a person chooses.",
+        "properties": {
+          "can_keep": {
+            "default": false,
+            "title": "Can Keep",
+            "type": "boolean"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "restore",
+              "update"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "detail",
+          "since"
+        ],
+        "title": "ServiceRecovery",
         "type": "object"
       },
       "ServiceUi": {
@@ -4994,6 +6325,14 @@
           "audit": {
             "$ref": "#/components/schemas/AuditResponse"
           },
+          "backup_attention": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BackupAttention"
+            },
+            "title": "Backup Attention",
+            "type": "array"
+          },
           "catalog": {
             "$ref": "#/components/schemas/CatalogResponse"
           },
@@ -5008,6 +6347,11 @@
           },
           "jobs": {
             "$ref": "#/components/schemas/JobsResponse"
+          },
+          "model_runner": {
+            "default": "",
+            "title": "Model Runner",
+            "type": "string"
           },
           "provisioning": {
             "$ref": "#/components/schemas/ProvisioningResponse"
@@ -5130,12 +6474,36 @@
           "disk": {
             "$ref": "#/components/schemas/Metric"
           },
+          "disk_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiskUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "docker_ready": {
             "title": "Docker Ready",
             "type": "boolean"
           },
           "memory": {
             "$ref": "#/components/schemas/Metric"
+          },
+          "memory_by_owner": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory By Owner"
           },
           "observed_at": {
             "default": "",
@@ -5436,6 +6804,13 @@
       },
       "UpdateResponse": {
         "properties": {
+          "added_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added Services",
+            "type": "array"
+          },
           "approved_version": {
             "title": "Approved Version",
             "type": "string"
@@ -5455,6 +6830,13 @@
           "release_url": {
             "title": "Release Url",
             "type": "string"
+          },
+          "removed_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Services",
+            "type": "array"
           },
           "repository": {
             "title": "Repository",
@@ -5949,6 +7331,198 @@
         "summary": "Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/ai/models": {
+      "get": {
+        "description": "Everyone may see where AI requests go; only administrators change it.",
+        "operationId": "ai_models_api_v1_ai_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ai Models",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "Queue the change: models download and are checked before anything is switched over.",
+        "operationId": "change_ai_models_api_v1_ai_models_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Change Ai Models",
+        "tags": [
+          "ai"
         ]
       }
     },
@@ -7425,6 +8999,211 @@
         ]
       }
     },
+    "/api/v1/calendar/events/{event_id}/resolve": {
+      "post": {
+        "description": "Keep this version (replacing Nextcloud's) or Nextcloud's (dropping the local edit).",
+        "operationId": "resolve_conflict_api_v1_calendar_events__event_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Resolve Conflict",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/api/v1/calendar/sync": {
+      "post": {
+        "description": "Send events kept on Mu3Lab to the connected Nextcloud calendar, never overwriting its changes.",
+        "operationId": "sync_api_v1_calendar_sync_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarSync"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Sync",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
     "/api/v1/catalog": {
       "get": {
         "description": "App descriptions and the core suite, from the app manifests.",
@@ -7514,6 +9293,198 @@
         "summary": "Catalog",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/chat/apps": {
+      "get": {
+        "description": "The chat apps Mu3Lab can show on the Chat page, and which one it shows.",
+        "operationId": "chat_apps_api_v1_chat_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatApps"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Chat Apps",
+        "tags": [
+          "chat"
+        ]
+      },
+      "put": {
+        "description": "Make an installed chat app the household one.",
+        "operationId": "choose_chat_app_api_v1_chat_apps_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatAppRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatApps"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Choose Chat App",
+        "tags": [
+          "chat"
         ]
       }
     },
@@ -12650,6 +14621,107 @@
         "tags": [
           "services"
         ]
+      },
+      "post": {
+        "description": "Ask Kopia's backup service to back the app up now, exactly as a scheduled run does.",
+        "operationId": "back_up_service_api_v1_services__service_id__backups_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Back Up Service",
+        "tags": [
+          "services"
+        ]
       }
     },
     "/api/v1/services/{service_id}/configuration": {
@@ -13558,6 +15630,665 @@
         ]
       }
     },
+    "/api/v1/system/backups/platform": {
+      "get": {
+        "description": "Mu3Lab's own backup and each core app's, from their own evidence.",
+        "operationId": "platform_backup_status_api_v1_system_backups_platform_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformBackupStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Platform Backup Status",
+        "tags": [
+          "system"
+        ]
+      },
+      "post": {
+        "description": "Ask Kopia's backup service to back up Mu3Lab itself and each core app now, one at a time.",
+        "operationId": "start_platform_backup_api_v1_system_backups_platform_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Start Platform Backup",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/backups/recovery-sheet": {
+      "post": {
+        "description": "The backup password and where the backups are, for printing. Each opening is audited.",
+        "operationId": "open_recovery_sheet_api_v1_system_backups_recovery_sheet_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoverySheet"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Open Recovery Sheet",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/backups/schedule": {
+      "get": {
+        "description": "When scheduled backups run, Kopia's next run, and what did not finish.",
+        "operationId": "backup_schedule_status_api_v1_system_backups_schedule_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Backup Schedule Status",
+        "tags": [
+          "system"
+        ]
+      },
+      "put": {
+        "operationId": "update_backup_schedule_api_v1_system_backups_schedule_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Backup Schedule",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/changelog": {
+      "get": {
+        "description": "What changed in the installed release and the few before it (What's new).",
+        "operationId": "mu3lab_changelog_api_v1_system_changelog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mu3LabChangelog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Mu3Lab Changelog",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/cleanup": {
+      "post": {
+        "description": "Remove removed apps' leftovers and old app versions; their data only when asked.",
+        "operationId": "free_up_space_api_v1_system_cleanup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Free Up Space",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/v1/system/config": {
       "get": {
         "operationId": "system_config_api_v1_system_config_get",
@@ -13939,6 +16670,413 @@
         "summary": "Start Mu3Lab Update",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/tool-approvals": {
+      "get": {
+        "operationId": "approvals_api_v1_tool_approvals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Approvals",
+        "tags": [
+          "tool approvals"
+        ]
+      }
+    },
+    "/api/v1/tool-approvals/{operation_id}": {
+      "get": {
+        "operationId": "approval_api_v1_tool_approvals__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Approval",
+        "tags": [
+          "tool approvals"
+        ]
+      }
+    },
+    "/api/v1/tool-approvals/{operation_id}/decision": {
+      "post": {
+        "operationId": "decide_api_v1_tool_approvals__operation_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Decide",
+        "tags": [
+          "tool approvals"
+        ]
+      }
+    },
+    "/api/v1/tool-approvals/{operation_id}/execute": {
+      "post": {
+        "operationId": "execute_api_v1_tool_approvals__operation_id__execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Execute",
+        "tags": [
+          "tool approvals"
         ]
       }
     },

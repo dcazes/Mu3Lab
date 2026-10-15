@@ -124,10 +124,10 @@ def _gated_entries(host: str, app: GatedApp) -> str:
       policy_engine_mode: any
       provider: !Find [authentik_providers_proxy.proxyprovider, [name, Mu3Lab {app.name} provider]]
 """
-    # No binding admits everyone Authentik knows, which is the household.
-    if app.audience == "operators":
-        entries += _bindings(key, ADMIN_GROUPS)
-    return entries
+    # Bound like the OIDC apps: someone removed from the household is refused at once,
+    # even while their account's own revocation is still pending.
+    groups = ADMIN_GROUPS if app.audience == "operators" else (*ADMIN_GROUPS, HOUSEHOLD_GROUP)
+    return entries + _bindings(key, groups)
 
 
 # The one-time sign-in link a new household member receives (Settings → People):
@@ -208,8 +208,11 @@ WELCOME_FLOW = """  - model: authentik_stages_prompt.prompt
       order: 30
   - model: authentik_brands.brand
     state: present
+    # Authentik's own default brand: matching on domain alone created a second
+    # one when this ran before Authentik's built-in blueprint had made it.
     identifiers:
       domain: authentik-default
+      default: true
     attrs:
       flow_recovery: !KeyOf mu3lab-welcome-flow
 """

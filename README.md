@@ -90,7 +90,7 @@ Mu3Lab installs **Vaultwarden**, a self-hosted server that works with the Bitwar
 <td valign="top">
 
 ### 🤖 A chat assistant that uses your apps
-LobeChat comes with **one assistant per installed app**. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **anything that changes data asks you first**.
+Chat (Open WebUI, or LobeChat if you prefer it) gives operators **one assistant per installed app** using shared application credentials. Ask it to plan meals in Mealie, find a receipt in Paperless, check your budget in Actual or search the web with Firecrawl. It connects through reviewed MCP connectors, and **every enabled write requires your approval of the exact inputs in the Mu3Lab dashboard**. Household members can use chat without access to these shared connectors.
 
 </td>
 </tr>
@@ -131,7 +131,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | Remote access | Private Tailscale HTTPS for every app, built in | Port forwarding or a reverse proxy you configure |
 | Sign-in | One account across apps, wired up automatically | A separate login for each app |
 | Passwords | Vault created and filled with every app login | Up to you |
-| AI assistant | A chat assistant per app that can read and act, with approval for changes | None, or a separate project |
+| AI assistant | Operator app assistants with exact-input approval for writes | None, or a separate project |
 | AI models | Free cloud providers plus local models, with automatic failover | Bring your own |
 | App catalog | Curated and reviewed, pinned to digests, one integration contract per app | Large, community-submitted |
 | Health | "Ready" means health, route and sign-in all verified | "Running" means the container started |
@@ -184,11 +184,10 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🚦 | **Caddy** | Gives each app its own private HTTPS address |
 | 🔑 | **Authentik** | One account and sign-in for the dashboard and your apps |
 | 🗝️ | **Vaultwarden** | Your password vault, compatible with every Bitwarden app |
-| 💬 | **LobeChat** | Chat workspace with an assistant for each of your apps |
+| 💬 | **Open WebUI** | Chat with an assistant for each of your apps, voice and your documents (LobeChat is available instead) |
 | 🔀 | **LiteLLM** | One AI gateway for chat and embeddings |
 | 🆓 | **FreeLLMAPI** | Routes chat to free cloud AI providers, with failover |
 | 🦙 | **Ollama** | Local AI models and embeddings, on CPU, NVIDIA or AMD |
-| 🕷️ | **Firecrawl** | Turns web pages into clean text so chat can research the web |
 
 ### Add with one click
 
@@ -203,8 +202,12 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 | 🔬 | **[SurfSense](https://github.com/MODSetter/SurfSense)** | AI research workspace with cited answers | Gated + own login | ✅ |
 | 👶 | **[Baby Buddy](https://docs.baby-buddy.net)** | Shared tracker for feeding, sleep, diapers and growth | SSO | Manual |
 | 🥫 | **[Grocy](https://grocy.info)** | Pantry stock, expiry dates, shopping lists and chores | SSO | ✅ |
+| 💬 | **[LobeChat](https://lobehub.com)** | A second chat app with an assistant for each app; choose it in Settings > AI | SSO | ✅ |
+| 🕷️ | **[Firecrawl](https://www.firecrawl.dev)** | Turns web pages into clean text so chat can research the web | None (internal) | ✅ |
+| 💾 | **[Kopia backups](https://kopia.io)** | Scheduled, encrypted backups of Mu3Lab and every app; browse and restore files | Gated | — |
+| 🎵 | **[Navidrome](https://www.navidrome.org)** | Your own music streaming, like Spotify; add music through Nextcloud's shared Music folder, play it in the browser or Subsonic phone apps | SSO (phones: own login) | — |
 
-<sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: LobeChat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
+<sub><b>SSO</b>: you're signed in automatically through Authentik. <b>Gated + own login</b>: Authentik guards the door, and the app keeps its own account, which Vaultwarden can fill. <b>Chat</b>: chat can use the app through a reviewed MCP connector that Mu3Lab sets up.</sub>
 
 **Supported free AI providers:** Cerebras · Google AI Studio · Groq · Hugging Face · NVIDIA · OpenRouter · Mistral · Zhipu
 
@@ -213,12 +216,12 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 ## 🧩 How it works
 
 <p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. LobeChat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Ollama or FreeLLMAPI." width="100%">
+  <img src="docs/images/architecture.svg" alt="Architecture: your devices reach Mu3Lab only through Tailscale. Caddy and Authentik sit in front of every app. Chat reaches your apps through MCP connectors and AI models through LiteLLM, which routes to Ollama or FreeLLMAPI." width="100%">
 </p>
 
 - **One front door.** Tailscale Serve accepts private HTTPS from your tailnet and forwards only to Caddy on loopback. Containers and the control plane publish no LAN-facing ports.
 - **One folder per app.** `apps/<app>/app.yaml` declares everything about an app: its address, sign-in method, generated settings, chat assistant and connectors, and the shared rules it follows. Image versions live only in that folder's `docker-compose.yml`. The dashboard's copy and state come from it, so the UI can't drift from reality.
-- **One private state store.** Numbered migrations manage `state/mu3lab.db`; a single private encryption key protects scoped credentials. App ownership, jobs and personal checklist progress share this store. Preserve the database and key together.
+- **One private state store.** Numbered migrations manage `state/mu3lab.db`; a single private encryption key protects scoped credentials. App ownership, jobs and personal checklist progress share this store. Gateway credentials and approvals use a separate private authority database/key pair. Preserve each database with its matching key.
 - **Shared status.** The worker observes apps and the host; page loads read its saved snapshot. Phone and laptop see the same app health, and the dashboard warns when observations are old.
 - **Durable jobs.** The FastAPI control plane queues every action as a leased, resumable SQLite job. A background worker runs it, reclaims interrupted work after a reboot and redacts secrets from logs.
 - **Typed interfaces.** Python API models generate the dashboard types, and CI catches mismatches. App setup uses shared rules and supported external interfaces. See [Architecture](docs/architecture.md).
@@ -230,7 +233,7 @@ The dashboard is clean and fast, with light and dark themes, a <kbd>Ctrl</kbd>+<
 
 - **No public exposure.** Apps are reachable only from devices on your Tailscale network. Reusable Tailscale auth keys are never accepted.
 - **Forged identities are ignored.** The control plane trusts Authentik identity headers only when they arrive with a shared proxy token, and every change needs a same-origin request and a CSRF token bound to your session.
-- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and write tools need your approval each time.
+- **Chat can't touch the platform.** Only application data is exposed to chat. Vaultwarden, Authentik, Docker and host operations are never offered as tools, and the gateway permits enabled writes only after a current operator approves the exact stored request. Shared application connectors are operator-only.
 - **Pinned supply chain.** Every image is pinned to an immutable digest. Apps move only to versions the maintainer has tested and approved, and only when you choose to update, with a backup first. See [App updates](docs/app-updates.md).
 - **Data outside Git.** Everything lives under `/srv/mu3lab`. The repository holds definitions and safe defaults, never app data, backups or unencrypted secrets.
 
@@ -279,17 +282,17 @@ Mu3Lab is in active development, and the core platform, AI slice and app catalog
 
 - [x] One-command, resumable installer with a guided Tailscale step
 - [x] Authentik SSO wired into every app, plus a pre-filled Vaultwarden vault
-- [x] AI slice: LobeChat, LiteLLM, FreeLLMAPI and Ollama, with GPU detection
-- [x] Per-app chat assistants through reviewed MCP connectors with write approval
+- [x] AI slice: Open WebUI (or LobeChat), LiteLLM, FreeLLMAPI and Ollama, with GPU detection
+- [x] Operator-only app assistants through reviewed MCP connectors; durable human approval for writes
 - [x] Parallel image downloads with size estimates before install
 - [x] Encrypted local backups of catalog apps, with guided restore
 - [x] One-click updates to tested versions, with a backup first and automatic rollback
 - [x] Update Mu3Lab itself from the dashboard
-- [ ] Scheduled and off-device backups, and backups of the core platform
+- [ ] Off-device backups
 - [ ] More curated apps
 
 > [!NOTE]
-> Backups cover catalog apps and run when you ask (and before every update); they are not scheduled yet. The core platform, including your Authentik sign-in accounts, is not backed up yet, so also keep your own copy of `/srv/mu3lab/data`. Run `make pause` first and `make resume` afterwards, because a copy of a running database may not restore. They stop and start only Mu3Lab's containers.
+> Backups are your choice: install **Kopia backups** from Apps and it backs up Mu3Lab itself, its core apps (including your Authentik sign-in accounts) and every installed app on the schedule you choose (weekly by default), into `/srv/mu3lab/backups/kopia` on this server. Without it, Mu3Lab still saves a backup of an app before each update. Backups are not copied to another computer yet, so also keep your own copy of that folder. See [docs/backup-recovery.md](docs/backup-recovery.md).
 
 ---
 
@@ -304,11 +307,16 @@ use the pinned toolchain; dashboard preview, checks and builds use Docker.
 | `make ui-dev` | UI preview with automatic refresh on loopback |
 | `make api-schema` | Regenerate OpenAPI and dashboard API types after Python model changes |
 | `make test` | Python and dashboard tests, with UI checks in the Node container |
-| `make verify` | Lint, type checks, tests and production UI build |
+| `make verify` | Everything that needs no network: lint, types, tests, catalog and Compose checks, UI build |
+| `make verify-security` | Dependency advisories, committed secrets, and that every pinned image exists for x86-64 |
 | `make format` | Python and UI formatting |
 
 See [Development](docs/development.md) for isolated backend setup and release
 checks, and [Acceptance](docs/acceptance.md) for the real-device test journey.
+
+The [2026-10-07 project review and change tracker](docs/reviews/2026-10-07-project-review.md)
+assesses the concept, architecture and implementation, with prioritized fixes,
+implementation steps, acceptance criteria and a supporting evidence record.
 
 | Path | What's there |
 |---|---|
@@ -320,7 +328,7 @@ checks, and [Acceptance](docs/acceptance.md) for the real-device test journey.
 | [`apps/`](apps) | One folder per app: `app.yaml` (validated by `ctl/manifest/`), its Compose file, and reviewed chat connectors under `connectors/` |
 | [`platform/`](platform) | Images Mu3Lab builds itself: the chat tool gateway and the generic connector adapter |
 
-Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs ruff, mypy, the Python and dashboard test suites, ESLint, Prettier, the dashboard build, generated API contract checks, YAML and Compose validation, and a secret scan.
+Tests never touch the host's `/srv/mu3lab`: [`tests/__init__.py`](tests/__init__.py) points `MU3LAB_RUNTIME_ROOT` at an empty temporary directory. CI runs exactly `make verify` and `make verify-security`, so a check that passes locally passes there; [`tests/test_ci_parity.py`](tests/test_ci_parity.py) keeps it that way. Its actions are pinned to commits, and Dependabot proposes their updates.
 
 ---
 

@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link, usePath } from '../lib/router';
 
 export function PageHeader({
@@ -37,6 +37,8 @@ export function Card({
   children,
   className = '',
   flush = false,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title?: ReactNode;
   description?: ReactNode;
@@ -44,19 +46,35 @@ export function Card({
   children?: ReactNode;
   className?: string;
   flush?: boolean;
+  /** The header opens and closes the body. */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen || !collapsible);
+  const heading = (
+    <div>
+      {title && <h2>{title}</h2>}
+      {description && <p>{description}</p>}
+    </div>
+  );
   return (
-    <section className={`card ${flush ? 'card-flush' : ''} ${className}`.trim()}>
+    <section
+      className={`card ${flush ? 'card-flush' : ''} ${collapsible && !open ? 'card-closed' : ''} ${className}`.trim()}
+    >
       {(title || actions) && (
         <header className="card-header">
-          <div>
-            {title && <h2>{title}</h2>}
-            {description && <p>{description}</p>}
-          </div>
+          {collapsible ? (
+            <button type="button" className="card-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+              <ChevronRight aria-hidden="true" />
+              {heading}
+            </button>
+          ) : (
+            heading
+          )}
           {actions && <div className="card-actions">{actions}</div>}
         </header>
       )}
-      {children}
+      {open && children}
     </section>
   );
 }

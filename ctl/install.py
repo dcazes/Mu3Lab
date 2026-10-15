@@ -42,6 +42,7 @@ from ctl.bootstrap import stamps
 from ctl.engine.project import Facts, render
 from ctl.identity import gate_blueprint, sync_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError, password_hash
+from ctl.lifecycle import compose_settings
 from ctl.manifest.catalog import load as load_app_catalog
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
@@ -53,7 +54,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 # Constants: versions, package lists, ports. Reasons inline.
 # ---------------------------------------------------------------------------
-BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg", "python3", "python3-pip", "python3-venv", "restic"]
+BASE_PACKAGES = ["curl", "git", "ca-certificates", "gnupg", "python3", "python3-pip", "python3-venv"]
 DOCKER_KEY_URL = "https://download.docker.com/linux/{slug}/gpg"
 DOCKER_PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"]
 # NVIDIA Container Toolkit repository (ASCII-armored key; apt reads .asc).
@@ -81,8 +82,8 @@ DASHBOARD_SERVE_PORT = "8446"
 VAULTWARDEN_SERVE_PORT = "8443"
 LOBEHUB_SERVE_PORT = "8457"
 TS_HOSTNAME = "mu3lab"
-TAILSCALE_JOIN_TIMEOUT = "120s"  # first-time control-plane registration can be slow
-TAILSCALE_WORKER_TIMEOUT = 130  # bounds the worker beyond the CLI's own join window
+TAILSCALE_JOIN_TIMEOUT = "1200s"  # time to create a Tailscale account and approve this computer
+TAILSCALE_WORKER_TIMEOUT = 1260  # bounds the worker beyond the CLI's own join window
 AUTHENTIK_READINESS_TIMEOUT = 600  # first migrations can legitimately take minutes
 AUTHENTIK_READINESS_INTERVAL = 5
 AUTHENTIK_HTTP_GRACE_TIMEOUT = 60  # Compose health passed; allow host port to settle
@@ -118,6 +119,10 @@ DISPATCH = {
     ("root_env", "ready"): "skip",
     ("runtime_layout", "missing"): "create_runtime_layout",
     ("runtime_layout", "ready"): "skip",
+    ("restore_backup", "not_requested"): "skip",
+    ("restore_backup", "interrupted"): "report_interrupted_restore",
+    ("restore_backup", "missing"): "restore_from_backups",
+    ("restore_backup", "ready"): "skip",
     ("service", "no_unit"): "render_unit",
     ("service", "outdated"): "restart_service",
     ("service", "inactive"): "start_service",
@@ -163,6 +168,8 @@ DISPATCH = {
     (by_capability("identity_provider").id, "ready"): "skip",
     ("authentik_serve", "unshared"): "share_authentik",
     ("authentik_serve", "ready"): "skip",
+    ("tailnet_relay", "missing"): "start_relay",
+    ("tailnet_relay", "ready"): "skip",
     ("lobehub_serve", "unshared"): "share_lobehub",
     ("lobehub_serve", "ready"): "skip",
     ("authentik_setup", "needs_user"): "create_account",
@@ -825,6 +832,29 @@ def fix_tailscale_pkg(check: dict, ctx: dict) -> dict:
     return _propagate(res)
 
 
+def _ingress_boundary_digest(root: Path) -> str:
+    source = root / "apps" / by_capability("private_proxy").id
+    return stamps.digest(root, [source / "Caddyfile", source / "Caddyfile.authenticated"])
+
+
+def _ingress_boundary_stamp() -> Path:
+    return RuntimePaths().projects / by_capability("private_proxy").id / ".ingress-boundary.sha256"
+
+
+def _safe_caddy_configuration(root: Path) -> Path:
+    """Never restart a legacy runtime dashboard proxy that can trust caller identity."""
+    source = root / "apps" / by_capability("private_proxy").id
+    target = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
+    if not target.is_file():
+        return source / "Caddyfile"
+    deployed = target.read_text(encoding="utf-8")
+    authenticated = (source / "Caddyfile.authenticated").read_text(encoding="utf-8")
+    if not routes.base_matches(authenticated, deployed):
+        # Retain optional app routes, but deny the dashboard until the gate step succeeds.
+        target.write_text(routes.rebase((source / "Caddyfile").read_text(encoding="utf-8"), deployed), encoding="utf-8")
+    return target
+
+
 def fix_caddy(check: dict, ctx: dict) -> dict:
     from ctl import secrets as _secrets
 
@@ -832,8 +862,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     projdir = ctx["root"] / "apps" / by_capability("private_proxy").id
     if not (projdir / "docker-compose.yml").is_file():
         return {"ok": False, "error": "apps/ingress/docker-compose.yml missing from checkout."}
-    runtime_caddy = RuntimePaths().projects / by_capability("private_proxy").id / "Caddyfile"
-    source_caddy = runtime_caddy if runtime_caddy.is_file() else projdir / "Caddyfile"
+    source_caddy = _safe_caddy_configuration(ctx["root"])
     _update_progress(
         ctx,
         "caddy",
@@ -853,8 +882,9 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     rc, out = actions.compose_up(
         projdir,
         log,
-        env={"MU3LAB_CADDYFILE": str(source_caddy), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        env=routes.ingress_env(source_caddy, ingress_token),
         on_output=compose_activity,
+        recreate=True,  # Config file contents may change without changing the Compose mount path.
     )
     log(out or f"(exit {rc})")
     if rc != 0:
@@ -867,6 +897,7 @@ def fix_caddy(check: dict, ctx: dict) -> dict:
     for _ in range(30):
         if _tcp_open(CADDY_PORT) and _caddy_health_status() == 204:
             log(f"Caddy health endpoint answering on :{CADDY_PORT}")
+            stamps.write(_ingress_boundary_stamp(), _ingress_boundary_digest(ctx["root"]))
             return {"ok": True}
         _time.sleep(2)
     return {
@@ -1097,13 +1128,8 @@ def fix_vaultwarden(check: dict, ctx: dict) -> dict:
     )
     # Start from the rendered project, the folder the dashboard watches and controls.
     projdir = project
-    env = {"MU3LAB_DATA_ROOT": str(RuntimePaths().data), "MU3LAB_VAULT_ENV_FILE": str(project / ".env")}
-    extra_files: list[Path] = []
     # Once Tailscale is joined, keep the private URL a restart or update would otherwise drop.
-    domain = vaultwarden_tailnet_domain(_tailscale_dns_name_for_install())
-    if domain:
-        env["VAULTWARDEN_DOMAIN"] = domain
-        extra_files.append(projdir / "docker-compose.tailnet.yml")
+    env, extra_files = compose_settings.vault_env(projdir, _tailscale_dns_name_for_install())
     rc, out = actions.compose_up(projdir, log, env=env, extra_files=extra_files, on_output=compose_activity)
     log(out or f"(exit {rc})")
     if rc != 0:
@@ -1261,6 +1287,20 @@ def fix_authentik_serve(check: dict, ctx: dict) -> dict:
     )
 
 
+def _tailnet_relay_check(ctx: dict) -> dict:
+    from ctl import tailnet_relay
+
+    verdict = tailnet_relay.status(_tailscale_dns_name_for_install(), ctx["log_fn"]("tailnet_relay"))
+    status = "ok" if verdict["state"] == "ready" else "missing"
+    return _row("tailnet_relay", status, verdict["detail"], verdict["state"])
+
+
+def fix_tailnet_relay(check: dict, ctx: dict) -> dict:
+    from ctl import tailnet_relay
+
+    return tailnet_relay.apply(_tailscale_dns_name_for_install(), ctx["log_fn"]("tailnet_relay"))
+
+
 def fix_lobehub_serve(check: dict, ctx: dict) -> dict:
     """Reserve LobeChat's stable private origin before core reconciliation."""
     return _tailscale_serve_port(
@@ -1279,12 +1319,8 @@ def _authentik_compose_env(account: dict, log) -> dict[str, str]:
     )
     if added:
         log("generated Authentik runtime configuration: " + ", ".join(added))
-    generated = read_runtime_env(env_file)
-    return {
-        "AUTHENTIK_ENV_FILE": str(env_file),
-        "AUTHENTIK_POSTGRESQL__PASSWORD": generated["AUTHENTIK_POSTGRESQL__PASSWORD"],
-        "MU3LAB_DATA_ROOT": str(RuntimePaths().data),
-    }
+    # The same values every later start uses (backups, restores), so neither can drift.
+    return compose_settings.identity_env(env_file=env_file)
 
 
 def fix_authentik(check: dict, ctx: dict) -> dict:
@@ -1396,10 +1432,7 @@ def _tailscale_dns_name_for_install() -> str:
 
 def vaultwarden_tailnet_domain(dns_name: str) -> str:
     """Build Vaultwarden's final private URL, rejecting local/bare values."""
-    name = dns_name.rstrip(".")
-    if not re.fullmatch(r"[A-Za-z0-9.-]+\.ts\.net", name):
-        return ""
-    return f"https://{name}:{VAULTWARDEN_SERVE_PORT}"
+    return compose_settings.vault_domain(dns_name)
 
 
 def fix_authentik_setup(check: dict, ctx: dict) -> dict:
@@ -1516,7 +1549,7 @@ def fix_dashboard_protection(check: dict, ctx: dict) -> dict:
     ingress_result["rc"], ingress_result["out"] = actions.compose_up(
         ctx["root"] / "apps" / by_capability("private_proxy").id,
         log,
-        env={"MU3LAB_CADDYFILE": str(target), "MU3LAB_INGRESS_TOKEN": ingress_token},
+        env=routes.ingress_env(target, ingress_token),
         recreate=True,  # the file path is unchanged on updates, so Caddy must restart to read it
         on_output=ingress_activity,
     )
@@ -1871,6 +1904,15 @@ def fix_tailscale_operator(check: dict, ctx: dict) -> dict:
 
 
 def _caddy_check(ctx: dict) -> dict:
+    if stamps.read(_ingress_boundary_stamp()) != _ingress_boundary_digest(ctx["root"]):
+        return {
+            "name": "caddy",
+            "status": "missing",
+            "state": "down",
+            "blocking": False,
+            "detail": "The ingress identity boundary needs to be applied.",
+            "action": "Restart Caddy with the current policy.",
+        }
     if not _tcp_open(CADDY_PORT):
         return {
             "name": "caddy",
@@ -2132,6 +2174,46 @@ class Step(TypedDict, total=False):
     verify_ok_states: tuple[str, ...]
 
 
+def _restore_check(ctx: dict) -> dict:
+    from ctl import rebuild
+
+    if rebuild.status(RuntimePaths()).get("restored_at"):
+        return {"status": "ok", "state": "ready", "detail": "Restored from your backups."}
+    if not ctx.get("restore") and rebuild.interrupted(RuntimePaths()):
+        # Never carry on with half the old data: only --restore may finish or redo it.
+        return {"status": "missing", "state": "interrupted", "detail": "A rebuild from backups did not finish."}
+    if not ctx.get("restore"):
+        return {"status": "ok", "state": "not_requested", "detail": "Not restoring from backups."}
+    return {"status": "missing", "state": "missing", "detail": "Mu3Lab will be restored from your backups."}
+
+
+def fix_restore_backup(check: dict, ctx: dict) -> dict:
+    from ctl import rebuild
+
+    if check.get("state") == "interrupted":
+        return {
+            "ok": False,
+            "error": "A rebuild from your backups stopped before it finished. Run ./install.sh --restore "
+            "again: it removes what it had restored and starts over.",
+        }
+    request = ctx["restore"]
+    log = ctx["log_fn"]("restore_backup")
+    _update_progress(
+        ctx,
+        "restore_backup",
+        phase="restoring",
+        activity="Opening your backups and restoring Mu3Lab, sign-in, the vault and your apps.",
+        timeout_seconds=6 * 3600,
+    )
+    try:
+        result = rebuild.restore(request["source"], request["password"], log)
+    except (rebuild.RebuildError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+    finally:
+        request["password"] = ""  # needed only for this step; the restored settings hold it from here
+    return {"ok": True, "detail": f"Restored Mu3Lab and {len(result['apps'])} apps from your backups."}
+
+
 STEPS: list[Step] = [
     {
         "id": "host_supported",
@@ -2237,6 +2319,14 @@ STEPS: list[Step] = [
         "check": lambda ctx: _runtime_layout_check(RuntimePaths().root),
         "fix": fix_runtime_layout,
     },
+    # Only with ./install.sh --restore: put the old computer's Mu3Lab back
+    # before anything below creates new secrets, a database or app data.
+    {
+        "id": "restore_backup",
+        "label": "Restore from your backups",
+        "check": lambda ctx: _restore_check(ctx),
+        "fix": fix_restore_backup,
+    },
     {
         "id": "root_env",
         "label": "Generate private keys",
@@ -2293,6 +2383,12 @@ STEPS: list[Step] = [
         "fix": fix_authentik_serve,
     },
     {
+        "id": "tailnet_relay",
+        "label": "Let apps reach sign-in",
+        "check": _tailnet_relay_check,
+        "fix": fix_tailnet_relay,
+    },
+    {
         "id": "lobehub_serve",
         "label": "Private address for LobeChat",
         "check": lambda ctx: _serve_port_check(LOBEHUB_SERVE_PORT),
@@ -2304,15 +2400,14 @@ STEPS: list[Step] = [
         "check": check_authentik_setup,
         "fix": fix_authentik_setup,
     },
-    # Publish the private dashboard route before the operator tests the
-    # Authentik gate; the route is tailnet-only while the gate is configured.
-    {"id": "serve", "label": "Private address for the dashboard", "check": _serve_check, "fix": fix_serve},
     {
         "id": "dashboard_protection",
         "label": "Require sign-in for the dashboard",
         "check": check_dashboard_protection,
         "fix": fix_dashboard_protection,
     },
+    # The gate probe uses loopback with the tailnet Host; no published route is needed.
+    {"id": "serve", "label": "Private address for the dashboard", "check": _serve_check, "fix": fix_serve},
     {
         "id": "core_images",
         "label": "Download the core apps",
@@ -2330,7 +2425,7 @@ PHASES = (
     ("Install Docker", ("docker", "docker_address_pools", "docker_networks", "nvidia_toolkit")),
     (
         "Set up Mu3Lab",
-        ("dashboard_src", "dashboard_build", "runtime_layout", "root_env", "service"),
+        ("dashboard_src", "dashboard_build", "runtime_layout", "restore_backup", "root_env", "service"),
     ),
     (
         "Start your password vault",
@@ -2341,10 +2436,11 @@ PHASES = (
         (
             by_capability("identity_provider").id,
             "authentik_serve",
+            "tailnet_relay",
             "lobehub_serve",
             "authentik_setup",
-            "serve",
             "dashboard_protection",
+            "serve",
         ),
     ),
     ("Download the core apps", ("core_images",)),
@@ -2540,7 +2636,29 @@ def run_job(job: dict, ctx: dict) -> None:
             ]
             bootstrap_root = ctx.get("root")
             if not existing and bootstrap_root:
-                start_core_setup(store, "bootstrap", bootstrap_root)
+                from ctl.people import owner_identity
+                from ctl.store import workflows as workflow_secrets
+
+                # Core apps that create the owner's own account (Open WebUI) need to know who that is.
+                owner = owner_identity()
+                start_core_setup(
+                    store,
+                    "bootstrap",
+                    bootstrap_root,
+                    prepare=(
+                        (
+                            lambda job_id: workflow_secrets.save_job_identity(
+                                job_id,
+                                owner_uid=owner["owner_uid"],
+                                email=owner["email"],
+                                username=owner["username"],
+                                display_name=owner["display_name"],
+                            )
+                        )
+                        if owner
+                        else None
+                    ),
+                )
                 ctx["emit"]({"type": "log", "id": "_install_", "line": "started durable core-platform reconciliation"})
             elif not existing and not bootstrap_root:
                 ctx["emit"](

@@ -47,18 +47,24 @@ const backups = {
   ],
 };
 
-function setup(update = release()) {
+// Kopia backups installed: scheduled and on-demand backups are on.
+const kopia = service('kopia-ui', 'Kopia backups', 'optional', { group: 'infrastructure' });
+
+function setup(update = release(), app = mealie, jobs: unknown[] = [], others = [kopia]) {
   const posts: unknown[] = [];
   stubFetch((path, init) => {
     if (path.endsWith('/updates')) return update;
     if (path.endsWith('/backups')) return backups;
-    if (path.endsWith('/actions') && init?.method === 'POST') {
-      posts.push(JSON.parse(String(init.body)));
+    if ((path.endsWith('/actions') || path.endsWith('/retry')) && init?.method === 'POST') {
+      posts.push(path.endsWith('/retry') ? { retry: path } : JSON.parse(String(init.body)));
       return { ok: true, job: { id: 'job', state: 'queued' } };
     }
     return undefined;
   });
-  renderWithDashboard(<AdvancedTab service={mealie} />, dashboardData([mealie]));
+  renderWithDashboard(
+    <AdvancedTab service={app} />,
+    dashboardData([app, ...others], { jobs: { ok: true, available: true, jobs } } as never),
+  );
   return posts;
 }
 
@@ -108,5 +114,65 @@ describe('AdvancedTab backups', () => {
     await vi.waitFor(() =>
       expect(posts).toEqual([{ action: 'restore', snapshot_id: 'a'.repeat(64), confirm: 'Mealie' }]),
     );
+  });
+
+  it('after an interrupted restore offers only putting the original data back', async () => {
+    const blocked = {
+      ...mealie,
+      recovery: {
+        kind: 'restore' as const,
+        detail: 'A restore of Mealie was interrupted before it finished.',
+        since: '2026-10-08T10:00:00Z',
+        can_keep: false,
+      },
+    };
+    const posts = setup(release(), blocked);
+    expect(await screen.findByText('Mealie needs attention.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back up now' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Restore…' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Keep new version' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Put my original data back' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'recover' }]));
+  });
+
+  it('without Kopia backups says backups are off and offers no Back up now', async () => {
+    setup(release(), mealie, [], []);
+    expect(await screen.findByText(/Backups are off, so Mealie is backed up only before updates/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Install Kopia backups' })).toHaveAttribute('href', '/apps/kopia-ui');
+    expect(screen.queryByRole('button', { name: 'Back up now' })).not.toBeInTheDocument();
+    // Earlier backups can still be restored.
+    expect(await screen.findByRole('button', { name: 'Restore…' })).toBeEnabled();
+  });
+
+  it('after an interrupted update offers undoing it or keeping the new version', async () => {
+    const blocked = {
+      ...mealie,
+      recovery: { kind: 'update' as const, detail: 'An update was interrupted.', since: '', can_keep: true },
+    };
+    const posts = setup(release(), blocked);
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep new version' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'keep_update' }]));
+    expect(screen.getByRole('button', { name: 'Undo update' })).toBeInTheDocument();
+  });
+
+  it('says a failed restore put the data back and offers to try again', async () => {
+    const failed = {
+      id: 'r1',
+      kind: 'lifecycle',
+      service_id: 'mealie',
+      action: 'restore',
+      state: 'failed',
+      actor: 'owner',
+      created_at: '2026-10-08T10:00:00Z',
+      updated_at: '2026-10-08T10:05:00Z',
+      detail: 'Mealie did not start on the restored data.',
+      error_code: 'restore_rolled_back',
+    };
+    const posts = setup(release(), mealie, [failed]);
+    expect(
+      await screen.findByText("The restore did not work, so Mealie's data was put back as it was."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ retry: '/api/v1/jobs/r1/retry' }]));
   });
 });
