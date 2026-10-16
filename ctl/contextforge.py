@@ -38,7 +38,11 @@ KEY_PREFIX = "mu3lab-lobechat-"
 
 
 class ContextForgeError(RuntimeError):
-    """A safe message for the dashboard or worker."""
+    """A safe message for the dashboard or worker; ``status`` is ContextForge's HTTP answer, if any."""
+
+    def __init__(self, message: str, status: int = 0) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def app() -> App:
@@ -116,7 +120,9 @@ class ContextForge:
         except (httpx.HTTPError, ValueError):
             raise ContextForgeError("ContextForge could not be reached.") from None
         if not response.is_success:
-            raise ContextForgeError(f"ContextForge did not accept this request (HTTP {response.status_code}).")
+            raise ContextForgeError(
+                f"ContextForge did not accept this request (HTTP {response.status_code}).", response.status_code
+            )
         return data
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -182,16 +188,30 @@ class ContextForge:
         The password is random and never shown: ContextForge refuses password sign-in to
         anyone but its administrator while Authentik sign-in is on.
         """
-        try:
-            self.request("GET", f"/v1/auth/email/admin/users/{email}")
+        if self.user(email) is not None:
             return
-        except ContextForgeError:
-            pass
         self.request(
             "POST",
             "/v1/auth/email/admin/users",
             json={"email": email, "password": password, "full_name": full_name, "is_admin": False},
         )
+
+    def user(self, email: str) -> dict[str, Any] | None:
+        """Someone's ContextForge account, or ``None`` when there is none; any other failure raises."""
+        try:
+            data = self.request("GET", f"/v1/auth/email/admin/users/{email}")
+        except ContextForgeError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return data if isinstance(data, dict) else {}
+
+    def remove_admin(self, email: str) -> None:
+        """Take ContextForge's administrator rights from someone, if they have an account and the rights."""
+        current = self.user(email)
+        if current is None or not _field(current, "is_admin"):
+            return
+        self.request("PATCH", f"/v1/auth/email/admin/users/{email}", json={"is_admin": False})
 
     def keys(self, email: str = "") -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": 1000}
@@ -203,8 +223,8 @@ class ContextForge:
             if str(item.get("name", "")).startswith(KEY_PREFIX)
         ]
 
-    def create_key(self, email: str, name: str, server_id: str) -> str:
-        """A key that acts as ``email`` and reaches only one virtual server."""
+    def create_key(self, email: str, name: str, server_id: str) -> tuple[str, str]:
+        """A key that acts as ``email`` and reaches only one virtual server: its ID and its text."""
         body = {
             "name": name,
             "description": "Created by Mu3Lab for LobeChat",
@@ -213,9 +233,10 @@ class ContextForge:
         }
         data = self.request("POST", "/v1/tokens", json=body) or {}
         token = data.get("access_token") if isinstance(data, dict) else None
-        if not token:
+        key = data.get("token") if isinstance(data, dict) else None
+        if not token or not isinstance(key, dict) or not key.get("id"):
             raise ContextForgeError("ContextForge did not return the new key.")
-        return str(token)
+        return str(key["id"]), str(token)
 
     def revoke_key(self, key_id: str) -> None:
         self.request("DELETE", f"/v1/tokens/admin/{key_id}")

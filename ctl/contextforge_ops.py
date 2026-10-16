@@ -89,33 +89,60 @@ def virtual_server(connector_id: str) -> str:
 
 
 def person_key(uid: str, email: str, connector_id: str, server_id: str, paths: RuntimePaths | None = None) -> str:
-    """This person's LobeChat key for one virtual server, created the first time."""
+    """This person's LobeChat key for one virtual server, created the first time.
+
+    A saved key is reused only while ContextForge still lists it as active, so a key
+    an operator revoked in ContextForge's screens is replaced on the next sync.
+    """
     store = SecretStore(paths or RuntimePaths())
     name = f"{uid}:{connector_id}"
     saved = store.get(KEY_SCOPE, name)
-    if isinstance(saved, dict) and saved.get("server_id") == server_id and saved.get("token"):
-        return str(saved["token"])
     label = f"{KEY_PREFIX}{connector_id}"
     with client(paths) as api:
+        if isinstance(saved, dict) and saved.get("server_id") == server_id and saved.get("token"):
+            try:
+                live = {str(key.get("id")) for key in api.keys(email) if key.get("is_active", True)}
+            except ContextForgeError:
+                # ContextForge is down: keep the saved key rather than fail the whole sync.
+                return str(saved["token"])
+            if saved.get("key_id") and str(saved["key_id"]) in live:
+                return str(saved["token"])
         api.ensure_user(email, email.split("@")[0], secrets.token_urlsafe(32))
         # A key whose text Mu3Lab no longer holds (or for another server) cannot be shown again; replace it.
         for key in api.keys(email):
             if key.get("name") == label:
                 api.revoke_key(str(key["id"]))
-        token = api.create_key(email, label, server_id)
-    store.put(KEY_SCOPE, name, {"server_id": server_id, "token": token})
+        key_id, token = api.create_key(email, label, server_id)
+    store.put(KEY_SCOPE, name, {"server_id": server_id, "key_id": key_id, "email": email, "token": token})
     return token
 
 
 def revoke_person(uid: str, email: str, paths: RuntimePaths | None = None) -> None:
-    """Withdraw every LobeChat key Mu3Lab made for this person."""
+    """Withdraw every LobeChat key Mu3Lab made for this person.
+
+    Raises when keys were saved for them but no email is known to find those keys by,
+    so the revocation stays pending instead of leaving the keys working.
+    """
     store = SecretStore(paths or RuntimePaths())
-    if email:
+    names = [f"{uid}:{connector}" for connector in records.names(SCOPE, paths or RuntimePaths())]
+    saved = [item for item in (store.get(KEY_SCOPE, name) for name in names) if isinstance(item, dict)]
+    emails = {email} if email else set()
+    emails |= {str(item["email"]) for item in saved if item.get("email")}
+    if saved and not emails:
+        raise ContextForgeError("This person's email is unknown, so their ContextForge keys could not be found.")
+    if emails:
         with client(paths) as api:
-            for key in api.keys(email):
-                api.revoke_key(str(key["id"]))
-    for name in records.names(SCOPE, paths or RuntimePaths()):
-        store.delete(KEY_SCOPE, f"{uid}:{name}")
+            for address in sorted(emails):
+                for key in api.keys(address):
+                    api.revoke_key(str(key["id"]))
+    for name in names:
+        store.delete(KEY_SCOPE, name)
+
+
+def remove_admin(email: str, paths: RuntimePaths | None = None) -> None:
+    """Take ContextForge administrator rights at once; ContextForge would only do it at their next sign-in."""
+    with client(paths) as api:
+        api.remove_admin(email)
 
 
 def retire_old_gateway(log: Log, paths: RuntimePaths | None = None) -> None:

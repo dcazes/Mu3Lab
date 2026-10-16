@@ -32,7 +32,10 @@ class FakeContextForge:
         self.tools: list[dict] = []
         self.servers: list[dict] = [{"id": "kept", "name": "Grocy (Grocy)", "associatedTools": ["chosen-by-operator"]}]
         self.users: set[str] = set()
+        self.admins: set[str] = set()
+        self.user_lookup_status = 0
         self.keys: list[dict] = []
+        self.keys_made = 0
         self.providers: dict[str, dict] = {}
         self.calls: list[tuple[str, str]] = []
 
@@ -73,8 +76,16 @@ class FakeContextForge:
             server = {"id": f"s{len(self.servers)}", **body["server"], "visibility": body["visibility"]}
             self.servers.append(server)
             return httpx.Response(201, json=server)
+        if path.startswith("/v1/auth/email/admin/users/") and method == "PATCH":
+            self.admins.discard(path.rsplit("/", 1)[1])
+            return httpx.Response(200, json={})
         if path.startswith("/v1/auth/email/admin/users/"):
-            return httpx.Response(200 if path.rsplit("/", 1)[1] in self.users else 404, json={})
+            email = path.rsplit("/", 1)[1]
+            if self.user_lookup_status:
+                return httpx.Response(self.user_lookup_status, json={})
+            if email not in self.users:
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json={"email": email, "is_admin": email in self.admins})
         if path == "/v1/auth/email/admin/users":
             self.users.add(body["email"])
             return httpx.Response(201, json={})
@@ -82,7 +93,8 @@ class FakeContextForge:
             email = request.url.params.get("user_email")
             return httpx.Response(200, json={"tokens": [key for key in self.keys if key["user_email"] == email]})
         if path == "/v1/tokens":
-            key = {"id": f"k{len(self.keys)}", **body}
+            key = {"id": f"k{self.keys_made}", **body}
+            self.keys_made += 1
             self.keys.append(key)
             return httpx.Response(201, json={"token": key, "access_token": f"secret-{key['id']}"})
         if path.startswith("/v1/tokens/admin/") and method == "DELETE":
@@ -138,8 +150,8 @@ class ClientTests(ContextForgeCase):
 
     def test_a_key_acts_as_the_person_and_reaches_one_virtual_server(self):
         with contextforge_ops.client() as api:
-            token = api.create_key("kid@example.test", "mu3lab-lobechat-grocy", "s1")
-        self.assertEqual(token, "secret-k0")
+            key_id, token = api.create_key("kid@example.test", "mu3lab-lobechat-grocy", "s1")
+        self.assertEqual((key_id, token), ("k0", "secret-k0"))
         key = self.fake.keys[0]
         self.assertEqual((key["user_email"], key["scope"]), ("kid@example.test", {"server_id": "s1"}))
 
@@ -202,6 +214,42 @@ class PersonKeyTests(ContextForgeCase):
         records.put(contextforge_ops.SCOPE, "grocy-community", {"server_id": "s2"}, self.paths)
         contextforge_ops.revoke_person("uid-1", "kid@example.test", self.paths)
         self.assertEqual(self.fake.keys, [])
+
+    def test_a_key_revoked_in_contextforge_is_replaced(self):
+        first = contextforge_ops.person_key("uid-1", "kid@example.test", "grocy-community", "s1", self.paths)
+        # An operator revokes it in ContextForge's screens; it no longer appears among active keys.
+        self.fake.keys.clear()
+        second = contextforge_ops.person_key("uid-1", "kid@example.test", "grocy-community", "s1", self.paths)
+        self.assertNotEqual(first, second)
+        self.assertEqual(len(self.fake.keys), 1)
+
+    def test_a_server_error_is_not_mistaken_for_a_missing_account(self):
+        self.fake.user_lookup_status = 503
+        with contextforge_ops.client() as api, self.assertRaises(ContextForgeError):
+            api.ensure_user("kid@example.test", "kid", "random")
+        self.assertNotIn(("POST", "/v1/auth/email/admin/users"), self.fake.calls)
+
+    def test_keys_are_found_by_their_saved_email_and_never_silently_skipped(self):
+        records.put(contextforge_ops.SCOPE, "grocy-community", {"server_id": "s1"}, self.paths)
+        contextforge_ops.person_key("uid-1", "kid@example.test", "grocy-community", "s1", self.paths)
+        # Authentik no longer gives an email: the one saved with the key still finds it.
+        contextforge_ops.revoke_person("uid-1", "", self.paths)
+        self.assertEqual(self.fake.keys, [])
+        # A key saved before emails were kept, with no email from Authentik, stays pending.
+        from ctl.store.secrets import SecretStore
+
+        SecretStore(self.paths).put(contextforge_ops.KEY_SCOPE, "uid-2:grocy-community", {"token": "t"})
+        with self.assertRaises(ContextForgeError):
+            contextforge_ops.revoke_person("uid-2", "", self.paths)
+
+    def test_admin_rights_are_removed_at_once(self):
+        self.fake.users |= {"op@example.test"}
+        self.fake.admins |= {"op@example.test"}
+        contextforge_ops.remove_admin("op@example.test", self.paths)
+        self.assertEqual(self.fake.admins, set())
+        # Someone without a ContextForge account has nothing to remove.
+        contextforge_ops.remove_admin("nobody@example.test", self.paths)
+        self.assertNotIn(("PATCH", "/v1/auth/email/admin/users/nobody@example.test"), self.fake.calls)
 
 
 class SignInTests(unittest.TestCase):
