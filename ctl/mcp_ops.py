@@ -114,11 +114,11 @@ def _materialize(server, root: Path) -> Path:
     return target
 
 
-def _probe(url: str) -> tuple[bool, str]:
+def _probe(url: str, headers: tuple[tuple[str, str], ...] = ()) -> tuple[bool, str]:
     if not url:
         return False, "MCP health contract is missing"
     try:
-        request = urllib.request.Request(url, method="GET")
+        request = urllib.request.Request(url, headers=dict(headers), method="GET")
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status < 500, f"HTTP {response.status}"
     except urllib.error.HTTPError as exc:
@@ -155,7 +155,14 @@ def _decode_rpc_response(payload: bytes, content_type: str) -> dict:
 
 
 def _rpc_request(
-    url: str, method: str, request_id: int, *, token: str = "", session_id: str = "", params: dict | None = None
+    url: str,
+    method: str,
+    request_id: int,
+    *,
+    token: str = "",
+    session_id: str = "",
+    params: dict | None = None,
+    extra: tuple[tuple[str, str], ...] = (),
 ) -> tuple[dict, str]:
     if params is None:
         params = (
@@ -168,6 +175,7 @@ def _rpc_request(
             else {}
         )
     headers = {
+        **dict(extra),
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": "2025-03-26",
@@ -186,8 +194,11 @@ def _rpc_request(
         return decoded, response.headers.get("Mcp-Session-Id", session_id)
 
 
-def _rpc_notification(url: str, method: str, *, token: str = "", session_id: str = "") -> None:
+def _rpc_notification(
+    url: str, method: str, *, token: str = "", session_id: str = "", extra: tuple[tuple[str, str], ...] = ()
+) -> None:
     headers = {
+        **dict(extra),
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": "2025-03-26",
@@ -260,9 +271,10 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
     if not url:
         raise ValueError("MCP verification endpoint is missing")
     token = values.get("MCP_AUTH_TOKEN", "")
-    _, session_id = _rpc_request(url, "initialize", 1, token=token)
-    _rpc_notification(url, "notifications/initialized", token=token, session_id=session_id)
-    response, _ = _rpc_request(url, "tools/list", 2, token=token, session_id=session_id)
+    extra = getattr(server, "headers", ())
+    _, session_id = _rpc_request(url, "initialize", 1, token=token, extra=extra)
+    _rpc_notification(url, "notifications/initialized", token=token, session_id=session_id, extra=extra)
+    response, _ = _rpc_request(url, "tools/list", 2, token=token, session_id=session_id, extra=extra)
     result = response.get("result", {})
     raw_tools = result.get("tools", []) if isinstance(result, dict) else []
     tools = [
@@ -368,7 +380,7 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
             state.set_mcp_server(server.id, service_id, enabled=True, state="failed", error={"message": redact(output)})
             success = False
             continue
-        healthy, detail = _probe(server.local_health)
+        healthy, detail = _probe(server.local_health, server.headers)
         if not healthy:
             state.set_mcp_server(
                 server.id, service_id, enabled=True, state="degraded", error={"message": redact(detail)}
@@ -433,7 +445,7 @@ def reconcile_lifecycle(root: Path, log) -> None:
         app_healthy = bool(
             installation and installation.get("state") == "running" and _healthy(registry.get(server.service_id))[0]
         )
-        mcp_healthy = _probe(server.local_health)[0] if runtime["state"] == "live" else False
+        mcp_healthy = _probe(server.local_health, server.headers)[0] if runtime["state"] == "live" else False
         if app_healthy and (runtime["state"] != "live" or not mcp_healthy):
             sync_application(server.service_id, running=True, root=root, log=log)
         elif not app_healthy and runtime["state"] not in {"stopped", "prepared", "authentication_required"}:
@@ -503,7 +515,7 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
             rc, output = actions.compose_up(target, log, recreate=True, wait_timeout=120)
             if rc:
                 raise ValueError("Updated MCP did not start: " + redact(output))
-            healthy, detail = _probe(server.local_health)
+            healthy, detail = _probe(server.local_health, server.headers)
             if not healthy:
                 raise ValueError("Updated MCP health check failed: " + redact(detail))
             tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
@@ -722,7 +734,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             job_id, "failed", actor=actor, detail=redact(output), error_code="mcp_start_failed", step_id="start"
         )
         return
-    healthy, detail = _probe(server.local_health)
+    healthy, detail = _probe(server.local_health, server.headers)
     if not healthy:
         state.set_mcp_server(
             server.id, server.service_id, enabled=True, state="degraded", error={"message": redact(detail)}

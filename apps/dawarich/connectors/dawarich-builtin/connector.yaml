@@ -1,0 +1,34 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Dawarich serves a read-only MCP server itself at /api/v1/mcp (since 1.15; app/controllers/api/v1/mcp_controller.rb).
+id: dawarich-builtin
+name: Dawarich MCP
+# Not switched on at install: every household member shares app assistants, so turning it on lets
+# them ask about the owner's whereabouts.
+preferred: false
+provenance: official
+repository: https://github.com/Freika/dawarich
+revision: 1.15.3
+builtin: true
+transport: streamable-http
+endpoint: http://dawarich-app:3000/api/v1/mcp
+local_health: http://127.0.0.1:3006/api/v1/health
+# Dawarich runs with force_ssl behind Caddy; without this it redirects plain HTTP.
+headers:
+  X-Forwarded-Proto: https
+credentials:
+- key: api_key
+  env: MCP_AUTH_TOKEN
+  type: secret
+  label: Dawarich API key
+  required: true
+provision:
+  service: app
+  script: provision.rb
+  interpreter:
+  - bin/rails
+  - runner
+  - /dev/stdin
+provision_note: Uses the owner's existing Dawarich API key (the same one their phone uses), so nothing else changes.
+review_note: Dawarich's own experimental MCP server, built into the pinned release. Its three tools only read the
+  owner's timeline, latest location and visits. Everyone in the household shares the assistant, so switching it on
+  shares the owner's location history with them; other people's histories are not reachable.

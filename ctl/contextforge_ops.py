@@ -54,7 +54,9 @@ def connect(server, app_name: str, log: Log) -> tuple[bool, str]:
             dns_name = tailnet_dns_name()
             if dns_name:
                 api.ensure_chat_provider(dns_name)
-            gateway = api.ensure_gateway(server.id, server.endpoint, token, f"{app_name}: {server.name}")
+            gateway = api.ensure_gateway(
+                server.id, server.endpoint, token, f"{app_name}: {server.name}", dict(getattr(server, "headers", ()))
+            )
             tools = api.tools(str(gateway["id"]))
             if not tools:
                 return False, f"ContextForge found no tools on {server.name}."

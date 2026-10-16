@@ -35,6 +35,7 @@ class McpServer:
     secrets: tuple[dict[str, Any], ...] = ()
     include: tuple[str, ...] = ()
     builtin: bool = False
+    headers: tuple[tuple[str, str], ...] = ()
 
     def compose_path(self, root: Path = ROOT) -> Path | None:
         if not self.compose_dir:
@@ -91,6 +92,7 @@ def load(registry: Registry) -> tuple[McpServer, ...]:
                     secrets=tuple(secret.model_dump() for secret in connector.secrets),
                     include=connector.include,
                     builtin=connector.builtin,
+                    headers=tuple(connector.headers.items()),
                 )
             )
     return tuple(result)

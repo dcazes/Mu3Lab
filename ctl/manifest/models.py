@@ -365,6 +365,9 @@ class Connector(Model):
     # The app serves MCP itself (``endpoint`` is the app's own service): no connector container
     # to build, start or stop, and the app joins mu3lab_mcp_upstream so ContextForge can reach it.
     builtin: bool = False
+    # Fixed headers sent with every call besides the credential, e.g. X-Forwarded-Proto for an app
+    # that redirects plain HTTP because it expects to sit behind an HTTPS proxy.
+    headers: dict[str, str] = Field(default_factory=dict)
 
     @property
     def auto_provision(self) -> bool:

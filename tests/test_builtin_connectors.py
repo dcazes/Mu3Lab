@@ -13,7 +13,10 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.store.secrets import SecretStore
 
-BUILTIN = {"outline-builtin": ("outline", "http://outline:3000/mcp")}
+BUILTIN = {
+    "outline-builtin": ("outline", "http://outline:3000/mcp"),
+    "dawarich-builtin": ("dawarich", "http://dawarich-app:3000/api/v1/mcp"),
+}
 
 
 class CatalogTests(unittest.TestCase):
@@ -45,3 +48,21 @@ class LifecycleTests(unittest.TestCase):
             project = mcp_ops._materialize(self.server, Path(__file__).resolve().parents[1])
         self.assertEqual(sorted(item.name for item in project.iterdir()), [".env"])
         self.assertTrue(mcp_ops._ready(self.server, project))
+
+
+class HeaderTests(unittest.TestCase):
+    def test_fixed_headers_go_to_contextforge_with_the_key(self):
+        from ctl.contextforge import ContextForge
+
+        api = ContextForge.__new__(ContextForge)
+        sent = {}
+        api.gateways = lambda: []
+        api.request = lambda method, path, json=None, **_: sent.update(json) or {"id": "g1"}
+        api.ensure_gateway("dawarich-builtin", "http://dawarich-app:3000/api/v1/mcp", "k", "Dawarich", {"X-Forwarded-Proto": "https"})
+        self.assertEqual(sent["auth_type"], "authheaders")
+        self.assertEqual(
+            sent["auth_headers"],
+            [{"key": "Authorization", "value": "Bearer k"}, {"key": "X-Forwarded-Proto", "value": "https"}],
+        )
+        api.ensure_gateway("outline-builtin", "http://outline:3000/mcp", "k", "Outline")
+        self.assertEqual((sent["auth_type"], sent["auth_token"]), ("bearer", "k"))

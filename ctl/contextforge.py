@@ -129,8 +129,10 @@ class ContextForge:
     def gateways(self) -> list[dict[str, Any]]:
         return _items(self.request("GET", "/v1/gateways", params={"limit": 0, "include_inactive": True}), "gateways")
 
-    def ensure_gateway(self, name: str, url: str, token: str, description: str) -> dict[str, Any]:
-        """Register a connector, or point an existing registration at its current address and key."""
+    def ensure_gateway(
+        self, name: str, url: str, token: str, description: str, headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """Register a connector, or point an existing registration at its current address, key and headers."""
         body: dict[str, Any] = {
             "name": name,
             "url": url,
@@ -138,7 +140,12 @@ class ContextForge:
             "transport": "STREAMABLEHTTP",
             "visibility": "public",
         }
-        if token:
+        if headers:
+            sent = ([{"key": "Authorization", "value": f"Bearer {token}"}] if token else []) + [
+                {"key": key, "value": value} for key, value in headers.items()
+            ]
+            body |= {"auth_type": "authheaders", "auth_headers": sent}
+        elif token:
             body |= {"auth_type": "bearer", "auth_token": token}
         current = next((item for item in self.gateways() if item.get("name") == name), None)
         if current is None:
