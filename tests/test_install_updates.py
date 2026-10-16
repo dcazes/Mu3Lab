@@ -117,8 +117,10 @@ class CoreImageTests(unittest.TestCase):
         with (
             patch.object(install, "_missing_images", return_value=[("Ollama", "ollama/ollama:1")]),
             patch.object(install.actions, "docker_cmd", return_value=(1, "network down")),
+            patch.object(install.actions, "docker_pull", return_value=(124, "no progress")) as pull,
         ):
             result = install.fix_core_images({}, ctx)
+        self.assertEqual(pull.call_args.kwargs["idle_timeout"], install.PULL_STALL_SECONDS)
         self.assertFalse(result["ok"])
         self.assertIn("ollama/ollama:1", result["error"])
 

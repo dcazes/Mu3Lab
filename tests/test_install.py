@@ -907,21 +907,40 @@ class RunnerTests(unittest.TestCase):
 
 
 class PullProgressTests(unittest.TestCase):
-    def test_reports_percent_and_speed_from_docker_pull_lines(self):
+    def make(self, sizes=None):
         shown: list[str] = []
-        progress = install._PullProgress(shown.append, "ollama (1 of 2)")
-        progress.started -= 10
-        progress("aaa: Pulling fs layer 100MB")
-        progress("bbb: Downloading 300MB")
-        progress("aaa: Download complete 100MB")
+        clock = [100.0]
+        progress = install._PullProgress(shown.append, "Open WebUI (1 of 2)", sizes, clock=lambda: clock[0])
+        return progress, shown, clock
+
+    def test_reports_mb_done_of_total_speed_and_time_left(self):
+        mb = 1000**2
+        progress, shown, clock = self.make(
+            {"aaaaaaaaaaaa": 100 * mb, "bbbbbbbbbbbb": 300 * mb, "cccccccccccc": 50 * mb}
+        )
+        progress("cccccccccccc: Already exists")
+        progress("aaaaaaaaaaaa: Pulling fs layer")
+        progress("bbbbbbbbbbbb: Downloading [>    ]  0B/300MB")
+        clock[0] += 10
+        progress("aaaaaaaaaaaa: Download complete")
         progress.last_report = 0
-        progress("bbb: Downloading 300MB")
-        self.assertTrue(shown)
-        self.assertIn("ollama (1 of 2) — 25%", shown[-1])
+        progress("bbbbbbbbbbbb: Downloading [==>  ]  100MB/300MB")
+        # 200 of 400 MB (the layer already here is not counted) at 20 MB/s: 10 s left.
+        self.assertEqual(shown[-1], "Open WebUI (1 of 2) · 200 of 400 MB · 20.0 MB/s · under a minute left")
+
+    def test_sizes_come_from_the_progress_bar_when_the_registry_was_not_asked(self):
+        progress, shown, _clock = self.make()
+        progress("bbbbbbbbbbbb: Downloading [==>  ]  1.5GB/3GB")
+        self.assertEqual(shown[-1], "Open WebUI (1 of 2) · 1,500 of 3,000 MB")
+
+    def test_time_left_reads_naturally(self):
+        self.assertEqual(install._time_left(30), "under a minute left")
+        self.assertEqual(install._time_left(600), "about 10 min left")
+        self.assertEqual(install._time_left(3900), "about 1 h 5 min left")
 
     def test_ignores_lines_without_a_layer(self):
-        shown: list[str] = []
-        install._PullProgress(shown.append, "x")("Digest:")
+        progress, shown, _clock = self.make()
+        progress("Digest: sha256:abc")
         self.assertEqual(shown, [])
 
 

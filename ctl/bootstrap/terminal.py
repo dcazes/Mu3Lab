@@ -542,6 +542,7 @@ def run(restoring: bool = False) -> int:
     job = install.new_job()
     labels = {step["id"]: step["label"] for step in job["steps"]}
     shown_phases: set[str] = set()
+    running = {"step": ""}
 
     def emit(event: dict) -> None:
         step_id = str(event.get("id", ""))
@@ -554,6 +555,7 @@ def run(restoring: bool = False) -> int:
                 if phase not in shown_phases:
                     shown_phases.add(phase)
                     screen.say("\n" + screen.color(BOLD, phase))
+                running["step"] = step_id
                 screen.start(labels[step_id])
             elif status == "ready":
                 quiet = step_id in NO_SKIP_NOTE
@@ -570,8 +572,9 @@ def run(restoring: bool = False) -> int:
     def log_fn(step_id: str):
         return lambda line: screen.log(step_id, line)
 
-    def progress(_step_id: str, update: dict) -> None:
-        if update.get("activity"):
+    def progress(step_id: str, update: dict) -> None:
+        # Background downloads report while other steps run; show each step's own news only.
+        if update.get("activity") and step_id == running["step"]:
             screen.progress(str(update["activity"]))
 
     ctx: dict[str, Any] = {

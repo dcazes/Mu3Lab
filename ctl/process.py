@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import signal
 import subprocess
 import threading
@@ -146,6 +147,39 @@ def _read(pipe: IO[bytes], stream: Stream, inbox: queue.Queue, stop: threading.E
         put(None)
 
 
+def _read_cr(pipe: IO[bytes], stream: Stream, inbox: queue.Queue, stop: threading.Event, max_line: int) -> None:
+    """Like ``_read``, but a carriage return also ends a line.
+
+    Terminal-style progress (``docker pull`` under a pseudo-terminal) redraws
+    one line with ``\\r`` and may not print ``\\n`` for minutes.
+    """
+
+    def put(item: tuple[Stream, str] | None) -> bool:
+        while True:
+            try:
+                inbox.put(item, timeout=_POLL_SECONDS)
+                return True
+            except queue.Full:
+                if stop.is_set():
+                    return False
+
+    try:
+        pending = b""
+        while chunk := pipe.read1(65536):  # type: ignore[attr-defined]
+            pending += chunk
+            *lines, pending = re.split(rb"\r\n|\r|\n", pending)
+            for line in lines:
+                if line and not put((stream, line[:max_line].decode("utf-8", "replace"))):
+                    return
+            pending = pending[-max_line:]
+        if pending:
+            put((stream, pending.decode("utf-8", "replace")))
+    except (OSError, ValueError):
+        pass
+    finally:
+        put(None)
+
+
 def start_ticks(pid: int) -> int | None:
     """The kernel's start time for ``pid`` (clock ticks since boot), or None if gone."""
     try:
@@ -246,13 +280,18 @@ def run(
     forward_limit: int = FORWARD_LIMIT,
     clock: Callable[[], float] = time.monotonic,
     own_session: bool = True,
+    idle_timeout: float | None = None,
+    split_cr: bool = False,
 ) -> Result:
     """Run ``argv`` (never through a shell) and return its bounded outcome.
 
     ``env`` replaces the environment when given, as with ``subprocess``.
     ``input`` or ``feed`` (a writer given the child's stdin) supply standard
     input from a separate thread. ``on_line`` receives each output line, cut
-    to ``FORWARD_LINE_CHARS``, on the calling thread.
+    to ``FORWARD_LINE_CHARS``, on the calling thread. ``idle_timeout`` also
+    stops the command when it prints nothing for that long, so a slow but
+    progressing download can be given a generous ``timeout``. ``split_cr``
+    treats a carriage return as a line end, for terminal-style progress.
     """
     argv = list(argv)
     deadline = clock() + timeout
@@ -281,9 +320,10 @@ def run(
     inbox: queue.Queue[tuple[Stream, str] | None] = queue.Queue(maxsize=_QUEUE_LINES)
     halt = threading.Event()
     assert proc.stdout is not None and proc.stderr is not None
+    reader = _read_cr if split_cr else _read
     threads = [
-        threading.Thread(target=_read, args=(proc.stdout, "stdout", inbox, halt, max_line), daemon=True),
-        threading.Thread(target=_read, args=(proc.stderr, "stderr", inbox, halt, max_line), daemon=True),
+        threading.Thread(target=reader, args=(proc.stdout, "stdout", inbox, halt, max_line), daemon=True),
+        threading.Thread(target=reader, args=(proc.stderr, "stderr", inbox, halt, max_line), daemon=True),
     ]
     writer_failure: list[BaseException] = []
     if has_stdin:
@@ -314,7 +354,8 @@ def run(
     tail = _Tail(keep_bytes)
     interruption: BaseException | None = None
     forwarded = unlogged = 0
-    timed_out = False
+    timed_out = stalled = False
+    last_output = clock()
 
     def forward(line: str) -> None:
         nonlocal interruption
@@ -328,9 +369,13 @@ def run(
     try:
         open_streams = 2
         while open_streams:
-            remaining = deadline - clock()
+            now = clock()
+            remaining = deadline - now
             if remaining <= 0:
                 timed_out = True
+                break
+            if idle_timeout is not None and now - last_output >= idle_timeout:
+                timed_out = stalled = True
                 break
             try:
                 item = inbox.get(timeout=min(_POLL_SECONDS, remaining))
@@ -339,6 +384,7 @@ def run(
             if item is None:
                 open_streams -= 1
                 continue
+            last_output = clock()
             stream, line = item
             tail.add(stream, line)
             if echo == "all" or stream == "stderr":
@@ -383,7 +429,10 @@ def run(
     if tail.dropped:
         output = f"[{tail.dropped} earlier output lines omitted]\n{output}"
     if timed_out:
-        note = f"{argv[0]}: timed out after {int(timeout)}s"
+        if stalled:
+            note = f"{argv[0]}: stopped after {int(idle_timeout or 0)}s without any output"
+        else:
+            note = f"{argv[0]}: timed out after {int(timeout)}s"
         return Result("timeout", 124, f"{output}\n{note}".strip(), stdout, f"{stderr}\n{note}".strip(), tail.dropped)
     returncode = int(proc.returncode)
     return Result("ok" if returncode == 0 else "failed", returncode, output, stdout, stderr, tail.dropped, unlogged)

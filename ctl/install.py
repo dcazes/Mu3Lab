@@ -2070,41 +2070,121 @@ def _core_images_check(ctx: dict) -> dict:
     return _row("core_images", "ok", "All core app images are downloaded.", "ready")
 
 
-_LAYER_SIZE = re.compile(r"(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)(?!.*\d)")
-_UNIT_BYTES = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+# docker pull's own units (decimal, as its progress bar prints them).
+_PULL_UNITS = {"B": 1, "kB": 1000, "KB": 1000, "MB": 1000**2, "GB": 1000**3}
+_PULL_LINE = re.compile(r"^([0-9a-f]{12}): (.*)$")
+_PULL_BYTES = re.compile(r"([\d.]+)\s*([kKMG]?B)/([\d.]+)\s*([kKMG]?B)")
+_DOCKER_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
+# Seconds of speed history behind the estimate: long enough to be steady on Wi-Fi.
+_SPEED_WINDOW = 30
+# A download that shows no progress for this long has stalled and is retried.
+PULL_STALL_SECONDS = 300
+
+
+def _layer_sizes(image: str) -> dict[str, int]:
+    """Compressed size of each layer this machine downloads, keyed like docker pull's short ids.
+
+    Read from the registry before pulling, so the total is known from the start
+    rather than growing as layers begin. Empty when the registry cannot be asked;
+    progress then counts the layers docker has reported so far.
+    """
+    rc, out = actions.docker_cmd(["docker", "manifest", "inspect", "-v", image], lambda _line: None, timeout=60)
+    if rc != 0:
+        return {}
+    try:
+        entries = json.loads(out)
+        if isinstance(entries, dict):
+            entries = [entries]
+        arch = _DOCKER_ARCH.get(platform.machine(), platform.machine())
+        for entry in entries:
+            target = entry.get("Descriptor", {}).get("platform") or {}
+            if len(entries) > 1 and (target.get("architecture"), target.get("os")) != (arch, "linux"):
+                continue
+            manifest = entry.get("OCIManifest") or entry.get("SchemaV2Manifest") or {}
+            return {layer["digest"].split(":")[-1][:12]: int(layer["size"]) for layer in manifest.get("layers", [])}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return {}
+
+
+def _megabytes(count: float) -> str:
+    return f"{count / 1000**2:,.0f}"
+
+
+def _time_left(seconds: float) -> str:
+    if seconds < 60:
+        return "under a minute left"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"about {minutes} min left"
+    return f"about {minutes // 60} h {minutes % 60} min left"
 
 
 class _PullProgress:
-    """Turns ``docker pull`` output lines into a percentage and speed for one image."""
+    """Turns ``docker pull`` terminal output into MB done of the total, speed and time left."""
 
-    def __init__(self, report: Callable[[str], None], label: str) -> None:
+    def __init__(
+        self, report: Callable[[str], None], label: str, sizes: dict[str, int] | None = None, clock=time.monotonic
+    ) -> None:
         self.report = report
         self.label = label
-        self.started = self.last_report = time.time()
-        self.layer_bytes: dict[str, float] = {}
-        self.completed: set[str] = set()
+        self.clock = clock
+        self.sizes: dict[str, int] = dict(sizes or {})
+        self.done: dict[str, float] = {}
+        self.present: set[str] = set()
+        self.samples: list[tuple[float, float]] = []
+        self.last_report = 0.0
+
+    def _bytes(self) -> tuple[float, float]:
+        layers = [layer for layer in self.sizes if layer not in self.present]
+        total = sum(self.sizes[layer] for layer in layers)
+        return min(total, sum(self.done.get(layer, 0) for layer in layers)), total
 
     def __call__(self, line: str) -> None:
-        parts = line.strip().split()
-        if len(parts) < 2:
+        match = _PULL_LINE.match(line.strip())
+        if not match:
             return
-        layer_id, status = parts[0], " ".join(parts[1:])
-        if "Download complete" in status:
-            self.completed.add(layer_id)
-        if any(word in status for word in ("Download complete", "Pulling fs layer", "Downloading")):
-            match = _LAYER_SIZE.search(status)
-            if match:
-                self.layer_bytes[layer_id] = float(match.group(1)) * _UNIT_BYTES[match.group(2)]
-        now = time.time()
+        layer, status = match.groups()
+        if status.startswith("Already exists"):
+            self.present.add(layer)
+        elif status.startswith("Downloading"):
+            amounts = _PULL_BYTES.search(status)
+            if amounts:
+                now, size = (float(amounts.group(i)) * _PULL_UNITS[amounts.group(i + 1)] for i in (1, 3))
+                self.sizes.setdefault(layer, int(size))
+                self.done[layer] = now
+        elif (
+            status.startswith(("Download complete", "Verifying", "Extracting", "Pull complete")) and layer in self.sizes
+        ):
+            self.done[layer] = self.sizes[layer]
+        now = self.clock()
+        self.samples.append((now, self._bytes()[0]))
+        while len(self.samples) > 2 and now - self.samples[1][0] > _SPEED_WINDOW:
+            self.samples.pop(0)
         if now - self.last_report < 2:
             return
         self.last_report = now
-        elapsed = now - self.started
-        total = sum(self.layer_bytes.values())
-        done = sum(self.layer_bytes[layer] for layer in self.completed if layer in self.layer_bytes)
-        if total > 0 and elapsed > 1:
-            speed = (done / elapsed) / 1024**2
-            self.report(f"Downloading {self.label} — {min(99, int(100 * done / total))}% at {speed:.1f} MB/s")
+        self.report(self.summary())
+
+    def summary(self) -> str:
+        done, total = self._bytes()
+        if not total:
+            return f"{self.label} · starting"
+        if done >= total:
+            return f"{self.label} · {_megabytes(total)} MB downloaded, unpacking"
+        text = f"{self.label} · {_megabytes(done)} of {_megabytes(total)} MB"
+        (first_time, first_done), (last_time, last_done) = self.samples[0], self.samples[-1]
+        if last_time - first_time >= 5:
+            speed = (last_done - first_done) / (last_time - first_time)
+            if speed > 0:
+                text += f" · {speed / 1000**2:.1f} MB/s · {_time_left((total - done) / speed)}"
+            else:
+                text += " · waiting for the network"
+        return text
+
+
+# The newest download line, so the waiting step can show it straight away.
+_download_activity = ""
 
 
 def _pull_missing(ctx: dict) -> list[str]:
@@ -2114,13 +2194,15 @@ def _pull_missing(ctx: dict) -> list[str]:
     failed: list[str] = []
 
     def show(activity: str) -> None:
-        _update_progress(ctx, "core_images", phase="downloading", activity=activity, timeout_seconds=1800)
+        global _download_activity
+        _download_activity = activity
+        _update_progress(ctx, "core_images", phase="downloading", activity=activity)
 
     for index, (name, image) in enumerate(missing, start=1):
         label = f"{name} ({index} of {len(missing)})"
-        show(f"Downloading {label}")
-        progress = _PullProgress(show, label)
-        rc, out = actions.docker_cmd_stream(["docker", "pull", image], log, timeout=1800, on_output=progress)
+        show(f"{label} · starting")
+        progress = _PullProgress(show, label, _layer_sizes(image))
+        rc, out = actions.docker_pull(image, log, on_output=progress, idle_timeout=PULL_STALL_SECONDS)
         if rc != 0:
             log(out[-500:] if out else f"(exit {rc})")
             failed.append(image)
@@ -2147,9 +2229,7 @@ def start_image_prefetch(ctx: dict) -> None:
 def fix_core_images(check: dict, ctx: dict) -> dict:
     thread = _prefetch_thread
     if thread is not None and thread.is_alive():
-        _update_progress(
-            ctx, "core_images", phase="waiting", activity="Finishing background downloads.", timeout_seconds=1800
-        )
+        _update_progress(ctx, "core_images", phase="waiting", activity=_download_activity or "Finishing downloads")
         thread.join()
     failed = _pull_missing(ctx)
     if failed:
