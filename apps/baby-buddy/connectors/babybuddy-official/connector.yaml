@@ -1,0 +1,31 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+id: babybuddy-official
+name: Baby Buddy MCP
+preferred: true
+provenance: official
+repository: https://github.com/babybuddy/babybuddy-mcp
+revision: 9f32d446241c323602b23160d05e926161184d9f
+package: babybuddy-mcp@v1.1.0
+transport: streamable-http
+endpoint: http://babybuddy-mcp:8080/mcp
+local_health: http://127.0.0.1:8824/mcp
+credentials:
+- key: api_token
+  env: BABYBUDDY_TOKEN
+  type: secret
+  label: Baby Buddy API key
+  required: true
+provision:
+  service: baby-buddy
+  script: provision.py
+  interpreter:
+  - s6-setuidgid
+  - abc
+  - /lsiopy/bin/python3
+  - '-'
+  owner_username: true
+provision_note: Uses the owner's Baby Buddy API key (the one a phone app would use), creating their Baby Buddy user and
+  key if they have not opened Baby Buddy yet.
+review_note: Baby Buddy's official MCP server (BSD-2-Clause), built from a pinned commit. It reaches only Baby Buddy, on
+  Baby Buddy's own network. Baby Buddy's records are shared by every caregiver, so the owner's key sees what everyone
+  sees.

@@ -63,3 +63,12 @@ mobile:
 resource_guidance: Lightweight family tracker with durable local data and uploaded media. Authentik creates the
   Baby Buddy user automatically on first access.
 setup_action: Install Baby Buddy for shared feeding, sleep, diaper, pumping, and growth tracking.
+chat:
+  assistant:
+    title: Baby Buddy
+    description: Log and look up feedings, sleep, diapers and growth.
+    instructions: Help log and review Baby Buddy records for the household's children. Confirm the child, time and
+      details before logging, ask before changing or deleting records, and give times in the household's time zone.
+      Use only Baby Buddy tools assigned to this agent.
+  connectors:
+  - babybuddy-official

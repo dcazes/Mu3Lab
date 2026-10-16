@@ -122,9 +122,10 @@ def _probe(url: str, headers: tuple[tuple[str, str], ...] = ()) -> tuple[bool, s
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status < 500, f"HTTP {response.status}"
     except urllib.error.HTTPError as exc:
-        # MCP POST endpoints commonly return 404/405 to a GET while the
-        # process is healthy. Authentication and tool discovery are separate.
-        return exc.code in {400, 401, 403, 404, 405}, f"HTTP {exc.code}"
+        # MCP POST endpoints commonly return 404/405 (or 406 without an event-stream
+        # Accept header) to a GET while the process is healthy. Authentication and
+        # tool discovery are separate.
+        return exc.code in {400, 401, 403, 404, 405, 406}, f"HTTP {exc.code}"
     except (urllib.error.URLError, OSError) as exc:
         return False, str(exc)
 
