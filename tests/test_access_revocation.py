@@ -51,6 +51,10 @@ class AccessCase(AuthentikFixture, unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.unadmined: list[str] = []
+        patcher = patch("ctl.contextforge_ops.remove_admin", side_effect=lambda email: self.unadmined.append(email))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.outages: set[str] = set()
         self.revoked: list[tuple[str, str]] = []
 
@@ -167,8 +171,12 @@ class DemotionTests(AccessCase):
         self.assertFalse(identity["is_admin"])
         self.assertTrue(identity["writes_enabled"])
         self.assertEqual(identity["role"], "member")
-        # Everyone has the same app tools, so only the administrator group goes.
-        self.assertEqual(self.pending(), ["authentik_role"])
+        # Everyone has the same app tools, so only administrator rights go: Authentik's group, and
+        # ContextForge's at once rather than at their next sign-in.
+        self.assertEqual(self.pending(), ["authentik_role", "contextforge_admin"])
+        access.run(lambda _line: None, subject="uid-1")
+        self.assertEqual(self.unadmined, ["owner@example.test"])
+        self.assertEqual(self.pending(), [])
 
     def test_failed_group_change_is_retried_and_listed_as_member(self):
         with patch.object(Authentik, "remove_from_group", side_effect=AuthentikError("Authentik could not be reached")):

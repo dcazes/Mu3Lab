@@ -28,15 +28,16 @@ from ctl.store import db
 
 Kind = Literal["deactivated", "demoted"]
 TARGETS: dict[str, tuple[str, ...]] = {
-    "deactivated": ("authentik_account", "authentik_sessions", "gateway", "voice_key", "chat"),
-    # Everyone in the household has the same app tools, so a demotion only takes the administrator group.
-    "demoted": ("authentik_role",),
+    "deactivated": ("authentik_account", "authentik_sessions", "gateway", "contextforge_admin", "voice_key", "chat"),
+    # Everyone in the household has the same app tools, so a demotion only takes administrator rights.
+    "demoted": ("authentik_role", "contextforge_admin"),
 }
 TARGET_LABELS = {
     "authentik_account": "Authentik sign-in",
     "authentik_sessions": "open Authentik sessions and tokens",
     "authentik_role": "administrator group",
     "gateway": "chat tool access",
+    "contextforge_admin": "ContextForge administrator rights",
     "voice_key": "voice key",
     "chat": "chat assistants",
 }
@@ -198,6 +199,19 @@ def _gateway(subject: str, username: str) -> None:
         contextforge_ops.revoke_person(subject, email)
 
 
+def _contextforge_admin(subject: str, username: str) -> None:
+    """ContextForge grants administrator rights from the Authentik group, but only re-checks at sign-in."""
+    from ctl import contextforge, contextforge_ops
+
+    if not (RuntimePaths().projects / contextforge.app().id / ".env").is_file():
+        return
+    _client, user = _authentik_user(subject, username)
+    email = str((user or {}).get("email") or "").strip().lower()
+    # ContextForge accounts are keyed by email, so without one there is no account to change.
+    if email:
+        contextforge_ops.remove_admin(email)
+
+
 def _voice_key(subject: str, _username: str) -> None:
     from ctl import voice_keys
 
@@ -216,6 +230,7 @@ HANDLERS: dict[str, Callable[[str, str], None]] = {
     "authentik_sessions": _authentik_sessions,
     "authentik_role": _authentik_role,
     "gateway": _gateway,
+    "contextforge_admin": _contextforge_admin,
     "voice_key": _voice_key,
     "chat": _chat,
 }
