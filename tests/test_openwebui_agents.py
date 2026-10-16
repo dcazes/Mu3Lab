@@ -1,4 +1,4 @@
-"""Open WebUI gets each operator's app assistants, private to them, through Mu3Lab's administrator key."""
+"""Open WebUI gets everyone's app assistants, through Mu3Lab's administrator key, reaching ContextForge."""
 
 from __future__ import annotations
 
@@ -21,8 +21,7 @@ ASSISTANT = {
     "title": "Mealie",
     "description": "Plan meals.",
     "instructions": "Help with recipes.",
-    "url": "http://mcp-gateway:8080/apps/mealie/mcp",
-    "token": "person-token",
+    "url": "http://contextforge:4444/servers/abc123/mcp",
 }
 
 
@@ -58,22 +57,24 @@ class FakeOpenWebUI:
 
 
 class ClientTests(unittest.TestCase):
-    def test_each_person_gets_a_private_connection_and_assistant_and_others_are_left_alone(self):
+    def test_one_shared_connection_and_assistant_per_app_and_others_are_left_alone(self):
         fake = FakeOpenWebUI()
         with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
-            managed = api.ensure({"u1": [ASSISTANT]})
-        self.assertEqual(managed, {"u1": ["mealie"]})
+            managed = api.ensure([ASSISTANT])
+        self.assertEqual(managed, ["mealie"])
         ids = [item["info"]["id"] for item in fake.connections]
-        # The owner's own connection stays; the departed person's is gone.
-        self.assertEqual(ids, ["owners-own", "mu3lab-app-mealie-u1"])
+        # The owner's own connection stays; the old per-person one is gone.
+        self.assertEqual(ids, ["owners-own", "mu3lab-app-mealie"])
         ours = fake.connections[1]
-        self.assertEqual((ours["type"], ours["auth_type"], ours["key"]), ("mcp", "bearer", "person-token"))
-        grant = [{"principal_type": "user", "principal_id": "u1", "permission": "read"}]
-        self.assertEqual(ours["config"]["access_grants"], grant)
-        model = fake.models["mu3lab-app-mealie-u1"]
-        self.assertEqual(model["meta"]["toolIds"], ["server:mcp:mu3lab-app-mealie-u1"])
+        # Each person's own Authentik sign-in reaches ContextForge; Mu3Lab stores no key.
+        self.assertEqual((ours["type"], ours["auth_type"], ours["key"]), ("mcp", "system_oauth", ""))
+        self.assertEqual(ours["url"], "http://contextforge:4444/servers/abc123/mcp")
+        everyone = [{"principal_type": "user", "principal_id": "*", "permission": "read"}]
+        self.assertEqual(ours["config"]["access_grants"], everyone)
+        model = fake.models["mu3lab-app-mealie"]
+        self.assertEqual(model["meta"]["toolIds"], ["server:mcp:mu3lab-app-mealie"])
         self.assertEqual(model["params"]["system"], "Help with recipes.")
-        self.assertEqual(model["access_grants"], grant)
+        self.assertEqual(model["access_grants"], everyone)
         self.assertNotIn("mu3lab-app-grocy-gone-user", fake.models)
         self.assertIn("someone-elses", fake.models)
         self.assertTrue(all(auth == "Bearer sk-key" for _method, _path, auth in fake.calls))
@@ -85,13 +86,7 @@ class SyncTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.paths = RuntimePaths(Path(temp.name))
         self.fake = FakeOpenWebUI()
-        people = {
-            "owner-uid": {"email": "owner@example.com", "operator": True},
-            "kid-uid": {"email": "kid@example.com", "operator": False},
-        }
         for target, value in (
-            ("ctl.openwebui_ops.chat_people", {"return_value": people}),
-            ("ctl.openwebui_ops.mcp_gateway.authority", {"return_value": MagicMock()}),
             ("ctl.openwebui_ops.chat_ops.desired_assistants", {"return_value": [ASSISTANT]}),
             (
                 "ctl.openwebui_ops.client",
@@ -108,13 +103,11 @@ class SyncTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_operators_with_an_account_get_assistants_and_members_get_none(self):
+    def test_everyone_shares_the_assistants(self):
         ok, _detail = openwebui_ops.sync_agents(lambda _line: None)
         self.assertTrue(ok)
-        self.assertEqual(records.get(openwebui_ops.SCOPE, "owner-uid", self.paths)["managed"], ["mealie"])
-        # The member never signed in to Open WebUI and is no operator: nothing to add.
-        self.assertEqual(records.get(openwebui_ops.SCOPE, "kid-uid", self.paths)["managed"], [])
-        self.assertEqual([item["info"]["id"] for item in self.fake.connections][-1], "mu3lab-app-mealie-u1")
+        self.assertEqual(records.get(openwebui_ops.SCOPE, openwebui_ops.RECORD, self.paths)["managed"], ["mealie"])
+        self.assertEqual([item["info"]["id"] for item in self.fake.connections][-1], "mu3lab-app-mealie")
 
 
 class ChatAppChoiceTests(unittest.TestCase):

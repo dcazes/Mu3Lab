@@ -5,9 +5,9 @@
 		header Content-Type "text/html; charset=utf-8"
 		header Cache-Control "no-store"
 		header Referrer-Policy "no-referrer"
-		header Content-Security-Policy "default-src 'none'; script-src 'sha256-LCmP7CZcsHYlLQAuCih7mkalBMgjUZtS3X639WLLGW4='; connect-src 'self'; base-uri 'none'; frame-ancestors https://{http.request.host}:8446"
+		header Content-Security-Policy "default-src 'none'; script-src 'sha256-BkTOOq4tQb5xjtG30Ej5C4ezmg8Y3RcFDWCI81ThLKk='; connect-src 'self'; base-uri 'none'; frame-ancestors https://{http.request.host}:8446"
 		respond `<!doctype html><html><head><meta charset="utf-8"><title>Opening app</title></head><body><p id="status">Signing in…</p><a href="/">Open Actual Budget</a><script>(async function () {
-  const cfg = {"path": "/account/login", "body": {"loginMethod": "openid", "returnUrl": "{origin}"}, "keys": ["data", "returnUrl"], "session": ""};
+  const cfg = {"path": "/account/login", "body": {"loginMethod": "openid", "returnUrl": "{origin}"}, "method": "POST", "keys": ["data", "returnUrl"], "session": ""};
   // ?next= continues to one of this app's own pages; anything else opens the app's home.
   const asked = new URLSearchParams(location.search).get('next') || '/';
   const next = /^\/(?!\/)[\w\-.\/?=&%]*$/.test(asked) ? asked : '/';
@@ -16,10 +16,14 @@
       const session = await fetch(cfg.session, {credentials: 'same-origin'});
       if (session.ok && (await session.json())?.user) { location.replace(next); return; }
     }
-    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}/', location.origin + next)
+    // A POST's "{origin}/" is where the app lands afterwards; a GET's names only its callback.
+    const landing = cfg.method === 'GET' ? '/' : next;
+    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}/', location.origin + landing)
       .replaceAll('{origin}', location.origin));
-    const r = await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const r = cfg.method === 'GET'
+      ? await fetch(cfg.path + '?' + new URLSearchParams(body), {credentials: 'same-origin'})
+      : await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     let target = await r.json();
     for (const key of cfg.keys) target = target?.[key];
     if (!r.ok || typeof target !== 'string' || !target) throw new Error();

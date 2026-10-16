@@ -35,7 +35,7 @@ class OwnerTests(unittest.TestCase):
         self.assertEqual(owner("/srv/mu3lab/projects/mcp-grocy-community"), "grocy")
         # Sign-in, the proxy and the vault, plus the tool gateway and relay, are Mu3Lab's core.
         self.assertEqual(owner(str(ROOT / "apps" / "authentik")), "core")
-        self.assertEqual(owner("/srv/mu3lab/projects/mcp-gateway"), "core")
+        self.assertEqual(owner("/srv/mu3lab/projects/tailnet-relay"), "core")
         self.assertEqual(owner(str(ROOT / "platform" / "tailnet-relay")), "core")
         # Apps no longer in the catalog.
         self.assertEqual(owner("/srv/mu3lab/projects/unsloth"), "removed")

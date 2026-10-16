@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" width="1200" height="260" role="img" aria-labelledby="t d">
+  <title id="t">What setup does</title>
+  <desc id="d">Six setup steps: run the installer, create your account, approve the computer in Tailscale, wait for the core apps, sign in to the dashboard, then follow Home's checklist for passwords, AI and apps.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    .card { fill: #f7f7f9; stroke: #dedee6; }
+    .you { fill: #eef0ff; stroke: #5e6ad2; }
+    .num { fill: #5e6ad2; }
+    .numt { fill: #ffffff; }
+    .h { fill: #15151c; }
+    .s { fill: #5d5d6e; }
+    .line { stroke: #9a9aae; fill: none; }
+    .arrow { fill: #9a9aae; }
+    .key { fill: #5d5d6e; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0f0f14; }
+      .card { fill: #17171f; stroke: #2c2c38; }
+      .you { fill: #1c1d33; stroke: #6f78e0; }
+      .num { fill: #6f78e0; }
+      .h { fill: #f0f0f6; }
+      .s { fill: #a3a3b6; }
+      .line { stroke: #5c5c70; }
+      .arrow { fill: #5c5c70; }
+      .key { fill: #a3a3b6; }
+    }
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .h { font-size: 15px; font-weight: 600; }
+    .s { font-size: 12.5px; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrow"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="260" rx="20"/>
+
+  <g>
+    <rect x="30" y="40" width="168" height="150" rx="12" class="you"/>
+    <circle cx="56" cy="68" r="14" class="num"/><text x="56" y="73" text-anchor="middle" class="numt" font-size="13" font-weight="700">1</text>
+    <text x="46" y="108" class="h">Run the installer</text>
+    <text x="46" y="130" class="s">./install.sh checks the</text>
+    <text x="46" y="148" class="s">computer and installs</text>
+    <text x="46" y="166" class="s">system software</text>
+
+    <rect x="226" y="40" width="168" height="150" rx="12" class="you"/>
+    <circle cx="252" cy="68" r="14" class="num"/><text x="252" y="73" text-anchor="middle" class="numt" font-size="13" font-weight="700">2</text>
+    <text x="242" y="108" class="h">Create your account</text>
+    <text x="242" y="130" class="s">Name, email and a</text>
+    <text x="242" y="148" class="s">password for Mu3Lab</text>
+    <text x="242" y="166" class="s">and your vault</text>
+
+    <rect x="422" y="40" width="168" height="150" rx="12" class="you"/>
+    <circle cx="448" cy="68" r="14" class="num"/><text x="448" y="73" text-anchor="middle" class="numt" font-size="13" font-weight="700">3</text>
+    <text x="438" y="108" class="h">Approve in Tailscale</text>
+    <text x="438" y="130" class="s">Sign in and approve</text>
+    <text x="438" y="148" class="s">this computer on your</text>
+    <text x="438" y="166" class="s">private network</text>
+
+    <rect x="618" y="40" width="168" height="150" rx="12" class="card"/>
+    <circle cx="644" cy="68" r="14" class="num"/><text x="644" y="73" text-anchor="middle" class="numt" font-size="13" font-weight="700">4</text>
+    <text x="634" y="108" class="h">Core apps start</text>
+    <text x="634" y="130" class="s">Sign-in, vault and</text>
+    <text x="634" y="148" class="s">dashboard; AI apps keep</text>
+    <text x="634" y="166" class="s">downloading after</text>
+
+    <rect x="814" y="40" width="168" height="150" rx="12" class="you"/>
+    <circle cx="840" cy="68" r="14" class="num"/><text x="840" y="73" text-anchor="middle" class="numt" font-size="13" font-weight="700">5</text>
+    <text x="830" y="108" class="h">Sign in</text>
+    <text x="830" y="130" class="s">Open the dashboard;</text>
+    <text x="830" y="148" class="s">setup finishes once</text>
+    <text x="830" y="166" class="s">it loads</text>
+
+    <rect x="1010" y="40" width="168" height="150" rx="12" class="you"/>
+    <circle cx="1036" cy="68" r="14" class="num"/><text x="1036" y="73" text-anchor="middle" class="numt" font-size="13" font-weight="700">6</text>
+    <text x="1026" y="108" class="h">Follow Home</text>
+    <text x="1026" y="130" class="s">Password filling, AI</text>
+    <text x="1026" y="148" class="s">provider or local model,</text>
+    <text x="1026" y="166" class="s">then your apps</text>
+  </g>
+
+  <path d="M198 115 H224" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M394 115 H420" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M590 115 H616" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M786 115 H812" class="line" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M982 115 H1008" class="line" stroke-width="2" marker-end="url(#a)"/>
+
+  <rect x="30" y="218" width="14" height="14" rx="3" class="you"/>
+  <text x="52" y="230" class="key" font-size="12.5">Needs you</text>
+  <rect x="140" y="218" width="14" height="14" rx="3" class="card"/>
+  <text x="162" y="230" class="key" font-size="12.5">Automatic</text>
+</svg>

@@ -28,7 +28,7 @@ from ctl.engine.hooks import HookContext
 from ctl.engine.launch import caddy_handler
 from ctl.engine.project import Facts, build_env, render
 from ctl.integrations.litellm import LiteLLM
-from ctl.lifecycle.signin_check import _form_launch
+from ctl.lifecycle.signin_check import _form_launch, _json_launch
 from ctl.manifest.catalog import load
 from ctl.manifest.models import Oidc
 from ctl.registry import load as load_registry
@@ -275,6 +275,22 @@ class RouteAndSignInTests(unittest.TestCase):
         self.assertIn("handle /__mu3lab/login", handler)
         self.assertIn("form-action 'self' https://{http.request.host}", handler)
         self.assertIn('"action": "/users/auth/openid_connect"', handler)
+
+    def test_contextforge_launch_asks_its_sso_endpoint_by_get(self):
+        seen: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"], seen["url"] = request.method, str(request.url)
+            return httpx.Response(200, json={"authorization_url": "https://box.test/application/o/authorize/?x=1"})
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            reply = _json_launch("contextforge", client, "https://box.test:8475")
+        self.assertEqual(seen["method"], "GET")
+        self.assertIn("redirect_uri=https%3A%2F%2Fbox.test%3A8475%2Fauth%2Fsso%2Fcallback%2Fmu3lab", seen["url"])
+        self.assertEqual(reply.headers["location"], "https://box.test/application/o/authorize/?x=1")
+        handler_text = caddy_handler(load().get("contextforge").manifest)
+        self.assertIn("handle /__mu3lab/login", handler_text)
+        self.assertIn('"method": "GET"', handler_text)
 
     def test_form_launch_check_submits_the_hidden_fields(self):
         page = (

@@ -30,14 +30,10 @@ class McpServer:
     auto_provision_note: str = ""
     review_note: str = ""
     reviewed_update: dict[str, str] | None = None
-    # A checked-in tool review; connectors with one are served through the tool gateway.
+    # A checked-in tool review: the tools its ContextForge virtual server starts with.
     review: str = ""
     secrets: tuple[dict[str, Any], ...] = ()
     include: tuple[str, ...] = ()
-
-    @property
-    def gateway(self) -> bool:
-        return bool(self.review)
 
     def compose_path(self, root: Path = ROOT) -> Path | None:
         if not self.compose_dir:

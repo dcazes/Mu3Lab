@@ -31,6 +31,13 @@ DESIRED = [
 ]
 
 
+PEOPLE = {
+    "owner": {"email": "owner@example.test", "operator": True},
+    "first": {"email": "first@example.test", "operator": False},
+    "second": {"email": "second@example.test", "operator": False},
+}
+
+
 class ApiServer:
     def __init__(self):
         self.agents = []
@@ -170,7 +177,7 @@ class AgentSyncTests(unittest.TestCase):
             patch.object(lobehub_ops.chat_connections, "records", return_value={"owner": {"key": "sk-lh-working"}}),
             patch.object(lobehub_ops.chat_connections, "save") as save,
             patch.object(lobehub_ops.chat_ops, "desired_assistants", return_value=[]),
-            patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
+            patch.object(lobehub_ops, "chat_people", return_value=PEOPLE),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
             patch.object(lobehub_ops, "LobeHub", Client),
@@ -207,7 +214,7 @@ class AgentSyncTests(unittest.TestCase):
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
             patch.object(lobehub_ops.chat_connections, "save") as save,
             patch.object(lobehub_ops.chat_ops, "desired_assistants", return_value=[]),
-            patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
+            patch.object(lobehub_ops, "chat_people", return_value=PEOPLE),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
             patch.object(lobehub_ops, "LobeHub", Client),
@@ -229,10 +236,10 @@ class AgentSyncTests(unittest.TestCase):
             manifest.name = app_id.title()
             return Mock(id=app_id, manifest=manifest)
 
-        def connector(app_id, reviewed):
-            return Mock(id=app_id + "-mcp", service_id=app_id, gateway=reviewed)
+        def connector(app_id):
+            return Mock(id=app_id + "-mcp", service_id=app_id)
 
-        apps = [app(name) for name in ("unreviewed", "down", "ready", "waiting")]
+        apps = [app(name) for name in ("unconnected", "down", "ready", "waiting")]
         servers = {
             "down-mcp": {"enabled": True, "state": "authentication_required"},
             "ready-mcp": {"enabled": True, "state": "live"},
@@ -241,12 +248,8 @@ class AgentSyncTests(unittest.TestCase):
         state = Mock()
         state.installation.return_value = {"state": "running"}
         state.mcp_server.side_effect = servers.get
-        connectors = [
-            connector("unreviewed", False),
-            connector("down", True),
-            connector("ready", True),
-            connector("waiting", True),
-        ]
+        # "unconnected" has no chat connector at all.
+        connectors = [connector("down"), connector("ready"), connector("waiting")]
         records = {"me": {"key": "sk-lh-key", "managed": {"ready": {"agent_id": "a"}}}}
         with (
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
@@ -260,7 +263,7 @@ class AgentSyncTests(unittest.TestCase):
                 item["id"]: item["status"] for item in lobehub_ops.assistant_report("someone-else", operator=True)
             }
         self.assertEqual(
-            report, {"unreviewed": "needs_review", "down": "connector_down", "ready": "ready", "waiting": "pending"}
+            report, {"unconnected": "needs_review", "down": "connector_down", "ready": "ready", "waiting": "pending"}
         )
         self.assertEqual(stranger["ready"], "not_connected")
 

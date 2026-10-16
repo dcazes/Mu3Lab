@@ -16,6 +16,7 @@ import {
 } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { AppQuickPanel } from './AppQuickPanel';
+import { CoreSetupProgress, useCoreSetupActive } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
 
@@ -76,7 +77,10 @@ function Attention() {
   const { data } = useDashboard();
   const [dismissed, dismiss] = useDismissed();
   const failing = data.services.services.filter(needsAttention);
-  const working = data.services.services.filter(isWorking);
+  // The core apps' own progress card covers them while their setup runs.
+  const coreActive = useCoreSetupActive();
+  const coreApps = new Set(coreActive ? (data.core.apps || []).map((app) => app.service_id) : []);
+  const working = data.services.services.filter((service) => isWorking(service) && !coreApps.has(service.id));
   const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
   const setupFailed = setupIncomplete && (data.provisioning.blocked || data.core.current_job?.state === 'failed');
   const items = [
@@ -162,6 +166,7 @@ export function HomePage() {
       </header>
       <SystemStatus />
       <Attention />
+      <CoreSetupProgress />
       <GetStarted />
       <section aria-labelledby="apps-heading">
         <div className="section-title">

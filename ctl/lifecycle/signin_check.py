@@ -129,7 +129,10 @@ def _json_launch(service_id: str, client: httpx.Client, origin: str) -> httpx.Re
         key: value.replace("{origin}", origin) if isinstance(value, str) else value
         for key, value in launch.body.items()
     }
-    response = client.post(origin + launch.path, json=body)
+    if launch.method == "GET":
+        response = client.get(origin + launch.path, params=body)
+    else:
+        response = client.post(origin + launch.path, json=body)
     _check_cookies(response, urlsplit(origin).hostname or "")
     target: object = response.json() if response.content else {}
     for key in launch.url_key:

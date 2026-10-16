@@ -10,7 +10,6 @@ from ctl.jobs import JobStore
 from ctl.runtime import RuntimePaths
 from ctl.store import db
 from ctl.store.secrets import SecretStore
-from gateway_authority import Authority
 
 
 class RecoveryReviewTests(unittest.TestCase):
@@ -50,24 +49,3 @@ class RecoveryReviewTests(unittest.TestCase):
         self.assertEqual((restored.state / "mu3lab.request-key").read_bytes(), original)
         again = JobStore(restored.state / "mu3lab.db")
         again.create(kind="lifecycle", service_id="demo", action="start", actor="owner", idempotency_key="request")
-
-    def test_control_export_restores_matching_gateway_key_and_retires_authority(self):
-        SecretStore(self.paths).put("platform", "backup-password", "test-only")
-        authority = Authority(self.paths.projects / "mcp-gateway" / "authority")
-        authority.grant_subject("operator", operator=True)
-        old_token = authority.credential("operator", "demo")
-        exported = platform_backup.export_control_plane(self.paths)
-        self.assertEqual((exported / "gateway-arguments.key").read_bytes(), authority.key.read_bytes())
-        restored = RuntimePaths(self.paths.root / "restored")
-        restored.state.mkdir(parents=True)
-        target = restored.projects / "mcp-gateway" / "authority"
-        target.mkdir(parents=True)
-        (target / "authority.db").write_bytes(b"inconsistent raw project copy")
-        (target / "authority.db-wal").write_bytes(b"old WAL")
-        (target / "authority.db-shm").write_bytes(b"old shared memory")
-        rebuild._place_control(exported, restored)
-        recovered = Authority(target, initialize=False)
-        self.assertEqual(recovered.key.read_bytes(), authority.key.read_bytes())
-        with self.assertRaises(ValueError):
-            recovered.authenticate(old_token, "demo")
-        self.assertFalse((target / "authority.db-wal").exists())

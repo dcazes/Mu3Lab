@@ -7,9 +7,7 @@ import json
 import tempfile
 import unittest
 import urllib.error
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar
 from unittest.mock import Mock, patch
 
 import httpx
@@ -107,7 +105,6 @@ class DashboardReadinessTests(unittest.TestCase):
             patch.object(terminal, "print_intro"),
             patch.object(terminal.install, "new_job", return_value={"steps": [], "inputs": {}}),
             patch.object(terminal.install, "run_job", side_effect=finish_job),
-            patch.object(terminal, "wait_for_core_apps", return_value=(True, "")),
             patch.object(terminal, "tailnet_name", return_value="host.ts.net"),
             patch.object(terminal, "verify_dashboard", return_value=(False, "snapshot unavailable")),
             patch.object(terminal, "report_success") as success,
@@ -299,26 +296,49 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class CoreProgressTests(unittest.TestCase):
-    NAMES: ClassVar[dict[str, str]] = {"freellmapi": "FreeLLMAPI", "ollama": "Ollama", "litellm": "LiteLLM"}
+class HandOffTests(unittest.TestCase):
+    def test_setup_hands_off_once_the_dashboard_loads_without_waiting_for_core_apps(self):
+        def finish_job(job, _ctx):
+            job["status"] = "ready"
 
-    def test_counts_finished_apps_and_says_what_the_current_one_is_doing(self):
-        events = [
-            {"event": "step.started", "detail": "Installing FreeLLMAPI.", "created_at": "2026-10-12T10:00:00+00:00"},
-            {"event": "stage", "detail": "verify_application: Waiting for application health."},
-            {"event": "step.verified", "detail": "freellmapi"},
-            {"event": "step.started", "detail": "Installing Ollama.", "created_at": "2026-10-12T10:01:00+00:00"},
-            {"event": "stage", "detail": "start_service: Starting application containers."},
-            {"event": "stage", "detail": "verify_application: Waiting for application health."},
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(terminal, "ROOT", Path(tmp)),
+            patch.object(terminal.sys.stdin, "isatty", return_value=True),
+            patch.object(terminal, "Screen"),
+            patch.object(terminal.install, "_vaultwarden_account_exists", return_value=True),
+            patch.object(terminal, "sign_in_needs_owner", return_value=False),
+            patch.object(terminal, "print_intro"),
+            patch.object(terminal.install, "new_job", return_value={"steps": [], "inputs": {}}),
+            patch.object(terminal.install, "run_job", side_effect=finish_job),
+            patch.object(terminal, "tailnet_name", return_value="host.ts.net"),
+            patch.object(terminal, "verify_dashboard", return_value=(True, "")),
+            patch("ctl.jobs.JobStore.runtime") as jobs,
+            patch.object(terminal, "report_success", return_value=0) as success,
+        ):
+            self.assertEqual(terminal.run(), 0)
+        jobs.assert_not_called()
+        self.assertEqual(success.call_args.args[1], f"https://host.ts.net:{terminal.install.DASHBOARD_SERVE_PORT}/")
+
+    def test_saving_only_the_sign_in_leaves_freellmapi_to_the_automatic_sync(self):
+        from ctl import vault_setup
+
+        authentik_only = [
+            vault_setup.DesiredItem(
+                mu3lab_id="service:authentik", name="Authentik", folder="Mu3Lab", username="a", password="b", uris=()
+            )
         ]
-        progress = terminal.core_progress(events, self.NAMES, datetime(2026, 10, 12, 10, 1, 42, tzinfo=UTC))
-        self.assertEqual(progress["done"], ["freellmapi"])
-        self.assertEqual(progress["current"], "ollama")
-        self.assertEqual(progress["phase"], "waiting for it to answer")
-        self.assertEqual(progress["elapsed"], 42)
-
-    def test_nothing_is_current_once_every_app_is_verified(self):
-        events = [{"event": "step.verified", "detail": service_id} for service_id in self.NAMES]
-        progress = terminal.core_progress(events, self.NAMES, datetime.now(UTC))
-        self.assertEqual(progress["current"], "")
-        self.assertEqual(len(progress["done"]), 3)
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        state = Mock()
+        with (
+            patch.object(vault_setup, "desired_items", return_value=authentik_only),
+            patch.object(vault_setup, "seed", return_value=Mock(created=[1], updated=[])),
+            patch("ctl.integrations.vaultwarden.VaultSession", return_value=session),
+            patch("ctl.registry.load"),
+            patch("ctl.control_state.ControlState.runtime", return_value=state),
+        ):
+            saved, _message = terminal.save_logins({"email": "a@test", "password": "pw"}, "host.ts.net")
+        self.assertTrue(saved)
+        state.mark_vault_seeded.assert_not_called()

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-labelledby="t d">
   <title id="t">Mu3Lab</title>
-  <desc id="d">Your private cloud and AI assistant, installed with one command.</desc>
+  <desc id="d">A private home cloud with app-aware AI, on your own computer.</desc>
   <style>
     .bg { fill: #f7f7f9; }
     .grid { stroke: #e4e4ea; }
@@ -44,7 +44,7 @@
 
   <!-- Wordmark -->
   <text x="420" y="178" class="title" font-size="76" font-weight="700" letter-spacing="-2">Mu3Lab</text>
-  <text x="422" y="226" class="tag" font-size="26">Your private cloud and AI assistant, installed with one command.</text>
+  <text x="422" y="226" class="tag" font-size="26">A private home cloud with app-aware AI, on your own computer.</text>
 
   <!-- Feature pills -->
   <g font-size="17" font-weight="500">
@@ -58,10 +58,10 @@
 
     <rect x="770" y="262" width="212" height="40" rx="20" class="pill"/>
     <circle cx="792" cy="282" r="5" class="dot"/>
-    <text x="806" y="288" class="pilltext">Chat runs your apps</text>
+    <text x="806" y="288" class="pilltext">Chat uses your apps</text>
 
     <rect x="994" y="262" width="122" height="40" rx="20" class="pill"/>
     <circle cx="1016" cy="282" r="5" class="dot"/>
-    <text x="1030" y="288" class="pilltext">Free AI</text>
+    <text x="1030" y="288" class="pilltext">Local AI</text>
   </g>
 </svg>

@@ -188,6 +188,26 @@ class RunTests(unittest.TestCase):
         self.assertEqual(lines, ["progress"])
         self.assertEqual(result.stdout, '{"ok": true}')
 
+    def test_idle_timeout_stops_a_silent_command_but_not_a_chatty_one(self) -> None:
+        start = time.monotonic()
+        silent = process.run(python("import time; print('hi', flush=True); time.sleep(30)"), timeout=60, idle_timeout=1)
+        self.assertEqual(silent.status, "timeout")
+        self.assertIn("without any output", silent.stderr)
+        self.assertLess(time.monotonic() - start, 15)
+        chatty = process.run(
+            python("import time\nfor i in range(4):\n    print(i, flush=True); time.sleep(0.5)"),
+            timeout=60,
+            idle_timeout=1.5,
+        )
+        self.assertEqual(chatty.status, "ok")
+
+    def test_split_cr_forwards_each_redrawn_progress_line(self) -> None:
+        seen: list[str] = []
+        code = "import sys, time\nfor i in range(3):\n    sys.stdout.write(f'\\r{i}/3'); sys.stdout.flush(); time.sleep(0.1)\nprint('\\r\\ndone')"
+        result = process.run(python(code), timeout=10, split_cr=True, on_line=seen.append)
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(seen, ["0/3", "1/3", "2/3", "done"])
+
     def test_environment_and_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             code = "import os; print(os.environ['MU3LAB_PROBE'], os.getcwd())"

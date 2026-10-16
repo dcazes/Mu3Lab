@@ -11,9 +11,9 @@ secrets, a new database or new app data:
 2. Copy the backups into place and open them with the typed password. A
    wrong password stops here, before anything else changes.
 3. Restore Mu3Lab's own state from the newest ``mu3lab`` backup: the control
-   database, the encryption key, deployment copies, the tool gateway's
-   database and the runtime projects. Mu3Lab's own encrypted store, and so
-   every app's passwords and keys, come back with them.
+   database, the encryption key, deployment copies and the runtime
+   projects. Mu3Lab's own encrypted store, and so every app's passwords and
+   keys, come back with them.
 4. Restore each app's data folders from that app's newest backup, so sign-in,
    the password vault, chat and every app start with their old data.
 5. Tidy the restored database for a new computer: jobs that were running on
@@ -347,12 +347,6 @@ def _place_control(staging: Path, paths: RuntimePaths) -> None:
     for name in ("mu3lab.db", "secrets.key"):
         if not (staging / name).is_file():
             raise RebuildError(f"The backup of Mu3Lab itself has no {name}; nothing was put in place.")
-    authority = staging / "gateway-authority.db"
-    target = paths.projects / "mcp-gateway" / "authority" / "authority.db"
-    if target.exists() and not authority.is_file():
-        raise RebuildError("The gateway backup has no consistent authority export. Manual recovery is required.")
-    if authority.is_file() and not (staging / "gateway-arguments.key").is_file():
-        raise RebuildError("The gateway backup has no matching encryption key. Manual recovery is required.")
     for name in ("mu3lab.db", "secrets.key"):
         os.replace(staging / name, paths.state / name)
     (paths.state / "secrets.key").chmod(0o600)
@@ -362,18 +356,6 @@ def _place_control(staging: Path, paths: RuntimePaths) -> None:
         (paths.state / request_key.name).chmod(0o600)
     if (staging / "deployments").is_dir():
         os.replace(staging / "deployments", paths.state / "deployments")
-    if authority.is_file():
-        # The consistent copy, not whatever the projects folder caught mid-write.
-        target.parent.mkdir(parents=True, exist_ok=True)
-        for suffix in ("-wal", "-shm"):
-            target.with_name(target.name + suffix).unlink(missing_ok=True)
-        os.replace(authority, target)
-        key = staging / "gateway-arguments.key"
-        os.replace(key, target.parent / "arguments.key")
-        (target.parent / "arguments.key").chmod(0o600)
-        from gateway_authority import Authority
-
-        Authority(target.parent, initialize=False).reset_after_restore()
     shutil.rmtree(staging, ignore_errors=True)
 
 

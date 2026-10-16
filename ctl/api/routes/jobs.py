@@ -11,8 +11,9 @@ from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, Operator, OperatorMutation
+from ctl.core_setup import app_progress, start_verify
 from ctl.core_setup import start as start_core_setup
-from ctl.core_setup import start_verify
+from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
@@ -145,6 +146,7 @@ def core_setup(_member: Member) -> models.CoreSetupResponse:
             "capacity": execution["capacity"],
             "provisioning": provisioned,
             "current_job": current_job,
+            "apps": app_progress(store, current_job, ImageDownloadStore.runtime()) if store and current_job else None,
             "next_action": (
                 "Add an inference provider to finish chat verification"
                 if waiting_for_provider

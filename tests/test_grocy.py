@@ -6,15 +6,14 @@ import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import yaml
 
+from ctl import contextforge_ops
 from ctl.engine.project import Facts, render
 from ctl.identity import gate_blueprint, mode_for
 from ctl.manifest.catalog import load as load_catalog
 from ctl.mcp_catalog import load as load_mcp
-from ctl.mcp_gateway import tool_states
 from ctl.mcp_review import load as load_review
 from ctl.registry import load
 from ctl.routes import _block
@@ -134,18 +133,14 @@ class GrocyTests(unittest.TestCase):
         self.assertNotIn("expected exactly one administrator", script)
         self.assertIn("MU3LAB_ERROR", script)
 
-    def test_review_and_connector_keep_writes_off_at_gateway(self):
+    def test_review_seeds_contextforge_and_blocks_server_administration(self):
         server = next(server for server in load_mcp(load()) if server.id == "grocy-community")
         review = load_review(server.id, server.review)
         self.assertEqual(review.revision, server.revision)
-        activity = MagicMock()
-        activity.explicit_permissions.return_value = {}
-        activity.category_switches.return_value = {}
-        states = tool_states(server, review, activity)
-        categories, tools = states["categories"], states["tools"]
-        self.assertTrue(categories["inventory"])
-        self.assertTrue(tools["inventory_stock_get_volatile"])
-        self.assertTrue(all(not tools[name] for name, tool in review.tools.items() if tool.access == "write"))
+        starting = contextforge_ops.starting_tools(server)
+        self.assertIn("inventory_stock_get_volatile", starting)
+        self.assertTrue(starting <= set(review.tools))
+        self.assertFalse(starting & set(review.blocked))
         self.assertIn("system_dev_call_api", review.blocked)
         self.assertIn("system_users_get", review.blocked)
         config = yaml.safe_load((CONNECTOR / "mcp-grocy.yaml").read_text())
@@ -155,7 +150,7 @@ class GrocyTests(unittest.TestCase):
         compose = yaml.safe_load((CONNECTOR / "docker-compose.yml").read_text())
         app = compose["services"]["grocy-mcp"]
         self.assertEqual(app["environment"]["GROCY_BASE_URL"], "http://grocy-app:80")
-        # Only the tool gateway can reach a reviewed connector.
+        # Only ContextForge can reach a connector.
         self.assertEqual(app["networks"], ["mu3lab_backend", "mu3lab_mcp_upstream"])
 
 

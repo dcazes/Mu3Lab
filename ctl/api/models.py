@@ -366,12 +366,21 @@ class CoreSetupResponseCapacity(ApiModel):
     docker_ready: bool | None = None
 
 
+class CoreAppProgress(ApiModel):
+    service_id: str
+    name: str
+    state: Literal["waiting", "downloading", "downloaded", "installing", "ready", "failed"]
+    download: ImageDownload | None = None
+
+
 class CoreSetupResponse(ApiModel):
     ok: bool
     ready_to_run: bool
     services: list[str]
     missing_manifests: list[str]
     current_job: Job | None = None
+    # Each core app's progress while the core setup job runs, in install order.
+    apps: list[CoreAppProgress] | None = None
     next_action: str
     capacity: CoreSetupResponseCapacity | None = None
     provisioning: ProvisioningResponse | None = None
@@ -869,16 +878,7 @@ class McpServerToolsItem(ApiModel):
     title: str
     risk: str
     enabled: bool
-    permission: str | None = None
     parameters: dict[str, JsonValue] | None = None
-    category: str | None = None
-    core: bool | None = None
-    offered: bool | None = None
-
-
-class McpServerBlockedItem(ApiModel):
-    id: str
-    reason: str
 
 
 class McpServer(ApiModel):
@@ -908,18 +908,8 @@ class McpServer(ApiModel):
     review: McpServerReview | None = None
     configuration: list[ServiceConfigField] | None = None
     tools: list[McpServerToolsItem]
-    gateway: bool | None = None
-    categories: list[McpCategory] | None = None
-    blocked: list[McpServerBlockedItem] | None = None
-    unreviewed: list[str] | None = None
-
-
-class McpCategory(ApiModel):
-    id: str
-    title: str
-    summary: str
-    enabled: bool
-    default_on: bool
+    # Where operators choose this connector's tools: its virtual server in ContextForge.
+    manage_url: str | None = None
 
 
 class McpRegistryResponse(ApiModel):
@@ -1176,19 +1166,6 @@ class BatchOrderRequest(RequestModel):
     service_ids: list[str]
 
 
-class ToolSwitchRequest(RequestModel):
-    enabled: bool
-
-
-class ToolPermissionRequest(RequestModel):
-    permission: Literal["auto", "needs_approval", "disabled"]
-
-
-class ToolCallRequest(RequestModel):
-    arguments: dict[str, JsonValue] = Field(default_factory=dict)
-    confirmation_token: str = ""
-
-
 class QueuedJob(ApiModel):
     id: str
     state: str
@@ -1318,25 +1295,6 @@ class McpToolsResponse(ApiModel):
     tools: list[McpServerToolsItem]
 
 
-class McpCall(ApiModel):
-    id: int
-    server_id: str
-    tool_name: str
-    source: str
-    actor: str
-    outcome: str
-    duration_ms: int
-    created_at: str
-    detail: str
-    source_ref: str | None = None
-
-
-class McpActivityResponse(ApiModel):
-    ok: bool
-    server_id: str
-    calls: list[McpCall]
-
-
 class McpJobsResponse(ApiModel):
     ok: bool
     server_id: str
@@ -1355,26 +1313,6 @@ class McpLogsResponse(ApiModel):
     ok: bool
     server_id: str
     lines: list[str]
-
-
-class ToolPermissionResponse(ApiModel):
-    ok: bool
-    server_id: str
-    tool_name: str
-    permission: str
-
-
-class ToolPrepareResponse(ToolPermissionResponse):
-    risk: str
-    confirmation_required: bool
-    confirmation_token: str
-    expires_in_seconds: int
-
-
-class ToolExecuteResponse(ApiModel):
-    ok: bool
-    result: dict[str, JsonValue]
-    outcome: str
 
 
 class VoiceKeyStatus(ApiModel):
@@ -1419,38 +1357,3 @@ class PersonInvite(ApiModel):
 
 
 PersonResponse.model_rebuild()
-
-
-class ApprovalOperation(ApiModel):
-    id: str
-    subject: str
-    provider: str
-    credential_version: int
-    app: str
-    server: str
-    tool: str
-    connector_revision: str
-    policy_revision: int
-    state: Literal[
-        "pending", "approved", "dispatching", "succeeded", "failed", "outcome_unknown", "rejected", "revoked", "expired"
-    ]
-    created_at: float
-    expires_at: float
-    dispatch_at: float
-    completed_at: float
-    arguments: dict[str, JsonValue] | None = None
-
-
-class ApprovalResponse(ApiModel):
-    ok: bool
-    operation: ApprovalOperation
-    execution: dict[str, JsonValue] | None = None
-
-
-class ApprovalsResponse(ApiModel):
-    ok: bool
-    operations: list[ApprovalOperation]
-
-
-class ApprovalDecisionRequest(RequestModel):
-    decision: Literal["approve", "reject"]

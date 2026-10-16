@@ -49,3 +49,11 @@ class ImageDownloadStore:
                 f"SELECT * FROM image_downloads WHERE job_id IN ({', '.join('?' for _ in wanted)})", wanted
             ).fetchall()
         return {str(row["job_id"]): {key: row[key] for key in ("state", *FIELDS, "updated_at")} for row in rows}
+
+    def for_job(self, job_id: str) -> dict[str, dict[str, Any]]:
+        """Progress keyed by app, for a job that downloads several apps (the core setup)."""
+        if not job_id:
+            return {}
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM image_downloads WHERE job_id = ?", (job_id,)).fetchall()
+        return {str(row["service_id"]): {key: row[key] for key in ("state", *FIELDS, "updated_at")} for row in rows}

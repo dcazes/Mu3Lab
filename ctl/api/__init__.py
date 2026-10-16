@@ -35,7 +35,6 @@ from ctl.api.routes import (
     services,
     snapshot,
     system,
-    tool_approvals,
     vault,
     voice,
 )
@@ -99,7 +98,6 @@ def create_app(dist: Path = DIST) -> FastAPI:
     for module in (
         backup_hooks,
         system,
-        tool_approvals,
         identity,
         services,
         install_batches,

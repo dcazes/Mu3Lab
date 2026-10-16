@@ -1,11 +1,11 @@
 """Open WebUI's admin API, used with Mu3Lab's own administrator key.
 
 Mu3Lab keeps two things in step: the tool connections (one MCP connection per
-person and app, pointing at the tool gateway with that person's token and
-readable only by them) and the workspace models that act as each app's
-assistant. Connections and models Mu3Lab did not create are never touched:
-ours carry the ``mu3lab-app-`` id prefix. Tokens and API error bodies never reach
-logs.
+app, pointing at that app's ContextForge virtual server and passing each
+person's own Authentik sign-in) and the workspace models that act as each
+app's assistant. Both are shared by everyone. Connections and models Mu3Lab
+did not create are never touched: ours carry the ``mu3lab-app-`` id prefix.
+API error bodies never reach logs.
 """
 
 from __future__ import annotations
@@ -22,9 +22,8 @@ class ChatError(RuntimeError):
     """A safe message for the dashboard or worker."""
 
 
-def user_grant(user_id: str) -> list[dict[str, str]]:
-    """Readable by exactly one Open WebUI user."""
-    return [{"principal_type": "user", "principal_id": user_id, "permission": "read"}]
+# Readable by every Open WebUI user; ContextForge decides what each person may do.
+EVERYONE = [{"principal_type": "user", "principal_id": "*", "permission": "read"}]
 
 
 class OpenWebUI:
@@ -73,42 +72,37 @@ class OpenWebUI:
     def delete_model(self, model_id: str) -> None:
         self.request("POST", "/api/v1/models/model/delete", json={"id": model_id})
 
-    def ensure(self, desired: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
-        """Make Mu3Lab's connections and assistants exactly ``desired``.
-
-        ``desired`` maps an Open WebUI user ID to that person's assistants;
-        anyone left out (no longer an operator) loses theirs. Returns each
-        user ID's assistant app IDs.
-        """
+    def ensure(self, assistants: list[dict[str, Any]]) -> list[str]:
+        """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
-        for user_id, assistants in desired.items():
-            for item in assistants:
-                server_id = f"{PREFIX}{item['id']}-{user_id}"
-                wanted_connections.append(
-                    {
-                        "url": item["url"],
-                        "path": "",
-                        "type": "mcp",
-                        "auth_type": "bearer",
-                        "key": item["token"],
-                        "config": {"enable": True, "access_grants": user_grant(user_id)},
-                        "info": {"id": server_id, "name": item["title"], "description": item["description"]},
-                    }
-                )
-                wanted_models[server_id] = {
-                    "id": server_id,
-                    "base_model_id": "mu3lab-chat",
-                    "name": item["title"],
-                    "meta": {
-                        "description": item["description"],
-                        "toolIds": [f"server:mcp:{server_id}"],
-                        "capabilities": {"function_calling": True},
-                    },
-                    "params": {"system": item["instructions"], "function_calling": "native"},
-                    "access_grants": user_grant(user_id),
-                    "is_active": True,
+        for item in assistants:
+            server_id = f"{PREFIX}{item['id']}"
+            wanted_connections.append(
+                {
+                    "url": item["url"],
+                    "path": "",
+                    "type": "mcp",
+                    # Each person's own Authentik sign-in, which ContextForge trusts.
+                    "auth_type": "system_oauth",
+                    "key": "",
+                    "config": {"enable": True, "access_grants": EVERYONE},
+                    "info": {"id": server_id, "name": item["title"], "description": item["description"]},
                 }
+            )
+            wanted_models[server_id] = {
+                "id": server_id,
+                "base_model_id": "mu3lab-chat",
+                "name": item["title"],
+                "meta": {
+                    "description": item["description"],
+                    "toolIds": [f"server:mcp:{server_id}"],
+                    "capabilities": {"function_calling": True},
+                },
+                "params": {"system": item["instructions"], "function_calling": "native"},
+                "access_grants": EVERYONE,
+                "is_active": True,
+            }
 
         def ours(identifier: str) -> bool:
             return identifier.startswith(PREFIX)
@@ -122,4 +116,4 @@ class OpenWebUI:
         for model_id in existing:
             if ours(model_id) and model_id not in wanted_models:
                 self.delete_model(model_id)
-        return {user_id: [item["id"] for item in assistants] for user_id, assistants in desired.items()}
+        return [item["id"] for item in assistants]

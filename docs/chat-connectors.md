@@ -1,88 +1,68 @@
 # Chat connectors
 
-How Mu3Lab gives each app's chat assistant a small, reliable set of tools.
+How Mu3Lab gives each app's chat assistant its tools.
 
-## Goals
-
-- **Small models stay accurate.** Tool selection degrades past roughly 20 visible tools and
-  collapses near 100. An assistant never sees more than about 10 tools at once.
-- **Nothing is hidden from the assistant.** It always knows every category its connector
-  offers, including the ones switched off, so it searches instead of giving up and can tell
-  the owner which switch to flip.
-- **One app, one assistant, one connector.** Each app's assistant can reach only its own app.
-  The main assistant has no app tools; it delegates to app assistants.
-- **Every tool is reviewed.** Mu3Lab decides what each tool does (reads or changes data), which
-  category it belongs to, and whether it starts on. New, unreviewed tools stay unreachable.
-- **Writes fail closed.** Chat tools that change data are unavailable until the gateway can verify
-  human approval for every call. Saved switches cannot bypass this restriction. The dashboard's
-  operator test console has its own confirmation path; it does not establish chat approval.
-
-## Architecture
+## In one picture
 
 ```text
-LobeChat app assistant ──► Mu3Lab tool gateway ──► active connector ──► app
-   (one per app)             /apps/<app>/mcp         (one per app)
-                             policy.json ◄── control plane (switches, reviews)
+Open WebUI / LobeChat ──► ContextForge ──► connector (one per app) ──► app
+  one assistant per app     one virtual server     prebuilt or self-built,
+                            per connector          pinned container
 ```
 
-### Tool gateway (`platform/tool-gateway`)
+- **ContextForge** (IBM, `apps/contextforge`) is the only way chat reaches an app's tools. Operators
+  open its screens to see every connector, choose which tools each app's assistant gets, and see who
+  called what.
+- **Connectors** stay Mu3Lab's own pinned containers in `apps/<app>/connectors/<id>/`, started after
+  their app is healthy and stopped before it stops. They share a network (`mu3lab_mcp_upstream`)
+  with ContextForge only; chat apps reach ContextForge on `mu3lab_mcp`.
+- **Everyone in the household gets the same assistants.** Tools that change data run without a
+  separate approval; switch off any you don't want in ContextForge.
 
-One small MCP server in front of every connector. Each app has its own path and its own bearer
-token, so an assistant's credential reaches only its app. For each app the assistant sees:
+## Connectors and virtual servers
 
-| Tool | Purpose | Approval |
-|---|---|---|
-| Up to 6 **everyday tools** | The app's most common requests, passed straight through | Reads: none. Writes are not listed |
-| `find_tools` | Lists every category (on and off) or the tools in one category, with inputs | None |
-| `use_tool` | Runs a switched-on tool that only reads | None |
-| `change_with_tool` | Currently not listed; calls are rejected even if the saved write switch is on | Unavailable |
+When a connector goes live, Mu3Lab (`ctl/contextforge_ops.py`):
 
-The gateway enforces the owner's switches and the reviewed read/change split on every call; the
-model cannot reach a switched-off tool, an unreviewed tool, or a changing tool through
-`use_tool`. Direct and wrapped writes are rejected before connector dispatch. Write discovery
-shows them as off with an approval-unavailable explanation. It also returns the category map as the MCP `instructions`, and Mu3Lab writes the
-same map into the assistant's instructions.
+1. registers it in ContextForge as a gateway named after the connector, with its bearer token;
+2. the first time only, creates its virtual server, "<App> (<Connector>)", visible to everyone signed
+   in. It starts with:
+   - the tools in its `review.yaml`, in categories that start on (blocked tools are never added); or
+   - for a connector without a review, every tool it offers.
 
-This follows the pattern of Docker's MCP Gateway and IBM ContextForge (a policy gateway in front
-of connectors) and of GitHub's dynamic toolsets and Anthropic's tool search (a small always-on
-set plus on-demand discovery). LobeChat stores a connector's tool list when it connects and
-does not follow `tools/list_changed`, so on-demand loading has to happen through fixed tools.
+After that, the virtual server belongs to the operators: Mu3Lab never changes its tools. Tools a
+connector adds later appear in ContextForge (it re-reads connectors every few minutes) but stay out
+of the virtual server until an operator adds them.
 
-Connectors sit on a network that only the gateway shares with them (`mu3lab_mcp_upstream`);
-LobeChat reaches the gateway only.
+When a connector stops, its gateway is switched off in ContextForge, so its tools leave chat until it
+is back. Switching an app to another connector gives chat that connector's own virtual server.
 
-### Reviews (`apps/<app>/connectors/<connector>/review.yaml`)
+## Who is calling
 
-One checked-in file per connector lists its categories, and for each tool its category, whether
-it reads or changes data, and whether it is an everyday tool. Tools that must never be offered
-(credentials, server administration) are listed under `blocked` with the reason. A tool the
-connector offers that the review does not list is treated as unreviewed and never exposed.
+| Chat app | How ContextForge knows the person |
+|---|---|
+| Open WebUI | Each tool connection passes the person's own Authentik sign-in (`system_oauth`). ContextForge trusts sign-ins Authentik issued to Open WebUI (the `mu3lab-chat` provider, audience-checked). Open WebUI asks Authentik for refresh tokens (`offline_access`) to keep this working. |
+| LobeChat | It cannot pass a sign-in on, so Mu3Lab creates a ContextForge key per person and virtual server, acting as that person. |
 
-Defaults: a category starts on unless its review says otherwise; within it, reading tools start
-on and changing tools start off.
+Deactivating someone withdraws their LobeChat keys; their Authentik account, and so Open WebUI's
+sign-ins, end with it.
 
-### One connector per app
+## Signing in to ContextForge
 
-An app may have several reviewed connectors (for example Immich has two). Exactly one is the
-default and at most one is enabled. Switching is one job: the old connector is stopped and
-detached before the new one starts. Each connector keeps its own switches, so switching back
-restores them. The assistant and its chats stay the same, because LobeChat is always connected
-to the gateway, not to the connector behind it.
+Only operators can sign in to ContextForge's screens, through Authentik (the "Mu3Lab" button).
+Operators become ContextForge administrators. The second sign-in button, "Mu3Lab chat", exists only
+so ContextForge trusts Open WebUI's sign-ins, and it is not for signing in. Mu3Lab's own administrator
+account (`mu3lab@contextforge.example.com`) has a password that only Mu3Lab holds.
 
-### Lifecycle
+## Adding a connector for an app without one
 
-- Installing an app enables its default connector, creates its credential where the app allows
-  it, and attaches it to the app's assistant through the gateway.
-- Stopping an app stops its connector; uninstalling removes it and its assistant (an assistant
-  with chats is kept).
+1. If the app's REST API covers the requests, register it as a REST tool in ContextForge and
+   write no code.
+2. Otherwise add a small MCP server under `apps/<app>/connectors/<id>/` (see `immich-control`). It is
+   registered like any other connector.
 
-## Later phases
+## Later
 
-- **Code as action.** A sandboxed `run_script` tool that lets an assistant chain several reads in
-  one step (after Anthropic's "code execution with MCP" and Cloudflare's Code Mode). The sandbox
-  holds no app credentials and can only call the gateway with the assistant's own token; scripts
-  that change data are shown in full for approval.
-- **Skills.** Checked-in, per-app procedures (for example "plan this week's dinners and build the
-  shopping list") attached to each app assistant.
-- **Home group.** A LobeChat agent group whose supervisor has no app tools and delegates to the
-  app assistants for requests that span apps.
+- **A parent assistant** that hands work to the app assistants. Open WebUI's sub-agents
+  (`delegate_task`) copy the current model and tools, so they cannot route work to the app
+  assistants; ContextForge's A2A support would need a small bridge.
+- **Approval for changes**, once ContextForge's human-approval hook ships.

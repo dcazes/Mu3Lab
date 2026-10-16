@@ -47,6 +47,7 @@ class OidcApp:
     initial_owner: str = ""  # while set, only this username may sign in
     # (claim, admin value, user value, list?) for apps that read the role in their own words.
     role_claim: tuple[str, str, str, bool] | None = None
+    audience: str = "household"  # household | operators (who may sign in)
 
 
 def quote(value: str) -> str:
@@ -374,6 +375,8 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        # Refresh tokens, for clients that keep acting for a signed-in person (Open WebUI's tool calls).
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
         - !KeyOf mu3lab-{app.id}-claims{"" if not app.role_claim else chr(10) + f"        - !KeyOf mu3lab-{app.id}-roles"}
       redirect_uris:
 {redirects}
@@ -390,6 +393,15 @@ entries:
       policy_engine_mode: any
 """
     if not app.initial_owner:
+        if app.audience == "operators":
+            # The household binding (order 2) goes if the app was once open to everyone.
+            absent = f"""  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf {key}
+      order: 2
+"""
+            return content + _bindings(key, ADMIN_GROUPS) + absent + _absent_owner_policy(app)
         return content + _bindings(key, (*ADMIN_GROUPS, HOUSEHOLD_GROUP)) + _absent_owner_policy(app)
     # The first person to sign in becomes the app's owner (Actual Budget), so
     # until the installer has, only they are admitted.

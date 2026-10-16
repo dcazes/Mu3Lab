@@ -124,7 +124,7 @@ class Route(Model):
     blocked_paths: tuple[BlockedPath, ...] = ()
     redirects: tuple[Redirect, ...] = ()
     forwarded_host: Literal["host", "hostport"] = "hostport"
-    # Who Authentik admits through a gate: everyone in the household, or administrators only.
+    # Who Authentik admits, through a gate or to an OIDC app: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"
     upstream_basic_auth: UpstreamBasicAuth | None = None
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
@@ -144,10 +144,12 @@ class OidcEnv(Model):
 
 
 class JsonLaunch(Model):
-    """The app's login page starts sign-in with a JSON POST that returns Authentik's address."""
+    """The app's login page starts sign-in with a JSON request that returns Authentik's address."""
 
     path: str
     body: dict[str, Any]  # "{origin}" in a string value becomes the app's private address
+    # GET sends ``body`` as query parameters (ContextForge's /auth/sso/login).
+    method: Literal["POST", "GET"] = "POST"
     url_key: tuple[str, ...]
     # Serve a same-origin page at the launch path that runs this POST in the
     # browser, for apps whose own login page would otherwise ask first.
@@ -358,7 +360,7 @@ class Connector(Model):
     secrets: tuple[Secret, ...] = ()
     # Shared Mu3Lab files copied into the connector's project, e.g. the generic adapter.
     include: tuple[str, ...] = ()
-    reviewed: bool = False  # a review.yaml sits next to it; served through the tool gateway
+    reviewed: bool = False  # a review.yaml sits next to it: the tools ContextForge starts it with
     reviewed_update: ReviewedUpdate | None = None
 
     @property
