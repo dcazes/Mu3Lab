@@ -16,6 +16,8 @@ services:
       DATABASE_URL: postgresql+psycopg://contextforge:${CONTEXTFORGE_DB_PASSWORD:?CONTEXTFORGE_DB_PASSWORD is required}@db:5432/contextforge
       # No Redis: one worker host, caches live in the database.
       CACHE_TYPE: database
+      # The default starts one worker per CPU (up to 16, ~2 GB idle); two is plenty for a home lab.
+      GUNICORN_WORKERS: "2"
       JWT_SECRET_KEY: ${CONTEXTFORGE_JWT_SECRET:?CONTEXTFORGE_JWT_SECRET is required}
       AUTH_ENCRYPTION_SECRET: ${CONTEXTFORGE_AUTH_ENCRYPTION_SECRET:?CONTEXTFORGE_AUTH_ENCRYPTION_SECRET is required}
       BASIC_AUTH_USER: mu3lab
