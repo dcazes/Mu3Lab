@@ -366,12 +366,21 @@ class CoreSetupResponseCapacity(ApiModel):
     docker_ready: bool | None = None
 
 
+class CoreAppProgress(ApiModel):
+    service_id: str
+    name: str
+    state: Literal["waiting", "downloading", "downloaded", "installing", "ready", "failed"]
+    download: ImageDownload | None = None
+
+
 class CoreSetupResponse(ApiModel):
     ok: bool
     ready_to_run: bool
     services: list[str]
     missing_manifests: list[str]
     current_job: Job | None = None
+    # Each core app's progress while the core setup job runs, in install order.
+    apps: list[CoreAppProgress] | None = None
     next_action: str
     capacity: CoreSetupResponseCapacity | None = None
     provisioning: ProvisioningResponse | None = None

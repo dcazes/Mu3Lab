@@ -74,9 +74,9 @@ The major phases are:
 4. Prepare Docker address pools and optional NVIDIA container tooling. [`ctl/docker_config.py`](../ctl/docker_config.py) supplies a pool of `/24` networks from `10.210.0.0/16` if the configured capacity is insufficient. Applying daemon settings can restart Docker and affect unrelated workloads. GPU drivers are not installed.
 5. Prepare dashboard assets, create the runtime directories, and—in restore mode—restore old state before generating new secrets or accounts.
 6. Generate missing platform keys, install user services, start Caddy and Vaultwarden, create the initial vault account, publish its private route and configure supported browser policies.
-7. Start Authentik, prepare its owner and integration settings, provide container-to-tailnet access, enforce dashboard authentication, and publish dashboard ingress.
-8. Queue and observe core-app installation, save generated logins and verify private routes.
-9. Open the dashboard and wait for a **fresh authenticated operator dashboard load**. The installer does not report final success solely because containers started.
+7. Start Authentik and queue the core-app job in the worker. [`ctl/core_setup.py`](../ctl/core_setup.py) downloads every core image straight away but installs nothing until the dashboard is protected and the owner is known. Then prepare Authentik's owner and integration settings, provide container-to-tailnet access, enforce dashboard authentication, and publish dashboard ingress.
+8. Hand the owner's identity to the core job, save the Authentik login to the owner's vault and verify private routes. Other generated logins reach the vault through the automatic vault sync once their apps exist.
+9. Open the dashboard and wait for a **fresh authenticated operator dashboard load**. The installer does not wait for the core apps: they keep downloading and installing in the worker, and Home shows each app's progress.
 
 Logs are written beneath the checkout's `.state/`. Re-running the installer resumes by checking current state; it does not fetch newer Git source. `start.sh` only restarts the existing control-plane service after checking that the environment and dashboard build exist.
 

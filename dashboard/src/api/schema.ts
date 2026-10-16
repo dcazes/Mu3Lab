@@ -2134,8 +2134,23 @@ export interface components {
        */
       reason?: string;
     };
+    /** CoreAppProgress */
+    CoreAppProgress: {
+      download?: components['schemas']['ImageDownload'] | null;
+      /** Name */
+      name: string;
+      /** Service Id */
+      service_id: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'waiting' | 'downloading' | 'downloaded' | 'installing' | 'ready' | 'failed';
+    };
     /** CoreSetupResponse */
     CoreSetupResponse: {
+      /** Apps */
+      apps?: components['schemas']['CoreAppProgress'][] | null;
       capacity?: components['schemas']['CoreSetupResponseCapacity'] | null;
       current_job?: components['schemas']['Job'] | null;
       /** Missing Manifests */

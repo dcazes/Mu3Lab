@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ctl import install
 from ctl.bootstrap import stamps
@@ -101,16 +101,28 @@ class NvidiaTests(unittest.TestCase):
 
 
 class CoreImageTests(unittest.TestCase):
-    def test_core_images_cover_the_always_on_platform_only(self):
-        names = {name for name, _image in install.core_images()}
-        self.assertTrue({"Authentik", "Vaultwarden", "Ollama", "LiteLLM", "FreeLLMAPI", "Open WebUI"} <= names)
-        self.assertNotIn("Immich", names)
+    def test_a_new_install_downloads_only_the_foundation(self):
+        with patch("ctl.control_state.ControlState.runtime", return_value=None):
+            names = {name for name, _image in install.core_images()}
+        self.assertTrue({"Authentik", "Vaultwarden"} <= names)
+        self.assertFalse(names & {"Ollama", "LiteLLM", "FreeLLMAPI", "Open WebUI", "Immich"})
+
+    def test_installed_core_apps_are_included_so_updates_have_their_images(self):
+        control = Mock()
+        control.installation.side_effect = lambda app_id: {"state": "running"} if app_id == "ollama" else None
+        with patch("ctl.control_state.ControlState.runtime", return_value=control):
+            names = {name for name, _image in install.core_images()}
+        self.assertIn("Ollama", names)
+        self.assertNotIn("Open WebUI", names)
 
     def test_check_lists_what_is_still_downloading(self):
-        with patch.object(install, "_image_present", side_effect=lambda image: "ollama" not in image):
+        with (
+            patch("ctl.control_state.ControlState.runtime", return_value=None),
+            patch.object(install, "_image_present", side_effect=lambda image: "vaultwarden" not in image),
+        ):
             check = install._core_images_check({"root": install.ROOT})
         self.assertEqual(check["state"], "missing")
-        self.assertIn("Ollama", check["detail"])
+        self.assertIn("Vaultwarden", check["detail"])
 
     def test_failed_downloads_are_named(self):
         ctx = {"root": install.ROOT, "log_fn": lambda _s: lambda _l: None}

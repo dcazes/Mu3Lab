@@ -2027,9 +2027,13 @@ def fix_nvidia_toolkit(check: dict, ctx: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Core app images. Downloads start in the background as soon as Docker works,
-# so they overlap with the account steps that need the user; the final
-# "core_images" step only waits for whatever is still downloading.
+# Platform app images. Downloads start in the background as soon as Docker
+# works, so they overlap with the account steps that need the user; the final
+# "core_images" step only waits for whatever is still downloading. A new
+# install downloads only the foundation (vault, sign-in, gateway): the core
+# apps download inside the worker's core job, after the terminal hands off to
+# the dashboard. Core apps already installed are included, so an update has
+# their new images ready before it restarts them.
 # ---------------------------------------------------------------------------
 
 # Docker and its GPU runtime are final once this step is done; downloads that
@@ -2040,13 +2044,16 @@ _prefetch_thread: threading.Thread | None = None
 
 
 def core_images(root: Path = ROOT) -> list[tuple[str, str]]:
-    """(app name, image) for every foundation and core app, in catalog order."""
+    """(app name, image) for the foundation and every installed core app, in catalog order."""
+    from ctl.control_state import ControlState
     from ctl.manifest.catalog import compose_images, load
 
+    control = ControlState.runtime()
     return [
         (app.manifest.name, image)
         for app in load(root / "apps").apps
-        if app.manifest.tier in ("foundation", "core")
+        if app.manifest.tier == "foundation"
+        or (app.manifest.tier == "core" and control is not None and control.installation(app.id))
         for image in compose_images(app.folder / "docker-compose.yml").values()
     ]
 
@@ -2490,7 +2497,7 @@ STEPS: list[Step] = [
     {"id": "serve", "label": "Private address for the dashboard", "check": _serve_check, "fix": fix_serve},
     {
         "id": "core_images",
-        "label": "Download the core apps",
+        "label": "Download the vault and sign-in apps",
         "check": _core_images_check,
         "fix": fix_core_images,
     },
@@ -2523,9 +2530,63 @@ PHASES = (
             "serve",
         ),
     ),
-    ("Download the core apps", ("core_images",)),
+    ("Finish downloads", ("core_images",)),
 )
 PHASE_OF = {step_id: title for title, ids in PHASES for step_id in ids}
+
+
+# The core apps start downloading in the worker once Authentik is running:
+# every foundation image is in place by then, so they never slow the steps
+# the owner is waiting on, and they keep going after the terminal hands off.
+CORE_LAUNCH_AFTER = by_capability("identity_provider").id
+CORE_ACTIVE_STATES = {"queued", "running", "waiting_for_confirmation", "succeeded"}
+
+
+def launch_core_setup(ctx: dict) -> None:
+    """Queue the worker's core job once, and give it the owner as soon as one exists.
+
+    The job downloads every core image straight away but installs nothing
+    until the dashboard is protected (see ``core_setup``), so it can start
+    before the owner's Authentik account exists.
+    """
+    from ctl.core_setup import start as start_core_setup
+    from ctl.jobs import JobStore
+    from ctl.people import owner_identity
+    from ctl.store import workflows as workflow_secrets
+
+    store = JobStore.runtime()
+    if store is None:
+        return
+    bootstrap_root = ctx.get("root")
+    active = [item for item in store.jobs_for_service("core-suite", limit=100) if item["state"] in CORE_ACTIVE_STATES]
+    if active:
+        job_id = str(active[0]["id"])
+    elif bootstrap_root:
+        job_id = start_core_setup(store, "bootstrap", bootstrap_root)["id"]
+        ctx["emit"]({"type": "log", "id": "_install_", "line": "started durable core-platform reconciliation"})
+    else:
+        ctx["emit"](
+            {"type": "log", "id": "_install_", "line": "core-platform launch deferred: bootstrap root unavailable"}
+        )
+        return
+    # Core apps that create the owner's own account (Open WebUI) need to know who that is.
+    owner = owner_identity()
+    if owner and workflow_secrets.job_identity(job_id) is None:
+        workflow_secrets.save_job_identity(
+            job_id,
+            owner_uid=owner["owner_uid"],
+            email=owner["email"],
+            username=owner["username"],
+            display_name=owner["display_name"],
+        )
+
+
+def _launch_core_quietly(ctx: dict) -> None:
+    """An early start is a head start only; the end of the install launches it again."""
+    try:
+        launch_core_setup(ctx)
+    except Exception as exc:
+        ctx["emit"]({"type": "log", "id": "_install_", "line": f"early core-platform launch deferred: {exc}"})
 
 
 def run_job(job: dict, ctx: dict) -> None:
@@ -2570,6 +2631,8 @@ def run_job(job: dict, ctx: dict) -> None:
             )
             if step["id"] == PREFETCH_AFTER:
                 start_image_prefetch(ctx)
+            elif step["id"] == CORE_LAUNCH_AFTER:
+                _launch_core_quietly(ctx)
             continue
         if action == "unknown":
             _finish_step(job, ctx, step, {"ok": False, "error": f"no fix mapped for state {check.get('state')!r}"})
@@ -2655,12 +2718,22 @@ def run_job(job: dict, ctx: dict) -> None:
         )
         if step["id"] == PREFETCH_AFTER:
             start_image_prefetch(ctx)
-    # The bootstrap and dashboard now share a durable workflow record.  The
-    # early bootstrap UI may still be closed or refreshed, but the real
-    # dashboard can always explain exactly what remains after hand-off.
+        elif step["id"] == CORE_LAUNCH_AFTER:
+            _launch_core_quietly(ctx)
+    # The owner exists now: hand them to the core job before the dashboard
+    # is marked protected, which is what lets that job start installing.
     from ctl.provisioning import ProvisioningStore
 
     provisioning = ProvisioningStore.runtime()
+    try:
+        launch_core_setup(ctx)
+    except Exception as exc:
+        if provisioning:
+            provisioning.update("core", "failed", error="Could not launch core reconciliation.")
+        ctx["emit"]({"type": "log", "id": "_install_", "line": f"core-platform launch deferred: {type(exc).__name__}"})
+    # The bootstrap and dashboard now share a durable workflow record.  The
+    # early bootstrap UI may still be closed or refreshed, but the real
+    # dashboard can always explain exactly what remains after hand-off.
     if provisioning:
         current = {item["phase_id"]: item["actual_state"] for item in provisioning.summary()["phases"]}
         if current.get("foundation") != "verified":
@@ -2699,59 +2772,6 @@ def run_job(job: dict, ctx: dict) -> None:
             provisioning.update(
                 "verification", "pending", detail="Mu3Lab will verify routes and application contracts before handoff."
             )
-    # There is no second "install core" decision. The bootstrap already has
-    # the user-approved elevation session and has established every required
-    # host dependency, so it launches one resumable core job automatically.
-    try:
-        from ctl.core_setup import start as start_core_setup
-        from ctl.jobs import JobStore
-
-        store = JobStore.runtime()
-        if store is not None:
-            existing = [
-                item
-                for item in store.jobs_for_service("core-suite", limit=100)
-                if item["service_id"] == "core-suite"
-                and item["state"] in {"queued", "running", "waiting_for_confirmation", "succeeded"}
-            ]
-            bootstrap_root = ctx.get("root")
-            if not existing and bootstrap_root:
-                from ctl.people import owner_identity
-                from ctl.store import workflows as workflow_secrets
-
-                # Core apps that create the owner's own account (Open WebUI) need to know who that is.
-                owner = owner_identity()
-                start_core_setup(
-                    store,
-                    "bootstrap",
-                    bootstrap_root,
-                    prepare=(
-                        (
-                            lambda job_id: workflow_secrets.save_job_identity(
-                                job_id,
-                                owner_uid=owner["owner_uid"],
-                                email=owner["email"],
-                                username=owner["username"],
-                                display_name=owner["display_name"],
-                            )
-                        )
-                        if owner
-                        else None
-                    ),
-                )
-                ctx["emit"]({"type": "log", "id": "_install_", "line": "started durable core-platform reconciliation"})
-            elif not existing and not bootstrap_root:
-                ctx["emit"](
-                    {
-                        "type": "log",
-                        "id": "_install_",
-                        "line": "core-platform launch deferred: bootstrap root unavailable",
-                    }
-                )
-    except Exception as exc:
-        if provisioning:
-            provisioning.update("core", "failed", error="Could not launch core reconciliation.")
-        ctx["emit"]({"type": "log", "id": "_install_", "line": f"core-platform launch deferred: {type(exc).__name__}"})
     job["status"] = "ready"
     ctx["emit"](
         {

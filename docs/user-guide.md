@@ -72,9 +72,9 @@ You do not need to open your router to incoming internet traffic. However, knowi
 
 ## 5. Wait for the software to be prepared
 
-Mu3Lab downloads and starts its password vault, shared sign-in, dashboard and AI supporting apps. The default chat app is **Open WebUI**. Most personal apps are optional and are installed later.
+Mu3Lab downloads and starts its password vault, shared sign-in and dashboard. The larger AI apps (the default chat app is **Open WebUI**) start downloading at the same time and carry on in the background after setup hands over to the dashboard. Most personal apps are optional and are installed later.
 
-Downloads can be large. The time depends on your connection, computer and the services being downloaded; there is no fixed completion time. You can leave it working after answering the early questions, but must return for the final sign-in.
+The time depends on your connection and computer; there is no fixed completion time. You can leave it working after answering the early questions, but must return for the final sign-in.
 
 For Chrome, Chromium and Brave installations that setup recognizes, Mu3Lab adds Bitwarden and points it at your vault. You may see **“Managed by your organization”** in the browser because of the setting used to add it. Mu3Lab sets the extension and its vault address; this does not mean a workplace has taken over your browser. While that setting is present, the extension can be disabled but not removed normally. Restart the browser if it does not appear. Other browsers and other devices need manual extension setup.
 
@@ -86,7 +86,7 @@ Setup opens, or prints, your private dashboard address. It normally ends with `:
 
 Sign in with the Mu3Lab email and password you chose. **The terminal waits until you sign in and the dashboard successfully loads.** A message saying it is waiting for your sign-in is not a frozen installer. If you left during downloads, this is the step that needs you to return.
 
-If a core app has not started, the installer reports it and directs you to **Settings → System** to try again. A successful dashboard sign-in does not mean you have already connected an AI provider, imported content or set up backups.
+Setup ends once the dashboard loads, even if the AI apps are still downloading. Home shows a **Setting up your AI apps** card with each app's progress, and you can start on the Get started steps meanwhile; chat becomes available when they finish. If one does not finish, Home says so and **Settings → System** has a button to try again. A successful dashboard sign-in does not mean you have already connected an AI provider, imported content or set up backups.
 
 ## 7. Finish the Home checklist
 

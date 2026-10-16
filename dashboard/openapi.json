@@ -1886,8 +1886,63 @@
         "title": "CoreAppBackup",
         "type": "object"
       },
+      "CoreAppProgress": {
+        "properties": {
+          "download": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageDownload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "service_id": {
+            "title": "Service Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "waiting",
+              "downloading",
+              "downloaded",
+              "installing",
+              "ready",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_id",
+          "name",
+          "state"
+        ],
+        "title": "CoreAppProgress",
+        "type": "object"
+      },
       "CoreSetupResponse": {
         "properties": {
+          "apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CoreAppProgress"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps"
+          },
           "capacity": {
             "anyOf": [
               {

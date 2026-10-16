@@ -47,6 +47,7 @@ export type CleanupRequest = components['schemas']['CleanupRequest'];
 export type ComputeRequest = components['schemas']['ComputeRequest'];
 export type ConfigurationRequest = components['schemas']['ConfigurationRequest'];
 export type CoreAppBackup = components['schemas']['CoreAppBackup'];
+export type CoreAppProgress = components['schemas']['CoreAppProgress'];
 export type CoreSetupResponse = components['schemas']['CoreSetupResponse'];
 export type CoreSetupResponseCapacity = components['schemas']['CoreSetupResponseCapacity'];
 export type DiskShare = components['schemas']['DiskShare'];
