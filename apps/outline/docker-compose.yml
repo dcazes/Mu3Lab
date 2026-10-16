@@ -35,7 +35,8 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       files-init: {condition: service_completed_successfully}
-    networks: [mu3lab_frontend, outline_internal]
+    # mu3lab_mcp_upstream: ContextForge calls Outline's own MCP server (/mcp) for chat.
+    networks: [mu3lab_frontend, mu3lab_mcp_upstream, outline_internal]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     healthcheck:
@@ -93,4 +94,5 @@ services:
 
 networks:
   mu3lab_frontend: {external: true}
+  mu3lab_mcp_upstream: {external: true}
   outline_internal: {internal: true}

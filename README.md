@@ -39,15 +39,15 @@ Every request enters through Tailscale, then Caddy routes it to the right app be
 | Immich | Photos and videos | ✓ |
 | Nextcloud | Files, calendars and contacts | ✓ |
 | Paperless-ngx | Searchable scanned paperwork | ✓ |
-| Outline | Household wiki | |
+| Outline | Household wiki | ✓ |
 | SurfSense | AI research workspace | ✓ |
 | Mealie | Recipes and meal plans | ✓ |
 | Grocy | Pantry and household stock | ✓ |
 | Actual Budget | Budgeting | ✓ |
-| Baby Buddy | Baby-care records | |
-| Beaver Habits | Habit tracking | |
+| Baby Buddy | Baby-care records | ✓ |
+| Beaver Habits | Habit tracking | ✓ (off by default) |
 | AdventureLog | Travel plans and journals | ✓ |
-| Dawarich | Personal location history | |
+| Dawarich | Personal location history | ✓ (off by default) |
 | Navidrome | Music streaming | |
 | Audiobookshelf | Audiobooks and podcasts | |
 | RomM | Game library with a browser player | |
@@ -56,7 +56,7 @@ Every request enters through Tailscale, then Caddy routes it to the right app be
 | Speech | Local speech recognition and spoken replies | |
 | Kopia backups | Scheduled encrypted backups | |
 
-The catalog is defined in [`apps/*/app.yaml`](apps). Proposals in `docs/expansion/` are ideas, not installable apps.
+Beaver Habits and Dawarich keep each person's data private, but chat assistants are shared by the household, so their assistants stay off until an administrator turns them on. The catalog is defined in [`apps/*/app.yaml`](apps). Proposals in `docs/expansion/` are ideas, not installable apps.
 
 ## AI chat and app tools
 
@@ -64,7 +64,7 @@ The catalog is defined in [`apps/*/app.yaml`](apps). Proposals in `docs/expansio
   <img src="docs/images/chat-tools.svg" alt="Each app's assistant in Open WebUI or LobeChat calls that app's virtual server in ContextForge, which forwards to the app's connector and then the app." width="100%">
 </p>
 
-Each app with a chat connector gets its own assistant, which you pick from the chat app's model menu. The assistant reaches the app only through [ContextForge](https://github.com/IBM/mcp-context-forge), an MCP gateway where administrators choose each assistant's tools and review who called what. Starting an app switches its tools on; stopping it switches them off.
+Every new chat starts with the **Mu3Lab** assistant. It has no app tools, but it knows which app assistants are available and tells you which one to use. Each app with a chat connector gets its own assistant: pick it from the model menu, or type `@` and its name in the message box. The assistant reaches the app only through [ContextForge](https://github.com/IBM/mcp-context-forge), an MCP gateway where administrators choose each assistant's tools and review who called what. Starting an app switches its tools on; stopping it switches them off.
 
 > [!IMPORTANT]
 > Tools that change app data run **without a separate approval step**, and every household member gets the same assistants. A connector may use a shared app account, so it can reach more than one person's records. Turn off any tools you don't want in ContextForge.

@@ -1,0 +1,25 @@
+name: mu3lab-mcp-babybuddy-official
+services:
+  babybuddy-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      # Baby Buddy's own network: Baby Buddy trusts sign-in headers, so it never joins a shared one.
+      BABYBUDDY_URL: http://baby-buddy:8000
+      BABYBUDDY_TOKEN: ${BABYBUDDY_TOKEN:?BABYBUDDY_TOKEN is required}
+      # It sits on the shared connector network holding the owner's key, so callers need this token.
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8824:8080
+    networks:
+    - baby_buddy
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-babybuddy-official:development
+networks:
+  baby_buddy:
+    name: mu3lab-baby-buddy_default
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

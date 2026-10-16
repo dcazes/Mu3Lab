@@ -14,7 +14,8 @@ x-dawarich: &dawarich
     DATABASE_PASSWORD: ${DAWARICH_DB_PASSWORD:?DAWARICH_DB_PASSWORD is required}
     DATABASE_NAME: dawarich
     REDIS_URL: redis://redis:6379
-    APPLICATION_HOSTS: ${DAWARICH_HOST:?DAWARICH_HOST is required},localhost,127.0.0.1
+    # dawarich-app: ContextForge, for chat tools.
+    APPLICATION_HOSTS: ${DAWARICH_HOST:?DAWARICH_HOST is required},localhost,127.0.0.1,dawarich-app
     APPLICATION_PROTOCOL: https
     SELF_HOSTED: "true"
     STORE_GEODATA: "true"
@@ -46,7 +47,13 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
-    networks: [mu3lab_frontend, mu3lab_backend, dawarich_internal]
+    networks:
+      mu3lab_frontend:
+      mu3lab_backend:
+      dawarich_internal:
+      # ContextForge calls Dawarich's own MCP server (/api/v1/mcp) for chat.
+      mu3lab_mcp_upstream:
+        aliases: [dawarich-app]
     healthcheck:
       test: ["CMD-SHELL", "wget --header='X-Forwarded-Proto: https' -qO- http://127.0.0.1:3000/api/v1/health | grep -q '\"ok\"'"]
       timeout: 10s
@@ -136,4 +143,5 @@ services:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  mu3lab_mcp_upstream: {external: true}
   dawarich_internal: {internal: true}

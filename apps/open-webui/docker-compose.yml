@@ -51,6 +51,11 @@ services:
       ENABLE_API_KEYS: "true"
       BYPASS_ADMIN_ACCESS_CONTROL: "false"
       MU3LAB_ADMIN_API_KEY: ${OPEN_WEBUI_ADMIN_API_KEY:?OPEN_WEBUI_ADMIN_API_KEY is required}
+      # Every new chat starts with Mu3Lab's main assistant (ctl/integrations/openwebui.py), listed first;
+      # people reach an app's assistant from the model menu or by typing @ and its name.
+      DEFAULT_MODELS: mu3lab-assistant
+      DEFAULT_PINNED_MODELS: mu3lab-assistant
+      MODEL_ORDER_LIST: '["mu3lab-assistant"]'
       ENABLE_VERSION_UPDATE_CHECK: "false"
       ENABLE_COMMUNITY_SHARING: "false"
     volumes:

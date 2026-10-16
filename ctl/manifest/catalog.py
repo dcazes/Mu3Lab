@@ -150,11 +150,18 @@ def _load_connectors(manifest: AppManifest, folder: Path) -> tuple[Connector, ..
         assert isinstance(connector, Connector)
         if connector.id != connector_id:
             raise CatalogError(f"{directory}: connector id must match its folder name")
-        if not (directory / COMPOSE_FILE).is_file():
+        if connector.builtin:
+            # The app serves MCP itself: it must be reachable by ContextForge, and nothing else runs.
+            if (directory / COMPOSE_FILE).is_file():
+                raise CatalogError(f"{directory}: a built-in connector has no {COMPOSE_FILE}")
+            if "mu3lab_mcp_upstream" not in (folder / COMPOSE_FILE).read_text(encoding="utf-8"):
+                raise CatalogError(f"{manifest.id}: a built-in connector needs the app on mu3lab_mcp_upstream")
+        elif not (directory / COMPOSE_FILE).is_file():
             raise CatalogError(f"{directory}: missing {COMPOSE_FILE}")
         if connector.reviewed and not (directory / "review.yaml").is_file():
             raise CatalogError(f"{directory}: a reviewed connector needs review.yaml")
-        _check_images(directory / COMPOSE_FILE)
+        if not connector.builtin:
+            _check_images(directory / COMPOSE_FILE)
         if connector.provision and not (directory / connector.provision.script).is_file():
             raise CatalogError(f"{directory}: missing credential script {connector.provision.script}")
         for relative in connector.include:
@@ -209,6 +216,11 @@ def _check_across(apps: list[App], platform_dir: Path = PLATFORM_DIR) -> None:
             health = connector.local_health.port
             if health is None:
                 raise CatalogError(f"{connector.id}: local_health must name its port")
+            if connector.builtin:
+                # The app's own port, already claimed by the app.
+                if health != app.manifest.service.local_port:
+                    raise CatalogError(f"{connector.id}: a built-in connector's local_health uses the app's port")
+                continue
             published = published_ports(app.connector_folder(connector.id) / COMPOSE_FILE)
             if published != [health]:
                 raise CatalogError(

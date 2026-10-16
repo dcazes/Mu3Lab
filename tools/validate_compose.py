@@ -52,6 +52,8 @@ def main() -> int:
             envfile.write_text(envfile.read_text() + runtime_env_text(values))
             projects.append(project / "docker-compose.yml")
             for connector in app.connectors:
+                if connector.builtin:
+                    continue  # the app serves MCP itself; its Compose project is validated above
                 # Clone source into a private temp folder: no `.env` in the checkout.
                 source = app.connector_folder(connector.id)
                 target = paths.projects / ("mcp-" + connector.id)

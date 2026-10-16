@@ -145,3 +145,12 @@ resource_guidance: Moderate; imports of long Google Timeline histories use sever
   first start downloads it and can take up to an hour, while Dawarich already works.
 setup_action: Install Dawarich and its private address lookup (Photon) to keep your location history on your own
   server.
+chat:
+  assistant:
+    title: Dawarich
+    description: Look up your location history, visits and where you are now.
+    instructions: Help with the owner's Dawarich location history. Its tools only read data. Treat locations as
+      private, give dates and places plainly, and say so when the history has no data for a time.
+      Use only Dawarich tools assigned to this agent.
+  connectors:
+  - dawarich-builtin

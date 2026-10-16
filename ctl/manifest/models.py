@@ -332,6 +332,11 @@ class CredentialScript(Model):
     # Pass the installing owner's username as the script's only argument, so it can
     # find the owner's account even after other household members become admins.
     owner_username: bool = False
+    # Or the owner's email, for apps that identify people by email.
+    owner_email: bool = False
+    # Optional script, in the same folder and interpreter, that deletes the credential when the
+    # connector is switched off. Only for credentials minted for Mu3Lab alone, never a phone's.
+    revoke_script: str = ""
 
 
 class ReviewedUpdate(Model):
@@ -362,6 +367,12 @@ class Connector(Model):
     include: tuple[str, ...] = ()
     reviewed: bool = False  # a review.yaml sits next to it: the tools ContextForge starts it with
     reviewed_update: ReviewedUpdate | None = None
+    # The app serves MCP itself (``endpoint`` is the app's own service): no connector container
+    # to build, start or stop, and the app joins mu3lab_mcp_upstream so ContextForge can reach it.
+    builtin: bool = False
+    # Fixed headers sent with every call besides the credential, e.g. X-Forwarded-Proto for an app
+    # that redirects plain HTTP because it expects to sit behind an HTTPS proxy.
+    headers: dict[str, str] = Field(default_factory=dict)
 
     @property
     def auto_provision(self) -> bool:

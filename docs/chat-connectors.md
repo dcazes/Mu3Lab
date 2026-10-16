@@ -53,16 +53,44 @@ Operators become ContextForge administrators. The second sign-in button, "Mu3Lab
 so ContextForge trusts Open WebUI's sign-ins, and it is not for signing in. Mu3Lab's own administrator
 account (`mu3lab@contextforge.example.com`) has a password that only Mu3Lab holds.
 
+## The main assistant
+
+Every new Open WebUI chat starts with **Mu3Lab** (`mu3lab-assistant`), set through Open WebUI's
+`DEFAULT_MODELS`, `DEFAULT_PINNED_MODELS` and `MODEL_ORDER_LIST`. It has no app tools. Its instructions
+list the app assistants that are live, and it tells people to switch with `@` and the assistant's name,
+or with the model menu. With no apps installed, it explains how to add them.
+
+It does not hand work to the app assistants itself. Open WebUI's sub-agents (`delegate_task`) run with
+the parent chat's own model and tools, so they cannot reach another assistant's tools.
+
+## Kinds of connector
+
+| Kind | Example | What runs |
+|---|---|---|
+| Upstream package in a pinned container | `mealie-community`, `babybuddy-official` | Our Compose project, built from a pinned release or commit |
+| Built into the app (`builtin: true`) | `outline-builtin`, `dawarich-builtin` | Nothing extra: the app joins `mu3lab_mcp_upstream` and ContextForge calls its own MCP endpoint |
+| Mu3Lab adapter | `adventurelog`, `beaver-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
+
+A connector can also declare fixed `headers` that ContextForge sends with its credential (Dawarich
+needs `X-Forwarded-Proto: https`). A credential script can ask for the owner's username
+(`owner_username`) or email (`owner_email`).
+
+## Off by default
+
+Assistants are shared by the household, and their connectors use the owner's credential. For apps
+that keep each person's data private, that would share the owner's data with everyone, so those
+connectors are not switched on at install (`preferred: false`): Dawarich (location history) and
+Beaver Habits (habits). An administrator can switch them on in the dashboard.
+
 ## Adding a connector for an app without one
 
-1. If the app's REST API covers the requests, register it as a REST tool in ContextForge and
-   write no code.
-2. Otherwise add a small MCP server under `apps/<app>/connectors/<id>/` (see `immich-control`). It is
-   registered like any other connector.
+1. If the app has its own MCP server, use it: built in (`builtin: true`) or as a pinned container.
+2. Otherwise, if a few REST calls cover it, add a mode to `platform/mcp-adapter/server.py`.
+3. Otherwise add a small MCP server under `apps/<app>/connectors/<id>/` (see `immich-control`).
 
 ## Later
 
-- **A parent assistant** that hands work to the app assistants. Open WebUI's sub-agents
-  (`delegate_task`) copy the current model and tools, so they cannot route work to the app
-  assistants; ContextForge's A2A support would need a small bridge.
+- **Per-person app access.** ContextForge knows who is calling, but connectors use one credential
+  per app. Passing each person's own app credential would let private apps (Dawarich, Beaver Habits)
+  be on for everyone.
 - **Approval for changes**, once ContextForge's human-approval hook ships.
