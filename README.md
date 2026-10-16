@@ -1,53 +1,91 @@
+<p align="center">
+  <img src="docs/images/banner.svg" alt="Mu3Lab: a private home cloud with app-aware AI, on your own computer" width="100%">
+</p>
+
 # Mu3Lab
 
-**A private home cloud that brings your household's apps, accounts, AI and day-to-day administration together on your own Linux computer.**
+Mu3Lab turns a Linux computer into a private home cloud for your household. One installer sets up a curated set of self-hosted apps along with shared sign-in, a password vault, private remote access and AI chat that can work with your apps. A web dashboard lets you install, run, update and back up those apps without editing configuration files.
 
-Mu3Lab installs and connects a curated collection of applications for files, photos, paperwork, meals, budgets, music, books, games and household life. Its dashboard gives you one place to open apps, manage people, see resource use, choose AI models, and handle installation, updates and recovery. Private remote access and shared sign-in are part of setup.
+Mu3Lab handles deployment and the connections between apps. Each app still provides its own screens, data and features.
 
-The goal is to reduce the work of running these applications together. Mu3Lab manages their deployment and integration; each application still provides its own screens, data and features. You choose what to install, supply your content, connect your devices and keep a separate copy of your backups.
+> [!NOTE]
+> Mu3Lab is in active development. This README describes the code in this repository; fresh installs on every hardware and app combination have not all been tested. See [acceptance](docs/acceptance.md).
 
-## Three ways to read about the project
+## Highlights
 
-| Document | Audience and purpose |
-| --- | --- |
-| **[User guide: what to expect](docs/user-guide.md)** | Plain-language walkthrough of preparation, every setup stage, daily use, extra app requirements, backups and removal. Read this before installing. |
-| **[Technical deep dive](docs/architecture.md)** | How the installer, app contracts, network, identities, worker, storage, dashboard, AI, calendars, backups and update mechanisms work, with links to implementation. |
-| **This README** | Project overview, current scope and starting point. |
+- **Private access.** Your devices connect through Tailscale with private HTTPS addresses. No router port forwarding is needed.
+- **One sign-in.** Authentik signs people in to the dashboard and to apps that support it. Generated app logins are saved to your own Vaultwarden vault, ready for Bitwarden to fill.
+- **Apps on demand.** Choose apps from the catalog, review download and disk estimates, and install. Start, stop, update, repair and remove them from the dashboard.
+- **AI chat that knows your apps.** Open WebUI (default) or LobeChat, with one assistant per app. Use outside AI providers, local models through Ollama, or switch to **Local only**.
+- **Household accounts.** Administrators and members, invitations and per-person app accounts.
+- **Backups and recovery.** Optional scheduled, encrypted Kopia backups, automatic backups before app updates and guided app recovery.
 
-## What it handles
+## How it fits together
 
-- **Private access:** Tailscale connects authorized devices to private HTTPS addresses without router port forwarding. Caddy routes requests; Authentik supplies shared sign-in where supported.
-- **Accounts and passwords:** household administrator/member roles, invitations, app account provisioning and generated logins saved to Vaultwarden for use with Bitwarden clients. Some apps and mobile clients still need a separate login or device authorization.
-- **Application management:** catalog discovery, configuration forms, download estimates, parallel image downloads, installation progress, start/stop, sign-in repair, app updates and removal.
-- **AI:** Open WebUI by default, optional LobeChat, external provider routing through FreeLLMAPI and LiteLLM, local models through Ollama, document-search models, and optional local speech.
-- **Chat tools:** app-specific assistants connect through ContextForge. Administrators select tools and inspect calls there. Household members also receive assistants. **Enabled tools can change application data without a separate approval dialog.** Connectors may use shared application credentials; these are not automatically limited to each person's private app data.
-- **Calendar:** a personal calendar in Mu3Lab, with an optional connection to one Nextcloud calendar for viewing and editing, explicit transfer of locally kept events, and conflict handling.
-- **Operations:** shared health observations, memory and disk accounting, durable background jobs, optional scheduled encrypted local backups, guided app recovery, and tagged Mu3Lab release updates for eligible installations.
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Devices connect through Tailscale to Caddy and Authentik. The Mu3Lab dashboard manages the apps. Chat reaches app tools through ContextForge and AI models through LiteLLM." width="100%">
+</p>
 
-## Applications in this checkout
+Every request enters through Tailscale, then Caddy routes it to the right app behind Authentik. Two background services run the dashboard and its job worker; each app runs in its own Docker Compose project. All data lives under `/srv/mu3lab` on this computer.
 
-The base installation includes Caddy, Authentik, Vaultwarden, Open WebUI, ContextForge, LiteLLM, FreeLLMAPI and Ollama, with Tailscale installed on the host. An AI provider or a downloaded local chat model is needed before chat can answer.
+## Applications
 
-| Optional applications | What they provide |
-| --- | --- |
-| Immich; Nextcloud | Photos and videos; files, calendars and contacts |
-| Paperless-ngx; Outline; SurfSense | Searchable paperwork; household wiki; AI research workspace |
-| Mealie; Grocy; Actual Budget | Recipes and meal plans; pantry and household stock; budgeting |
-| Baby Buddy; Beaver Habits | Baby-care records; personal habit tracking |
-| AdventureLog; Dawarich | Travel planning and journals; personal location history |
-| Navidrome; Audiobookshelf; RomM | Music; audiobooks and podcasts; a library and browser player for your game files |
-| LobeChat; Firecrawl; Speech | Alternative chat; web extraction for AI; local speech recognition and speech playback |
-| Kopia backups | Scheduled local backups and a backup browser |
+**Always installed:** Caddy (routing), Authentik (sign-in), Vaultwarden (passwords), Open WebUI (chat), ContextForge (app tools for chat), LiteLLM and FreeLLMAPI (AI routing) and Ollama (local models). Tailscale is installed on the host.
 
-Chat connectors are declared for Actual Budget, AdventureLog, Firecrawl, Grocy, Immich, Mealie, Nextcloud, Paperless-ngx and SurfSense. Installing an app does not give chat access to every feature of that app. Connector availability, credentials and the tools enabled in ContextForge determine what works.
+**Optional apps:**
 
-The catalog is defined by [`apps/*/app.yaml`](apps). Proposals under `docs/expansion/` are not additional installable applications.
+| App | Purpose | Chat assistant |
+| --- | --- | :---: |
+| Immich | Photos and videos | ✓ |
+| Nextcloud | Files, calendars and contacts | ✓ |
+| Paperless-ngx | Searchable scanned paperwork | ✓ |
+| Outline | Household wiki | |
+| SurfSense | AI research workspace | ✓ |
+| Mealie | Recipes and meal plans | ✓ |
+| Grocy | Pantry and household stock | ✓ |
+| Actual Budget | Budgeting | ✓ |
+| Baby Buddy | Baby-care records | |
+| Beaver Habits | Habit tracking | |
+| AdventureLog | Travel plans and journals | ✓ |
+| Dawarich | Personal location history | |
+| Navidrome | Music streaming | |
+| Audiobookshelf | Audiobooks and podcasts | |
+| RomM | Game library with a browser player | |
+| LobeChat | Alternative chat app | |
+| Firecrawl | Web page extraction for AI | ✓ |
+| Speech | Local speech recognition and spoken replies | |
+| Kopia backups | Scheduled encrypted backups | |
 
-## Getting started
+The catalog is defined in [`apps/*/app.yaml`](apps). Proposals in `docs/expansion/` are ideas, not installable apps.
 
-Use an **x86-64** computer with Ubuntu 22.04+, Debian 12+, or a compatible derivative accepted by the installer. ARM is currently rejected by the host check. You need administrator access, an internet connection, a Tailscale account and enough memory and disk for your chosen apps and data. There is no single capacity figure that guarantees the entire catalog will fit.
+## AI chat and app tools
 
-Run these commands as your ordinary Linux user, in a terminal:
+<p align="center">
+  <img src="docs/images/chat-tools.svg" alt="Each app's assistant in Open WebUI or LobeChat calls that app's virtual server in ContextForge, which forwards to the app's connector and then the app." width="100%">
+</p>
+
+Each app with a chat connector gets its own assistant, which you pick from the chat app's model menu. The assistant reaches the app only through [ContextForge](https://github.com/IBM/mcp-context-forge), an MCP gateway where administrators choose each assistant's tools and review who called what. Starting an app switches its tools on; stopping it switches them off.
+
+> [!IMPORTANT]
+> Tools that change app data run **without a separate approval step**, and every household member gets the same assistants. A connector may use a shared app account, so it can reach more than one person's records. Turn off any tools you don't want in ContextForge.
+
+AI answers come from outside providers (through FreeLLMAPI, allowed by default) or local models (through Ollama). **Local only** keeps Mu3Lab's chat requests on this computer. It does not stop web searches, downloads or other apps' own outside connections.
+
+## Requirements
+
+- An **x86-64** computer running Ubuntu 22.04+, Debian 12+ or a compatible derivative that the installer accepts. ARM, including Raspberry Pi, is not supported.
+- A Linux account with `sudo` rights, an internet connection and a [Tailscale](https://tailscale.com) account.
+- `git`, `curl`, `tar` and `sha256sum`.
+- Enough memory and disk for the apps and content you choose. No single figure covers the whole catalog; the dashboard shows estimates before each install.
+- Optional: an NVIDIA GPU with working drivers for faster local AI. AMD support varies by app.
+
+## Install
+
+<p align="center">
+  <img src="docs/images/setup-flow.svg" alt="Setup steps: run the installer, create your account, approve in Tailscale, core apps start, sign in, follow Home's checklist." width="100%">
+</p>
+
+Run these as your normal user (not with `sudo`):
 
 ```bash
 git clone https://github.com/dcazes/Mu3Lab.git
@@ -55,34 +93,41 @@ cd Mu3Lab
 ./install.sh
 ```
 
-Git must already be available to download the project; the script also needs `curl`, `tar` and `sha256sum`. See the [user guide](docs/user-guide.md) for preparation commands and the complete walkthrough.
+The installer asks for your computer password, your name, email and a new Mu3Lab password, then walks you through approving the computer in Tailscale. Setup finishes once you sign in and the dashboard loads; the AI apps keep downloading in the background. Home then guides you through password filling, AI and your first apps.
 
-Setup asks for your computer password, your name/email and a new Mu3Lab password, then guides Tailscale approval. It installs system software, prepares the apps and opens the private dashboard. **You must sign in and let the dashboard load before setup reports completion.** Follow Home's remaining steps for password autofill, AI, personal apps and other devices.
+Keep the `Mu3Lab` folder where it is, because the background services run from it. Running `./install.sh` again checks and resumes setup; it does not download a newer version of Mu3Lab. The [user guide](docs/user-guide.md) covers every step in detail.
 
-Keep the checkout where you installed it: the background services run from it. Re-running `./install.sh` checks and resumes setup; it does not download newer project source by itself.
+## Before you install
 
-## Boundaries to understand
+- **Docker and browsers.** Setup may install or upgrade Docker and restart it, which affects other containers on this computer. It also adds the Bitwarden extension to Chrome, Chromium and Brave through a browser policy, so those browsers may show *Managed by your organization*.
+- **Backups stay local.** Scheduled backups need the Kopia backups app and are stored on this computer. Copying them elsewhere is up to you. Media libraries under `/srv/mu3lab/media` are not backed up.
+- **Trusted household only.** The dashboard and worker share Docker access, which is equivalent to root on this computer. Mu3Lab is not designed to isolate untrusted users or apps.
 
-Mu3Lab is in active development. These documents describe the checked-in implementation, not a guarantee that every upstream service or fresh-machine combination has passed real-device acceptance. See [acceptance](docs/acceptance.md) and [development](docs/development.md).
+## Updates and removal
 
-Private access does not mean that all activity stays on the server. Outside AI providers are allowed by default; **Local only** changes Mu3Lab's AI routing, while web searches, downloads and third-party app integrations can still contact external services. NVIDIA acceleration depends on working drivers and app support; AMD support varies by app and is not fully prepared by the installer.
+Tagged installs can update Mu3Lab from **Settings → System → Mu3Lab updates**. Development checkouts update with `git pull` followed by `./install.sh`. App updates are offered separately and back up the app first.
 
-Scheduled backups require installing **Kopia backups**. They remain on this server; off-device copying is your responsibility. Audiobook, podcast and game libraries under `/srv/mu3lab/media` are excluded. Preserve the recovery sheet and a separate copy of those libraries. App updates make a pre-update backup even without the scheduled backup app.
-
-The dashboard and worker share credentials and Docker access. This is a trusted household server, not an isolation boundary for hostile users or arbitrary applications.
-
-## Updates, removal and further reading
-
-Use **Settings → System → Mu3Lab updates** for eligible tagged installations. Development or edited checkouts require manual source updates and `./install.sh`. App version changes are offered separately; installed apps retain their recorded versions until updated.
-
-Preview full removal with:
+To preview a full removal:
 
 ```bash
 ./uninstall.sh --dry-run
 ```
 
-Actual removal with `./uninstall.sh` deletes `/srv/mu3lab`, **including local backups, passwords and media**. Copy what you need elsewhere first. `--everything` also removes Docker and its unrelated contents, Tailscale and NVIDIA container support.
+`./uninstall.sh` deletes `/srv/mu3lab`, **including local backups, saved passwords and media**. Copy anything you need first. Adding `--everything` also removes Docker (with any unrelated containers), Tailscale and NVIDIA container support.
 
-For detailed implementation and operating references, start with the [technical deep dive](docs/architecture.md). Existing focused guides cover [backups](docs/backup-recovery.md), [app updates](docs/app-updates.md), [chat connectors](docs/chat-connectors.md) and [development](docs/development.md); dated reviews and plans record earlier designs and should not be treated as current feature promises.
+## Documentation
 
-Mu3Lab is licensed under [AGPL-3.0-or-later](LICENSE). Included applications retain their own licenses.
+| Document | What it covers |
+| --- | --- |
+| [User guide](docs/user-guide.md) | Preparation, every setup step, daily use, backups, recovery and removal, in plain language |
+| [Technical deep dive](docs/architecture.md) | Installer, app contracts, networking, identity, jobs, AI, backups and updates, with links to the code |
+| [Chat connectors](docs/chat-connectors.md) | How ContextForge, connectors and assistants work, and how to add a connector |
+| [Backups and recovery](docs/backup-recovery.md) | What is backed up, schedules and restoring |
+| [App updates](docs/app-updates.md) | How app versions are reviewed and applied |
+| [Development](docs/development.md) | Working on Mu3Lab and running its checks |
+
+Dated plans and reviews elsewhere in `docs/` record earlier designs and are not promises about current features.
+
+## License
+
+Mu3Lab is licensed under [AGPL-3.0-or-later](LICENSE). Included applications keep their own licenses.
