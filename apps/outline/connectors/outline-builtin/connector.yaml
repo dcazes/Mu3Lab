@@ -1,0 +1,29 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Outline serves MCP itself at /mcp (since v1.x; https://github.com/outline/outline/tree/main/server/routes/mcp).
+id: outline-builtin
+name: Outline MCP
+preferred: true
+provenance: official
+repository: https://github.com/outline/outline
+revision: v1.10.1
+builtin: true
+transport: streamable-http
+endpoint: http://outline:3000/mcp
+local_health: http://127.0.0.1:3005/_health
+credentials:
+- key: api_key
+  env: MCP_AUTH_TOKEN
+  type: secret
+  label: Outline API key
+  required: true
+  prefix: ol_api_
+provision:
+  service: outline
+  script: provision.js
+  interpreter:
+  - node
+  - '-'
+provision_note: Creates a dedicated Mu3Lab chat API key for Outline's administrator and keeps MCP switched on for the
+  workspace.
+review_note: Outline's own MCP server, built into the pinned release. Tools act as the administrator, so they can reach
+  every collection the administrator can.

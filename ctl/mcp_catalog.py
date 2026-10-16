@@ -34,6 +34,7 @@ class McpServer:
     review: str = ""
     secrets: tuple[dict[str, Any], ...] = ()
     include: tuple[str, ...] = ()
+    builtin: bool = False
 
     def compose_path(self, root: Path = ROOT) -> Path | None:
         if not self.compose_dir:
@@ -89,6 +90,7 @@ def load(registry: Registry) -> tuple[McpServer, ...]:
                     review=str(folder / "review.yaml") if connector.reviewed else "",
                     secrets=tuple(secret.model_dump() for secret in connector.secrets),
                     include=connector.include,
+                    builtin=connector.builtin,
                 )
             )
     return tuple(result)

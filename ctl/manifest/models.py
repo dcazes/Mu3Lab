@@ -362,6 +362,9 @@ class Connector(Model):
     include: tuple[str, ...] = ()
     reviewed: bool = False  # a review.yaml sits next to it: the tools ContextForge starts it with
     reviewed_update: ReviewedUpdate | None = None
+    # The app serves MCP itself (``endpoint`` is the app's own service): no connector container
+    # to build, start or stop, and the app joins mu3lab_mcp_upstream so ContextForge can reach it.
+    builtin: bool = False
 
     @property
     def auto_provision(self) -> bool:

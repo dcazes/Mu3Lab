@@ -79,13 +79,18 @@ def _stop_connector(server, state: ControlState, log) -> tuple[bool, str]:
     return unbind(server, log)
 
 
+def _ready(server, project: Path) -> bool:
+    """Whether the connector's files are in place: its .env for a built-in one, else its Compose project."""
+    return (project / (".env" if server.builtin else "docker-compose.yml")).is_file()
+
+
 def _materialize(server, root: Path) -> Path:
     source = server.compose_path(root)
-    if source is None or not (source / "docker-compose.yml").is_file():
+    if not server.builtin and (source is None or not (source / "docker-compose.yml").is_file()):
         raise ValueError("reviewed MCP runtime is not available")
     target = credential_path(server.id).parent
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
-    for item in source.iterdir():
+    for item in () if server.builtin else source.iterdir():
         if item.name.startswith(".env") or item.is_symlink():
             continue
         destination = target / item.name
@@ -104,7 +109,8 @@ def _materialize(server, root: Path) -> Path:
     store.put("connector", server.id, values)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
-    platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
+    if not server.builtin:
+        platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
     return target
 
 
@@ -310,13 +316,13 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
         if not runtime or not runtime["enabled"]:
             continue
         project = credential_path(server.id).parent
-        if not (project / "docker-compose.yml").is_file():
+        if not _ready(server, project):
             # Enabled before its files were copied (or they were deleted): restore them from the repo.
             try:
                 project = _materialize(server, root)
             except (OSError, ValueError) as exc:
                 log(f"Could not restore {server.name}: {redact(str(exc))}")
-        if not (project / "docker-compose.yml").is_file():
+        if not _ready(server, project):
             state.set_mcp_server(
                 server.id,
                 service_id,
@@ -329,7 +335,7 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
         if not running:
             if runtime["state"] in {"prepared", "authentication_required"}:
                 continue
-            rc, output = actions.compose_action(project, "stop", log)
+            rc, output = (0, "") if server.builtin else actions.compose_action(project, "stop", log)
             state.set_mcp_server(
                 server.id,
                 service_id,
@@ -357,7 +363,7 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
                 error={"message": provision_detail},
             )
             continue
-        rc, output = actions.compose_up(project, log, wait_timeout=120)
+        rc, output = (0, "") if server.builtin else actions.compose_up(project, log, wait_timeout=120)
         if rc:
             state.set_mcp_server(server.id, service_id, enabled=True, state="failed", error={"message": redact(output)})
             success = False
@@ -707,7 +713,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     state.set_mcp_server(server.id, server.service_id, enabled=True, state="starting")
-    rc, output = actions.compose_up(project, log, wait_timeout=120)
+    rc, output = (0, "") if server.builtin else actions.compose_up(project, log, wait_timeout=120)
     if rc:
         state.set_mcp_server(
             server.id, server.service_id, enabled=True, state="failed", error={"message": redact(output)}
