@@ -6,7 +6,8 @@ ADD --keep-git-dir=false https://github.com/babybuddy/babybuddy-mcp.git#9f32d446
 RUN pip install --no-cache-dir uv==0.8.22 \
     && uv sync --frozen --no-dev --no-install-project \
     && pip uninstall -y uv
+COPY serve.py /app/mu3lab_serve.py
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH="/app/src" MCP_TRANSPORT=http MCP_HOST=0.0.0.0 MCP_PORT=8080
 USER 65534:65534
 EXPOSE 8080
-CMD ["python", "-m", "babybuddy_mcp"]
+CMD ["python", "/app/mu3lab_serve.py"]

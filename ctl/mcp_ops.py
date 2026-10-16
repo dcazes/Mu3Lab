@@ -19,6 +19,7 @@ from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
 from ctl.mcp_credentials import ensure as ensure_credentials
+from ctl.mcp_credentials import revoke as revoke_credentials
 from ctl.mcp_registry import credential_path, missing_credentials
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
@@ -673,6 +674,12 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
                 step_id="register",
             )
             return
+        revoked, revoke_detail = revoke_credentials(server, log)
+        if not revoked:
+            # Switched off either way; the key is replaced the next time it is switched on.
+            log(f"{server.name}'s chat key could not be deleted yet: {redact(revoke_detail)}")
+        elif revoke_detail:
+            log(revoke_detail)
         store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
         return
     for other in others:

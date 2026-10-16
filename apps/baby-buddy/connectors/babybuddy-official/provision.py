@@ -1,5 +1,5 @@
-# Prints the owner's Baby Buddy API key. The owner's user is created (as the trusted sign-in would)
-# if they have not opened Baby Buddy yet; an existing key is reused because a phone may use it.
+# Prints the owner's Baby Buddy API key. The owner's user is created, with the role the trusted sign-in
+# gives, if they have not opened Baby Buddy yet; an existing key is reused because a phone may use it.
 import os
 import sys
 
@@ -17,8 +17,9 @@ from rest_framework.authtoken.models import Token  # noqa: E402
 username = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
 if not username:
     raise SystemExit("MU3LAB_ERROR the owner's username is missing")
-user, _ = User.objects.get_or_create(username=username)
-if not (user.is_staff and user.is_superuser):
+user, created = User.objects.get_or_create(username=username)
+if created:
+    # The role Mu3Lab's sign-in gives a new user (mu3lab_auth.py); an existing user is left as they are.
     user.is_staff = user.is_superuser = True
     user.save(update_fields=["is_staff", "is_superuser"])
 token, _ = Token.objects.get_or_create(user=user)

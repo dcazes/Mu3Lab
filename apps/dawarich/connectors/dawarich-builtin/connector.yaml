@@ -28,6 +28,8 @@ provision:
   - bin/rails
   - runner
   - /dev/stdin
+  owner_email: true
+  # No revoke script: the key is the owner's own (their phone sends locations with it).
 provision_note: Uses the owner's existing Dawarich API key (the same one their phone uses), so nothing else changes.
 review_note: Dawarich's own experimental MCP server, built into the pinned release. Its three tools only read the
   owner's timeline, latest location and visits. Everyone in the household shares the assistant, so switching it on

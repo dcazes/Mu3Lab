@@ -170,7 +170,10 @@ def _beaver(name: str, args: dict):
         raise ValueError("habit_id is required")
     route = f"/api/v1/habits/{quote(habit_id, safe='')}/completions"
     if name == "list_completions":
-        query = {"date_fmt": "%Y-%m-%d", "sort": "desc", "limit": int(args.get("limit", 30))}
+        limit = args.get("limit", 30)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 366:
+            raise ValueError("limit must be a whole number from 1 to 366")
+        query = {"date_fmt": "%Y-%m-%d", "sort": "desc", "limit": limit}
         query |= {key: args[key] for key in ("date_start", "date_end") if args.get(key)}
         data, _ = _request(route + "?" + urlencode(query))
         return json.loads(data)

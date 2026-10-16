@@ -334,6 +334,9 @@ class CredentialScript(Model):
     owner_username: bool = False
     # Or the owner's email, for apps that identify people by email.
     owner_email: bool = False
+    # Optional script, in the same folder and interpreter, that deletes the credential when the
+    # connector is switched off. Only for credentials minted for Mu3Lab alone, never a phone's.
+    revoke_script: str = ""
 
 
 class ReviewedUpdate(Model):

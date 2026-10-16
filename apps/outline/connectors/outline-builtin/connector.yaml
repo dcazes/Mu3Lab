@@ -23,6 +23,7 @@ provision:
   interpreter:
   - node
   - '-'
+  revoke_script: revoke.js
 provision_note: Creates a dedicated Mu3Lab chat API key for Outline's administrator and keeps MCP switched on for the
   workspace.
 review_note: Outline's own MCP server, built into the pinned release. Tools act as the administrator, so they can reach

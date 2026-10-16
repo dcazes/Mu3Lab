@@ -26,6 +26,9 @@ provision:
   owner_username: true
 provision_note: Uses the owner's Baby Buddy API key (the one a phone app would use), creating their Baby Buddy user and
   key if they have not opened Baby Buddy yet.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
 review_note: Baby Buddy's official MCP server (BSD-2-Clause), built from a pinned commit. It reaches only Baby Buddy, on
   Baby Buddy's own network. Baby Buddy's records are shared by every caregiver, so the owner's key sees what everyone
   sees.
