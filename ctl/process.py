@@ -412,8 +412,8 @@ def run(
         # Closing a pipe another thread is still reading would block on its
         # lock; a reader only stays alive if something outside the process
         # group inherited the pipe, and then it ends when that holder exits.
-        for pipe, reader in ((proc.stdout, threads[0]), (proc.stderr, threads[1])):
-            if not reader.is_alive():
+        for pipe, pipe_reader in ((proc.stdout, threads[0]), (proc.stderr, threads[1])):
+            if not pipe_reader.is_alive():
                 try:
                     pipe.close()
                 except OSError:
