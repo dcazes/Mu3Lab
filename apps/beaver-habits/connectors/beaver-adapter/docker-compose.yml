@@ -1,0 +1,23 @@
+name: mu3lab-mcp-beaver-adapter
+services:
+  beaver-habits-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      MCP_APP: beaver
+      APP_URL: http://beaver:8080
+      BEAVER_API_TOKEN: ${BEAVER_API_TOKEN:?BEAVER_API_TOKEN is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8825:8080
+    networks:
+    - mu3lab_frontend
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-beaver-adapter:development
+networks:
+  mu3lab_frontend:
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

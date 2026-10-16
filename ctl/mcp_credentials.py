@@ -18,11 +18,12 @@ def ensure(server, log) -> tuple[bool, str]:
     if provision is None:
         return False, connector.provision_note or "This application requires manual MCP credentials."
     args: list[str] = []
-    if provision.owner_username:
+    if provision.owner_username or provision.owner_email:
+        field = "username" if provision.owner_username else "email"
         owner = onboarding_state.read(app.id).get("owner") or {}
-        if not owner.get("username"):
+        if not owner.get(field):
             return False, f"{app.manifest.name}'s owner is not known yet; reinstall the app to record it."
-        args = [str(owner["username"])]
+        args = [str(owner[field])]
     try:
         script = (app.connector_folder(connector.id) / provision.script).read_text()
         result = Compose(RuntimePaths().projects / app.id).run_script(

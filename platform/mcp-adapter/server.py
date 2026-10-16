@@ -8,7 +8,7 @@ import os
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
@@ -47,6 +47,29 @@ elif MODE == "adventurelog":
             schema({"name": TEXT, "description": {"type": "string"}}, ["name"]),
         ),
     ]
+elif MODE == "beaver":
+    DAY = {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": "A date as YYYY-MM-DD"}
+    TOOLS = [
+        tool("list_habits", "List the owner's active habits with their IDs", schema({})),
+        tool(
+            "list_completions",
+            "List the days one habit was done, newest first",
+            schema(
+                {
+                    "habit_id": TEXT,
+                    "date_start": DAY,
+                    "date_end": DAY,
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 366, "default": 30},
+                },
+                ["habit_id"],
+            ),
+        ),
+        tool(
+            "mark_habit",
+            "Mark one habit as done, or not done, on one day",
+            schema({"habit_id": TEXT, "date": DAY, "done": {"type": "boolean"}}, ["habit_id", "date", "done"]),
+        ),
+    ]
 else:
     raise SystemExit("unsupported adapter mode")
 
@@ -58,6 +81,11 @@ def _auth() -> str:
         if not username or not password:
             raise ValueError("Nextcloud app credential is not configured")
         return "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
+    if MODE == "beaver":
+        token = os.environ.get("BEAVER_API_TOKEN", "")
+        if not token:
+            raise ValueError("Beaver Habits API token is not configured")
+        return "Bearer " + token
     token = os.environ.get("ADVENTURELOG_API_KEY", "")
     if not token:
         raise ValueError("AdventureLog API key is not configured")
@@ -133,6 +161,31 @@ def _adventurelog(name: str, args: dict):
     raise ValueError("unknown tool")
 
 
+def _beaver(name: str, args: dict):
+    if name == "list_habits":
+        data, _ = _request("/api/v1/habits")
+        return json.loads(data)
+    habit_id = args.get("habit_id")
+    if not isinstance(habit_id, str) or not habit_id.strip():
+        raise ValueError("habit_id is required")
+    route = f"/api/v1/habits/{quote(habit_id, safe='')}/completions"
+    if name == "list_completions":
+        query = {"date_fmt": "%Y-%m-%d", "sort": "desc", "limit": int(args.get("limit", 30))}
+        query |= {key: args[key] for key in ("date_start", "date_end") if args.get(key)}
+        data, _ = _request(route + "?" + urlencode(query))
+        return json.loads(data)
+    if name == "mark_habit":
+        if not isinstance(args.get("done"), bool) or not isinstance(args.get("date"), str):
+            raise ValueError("date and done are required")
+        value = {"date": args["date"], "date_fmt": "%Y-%m-%d", "done": args["done"]}
+        data, _ = _request(route, "POST", json.dumps(value).encode())
+        return json.loads(data)
+    raise ValueError("unknown tool")
+
+
+HANDLERS = {"nextcloud": _nextcloud, "adventurelog": _adventurelog, "beaver": _beaver}
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/health":
@@ -175,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
                 args = params.get("arguments") or {}
                 if not isinstance(args, dict):
                     raise ValueError("arguments must be an object")
-                output = _nextcloud(name, args) if MODE == "nextcloud" else _adventurelog(name, args)
+                output = HANDLERS[MODE](name, args)
                 result = {"content": [{"type": "text", "text": json.dumps(output)}]}
             else:
                 raise ValueError("unsupported MCP method")

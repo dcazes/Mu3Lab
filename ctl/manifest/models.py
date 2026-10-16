@@ -332,6 +332,8 @@ class CredentialScript(Model):
     # Pass the installing owner's username as the script's only argument, so it can
     # find the owner's account even after other household members become admins.
     owner_username: bool = False
+    # Or the owner's email, for apps that identify people by email.
+    owner_email: bool = False
 
 
 class ReviewedUpdate(Model):

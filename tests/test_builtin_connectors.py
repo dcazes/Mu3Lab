@@ -66,3 +66,21 @@ class HeaderTests(unittest.TestCase):
         )
         api.ensure_gateway("outline-builtin", "http://outline:3000/mcp", "k", "Outline")
         self.assertEqual((sent["auth_type"], sent["auth_token"]), ("bearer", "k"))
+
+
+class OwnerArgumentTests(unittest.TestCase):
+    def test_a_script_can_ask_for_the_owners_email(self):
+        from ctl import mcp_credentials
+
+        server = next(c for c in load_connectors(load_registry()) if c.id == "beaver-adapter")
+        owner = {"owner": {"username": "dak", "email": "dak@example.com"}}
+        with (
+            patch("ctl.mcp_credentials.missing_credentials", return_value=["api_token"]),
+            patch("ctl.mcp_credentials.onboarding_state.read", return_value=owner),
+            patch("ctl.mcp_credentials.Compose") as compose,
+            patch("ctl.mcp_credentials.mcp_config.write"),
+        ):
+            compose.return_value.run_script.return_value.ok = True
+            ok, _detail = mcp_credentials.ensure(server, lambda _line: None)
+        self.assertTrue(ok)
+        self.assertEqual(compose.return_value.run_script.call_args.kwargs["args"], ["dak@example.com"])

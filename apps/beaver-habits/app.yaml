@@ -77,3 +77,12 @@ mobile:
     - Use the browser's share or menu button and choose Add to Home Screen.
 resource_guidance: Very light; one small database file.
 setup_action: Install Beaver Habits to track daily habits and streaks.
+chat:
+  assistant:
+    title: Beaver Habits
+    description: Check and tick off the owner's daily habits.
+    instructions: Help with the owner's Beaver Habits. Look up habits by name before acting, confirm the habit and date
+      before marking it, and report streaks from the days the tools return. Use only Beaver Habits tools assigned to
+      this agent.
+  connectors:
+  - beaver-adapter
