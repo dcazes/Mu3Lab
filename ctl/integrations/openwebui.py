@@ -3,8 +3,9 @@
 Mu3Lab keeps two things in step: the tool connections (one MCP connection per
 app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
-app's assistant. Both are shared by everyone. Connections and models Mu3Lab
-did not create are never touched: ours carry the ``mu3lab-app-`` id prefix.
+app's assistant, plus the main assistant every new chat starts with. All are
+shared by everyone. Connections and models Mu3Lab did not create are never
+touched: ours carry the ``mu3lab-app-`` id prefix, or are ``mu3lab-assistant``.
 API error bodies never reach logs.
 """
 
@@ -16,6 +17,10 @@ import httpx
 
 # Distinct from LiteLLM model names such as mu3lab-chat, which Open WebUI also lists.
 PREFIX = "mu3lab-app-"
+# The household's main assistant: no app tools, the selected model in every new chat
+# (DEFAULT_MODELS in apps/open-webui/docker-compose.yml), and it points people to the app assistants.
+MAIN = "mu3lab-assistant"
+BASE_MODEL = "mu3lab-chat"
 
 
 class ChatError(RuntimeError):
@@ -92,7 +97,7 @@ class OpenWebUI:
             )
             wanted_models[server_id] = {
                 "id": server_id,
-                "base_model_id": "mu3lab-chat",
+                "base_model_id": BASE_MODEL,
                 "name": item["title"],
                 "meta": {
                     "description": item["description"],
@@ -111,9 +116,45 @@ class OpenWebUI:
         others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
+        self.save_model(main_model(assistants), exists=MAIN in existing)
         for model_id, model in wanted_models.items():
             self.save_model(model, exists=model_id in existing)
         for model_id in existing:
             if ours(model_id) and model_id not in wanted_models:
                 self.delete_model(model_id)
         return [item["id"] for item in assistants]
+
+
+def main_model(assistants: list[dict[str, Any]]) -> dict[str, Any]:
+    """The main assistant, told which app assistants exist so it can send people to them."""
+    if assistants:
+        listing = "\n".join(f"- {item['title']}: {item['description']}" for item in assistants)
+        apps = (
+            "These app assistants can read and change data in their app:\n"
+            f"{listing}\n\n"
+            "When a request needs one of these apps, name the assistant to use and tell the person to type @ "
+            "followed by its name in the message box, or to choose it from the model menu at the top of the chat."
+        )
+    else:
+        apps = (
+            "No app assistants are available yet. When someone asks about their apps, explain that an "
+            "administrator can install apps from the Mu3Lab dashboard (Apps, then Discover); apps with chat "
+            "support then get their own assistant here."
+        )
+    instructions = (
+        "You are Mu3Lab, this household's general assistant. You can help with general questions, writing and "
+        "planning. You have no app tools: you cannot see or change anything inside the household's apps, so never "
+        f"claim to have done so.\n\n{apps}"
+    )
+    return {
+        "id": MAIN,
+        "base_model_id": BASE_MODEL,
+        "name": "Mu3Lab",
+        "meta": {
+            "description": "General help, and directions to the right app assistant.",
+            "capabilities": {"function_calling": True},
+        },
+        "params": {"system": instructions},
+        "access_grants": EVERYONE,
+        "is_active": True,
+    }

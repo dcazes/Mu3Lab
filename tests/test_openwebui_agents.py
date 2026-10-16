@@ -79,6 +79,24 @@ class ClientTests(unittest.TestCase):
         self.assertIn("someone-elses", fake.models)
         self.assertTrue(all(auth == "Bearer sk-key" for _method, _path, auth in fake.calls))
 
+    def test_the_main_assistant_has_no_tools_and_points_to_the_app_assistants(self):
+        fake = FakeOpenWebUI()
+        with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
+            api.ensure([ASSISTANT])
+            main = fake.models["mu3lab-assistant"]
+            self.assertNotIn("toolIds", main["meta"])
+            self.assertIn("- Mealie: Plan meals.", main["params"]["system"])
+            self.assertEqual(main["base_model_id"], "mu3lab-chat")
+            # With nothing installed it still exists, and says how to get app assistants.
+            api.ensure([])
+        main = fake.models["mu3lab-assistant"]
+        self.assertIn("No app assistants are available yet", main["params"]["system"])
+        self.assertNotIn("mu3lab-app-mealie", fake.models)
+
+    def test_the_main_assistant_is_every_new_chats_model(self):
+        compose = (Path(__file__).resolve().parents[1] / "apps/open-webui/docker-compose.yml").read_text()
+        self.assertIn("DEFAULT_MODELS: mu3lab-assistant", compose)
+
 
 class SyncTests(unittest.TestCase):
     def setUp(self):
