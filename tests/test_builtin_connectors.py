@@ -58,7 +58,9 @@ class HeaderTests(unittest.TestCase):
         sent = {}
         api.gateways = lambda: []
         api.request = lambda method, path, json=None, **_: sent.update(json) or {"id": "g1"}
-        api.ensure_gateway("dawarich-builtin", "http://dawarich-app:3000/api/v1/mcp", "k", "Dawarich", {"X-Forwarded-Proto": "https"})
+        api.ensure_gateway(
+            "dawarich-builtin", "http://dawarich-app:3000/api/v1/mcp", "k", "Dawarich", {"X-Forwarded-Proto": "https"}
+        )
         self.assertEqual(sent["auth_type"], "authheaders")
         self.assertEqual(
             sent["auth_headers"],
