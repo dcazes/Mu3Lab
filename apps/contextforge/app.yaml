@@ -30,7 +30,17 @@ sign_in:
     client_id: mu3lab-contextforge
     redirect_paths:
     - /auth/sso/callback/mu3lab
-    launch_path: /admin/login
+    # Its login page asks first; the launcher starts Authentik sign-in straight away.
+    launch_path: /__mu3lab/login
+    launch: json_post
+    json_launch:
+      method: GET
+      path: /auth/sso/login/mu3lab
+      body:
+        redirect_uri: '{origin}/auth/sso/callback/mu3lab'
+      url_key:
+      - authorization_url
+      launcher: true
     env:
       client_id: CONTEXTFORGE_OIDC_CLIENT_ID
       client_secret: CONTEXTFORGE_OIDC_CLIENT_SECRET

@@ -1,7 +1,7 @@
 """Same-origin sign-in launch pages generated from a manifest.
 
-Two kinds: a JSON POST whose reply names Authentik's address (Actual
-Budget), and a form on the app's own sign-in page that must be submitted
+Two kinds: a JSON request whose reply names Authentik's address (Actual
+Budget, ContextForge), and a form on the app's own sign-in page that must be submitted
 with that page's anti-forgery token (Dawarich).
 """
 
@@ -73,7 +73,13 @@ def caddy_handler(manifest: AppManifest) -> str:
     if not oidc or not launch or not launch.launcher:
         return ""
     settings = json.dumps(
-        {"path": launch.path, "body": launch.body, "keys": launch.url_key, "session": launch.session_check_path}
+        {
+            "path": launch.path,
+            "body": launch.body,
+            "method": launch.method,
+            "keys": launch.url_key,
+            "session": launch.session_check_path,
+        }
     ).replace("<", "\\u003c")
     script = """(async function () {
   const cfg = SETTINGS;
@@ -85,10 +91,14 @@ def caddy_handler(manifest: AppManifest) -> str:
       const session = await fetch(cfg.session, {credentials: 'same-origin'});
       if (session.ok && (await session.json())?.user) { location.replace(next); return; }
     }
-    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}/', location.origin + next)
+    // A POST's "{origin}/" is where the app lands afterwards; a GET's names only its callback.
+    const landing = cfg.method === 'GET' ? '/' : next;
+    const body = JSON.parse(JSON.stringify(cfg.body).replaceAll('{origin}/', location.origin + landing)
       .replaceAll('{origin}', location.origin));
-    const r = await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const r = cfg.method === 'GET'
+      ? await fetch(cfg.path + '?' + new URLSearchParams(body), {credentials: 'same-origin'})
+      : await fetch(cfg.path, {method: 'POST', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     let target = await r.json();
     for (const key of cfg.keys) target = target?.[key];
     if (!r.ok || typeof target !== 'string' || !target) throw new Error();

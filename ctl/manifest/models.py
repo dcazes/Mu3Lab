@@ -144,10 +144,12 @@ class OidcEnv(Model):
 
 
 class JsonLaunch(Model):
-    """The app's login page starts sign-in with a JSON POST that returns Authentik's address."""
+    """The app's login page starts sign-in with a JSON request that returns Authentik's address."""
 
     path: str
     body: dict[str, Any]  # "{origin}" in a string value becomes the app's private address
+    # GET sends ``body`` as query parameters (ContextForge's /auth/sso/login).
+    method: Literal["POST", "GET"] = "POST"
     url_key: tuple[str, ...]
     # Serve a same-origin page at the launch path that runs this POST in the
     # browser, for apps whose own login page would otherwise ask first.
