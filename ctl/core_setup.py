@@ -272,8 +272,8 @@ def _turned_off(runtime: RuntimePaths) -> str:
     return _stopped_service(runtime, [*checked, chat_ops.default_app().id])
 
 
-def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
-    """Check application-level contracts after container health has passed."""
+def _verify_services(runtime: RuntimePaths) -> tuple[bool, str]:
+    """Check what setup wires up by itself, none of which needs a provider key."""
     litellm_env = read_runtime_env(runtime.projects / by_capability("model_proxy").id / ".env")
     key = litellm_env.get("LITELLM_MASTER_KEY", "")
     if not key or not _http_ok("http://127.0.0.1:4000/v1/models", headers={"Authorization": f"Bearer {key}"}):
@@ -289,6 +289,17 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     chat_env = read_runtime_env(runtime.projects / chat.id / ".env")
     if oidc and not all(chat_env.get(key) for key in (oidc.env.client_id, oidc.env.client_secret)):
         return False, f"{name}'s Authentik sign-in configuration is incomplete"
+    return True, ""
+
+
+def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
+    """Check application-level contracts after container health has passed."""
+    ok, detail = _verify_services(runtime)
+    if not ok:
+        return False, detail
+    key = read_runtime_env(runtime.projects / by_capability("model_proxy").id / ".env").get("LITELLM_MASTER_KEY", "")
+    chat = chat_ops.default_app()
+    name = chat.manifest.name
     local = local_models.local_only(runtime)
     if not wiring["chat_configured"]:
         if local:
@@ -491,18 +502,23 @@ def _run(
             ahead.stop.set()
         runtime = RuntimePaths()
         wiring = configure_wiring(runtime, registry.catalog)
-        verified, detail = _verify_platform(runtime, wiring)
-        if not verified:
-            state = "waiting_for_confirmation" if not wiring["chat_configured"] else "failed"
-            store.transition(job_id, state, actor=actor, detail=detail)
-            if provisioning:
-                if state == "waiting_for_confirmation":
-                    provisioning.update(
-                        "core", "verified", detail="Core services and their private routes are healthy."
-                    )
+        if not wiring["chat_configured"]:
+            # Setup ends with what it can do by itself. Adding a provider is the
+            # owner's step; it queues its own verification job when it passes.
+            verified, detail = _verify_services(runtime)
+            if verified:
+                detail = "Core apps installed. Add an AI provider to finish the chat checks."
+                if provisioning:
+                    _mark_verified(provisioning, "core", "Core services and their private routes are healthy.")
                     provisioning.update("configuration", "waiting_for_user", detail=detail)
-                else:
-                    provisioning.update("core", "failed", detail=detail, error=detail)
+                store.transition(job_id, "succeeded", actor=actor, detail=detail)
+                return
+        else:
+            verified, detail = _verify_platform(runtime, wiring)
+        if not verified:
+            store.transition(job_id, "failed", actor=actor, detail=detail)
+            if provisioning:
+                provisioning.update("core", "failed", detail=detail, error=detail)
             return
         if provisioning:
             _mark_verified(provisioning, "core", "Core services and private integration checks passed.")
