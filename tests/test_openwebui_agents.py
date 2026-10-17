@@ -93,6 +93,17 @@ class ClientTests(unittest.TestCase):
         self.assertIn("No app assistants are available yet", main["params"]["system"])
         self.assertNotIn("mu3lab-app-mealie", fake.models)
 
+    def test_the_gateways_own_models_are_hidden_from_the_menu(self):
+        fake = FakeOpenWebUI()
+        with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
+            api.ensure([ASSISTANT])
+        for model_id in ("mu3lab-chat", "mu3lab-fast", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts"):
+            self.assertTrue(fake.models[model_id]["meta"]["hidden"], model_id)
+            self.assertIsNone(fake.models[model_id]["base_model_id"])
+        # The assistants stay in the menu.
+        self.assertNotIn("hidden", fake.models["mu3lab-assistant"]["meta"])
+        self.assertNotIn("hidden", fake.models["mu3lab-app-mealie"]["meta"])
+
     def test_the_main_assistant_is_every_new_chats_model(self):
         compose = (Path(__file__).resolve().parents[1] / "apps/open-webui/docker-compose.yml").read_text()
         self.assertIn("DEFAULT_MODELS: mu3lab-assistant", compose)

@@ -128,59 +128,6 @@
   padding: 0 20px 16px;
 }
 
-.meters {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-.meter {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.meter-label {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-2);
-}
-
-.meter-label b {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.meter-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--surface-hover);
-  overflow: hidden;
-}
-
-.meter-bar span {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-}
-
-.meter-green span {
-  background: var(--green);
-}
-
-.meter-amber span {
-  background: var(--amber);
-}
-
-.meter-red span {
-  background: var(--red);
-}
-
-.meter small {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
 .checklist {
   margin: 0;
   padding: 0;

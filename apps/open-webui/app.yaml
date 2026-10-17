@@ -44,18 +44,6 @@ secrets:
 env:
   OPEN_WEBUI_URL: '{{public_url}}'
   LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
-integrates_with:
-# With Mu3Lab's speech app, voice runs on this server; without it, in the browser.
-- capability: speech
-  env:
-    AUDIO_STT_ENGINE: openai
-    AUDIO_STT_MODEL: mu3lab-stt
-    AUDIO_TTS_ENGINE: openai
-    AUDIO_TTS_MODEL: mu3lab-tts
-    AUDIO_TTS_VOICE: '{{provider:MU3LAB_TTS_VOICE}}'
-  absent_env:
-    AUDIO_STT_ENGINE: web
-    AUDIO_TTS_ENGINE: ''
 rules:
 # Before anyone can sign in, the owner's administrator account is created already
 # linked to their Authentik sign-in, so no one else can become the first user.

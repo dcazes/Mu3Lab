@@ -154,7 +154,7 @@ class SystemTailscaleContractTests(unittest.TestCase):
             patch("ctl.status.host.process.completed", return_value=SimpleNamespace(returncode=0, stdout="active\n")),
             patch("ctl.status.host.RuntimePaths") as runtime_paths,
             patch("ctl.status.host.backup_readiness", return_value={}),
-            patch("ctl.status.host.resource_usage.memory", return_value=({"mu3lab-ollama": 5}, {"ollama": 5})),
+            patch("ctl.status.host.resource_usage.memory", return_value=({"mu3lab-ollama": 5}, {"ollama": 5}, {})),
             patch("ctl.status.host.resource_usage.stored_disk", return_value=None),
             patch("ctl.status.host.tailscale_status", return_value=status) as status_call,
             patch("ctl.status.host.tailnet_serve_status", return_value=serve) as serve_call,

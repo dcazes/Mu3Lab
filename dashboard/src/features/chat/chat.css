@@ -23,15 +23,3 @@
   border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
-
-.chat-popout {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.chat:hover .chat-popout {
-  opacity: 0.9;
-}

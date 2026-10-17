@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { jobActive } from '../lib/jobs';
+import { resolvePath, usePath } from '../lib/router';
 import { isWorking } from '../lib/services';
 import {
   api,
@@ -32,6 +33,8 @@ export interface DashboardData {
   chat: ChatStatus;
   /** The app that runs local models now (Ollama). */
   model_runner?: string;
+  /** Home warnings this person dismissed, on every device; each hides until it changes. */
+  dismissed?: string[];
 }
 
 export type Connection = 'connecting' | 'online' | 'offline' | 'signed_out' | 'server_error';
@@ -68,13 +71,17 @@ export const emptyData: DashboardData = {
 };
 
 // The page refreshes quickly only while something is in progress (an install, a backup, an app
-// starting); otherwise a slow heartbeat still shows a crash or a change made on another device.
-// Coming back to the tab, or any action, refreshes at once.
+// starting). A page showing app statuses refreshes every minute; any other page keeps a slow
+// heartbeat that still shows a crash or a change made on another device.
+// Opening a page, coming back to the tab, or any action refreshes at once.
 const BUSY_POLL_MS = 3000;
+const STATUS_POLL_MS = 60000;
 const IDLE_POLL_MS = 300000;
-// After a quiet spell the worker checks everything again once someone looks; ask once more shortly.
+// Opening a status page on a check over a minute old makes the worker check again; ask again
+// shortly for its results, a few times, so a stopped worker never turns into fast polling.
 const SETTLE_MS = 4000;
-const SETTLE_AFTER_MS = 30000;
+const SETTLE_AFTER_MS = 60000;
+const SETTLE_TRIES = 3;
 // A refresh that has not answered by then is abandoned, so the next one can run (review R22).
 const POLL_TIMEOUT_MS = 20000;
 // Once loaded, the page stays up (marked out of date) for this long through failed refreshes, retrying
@@ -91,13 +98,24 @@ export function busy(data: DashboardData): boolean {
   );
 }
 
-/** How long until the next refresh. */
-export function nextRefresh(data: DashboardData, retrying: boolean, settled: boolean): number {
+/** Pages that show app statuses. The sidebar's summary, on every page, does not count. */
+export function showsStatus(path: string): boolean {
+  return (
+    path === '/' ||
+    path === '/apps' ||
+    path.startsWith('/apps/') ||
+    /^\/settings\/(ai|integrations|security|system|sign-in)$/.test(path)
+  );
+}
+
+/** How long until the next refresh. ``settleTries``: quick re-asks already made for this check. */
+export function nextRefresh(data: DashboardData, retrying: boolean, statusPage: boolean, settleTries = 0): number {
   if (retrying) return RETRY_MS;
   if (busy(data)) return BUSY_POLL_MS;
+  if (!statusPage) return IDLE_POLL_MS;
   const observed = Date.parse(data.services.observed_at || '');
-  if (!settled && Number.isFinite(observed) && Date.now() - observed > SETTLE_AFTER_MS) return SETTLE_MS;
-  return IDLE_POLL_MS;
+  const old = Number.isFinite(observed) && Date.now() - observed > SETTLE_AFTER_MS;
+  return old && settleTries < SETTLE_TRIES ? SETTLE_MS : STATUS_POLL_MS;
 }
 const DashboardContext = createContext<DashboardValue | null>(null);
 
@@ -135,8 +153,10 @@ export function useDashboardLoader(): DashboardValue {
   const loaded = useRef(false);
   const failingSince = useRef(0);
   const [retrying, setRetrying] = useState(false);
-  // The observation already asked about once after a quiet spell, so it is asked about only once.
-  const [settledFor, setSettledFor] = useState('');
+  // Quick re-asks made for one check, so an old check is asked about only a few times.
+  const [settle, setSettle] = useState({ observedAt: '', tries: 0 });
+  const path = usePath();
+  const statusPage = showsStatus(path);
   // Counts finished refreshes, so each one schedules the next even when nothing changed.
   const [refreshes, setRefreshes] = useState(0);
 
@@ -164,7 +184,11 @@ export function useDashboardLoader(): DashboardValue {
         return;
       }
       try {
-        const snapshot = await api<SnapshotResponse>('/api/v1/snapshot', undefined, POLL_TIMEOUT_MS);
+        // A page showing app statuses asks the worker to check them if its last check is a minute old.
+        const path = showsStatus(resolvePath(window.location.pathname))
+          ? '/api/v1/snapshot?status=true'
+          : '/api/v1/snapshot';
+        const snapshot = await api<SnapshotResponse>(path, undefined, POLL_TIMEOUT_MS);
         setData(snapshot);
         setFailedSources([]);
       } catch (error) {
@@ -207,16 +231,24 @@ export function useDashboardLoader(): DashboardValue {
     };
   }, [load]);
 
+  // Opening a page that shows app statuses refreshes at once (the first page already loads above).
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current && showsStatus(path)) void load();
+    opened.current = true;
+  }, [path, load]);
+
   const observedAt = data.services.observed_at || '';
-  const delay = nextRefresh(data, retrying, settledFor === observedAt);
+  const tries = settle.observedAt === observedAt ? settle.tries : 0;
+  const delay = nextRefresh(data, retrying, statusPage, tries);
   useEffect(() => {
     // A hidden tab asks nothing; showing it again refreshes at once (above).
     const timer = window.setTimeout(() => {
-      if (delay === SETTLE_MS) setSettledFor(observedAt);
+      if (delay === SETTLE_MS) setSettle({ observedAt, tries: tries + 1 });
       if (document.visibilityState === 'visible') void load();
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [delay, observedAt, load, refreshes]);
+  }, [delay, observedAt, tries, load, refreshes]);
 
   return { data, connection, errorStatus, failedSources, refresh: load };
 }

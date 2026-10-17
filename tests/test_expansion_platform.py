@@ -116,17 +116,14 @@ class IntegrationTests(unittest.TestCase):
     def test_absent_provider_uses_the_fallback_and_drops_provider_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            env = self._env(paths, "open-webui")
-            self.assertEqual(env["AUDIO_STT_ENGINE"], "web")
-            self.assertNotIn("AUDIO_STT_MODEL", env)
+            env = self._env(paths, "nextcloud")
+            self.assertEqual(env["MU3LAB_MUSIC_SHARED"], "0")
+            self.assertTrue(env["MU3LAB_MUSIC_FOLDER"].endswith("/nextcloud/no-music"))
 
     def test_installed_provider_supplies_its_published_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             self._install(paths, "speaches", "MU3LAB_TTS_VOICE=af_heart\nMU3LAB_SPEECH_URL=http://speaches:8000/v1\n")
-            env = self._env(paths, "open-webui")
-            self.assertEqual(env["AUDIO_STT_ENGINE"], "openai")
-            self.assertEqual(env["AUDIO_TTS_VOICE"], "af_heart")
             litellm = self._env(paths, "litellm")
             self.assertEqual(litellm["MU3LAB_SPEECH_URL"], "http://speaches:8000/v1")
 
@@ -145,23 +142,27 @@ class IntegrationTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             catalog = load()
             self._install(paths, "open-webui")
+            # LiteLLM is core (always present); Open WebUI's chat voice has its own Whisper.
             names = {app.id for app in rewire.consumers(catalog.get("speaches"), catalog, paths)}
-            # LiteLLM is core (always present); Open WebUI is installed here; Dawarich is not.
-            self.assertEqual(names, {"litellm", "open-webui"})
+            self.assertEqual(names, {"litellm"})
+            self.assertEqual({app.id for app in rewire.consumers(catalog.get("navidrome"), catalog, paths)}, set())
+            self._install(paths, "nextcloud")
+            names = {app.id for app in rewire.consumers(catalog.get("navidrome"), catalog, paths)}
+            self.assertEqual(names, {"nextcloud"})
 
     def test_rewire_restarts_only_a_running_consumer_whose_files_changed(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             catalog = load()
             facts = Facts("box.test", paths, catalog)
-            render(catalog.get("open-webui"), facts)
+            render(catalog.get("nextcloud"), facts)
             with (
                 patch.object(rewire, "_running", return_value=True),
                 patch.object(Compose, "up", return_value=(0, "")) as up,
             ):
-                self.assertFalse(rewire.rewire_one(catalog.get("open-webui"), facts, lambda _line: None))
-                self._install(paths, "speaches", "MU3LAB_TTS_VOICE=af_heart\n")
-                self.assertTrue(rewire.rewire_one(catalog.get("open-webui"), facts, lambda _line: None))
+                self.assertFalse(rewire.rewire_one(catalog.get("nextcloud"), facts, lambda _line: None))
+                self._install(paths, "navidrome")
+                self.assertTrue(rewire.rewire_one(catalog.get("nextcloud"), facts, lambda _line: None))
             self.assertEqual(up.call_count, 1)
 
 

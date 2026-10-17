@@ -368,6 +368,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/dismissed': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Dismiss
+     * @description Hide one Home warning for this person until it changes.
+     */
+    post: operations['dismiss_api_v1_dismissed_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/identity': {
     parameters: {
       query?: never;
@@ -2187,6 +2207,10 @@ export interface components {
     };
     /** DiskUsage */
     DiskUsage: {
+      /** Core Parts */
+      core_parts?: {
+        [key: string]: components['schemas']['DiskShare'];
+      };
       /** Measured At */
       measured_at: string;
       /** Owners */
@@ -2195,6 +2219,21 @@ export interface components {
       };
       /** Removed Folders */
       removed_folders?: string[];
+    };
+    /** DismissRequest */
+    DismissRequest: {
+      /** Warning */
+      warning: string;
+    };
+    /** DismissedResponse */
+    DismissedResponse: {
+      /** Dismissed */
+      dismissed: string[];
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
     };
     /** Health */
     Health: {
@@ -3383,6 +3422,11 @@ export interface components {
       catalog: components['schemas']['CatalogResponse'];
       chat: components['schemas']['ChatStatus'];
       core: components['schemas']['CoreSetupResponse'];
+      /**
+       * Dismissed
+       * @default []
+       */
+      dismissed?: string[];
       identity: components['schemas']['IdentityResponse'];
       jobs: components['schemas']['JobsResponse'];
       /**
@@ -3423,6 +3467,10 @@ export interface components {
       /** Docker Ready */
       docker_ready: boolean;
       memory: components['schemas']['Metric'];
+      /** Memory By Core Part */
+      memory_by_core_part?: {
+        [key: string]: number;
+      } | null;
       /** Memory By Owner */
       memory_by_owner?: {
         [key: string]: number;
@@ -5749,6 +5797,93 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ChatStatus'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  dismiss_api_v1_dismissed_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DismissRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DismissedResponse'];
         };
       };
       /** @description Bad Request */
@@ -10083,7 +10218,9 @@ export interface operations {
   };
   snapshot_api_v1_snapshot_get: {
     parameters: {
-      query?: never;
+      query?: {
+        status?: boolean;
+      };
       header?: never;
       path?: never;
       cookie?: never;

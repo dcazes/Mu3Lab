@@ -2,7 +2,7 @@ import { MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useRef, useState } from 'react';
 import { postApi } from '../../api/client';
-import { ExternalButton, LinkButton } from '../../components/Button';
+import { LinkButton } from '../../components/Button';
 import { EmptyState } from '../../components/Layout';
 import type { AiModels } from '../../api/models';
 import { useApi } from '../../lib/useApi';
@@ -121,9 +121,6 @@ export function ChatPage() {
         </div>
       )}
       <iframe title="Mu3Lab chat" src={frameUrl} allow="clipboard-read; clipboard-write; microphone" />
-      <ExternalButton size="sm" className="chat-popout" href={status.url}>
-        Open in new window
-      </ExternalButton>
     </div>
   );
 }

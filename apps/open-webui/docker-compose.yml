@@ -37,15 +37,11 @@ services:
       RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
       RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
       RAG_EMBEDDING_MODEL: mu3lab-embed
-      AUDIO_STT_ENGINE: ${AUDIO_STT_ENGINE:-web}
-      AUDIO_STT_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      AUDIO_STT_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
-      AUDIO_STT_MODEL: ${AUDIO_STT_MODEL:-}
-      AUDIO_TTS_ENGINE: ${AUDIO_TTS_ENGINE:-}
-      AUDIO_TTS_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      AUDIO_TTS_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
-      AUDIO_TTS_MODEL: ${AUDIO_TTS_MODEL:-}
-      AUDIO_TTS_VOICE: ${AUDIO_TTS_VOICE:-}
+      # Voice in chat: Open WebUI's own Whisper turns speech into text on this server, in any browser,
+      # and replies are read aloud with the browser's voices. It never depends on the Speech app.
+      AUDIO_STT_ENGINE: ""
+      WHISPER_MODEL: small
+      AUDIO_TTS_ENGINE: ""
       # Mu3Lab adds each operator's app assistants with its own administrator key; each
       # person's tool connections and assistants are private to them, administrators included.
       ENABLE_API_KEYS: "true"

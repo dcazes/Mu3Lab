@@ -15,8 +15,9 @@ describe('Dashboard connection failures', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (path: string) => {
-        if (path === '/api/v1/snapshot' && failing) return new Response('Internal Server Error', { status: 500 });
-        return new Response(JSON.stringify(path === '/api/v1/snapshot' ? dashboardData([]) : { ok: true }));
+        if (path.startsWith('/api/v1/snapshot') && failing)
+          return new Response('Internal Server Error', { status: 500 });
+        return new Response(JSON.stringify(path.startsWith('/api/v1/snapshot') ? dashboardData([]) : { ok: true }));
       }),
     );
     render(<App />);
@@ -39,7 +40,9 @@ describe('Dashboard connection failures', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (path: string) =>
-        path === '/api/v1/snapshot' ? new Response(null, { status: 302 }) : new Response(JSON.stringify({ ok: true })),
+        path.startsWith('/api/v1/snapshot')
+          ? new Response(null, { status: 302 })
+          : new Response(JSON.stringify({ ok: true })),
       ),
     );
     render(<App />);

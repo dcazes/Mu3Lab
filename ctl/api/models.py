@@ -307,6 +307,8 @@ class DiskUsage(ApiModel):
     owners: dict[str, DiskShare]
     # Data folders removed apps left behind; "Free up space" deletes them only when asked.
     removed_folders: list[str] = Field(default_factory=list)
+    # "core" part by part: platform app ids, "tailnet-relay" and "mu3lab" (Mu3Lab's own services).
+    core_parts: dict[str, DiskShare] = Field(default_factory=dict)
 
 
 class CleanupRequest(ApiModel):
@@ -323,6 +325,8 @@ class SystemResponse(ApiModel):
     container_memory: dict[str, float] | None = None
     # By owner: an app's id, "core" or "removed" (apps no longer offered).
     memory_by_owner: dict[str, float] | None = None
+    # "core" part by part, as in DiskUsage.core_parts.
+    memory_by_core_part: dict[str, float] | None = None
     disk_usage: DiskUsage | None = None
     tailnet_dns_name: str
     tailscale: TailscaleStatus | None = None
@@ -1216,6 +1220,17 @@ class SnapshotResponse(ApiModel):
     backup_attention: list[BackupAttention] = []
     # The app that runs local models now (Settings, AI): Ollama.
     model_runner: str = ""
+    # Home warnings this person dismissed (ctl/dismissals.py), on every device.
+    dismissed: list[str] = []
+
+
+class DismissRequest(RequestModel):
+    warning: str = Field(min_length=1, max_length=500)
+
+
+class DismissedResponse(ApiModel):
+    ok: bool = True
+    dismissed: list[str]
 
 
 class ParallelDownloadsRequest(RequestModel):

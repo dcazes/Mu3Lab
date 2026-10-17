@@ -4,7 +4,8 @@ Mu3Lab keeps two things in step: the tool connections (one MCP connection per
 app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
 app's assistant, plus the main assistant every new chat starts with. All are
-shared by everyone. Connections and models Mu3Lab did not create are never
+shared by everyone. It also hides the AI gateway's own names from the model
+menu (``HIDDEN``). Connections and models Mu3Lab did not create are never
 touched: ours carry the ``mu3lab-app-`` id prefix, or are ``mu3lab-assistant``.
 API error bodies never reach logs.
 """
@@ -21,6 +22,10 @@ PREFIX = "mu3lab-app-"
 # (DEFAULT_MODELS in apps/open-webui/docker-compose.yml), and it points people to the app assistants.
 MAIN = "mu3lab-assistant"
 BASE_MODEL = "mu3lab-chat"
+# LiteLLM's names, which Open WebUI would list as chat models: the main assistant is built on
+# mu3lab-chat, and the rest serve Mu3Lab's own checks, document search and speech. Hidden from
+# the model menu only; they keep working.
+HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-local", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts")
 
 
 class ChatError(RuntimeError):
@@ -117,12 +122,27 @@ class OpenWebUI:
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
         self.save_model(main_model(assistants), exists=MAIN in existing)
+        for model_id in HIDDEN:
+            self.save_model(hidden_model(model_id), exists=model_id in existing)
         for model_id, model in wanted_models.items():
             self.save_model(model, exists=model_id in existing)
         for model_id in existing:
             if ours(model_id) and model_id not in wanted_models:
                 self.delete_model(model_id)
         return [item["id"] for item in assistants]
+
+
+def hidden_model(model_id: str) -> dict[str, Any]:
+    """Settings for one of the gateway's own models that keep it out of the model menu."""
+    return {
+        "id": model_id,
+        "base_model_id": None,
+        "name": model_id,
+        "meta": {"hidden": True},
+        "params": {},
+        "access_grants": EVERYONE,
+        "is_active": True,
+    }
 
 
 def main_model(assistants: list[dict[str, Any]]) -> dict[str, Any]:

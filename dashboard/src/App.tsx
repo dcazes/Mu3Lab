@@ -10,12 +10,12 @@ import { HomePage } from './features/home/HomePage';
 import { usePath } from './lib/router';
 import { useTheme } from './lib/theme';
 import { CommandPalette } from './shell/CommandPalette';
-import { MobileBar, Sidebar } from './shell/Sidebar';
+import { MobileBar, Sidebar, useSidebarCollapsed } from './shell/Sidebar';
 import { LoadingScreen, OfflineScreen, ServerErrorScreen, SignedOutScreen } from './shell/StatusScreens';
 import { DashboardProvider, useDashboard, useDashboardLoader } from './state/dashboard';
 
-// The worker re-checks every five minutes while idle; allow for one late check.
-const STATUS_STALE_MS = 7 * 60 * 1000;
+// The worker re-checks every five minutes while idle; older than the server's limit means it stopped.
+const STATUS_STALE_MS = 10 * 60 * 1000;
 
 // Heavier pages load after Home so it opens quickly; preloadPages fetches them soon after.
 const loadCalendar = () => import('./features/calendar/CalendarPage');
@@ -65,13 +65,20 @@ function Shell() {
   const { preference, setPreference } = useTheme();
   const [searchOpen, setSearchOpen] = useState(false);
   const path = usePath();
+  const [collapsed, toggleSidebar] = useSidebarCollapsed(path);
   if (connection === 'connecting') return <LoadingScreen />;
   if (connection === 'offline') return <OfflineScreen retry={() => void refresh()} />;
   if (connection === 'server_error') return <ServerErrorScreen status={errorStatus} retry={() => void refresh()} />;
   if (connection === 'signed_out') return <SignedOutScreen />;
   return (
-    <div className="shell">
-      <Sidebar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
+    <div className={`shell${collapsed ? ' sidebar-collapsed' : ''}`}>
+      <Sidebar
+        openSearch={() => setSearchOpen(true)}
+        theme={preference}
+        setTheme={setPreference}
+        collapsed={collapsed}
+        toggle={toggleSidebar}
+      />
       <MobileBar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
       <main className={path === '/chat' ? 'main main-full' : 'main'}>
         <div className="main-inner">

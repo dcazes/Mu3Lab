@@ -13,7 +13,9 @@ counted once, split between the apps by how much of it each one uses.
 Usage belongs to an owner: an app's id, ``core`` (sign-in, the proxy, the
 password vault, the private-network relay and Mu3Lab's own
 services) or ``removed`` (projects of apps no longer in the catalog). Images no
-container uses are ``unused``.
+container uses are ``unused``. Core is also reported part by part (``core_parts``):
+each platform app by its id, ``tailnet-relay``, and ``mu3lab`` for Mu3Lab's own
+services, state and projects.
 """
 
 from __future__ import annotations
@@ -42,6 +44,8 @@ PLATFORM_PROJECTS = {"tailnet-relay"}
 # Measured once a day, and again right after an install, update or removal.
 DISK_EVERY = 24 * 3600
 DISK_RECORD = ("status", "disk-usage")
+# Mu3Lab's own part of core: the dashboard and worker, their state and the project files.
+OWN_PART = "mu3lab"
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 log = logging.getLogger(__name__)
@@ -52,8 +56,22 @@ disk_stale = threading.Event()
 # ---------------------------------------------------------------- owners
 
 
-def owners(registry, root: Path, paths: RuntimePaths | None = None) -> Callable[[str], str]:
-    """Who a Compose project belongs to, from its working directory; "" when it is not Mu3Lab's."""
+def core_part(owner: str) -> str:
+    """The core part a ``split_core`` owner names ("core/authentik" -> "authentik"), else ""."""
+    return owner.partition("/")[2] if owner.startswith(f"{CORE}/") else ""
+
+
+def _fold(owner: str) -> str:
+    return CORE if core_part(owner) else owner
+
+
+def owners(
+    registry, root: Path, paths: RuntimePaths | None = None, *, split_core: bool = False
+) -> Callable[[str], str]:
+    """Who a Compose project belongs to, from its working directory; "" when it is not Mu3Lab's.
+
+    With ``split_core``, core projects are "core/<part>" instead of "core".
+    """
     from ctl.mcp_catalog import load as load_connectors
 
     stages = {service.id: service.stage for service in registry.services}
@@ -69,7 +87,7 @@ def owners(registry, root: Path, paths: RuntimePaths | None = None) -> Callable[
             return ""
         name = folder.name
         if name in PLATFORM_PROJECTS or stages.get(name) == "foundation":
-            return CORE
+            return f"{CORE}/{name}" if split_core else CORE
         if name in stages:
             return name
         if name in connectors:
@@ -133,11 +151,15 @@ def _own_services(base: Path = CGROUP_ROOT) -> int:
 
 def memory(
     registry, root: Path, run=process.completed, base: Path = CGROUP_ROOT, paths: RuntimePaths | None = None
-) -> tuple[dict, dict]:
-    """Memory per container name, and per owner (apps, core, removed); other containers are left out."""
-    owner = owners(registry, root, paths)
+) -> tuple[dict, dict, dict]:
+    """Memory per container name, per owner (apps, core, removed) and per core part.
+
+    Containers that are not Mu3Lab's are left out.
+    """
+    owner = owners(registry, root, paths, split_core=True)
     by_name: dict[str, int] = {}
     by_owner: dict[str, int] = defaultdict(int)
+    parts: dict[str, int] = defaultdict(int)
     for container_id, name, working_dir in _containers(run):
         folder = _container_cgroup(container_id, base)
         used = _cgroup_memory(folder) if folder else None
@@ -145,10 +167,15 @@ def memory(
             continue
         by_name[name] = used
         who = owner(working_dir)
+        if core_part(who):
+            parts[core_part(who)] += used
         if who:
-            by_owner[who] += used
-    by_owner[CORE] += _own_services(base)
-    return by_name, {key: value for key, value in by_owner.items() if value}
+            by_owner[_fold(who)] += used
+    own = _own_services(base)
+    by_owner[CORE] += own
+    parts[OWN_PART] += own
+    nonzero = lambda values: {key: value for key, value in values.items() if value}  # noqa: E731
+    return by_name, nonzero(by_owner), nonzero(parts)
 
 
 # ---------------------------------------------------------------- disk
@@ -251,14 +278,19 @@ def docker_usage(
     }
 
 
-def folder_owners(registry, root: Path, paths: RuntimePaths) -> dict[str, str]:
-    """Which owner each measured folder (relative to the runtime root) belongs to."""
+def folder_owners(registry, root: Path, paths: RuntimePaths, *, split_core: bool = False) -> dict[str, str]:
+    """Which owner each measured folder (relative to the runtime root) belongs to.
+
+    With ``split_core``, core folders are "core/<part>" instead of "core".
+    """
     from ctl import backup_service
     from ctl.lifecycle.uninstall import data_directories
 
-    result = {"state": CORE, "projects": CORE}
+    own = f"{CORE}/{OWN_PART}" if split_core else CORE
+    result = {"state": own, "projects": own}
     for service in registry.services:
-        name = CORE if service.stage == "foundation" else service.id
+        core = f"{CORE}/{service.id}" if split_core else CORE
+        name = core if service.stage == "foundation" else service.id
         for folder in data_directories(service, root, paths=paths):
             result[f"data/{folder.name}"] = name
         for media in service.manifest.media:
@@ -267,7 +299,7 @@ def folder_owners(registry, root: Path, paths: RuntimePaths) -> dict[str, str]:
         # Kopia's repository is the backup app's data.
         result["backups"] = backup_service.service_id()
     except ValueError:
-        result["backups"] = CORE
+        result["backups"] = own
     return result
 
 
@@ -297,17 +329,26 @@ def measure_disk(registry, root: Path, paths: RuntimePaths, run=process.complete
     from ctl.disk_cleanup import reclaimable, removed_data
     from ctl.lifecycle.uninstall import _cleanup_image
 
-    owner = owners(registry, root, paths)
-    usage: dict[str, dict[str, int]] = defaultdict(lambda: {"data": 0, "program": 0})
-    mapping = folder_owners(registry, root, paths)
+    owner = owners(registry, root, paths, split_core=True)
+    split: dict[str, dict[str, int]] = defaultdict(lambda: {"data": 0, "program": 0})
+    mapping = folder_owners(registry, root, paths, split_core=True)
     for name, size in folders(paths, _cleanup_image(root), run).items():
-        usage[mapping.get(name, REMOVED if name.startswith("data/") else CORE)]["data"] += size
+        split[mapping.get(name, REMOVED if name.startswith("data/") else f"{CORE}/{OWN_PART}")]["data"] += size
     for name, sizes in docker_usage(owner, reclaimable(registry, root, paths), run).items():
-        usage[name]["data"] += sizes["data"]
-        usage[name]["program"] += sizes["program"]
+        split[name]["data"] += sizes["data"]
+        split[name]["program"] += sizes["program"]
+    usage: dict[str, dict[str, int]] = defaultdict(lambda: {"data": 0, "program": 0})
+    parts: dict[str, dict[str, int]] = {}
+    for name, value in split.items():
+        if core_part(name):
+            parts[core_part(name)] = value
+        usage[_fold(name)]["data"] += value["data"]
+        usage[_fold(name)]["program"] += value["program"]
+    used = lambda values: {name: value for name, value in values.items() if value["data"] or value["program"]}  # noqa: E731
     return {
         "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "owners": {name: value for name, value in usage.items() if value["data"] or value["program"]},
+        "owners": used(usage),
+        "core_parts": used(parts),
         "removed_folders": [folder.name for folder in removed_data(registry, root, paths)],
     }
 

@@ -17,7 +17,7 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import allowed_actions
 from ctl.status import snapshots
-from ctl.status.checks import OBSERVATION_MAX_AGE_SECONDS, Check, epoch, sign_in_check, stale
+from ctl.status.checks import STATUS_MAX_AGE_SECONDS, Check, epoch, sign_in_check, stale
 from ctl.status.display import projection as display_projection
 from ctl.store import db, records
 
@@ -216,7 +216,7 @@ def _apply_checks(service: Service, item: dict, control_state: ControlState | No
     sign_in = sign_in_check(service, saved_identity, now)
     observed_at = str(item.get("observed_at") or "")
     observed = epoch(observed_at)
-    outdated = bool(observed_at) and (observed is None or now - observed > OBSERVATION_MAX_AGE_SECONDS)
+    outdated = bool(observed_at) and (observed is None or now - observed > STATUS_MAX_AGE_SECONDS)
     if outdated:
         process, route = stale(process, observed_at), stale(route, observed_at)
     item["checks"] = {"process": process.public(), "route": route.public(), "sign_in": sign_in.public()}

@@ -14,28 +14,11 @@ import { copyText } from '../../components/CopyField';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Facts, PageHeader } from '../../components/Layout';
 import { Badge, Dot, StateBadge } from '../../components/Status';
-import { duration } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { JobDialog, JobRow } from '../activity/JobDialog';
 import { ResourceCharts } from '../home/ResourceCharts';
-
-function Meter({ label, percent, detail }: { label: string; percent: number; detail: string }) {
-  const tone = percent > 90 ? 'red' : percent > 75 ? 'amber' : 'green';
-  return (
-    <div className="meter">
-      <div className="meter-label">
-        <span>{label}</span>
-        <b>{Math.round(percent)}%</b>
-      </div>
-      <div className={`meter-bar meter-${tone}`}>
-        <span style={{ width: `${Math.min(100, Math.max(2, percent))}%` }} />
-      </div>
-      <small>{detail}</small>
-    </div>
-  );
-}
 
 /** Setup normally finishes in the installer; this shows only when a setup step has failed. */
 function SetupProblem() {
@@ -309,13 +292,6 @@ export function SystemSettings() {
       />
       <SetupProblem />
       <Card title="Server">
-        <div className="meters">
-          <Meter
-            label="CPU"
-            percent={system.cpu_percent}
-            detail={`Up ${duration(system.uptime_seconds ?? undefined)}`}
-          />
-        </div>
         <ResourceCharts detailed />
         <Facts
           items={[

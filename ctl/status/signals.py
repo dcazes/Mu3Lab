@@ -2,7 +2,8 @@
 
 The worker also paces its upkeep by whether anyone is looking: the dashboard
 touches a marker file on each refresh, and while nobody has looked recently
-the worker checks rarely, like a normal background app.
+the worker checks rarely, like a normal background app. App statuses are
+checked again only when a page that shows them asks (see ``status_wanted``).
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ changed = Event()
 
 VIEWED_FILE = "dashboard-viewed"
 HOUSEHOLD_FILE = "household-changed"
+STATUS_FILE = "status-wanted"
 ACTIVE_SECONDS = 600  # someone looked within 10 minutes: keep the fast pace
 
 
@@ -43,6 +45,19 @@ def _age(name: str, paths: RuntimePaths | None, now=time.time) -> float:
 def viewed(paths: RuntimePaths | None = None) -> None:
     """The dashboard was just refreshed."""
     _touch(VIEWED_FILE, paths)
+
+
+def status_wanted(paths: RuntimePaths | None = None) -> None:
+    """A page showing app statuses was opened or refreshed."""
+    _touch(STATUS_FILE, paths)
+
+
+def status_wanted_at(paths: RuntimePaths | None = None) -> float:
+    """When a page last asked for app statuses (seconds since the epoch), or 0."""
+    try:
+        return ((paths or RuntimePaths()).state / STATUS_FILE).stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def household_changed(paths: RuntimePaths | None = None) -> None:

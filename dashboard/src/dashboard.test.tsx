@@ -55,90 +55,75 @@ describe('Home', () => {
     expect(within(panel).getByRole('button', { name: 'Start' })).toBeInTheDocument();
   });
 
-  it('groups status into Security, AI and System chips that expand with real usage figures', () => {
+  it('opens one System chip on donuts and a sortable list of every app, with core part by part', () => {
     stubFetch(() => ({}));
     const GB = 1024 ** 3;
     const data = dashboardData([
-      service('ingress', 'Caddy', 'foundation'),
       service('authentik', 'Authentik', 'foundation'),
-      service('ollama', 'Ollama', 'core', {
-        display_state: 'needs_attention',
-        detail: 'Container exited.',
-        containers: [
-          { service: 'ollama', name: 'mu3lab-ollama', state: 'running', status: 'Up', health: 'unknown', image: 'x' },
-        ],
-      }),
-      service('firecrawl', 'Firecrawl', 'optional', {
-        display_state: 'not_installed',
-        installed: false,
-        allowed_actions: ['install'],
-      }),
+      service('ollama', 'Ollama', 'core'),
+      service('immich', 'Immich', 'optional'),
     ]);
     data.system = {
       ...data.system,
+      cpu_percent: 12,
       worker_state: 'failed',
-      container_memory: { 'mu3lab-ollama': 3.5 * GB },
-      memory_by_owner: { ollama: 3.5 * GB, core: 1 * GB },
+      memory_by_owner: { ollama: 3.5 * GB, immich: 0.5 * GB, core: 1 * GB },
+      memory_by_core_part: { authentik: 0.75 * GB, mu3lab: 0.25 * GB },
       disk_usage: {
         measured_at: new Date().toISOString(),
-        owners: { ollama: { data: 20 * GB, program: 2 * GB }, unused: { data: 0, program: 4 * GB } },
+        owners: {
+          ollama: { data: 20 * GB, program: 2 * GB },
+          immich: { data: 48 * GB, program: 2 * GB },
+          unused: { data: 0, program: 4 * GB },
+        },
         removed_folders: [],
+        core_parts: {},
       },
       memory: { total: 16 * GB, used: 10 * GB, percent: 62 },
       disk: { total: 100 * GB, used: 96 * GB, percent: 96 },
-      tailscale: {
-        state: 'connected',
-        backend_state: 'Running',
-        online: true,
-        dns_name: 'host.ts.net',
-        detail: '',
-        serve: { state: 'available', ports: [] },
-      },
     };
-    // The model runner in use leads the AI group.
-    data.model_runner = 'ollama';
     renderWithDashboard(<HomePage />, data);
+    // The stopped worker is a Home warning, not a row in the panel.
+    expect(screen.getByRole('link', { name: /background worker is failed/ })).toHaveAttribute(
+      'href',
+      '/settings/system',
+    );
     const strip = screen.getByRole('region', { name: 'System status' });
-    // Collapsed: three chips, no detail rows, real figures on hover.
-    const chips = within(strip).getAllByRole('button');
-    expect(chips.map((chip) => chip.textContent)).toEqual([
-      'Security3/3 healthy',
-      'AI1 needs attention',
-      'SystemRAM 62% · Disk 96%',
-    ]);
-    expect(within(strip).queryByRole('link')).not.toBeInTheDocument();
-    expect(chips[2]).toHaveAttribute('title', 'Memory 10.0 GB of 16.0 GB · Disk 96.0 GB of 100.0 GB');
+    // Collapsed: one chip with the three figures, real sizes on hover.
+    const chip = within(strip).getByRole('button');
+    expect(chip).toHaveTextContent('SystemRAM 62% · Disk 96% · CPU 12%');
+    expect(chip).toHaveAttribute('title', 'Memory 10.0 GB of 16.0 GB · Disk 96.0 GB of 100.0 GB');
 
-    fireEvent.click(chips[0]);
-    const caddy = within(strip).getByRole('link', { name: 'Caddy: Running' });
-    expect(caddy).toHaveAttribute('href', '/apps/ingress');
-    // Healthy rows leave the state to the dot.
-    expect(caddy).not.toHaveTextContent('Running');
-    expect(within(strip).getByRole('link', { name: 'Tailscale: Connected' })).toBeInTheDocument();
-
-    fireEvent.click(chips[1]);
-    expect(chips[0]).toHaveAttribute('aria-expanded', 'false');
-    const runner = within(strip).getByRole('link', { name: 'Ollama: Needs attention' });
-    expect(runner).toHaveAttribute('title', '3.5 GB — Container exited.');
-    expect(runner).toHaveTextContent('Needs attention');
-    // Firecrawl is an optional app now; the household chat app is the fourth AI row.
-    expect(within(strip).queryByRole('link', { name: /Firecrawl/ })).not.toBeInTheDocument();
-
-    fireEvent.click(chips[2]);
-    expect(within(strip).getByRole('link', { name: 'Background worker: Failed' })).toBeInTheDocument();
-    expect(within(strip).getByRole('link', { name: 'Docker: Running' })).toBeInTheDocument();
-    // Memory and disk become two donuts with one legend: each app, core, what can be freed, the rest, free.
-    expect(within(strip).getByRole('img', { name: 'Memory: 10.0 GB of 16.0 GB used' })).toBeInTheDocument();
-    expect(within(strip).getByRole('img', { name: 'Disk: 96.0 GB of 100.0 GB used' })).toBeInTheDocument();
+    fireEvent.click(chip);
+    for (const name of ['Memory: 10.0 GB of 16.0 GB used', 'Disk: 96.0 GB of 100.0 GB used', 'CPU: 12% of 100% used'])
+      expect(within(strip).getByRole('img', { name })).toBeInTheDocument();
     const legend = within(strip).getByRole('table');
+    const names = () =>
+      within(legend)
+        .getAllByRole('rowheader')
+        .map((cell) => cell.textContent);
     const row = (name: string) =>
       within(legend).getByRole('rowheader', { name }).closest('tr')!.textContent?.replace(/\s+/g, ' ');
+    // Biggest memory first; what can be freed, the rest and free always come last.
+    expect(names()).toEqual(['Ollama', 'Mu3Lab core', 'Immich', 'Can be freed', 'Other (not Mu3Lab)', 'Free']);
     expect(row('Ollama')).toBe('Ollama3.5 GB22.0 GB');
     expect(within(legend).getByRole('link', { name: 'Ollama' })).toHaveAttribute('href', '/apps/ollama');
-    expect(row('Mu3Lab core')).toBe('Mu3Lab core1.0 GB—');
     expect(row('Can be freed')).toBe('Can be freed—4.0 GB');
-    expect(row('Other (not Mu3Lab)')).toBe('Other (not Mu3Lab)5.5 GB70.0 GB');
+    expect(row('Other (not Mu3Lab)')).toBe('Other (not Mu3Lab)5.0 GB20.0 GB');
     expect(row('Free')).toBe('Free6.0 GB4.0 GB');
+
+    fireEvent.click(within(legend).getByRole('button', { name: 'Disk' }));
+    expect(names().slice(0, 3)).toEqual(['Immich', 'Ollama', 'Mu3Lab core']);
+    // The same header again: smallest first.
+    fireEvent.click(within(legend).getByRole('button', { name: /Disk/ }));
+    expect(names().slice(0, 3)).toEqual(['Mu3Lab core', 'Ollama', 'Immich']);
+
+    // Core folds open to its parts, named after their apps.
+    const core = within(legend).getByRole('button', { name: 'Mu3Lab core' });
+    expect(core).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(core);
+    expect(names()).toContain('Authentik');
+    expect(names()).toContain('Mu3Lab dashboard and worker');
   });
 
   it('surfaces app problems in the attention strip', () => {
@@ -831,7 +816,7 @@ describe('Shell', () => {
     stubFetch((path) =>
       path === '/api/health'
         ? { ok: true }
-        : path === '/api/v1/snapshot'
+        : path.startsWith('/api/v1/snapshot')
           ? dashboardData([service('immich', 'Immich', 'optional', { identity: identity() })])
           : {},
     );

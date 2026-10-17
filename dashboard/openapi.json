@@ -2090,6 +2090,13 @@
       },
       "DiskUsage": {
         "properties": {
+          "core_parts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DiskShare"
+            },
+            "title": "Core Parts",
+            "type": "object"
+          },
           "measured_at": {
             "title": "Measured At",
             "type": "string"
@@ -2114,6 +2121,43 @@
           "owners"
         ],
         "title": "DiskUsage",
+        "type": "object"
+      },
+      "DismissRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "warning": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Warning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "warning"
+        ],
+        "title": "DismissRequest",
+        "type": "object"
+      },
+      "DismissedResponse": {
+        "properties": {
+          "dismissed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dismissed"
+        ],
+        "title": "DismissedResponse",
         "type": "object"
       },
       "Health": {
@@ -5997,6 +6041,14 @@
           "core": {
             "$ref": "#/components/schemas/CoreSetupResponse"
           },
+          "dismissed": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          },
           "identity": {
             "$ref": "#/components/schemas/IdentityResponse"
           },
@@ -6145,6 +6197,20 @@
           },
           "memory": {
             "$ref": "#/components/schemas/Metric"
+          },
+          "memory_by_core_part": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory By Core Part"
           },
           "memory_by_owner": {
             "anyOf": [
@@ -9259,6 +9325,108 @@
         "summary": "Chat Status",
         "tags": [
           "chat"
+        ]
+      }
+    },
+    "/api/v1/dismissed": {
+      "post": {
+        "description": "Hide one Home warning for this person until it changes.",
+        "operationId": "dismiss_api_v1_dismissed_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DismissRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DismissedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Dismiss",
+        "tags": [
+          "snapshot"
         ]
       }
     },
@@ -14346,6 +14514,18 @@
     "/api/v1/snapshot": {
       "get": {
         "operationId": "snapshot_api_v1_snapshot_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Status",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

@@ -59,17 +59,19 @@ class MemoryTests(unittest.TestCase):
             )
             cgroup(base / "system.slice" / "docker-ddd.scope", 999, 0)
             with patch("ctl.resource_usage._own_services", return_value=7):
-                by_name, by_owner = resource_usage.memory(
+                by_name, by_owner, parts = resource_usage.memory(
                     load(), ROOT, run=lambda *a, **k: result(listing), base=base, paths=PATHS
                 )
         self.assertEqual(by_name, {"mu3lab-immich-server-1": 200, "mu3lab-ingress-caddy-1": 50, "mine": 999})
         # Mu3Lab's own services count as core.
         self.assertEqual(by_owner, {"immich": 200, "core": 57})
+        # Core is also reported part by part: the proxy, and Mu3Lab's own services.
+        self.assertEqual(parts, {"ingress": 50, "mu3lab": 7})
 
     def test_docker_unreachable_reports_nothing(self):
         with patch("ctl.resource_usage._own_services", return_value=0):
             self.assertEqual(
-                resource_usage.memory(load(), ROOT, run=lambda *a, **k: result("", 1), paths=PATHS), ({}, {})
+                resource_usage.memory(load(), ROOT, run=lambda *a, **k: result("", 1), paths=PATHS), ({}, {}, {})
             )
 
 
@@ -149,6 +151,10 @@ class DiskTests(unittest.TestCase):
         self.assertEqual(owners["removed"], {"data": 2048, "program": 0})
         self.assertEqual(owners["romm"], {"data": 3072, "program": 0})
         self.assertEqual(owners["core"], {"data": 4096 + 5120, "program": 0})
+        # Core part by part: Mu3Lab's own state, and Authentik's data.
+        self.assertEqual(
+            measured["core_parts"], {"mu3lab": {"data": 4096, "program": 0}, "authentik": {"data": 5120, "program": 0}}
+        )
 
     def test_installs_updates_and_removals_ask_for_a_new_measurement(self):
         self.assertTrue(resource_usage.touches_disk({"action": "install"}))

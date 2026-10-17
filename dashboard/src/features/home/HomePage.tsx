@@ -1,6 +1,8 @@
 import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus, X } from 'lucide-react';
 import { useState } from 'react';
-import type { Service } from '../../api';
+import { toast } from 'sonner';
+import type { DismissedResponse, Service } from '../../api';
+import { postJsonApi } from '../../api/client';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
 import { Link } from '../../lib/router';
@@ -48,27 +50,23 @@ function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => voi
   );
 }
 
-// Reminders the owner may wave away for good on this browser; the rest stay until fixed.
-const DISMISSIBLE = new Set(['backup-service-missing']);
-const DISMISSED_KEY = 'mu3lab.dismissedAttention';
-
+/**
+ * Warnings the person dismissed, on all their devices. Each warning is named by what it says and
+ * when its problem began, so a dismissal lasts only while that same problem continues.
+ */
 function useDismissed() {
-  const [dismissed, setDismissed] = useState<string[]>(() => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
-      return Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
-  const dismiss = (key: string) => {
-    const next = [...dismissed, key];
-    setDismissed(next);
-    try {
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
-    } catch {
-      // Storage can be unavailable; the reminder is hidden until the page reloads.
-    }
+  const { data, refresh } = useDashboard();
+  // Hidden at once on a click, before the server has answered.
+  const [pending, setPending] = useState<string[]>([]);
+  const dismissed = [...(data.dismissed || []), ...pending];
+  const dismiss = (warning: string) => {
+    setPending((current) => [...current, warning]);
+    postJsonApi<DismissedResponse>('/api/v1/dismissed', { warning })
+      .then(() => refresh())
+      .catch(() => {
+        setPending((current) => current.filter((item) => item !== warning));
+        toast.error('That warning could not be hidden. Try again.');
+      });
   };
   return [dismissed, dismiss] as const;
 }
@@ -83,12 +81,40 @@ function Attention() {
   const working = data.services.services.filter((service) => isWorking(service) && !coreApps.has(service.id));
   const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
   const setupFailed = setupIncomplete && (data.provisioning.blocked || data.core.current_job?.state === 'failed');
-  const items = [
+  const worker = data.system.worker_state || '';
+  const workerDown = data.system.ok && !['', 'active', 'activating', 'unknown'].includes(worker);
+  const warnings = [
+    // Nothing runs without these two, so they lead.
+    ...(data.system.ok && !data.system.docker_ready
+      ? [
+          {
+            key: 'docker',
+            warning: 'docker|down',
+            icon: AlertTriangle,
+            tone: 'warning',
+            text: 'Docker isn’t reachable, so apps can’t start or run. Open System settings for details.',
+            to: '/settings/system',
+          },
+        ]
+      : []),
+    ...(workerDown
+      ? [
+          {
+            key: 'worker',
+            warning: `worker|${worker}`,
+            icon: AlertTriangle,
+            tone: 'warning',
+            text: `Mu3Lab’s background worker is ${worker}, so installs, backups and repairs wait until it runs again.`,
+            to: '/settings/system',
+          },
+        ]
+      : []),
     // The button that tries again sits in System settings.
     ...(setupFailed
       ? [
           {
             key: 'setup-failed',
+            warning: `setup-failed|${data.core.current_job?.id || ''}`,
             icon: AlertTriangle,
             tone: 'warning',
             text: 'A setup step didn’t finish. Open System settings to try again.',
@@ -98,45 +124,50 @@ function Attention() {
       : []),
     ...failing.map((service) => ({
       key: service.id,
+      // An app that recovered in between has a newer last success, so a new failure shows again.
+      warning: `app|${service.id}|${service.display_state}|${service.reason}|${service.checks?.process?.last_success_at || ''}`,
       icon: AlertTriangle,
       tone: 'warning',
       text: `${service.name}: ${stateLabel[service.display_state].toLowerCase()}`,
       to: `/apps/${service.id}`,
     })),
     // Sent to administrators only, and only while backups fall behind the schedule.
-    ...(setupIncomplete ? [] : data.backup_attention || [])
-      .filter((item) => !dismissed.includes(item.key))
-      .map((item) => ({
-        key: item.key,
-        icon: DatabaseBackup,
-        tone: 'warning',
-        text: item.message,
-        to: '/settings/security',
-      })),
-    ...working.map((service) => ({
-      key: `working-${service.id}`,
-      icon: Loader2,
-      tone: 'progress',
-      text: `${service.name} is ${stateLabel[service.display_state].toLowerCase()}…`,
-      to: `/apps/${service.id}`,
+    ...(setupIncomplete ? [] : data.backup_attention || []).map((item) => ({
+      key: item.key,
+      warning: `backup|${item.key}|${item.message}`,
+      icon: DatabaseBackup,
+      tone: 'warning',
+      text: item.message,
+      to: '/settings/security',
     })),
-  ];
+  ].filter((item) => !dismissed.includes(item.warning));
+  // Progress clears by itself, so it cannot be dismissed.
+  const progress = working.map((service) => ({
+    key: `working-${service.id}`,
+    warning: '',
+    icon: Loader2,
+    tone: 'progress',
+    text: `${service.name} is ${stateLabel[service.display_state].toLowerCase()}…`,
+    to: `/apps/${service.id}`,
+  }));
+  const items = [...warnings, ...progress];
   if (!items.length) return null;
   return (
     <section className="attention" aria-label="Needs attention">
-      {items.map(({ key, icon: Icon, tone, text, to }) => (
+      {items.map(({ key, warning, icon: Icon, tone, text, to }) => (
         <div key={key} className="attention-row">
           <Link to={to} className={`attention-item attention-${tone}`}>
             <Icon className={tone === 'progress' ? 'spin' : ''} />
             <span>{text}</span>
             <ArrowRight className="attention-arrow" />
           </Link>
-          {DISMISSIBLE.has(key) && (
+          {warning && (
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-icon"
-              aria-label="Dismiss this reminder"
-              onClick={() => dismiss(key)}
+              aria-label="Hide this warning until it changes"
+              title="Hide until it changes"
+              onClick={() => dismiss(warning)}
             >
               <X />
             </button>

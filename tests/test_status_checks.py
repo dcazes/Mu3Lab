@@ -191,7 +191,7 @@ class ServiceReadTests(unittest.TestCase):
         )
 
     def test_stale_observer_suppresses_usable_claim(self):
-        self.write(observed_at=iso(time.time() - checks.OBSERVATION_MAX_AGE_SECONDS - 5))
+        self.write(observed_at=iso(time.time() - checks.STATUS_MAX_AGE_SECONDS - 5))
         self.verify_sign_in()
         app = self.mealie()
         self.assertEqual(app["display_state"], "needs_attention")
@@ -200,6 +200,14 @@ class ServiceReadTests(unittest.TestCase):
         self.assertEqual(app["identity"]["launch_url"], "")
         self.assertIn("not refreshed", app["reason"])
         self.assertEqual(app["checks"]["route"]["state"], "stale")
+
+    def test_last_quiet_spell_check_still_stands(self):
+        # Nobody looked for a while, so the worker last checked minutes ago: no false alarm.
+        self.write(observed_at=iso(time.time() - 280))
+        self.verify_sign_in()
+        app = self.mealie()
+        self.assertEqual(app["display_state"], "running")
+        self.assertTrue(app["ui"]["url"])
 
     def test_route_grace_is_shown_as_checking_and_keeps_open(self):
         self.write(

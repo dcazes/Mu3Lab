@@ -34,6 +34,10 @@ SIGN_IN_MAX_AGE_SECONDS = 24 * 3600
 # Observations older than this are not evidence of anything current. The
 # observer runs every few seconds; this tolerates a slow cycle, not a stop.
 OBSERVATION_MAX_AGE_SECONDS = 90
+# A saved status older than this means the worker has stopped: it checks every
+# 5 minutes even while nobody is looking, so a younger one is simply the last
+# regular check and still stands until the next one (asked for on page open).
+STATUS_MAX_AGE_SECONDS = 600
 SIGN_IN_METHODS = frozenset({"oidc", "trusted_header", "gate"})
 
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ctl import backup_service, bootstrap_state, local_models
+from ctl import backup_service, bootstrap_state, dismissals, local_models
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.routes import chat, jobs, system
-from ctl.api.security import Member
+from ctl.api.security import Member, MemberMutation
 from ctl.api.service_view import service_snapshot
 from ctl.status import signals
 from ctl.store import db
@@ -17,9 +17,12 @@ router = APIRouter(prefix="/api/v1", tags=["snapshot"], route_class=ContractRout
 
 
 @router.get("/snapshot", response_model=models.SnapshotResponse, response_model_exclude_none=True)
-def snapshot(person: Member) -> models.SnapshotResponse:
-    # Someone is looking: the worker keeps statuses fresh while this continues.
+def snapshot(person: Member, status: bool = False) -> models.SnapshotResponse:
+    # Someone is using Mu3Lab: the worker's upkeep keeps its usual pace.
     signals.viewed()
+    # The page shows app statuses: the worker checks them again if its last check is a minute old.
+    if status:
+        signals.status_wanted()
 
     def read() -> dict:
         return {
@@ -34,6 +37,7 @@ def snapshot(person: Member) -> models.SnapshotResponse:
             "audit": jobs.audit(person) if person.get("is_admin") else {"ok": True, "available": False, "events": []},
             "backup_attention": backup_service.attention() if person.get("is_admin") else [],
             "model_runner": local_models.runner().id,
+            "dismissed": dismissals.for_person(person),
         }
 
     path = db.database()
@@ -46,3 +50,9 @@ def snapshot(person: Member) -> models.SnapshotResponse:
     if person.get("is_admin"):
         bootstrap_state.confirm_dashboard_ready()
     return result
+
+
+@router.post("/dismissed", response_model=models.DismissedResponse)
+def dismiss(body: models.DismissRequest, person: MemberMutation) -> models.DismissedResponse:
+    """Hide one Home warning for this person until it changes."""
+    return models.DismissedResponse(dismissed=dismissals.dismiss(person, body.warning))

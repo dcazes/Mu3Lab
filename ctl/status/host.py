@@ -39,7 +39,9 @@ def observe_system(registry=None, root: Path | None = None) -> dict:
         )
     except (OSError, subprocess.SubprocessError):
         docker = False
-    by_name, by_owner = resource_usage.memory(registry, root) if docker and registry is not None and root else ({}, {})
+    by_name, by_owner, core_parts = (
+        resource_usage.memory(registry, root) if docker and registry is not None and root else ({}, {}, {})
+    )
     tailscale = tailscale_status()
     tailscale["serve"] = tailnet_serve_status()
     return {
@@ -51,6 +53,7 @@ def observe_system(registry=None, root: Path | None = None) -> dict:
         "docker_ready": docker,
         "container_memory": by_name,
         "memory_by_owner": by_owner,
+        "memory_by_core_part": core_parts,
         "disk_usage": resource_usage.stored_disk(),
         "worker_state": _worker_state(),
         "tailnet_dns_name": tailscale["dns_name"],

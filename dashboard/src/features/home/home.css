@@ -346,94 +346,6 @@
   transform: rotate(180deg);
 }
 
-.status-meta {
-  margin-left: auto;
-  color: var(--text-3);
-  font-size: 12.5px;
-}
-
-.status-panel {
-  display: grid;
-  /* Every group fills one row of four equal columns, so nothing wraps to a lonely second row. */
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: start;
-  gap: 0 28px;
-  margin: 0;
-  padding: 4px 14px;
-  list-style: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-}
-
-.status-row {
-  display: grid;
-  grid-template-columns: 7px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px 10px;
-  min-height: 34px;
-  padding: 8px 0;
-  color: var(--text-2);
-  font-size: 12.5px;
-  line-height: 18px;
-}
-
-.status-row:hover .status-row-name {
-  text-decoration: underline;
-}
-
-.status-row-name {
-  overflow: hidden;
-  color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-row-state {
-  text-align: right;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.status-row-state.tone-amber {
-  color: var(--amber);
-}
-
-.status-row-state.tone-red {
-  color: var(--red);
-}
-
-.status-row-note {
-  color: var(--text-3);
-}
-
-.status-bar {
-  grid-column: 2 / -1;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--surface-2);
-  overflow: hidden;
-}
-
-.status-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-
-.status-bar-fill.tone-green,
-.status-bar-fill.tone-gray {
-  background: var(--green);
-}
-
-.status-bar-fill.tone-amber {
-  background: var(--amber);
-}
-
-.status-bar-fill.tone-red {
-  background: var(--red);
-}
-
 /* Home's quick panel for one app. */
 .quick-panel-head {
   display: flex;
@@ -445,31 +357,35 @@
   align-self: flex-start;
 }
 
-/* ---------- Memory and disk per app ---------- */
+/* ---------- Memory, disk and CPU per app ---------- */
 .status-panel-system {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
-  gap: 16px 32px;
   padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
-.status-side {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
+/* Donuts stacked on the left, every app's share beside them. */
 .resources {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  --donut-size: 120px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 16px 32px;
   min-width: 0;
 }
 
 .donuts {
   display: flex;
-  flex-wrap: wrap;
-  gap: 24px 40px;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.resources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 
 .donut {
@@ -483,6 +399,8 @@
 
 .donut svg {
   display: block;
+  width: var(--donut-size);
+  height: var(--donut-size);
 }
 
 .donut-slice {
@@ -505,8 +423,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 120px;
-  height: 120px;
+  width: var(--donut-size);
+  height: var(--donut-size);
   padding: 0 22px;
   text-align: center;
   pointer-events: none;
@@ -543,7 +461,6 @@
 
 .resource-legend {
   width: 100%;
-  max-width: 460px;
   border-collapse: collapse;
   font-size: 12.5px;
 }
@@ -617,7 +534,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
-  max-width: 460px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -630,9 +546,60 @@
   color: var(--text);
 }
 
+/* Sort buttons in the column headers, and Mu3Lab core's fold. */
+.legend-sort,
+.legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.legend-sort:hover,
+.legend-sort.active,
+.legend-toggle:hover {
+  color: var(--text);
+}
+
+.legend-sort svg,
+.legend-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+
+.resource-legend tr.legend-part th {
+  padding-left: 18px;
+  color: var(--text-2);
+}
+
+.resources-free-wait {
+  color: var(--text-3);
+}
+
+/* Phones: the three donuts side by side, smaller, above the list. */
 @media (max-width: 720px) {
-  .status-panel-system {
+  .resources {
+    --donut-size: 92px;
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .donuts {
+    flex-direction: row;
+    justify-content: space-around;
+    gap: 8px;
+  }
+
+  .donut-centre {
+    padding: 0 14px;
+  }
+
+  .donut-centre b {
+    font-size: 13px;
   }
 
   .resource-legend td {
