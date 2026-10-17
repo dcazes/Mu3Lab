@@ -673,6 +673,13 @@ describe('Settings', () => {
   });
 });
 
+// Mid-morning today, so a test event never runs past midnight and shows on two days.
+const todayAt10 = () => {
+  const date = new Date();
+  date.setHours(10, 0, 0, 0);
+  return date;
+};
+
 describe('Calendar', () => {
   it('shows the month view and opens the event editor', async () => {
     stubFetch((path) =>
@@ -685,8 +692,8 @@ describe('Calendar', () => {
               {
                 id: 'e1',
                 title: 'Planning',
-                start: new Date().toISOString(),
-                end: new Date().toISOString(),
+                start: todayAt10().toISOString(),
+                end: todayAt10().toISOString(),
                 all_day: false,
                 editable: true,
                 revision: 'r',
@@ -739,8 +746,8 @@ describe('Calendar sync', () => {
   const event = (overrides = {}) => ({
     id: 'local-1',
     title: 'Piano',
-    start: new Date().toISOString(),
-    end: new Date(Date.now() + 3600000).toISOString(),
+    start: todayAt10().toISOString(),
+    end: new Date(todayAt10().getTime() + 3600000).toISOString(),
     all_day: false,
     editable: true,
     revision: 'r',
