@@ -131,9 +131,10 @@ def core_setup(_member: Member) -> models.CoreSetupResponse:
     provisioning_store = ProvisioningStore.runtime()
     provisioned = {"available": True, **provisioning_store.summary(initialize=False)} if provisioning_store else None
     waiting = (provisioned or {}).get("waiting")
+    # Setup itself has finished; only the owner's provider step is left.
     waiting_for_provider = bool(
         current_job
-        and current_job.get("state") == "waiting_for_confirmation"
+        and current_job.get("state") in {"succeeded", "waiting_for_confirmation"}
         and waiting
         and waiting.get("phase_id") == "configuration"
     )
