@@ -2026,7 +2026,15 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: 'ready' | 'pending' | 'failed' | 'not_connected' | 'connector_down' | 'needs_review' | 'operator_only';
+      status:
+        | 'ready'
+        | 'paused'
+        | 'pending'
+        | 'failed'
+        | 'not_connected'
+        | 'connector_down'
+        | 'needs_review'
+        | 'operator_only';
     };
     /** ChatConnectResponse */
     ChatConnectResponse: {

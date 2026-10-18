@@ -6,7 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import httpx
 
@@ -22,6 +22,14 @@ ASSISTANT = {
     "description": "Plan meals.",
     "instructions": "Help with recipes.",
     "url": "http://contextforge:4444/servers/abc123/mcp",
+    "active": True,
+}
+STOPPED = {
+    **ASSISTANT,
+    "id": "grocy",
+    "title": "Grocy",
+    "url": "http://contextforge:4444/servers/def456/mcp",
+    "active": False,
 }
 
 
@@ -35,6 +43,9 @@ class FakeOpenWebUI:
         ]
         self.models = {"mu3lab-app-grocy-gone-user": {}, "someone-elses": {}}
         self.calls = []
+        # What Open WebUI's connection test finds at each address; missing ones fail.
+        self.tools = {ASSISTANT["url"]: [{"name": "get_recipes"}, {"name": "add_recipe"}]}
+        self.verified = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append((request.method, request.url.path, request.headers.get("authorization")))
@@ -45,8 +56,13 @@ class FakeOpenWebUI:
             if request.method == "POST":
                 self.connections = body["TOOL_SERVER_CONNECTIONS"]
             return httpx.Response(200, json={"TOOL_SERVER_CONNECTIONS": self.connections})
+        if request.url.path == "/api/v1/configs/tool_servers/verify":
+            self.verified.append((body["url"], body["auth_type"], body["key"]))
+            if body["url"] not in self.tools:
+                return httpx.Response(400, json={"detail": "Failed to create MCP client"})
+            return httpx.Response(200, json={"status": True, "specs": self.tools[body["url"]]})
         if request.url.path == "/api/v1/models/all":
-            return httpx.Response(200, json=[{"id": key} for key in self.models])
+            return httpx.Response(200, json=[{"id": key, **value} for key, value in self.models.items()])
         if request.url.path in {"/api/v1/models/create", "/api/v1/models/model/update"}:
             self.models[body["id"]] = body
             return httpx.Response(200, json=body)
@@ -104,6 +120,48 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn("hidden", fake.models["mu3lab-assistant"]["meta"])
         self.assertNotIn("hidden", fake.models["mu3lab-app-mealie"]["meta"])
 
+    def test_a_stopped_apps_assistant_is_switched_off_not_deleted(self):
+        fake = FakeOpenWebUI()
+        with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
+            managed = api.ensure([ASSISTANT, STOPPED])
+        self.assertEqual(managed, ["mealie", "grocy"])
+        connections = {item["info"]["id"]: item for item in fake.connections}
+        self.assertTrue(connections["mu3lab-app-mealie"]["config"]["enable"])
+        self.assertFalse(connections["mu3lab-app-grocy"]["config"]["enable"])
+        self.assertTrue(fake.models["mu3lab-app-mealie"]["is_active"])
+        # Kept with its settings, but out of the model menu.
+        self.assertFalse(fake.models["mu3lab-app-grocy"]["is_active"])
+        self.assertEqual(fake.models["mu3lab-app-grocy"]["meta"]["toolIds"], ["server:mcp:mu3lab-app-grocy"])
+        # The main assistant only sends people to assistants that work now.
+        self.assertNotIn("Grocy", fake.models["mu3lab-assistant"]["params"]["system"])
+
+    def test_the_check_asks_open_webui_itself(self):
+        fake = FakeOpenWebUI()
+        with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
+            api.ensure([ASSISTANT, STOPPED])
+            checks = api.check([ASSISTANT, STOPPED], "cf-token")
+        self.assertEqual(checks["mealie"], {"status": "ready", "tools": 2, "detail": "Open WebUI reached 2 tools."})
+        self.assertEqual(checks["grocy"]["status"], "paused")
+        # Only the switched-on assistant is tested, with ContextForge's sign-in in place of a person's.
+        self.assertEqual(fake.verified, [(ASSISTANT["url"], "bearer", "cf-token")])
+
+    def test_the_check_finds_what_is_broken(self):
+        fake = FakeOpenWebUI()
+        with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
+            api.ensure([ASSISTANT, STOPPED])
+            unreachable = {**ASSISTANT, "id": "outline", "url": "http://contextforge:4444/servers/zzz/mcp"}
+            api.ensure([ASSISTANT, STOPPED, unreachable])
+            fake.models["mu3lab-app-grocy"]["is_active"] = True
+            fake.models.pop("mu3lab-app-mealie")
+            checks = api.check([ASSISTANT, STOPPED, unreachable], "cf-token")
+            fake.tools[unreachable["url"]] = []
+            empty = api.check([unreachable], "cf-token")
+        self.assertEqual(checks["mealie"]["detail"], "Open WebUI does not have this app's assistant.")
+        self.assertEqual(checks["grocy"]["detail"], "Open WebUI still has this assistant switched on.")
+        self.assertIn("could not reach", checks["outline"]["detail"])
+        self.assertTrue(all(item["status"] == "failed" for item in checks.values()))
+        self.assertIn("none are switched on", empty["outline"]["detail"])
+
     def test_the_main_assistant_is_every_new_chats_model(self):
         compose = (Path(__file__).resolve().parents[1] / "apps/open-webui/docker-compose.yml").read_text()
         self.assertIn("DEFAULT_MODELS: mu3lab-assistant", compose)
@@ -126,6 +184,7 @@ class SyncTests(unittest.TestCase):
                 },
             ),
             ("ctl.openwebui_ops.RuntimePaths", {"return_value": self.paths}),
+            ("ctl.openwebui_ops._check_token", {"return_value": "cf-token"}),
             ("ctl.resource_locks.hold", {"return_value": MagicMock()}),
         ):
             patcher = patch(target, **value)
@@ -137,6 +196,57 @@ class SyncTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(records.get(openwebui_ops.SCOPE, openwebui_ops.RECORD, self.paths)["managed"], ["mealie"])
         self.assertEqual([item["info"]["id"] for item in self.fake.connections][-1], "mu3lab-app-mealie")
+        checks = records.get(openwebui_ops.SCOPE, openwebui_ops.RECORD, self.paths)["checks"]
+        self.assertEqual(checks["mealie"]["status"], "ready")
+
+    def test_a_failed_check_fails_the_sync_with_its_reason(self):
+        self.fake.tools = {}
+        ok, detail = openwebui_ops.sync_agents(lambda _line: None)
+        self.assertFalse(ok)
+        self.assertEqual(detail, "Mealie: Open WebUI could not reach this app's tools through ContextForge.")
+
+
+class ReportTests(unittest.TestCase):
+    def test_the_report_shows_open_webuis_answer(self):
+        def app(app_id):
+            manifest = Mock(id=app_id)
+            manifest.name = app_id.title()
+            return Mock(id=app_id, manifest=manifest)
+
+        apps = [app(name) for name in ("ready", "stopped", "broken", "down", "new")]
+        servers = {
+            "ready-mcp": {"enabled": True, "state": "live"},
+            "stopped-mcp": {"enabled": True, "state": "stopped"},
+            "broken-mcp": {"enabled": True, "state": "live"},
+            "down-mcp": {"enabled": True, "state": "degraded"},
+            "new-mcp": {"enabled": True, "state": "live"},
+        }
+        state = Mock()
+        state.installation.return_value = {"state": "running"}
+        state.mcp_server.side_effect = servers.get
+        connectors = [Mock(id=name + "-mcp", service_id=name) for name in ("ready", "stopped", "broken", "down", "new")]
+        record = {
+            "checks": {
+                "ready": {"status": "ready", "detail": "Open WebUI reached 2 tools."},
+                "stopped": {"status": "paused", "detail": "Switched off."},
+                "broken": {"status": "failed", "detail": "Open WebUI could not reach this app's tools."},
+                "down": {"status": "paused", "detail": "Switched off."},
+            },
+            "error": "",
+        }
+        with (
+            patch.object(openwebui_ops.ControlState, "runtime", return_value=state),
+            patch.object(openwebui_ops.records, "get", return_value=record),
+            patch.object(openwebui_ops, "load_connectors", return_value=connectors),
+            patch.object(openwebui_ops, "load_registry"),
+            patch.object(openwebui_ops, "cached", return_value=Mock(apps=apps)),
+        ):
+            report = {item["id"]: item for item in openwebui_ops.assistant_report("me", operator=True)}
+        self.assertEqual(
+            {key: item["status"] for key, item in report.items()},
+            {"ready": "ready", "stopped": "paused", "broken": "failed", "down": "connector_down", "new": "pending"},
+        )
+        self.assertIn("could not reach", report["broken"]["detail"])
 
 
 class ChatAppChoiceTests(unittest.TestCase):

@@ -130,6 +130,12 @@ class ContextForge:
             self._sign_in()
         return self._send(method, path, **kwargs)
 
+    def access_token(self) -> str:
+        """Mu3Lab's own short-lived sign-in, which Open WebUI's connection test passes to the virtual servers."""
+        if not self.signed_in:
+            self._sign_in()
+        return str(self.client.headers["Authorization"]).removeprefix("Bearer ")
+
     # --- Connectors (gateways) and their tools -----------------------------------
 
     def gateways(self) -> list[dict[str, Any]]:

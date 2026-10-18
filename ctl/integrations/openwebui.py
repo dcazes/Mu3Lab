@@ -4,7 +4,9 @@ Mu3Lab keeps two things in step: the tool connections (one MCP connection per
 app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
 app's assistant, plus the main assistant every new chat starts with. All are
-shared by everyone. It also hides the AI gateway's own names from the model
+shared by everyone. An app that is stopped keeps its assistant switched off
+(out of the model menu, settings kept) rather than deleted; ``check`` then
+asks Open WebUI itself whether each one is set up and its tools answer. It also hides the AI gateway's own names from the model
 menu (``HIDDEN``). Connections and models Mu3Lab did not create are never
 touched: ours carry the ``mu3lab-app-`` id prefix, or are ``mu3lab-assistant``.
 API error bodies never reach logs.
@@ -82,12 +84,21 @@ class OpenWebUI:
     def delete_model(self, model_id: str) -> None:
         self.request("POST", "/api/v1/models/model/delete", json={"id": model_id})
 
+    def verify(self, connection: dict[str, Any], token: str) -> list[dict[str, Any]]:
+        """Open WebUI's own connection test: it connects to the MCP server and lists its tools."""
+        data = self.request(
+            "POST", "/api/v1/configs/tool_servers/verify", json={**connection, "auth_type": "bearer", "key": token}
+        )
+        return list((data or {}).get("specs") or [])
+
     def ensure(self, assistants: list[dict[str, Any]]) -> list[str]:
         """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
         for item in assistants:
             server_id = f"{PREFIX}{item['id']}"
+            # Switched off while its app is stopped: kept, but out of the menu and unreachable.
+            active = bool(item.get("active", True))
             wanted_connections.append(
                 {
                     "url": item["url"],
@@ -96,7 +107,7 @@ class OpenWebUI:
                     # Each person's own Authentik sign-in, which ContextForge trusts.
                     "auth_type": "system_oauth",
                     "key": "",
-                    "config": {"enable": True, "access_grants": EVERYONE},
+                    "config": {"enable": active, "access_grants": EVERYONE},
                     "info": {"id": server_id, "name": item["title"], "description": item["description"]},
                 }
             )
@@ -111,7 +122,7 @@ class OpenWebUI:
                 },
                 "params": {"system": item["instructions"], "function_calling": "native"},
                 "access_grants": EVERYONE,
-                "is_active": True,
+                "is_active": active,
             }
 
         def ours(identifier: str) -> bool:
@@ -121,7 +132,7 @@ class OpenWebUI:
         others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
-        self.save_model(main_model(assistants), exists=MAIN in existing)
+        self.save_model(main_model([item for item in assistants if item.get("active", True)]), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
         for model_id, model in wanted_models.items():
@@ -130,6 +141,52 @@ class OpenWebUI:
             if ours(model_id) and model_id not in wanted_models:
                 self.delete_model(model_id)
         return [item["id"] for item in assistants]
+
+    def check(self, assistants: list[dict[str, Any]], token: str) -> dict[str, dict[str, Any]]:
+        """Read back what Open WebUI holds for each assistant and, for those switched on, have it list their tools.
+
+        ``token`` is how Open WebUI signs in to ContextForge for the test, in place of a person's sign-in.
+        Returns each app's ``status`` (ready, paused or failed), ``detail`` and ``tools`` (how many answered).
+        """
+        connections = {str((item.get("info") or {}).get("id") or ""): item for item in self.connections()}
+        models = {str(model.get("id")): model for model in self.models()}
+        results = {}
+        for item in assistants:
+            server_id = f"{PREFIX}{item['id']}"
+            active = bool(item.get("active", True))
+            connection, model = connections.get(server_id), models.get(server_id)
+            result = {"status": "failed", "tools": 0}
+            if connection is None or model is None:
+                missing = "tool connection" if connection is None else "assistant"
+                result["detail"] = f"Open WebUI does not have this app's {missing}."
+            elif connection.get("url") != item["url"] or (model.get("meta") or {}).get("toolIds") != [
+                f"server:mcp:{server_id}"
+            ]:
+                result["detail"] = "Open WebUI's assistant does not point at this app's tools."
+            elif (
+                bool((connection.get("config") or {}).get("enable")) != active or bool(model.get("is_active")) != active
+            ):
+                result["detail"] = f"Open WebUI still has this assistant switched {'off' if active else 'on'}."
+            elif not active:
+                result |= {"status": "paused", "detail": "Switched off in Open WebUI while the app is stopped."}
+            else:
+                try:
+                    tools = self.verify(connection, token)
+                except ChatError:
+                    result["detail"] = "Open WebUI could not reach this app's tools through ContextForge."
+                else:
+                    if tools:
+                        result |= {
+                            "status": "ready",
+                            "tools": len(tools),
+                            "detail": f"Open WebUI reached {len(tools)} tools.",
+                        }
+                    else:
+                        result["detail"] = (
+                            "Open WebUI reached this app's tools, but none are switched on in ContextForge."
+                        )
+            results[item["id"]] = result
+        return results
 
 
 def hidden_model(model_id: str) -> dict[str, Any]:
