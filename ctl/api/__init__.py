@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-from ctl import __version__
+from ctl import __version__, resource_locks
 from ctl.api.errors import (
     ApiError,
     api_error_handler,
@@ -51,14 +52,23 @@ DIST = ROOT / "dashboard" / "dist"
 
 
 def _reconcile_runtime_state() -> None:
-    """Recover durable milestones and sign-in settings through Authentik on startup."""
+    """Recover durable milestones on startup; sign-in settings follow in the background."""
     store = ProvisioningStore.runtime()
     if store:
         store.reconcile_runtime()
+    # One Authentik import per app, tens of seconds each: answering only after
+    # all of them kept the dashboard down for minutes after every restart, past
+    # the installer's and the update guard's health checks.
+    threading.Thread(target=_reconcile_sign_in, name="sign-in-sync", daemon=True).start()
+
+
+def _reconcile_sign_in() -> None:
     try:
         sync_sign_in(load_registry().catalog, tailnet_dns_name(), Authentik.runtime())
-    except (AuthentikError, OSError, RegistryError, ValueError) as exc:
+    except (AuthentikError, OSError, RegistryError, ValueError, resource_locks.Busy) as exc:
         logging.getLogger(__name__).warning("Sign-in reconciliation deferred: %s", redact(str(exc)))
+    except Exception:  # an unexpected failure must not go unrecorded in a thread nobody joins
+        logging.getLogger(__name__).exception("Sign-in reconciliation failed")
 
 
 @asynccontextmanager

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ctl import resource_locks
 from ctl.authentik_blueprints import (
     DASHBOARD_BLUEPRINT,
     GatedApp,
@@ -21,6 +22,10 @@ from ctl.manifest.models import AppManifest
 from ctl.registry import RegistryError, Service, load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+
+# Every sign-in change goes through Authentik one at a time: the dashboard's
+# startup sync, app installs and removals, and the installer (another process).
+SIGN_IN_LOCK = "sign-in"
 
 
 def launch_path(app: AppManifest, paths: RuntimePaths | None = None) -> str:
@@ -191,6 +196,13 @@ def sync_sign_in(
     paths = paths or RuntimePaths()
     if not host:
         raise ValueError("This server's private address is not known yet.")
+    with resource_locks.hold(SIGN_IN_LOCK, paths=paths):
+        return _sync_sign_in(catalog, host, authentik, paths, app_id)
+
+
+def _sync_sign_in(
+    catalog: Catalog, host: str, authentik: Authentik, paths: RuntimePaths, app_id: str | None
+) -> list[str]:
     target = catalog.get(app_id) if app_id else None
     if target is None or _gated(target):
         authentik.remove_duplicate_default_brands()
@@ -216,7 +228,9 @@ def remove_sign_in(
             raise ValueError("Removing a gated app needs the remaining app catalog.")
         # Exclude explicitly too: a caller may be retrying cleanup before removing the project.
         remaining = Catalog(tuple(item for item in catalog.apps if item.id != app.id))
-        sync_sign_in(remaining, host, authentik, paths)
-    authentik.apply_blueprint(
-        removal_blueprint_name(app.id), render_removal_blueprint(app.id, app.manifest.name, oidc=method == "oidc")
-    )
+    with resource_locks.hold(SIGN_IN_LOCK, paths=paths or RuntimePaths()):
+        if method in {"gate", "trusted_header"}:
+            sync_sign_in(remaining, host, authentik, paths)
+        authentik.apply_blueprint(
+            removal_blueprint_name(app.id), render_removal_blueprint(app.id, app.manifest.name, oidc=method == "oidc")
+        )

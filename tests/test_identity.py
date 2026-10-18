@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 
+from ctl import resource_locks
 from ctl.control_state import ControlState
-from ctl.identity import launch_path, mode_for, projection, remove_sign_in, sync_sign_in
+from ctl.identity import SIGN_IN_LOCK, launch_path, mode_for, projection, remove_sign_in, sync_sign_in
 from ctl.integrations.authentik import Authentik
 from ctl.manifest.catalog import App, Catalog
 from ctl.registry import load
@@ -145,6 +147,24 @@ class IdentityContractTests(unittest.TestCase):
             self.assertIn("state: absent", bodies[-1])
             sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths)
             self.assertIn("Mu3Lab SurfSense provider", bodies[-1])
+
+    def test_a_sign_in_sync_waits_for_one_already_running(self):
+        # The dashboard's startup sync runs beside app installs and the installer.
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            bodies = []
+            client = self._client(bodies)
+            with resource_locks.hold(SIGN_IN_LOCK, paths=paths):
+                other = threading.Thread(
+                    target=sync_sign_in, args=(load().catalog, "mu3lab.example.ts.net", client, paths)
+                )
+                other.start()
+                other.join(0.5)
+                self.assertTrue(other.is_alive())
+                self.assertEqual(bodies, [])
+            other.join(10)
+            self.assertFalse(other.is_alive())
+            self.assertTrue(bodies)
 
     def test_one_app_install_imports_only_that_apps_sign_in(self):
         # Each import takes tens of seconds; re-importing every installed app
