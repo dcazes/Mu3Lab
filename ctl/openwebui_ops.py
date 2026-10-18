@@ -2,17 +2,21 @@
 
 Unlike LobeChat, nobody connects chat by hand: Mu3Lab holds an administrator
 key (``OPEN_WEBUI_ADMIN_API_KEY``, registered by the app's owner script) and
-keeps one assistant per app whose connector is live, shared by everyone in
-the household. Each assistant's tools reach that app's ContextForge virtual
-server with the signed-in person's own Authentik sign-in, so ContextForge
-knows and logs who made every call.
+keeps one assistant per app with a connector, shared by everyone in the
+household, switched off while the app is stopped. Each assistant's tools reach
+that app's ContextForge virtual server with the signed-in person's own
+Authentik sign-in, so ContextForge knows and logs who made every call.
+
+After every change Mu3Lab asks Open WebUI itself whether each assistant is
+set up and, for the ones switched on, whether its tools answer; the
+dashboard shows that answer, not what Mu3Lab meant to do.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from ctl import chat_ops
+from ctl import chat_ops, contextforge
 from ctl.contextforge import ContextForgeError
 from ctl.control_state import ControlState
 from ctl.integrations.openwebui import ChatError, OpenWebUI
@@ -57,14 +61,28 @@ def revoke(subject: str) -> None:
 def _sync(log: Log) -> tuple[bool, str]:
     paths = RuntimePaths()
     try:
+        desired = chat_ops.desired_assistants()
         with client() as api:
-            managed = api.ensure(chat_ops.desired_assistants())
+            managed = api.ensure(desired)
+            checks = api.check(desired, _check_token() if any(item["active"] for item in desired) else "")
     except (ChatError, ContextForgeError, OSError, ValueError, KeyError) as exc:
         log(f"Open WebUI assistants were not updated: {exc}")
         records.put(SCOPE, RECORD, {**records.get(SCOPE, RECORD, paths), "error": str(exc)}, paths)
         return False, str(exc)
-    records.put(SCOPE, RECORD, {"managed": managed, "error": ""}, paths)
+    records.put(SCOPE, RECORD, {"managed": managed, "checks": checks, "error": ""}, paths)
+    names = {item["id"]: item["title"] for item in desired}
+    failed = [
+        f"{names[app_id]}: {result['detail']}" for app_id, result in checks.items() if result["status"] == "failed"
+    ]
+    if failed:
+        log("Open WebUI's check found assistants that do not work: " + "; ".join(failed))
+        return False, failed[0]
     return True, "Your assistants are ready."
+
+
+def _check_token() -> str:
+    with contextforge.client() as api:
+        return api.access_token()
 
 
 def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]]:
@@ -82,16 +100,22 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
         own = [connector for connector in connectors if connector.service_id == app.id]
         runtimes = [state.mcp_server(connector.id) for connector in own]
         live = any(runtime and runtime["enabled"] and runtime["state"] == "live" for runtime in runtimes)
+        check = (record.get("checks") or {}).get(app.id) or {}
         if not own:
             status, detail = "needs_review", "This app has no chat connector yet."
+        elif check.get("status") == "failed":
+            status, detail = "failed", str(check["detail"])
         elif not live:
             current = next((runtime["state"] for runtime in runtimes if runtime), "not started")
-            status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
-        elif app.id in (record.get("managed") or []):
-            status, detail = "ready", "Available in chat."
+            if current == "stopped" and check.get("status") == "paused":
+                status, detail = "paused", "Switched off while the app is stopped; it comes back when the app starts."
+            else:
+                status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
+        elif check.get("status") == "ready":
+            status, detail = "ready", f"Available in chat. {check['detail']}"
         elif record.get("error"):
             status, detail = "failed", str(record["error"])
         else:
-            status, detail = "pending", "Adding to chat within five minutes."
+            status, detail = "pending", "Adding to chat and checking it within five minutes."
         report.append({"id": app.id, "name": app.manifest.name, "status": status, "detail": detail})
     return report

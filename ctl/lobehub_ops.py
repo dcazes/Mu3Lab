@@ -35,19 +35,26 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
         own = [connector for connector in connectors if connector.service_id == app.id]
         runtimes = [state.mcp_server(connector.id) for connector in own]
         live = any(runtime and runtime["enabled"] and runtime["state"] == "live" for runtime in runtimes)
+        # LobeChat's own answer from the last sync, made with this person's key.
+        check = (record.get("managed", {}).get(app.id) or {}).get("check") or {}
         if not own:
             status, detail = "needs_review", "This app has no chat connector yet."
         elif not live:
             current = next((runtime["state"] for runtime in runtimes if runtime), "not started")
-            status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
+            if current == "stopped" and check.get("status") == "paused":
+                status, detail = "paused", "Switched off while the app is stopped; it comes back when the app starts."
+            else:
+                status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
         elif not record.get("key"):
             status, detail = "not_connected", "Waiting for your one-time approval on the Chat page."
-        elif app.id in record.get("managed", {}):
-            status, detail = "ready", "Available in chat."
+        elif check.get("status") == "failed":
+            status, detail = "failed", str(check["detail"])
+        elif check.get("status") == "ready":
+            status, detail = "ready", f"Available in chat. {check['detail']}"
         elif record.get("error"):
             status, detail = "failed", record["error"]
         else:
-            status, detail = "pending", "Adding to chat within five minutes."
+            status, detail = "pending", "Adding to chat and checking it within five minutes."
         report.append({"id": app.id, "name": app.manifest.name, "status": status, "detail": detail})
     return report
 

@@ -91,7 +91,9 @@ def needs_connect(app: App) -> bool:
 
 
 def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
-    """Everyone's assistants: one per installed app whose connector is live, reaching its ContextForge virtual server.
+    """Everyone's assistants: one per installed app whose connector is switched on and has a ContextForge virtual server.
+
+    Each is ``active`` only while its connector is live; one whose app is stopped stays, switched off.
 
     With ``uid`` and ``email`` (LobeChat), each carries that person's own ContextForge key;
     Open WebUI passes each person's Authentik sign-in instead.
@@ -103,16 +105,16 @@ def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
     state = ControlState.runtime()
     if state is None:
         return []
+    # Per app: its switched-on connector, a live one first, and whether that one is live.
     live: dict[str, str] = {}
+    active: dict[str, bool] = {}
     for connector in load_connectors(load_registry()):
         runtime = state.mcp_server(connector.id)
-        if (
-            runtime
-            and runtime["enabled"]
-            and runtime["state"] == "live"
-            and contextforge_ops.virtual_server(connector.id)
-        ):
+        if not runtime or not runtime["enabled"] or not contextforge_ops.virtual_server(connector.id):
+            continue
+        if not active.get(connector.service_id):
             live[connector.service_id] = connector.id
+            active[connector.service_id] = runtime["state"] == "live"
     result = []
     for app in cached().apps:
         assistant = app.manifest.chat.assistant
@@ -131,8 +133,9 @@ def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
             "description": assistant.description,
             "instructions": assistant.instructions,
             "url": contextforge.endpoint(server_id),
+            "active": active[app.id],
         }
-        if uid and email:
+        if uid and email and item["active"]:
             item["token"] = contextforge_ops.person_key(uid, email, live[app.id], server_id)
         result.append(item)
     return result

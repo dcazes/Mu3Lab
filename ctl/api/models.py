@@ -935,7 +935,9 @@ class ChatProvider(ApiModel):
 class ChatAssistant(ApiModel):
     id: str
     name: str
-    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"]
+    status: Literal[
+        "ready", "paused", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"
+    ]
     detail: str
 
 

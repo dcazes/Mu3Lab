@@ -2,6 +2,11 @@
 
 Request shapes are pinned by tests/fixtures/lobehub-openapi-2.2.18.json.
 No database access is used. Tokens and API error bodies never reach logs.
+
+LobeChat agents cannot be switched off, so a stopped app's assistant keeps its
+agent and connector, with the connector switched off (LobeChat then refuses its
+tool calls) and its description saying why. LobeChat's own tool sync, made with
+the person's key, is the check that the assistant's tools answer.
 """
 
 from __future__ import annotations
@@ -21,9 +26,12 @@ class ChatError(RuntimeError):
 class AssistantSyncError(ChatError):
     """Some assistants failed; ``managed`` still records the ones that synced."""
 
-    def __init__(self, message: str, managed: dict[str, dict[str, str]]) -> None:
+    def __init__(self, message: str, managed: dict[str, dict[str, Any]]) -> None:
         super().__init__(message)
         self.managed = managed
+
+
+PAUSED = "Off while the app is stopped; it comes back when the app starts."
 
 
 class LobeHub:
@@ -119,12 +127,14 @@ class LobeHub:
             page += 1
 
     def ensure_assistants(
-        self, desired: list[dict[str, Any]], managed: dict[str, dict[str, str]], *, installed: set[str] | None = None
-    ) -> dict[str, dict[str, str]]:
+        self, desired: list[dict[str, Any]], managed: dict[str, dict[str, Any]], *, installed: set[str] | None = None
+    ) -> dict[str, dict[str, Any]]:
         """Upsert by saved ID, then title; only retire our own empty agents.
 
         Saved instruction text lets us preserve a person's edits on later syncs.
         Stale connectors are disabled even when conversation history is retained.
+        An assistant that is not ``active`` (its app is stopped) is switched off, not retired.
+        Each kept assistant records its ``check``: ready, paused or failed.
         """
         agents = self.agents()
         servers = self.request("GET", "/api/v1/mcp-servers")
@@ -135,9 +145,16 @@ class LobeHub:
         for item in desired:
             # One app's failing connector must not keep the person's other assistants away.
             try:
-                updated[item["id"]] = self._upsert_assistant(item, managed.get(item["id"], {}), agents, servers)
+                if item.get("active", True):
+                    updated[item["id"]] = self._upsert_assistant(item, managed.get(item["id"], {}), agents, servers)
+                elif paused := self._pause_assistant(item, managed.get(item["id"], {}), agents, servers):
+                    updated[item["id"]] = paused
             except ChatError as exc:
                 failures.append(f"{item['title']}: {exc}")
+                continue
+            check = (updated.get(item["id"]) or {}).get("check") or {}
+            if check.get("status") == "failed":
+                failures.append(f"{item['title']}: {check['detail']}")
         for app_id, old in managed.items():
             if app_id in wanted:
                 continue
@@ -154,8 +171,8 @@ class LobeHub:
         return updated
 
     def _upsert_assistant(
-        self, item: dict[str, Any], old: dict[str, str], agents: list[dict[str, Any]], servers: list[dict[str, Any]]
-    ) -> dict[str, str]:
+        self, item: dict[str, Any], old: dict[str, Any], agents: list[dict[str, Any]], servers: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         slug = "mu3lab-" + item["id"]
         agent = next((a for a in agents if a["id"] == old.get("agent_id")), None)
         if not agent:
@@ -171,7 +188,7 @@ class LobeHub:
             server = self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json=server_body)
         else:
             server = self.request("POST", "/api/v1/mcp-servers", json={"identifier": slug, **server_body})
-        self.request("POST", "/api/v1/mcp-servers/" + quote(server["id"], safe="") + "/sync")
+        check = self._sync_tools(server)
         body = {
             "title": item["title"],
             "description": item["description"],
@@ -186,7 +203,46 @@ class LobeHub:
             agent = self.request("PATCH", "/api/v1/agents/" + quote(agent["id"], safe=""), json=body)
         else:
             agent = self.request("POST", "/api/v1/agents", json={**body, "systemRole": instructions})
-        return {"agent_id": agent["id"], "instructions": instructions}
+        return {"agent_id": agent["id"], "instructions": instructions, "check": check}
+
+    def _sync_tools(self, server: dict[str, Any]) -> dict[str, Any]:
+        """LobeChat's own check: it connects with the person's key, lists the tools and saves them."""
+        try:
+            data = self.request("POST", "/api/v1/mcp-servers/" + quote(server["id"], safe="") + "/sync") or {}
+        except ChatError:
+            return {
+                "status": "failed",
+                "tools": 0,
+                "detail": "LobeChat could not reach this app's tools through ContextForge.",
+            }
+        count = int(data.get("toolCount") or 0)
+        if data.get("status") == "connected" and count:
+            return {"status": "ready", "tools": count, "detail": f"LobeChat reached {count} tools."}
+        return {
+            "status": "failed",
+            "tools": 0,
+            "detail": "LobeChat reached this app's tools, but none are switched on in ContextForge.",
+        }
+
+    def _pause_assistant(
+        self, item: dict[str, Any], old: dict[str, Any], agents: list[dict[str, Any]], servers: list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        """Switch a stopped app's connector off and say so on its agent; None when it was never set up."""
+        agent = next((a for a in agents if a["id"] == old.get("agent_id")), None)
+        server = next((s for s in servers if s["identifier"] == "mu3lab-" + item["id"]), None)
+        if not agent or not server:
+            return None
+        server = self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json={"isEnabled": False})
+        self.request(
+            "PATCH",
+            "/api/v1/agents/" + quote(agent["id"], safe=""),
+            json={"description": f"{item['description']} ({PAUSED})"},
+        )
+        if (server or {}).get("isEnabled", False):
+            check = {"status": "failed", "tools": 0, "detail": "LobeChat still has this app's tools switched on."}
+        else:
+            check = {"status": "paused", "tools": 0, "detail": "Switched off in LobeChat while the app is stopped."}
+        return {**old, "check": check}
 
     def _retire_assistant(
         self,
