@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -59,3 +61,28 @@ class DashboardServingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartupTests(unittest.TestCase):
+    def test_the_dashboard_answers_before_sign_in_is_synced(self):
+        # Syncing every app's sign-in takes minutes; the installer and the update
+        # guard give up on a dashboard that doesn't answer well before that.
+        release, finished = threading.Event(), threading.Event()
+
+        def slow_sync(*_args):
+            release.wait(5)
+            finished.set()
+
+        with (
+            patch("ctl.api.ProvisioningStore.runtime", return_value=None),
+            patch("ctl.api.load_registry"),
+            patch("ctl.api.tailnet_dns_name", return_value="mu3lab.example.ts.net"),
+            patch("ctl.api.Authentik.runtime"),
+            patch("ctl.api.sync_sign_in", side_effect=slow_sync),
+            TestClient(create_app()) as client,
+        ):
+            try:
+                self.assertEqual(client.get("/api/health").status_code, 200)
+                self.assertFalse(finished.is_set())
+            finally:
+                release.set()
