@@ -168,7 +168,7 @@ def run_install(
         stage("start_service", "Starting application containers.")
         timeout = app.manifest.service.start_timeout_seconds
 
-        def start(recreate: bool) -> tuple[int, str]:
+        def start(recreate: bool, build: bool = False) -> tuple[int, str]:
             return ctx.compose.up(
                 log,
                 wait_seconds=timeout if plan.wait else None,
@@ -176,9 +176,11 @@ def run_install(
                 env=plan.env,
                 extra=plan.extra_files,
                 recreate=recreate,
+                build=build,
             )
 
-        rc, output = start(bool(prior_install))
+        # Install and update rebuild source-built images, so a changed Dockerfile is not left behind.
+        rc, output = start(bool(prior_install), build=True)
         if rc and _failure_code("", output) == "dependency_unhealthy":
             stage("start_service", "A container stopped during its first start; waiting for its restart.")
             rc, output = start(False)

@@ -279,6 +279,7 @@ def compose_up(
     recreate: bool = False,
     services: list[str] | tuple[str, ...] | None = None,
     on_output: Callable[[str], None] | None = None,
+    build: bool = False,
 ) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
@@ -289,6 +290,10 @@ def compose_up(
     argv = [*_compose_project_command(projdir, extra_files), "up", "-d"]
     if recreate:
         argv.append("--force-recreate")
+    # Rebuilds images Mu3Lab builds from source (``build:``), so changed build files take effect;
+    # Docker's build cache keeps this quick when nothing changed. Release installs have no ``build:``.
+    if build:
+        argv.append("--build")
     if wait_timeout is not None:
         argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
     # Service names are always source-owned curated Compose names.  Keeping

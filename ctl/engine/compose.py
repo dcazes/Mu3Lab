@@ -79,6 +79,7 @@ class Compose:
         services: Sequence[str] = (),
         env: dict[str, str] | None = None,
         extra: Sequence[Path] = (),
+        build: bool = False,
     ) -> tuple[int, str]:
         timeout = (wait_seconds or 0) + 300
         return actions.compose_up(
@@ -90,6 +91,7 @@ class Compose:
             wait_timeout=wait_seconds,
             recreate=recreate,
             services=list(services) or None,
+            build=build,
         )
 
     def down(self, log: Log) -> tuple[int, str]:
