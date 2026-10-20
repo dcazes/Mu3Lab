@@ -12,12 +12,13 @@ ENV HF_HOME=/app/.cache/huggingface
 WORKDIR /app
 
 # Dependencies first, so code-only changes reuse this layer.
+# Only the dependencies: the agent runs as a script, so the project itself is never
+# built (building it at start would need PyPI, which the agent's network can't reach).
 COPY pyproject.toml uv.lock ./
-RUN mkdir -p src
-RUN uv sync --locked
+RUN uv sync --locked --no-install-project
 
 # Downloads the local voice activity and turn-detection models the installed plugins need.
-RUN uv run --module livekit.agents download-files
+RUN .venv/bin/python -m livekit.agents download-files
 
 COPY . .
 
@@ -41,4 +42,5 @@ WORKDIR /app
 USER appuser
 
 # "start" connects the worker to LiveKit and waits for rooms to dispatch to it.
-CMD ["uv", "run", "src/agent.py", "start"]
+# The venv's Python directly, not "uv run", which would try to sync (and reach PyPI) at start.
+CMD ["/app/.venv/bin/python", "src/agent.py", "start"]
