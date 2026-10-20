@@ -27,6 +27,8 @@ def ensure(server, log) -> tuple[bool, str]:
     if not missing_credentials(server):
         return True, "MCP credentials are already registered."
     app, connector = cached().connector(server.id)
+    if connector.provision_hook:
+        return _from_hooks(server, app, connector)
     provision = connector.provision
     if provision is None:
         return False, connector.provision_note or "This application requires manual MCP credentials."
@@ -44,6 +46,18 @@ def ensure(server, log) -> tuple[bool, str]:
     except (OSError, ValueError, TypeError) as exc:
         return False, str(exc)
     return True, f"Created and securely registered a dedicated {server.name} credential."
+
+
+def _from_hooks(server, app, connector) -> tuple[bool, str]:
+    """Mu3Lab mints the credential through the app's API (``provision_hook``)."""
+    from ctl.engine.hooks import load_app_hooks
+
+    try:
+        values = load_app_hooks(app).connector_credentials(app, connector.id, RuntimePaths())
+        mcp_config.write(server, values)
+    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as exc:
+        return False, str(exc)
+    return True, f"Securely registered {server.name}'s credential."
 
 
 def revoke(server, log) -> tuple[bool, str]:

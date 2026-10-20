@@ -217,6 +217,7 @@ class AgentSyncTests(unittest.TestCase):
 
         state = Mock()
         state.installation.return_value = None
+        state.app_installation.return_value = None
         with (
             patch.object(lobehub_ops.chat_connections, "records", return_value={"owner": {"key": "sk-lh-working"}}),
             patch.object(lobehub_ops.chat_connections, "save") as save,
@@ -253,6 +254,7 @@ class AgentSyncTests(unittest.TestCase):
 
         state = Mock()
         state.installation.return_value = None
+        state.app_installation.return_value = None
         records = {"first": {"key": "sk-lh-revoked"}, "second": {"key": "sk-lh-working"}}
         with (
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
@@ -293,6 +295,7 @@ class AgentSyncTests(unittest.TestCase):
         }
         state = Mock()
         state.installation.return_value = {"state": "running"}
+        state.app_installation.return_value = {"state": "running"}
         state.mcp_server.side_effect = servers.get
         # "unconnected" has no chat connector at all.
         connectors = [connector(name) for name in ("down", "ready", "waiting", "stopped", "broken")]

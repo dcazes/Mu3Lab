@@ -443,7 +443,7 @@ def reconcile_lifecycle(root: Path, log) -> None:
         runtime = state.mcp_server(server.id)
         if not runtime or not runtime["enabled"] or server.status != "accepted":
             continue
-        installation = state.installation(server.service_id)
+        installation = state.app_installation(server.service_id)
         app_healthy = bool(
             installation and installation.get("state") == "running" and _healthy(registry.get(server.service_id))[0]
         )
@@ -588,7 +588,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             step_id="validate",
         )
         return
-    installation = state.installation(server.service_id)
+    installation = state.app_installation(server.service_id)
     if action != "disable" and (not installation or installation.get("state") != "running"):
         if action == "prepare" and installation and installation.get("installed_at"):
             try:

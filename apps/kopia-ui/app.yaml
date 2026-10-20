@@ -52,3 +52,13 @@ env:
   KOPIA_SERVER_CONTROL_USER: mu3lab-control
 rules:
 - rule: runs_backups
+chat:
+  assistant:
+    title: Kopia backups (admins)
+    description: Check whether each app's backups are running and up to date. Read-only.
+    instructions: Help administrators check Mu3Lab's backups. You can only read each app's backup status and the
+      backup storage; to back up now, restore or change the schedule, point them to Security & backups in the Mu3Lab
+      dashboard. Use only Kopia tools assigned to this agent.
+    audience: operators
+  connectors:
+  - kopia-reader

@@ -90,13 +90,15 @@ def needs_connect(app: App) -> bool:
     return app.manifest.chat.workspace == "lobe"
 
 
-def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
+def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False) -> list[dict[str, Any]]:
     """Everyone's assistants: one per installed app whose connector is switched on and has a ContextForge virtual server.
 
     Each is ``active`` only while its connector is live; one whose app is stopped stays, switched off.
+    Each names its ``audience``: the household, or administrators only.
 
-    With ``uid`` and ``email`` (LobeChat), each carries that person's own ContextForge key;
-    Open WebUI passes each person's Authentik sign-in instead.
+    With ``uid`` and ``email`` (LobeChat), each carries that person's own ContextForge key, and
+    administrators-only assistants are left out unless ``operator``; Open WebUI passes each
+    person's Authentik sign-in instead and keeps those assistants to its administrators.
     """
     from ctl import contextforge, contextforge_ops
     from ctl.mcp_catalog import load as load_connectors
@@ -118,7 +120,7 @@ def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
     result = []
     for app in cached().apps:
         assistant = app.manifest.chat.assistant
-        installation = state.installation(app.id)
+        installation = state.app_installation(app.id)
         if (
             not assistant
             or app.id not in live
@@ -134,7 +136,10 @@ def desired_assistants(uid: str = "", email: str = "") -> list[dict[str, Any]]:
             "instructions": assistant.instructions,
             "url": contextforge.endpoint(server_id),
             "active": active[app.id],
+            "audience": assistant.audience,
         }
+        if uid and assistant.audience == "operators" and not operator:
+            continue
         if uid and email and item["active"]:
             item["token"] = contextforge_ops.person_key(uid, email, live[app.id], server_id)
         result.append(item)

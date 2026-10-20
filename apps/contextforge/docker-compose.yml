@@ -3,8 +3,11 @@ name: mu3lab-contextforge
 services:
   contextforge:
     image: ghcr.io/ibm/mcp-context-forge:v1.0.11@sha256:e9639c030162d6cb2f9f188600dd69af8091ec62a7ce307d4a74f4d4f86873df
-    # Containers resolve this server's private name to the tailnet relay (Authentik's sign-in keys).
-    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
+    # Containers resolve this server's private name to the tailnet relay (Authentik's sign-in keys),
+    # and host.docker.internal to this computer, where Kopia's read-only chat connector listens.
+    extra_hosts:
+      - "${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     ports: ["127.0.0.1:4444:4444"]
     environment:

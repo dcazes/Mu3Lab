@@ -94,8 +94,11 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
     connectors = load_connectors(load_registry())
     report = []
     for app in cached().apps:
-        installation = state.installation(app.id)
-        if not app.manifest.chat.assistant or not installation or installation["state"] == "not_installed":
+        installation = state.app_installation(app.id)
+        assistant = app.manifest.chat.assistant
+        if not assistant or not installation or installation["state"] == "not_installed":
+            continue
+        if assistant.audience == "operators" and not operator:
             continue
         own = [connector for connector in connectors if connector.service_id == app.id]
         runtimes = [state.mcp_server(connector.id) for connector in own]

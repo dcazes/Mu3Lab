@@ -132,6 +132,20 @@ def published_ports(compose: Path) -> list[int]:
     return ports
 
 
+def _host_listen_ports(compose: Path) -> list[int]:
+    """Ports a host-network Mu3Lab adapter listens on (``MCP_LISTEN``), on loopback and Docker's host address only."""
+    ports = []
+    for definition in _services(compose).values():
+        if definition.get("network_mode") != "host":
+            continue
+        for item in str((definition.get("environment") or {}).get("MCP_LISTEN", "")).split(","):
+            host, _, port = item.strip().rpartition(":")
+            if host not in {"127.0.0.1", "@docker0"} or not port.isdigit():
+                raise CatalogError(f"{compose}: MCP_LISTEN may use 127.0.0.1 and @docker0 only, not {item!r}")
+            ports.append(int(port))
+    return ports
+
+
 def _check_compose(compose: Path, project: str) -> None:
     document = _read_yaml(compose)
     if not isinstance(document, dict) or document.get("name") != project:
@@ -139,10 +153,31 @@ def _check_compose(compose: Path, project: str) -> None:
     _check_images(compose)
 
 
+def _check_read_only(connector: Connector, directory: Path) -> None:
+    """An infrastructure connector is reviewed, and every tool its review offers only reads."""
+    from ctl.mcp_review import load as load_review
+
+    if not connector.reviewed:
+        raise CatalogError(f"{directory}: an infrastructure connector needs a review")
+    root = directory.parents[3]  # <checkout>/apps/<app>/connectors/<id>
+    try:
+        review = load_review(connector.id, str((directory / "review.yaml").relative_to(root)), root)
+    except (OSError, ValueError) as exc:
+        raise CatalogError(f"{directory}: {exc}") from None
+    writes = sorted(name for name, tool in review.tools.items() if tool.access != "read")
+    if writes:
+        raise CatalogError(f"{directory}: an infrastructure connector may only read; it offers {', '.join(writes)}")
+
+
 def _load_connectors(manifest: AppManifest, folder: Path) -> tuple[Connector, ...]:
-    if manifest.chat.connectors and (manifest.group == "infrastructure" or manifest.chat.assistant is None):
-        # Chat may use app data only; platform services (Vaultwarden, Authentik, Caddy) never get tools.
-        raise CatalogError(f"{manifest.id}: only apps with a chat assistant, never infrastructure, may have connectors")
+    assistant = manifest.chat.assistant
+    if manifest.chat.connectors and assistant is None:
+        raise CatalogError(f"{manifest.id}: only apps with a chat assistant may have connectors")
+    # Platform services (Authentik, Kopia) may only be read, and only by administrators:
+    # their assistant shows the whole server's people, sign-ins or backups.
+    infrastructure = manifest.group == "infrastructure"
+    if infrastructure and assistant is not None and assistant.audience != "operators":
+        raise CatalogError(f"{manifest.id}: an infrastructure app's assistant is for administrators only")
     connectors: list[Connector] = []
     for connector_id in manifest.chat.connectors:
         directory = folder / "connectors" / connector_id
@@ -160,6 +195,8 @@ def _load_connectors(manifest: AppManifest, folder: Path) -> tuple[Connector, ..
             raise CatalogError(f"{directory}: missing {COMPOSE_FILE}")
         if connector.reviewed and not (directory / "review.yaml").is_file():
             raise CatalogError(f"{directory}: a reviewed connector needs review.yaml")
+        if infrastructure:
+            _check_read_only(connector, directory)
         if not connector.builtin:
             _check_images(directory / COMPOSE_FILE)
         if connector.provision and not (directory / connector.provision.script).is_file():
@@ -221,7 +258,12 @@ def _check_across(apps: list[App], platform_dir: Path = PLATFORM_DIR) -> None:
                 if health != app.manifest.service.local_port:
                     raise CatalogError(f"{connector.id}: a built-in connector's local_health uses the app's port")
                 continue
-            published = published_ports(app.connector_folder(connector.id) / COMPOSE_FILE)
+            compose = app.connector_folder(connector.id) / COMPOSE_FILE
+            published = published_ports(compose)
+            if not published and health in _host_listen_ports(compose):
+                # On the host network (Kopia's reader): it publishes nothing and listens itself.
+                claim(health, f"connector {connector.id}")
+                continue
             if published != [health]:
                 raise CatalogError(
                     f"{connector.id}: its compose file publishes {published}, but local_health uses port {health}"

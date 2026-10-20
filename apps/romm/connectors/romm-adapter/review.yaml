@@ -1,0 +1,20 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: romm-adapter
+revision: 5.3.1-api
+reviewed_at: '2026-10-18'
+guidance: |
+  List the systems to get their IDs, then search games by name, optionally on one system. Use the names
+  the tools return rather than guessing; the library holds only the games the household added.
+
+categories:
+  - id: library
+    title: Game library
+    summary: List systems and collections, search games, and show one game's details.
+
+tools:
+  list_platforms: {category: library, access: read, core: true}
+  search_games: {category: library, access: read, core: true}
+  get_game: {category: library, access: read}
+  list_collections: {category: library, access: read}

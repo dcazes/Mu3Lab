@@ -69,11 +69,19 @@ the parent chat's own model and tools, so they cannot reach another assistant's 
 |---|---|---|
 | Upstream package in a pinned container | `mealie-community`, `babybuddy-official` | Our Compose project, built from a pinned release or commit |
 | Built into the app (`builtin: true`) | `outline-builtin`, `dawarich-builtin` | Nothing extra: the app joins `mu3lab_mcp_upstream` and ContextForge calls its own MCP endpoint |
-| Mu3Lab adapter | `adventurelog`, `beaver-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
+| Mu3Lab adapter | `adventurelog`, `beaver-adapter`, `audiobookshelf-adapter`, `navidrome-adapter`, `romm-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
 
 A connector can also declare fixed `headers` that ContextForge sends with its credential (Dawarich
 needs `X-Forwarded-Proto: https`). A credential script can ask for the owner's username
 (`owner_username`) or email (`owner_email`).
+
+When no script inside the app can make the credential, `provision_hook: true` has Mu3Lab make it
+instead, through `connector_credentials` in the app's `hooks.py`. Navidrome uses this: its connector
+signs in as Mu3Lab's own administrator (`mu3lab-service`), so no person's login is shared.
+
+Apps that sign people in through Authentik only (Audiobookshelf, RomM) have no password Mu3Lab could
+use, so their scripts run inside the app and make a dedicated "Mu3Lab MCP" key with the app's own code.
+RomM's token can only read the library.
 
 ## Off by default
 
@@ -81,6 +89,32 @@ Assistants are shared by the household, and their connectors use the owner's cre
 that keep each person's data private, that would share the owner's data with everyone, so those
 connectors are not switched on at install (`preferred: false`): Dawarich (location history) and
 Beaver Habits (habits). An administrator can switch them on in the dashboard.
+
+## Platform services: read-only, administrators only
+
+Infrastructure apps (`group: infrastructure`) may have a connector only if its assistant is
+`audience: operators` and every tool in its `review.yaml` only reads; the catalog refuses anything
+else. Both start switched off (`preferred: false`).
+
+| App | Tools | Credential |
+|---|---|---|
+| Authentik (`authentik-reader`) | People, groups, recent sign-in events | A `mu3lab-mcp` service account whose only role views users, groups and events (blueprint in `ctl/authentik_blueprints.py`) |
+| Kopia (`kopia-reader`) | Each app's backup status, the backup storage | Mu3Lab's `mu3lab-control` login; the adapter calls only the two read routes |
+
+Open WebUI keeps them to its administrators: a tool connection with no grants is admin-only, and the
+assistant is granted to each administrator by ID (administrators do not see everything there). The
+main assistant does not list them, and LobeChat gives them to operators only. Foundation services
+such as Authentik have no install record, so connector code treats them as installed and running
+(`ControlState.app_installation`).
+
+Kopia's server listens on loopback only, so its adapter runs on the host network and listens on
+loopback and on `docker0` (`MCP_LISTEN`); ContextForge reaches it as `host.docker.internal`.
+
+Caddy (ingress) has none: its admin API is switched off, so there is nothing to read. Vaultwarden is
+not offered either.
+
+Where only some tools touch one person's data, the connector is on but those tools start off
+(`default_on: false` in its `review.yaml`): Audiobookshelf's listening progress and listening time.
 
 ## Adding a connector for an app without one
 

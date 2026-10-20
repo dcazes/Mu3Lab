@@ -1,0 +1,27 @@
+name: mu3lab-mcp-navidrome-adapter
+services:
+  navidrome-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      MCP_APP: navidrome
+      APP_URL: http://navidrome:4533
+      NAVIDROME_USERNAME: mu3lab-service
+      NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD:?NAVIDROME_PASSWORD is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8827:8080
+    # Navidrome sits on a network of its own (it trusts the sign-in header Caddy sends);
+    # the adapter joins it and never sends that header.
+    networks:
+    - navidrome
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-navidrome-adapter:development
+networks:
+  navidrome:
+    name: mu3lab-navidrome_navidrome
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

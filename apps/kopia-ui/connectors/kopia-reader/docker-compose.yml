@@ -1,0 +1,19 @@
+name: mu3lab-mcp-kopia-reader
+services:
+  kopia-mcp:
+    build: .
+    restart: 'no'
+    # Kopia's server listens on 127.0.0.1:51515 only (apps/kopia-ui/docker-compose.yml).
+    network_mode: host
+    environment:
+      MCP_APP: kopia
+      APP_URL: http://127.0.0.1:51515
+      MCP_LISTEN: 127.0.0.1:8830,@docker0:8830
+      KOPIA_USERNAME: mu3lab-control
+      KOPIA_PASSWORD: ${KOPIA_PASSWORD:?KOPIA_PASSWORD is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-kopia-reader:development

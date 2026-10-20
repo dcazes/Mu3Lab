@@ -162,6 +162,33 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(all(item["status"] == "failed" for item in checks.values()))
         self.assertIn("none are switched on", empty["outline"]["detail"])
 
+    def test_an_administrators_only_assistant_is_kept_from_everyone_else(self):
+        fake = FakeOpenWebUI()
+        users = [{"id": "a1", "role": "admin"}, {"id": "m1", "role": "user"}, {"id": "a2", "role": "admin"}]
+        plain = fake.handler
+        fake.handler = lambda request: (
+            httpx.Response(200, json={"users": users}) if request.url.path == "/api/v1/users/all" else plain(request)
+        )
+        admins_only = {**ASSISTANT, "id": "kopia-ui", "title": "Kopia backups", "audience": "operators"}
+        with OpenWebUI("http://owui", "sk-key", transport=httpx.MockTransport(fake.handler)) as api:
+            api.ensure([ASSISTANT, admins_only])
+            connections = {item["info"]["id"]: item for item in fake.connections}
+            # No grants on a tool connection is Open WebUI's own "administrators only".
+            self.assertEqual(connections["mu3lab-app-kopia-ui"]["config"]["access_grants"], [])
+            self.assertEqual(
+                [grant["principal_id"] for grant in fake.models["mu3lab-app-kopia-ui"]["access_grants"]], ["a1", "a2"]
+            )
+            # The main assistant is everyone's, so it does not mention it.
+            self.assertNotIn("Kopia", fake.models["mu3lab-assistant"]["params"]["system"])
+            self.assertIn("Mealie", fake.models["mu3lab-assistant"]["params"]["system"])
+            self.assertEqual(api.check([admins_only], "cf-token")["kopia-ui"]["status"], "ready")
+            fake.models["mu3lab-app-kopia-ui"]["access_grants"] = fake.models["mu3lab-app-mealie"]["access_grants"]
+            shared = api.check([admins_only], "cf-token")["kopia-ui"]
+        self.assertEqual(
+            (shared["status"], shared["detail"]),
+            ("failed", "Open WebUI offers this administrators-only assistant to everyone."),
+        )
+
     def test_the_main_assistant_is_every_new_chats_model(self):
         compose = (Path(__file__).resolve().parents[1] / "apps/open-webui/docker-compose.yml").read_text()
         self.assertIn("DEFAULT_MODELS: mu3lab-assistant", compose)
@@ -223,6 +250,7 @@ class ReportTests(unittest.TestCase):
         }
         state = Mock()
         state.installation.return_value = {"state": "running"}
+        state.app_installation.return_value = {"state": "running"}
         state.mcp_server.side_effect = servers.get
         connectors = [Mock(id=name + "-mcp", service_id=name) for name in ("ready", "stopped", "broken", "down", "new")]
         record = {

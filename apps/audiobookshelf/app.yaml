@@ -81,3 +81,12 @@ mobile:
     - Use the browser menu to add it to the Home Screen.
 resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups leave out.
 setup_action: Install Audiobookshelf to listen to your audiobooks and podcasts anywhere.
+chat:
+  assistant:
+    title: Audiobookshelf
+    description: Find audiobooks and podcasts, and see what's being listened to.
+    instructions: Help with the household's Audiobookshelf library. List the libraries before searching one, and use
+      the titles and authors the tools return. Progress and listening time are the owner's. Use only Audiobookshelf
+      tools assigned to this agent.
+  connectors:
+  - audiobookshelf-adapter

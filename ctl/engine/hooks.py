@@ -130,6 +130,13 @@ class AppHooks:
         """
         return None
 
+    def connector_credentials(self, app: App, connector_id: str, paths: RuntimePaths) -> dict[str, str]:
+        """Mint a connector's credentials through the app's API (connector ``provision_hook``).
+
+        Returns ``{credential key: value}``; raise ``RuntimeError`` with a safe sentence when the app refuses.
+        """
+        raise RuntimeError(f"{app.manifest.name} cannot create this chat credential.")
+
 
 def load_app_hooks(app: App) -> AppHooks:
     """Import ``apps/<id>/hooks.py`` by path; an app without one gets the empty defaults."""

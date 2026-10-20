@@ -4,7 +4,8 @@ Mu3Lab keeps two things in step: the tool connections (one MCP connection per
 app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
 app's assistant, plus the main assistant every new chat starts with. All are
-shared by everyone. An app that is stopped keeps its assistant switched off
+shared by everyone, except an infrastructure app's read-only assistant, which only
+Open WebUI's administrators see. An app that is stopped keeps its assistant switched off
 (out of the model menu, settings kept) rather than deleted; ``check`` then
 asks Open WebUI itself whether each one is set up and its tools answer. It also hides the AI gateway's own names from the model
 menu (``HIDDEN``). Connections and models Mu3Lab did not create are never
@@ -36,6 +37,18 @@ class ChatError(RuntimeError):
 
 # Readable by every Open WebUI user; ContextForge decides what each person may do.
 EVERYONE = [{"principal_type": "user", "principal_id": "*", "permission": "read"}]
+# A tool connection with no grants is Open WebUI's own "administrators only" (has_connection_access);
+# an administrators-only assistant is granted to each administrator by name instead, because
+# administrators do not see everything here (BYPASS_ADMIN_ACCESS_CONTROL is off).
+ADMINS_ONLY: list[dict[str, str]] = []
+
+
+def grants_for(user_ids: list[str]) -> list[dict[str, str]]:
+    return [{"principal_type": "user", "principal_id": uid, "permission": "read"} for uid in sorted(user_ids)]
+
+
+def operators_only(item: dict[str, Any]) -> bool:
+    return item.get("audience") == "operators"
 
 
 class OpenWebUI:
@@ -67,6 +80,10 @@ class OpenWebUI:
         data = self.request("GET", "/api/v1/users/all")
         return list((data or {}).get("users") or []) if isinstance(data, dict) else list(data or [])
 
+    def admin_ids(self) -> list[str]:
+        """Open WebUI's administrators: Authentik's operators, as of their last sign-in (OAUTH_ADMIN_ROLES)."""
+        return [str(user["id"]) for user in self.users() if user.get("role") == "admin" and user.get("id")]
+
     def connections(self) -> list[dict[str, Any]]:
         data = self.request("GET", "/api/v1/configs/tool_servers") or {}
         return list(data.get("TOOL_SERVER_CONNECTIONS") or [])
@@ -95,10 +112,12 @@ class OpenWebUI:
         """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
+        admins = grants_for(self.admin_ids()) if any(operators_only(item) for item in assistants) else []
         for item in assistants:
             server_id = f"{PREFIX}{item['id']}"
             # Switched off while its app is stopped: kept, but out of the menu and unreachable.
             active = bool(item.get("active", True))
+            restricted = operators_only(item)
             wanted_connections.append(
                 {
                     "url": item["url"],
@@ -107,7 +126,7 @@ class OpenWebUI:
                     # Each person's own Authentik sign-in, which ContextForge trusts.
                     "auth_type": "system_oauth",
                     "key": "",
-                    "config": {"enable": active, "access_grants": EVERYONE},
+                    "config": {"enable": active, "access_grants": ADMINS_ONLY if restricted else EVERYONE},
                     "info": {"id": server_id, "name": item["title"], "description": item["description"]},
                 }
             )
@@ -121,7 +140,7 @@ class OpenWebUI:
                     "capabilities": {"function_calling": True},
                 },
                 "params": {"system": item["instructions"], "function_calling": "native"},
-                "access_grants": EVERYONE,
+                "access_grants": admins if restricted else EVERYONE,
                 "is_active": active,
             }
 
@@ -132,7 +151,9 @@ class OpenWebUI:
         others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
-        self.save_model(main_model([item for item in assistants if item.get("active", True)]), exists=MAIN in existing)
+        # The main assistant is everyone's, so it names only the household's assistants.
+        listed = [item for item in assistants if item.get("active", True) and not operators_only(item)]
+        self.save_model(main_model(listed), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
         for model_id, model in wanted_models.items():
@@ -163,6 +184,10 @@ class OpenWebUI:
                 f"server:mcp:{server_id}"
             ]:
                 result["detail"] = "Open WebUI's assistant does not point at this app's tools."
+            elif operators_only(item) and (
+                (connection.get("config") or {}).get("access_grants") or _public(model.get("access_grants"))
+            ):
+                result["detail"] = "Open WebUI offers this administrators-only assistant to everyone."
             elif (
                 bool((connection.get("config") or {}).get("enable")) != active or bool(model.get("is_active")) != active
             ):
@@ -187,6 +212,14 @@ class OpenWebUI:
                         )
             results[item["id"]] = result
         return results
+
+
+def _public(grants: Any) -> bool:
+    """Whether a model's grants let every Open WebUI user read it."""
+    return any(
+        isinstance(grant, dict) and grant.get("principal_type") == "user" and grant.get("principal_id") == "*"
+        for grant in grants or []
+    )
 
 
 def hidden_model(model_id: str) -> dict[str, Any]:

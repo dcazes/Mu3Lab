@@ -483,3 +483,49 @@ entries:
     identifiers:
       name: Mu3Lab {name} provider
 {extra}"""
+
+
+CHAT_READER = "mu3lab-mcp"
+CHAT_READER_BLUEPRINT = "Mu3Lab chat read-only access"
+CHAT_READER_PERMISSIONS = ("authentik_core.view_user", "authentik_core.view_group", "authentik_events.view_event")
+_TOKEN_KEY = re.compile(r"[A-Za-z0-9_-]{40,128}")
+
+
+def render_chat_reader_blueprint(key: str) -> str:
+    """A service account that can only view people, groups and sign-in events, with an API token ``key``.
+
+    The administrators-only Authentik assistant uses it; it cannot sign in, and its role grants
+    nothing beyond viewing. Applying it again replaces the token's key.
+    """
+    if not _TOKEN_KEY.fullmatch(key):
+        raise ValueError("The chat token for Authentik is not a plain random key.")
+    permissions = "".join(f"\n        - {permission}" for permission in CHAT_READER_PERMISSIONS)
+    return f"""# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
+version: 1
+metadata:
+  name: {CHAT_READER_BLUEPRINT}
+entries:
+  - model: authentik_rbac.role
+    identifiers:
+      name: Mu3Lab chat read-only
+    attrs:
+      permissions:{permissions}
+  - model: authentik_core.user
+    identifiers:
+      username: {CHAT_READER}
+    attrs:
+      name: Mu3Lab chat (read-only)
+      type: service_account
+      is_active: true
+      roles:
+        - !Find [authentik_rbac.role, [name, Mu3Lab chat read-only]]
+  - model: authentik_core.token
+    identifiers:
+      identifier: {CHAT_READER}-read-only
+    attrs:
+      user: !Find [authentik_core.user, [username, {CHAT_READER}]]
+      intent: api
+      expiring: false
+      description: Mu3Lab's administrators-only chat assistant reads people, groups and sign-in events.
+      key: {quote(key)}
+"""

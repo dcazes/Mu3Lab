@@ -1,0 +1,27 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Navidrome has no maintained MCP server; Mu3Lab's small adapter calls its Subsonic API (/rest).
+id: navidrome-adapter
+name: Navidrome MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://github.com/navidrome/navidrome
+revision: v0.64.2-subsonic
+transport: streamable-http
+endpoint: http://navidrome-mcp:8080/mcp
+local_health: http://127.0.0.1:8827/health
+credentials:
+- key: password
+  env: NAVIDROME_PASSWORD
+  type: secret
+  label: Navidrome password for mu3lab-service
+  required: true
+provision_hook: true
+provision_note: Uses Mu3Lab's own Navidrome administrator (mu3lab-service), so no person's login is shared.
+review_note: Mu3Lab adapter with six tools, searching the shared music library, listing albums and playlists, and
+  creating playlists. Playlists it creates belong to Mu3Lab's account and are public, so the whole household sees them.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

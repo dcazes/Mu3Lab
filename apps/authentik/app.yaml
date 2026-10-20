@@ -25,3 +25,13 @@ sign_in:
   method: local
   session_provider: true
 setup_action: Create the Authentik administrator and Mu3Lab application.
+chat:
+  assistant:
+    title: Authentik (admins)
+    description: Look up who can sign in and recent sign-in activity. Read-only.
+    instructions: Help administrators check Mu3Lab's sign-in service. You can only read people, groups and sign-in
+      events; to change anyone, point them to the People page in the Mu3Lab dashboard. Use only Authentik tools
+      assigned to this agent.
+    audience: operators
+  connectors:
+  - authentik-reader

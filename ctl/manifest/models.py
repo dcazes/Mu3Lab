@@ -295,6 +295,9 @@ class Assistant(Model):
     title: str
     description: str
     instructions: str
+    # Who may use it: the whole household, or administrators only (an infrastructure app's
+    # read-only assistant, which shows the whole server's people, sign-ins or backups).
+    audience: Literal["household", "operators"] = "household"
 
 
 class Chat(Model):
@@ -360,6 +363,9 @@ class Connector(Model):
     local_health: HttpUrl
     credentials: tuple[CredentialField, ...] = ()
     provision: CredentialScript | None = None
+    # Or Mu3Lab mints the credential itself, through the app's API with a login Mu3Lab already
+    # holds (``connector_credentials`` in apps/<id>/hooks.py), when no script inside the app can.
+    provision_hook: bool = False
     provision_note: str = ""
     review_note: str = ""
     secrets: tuple[Secret, ...] = ()
@@ -374,9 +380,15 @@ class Connector(Model):
     # that redirects plain HTTP because it expects to sit behind an HTTPS proxy.
     headers: dict[str, str] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _one_provisioner(self) -> Connector:
+        if self.provision is not None and self.provision_hook:
+            raise ValueError("a connector is provisioned by a script or by its app's hooks, not both")
+        return self
+
     @property
     def auto_provision(self) -> bool:
-        return self.provision is not None
+        return self.provision is not None or self.provision_hook
 
 
 # --- Phones -----------------------------------------------------------------------------

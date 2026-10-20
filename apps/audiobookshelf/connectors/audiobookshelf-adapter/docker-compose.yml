@@ -1,0 +1,23 @@
+name: mu3lab-mcp-audiobookshelf-adapter
+services:
+  audiobookshelf-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      MCP_APP: audiobookshelf
+      APP_URL: http://audiobookshelf:80
+      ABS_API_KEY: ${ABS_API_KEY:?ABS_API_KEY is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8826:8080
+    networks:
+    - mu3lab_frontend
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-audiobookshelf-adapter:development
+networks:
+  mu3lab_frontend:
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

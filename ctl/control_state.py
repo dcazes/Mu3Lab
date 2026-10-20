@@ -300,6 +300,22 @@ class ControlState:
             )
         return self.service_identity(service_id) or {}
 
+    def app_installation(self, service_id: str) -> dict[str, Any] | None:
+        """``installation``, or, for a foundation service (Authentik), which the installer sets up
+        and nobody installs or stops, a record that it is installed and running."""
+        found = self.installation(service_id)
+        if found is not None:
+            return found
+        from ctl.manifest.catalog import CatalogError, cached
+
+        try:
+            foundation = cached().get(service_id).manifest.tier == "foundation"
+        except (CatalogError, KeyError):
+            return None
+        if not foundation:
+            return None
+        return {"service_id": service_id, "state": "running", "installed_at": "foundation"}
+
     def installation(self, service_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM service_installations WHERE service_id = ?", (service_id,)).fetchone()

@@ -29,8 +29,11 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
     connectors = load_connectors(load_registry())
     report = []
     for app in cached().apps:
-        installation = state.installation(app.id)
-        if not app.manifest.chat.assistant or not installation or installation["state"] == "not_installed":
+        installation = state.app_installation(app.id)
+        assistant = app.manifest.chat.assistant
+        if not assistant or not installation or installation["state"] == "not_installed":
+            continue
+        if assistant.audience == "operators" and not operator:
             continue
         own = [connector for connector in connectors if connector.service_id == app.id]
         runtimes = [state.mcp_server(connector.id) for connector in own]
@@ -80,7 +83,7 @@ def _sync_agents(log) -> tuple[bool, str]:
         installed = {
             app.id
             for app in cached().apps
-            if (record := state.installation(app.id))
+            if (record := state.app_installation(app.id))
             and record.get("installed_at")
             and record["state"] != "not_installed"
         }
@@ -95,7 +98,11 @@ def _sync_agents(log) -> tuple[bool, str]:
         # One person's revoked key or failed request must not stop everyone else's assistants.
         try:
             person = people.get(uid)
-            desired = chat_ops.desired_assistants(uid, person["email"]) if person and person["email"] else []
+            desired = (
+                chat_ops.desired_assistants(uid, person["email"], operator=bool(person.get("operator")))
+                if person and person["email"]
+                else []
+            )
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
             chat_connections.save(uid, {**record, "managed": managed, "error": ""}, paths)

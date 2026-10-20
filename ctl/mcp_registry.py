@@ -35,7 +35,7 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
         manage = f"{origin}/admin/#catalog" if origin else ""
     for server in load_catalog(registry):
         service = services[server.service_id]
-        installation = persisted.installation(service.id) if persisted else None
+        installation = persisted.app_installation(service.id) if persisted else None
         # MCP is an enhancement for an application the operator has actually
         # installed, never an alternate application installer.
         if not installation or not installation.get("installed_at"):

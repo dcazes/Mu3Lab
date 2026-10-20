@@ -1,0 +1,35 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# RomM has no maintained MCP server; Mu3Lab's small adapter calls its REST API (/api).
+id: romm-adapter
+name: RomM MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://github.com/rommapp/romm
+revision: 5.3.1-api
+transport: streamable-http
+endpoint: http://romm-mcp:8080/mcp
+local_health: http://127.0.0.1:8828/health
+credentials:
+- key: api_token
+  env: ROMM_API_TOKEN
+  type: secret
+  label: RomM client API token
+  required: true
+  prefix: rmm_
+provision:
+  service: romm
+  script: provision.py
+  interpreter:
+  - python
+  - '-'
+  owner_username: true
+provision_note: Creates a read-only "Mu3Lab MCP" client API token for the owner's RomM account (Settings, Client API
+  tokens). The owner must have opened RomM once.
+review_note: Mu3Lab adapter with four read-only tools, listing systems and collections, searching games and showing one
+  game's details. Its token can only read the library, so it cannot change or delete anything.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

@@ -131,7 +131,7 @@ def queue_action(server_id: str, action: str, request: Request, operator: Operat
         raise ApiError(409, "no reviewed MCP update is available")
     if action == "prepare":
         control = ControlState.runtime()
-        installation = control.installation(server.service_id) if control else None
+        installation = control.app_installation(server.service_id) if control else None
         if not installation or not installation.get("installed_at"):
             raise ApiError(409, "install the application before preparing its MCP")
     elif service_states(operator).get(server.service_id) not in {"ready", "running", "degraded"}:
