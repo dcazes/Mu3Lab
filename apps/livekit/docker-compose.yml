@@ -46,7 +46,7 @@ services:
       # point these at http://ollama:11434/v1 and http://speaches:8000/v1 (see README.md).
       MU3LAB_LLM_BASE_URL: http://litellm:4000/v1
       MU3LAB_LLM_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
-      MU3LAB_LLM_MODEL: mu3lab-local
+      MU3LAB_LLM_MODEL: mu3lab-voice
       MU3LAB_SPEECH_URL: http://litellm:4000/v1
       MU3LAB_STT_MODEL: mu3lab-stt
       MU3LAB_TTS_MODEL: mu3lab-tts

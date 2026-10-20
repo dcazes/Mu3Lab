@@ -244,7 +244,7 @@ class GatewayKeyTests(unittest.TestCase):
         self.assertIn(("delete", ["mu3lab-app-livekit"]), FakeLiteLLM.calls)
         generated = FakeLiteLLM.calls[-1][1]
         self.assertEqual(generated["key"], "sk-abc123")
-        self.assertEqual(generated["models"], ["mu3lab-local", "mu3lab-stt", "mu3lab-tts"])
+        self.assertEqual(generated["models"], ["mu3lab-voice", "mu3lab-stt", "mu3lab-tts"])
         self.assertEqual(generated["alias"], "mu3lab-app-livekit")
 
     def test_refuses_a_key_litellm_would_reject(self):

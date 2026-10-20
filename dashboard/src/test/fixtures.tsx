@@ -125,6 +125,14 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
       changed_by: '',
       ...settings,
     },
+    // Voice matches chat until the owner saves a voice choice.
+    voice: {
+      privacy: settings.privacy ?? 'outside_allowed',
+      model: settings.chat_model ?? '',
+      matches_chat: true,
+      changed_at: '',
+      changed_by: '',
+    },
     chat_models: [model('qwen3.5-4b', 'Qwen 3.5 4B'), model('qwen3-8b', 'Qwen3 8B', { downloaded: true })],
     embedding_models: [
       model('bge-m3', 'BGE-M3', { dimensions: 1024, downloaded: true }),

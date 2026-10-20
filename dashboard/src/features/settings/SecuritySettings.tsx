@@ -2,7 +2,7 @@ import { FolderSearch, KeyRound, ShieldAlert, ShieldCheck } from 'lucide-react';
 import type { BackupProtection, PlatformBackupStatus } from '../../api';
 import { ExternalButton, LinkButton } from '../../components/Button';
 import { Callout, Card, Collapsible, Facts, PageHeader } from '../../components/Layout';
-import { Badge, Dot } from '../../components/Status';
+import { Badge } from '../../components/Status';
 import { relativeTime } from '../../lib/format';
 import { BACKUP_APP_ID, backupsOn, launchTarget } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
@@ -97,34 +97,13 @@ export function SecuritySettings() {
   const { identity, audit } = data;
   return (
     <>
-      <PageHeader title="Security & backups" description="Who can manage Mu3Lab and how your data is protected." />
-      <Card title="Your access">
-        <Facts
-          items={[
-            { label: 'Signed in as', value: identity.display_name || identity.username || '—' },
-            { label: 'Email', value: identity.email || '—' },
-            {
-              label: 'Role',
-              value: identity.is_admin ? (
-                <Badge tone="green">Administrator</Badge>
-              ) : identity.writes_enabled ? (
-                <Badge>Household member</Badge>
-              ) : (
-                <Badge>Read only</Badge>
-              ),
-            },
-            {
-              label: 'Protection',
-              value: (
-                <span className="inline">
-                  <Dot tone={identity.writes_enabled ? 'green' : 'amber'} />
-                  {identity.writes_enabled ? 'Tailscale + Authentik verified' : identity.detail}
-                </span>
-              ),
-            },
-          ]}
-        />
-      </Card>
+      <PageHeader title="Security & backups" description="How your data is protected, and what has been changed." />
+      {/* Who is signed in is in the user menu; this page speaks up only when protection is not verified. */}
+      {!identity.writes_enabled && (
+        <Callout tone="warning" icon={ShieldAlert} title="Sign-in protection is not verified">
+          {identity.detail}
+        </Callout>
+      )}
       <BackupsCard />
       <Collapsible title={`Audit log${audit.available ? ` (${audit.events.length})` : ''}`}>
         {audit.events.length ? (

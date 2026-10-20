@@ -2,7 +2,9 @@
 
 Memory is read from each container's cgroup: the same figure ``docker stats``
 shows (usage less reclaimable page cache), without its one-second sample, so
-the status loop reads it every few seconds for next to nothing.
+the status loop reads it every few seconds for next to nothing. Graphics memory
+(NVIDIA) comes from ``nvidia-smi``: each process on the GPU is matched to its
+container through its cgroup.
 
 Disk is slower to measure, so the worker measures it once a day and right after
 an app is installed, updated or removed. An app's disk is its data (its
@@ -176,6 +178,68 @@ def memory(
     parts[OWN_PART] += own
     nonzero = lambda values: {key: value for key, value in values.items() if value}  # noqa: E731
     return by_name, nonzero(by_owner), nonzero(parts)
+
+
+# ---------------------------------------------------------------- graphics memory
+
+_DOCKER_SCOPE = re.compile(r"docker-([0-9a-f]{64})\.scope|/docker/([0-9a-f]{64})")
+
+
+def _nvidia(argv: list[str], run) -> list[list[str]]:
+    """Rows of an nvidia-smi CSV query (no header, no units); [] when it cannot answer."""
+    try:
+        proc = run(["nvidia-smi", *argv, "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=4)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    return [[cell.strip() for cell in line.split(",")] for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _pid_container(pid: str, proc_root: Path = Path("/proc")) -> str:
+    """The id of the container a host process runs in, from its cgroup; "" when it is not in one."""
+    try:
+        text = (proc_root / pid / "cgroup").read_text()
+    except OSError:
+        return ""
+    match = _DOCKER_SCOPE.search(text)
+    return (match.group(1) or match.group(2)) if match else ""
+
+
+def gpu_memory(
+    registry, root: Path, run=process.completed, paths: RuntimePaths | None = None, proc_root: Path = Path("/proc")
+) -> dict[str, Any] | None:
+    """Graphics memory of NVIDIA GPUs (all cards added up), in bytes, and how much each owner uses.
+
+    None without an NVIDIA GPU. Use that is not a Mu3Lab container (the desktop, other programs)
+    is left out of ``by_owner``, as for memory.
+    """
+    cards = _nvidia(["--query-gpu=name,memory.total,memory.used"], run)
+    sizes = [row for row in cards if len(row) == 3 and row[1].isdigit() and row[2].isdigit()]
+    if not sizes:
+        return None
+    mib = 1024**2
+    by_owner: dict[str, int] = defaultdict(int)
+    parts: dict[str, int] = defaultdict(int)
+    users = [row for row in _nvidia(["--query-compute-apps=pid,used_memory"], run) if len(row) == 2]
+    if users:
+        owner = owners(registry, root, paths, split_core=True)
+        folders = {container_id: working_dir for container_id, _name, working_dir in _containers(run)}
+        for pid, used in users:
+            container_id = _pid_container(pid, proc_root)
+            who = owner(folders.get(container_id, "")) if container_id else ""
+            if not who or not used.isdigit():
+                continue
+            by_owner[_fold(who)] += int(used) * mib
+            if core_part(who):
+                parts[core_part(who)] += int(used) * mib
+    return {
+        "name": ", ".join(dict.fromkeys(row[0] for row in sizes)),
+        "total": sum(int(row[1]) for row in sizes) * mib,
+        "used": sum(int(row[2]) for row in sizes) * mib,
+        "by_owner": dict(by_owner),
+        "by_core_part": dict(parts),
+    }
 
 
 # ---------------------------------------------------------------- disk

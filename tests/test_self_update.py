@@ -112,6 +112,45 @@ class HistoryTests(_Checkout):
         self.assertEqual(releases[0]["version"], "")
         self.assertEqual(releases[0]["changes"], ["first"])
 
+    def test_changes_are_grouped_by_the_development_they_came_with(self):
+        git(self.copy, "tag", "--delete", "v1.0.1")
+        work = self.copy / "file.txt"
+
+        def change(message: str) -> None:
+            work.write_text(message, encoding="utf-8")
+            git(self.copy, "commit", "--quiet", "-am", message)
+
+        git(self.copy, "checkout", "--quiet", "-b", "fix/sign-in-sync")
+        change("fix(rules): skip account sync while stopped")
+        change("test(rules): stopped apps")
+        git(self.copy, "checkout", "--quiet", "main")
+        git(
+            self.copy,
+            "merge",
+            "--quiet",
+            "--no-ff",
+            "fix/sign-in-sync",
+            "-m",
+            "Merge pull request #12 from dcazes/fix/sign-in-sync",
+            "-m",
+            "fix(rules): stopped-app account sync",
+        )
+        git(self.copy, "checkout", "--quiet", "-b", "feature/livekit-voice")
+        change("feat(livekit): voice assistant app")
+        developments = self_update.history(self.copy)[0]["developments"]
+        # Newest first: the current branch's own commits, the merged pull request, then what came before.
+        self.assertEqual(
+            [(item["title"], item["branch"]) for item in developments],
+            [
+                ("Livekit voice", "feature/livekit-voice"),
+                ("Stopped-app account sync", "fix/sign-in-sync"),
+                ("Smaller changes", ""),
+            ],
+        )
+        self.assertEqual(
+            developments[1]["changes"], ["test(rules): stopped apps", "fix(rules): skip account sync while stopped"]
+        )
+
 
 class UpdateTests(_Checkout):
     def setUp(self):

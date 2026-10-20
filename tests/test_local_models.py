@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -37,7 +38,7 @@ class FakeEngine:
     def has(self, model, present) -> bool:
         return model.id in present
 
-    def pull(self, model, _log) -> None:
+    def pull(self, model, _log, _progress=None) -> None:
         self.present.add(model.id)
 
     def delete(self, model) -> None:
@@ -185,6 +186,40 @@ class RunnerChoiceTests(unittest.TestCase):
                 patch("ctl.model_runners.ControlState.runtime", return_value=None),
             ):
                 self.assertEqual(model_runners.effective(chosen).id, expected)
+
+
+class OllamaPullTests(unittest.TestCase):
+    def test_progress_adds_up_every_layer_and_never_goes_back(self):
+        model = local_models.CHAT_BY_ID["qwen3.5-2b"]
+        expected = int(model.download_gb * 1e9)
+        # Ollama streams one line per layer update; the small layers come after the big one.
+        lines = [
+            {"status": "pulling manifest"},
+            {"status": "pulling", "digest": "a", "total": expected - 2000, "completed": 0},
+            {"status": "pulling", "digest": "a", "total": expected - 2000, "completed": expected // 2},
+            {"status": "pulling", "digest": "a", "total": expected - 2000, "completed": expected - 2000},
+            {"status": "pulling", "digest": "b", "total": 3000, "completed": 3000},
+            {"status": "success"},
+        ]
+        body = [(json.dumps(line) + "\n").encode() for line in lines]
+
+        class Response:
+            def __enter__(self):
+                return iter(body)
+
+            def __exit__(self, *_exc):
+                return False
+
+        engine = model_runners.OllamaEngine(
+            SimpleNamespace(id="ollama", manifest=SimpleNamespace(service=SimpleNamespace(local_port=11434))), None
+        )
+        seen: list[tuple[int, int]] = []
+        with patch("urllib.request.urlopen", return_value=Response()):
+            engine.pull(model, lambda _line: None, lambda done, total: seen.append((done, total)))
+        # The reviewed size is the floor for the total until the layers add up to more.
+        self.assertEqual(seen[0], (0, expected))
+        self.assertEqual(seen[-1], (expected + 1000, expected + 1000))
+        self.assertEqual([done for done, _ in seen], sorted(done for done, _ in seen))
 
 
 class JobTests(_Runtime):

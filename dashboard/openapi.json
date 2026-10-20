@@ -92,11 +92,15 @@
           },
           "settings": {
             "$ref": "#/components/schemas/AiModelSettings"
+          },
+          "voice": {
+            "$ref": "#/components/schemas/AiVoiceSettings"
           }
         },
         "required": [
           "ok",
           "settings",
+          "voice",
           "chat_models",
           "embedding_models",
           "runner",
@@ -141,6 +145,67 @@
           "embedding_model"
         ],
         "title": "AiModelsRequest",
+        "type": "object"
+      },
+      "AiVoiceRequest": {
+        "properties": {
+          "model": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Model",
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "outside_allowed",
+              "local_only"
+            ],
+            "title": "Privacy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "privacy"
+        ],
+        "title": "AiVoiceRequest",
+        "type": "object"
+      },
+      "AiVoiceSettings": {
+        "description": "Where the voice assistant's answers come from, independent of chat.",
+        "properties": {
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "string"
+          },
+          "matches_chat": {
+            "title": "Matches Chat",
+            "type": "boolean"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "outside_allowed",
+              "local_only"
+            ],
+            "title": "Privacy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "privacy",
+          "model",
+          "matches_chat",
+          "changed_at",
+          "changed_by"
+        ],
+        "title": "AiVoiceSettings",
         "type": "object"
       },
       "ApiErrorResponse": {
@@ -2161,6 +2226,44 @@
         "title": "DismissedResponse",
         "type": "object"
       },
+      "GpuMemory": {
+        "description": "Graphics memory of the NVIDIA GPUs, all cards added up, in bytes.",
+        "properties": {
+          "by_core_part": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "By Core Part",
+            "type": "object"
+          },
+          "by_owner": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "By Owner",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          },
+          "used": {
+            "title": "Used",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "total",
+          "used"
+        ],
+        "title": "GpuMemory",
+        "type": "object"
+      },
       "Health": {
         "properties": {
           "ok": {
@@ -3662,6 +3765,38 @@
         "title": "Mu3LabChangelog",
         "type": "object"
       },
+      "Mu3LabDevelopment": {
+        "description": "One merged branch or pull request (or a run of direct commits) inside a release.",
+        "properties": {
+          "branch": {
+            "default": "",
+            "title": "Branch",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "date",
+          "changes"
+        ],
+        "title": "Mu3LabDevelopment",
+        "type": "object"
+      },
       "Mu3LabRelease": {
         "description": "One release's changes; a development copy has no version.",
         "properties": {
@@ -3680,6 +3815,13 @@
           "date": {
             "title": "Date",
             "type": "string"
+          },
+          "developments": {
+            "items": {
+              "$ref": "#/components/schemas/Mu3LabDevelopment"
+            },
+            "title": "Developments",
+            "type": "array"
           },
           "version": {
             "title": "Version",
@@ -6262,6 +6404,16 @@
             "title": "Docker Ready",
             "type": "boolean"
           },
+          "gpu": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GpuMemory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "memory": {
             "$ref": "#/components/schemas/Metric"
           },
@@ -7155,6 +7307,108 @@
           }
         },
         "summary": "Change Ai Models",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/voice": {
+      "put": {
+        "description": "Queue the voice assistant's change: a local model downloads and is checked before voice switches over.",
+        "operationId": "change_voice_api_v1_ai_voice_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Change Voice",
         "tags": [
           "ai"
         ]

@@ -126,6 +126,7 @@ def _load_all() -> None:
         hide_model_providers,
         initial_owner_guard,
         needs_embedding_model,
+        needs_voice_model,
         password_login_off_after_setup,
         per_person_accounts,
         per_person_logins,

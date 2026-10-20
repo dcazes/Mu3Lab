@@ -61,54 +61,6 @@
   margin: 0 20px 12px;
 }
 
-.route {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  counter-reset: route;
-}
-
-.route-step {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-
-.route-step:hover {
-  border-color: var(--border-strong);
-}
-
-.route-step > span:nth-child(2) {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-}
-
-.route-step small {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.route-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-2);
-  font-size: 12px;
-}
-
-.route-state .dot {
-  box-shadow: none;
-}
-
 .credential {
   border-bottom: 1px solid var(--border);
 }
@@ -159,11 +111,65 @@
   box-shadow: none;
 }
 
-.assistant-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* A model change in progress: the current step, a download bar while a model downloads, the log. */
+.model-job {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.model-job-step {
   margin: 0;
-  padding-left: 18px;
   color: var(--text-2);
+  font-size: 13px;
+}
+
+/* What's new: each development in a release folds open on its own. */
+.developments {
+  display: grid;
+  gap: 8px;
+}
+
+.developments .collapsible > summary {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.development-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}
+
+.developments .collapsible > summary small {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* The Providers card's lower half: providers to add. */
+.provider-add {
+  border-top: 1px solid var(--border);
+}
+
+.provider-add-header {
+  padding: 16px 20px 4px;
+}
+
+.provider-add-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.provider-add-header p {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* Where chat or voice runs now, above its choices. */
+.model-where {
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-size: 13px;
 }

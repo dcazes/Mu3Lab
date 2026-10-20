@@ -42,6 +42,8 @@ def observe_system(registry=None, root: Path | None = None) -> dict:
     by_name, by_owner, core_parts = (
         resource_usage.memory(registry, root) if docker and registry is not None and root else ({}, {}, {})
     )
+    # None without an NVIDIA GPU (nvidia-smi missing or not answering).
+    gpu = resource_usage.gpu_memory(registry, root) if registry is not None and root else None
     tailscale = tailscale_status()
     tailscale["serve"] = tailnet_serve_status()
     return {
@@ -55,6 +57,7 @@ def observe_system(registry=None, root: Path | None = None) -> dict:
         "memory_by_owner": by_owner,
         "memory_by_core_part": core_parts,
         "disk_usage": resource_usage.stored_disk(),
+        "gpu": gpu,
         "worker_state": _worker_state(),
         "tailnet_dns_name": tailscale["dns_name"],
         "tailscale": tailscale,

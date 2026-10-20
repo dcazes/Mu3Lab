@@ -26,7 +26,22 @@ function setup(current: AiModels = aiModels()) {
       return current;
     }
     if (path === '/api/v1/jobs/job1')
-      return { ok: true, job: { id: 'job1', state: 'running', step_id: 'download', detail: '' }, events: [] };
+      return {
+        ok: true,
+        job: { id: 'job1', state: 'running', step_id: 'download', detail: '' },
+        events: [{ detail: 'Downloading Qwen 3.5 4B into Ollama (3.3 GB).', created_at: '2026-10-20T12:00:00Z' }],
+        // Ollama's byte count, as the worker stores it for the bar.
+        download: {
+          state: 'downloading',
+          total_bytes: 3.3e9,
+          done_bytes: 1.1e9,
+          rate_bps: 2.2e7,
+          images_total: 0,
+          images_done: 0,
+          connections: 0,
+          updated_at: '',
+        },
+      };
     return undefined;
   });
   renderWithDashboard(<ModelsCard />, dashboardData([]));
@@ -44,7 +59,7 @@ describe('Where AI runs', () => {
       'Qwen 3.5 4B (private) runs on this server',
     );
     expect(whereChatRuns(aiModels({ privacy: 'local_only', chat_model: 'qwen3.5-4b' }))).toBe(
-      'Only on this server, with Qwen 3.5 4B. Nothing is sent to outside providers.',
+      'Chat runs only on this server, with Qwen 3.5 4B. Chat sends nothing to outside providers.',
     );
   });
 
@@ -68,7 +83,11 @@ describe('Where AI runs', () => {
         { privacy: 'local_only', chat_model: 'qwen3.5-4b', embedding_model: 'bge-m3', runner: 'ollama' },
       ]),
     );
-    expect(await screen.findByText('Changing AI models: Download')).toBeInTheDocument();
+    // The model download shows a bar with how far it has got, as app downloads do.
+    expect(
+      await screen.findByText('Downloading Qwen 3.5 4B into Ollama (3.3 GB).', { selector: '.model-job-step' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Download progress' }).getAttribute('aria-valuenow')).toBe('33');
   });
 
   it('asks only for the search model while outside providers are allowed', async () => {

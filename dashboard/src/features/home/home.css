@@ -365,6 +365,12 @@
   background: var(--surface);
 }
 
+/* The charts adapt to the room they get (a narrow pane or a phone), not to the window. */
+.resources-frame {
+  container-type: inline-size;
+  min-width: 0;
+}
+
 /* Donuts stacked on the left, every app's share beside them. */
 .resources {
   --donut-size: 120px;
@@ -379,6 +385,13 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+/* With graphics memory there are four: two by two, so the card does not grow so tall. */
+.donuts-four {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 18px 16px;
 }
 
 .resources-list {
@@ -581,15 +594,18 @@
   color: var(--text-3);
 }
 
-/* Phones: the three donuts side by side, smaller, above the list. */
-@media (max-width: 720px) {
+/* Little room (phones, narrow panes): the donuts side by side, smaller, above the list. */
+@container (max-width: 640px) {
   .resources {
     --donut-size: 92px;
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .donuts {
+  .donuts,
+  .donuts-four {
+    display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     justify-content: space-around;
     gap: 8px;
   }
@@ -604,6 +620,16 @@
 
   .resource-legend td {
     width: 76px;
+  }
+
+  /* Four columns with graphics memory: the data and program split stays in the hover title. */
+  .resource-legend:has(th:nth-child(4)) td {
+    width: 60px;
+    font-size: 12px;
+  }
+
+  .resource-legend:has(th:nth-child(4)) .legend-split {
+    display: none;
   }
 }
 

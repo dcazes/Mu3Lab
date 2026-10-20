@@ -26,9 +26,9 @@ PREFIX = "mu3lab-app-"
 MAIN = "mu3lab-assistant"
 BASE_MODEL = "mu3lab-chat"
 # LiteLLM's names, which Open WebUI would list as chat models: the main assistant is built on
-# mu3lab-chat, and the rest serve Mu3Lab's own checks, document search and speech. Hidden from
-# the model menu only; they keep working.
-HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-local", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts")
+# mu3lab-chat, and the rest serve Mu3Lab's own checks, document search, speech and the voice
+# assistant. Hidden from the model menu only; they keep working.
+HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-local", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts", "mu3lab-voice")
 
 
 class ChatError(RuntimeError):

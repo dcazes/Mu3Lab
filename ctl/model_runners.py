@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 CAPABILITY = "model_runner"
 Log = Callable[[str], None]
+# Bytes downloaded so far and the expected total, called as a download goes.
+Progress = Callable[[int, int], None]
 
 
 class RunnerError(RuntimeError):
@@ -73,7 +75,7 @@ class Engine(Protocol):
     def embedding_route(self, model: Model) -> str: ...
     def downloaded(self) -> set[str]: ...
     def has(self, model: Model, present: set[str]) -> bool: ...
-    def pull(self, model: Model, log: Log) -> None: ...
+    def pull(self, model: Model, log: Log, progress: Progress | None = None) -> None: ...
     def delete(self, model: Model) -> None: ...
     def check_chat(self, model: Model) -> None: ...
     def check_embedding(self, model: Model) -> None: ...
@@ -120,14 +122,18 @@ class OllamaEngine:
     def has(self, model: Model, present: set[str]) -> bool:
         return self.name(model.tag) in present
 
-    def pull(self, model: Model, log: Log) -> None:
-        """Download through Ollama, logging progress about every tenth of the way."""
+    def pull(self, model: Model, log: Log, progress: Progress | None = None) -> None:
+        """Download through Ollama, logging about every tenth of the way and reporting bytes to ``progress``."""
         request = urllib.request.Request(
             f"{self.base}/api/pull",
             method="POST",
             data=json.dumps({"model": model.tag, "stream": True}).encode(),
             headers={"Content-Type": "application/json"},
         )
+        # Ollama reports each layer on its own; the bar adds them up. The reviewed size is the
+        # floor for the total, so the bar does not jump back when a later layer starts.
+        layers: dict[str, tuple[int, int]] = {}
+        expected = int(model.download_gb * 1e9)
         reported = -1
         with urllib.request.urlopen(request, timeout=3600) as response:
             for line in response:
@@ -137,9 +143,13 @@ class OllamaEngine:
                     continue
                 if event.get("error"):
                     raise RuntimeError(str(event["error"]))
-                total, done = event.get("total") or 0, event.get("completed") or 0
-                if total:
-                    tenth = int(done * 10 / total)
+                if event.get("total") and event.get("digest"):
+                    layers[str(event["digest"])] = (int(event.get("completed") or 0), int(event["total"]))
+                    done = sum(part for part, _ in layers.values())
+                    total = max(expected, sum(whole for _, whole in layers.values()))
+                    if progress:
+                        progress(done, total)
+                    tenth = min(10, int(done * 10 / total))
                     if tenth != reported:
                         reported = tenth
                         log(f"Downloading {model.tag}: {tenth * 10}% of {total / 1e9:.1f} GB")

@@ -63,16 +63,28 @@ Status: built (`apps/livekit`). Nothing has been tested live; that is left to th
 - **Narrow media ports, no host networking.** WebRTC media (7881/tcp, 7882/udp) is published on
   this server's tailnet address only (`${MU3LAB_TAILNET_IP:?...}`). The catalog refuses any other
   address, and Compose refuses to start without it. One UDP port (a mux) replaces the 50000-60000 range.
-- **The agent's own LiteLLM key** (`gateway_key` rule), limited to `mu3lab-local`, `mu3lab-stt`
+- **The agent's own LiteLLM key** (`gateway_key` rule), limited to `mu3lab-voice`, `mu3lab-stt`
   and `mu3lab-tts`. It is registered after install and again when LiteLLM is reinstalled.
-- **Default chat model:** the agent asks LiteLLM for `mu3lab-local`, the local chat model chosen in
-  Settings, AI. The pinned LiteLLM (v1.103.2) turns `reasoning_effort: "none"` into Ollama's
+- **Answer model:** the agent asks LiteLLM for `mu3lab-voice`, routed by Settings, Voice Assistant
+  (outside providers or a local model, independent of chat; it matches chat until saved). The pinned LiteLLM (v1.103.2) turns `reasoning_effort: "none"` into Ollama's
   `think: false` (read in `llms/ollama/chat/transformation.py`), so Qwen does not think first.
 - **Sign-in through Authentik, not the dashboard's own login.** The admin dashboard supports only
   one username and password (HTTP Basic, from its environment). Mu3Lab generates them, and Caddy sends
   them after Authentik admits an administrator (`upstream_basic_auth`, as Kopia does). The voice
   page's token endpoint refuses to run in production unless something authenticates visitors
   first; Authentik's gate is that layer.
+
+## Live findings (2026-10-20)
+
+- Rooms and dispatch already worked: the voice page's token names `mu3lab-agent`, LiveKit created the
+  room and handed the agent the job. Nothing needs creating by hand.
+- The agent's media never connected ("wait_pc_connection timed out"). LiveKit advertised only the tailnet
+  address, which the agent cannot reach from the internal backend network. Fixed with
+  `advertise_internal_ip: true` (supported by v1.13.10's rtcconfig with a fixed `node_ip`); tested live:
+  the agent became active in a test room within a second.
+- The installed agent still asked for `mu3lab-local`, which LiteLLM no longer routes once voice has its own
+  setting. Reinstalling the app gives it `mu3lab-voice` and re-registers its key for that name.
+- The agent now greets the person first (`session.generate_reply`), as in LiveKit's voice-AI guide.
 
 ## Still to confirm on the live install
 

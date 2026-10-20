@@ -1,10 +1,9 @@
-"""Mu3Lab voice agent: speech in, a local language model, speech out.
+"""Mu3Lab voice agent: speech in, a language model, speech out.
 
-Everything runs on this server. The chat model (the local model chosen in
-Mu3Lab's Settings) and speech both go through Mu3Lab's LiteLLM gateway with
-the agent's own key, and voice activity and turn taking run inside this
-container. Every address and model
-name comes from the environment, so the same code runs on a desktop for
+The answer model (chosen in Mu3Lab's Settings, Voice Assistant) and speech both
+go through Mu3Lab's LiteLLM gateway with the agent's own key, and voice activity
+and turn taking run inside this container. Every address and model name comes
+from the environment, so the same code runs on a desktop for
 testing (localhost ports) and inside Mu3Lab (service names).
 """
 
@@ -39,7 +38,7 @@ AGENT_NAME = _env("MU3LAB_AGENT_NAME", "mu3lab-agent")
 # for voice, so the agent always sends reasoning_effort="none".
 LLM_BASE_URL = _env("MU3LAB_LLM_BASE_URL", "http://litellm:4000/v1")
 LLM_API_KEY = _env("MU3LAB_LLM_API_KEY", "not-needed")
-LLM_MODEL = _env("MU3LAB_LLM_MODEL", "mu3lab-local")
+LLM_MODEL = _env("MU3LAB_LLM_MODEL", "mu3lab-voice")
 # Speech recognition and speech output, on one OpenAI-compatible API: LiteLLM's mu3lab-stt and
 # mu3lab-tts in Mu3Lab, or Speaches itself (real model names) when LiteLLM is bypassed.
 SPEECH_BASE_URL = _env("MU3LAB_SPEECH_URL", "http://litellm:4000/v1")
@@ -99,6 +98,8 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(agent=Assistant(), room=ctx.room)
     await ctx.connect()
+    # Speak first, so the person hears at once that the call is working.
+    session.generate_reply(instructions="Greet the person in one short sentence and offer your help.")
 
 
 if __name__ == "__main__":

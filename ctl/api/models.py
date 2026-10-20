@@ -330,6 +330,17 @@ class CleanupRequest(ApiModel):
     delete_data: bool = False
 
 
+class GpuMemory(ApiModel):
+    """Graphics memory of the NVIDIA GPUs, all cards added up, in bytes."""
+
+    name: str
+    total: float
+    used: float
+    # As memory_by_owner; use that is not a Mu3Lab container is left out.
+    by_owner: dict[str, float] = Field(default_factory=dict)
+    by_core_part: dict[str, float] = Field(default_factory=dict)
+
+
 class SystemResponse(ApiModel):
     observed_at: str = ""
     ok: bool
@@ -343,6 +354,8 @@ class SystemResponse(ApiModel):
     # "core" part by part, as in DiskUsage.core_parts.
     memory_by_core_part: dict[str, float] | None = None
     disk_usage: DiskUsage | None = None
+    # None without an NVIDIA GPU.
+    gpu: GpuMemory | None = None
     tailnet_dns_name: str
     tailscale: TailscaleStatus | None = None
     runtime_root: str
@@ -774,6 +787,18 @@ class AiModelSettings(ApiModel):
     changed_by: str
 
 
+class AiVoiceSettings(ApiModel):
+    """Where the voice assistant's answers come from, independent of chat."""
+
+    privacy: AiPrivacy
+    # The local model voice runs on (a chat model id); used only with local only.
+    model: str
+    # True until the owner saves a voice choice: voice then reads chat's settings.
+    matches_chat: bool
+    changed_at: str
+    changed_by: str
+
+
 class ModelRunnerOption(ApiModel):
     id: str
     name: str
@@ -787,6 +812,7 @@ class AiModels(ApiModel):
 
     ok: bool
     settings: AiModelSettings
+    voice: AiVoiceSettings
     chat_models: list[LocalModel]
     embedding_models: list[LocalModel]
     # The runner that serves requests now, and every runner Mu3Lab knows.
@@ -803,6 +829,11 @@ class AiModelsRequest(ApiModel):
     chat_model: str = Field(default="", max_length=64)
     embedding_model: str = Field(max_length=64)
     runner: str = Field(default="", max_length=64)
+
+
+class AiVoiceRequest(ApiModel):
+    privacy: AiPrivacy
+    model: str = Field(default="", max_length=64)
 
 
 class RecoverySheet(ApiModel):
@@ -851,6 +882,15 @@ class Mu3LabUpdate(ApiModel):
     last_update: Mu3LabUpdateResult | None = None
 
 
+class Mu3LabDevelopment(ApiModel):
+    """One merged branch or pull request (or a run of direct commits) inside a release."""
+
+    title: str
+    branch: str = ""
+    date: str
+    changes: list[str]
+
+
 class Mu3LabRelease(ApiModel):
     """One release's changes; a development copy has no version."""
 
@@ -858,6 +898,8 @@ class Mu3LabRelease(ApiModel):
     date: str
     commit: str = ""
     changes: list[str]
+    # The same changes grouped by development, newest first.
+    developments: list[Mu3LabDevelopment] = Field(default_factory=list)
 
 
 class Mu3LabChangelog(ApiModel):

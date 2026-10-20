@@ -43,6 +43,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/voice': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Voice
+     * @description Queue the voice assistant's change: a local model downloads and is checked before voice switches over.
+     */
+    put: operations['change_voice_api_v1_ai_voice_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/app-sizes': {
     parameters: {
       query?: never;
@@ -1500,6 +1520,7 @@ export interface components {
       /** Runners */
       runners: components['schemas']['ModelRunnerOption'][];
       settings: components['schemas']['AiModelSettings'];
+      voice: components['schemas']['AiVoiceSettings'];
     };
     /** AiModelsRequest */
     AiModelsRequest: {
@@ -1520,6 +1541,38 @@ export interface components {
        * @default
        */
       runner?: string;
+    };
+    /** AiVoiceRequest */
+    AiVoiceRequest: {
+      /**
+       * Model
+       * @default
+       */
+      model?: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
+    };
+    /**
+     * AiVoiceSettings
+     * @description Where the voice assistant's answers come from, independent of chat.
+     */
+    AiVoiceSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Matches Chat */
+      matches_chat: boolean;
+      /** Model */
+      model: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
     };
     /** ApiErrorResponse */
     ApiErrorResponse: {
@@ -2243,6 +2296,26 @@ export interface components {
        */
       ok?: boolean;
     };
+    /**
+     * GpuMemory
+     * @description Graphics memory of the NVIDIA GPUs, all cards added up, in bytes.
+     */
+    GpuMemory: {
+      /** By Core Part */
+      by_core_part?: {
+        [key: string]: number;
+      };
+      /** By Owner */
+      by_owner?: {
+        [key: string]: number;
+      };
+      /** Name */
+      name: string;
+      /** Total */
+      total: number;
+      /** Used */
+      used: number;
+    };
     /** Health */
     Health: {
       /** Ok */
@@ -2688,6 +2761,23 @@ export interface components {
       releases: components['schemas']['Mu3LabRelease'][];
     };
     /**
+     * Mu3LabDevelopment
+     * @description One merged branch or pull request (or a run of direct commits) inside a release.
+     */
+    Mu3LabDevelopment: {
+      /**
+       * Branch
+       * @default
+       */
+      branch?: string;
+      /** Changes */
+      changes: string[];
+      /** Date */
+      date: string;
+      /** Title */
+      title: string;
+    };
+    /**
      * Mu3LabRelease
      * @description One release's changes; a development copy has no version.
      */
@@ -2701,6 +2791,8 @@ export interface components {
       commit?: string;
       /** Date */
       date: string;
+      /** Developments */
+      developments?: components['schemas']['Mu3LabDevelopment'][];
       /** Version */
       version: string;
     };
@@ -3498,6 +3590,7 @@ export interface components {
       disk_usage?: components['schemas']['DiskUsage'] | null;
       /** Docker Ready */
       docker_ready: boolean;
+      gpu?: components['schemas']['GpuMemory'] | null;
       memory: components['schemas']['Metric'];
       /** Memory By Core Part */
       memory_by_core_part?: {
@@ -3870,6 +3963,93 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['AiModelsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_api_v1_ai_voice_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiVoiceRequest'];
       };
     };
     responses: {

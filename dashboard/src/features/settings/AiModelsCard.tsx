@@ -1,4 +1,3 @@
-import { Cpu, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   type AiModels,
@@ -12,12 +11,13 @@ import { Button } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Collapsible } from '../../components/Layout';
 import { Badge } from '../../components/Status';
+import { DownloadStatus } from '../apps/InstallProgress';
 import { humanize } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { type ApiState, useApi } from '../../lib/useApi';
 import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
 
-function option(model: LocalModel): string {
+export function option(model: LocalModel): string {
   return `${model.name} · ${model.download_gb} GB download, about ${model.memory_gb} GB memory`;
 }
 
@@ -25,13 +25,13 @@ function option(model: LocalModel): string {
 export function whereChatRuns(data: Pick<AiModels, 'settings' | 'chat_models'>): string {
   const local = data.chat_models.find((model) => model.id === data.settings.chat_model);
   if (data.settings.privacy === 'local_only')
-    return `Only on this server${local ? `, with ${local.name}` : ''}. Nothing is sent to outside providers.`;
+    return `Chat runs only on this server${local ? `, with ${local.name}` : ''}. Chat sends nothing to outside providers.`;
   return local
     ? `Through your outside providers by default. ${local.name} (private) runs on this server and can be chosen in chat.`
     : 'Through your outside providers. No local chat model is chosen.';
 }
 
-function JobLog({ id, finished }: { id: string; finished: () => void }) {
+export function JobLog({ id, finished }: { id: string; finished: () => void }) {
   const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, {
     interval: (data) => (jobActive(data?.job.state) ? JOB_POLL_MS : 0),
   });
@@ -48,15 +48,26 @@ function JobLog({ id, finished }: { id: string; finished: () => void }) {
       </Callout>
     );
   if (!running) return null;
+  const download = job.data.download;
+  // The bar shows how far a download has got, so the line above it names the step, not the percentage.
+  const latest = job.data.events
+    .map((event) => event.detail)
+    .filter((detail) => !(download?.state === 'downloading' && /: \d+% of /.test(detail)))
+    .slice(-1)[0];
   return (
-    <Collapsible title={`Changing AI models: ${humanize(job.data.job.step_id || job.data.job.state)}`}>
-      <pre className="log">
-        {job.data.events
-          .slice(-8)
-          .map((event) => event.detail)
-          .join('\n')}
-      </pre>
-    </Collapsible>
+    <div className="model-job" aria-live="polite">
+      <p className="model-job-step">{latest || humanize(job.data.job.step_id || job.data.job.state)}</p>
+      {/* A model download shows the same bar as an app download: bytes, speed and time left. */}
+      {download && download.state === 'downloading' && <DownloadStatus download={download} />}
+      <Collapsible title="Live activity">
+        <pre className="log">
+          {job.data.events
+            .slice(-8)
+            .map((event) => event.detail)
+            .join('\n')}
+        </pre>
+      </Collapsible>
+    </div>
   );
 }
 
@@ -111,7 +122,9 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
     event.preventDefault();
     const warnings = [
       draft.privacy === 'local_only' && saved.privacy !== 'local_only'
-        ? 'Chat will use only the local model. Outside provider keys stay saved but are not used.'
+        ? data.voice.matches_chat || data.voice.privacy === 'local_only'
+          ? 'Chat will use only the local model. Outside provider keys stay saved but are not used.'
+          : 'Chat will use only the local model. The voice assistant keeps its own setting and still uses outside providers.'
         : '',
       embeddingChanged
         ? 'Document search in every app has to index its documents again with the new search model. Until it does, search may find nothing.'
@@ -147,16 +160,8 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
 
   return (
     <Card title={title} description={description}>
-      {saved.privacy === 'local_only' ? (
-        <Callout tone="success" icon={ShieldCheck} title="Local only">
-          {whereChatRuns(data)}
-        </Callout>
-      ) : (
-        <Callout tone="info" icon={Cpu} title="Outside providers allowed">
-          {whereChatRuns(data)} Messages sent to an outside provider, and any documents an assistant includes, leave
-          this server.
-        </Callout>
-      )}
+      {/* The selected option below says the rest; this line adds which model runs where. */}
+      <p className="model-where">{whereChatRuns(data)}</p>
       {!data.runner_reachable && (
         <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
           Download states may be out of date until {runnerName(data.runner)} is running again.
@@ -174,7 +179,10 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
             />
             <span>
               <strong>Outside providers allowed</strong>
-              <small>Chat uses the providers you connect below.</small>
+              <small>
+                Chat uses the providers you connect below. Messages sent to them, and any documents an assistant
+                includes, leave this server.
+              </small>
             </span>
           </label>
           <label className="choice">
@@ -188,7 +196,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
               <strong>Local only</strong>
               <small>
                 Every chat runs on this server. If the local model stops working, chat stops too: it never falls back to
-                an outside provider.
+                an outside provider. The voice assistant has its own setting in Settings, Voice Assistant.
               </small>
             </span>
           </label>

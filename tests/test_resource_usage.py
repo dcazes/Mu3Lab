@@ -75,6 +75,44 @@ class MemoryTests(unittest.TestCase):
             )
 
 
+class GpuMemoryTests(unittest.TestCase):
+    OLLAMA = "a" * 64
+    CADDY = "b" * 64
+
+    def fake_run(self, argv, **_kwargs):
+        if argv[0] != "nvidia-smi":
+            return result(
+                f"{self.OLLAMA}\tmu3lab-ollama-ollama-1\t/srv/mu3lab/projects/ollama\n"
+                f"{self.CADDY}\tmu3lab-ingress-caddy-1\t{ROOT / 'apps' / 'ingress'}\n"
+            )
+        if "--query-gpu=name,memory.total,memory.used" in argv:
+            return result("NVIDIA GeForce RTX 3060, 12288, 3000\n")
+        # Ollama, the proxy (core), and the desktop, which is no container.
+        return result("101, 2300\n102, 100\n103, 500\n")
+
+    def test_each_gpu_process_belongs_to_its_containers_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = Path(tmp)
+            for pid, scope in (("101", f"/system.slice/docker-{self.OLLAMA}.scope"), ("102", f"/docker/{self.CADDY}")):
+                (proc / pid).mkdir()
+                (proc / pid / "cgroup").write_text(f"0::{scope}\n")
+            (proc / "103").mkdir()
+            (proc / "103" / "cgroup").write_text("0::/user.slice/user-1000.slice/session-2.scope\n")
+            gpu = resource_usage.gpu_memory(load(), ROOT, run=self.fake_run, paths=PATHS, proc_root=proc)
+        mib = 1024**2
+        self.assertEqual(gpu["name"], "NVIDIA GeForce RTX 3060")
+        self.assertEqual((gpu["total"], gpu["used"]), (12288 * mib, 3000 * mib))
+        # The desktop's 500 MiB is not Mu3Lab's; the charts show it as "Other".
+        self.assertEqual(gpu["by_owner"], {"ollama": 2300 * mib, "core": 100 * mib})
+        self.assertEqual(gpu["by_core_part"], {"ingress": 100 * mib})
+
+    def test_no_nvidia_gpu_reports_nothing(self):
+        def missing(*_args, **_kwargs):
+            raise FileNotFoundError("nvidia-smi")
+
+        self.assertIsNone(resource_usage.gpu_memory(load(), ROOT, run=missing, paths=PATHS))
+
+
 class DiskTests(unittest.TestCase):
     def test_sizes_use_dockers_decimal_units(self):
         self.assertEqual(resource_usage._size("1.5GB"), 1_500_000_000)

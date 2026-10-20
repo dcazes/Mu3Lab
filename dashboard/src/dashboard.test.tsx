@@ -126,6 +126,41 @@ describe('Home', () => {
     expect(names()).toContain('Mu3Lab dashboard and worker');
   });
 
+  it('adds graphics memory to the chip, a donut and a column when the server has an NVIDIA GPU', () => {
+    stubFetch(() => ({}));
+    const GB = 1024 ** 3;
+    const data = dashboardData([service('ollama', 'Ollama', 'core'), service('speaches', 'Speech', 'optional')]);
+    data.system = {
+      ...data.system,
+      cpu_percent: 5,
+      memory_by_owner: { ollama: 1 * GB },
+      memory: { total: 16 * GB, used: 4 * GB, percent: 25 },
+      disk: { total: 100 * GB, used: 50 * GB, percent: 50 },
+      // Speech is on the GPU only; the desktop's share is not Mu3Lab's.
+      gpu: {
+        name: 'RTX 3060',
+        total: 12 * GB,
+        used: 3 * GB,
+        by_owner: { ollama: 2 * GB, speaches: 0.5 * GB },
+        by_core_part: {},
+      },
+    };
+    renderWithDashboard(<HomePage />, data);
+    const strip = screen.getByRole('region', { name: 'System status' });
+    const chip = within(strip).getByRole('button');
+    expect(chip).toHaveTextContent('RAM 25% · Disk 50% · CPU 5% · GPU 25%');
+    expect(chip.getAttribute('title')).toContain('Graphics memory 3.0 GB of 12.0 GB');
+    fireEvent.click(chip);
+    expect(within(strip).getByRole('img', { name: 'Graphics memory: 3.0 GB of 12.0 GB used' })).toBeInTheDocument();
+    const legend = within(strip).getByRole('table');
+    const row = (name: string) =>
+      within(legend).getByRole('rowheader', { name }).closest('tr')!.textContent?.replace(/\s+/g, ' ');
+    expect(within(legend).getByRole('button', { name: 'Graphics' })).toBeInTheDocument();
+    expect(row('Speech')).toBe('Speech——512.0 MB');
+    expect(row('Other (not Mu3Lab)')).toContain('512.0 MB');
+    expect(row('Free')).toContain('9.0 GB');
+  });
+
   it('surfaces app problems in the attention strip', () => {
     renderWithDashboard(
       <HomePage />,
@@ -630,11 +665,13 @@ describe('Settings', () => {
     );
   });
 
-  it('shows access and backups without temporary credential handoffs', () => {
+  it('shows backups without temporary credential handoffs', () => {
     stubFetch(() => undefined);
     const kopia = service('kopia-ui', 'Kopia backups', 'optional', { group: 'infrastructure' });
     renderWithDashboard(<SecuritySettings />, dashboardData([kopia]));
-    expect(screen.getByText('Your access')).toBeInTheDocument();
+    // Who is signed in is in the user menu, not repeated here while protection is verified.
+    expect(screen.queryByText('Your access')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sign-in protection is not verified')).not.toBeInTheDocument();
     expect(screen.getByText('Backup protection is not verified')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export credentials' })).not.toBeInTheDocument();
   });

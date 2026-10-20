@@ -56,6 +56,11 @@ class LiteLLM:
             raise LiteLLMError("LiteLLM did not return a key.")
         return key
 
+    def model_names(self) -> set[str]:
+        """The model names LiteLLM routes right now (the names apps ask for)."""
+        data = self._call("GET", "/v1/models")
+        return {str(item["id"]) for item in data.get("data", []) if isinstance(item, dict) and item.get("id")}
+
     def delete(self, aliases: list[str]) -> None:
         if aliases:
             self._call("POST", "/key/delete", json={"key_aliases": aliases})

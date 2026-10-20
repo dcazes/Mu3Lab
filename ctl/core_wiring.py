@@ -82,8 +82,8 @@ def routing_projects(catalog: Catalog | None = None) -> list[RoutingProject]:
 
 def _provider_keys(paths: RuntimePaths) -> list[dict]:
     state = ControlState.runtime(paths)
-    # Local only: every provider key is switched off in the gateway, so nothing can go outside.
-    outside = not local_models.local_only(paths)
+    # When neither chat nor voice may go outside, every provider key is switched off in the gateway.
+    outside = local_models.outside_used(paths)
 
     def routable(provider_id: str) -> bool:
         if not outside:

@@ -53,7 +53,10 @@ describe('household member', () => {
     expect(await screen.findByText('Only an administrator can change AI providers')).toBeInTheDocument();
     expect(await screen.findByText('Groq')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Groq actions' })).not.toBeInTheDocument();
-    expect(await screen.findByText('Outside providers allowed', { selector: 'b' })).toBeInTheDocument();
+    // The summary line says where chat goes; the choices themselves are read-only.
+    expect(
+      await screen.findByText(/^Through your outside providers/, { selector: '.model-where' }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save and apply' })).not.toBeInTheDocument();
   });
 });

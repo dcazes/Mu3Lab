@@ -8,6 +8,10 @@ rtc:
   # Browsers reach the media ports on the tailnet address; never ask a public STUN server.
   use_external_ip: false
   node_ip: {{tailnet_ip}}
+  # Also offer the container-network addresses. The voice agent sits on Mu3Lab's private
+  # network, which cannot reach the tailnet address, so without this its media never connects
+  # (it joins the room, then times out). Browsers keep using the tailnet address.
+  advertise_internal_ip: true
 keys:
   # Quoted: a key of only digits would otherwise read as a number.
   "{{LIVEKIT_API_KEY}}": "{{LIVEKIT_API_SECRET}}"
