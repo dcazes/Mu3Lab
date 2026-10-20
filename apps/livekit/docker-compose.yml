@@ -20,6 +20,9 @@ services:
     networks:
       mu3lab_backend:
         aliases: [livekit]
+      # The backend network is internal, and Docker publishes no ports for a container on
+      # internal networks only; this one carries the published ports above.
+      mu3lab_frontend: {}
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     healthcheck:
