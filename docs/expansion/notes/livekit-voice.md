@@ -1,8 +1,7 @@
 # LiveKit voice app: research and decisions
 
 Branch: `feature/livekit-voice` (from `feature/mcp-agents` at `79f7fa4`).
-Status: research done, voice agent written, compose and manifest waiting on the
-routing decision below. Nothing has been tested live; that is left to the owner.
+Status: built (`apps/livekit`). Nothing has been tested live; that is left to the owner.
 
 ## Decisions from the owner
 
@@ -55,10 +54,34 @@ routing decision below. Nothing has been tested live; that is left to the owner.
    The hand edits from the earlier session (`CHAT_COMPLETION_BASE_URL`,
    `LOOPBACK_HOST_URL`, `model_aliases.json`) are not in the repo and are not added.
 
-## Open routing question (blocking)
+## Decisions (2026-10-20)
 
-LiveKit needs three browser-facing endpoints. Mu3Lab gives each app one route.
-Options are listed in the chat reply.
+- **Several ports and routes per app** (platform change, generic): `service.extra_ports` and
+  `extra_routes`. LiveKit uses three addresses: Talk (the voice page, Authentik, household),
+  the signal route (open; LiveKit checks its own room tokens), and the admin dashboard
+  (Authentik, operators).
+- **Narrow media ports, no host networking.** WebRTC media (7881/tcp, 7882/udp) is published on
+  this server's tailnet address only (`${MU3LAB_TAILNET_IP:?...}`). The catalog refuses any other
+  address, and Compose refuses to start without it. One UDP port (a mux) replaces the 50000-60000 range.
+- **The agent's own LiteLLM key** (`gateway_key` rule), limited to `mu3lab-local`, `mu3lab-stt`
+  and `mu3lab-tts`. It is registered after install and again when LiteLLM is reinstalled.
+- **Default chat model:** the agent asks LiteLLM for `mu3lab-local`, the local chat model chosen in
+  Settings, AI. The pinned LiteLLM (v1.103.2) turns `reasoning_effort: "none"` into Ollama's
+  `think: false` (read in `llms/ollama/chat/transformation.py`), so Qwen does not think first.
+- **Sign-in through Authentik, not the dashboard's own login.** The admin dashboard supports only
+  one username and password (HTTP Basic, from its environment). Mu3Lab generates them, and Caddy sends
+  them after Authentik admits an administrator (`upstream_basic_auth`, as Kopia does). The voice
+  page's token endpoint refuses to run in production unless something authenticates visitors
+  first; Authentik's gate is that layer.
+
+## Still to confirm on the live install
+
+- Docker publishing on the tailnet address at boot: if Docker starts before `tailscale0` has its
+  address, the `server` container cannot bind and stays down until restarted.
+- Browser microphone and WebRTC over the tailnet from another device (phone).
+- The agent worker's health answer on port 8081 inside the container.
+- The voice page and dashboard image builds (network needed at build time).
+- Latency through LiteLLM compared with going direct (README, "Bypassing LiteLLM").
 
 ## Voice agent (written)
 

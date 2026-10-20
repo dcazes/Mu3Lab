@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ctl.manifest import catalog as manifest_catalog
-from ctl.manifest.models import AppManifest
+from ctl.manifest.models import AppManifest, Route
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -24,6 +24,18 @@ _AUTH = {"oidc": "oidc", "gate": "proxy", "trusted_header": "trusted_header", "l
 
 class RegistryError(ValueError):
     """Raised when an app is unknown or the catalog is malformed."""
+
+
+@dataclass(frozen=True)
+class RouteTarget:
+    """One private address of an app: tailnet port → Caddy listener → the loopback port behind it."""
+
+    name: str  # "" for the app's main route, else ``extra_routes[].name``
+    label: str
+    route: Route
+    private_https_port: int
+    proxy_port: int
+    upstream_port: int
 
 
 @dataclass(frozen=True, eq=False)
@@ -67,6 +79,21 @@ class Service:
     def required(self) -> bool:
         return self.manifest.tier != "optional"
 
+    @property
+    def route_targets(self) -> tuple[RouteTarget, ...]:
+        """Every private address of the app, main route first."""
+        main = self.manifest.route
+        if main is None:
+            return ()
+        targets = [
+            RouteTarget("", str(self.ui.get("label", "Open")), main, main.https_port, main.caddy_port, self.https_port)
+        ]
+        targets += [
+            RouteTarget(extra.name, extra.label, extra, extra.https_port, extra.caddy_port, extra.local_port)
+            for extra in self.manifest.extra_routes
+        ]
+        return tuple(targets)
+
     def compose_path(self, root: Path = ROOT) -> Path:
         return root / self.compose_dir
 
@@ -87,6 +114,11 @@ class Service:
             "dependencies": list(self.dependencies),
             "stage": self.stage,
             "routable": self.private_https_port is not None,
+            # The app's other private addresses (``extra_routes``), shown as links beside Open.
+            "extra_routes": [
+                {"name": target.name, "label": target.label, "private_https_port": target.private_https_port}
+                for target in self.route_targets[1:]
+            ],
             "required": self.required,
             "summary": self.summary,
             "tagline": self.tagline,

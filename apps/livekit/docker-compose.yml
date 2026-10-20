@@ -1,0 +1,118 @@
+name: mu3lab-livekit
+
+services:
+  server:
+    image: livekit/livekit-server:v1.13.10@sha256:89ca9ce0791e18d6e03bf6e2c49ceb27e1c754eae8bd50c989386c1a5963791a
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    # livekit.yaml holds the keys and is private to Mu3Lab's user; run as that user to read it
+    # (as LobeHub's Caddy does), since root without capabilities cannot.
+    user: "1000:1000"
+    ports:
+      # Signalling and the server API: Caddy (the signal route), the dashboard and Mu3Lab's health check.
+      - "127.0.0.1:7880:7880"
+      # WebRTC media, on this server's tailnet address only. Compose refuses to start without it,
+      # rather than listening on every network.
+      - "${MU3LAB_TAILNET_IP:?MU3LAB_TAILNET_IP is required}:7881:7881"
+      - "${MU3LAB_TAILNET_IP:?MU3LAB_TAILNET_IP is required}:7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    networks:
+      mu3lab_backend:
+        aliases: [livekit]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 1m
+      timeout: 5s
+      start_period: 30s
+      start_interval: 5s
+      retries: 3
+
+  # Waits for rooms that ask for "mu3lab-agent", then listens, thinks and answers.
+  agent:
+    build: ./voice-agent
+    restart: unless-stopped
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      MU3LAB_AGENT_NAME: mu3lab-agent
+      # Chat and speech both go through LiteLLM with the agent's own key. To bypass LiteLLM,
+      # point these at http://ollama:11434/v1 and http://speaches:8000/v1 (see README.md).
+      MU3LAB_LLM_BASE_URL: http://litellm:4000/v1
+      MU3LAB_LLM_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
+      MU3LAB_LLM_MODEL: mu3lab-local
+      MU3LAB_SPEECH_URL: http://litellm:4000/v1
+      MU3LAB_STT_MODEL: mu3lab-stt
+      MU3LAB_TTS_MODEL: mu3lab-tts
+      MU3LAB_TTS_VOICE: ${MU3LAB_TTS_VOICE:-af_heart}
+    depends_on:
+      server: {condition: service_healthy}
+    networks: [mu3lab_backend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      # The agent worker answers on its own health port once it is registered with LiveKit.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/', timeout=5)"]
+      interval: 1m
+      timeout: 8s
+      start_period: 2m
+      start_interval: 10s
+      retries: 3
+
+  # The page people talk on (LiveKit's agent-starter-react, built from a pinned commit).
+  voice-ui:
+    build: ./voice-ui
+    restart: unless-stopped
+    ports: ["127.0.0.1:8093:3000"]
+    environment:
+      # Without LIVEKIT_URL the page would connect to LiveKit's hosted demo agent instead.
+      LIVEKIT_URL: ${MU3LAB_LIVEKIT_PUBLIC_URL:?MU3LAB_LIVEKIT_PUBLIC_URL is required}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      AGENT_NAME: mu3lab-agent
+      # The page's token endpoint runs only when something authenticates visitors first.
+      # Authentik's gate on this route is that layer; this setting tells the page so.
+      IS_VERCEL_PREVIEW: "true"
+    networks: [mu3lab_frontend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 1m
+      timeout: 8s
+      start_period: 1m
+      start_interval: 5s
+      retries: 3
+
+  # LiveKit admin dashboard (thinhdanggroup/livekit-dashboard, built from a pinned commit).
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    ports: ["127.0.0.1:8094:8000"]
+    environment:
+      LIVEKIT_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      ADMIN_USERNAME: ${LIVEKIT_ADMIN_USER:?LIVEKIT_ADMIN_USER is required}
+      ADMIN_PASSWORD: ${LIVEKIT_ADMIN_PASSWORD:?LIVEKIT_ADMIN_PASSWORD is required}
+      APP_SECRET_KEY: ${LIVEKIT_DASHBOARD_SECRET:?LIVEKIT_DASHBOARD_SECRET is required}
+      ENABLE_SIP: "false"
+    depends_on:
+      server: {condition: service_healthy}
+    networks: [mu3lab_backend, mu3lab_frontend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/health"]
+      interval: 1m
+      timeout: 5s
+      start_period: 30s
+      start_interval: 5s
+      retries: 3
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

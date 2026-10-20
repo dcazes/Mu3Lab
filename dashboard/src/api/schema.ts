@@ -3111,6 +3111,8 @@ export interface components {
        * @enum {string}
        */
       display_state: 'running' | 'stopped' | 'working' | 'checking' | 'not_installed' | 'needs_attention';
+      /** Extra Routes */
+      extra_routes?: components['schemas']['ServiceExtraRoute'][];
       /** Group */
       group: 'apps' | 'ai' | 'infrastructure';
       /** Health State */
@@ -3136,6 +3138,8 @@ export interface components {
       last_job_id: string;
       /** Lifecycle */
       lifecycle: 'always_on' | 'shared' | 'optional';
+      /** Links */
+      links?: components['schemas']['ServiceLink'][];
       mobile?: components['schemas']['ServiceMobile0'] | null;
       /** Name */
       name: string;
@@ -3292,6 +3296,15 @@ export interface components {
       /** Status */
       status: string;
     };
+    /** ServiceExtraRoute */
+    ServiceExtraRoute: {
+      /** Label */
+      label: string;
+      /** Name */
+      name: string;
+      /** Private Https Port */
+      private_https_port: number;
+    };
     /** ServiceIdentity */
     ServiceIdentity: {
       /** Detail */
@@ -3331,6 +3344,16 @@ export interface components {
       initialization: components['schemas']['ServiceInitialization'];
       /** Ok */
       ok: boolean;
+    };
+    /**
+     * ServiceLink
+     * @description Another private address of an app (``extra_routes``), shown beside its Open button.
+     */
+    ServiceLink: {
+      /** Label */
+      label: string;
+      /** Url */
+      url: string;
     };
     /** ServiceLogsResponse */
     ServiceLogsResponse: {

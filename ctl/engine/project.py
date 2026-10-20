@@ -23,6 +23,7 @@ import secrets
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -173,11 +174,29 @@ class Facts:
         port = "" if route.https_port == 443 else f":{route.https_port}"
         return f"https://{self.dns_name}{port}"
 
+    def route_url(self, app: App, name: str) -> str:
+        """The private address of one of the app's ``extra_routes``."""
+        route = next((extra for extra in app.manifest.extra_routes if extra.name == name), None)
+        if not self.dns_name or route is None:
+            return ""
+        return f"https://{self.dns_name}:{route.https_port}"
+
+    @cached_property
+    def tailnet_ip(self) -> str:
+        """Asked of Tailscale once per render, and only by an app whose settings name it."""
+        from ctl.service_state import tailnet_ip
+
+        return tailnet_ip()
+
 
 def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
     """Resolve ``{{name}}`` for this app; None for names that cannot be known yet."""
 
     def lookup(name: str) -> str | None:
+        if name == "tailnet_ip":
+            return facts.tailnet_ip or None
+        if name.startswith("route_url:"):
+            return facts.route_url(app, name.split(":", 1)[1]) or None
         if name.startswith("app:"):
             _, other, key = ([*name.split(":", 2), "", ""])[:3]
             if other not in facts.catalog:

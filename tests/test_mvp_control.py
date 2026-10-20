@@ -58,6 +58,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "outline",
                 "audiobookshelf",
                 "romm",
+                "livekit",
                 "dawarich",
                 "lobehub",
                 "speaches",

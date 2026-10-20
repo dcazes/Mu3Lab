@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 
 # Based on LiveKit's agent-starter-python template, changed to run fully on this server:
 # no LiveKit Cloud models and no noise-cancellation cloud service.

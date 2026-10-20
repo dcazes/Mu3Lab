@@ -10,7 +10,7 @@ from ctl import actions
 from ctl.control_state import ControlState
 from ctl.engine.launch import caddy_handler
 from ctl.platform_apps import by_capability
-from ctl.registry import Registry, Service
+from ctl.registry import Registry, RouteTarget, Service
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import write_atomic
 from ctl.secrets import platform_values, read_runtime_env
@@ -27,9 +27,10 @@ IDENTITY_HEADERS = {"username": "X-Authentik-Username", "email": "X-Authentik-Em
 UPSTREAM_AUTH_FILE = "upstream-auth.env"
 
 
-def upstream_auth_name(service_id: str) -> str:
-    """The environment value Caddy reads an app's login header from."""
-    return "MU3LAB_UPSTREAM_AUTH_" + service_id.upper().replace("-", "_")
+def upstream_auth_name(service_id: str, route_name: str = "") -> str:
+    """The environment value Caddy reads an app's login header from (one per route that adds one)."""
+    name = f"{service_id}_{route_name}" if route_name else service_id
+    return "MU3LAB_UPSTREAM_AUTH_" + name.upper().replace("-", "_")
 
 
 def write_upstream_auth(registry: Registry, paths: RuntimePaths | None = None) -> Path:
@@ -37,15 +38,15 @@ def write_upstream_auth(registry: Registry, paths: RuntimePaths | None = None) -
     paths = paths or RuntimePaths()
     lines = []
     for service in registry.services:
-        route = service.manifest.route
-        auth = route.upstream_basic_auth if route else None
-        if auth is None:
-            continue
-        env = read_runtime_env(paths.projects / service.id / ".env")
-        user, password = env.get(auth.user_env, ""), env.get(auth.password_env, "")
-        if user and password:
-            token = base64.b64encode(f"{user}:{password}".encode()).decode()
-            lines.append(f"{upstream_auth_name(service.id)}={token}\n")
+        for route in service.route_targets:
+            auth = route.route.upstream_basic_auth
+            if auth is None:
+                continue
+            env = read_runtime_env(paths.projects / service.id / ".env")
+            user, password = env.get(auth.user_env, ""), env.get(auth.password_env, "")
+            if user and password:
+                token = base64.b64encode(f"{user}:{password}".encode()).decode()
+                lines.append(f"{upstream_auth_name(service.id, route.name)}={token}\n")
     target = paths.projects / by_capability("private_proxy").id / UPSTREAM_AUTH_FILE
     target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     write_atomic(target, "".join(lines).encode())  # private (0600) from its first byte
@@ -128,15 +129,16 @@ def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token
     return True, "Caddy routes activated."
 
 
-def _block(service: Service) -> str:
-    route = service.manifest.route
-    assert route is not None and service.proxy_port is not None
+def _block(service: Service, target: RouteTarget | None = None) -> str:
+    """One Caddy listener: the app's main route, or ``target`` (one of its extra routes)."""
+    target = target or service.route_targets[0]
+    route = target.route
     host = "{http.request." + route.forwarded_host + "}"
     identity = IDENTITY_HEADERS[route.trusted_value]
-    lines = [f":{service.proxy_port} {{", "\tbind 127.0.0.1", "\troute {"]
+    lines = [f":{target.proxy_port} {{", "\tbind 127.0.0.1", "\troute {"]
 
     def proxy(indent: str, trusted: bool = False, strip: bool = False) -> None:
-        lines.append(f"{indent}reverse_proxy 127.0.0.1:{service.https_port} {{")
+        lines.append(f"{indent}reverse_proxy 127.0.0.1:{target.upstream_port} {{")
         if strip:
             lines.append(f"{indent}\theader_up -{route.trusted_header}")
         if trusted:
@@ -150,7 +152,9 @@ def _block(service: Service) -> str:
             )
         if route.upstream_basic_auth:
             # Replaces anything the visitor sent; the value reaches Caddy as an environment value.
-            lines.append(f'{indent}\theader_up Authorization "Basic {{env.{upstream_auth_name(service.id)}}}"')
+            lines.append(
+                f'{indent}\theader_up Authorization "Basic {{env.{upstream_auth_name(service.id, target.name)}}}"'
+            )
         lines.extend(
             [
                 f"{indent}\theader_up X-Forwarded-Proto https",
@@ -193,7 +197,8 @@ def _block(service: Service) -> str:
         lines.append(f"{indent}respond {blocked.path} {json.dumps(blocked.message)} {blocked.status}")
     for redirect in route.redirects:
         lines.append(f"{indent}redir {redirect.path} {redirect.to} {redirect.status}")
-    launcher = caddy_handler(service.manifest)
+    # The sign-in launcher belongs to the app's main address only.
+    launcher = caddy_handler(service.manifest) if not target.name else ""
     if launcher:
         lines.extend(launcher.strip("\n").splitlines())
         lines.append(f"{indent}handle {{")
@@ -215,7 +220,7 @@ def render(base: str, services: list[Service]) -> str:
         after = after_section.split(END, 1)[1].lstrip() if END in after_section else ""
     else:
         before, after = base.rstrip(), ""
-    body = "\n\n".join(_block(service) for service in services)
+    body = "\n\n".join(_block(service, target) for service in services for target in service.route_targets)
     pieces = [before, START, body, END]
     if after:
         pieces.append(after.rstrip())
@@ -248,15 +253,16 @@ def apply(registry: Registry, current: Service, root: Path, log) -> tuple[bool, 
     activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
     if not activated:
         return False, detail
-    published = actions.tailscale_serve(current.private_https_port, current.proxy_port, log)
-    if not published.get("ok"):
-        terminal_command = published.get("terminal_command")
-        if terminal_command:
-            return False, (
-                "Administrator action required before this route can be published. "
-                f"Run `{terminal_command}` once, then retry the installation."
-            )
-        return False, str(published.get("log", ["Tailscale Serve failed."])[-1])
+    for route in current.route_targets:
+        published = actions.tailscale_serve(route.private_https_port, route.proxy_port, log)
+        if not published.get("ok"):
+            terminal_command = published.get("terminal_command")
+            if terminal_command:
+                return False, (
+                    "Administrator action required before this route can be published. "
+                    f"Run `{terminal_command}` once, then retry the installation."
+                )
+            return False, str(published.get("log", ["Tailscale Serve failed."])[-1])
     return True, "Private HTTPS route published."
 
 
@@ -271,15 +277,16 @@ def withdraw(registry: Registry, current: Service, root: Path, log) -> tuple[boo
     activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
     if not activated:
         return False, detail
-    removed = actions.tailscale_serve_off(current.private_https_port, log)
-    if not removed.get("ok"):
-        terminal_command = removed.get("terminal_command")
-        if terminal_command:
-            return False, (
-                "Administrator action required before this route can be removed. "
-                f"Run `{terminal_command}` once, then retry the uninstall."
-            )
-        return False, str(removed.get("log", ["Tailscale Serve failed."])[-1])
+    for route in current.route_targets:
+        removed = actions.tailscale_serve_off(route.private_https_port, log)
+        if not removed.get("ok"):
+            terminal_command = removed.get("terminal_command")
+            if terminal_command:
+                return False, (
+                    "Administrator action required before this route can be removed. "
+                    f"Run `{terminal_command}` once, then retry the uninstall."
+                )
+            return False, str(removed.get("log", ["Tailscale Serve failed."])[-1])
     return True, "Private HTTPS route removed."
 
 
@@ -293,15 +300,14 @@ def reconcile_core(registry: Registry, root: Path, log) -> tuple[bool, str]:
     if not activated:
         return False, detail
     for service in _generated_services(registry, root):
-        if service.private_https_port is None or service.proxy_port is None:
-            continue
-        published = actions.tailscale_serve(service.private_https_port, service.proxy_port, log)
-        if not published.get("ok"):
-            terminal_command = published.get("terminal_command")
-            if terminal_command:
-                return (
-                    False,
-                    f"Administrator action required before this route can be published. Run `{terminal_command}` once, then retry.",
-                )
-            return False, str(published.get("log", ["Tailscale Serve failed."])[-1])
+        for route in service.route_targets:
+            published = actions.tailscale_serve(route.private_https_port, route.proxy_port, log)
+            if not published.get("ok"):
+                terminal_command = published.get("terminal_command")
+                if terminal_command:
+                    return (
+                        False,
+                        f"Administrator action required before this route can be published. Run `{terminal_command}` once, then retry.",
+                    )
+                return False, str(published.get("log", ["Tailscale Serve failed."])[-1])
     return True, "Core UI routes and Tailscale HTTPS endpoints are active."

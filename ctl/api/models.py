@@ -67,6 +67,19 @@ class ServiceUi(ApiModel):
     launch_label: str | None = None
 
 
+class ServiceLink(ApiModel):
+    """Another private address of an app (``extra_routes``), shown beside its Open button."""
+
+    label: str
+    url: str
+
+
+class ServiceExtraRoute(ApiModel):
+    name: str
+    label: str
+    private_https_port: float
+
+
 class ServiceCheck(ApiModel):
     state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
     detail: str
@@ -146,6 +159,7 @@ class Service(ApiModel):
     stage: Literal["foundation"] | Literal["core"] | Literal["optional"]
     group: Literal["apps"] | Literal["ai"] | Literal["infrastructure"]
     routable: bool
+    extra_routes: list[ServiceExtraRoute] = Field(default_factory=list)
     required: bool
     identity_note: str
     resource_guidance: str
@@ -157,6 +171,7 @@ class Service(ApiModel):
     detail: str
     url: str
     route_ready: bool
+    links: list[ServiceLink] = Field(default_factory=list)
     compose_present: bool
     ui: ServiceUi | None = None
     allowed_actions: (

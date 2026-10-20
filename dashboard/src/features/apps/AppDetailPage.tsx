@@ -33,6 +33,12 @@ function HeaderActions({ service }: { service: Service }) {
   return (
     <>
       {service.id === 'freellmapi' && <LinkButton to="/settings/ai">Manage providers</LinkButton>}
+      {target &&
+        (service.links || []).map((link) => (
+          <ExternalButton key={link.url} href={link.url}>
+            {link.label}
+          </ExternalButton>
+        ))}
       {target ? (
         <ExternalButton variant="primary" href={target.url}>
           {target.label}

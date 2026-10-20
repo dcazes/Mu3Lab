@@ -118,18 +118,42 @@ def _check_images(compose: Path) -> None:
             raise CatalogError(f"{compose}: service {service} must pin its image to a sha256 digest, not {image!r}")
 
 
-def published_ports(compose: Path) -> list[int]:
-    """The host ports a compose file publishes (``127.0.0.1:<host>:<container>``)."""
+# ``<address>:<host port>:<container port>[/tcp|/udp]``
+_PUBLISH = re.compile(r"(?:(?P<address>.+):)?(?P<port>\d+):\d+(?:/(?P<protocol>tcp|udp))?")
+# This server's tailnet address. The ``:?`` form makes Compose refuse to start without it:
+# an empty address would publish the port on every network the computer is on.
+_TAILNET_ADDRESS = re.compile(r"\$\{MU3LAB_TAILNET_IP:\?[^}:]*\}")
+
+
+def published(compose: Path) -> list[tuple[int, str, str]]:
+    """``(port, protocol, listen)`` for every host port a compose file publishes.
+
+    ``listen`` is ``loopback`` (``127.0.0.1``) or ``tailnet`` (``${MU3LAB_TAILNET_IP:?...}``);
+    any other address is refused.
+    """
     ports = []
     for definition in _services(compose).values():
         for entry in definition.get("ports") or []:
-            parts = str(entry).split(":")
-            if len(parts) < 2 or not parts[-2].isdigit():
+            match = _PUBLISH.fullmatch(str(entry))
+            if not match:
                 raise CatalogError(f"{compose}: publish ports as 127.0.0.1:<host>:<container>, not {entry!r}")
-            if len(parts) != 3 or parts[0] != "127.0.0.1":
-                raise CatalogError(f"{compose}: {entry!r} must listen on 127.0.0.1 only")
-            ports.append(int(parts[-2]))
+            address = match["address"] or ""  # none at all means every address
+            if address == "127.0.0.1":
+                listen = "loopback"
+            elif _TAILNET_ADDRESS.fullmatch(address):
+                listen = "tailnet"
+            else:
+                raise CatalogError(
+                    f"{compose}: {entry!r} must listen on 127.0.0.1 only "
+                    "(or on ${MU3LAB_TAILNET_IP:?...} for a tailnet extra port)"
+                )
+            ports.append((int(match["port"]), match["protocol"] or "tcp", listen))
     return ports
+
+
+def published_ports(compose: Path) -> list[int]:
+    """The host port numbers a compose file publishes."""
+    return [port for port, _protocol, _listen in published(compose)]
 
 
 def _host_listen_ports(compose: Path) -> list[int]:
@@ -237,15 +261,22 @@ def _check_across(apps: list[App], platform_dir: Path = PLATFORM_DIR) -> None:
         if unknown:
             raise CatalogError(f"{app.id}: unknown dependencies {sorted(unknown)}")
         claim(manifest.service.local_port, app.id)
-        for port in published_ports(app.folder / COMPOSE_FILE):
-            if port != manifest.service.local_port:
+        declared = {(manifest.service.local_port, "tcp", "loopback")}
+        for extra in manifest.service.extra_ports:
+            claim(extra.port, f"{app.id}'s {extra.purpose}", app.id)
+            declared.add((extra.port, extra.protocol, extra.listen))
+        for port, protocol, listen in published(app.folder / COMPOSE_FILE):
+            if (port, protocol, listen) not in declared:
                 raise CatalogError(
                     f"{app.id}: its compose file publishes port {port}, but service.local_port is "
-                    f"{manifest.service.local_port}"
+                    f"{manifest.service.local_port} and service.extra_ports does not list it as {protocol} on {listen}"
                 )
-        if manifest.route:
-            claim(manifest.route.https_port, f"{app.id}'s tailnet address", app.id)
-            claim(manifest.route.caddy_port, f"{app.id}'s Caddy listener", app.id)
+        for route in (manifest.route, *manifest.extra_routes):
+            if route:
+                name = getattr(route, "name", "")
+                where = f"{app.id}'s {name} route" if name else f"{app.id}'s"
+                claim(route.https_port, f"{where} tailnet address", app.id)
+                claim(route.caddy_port, f"{where} Caddy listener", app.id)
         for connector in app.connectors:
             if connector.id in connector_ids:
                 raise CatalogError(f"connector id {connector.id!r} is used twice")
@@ -259,14 +290,14 @@ def _check_across(apps: list[App], platform_dir: Path = PLATFORM_DIR) -> None:
                     raise CatalogError(f"{connector.id}: a built-in connector's local_health uses the app's port")
                 continue
             compose = app.connector_folder(connector.id) / COMPOSE_FILE
-            published = published_ports(compose)
-            if not published and health in _host_listen_ports(compose):
+            connector_ports = published_ports(compose)
+            if not connector_ports and health in _host_listen_ports(compose):
                 # On the host network (Kopia's reader): it publishes nothing and listens itself.
                 claim(health, f"connector {connector.id}")
                 continue
-            if published != [health]:
+            if connector_ports != [health]:
                 raise CatalogError(
-                    f"{connector.id}: its compose file publishes {published}, but local_health uses port {health}"
+                    f"{connector.id}: its compose file publishes {connector_ports}, but local_health uses port {health}"
                 )
             claim(health, f"connector {connector.id}")
     _check_no_cycles({app.id: app.manifest.depends_on for app in apps})

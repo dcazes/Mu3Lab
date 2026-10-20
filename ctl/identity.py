@@ -148,6 +148,12 @@ def gate_blueprint(catalog: Catalog, host: str, paths: RuntimePaths) -> str:
         if app.manifest.route is not None
         and app.manifest.route.access in {"gate", "trusted_header"}
         and installed(app, paths)
+    ) + tuple(
+        # Each gated extra address is its own forward-auth provider in Authentik.
+        GatedApp(f"{app.id}-{extra.name}", f"{app.manifest.name} {extra.label}", extra.https_port, extra.audience)
+        for app in catalog.apps
+        for extra in app.manifest.extra_routes
+        if extra.access == "gate" and installed(app, paths)
     )
     return render_gate_blueprint(host, dashboard.manifest.route.https_port, gated)
 

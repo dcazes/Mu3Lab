@@ -5002,6 +5002,13 @@
             "title": "Display State",
             "type": "string"
           },
+          "extra_routes": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceExtraRoute"
+            },
+            "title": "Extra Routes",
+            "type": "array"
+          },
           "group": {
             "anyOf": [
               {
@@ -5103,6 +5110,13 @@
               }
             ],
             "title": "Lifecycle"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceLink"
+            },
+            "title": "Links",
+            "type": "array"
           },
           "mobile": {
             "anyOf": [
@@ -5609,6 +5623,29 @@
         "title": "ServiceContainersItem",
         "type": "object"
       },
+      "ServiceExtraRoute": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "private_https_port": {
+            "title": "Private Https Port",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "private_https_port"
+        ],
+        "title": "ServiceExtraRoute",
+        "type": "object"
+      },
       "ServiceIdentity": {
         "properties": {
           "detail": {
@@ -5780,6 +5817,25 @@
           "initialization"
         ],
         "title": "ServiceInitializationResponse",
+        "type": "object"
+      },
+      "ServiceLink": {
+        "description": "Another private address of an app (``extra_routes``), shown beside its Open button.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url"
+        ],
+        "title": "ServiceLink",
         "type": "object"
       },
       "ServiceLogsResponse": {

@@ -196,6 +196,18 @@ describe('App page', () => {
     expect(screen.getByRole('link', { name: 'Manage providers' })).toHaveAttribute('href', '/settings/ai');
   });
 
+  it('links an app’s other private addresses beside its Open button', () => {
+    stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '' }));
+    const voice = service('voice', 'Voice', 'optional', {
+      identity: identity({ mode: 'proxy_gate', launch_url: 'https://host.ts.net:8476' }),
+      ui: readyUi('https://host.ts.net:8476'),
+      links: [{ label: 'Admin dashboard', url: 'https://host.ts.net:8478' }],
+    });
+    renderWithDashboard(<AppDetailPage id="voice" tab="overview" />, dashboardData([voice]));
+    expect(screen.getByRole('link', { name: 'Admin dashboard' })).toHaveAttribute('href', 'https://host.ts.net:8478');
+    expect(screen.getByRole('link', { name: /^Open/ })).toHaveAttribute('href', 'https://host.ts.net:8476');
+  });
+
   it('offers the GPU version after the compute mode changes, and switches only when asked', async () => {
     const fetchMock = stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '', job: { id: 'j' } }));
     const immich = service('immich', 'Immich', 'optional', { compute: { running: 'cpu', wanted: 'nvidia' } });

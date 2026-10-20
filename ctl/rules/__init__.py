@@ -122,6 +122,7 @@ def _load_all() -> None:
     from ctl.rules import (  # noqa: F401
         container_script,
         first_admin_from_env,
+        gateway_key,
         hide_model_providers,
         initial_owner_guard,
         needs_embedding_model,

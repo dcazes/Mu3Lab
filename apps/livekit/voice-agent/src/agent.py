@@ -1,8 +1,9 @@
 """Mu3Lab voice agent: speech in, a local language model, speech out.
 
-Everything runs on this server. Speech recognition and speech output go to
-Speaches, the chat model goes through Mu3Lab's LiteLLM gateway, and voice
-activity and turn taking run inside this container. Every address and model
+Everything runs on this server. The chat model (the local model chosen in
+Mu3Lab's Settings) and speech both go through Mu3Lab's LiteLLM gateway with
+the agent's own key, and voice activity and turn taking run inside this
+container. Every address and model
 name comes from the environment, so the same code runs on a desktop for
 testing (localhost ports) and inside Mu3Lab (service names).
 """
@@ -38,11 +39,13 @@ AGENT_NAME = _env("MU3LAB_AGENT_NAME", "mu3lab-agent")
 # for voice, so the agent always sends reasoning_effort="none".
 LLM_BASE_URL = _env("MU3LAB_LLM_BASE_URL", "http://litellm:4000/v1")
 LLM_API_KEY = _env("MU3LAB_LLM_API_KEY", "not-needed")
-LLM_MODEL = _env("MU3LAB_LLM_MODEL", "qwen3.5:4b")
-# Speaches serves speech recognition and speech output on one OpenAI-compatible API.
-SPEECH_BASE_URL = _env("MU3LAB_SPEECH_URL", "http://speaches:8000/v1")
-STT_MODEL = _env("MU3LAB_STT_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
-TTS_MODEL = _env("MU3LAB_TTS_MODEL", "speaches-ai/Kokoro-82M-v1.0-ONNX-int8")
+LLM_MODEL = _env("MU3LAB_LLM_MODEL", "mu3lab-local")
+# Speech recognition and speech output, on one OpenAI-compatible API: LiteLLM's mu3lab-stt and
+# mu3lab-tts in Mu3Lab, or Speaches itself (real model names) when LiteLLM is bypassed.
+SPEECH_BASE_URL = _env("MU3LAB_SPEECH_URL", "http://litellm:4000/v1")
+SPEECH_API_KEY = _env("MU3LAB_SPEECH_API_KEY", LLM_API_KEY)
+STT_MODEL = _env("MU3LAB_STT_MODEL", "mu3lab-stt")
+TTS_MODEL = _env("MU3LAB_TTS_MODEL", "mu3lab-tts")
 TTS_VOICE = _env("MU3LAB_TTS_VOICE", "af_heart")
 
 INSTRUCTIONS = (
@@ -68,7 +71,7 @@ async def entrypoint(ctx: JobContext) -> None:
         vad=silero.VAD.load(),
         stt=openai.STT(
             base_url=SPEECH_BASE_URL,
-            api_key="not-needed",
+            api_key=SPEECH_API_KEY,
             model=STT_MODEL,
             language="en",
             # Speaches' REST transcription endpoint, one request per utterance.
@@ -82,7 +85,7 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
         tts=openai.TTS(
             base_url=SPEECH_BASE_URL,
-            api_key="not-needed",
+            api_key=SPEECH_API_KEY,
             model=TTS_MODEL,
             voice=TTS_VOICE,
         ),

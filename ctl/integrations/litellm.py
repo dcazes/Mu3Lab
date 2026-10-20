@@ -45,12 +45,12 @@ class LiteLLM:
         data = self._call("GET", "/key/list", params={"user_id": user_id, "return_full_object": "true"})
         return [item for item in data.get("keys", []) if isinstance(item, dict)]
 
-    def generate(self, *, user_id: str, alias: str, models: list[str], rpm_limit: int) -> str:
-        data = self._call(
-            "POST",
-            "/key/generate",
-            json={"user_id": user_id, "key_alias": alias, "models": models, "rpm_limit": rpm_limit},
-        )
+    def generate(self, *, user_id: str, alias: str, models: list[str], rpm_limit: int, key: str = "") -> str:
+        """Create a key; ``key`` sets its value (an app's generated secret) instead of a random one."""
+        body: dict[str, Any] = {"user_id": user_id, "key_alias": alias, "models": models, "rpm_limit": rpm_limit}
+        if key:
+            body["key"] = key
+        data = self._call("POST", "/key/generate", json=body)
         key = data.get("key")
         if not isinstance(key, str) or not key:
             raise LiteLLMError("LiteLLM did not return a key.")
