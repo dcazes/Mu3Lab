@@ -661,6 +661,8 @@ class JobDetailResponse(ApiModel):
     ok: bool
     job: Job
     events: list[AuditEvent]
+    # Image download progress while an install job downloads.
+    download: ImageDownload | None = None
 
 
 class BackupSnapshot(ApiModel):

@@ -21,6 +21,7 @@ import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
+import { activeJob, JobProgress } from './JobProgress';
 import { useInstallBatch } from './useInstallBatch';
 
 const GROUP_ORDER: Group[] = ['apps', 'ai', 'infrastructure'];
@@ -193,6 +194,12 @@ export function AppsPage({ discover }: { discover: boolean }) {
           ])
       : [],
   );
+  // Installs, retries and updates started from an app's own page; the batch card covers its own jobs.
+  const batchJobs = new Set((installBatch.batch?.items || []).map((item) => item.job_id).filter(Boolean));
+  const singleJobs = services.filter((service) => {
+    const job = activeJob(service);
+    return job && !batchJobs.has(job.id);
+  });
   // Drop picks that have since been installed or joined the queue.
   const selected = stored.filter((id) =>
     available.some((service) => service.id === id && canInstall(service) && !queued.has(id)),
@@ -256,6 +263,9 @@ export function AppsPage({ discover }: { discover: boolean }) {
           controls={installBatch.controls}
         />
       )}
+      {singleJobs.map((service) => (
+        <JobProgress key={service.id} service={service} showName />
+      ))}
       {!shown.length ? (
         <EmptyState
           icon={PackageSearch}

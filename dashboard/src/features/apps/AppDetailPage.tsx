@@ -17,6 +17,7 @@ import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
 import { ConfigurationForm } from './ConfigurationForm';
 import { DevicesSection } from './DevicesSection';
+import { JobProgress } from './JobProgress';
 import { UninstallDialog } from './UninstallDialog';
 import { ACTIONS, type ServiceAction, useServiceActions } from './useServiceActions';
 
@@ -336,6 +337,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
         }
         actions={<HeaderActions service={service} />}
       />
+      <JobProgress service={service} />
       {tabs.length > 1 && <Tabs label={`${service.name} sections`} items={tabs} />}
       {active === 'overview' && <Overview service={service} address={address} devices={hasDevices} />}
       {active === 'chat' && mcp && (

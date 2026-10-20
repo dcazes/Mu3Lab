@@ -54,8 +54,11 @@ def _recent_job(store: JobStore, job_id: str) -> dict[str, JsonValue]:
 @router.get("/jobs/{job_id}", response_model=models.JobDetailResponse, response_model_exclude_none=True)
 def job_detail(job_id: str, _operator: Member) -> models.JobDetailResponse:
     store = runtime.job_store()
+    job = _recent_job(store, job_id)
+    downloads = ImageDownloadStore.runtime()
+    download = downloads.for_jobs([job_id]).get(job_id) if downloads else None
     return models.JobDetailResponse.model_validate(
-        {"ok": True, "job": _recent_job(store, job_id), "events": store.events(job_id)}
+        {"ok": True, "job": job, "events": store.events(job_id), "download": download}
     )
 
 

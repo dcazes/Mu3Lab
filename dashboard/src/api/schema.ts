@@ -2430,6 +2430,7 @@ export interface components {
     };
     /** JobDetailResponse */
     JobDetailResponse: {
+      download?: components['schemas']['ImageDownload'] | null;
       /** Events */
       events: components['schemas']['AuditEvent'][];
       job: components['schemas']['Job'];

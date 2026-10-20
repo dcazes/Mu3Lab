@@ -2811,6 +2811,16 @@
       },
       "JobDetailResponse": {
         "properties": {
+          "download": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageDownload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/AuditEvent"
