@@ -21,6 +21,7 @@ import yaml
 
 from ctl import hostinfo, voice_keys
 from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint
+from ctl.control_state import ControlState
 from ctl.core_wiring import RoutingParams, speech_models
 from ctl.engine import rewire
 from ctl.engine.compose import Compose, ScriptResult
@@ -195,11 +196,17 @@ class PerPersonAccountsTests(unittest.TestCase):
         self.assertEqual([p["username"] for p in household("household", self.PEOPLE)], ["owner", "sam"])
         self.assertEqual([p["username"] for p in household("operators", self.PEOPLE)], ["owner"])
 
+    @staticmethod
+    def _set_state(paths: RuntimePaths, state: str) -> None:
+        paths.runtime.mkdir(parents=True, exist_ok=True)
+        ControlState.runtime(paths).set_installation("beaver-habits", state)
+
     def test_periodic_runs_the_script_only_when_the_household_changed(self):
         rule = rules_for(load().get("beaver-habits").manifest)[0]
         self.assertIsInstance(rule, PerPersonAccounts)
         with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
             paths = RuntimePaths(Path(tmp))
+            self._set_state(paths, "running")
             people.return_value = self.PEOPLE
             ctx = scripted("beaver-habits", paths, [ok("MU3LAB_BEAVER_PEOPLE_OK created=2")])
             self.assertIn("match the household", rule.periodic(ctx))
@@ -209,10 +216,24 @@ class PerPersonAccountsTests(unittest.TestCase):
             self.assertEqual(rule.periodic(ctx), "")  # unchanged: no script run
             self.assertEqual(len(ctx.calls), 1)
 
+    def test_periodic_leaves_a_stopped_app_alone_until_it_runs_again(self):
+        rule = rules_for(load().get("beaver-habits").manifest)[0]
+        with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
+            paths = RuntimePaths(Path(tmp))
+            people.return_value = self.PEOPLE
+            ctx = scripted("beaver-habits", paths, [ok("MU3LAB_BEAVER_PEOPLE_OK created=2")])
+            self.assertEqual(rule.periodic(ctx), "")  # not installed yet
+            self._set_state(paths, "stopped")
+            self.assertEqual(rule.periodic(ctx), "")
+            self.assertEqual(ctx.calls, [])
+            self._set_state(paths, "running")
+            self.assertIn("match the household", rule.periodic(ctx))
+
     def test_a_failed_sync_is_retried_later_and_fails_an_install(self):
         rule = rules_for(load().get("beaver-habits").manifest)[0]
         with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
             paths = RuntimePaths(Path(tmp))
+            self._set_state(paths, "running")
             people.return_value = self.PEOPLE
             ctx = scripted("beaver-habits", paths, [ScriptResult(ok=False, error="boom"), ScriptResult(ok=False)])
             self.assertEqual(rule.periodic(ctx), "")

@@ -4,7 +4,7 @@ Some apps trust Mu3Lab's identity header but only for accounts that already
 exist (Beaver Habits). A script kept in the app's folder receives the current
 household as JSON and creates whatever is missing through the app's own user
 service. It runs once the app is healthy, and again whenever the household
-changes. Removed people are shut out by Authentik itself, so the script only
+changes while the app is running. Removed people are shut out by Authentik itself, so the script only
 creates.
 """
 
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
+from ctl.control_state import ControlState
 from ctl.engine.hooks import HookContext
 from ctl.people import PeopleError, list_people
 from ctl.rules import Params, Rule, RuleError, register
@@ -99,6 +100,10 @@ class PerPersonAccounts(Rule):
             )
 
     def periodic(self, ctx: HookContext) -> str:
+        state = ControlState.runtime(ctx.facts.paths) if ctx.facts else ControlState.runtime()
+        installation = state.installation(ctx.app.id) if state else None
+        if not installation or installation["state"] != "running":
+            return ""  # a stopped app catches up once it runs again
         try:
             people = household(self.params.audience, list_people())
         except PeopleError:
