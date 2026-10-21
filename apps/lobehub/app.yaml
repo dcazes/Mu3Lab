@@ -64,6 +64,10 @@ secrets:
   value: mu3lab-lobehub
 - env: RUSTFS_SECRET_KEY
   length: 48
+# The value of its own AI gateway key (gateway_key rule); LiteLLM keys start with sk-.
+- env: LITELLM_APP_KEY
+  kind: hex
+  length: 24
 env:
   APP_URL: '{{public_url}}'
   S3_ENDPOINT: '{{public_url}}/lobe-assets'
@@ -72,8 +76,17 @@ env:
   FEATURE_FLAGS: '-provider_settings,-openai_api_key,-openai_proxy_url,-api_key_manage'
   AUTH_DISABLE_EMAIL_PASSWORD: '1'
   OPENAI_PROXY_URL: http://litellm:4000/v1
-  LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
+  MU3LAB_LLM_API_KEY: 'sk-{{LITELLM_APP_KEY}}'
+# Registers its key again when the gateway is reinstalled.
+integrates_with:
+- capability: model_proxy
 rules:
+# Its own AI gateway key, for chat and document search only: never the voice assistant's route.
+- rule: gateway_key
+  with:
+    key_env: MU3LAB_LLM_API_KEY
+    models: [mu3lab-chat, mu3lab-fast, mu3lab-local, mu3lab-embed]
+    rpm_limit: 3000
 - rule: hide_model_providers
   with:
     providers_file: blocked-model-providers.txt

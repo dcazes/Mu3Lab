@@ -1,14 +1,16 @@
 """Give an app its own key to Mu3Lab's AI gateway (LiteLLM), limited to the models it uses.
 
-Most apps reach LiteLLM with its master key, which can do anything,
-including creating and deleting keys. An app that follows this rule gets a
-key of its own instead: the value is one of the app's generated secrets
+LiteLLM's master key can do anything, including creating and deleting keys
+and calling every model, so apps never hold it. An app that follows this rule
+gets a key of its own instead (chat apps, for example, cannot reach the voice
+assistant's route, which may go outside while chat is local only): the value is one of the app's generated secrets
 (``key_env``, which must start with ``sk-`` as LiteLLM requires), and LiteLLM
 accepts it only for ``models`` and at most ``rpm_limit`` requests a minute.
 
-The key is registered once the app is healthy, and again whenever the
+The key is registered before the app starts, and again whenever the
 gateway is reinstalled (``rewire``), since its database then starts empty.
-Registering updates the app's key in place, or replaces an earlier key of the same app, so it is safe to repeat.
+Registering updates the app's key in place, or replaces an earlier key of the same
+app, so it is safe to repeat.
 """
 
 from __future__ import annotations
@@ -41,7 +43,8 @@ class GatewayKey(Rule):
     summary = "Registers the app's own AI gateway key, limited to the models it uses."
     params: GatewayKeyParams
 
-    def after_healthy(self, ctx: HookContext) -> None:
+    def before_start(self, ctx: HookContext) -> None:
+        # Before the app's first start, so it never starts with a key LiteLLM refuses.
         self._register(ctx)
 
     def rewire(self, ctx: HookContext) -> None:

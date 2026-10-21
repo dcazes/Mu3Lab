@@ -30,12 +30,13 @@ services:
       OAUTH_ALLOWED_ROLES: mu3lab-users,mu3lab-operators
       DEFAULT_USER_ROLE: user
       # Models come only from LiteLLM, which also routes the local model (mu3lab-local) and local only.
+      # Open WebUI's own key reaches chat and document search only (gateway_key in app.yaml).
       ENABLE_OLLAMA_API: "false"
       OPENAI_API_BASE_URL: http://litellm:4000/v1
-      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      OPENAI_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       RAG_EMBEDDING_ENGINE: openai
       RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      RAG_OPENAI_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       RAG_EMBEDDING_MODEL: mu3lab-embed
       # Voice in chat: Open WebUI's own Whisper turns speech into text on this server, in any browser,
       # and replies are read aloud with the browser's voices. It never depends on the Speech app.

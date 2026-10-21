@@ -188,7 +188,9 @@ class RegistryTests(unittest.TestCase):
             self.assertNotIn("{{sign_in_launch}}", launcher)
             self.assertEqual(values["AUTH_SSO_PROVIDERS"], "authentik")
             self.assertEqual(values["AUTH_DISABLE_EMAIL_PASSWORD"], "1")
-            self.assertEqual(values["LITELLM_MASTER_KEY"], "test-master-key")
+            # LobeChat gets its own gateway key, never LiteLLM's master key.
+            self.assertNotIn("LITELLM_MASTER_KEY", values)
+            self.assertRegex(values["MU3LAB_LLM_API_KEY"], r"^sk-[0-9a-f]{48}$")
             self.assertEqual(values["APP_URL"], "https://mu3lab.example.ts.net:8457")
             self.assertIn("/api/auth/callback/authentik", service.manifest.sign_in.oidc.redirect_paths)
             self.assertFalse((paths.projects / "authentik" / "blueprints").exists())

@@ -249,7 +249,7 @@ class GatewayKeyTests(unittest.TestCase):
         (self.project / ".env").write_text("MU3LAB_LLM_API_KEY=sk-abc123\n")
         FakeLiteLLM.known = {"sk-abc123"}
         with mock.patch("ctl.rules.gateway_key.LiteLLM", FakeLiteLLM):
-            self.rule.after_healthy(self.ctx())
+            self.rule.before_start(self.ctx())
         kinds = [call[0] for call in FakeLiteLLM.calls]
         self.assertNotIn("delete", kinds)
         self.assertNotIn("generate", kinds)
@@ -258,7 +258,7 @@ class GatewayKeyTests(unittest.TestCase):
     def test_registers_the_apps_own_key_for_its_models_only(self):
         (self.project / ".env").write_text("MU3LAB_LLM_API_KEY=sk-abc123\n")
         with mock.patch("ctl.rules.gateway_key.LiteLLM", FakeLiteLLM):
-            self.rule.after_healthy(self.ctx())
+            self.rule.before_start(self.ctx())
         self.assertEqual(FakeLiteLLM.calls[0], ("open", "http://127.0.0.1:4000", "master"))
         # A different value under the alias is replaced.
         self.assertIn(("delete", ["mu3lab-app-livekit"]), FakeLiteLLM.calls)
@@ -270,8 +270,21 @@ class GatewayKeyTests(unittest.TestCase):
     def test_refuses_a_key_litellm_would_reject(self):
         (self.project / ".env").write_text("MU3LAB_LLM_API_KEY=abc123\n")
         with mock.patch("ctl.rules.gateway_key.LiteLLM", FakeLiteLLM), self.assertRaises(StepFailed):
-            self.rule.after_healthy(self.ctx())
+            self.rule.before_start(self.ctx())
         self.assertEqual(FakeLiteLLM.calls, [])
+
+    def test_no_app_is_handed_the_gateway_master_key(self):
+        # The master key reaches every route, the voice assistant's too; apps get gateway_key instead.
+        for app in self.catalog.apps:
+            text = (app.folder / "app.yaml").read_text() + (app.folder / "docker-compose.yml").read_text()
+            if app.id != "litellm":
+                self.assertNotIn("LITELLM_MASTER_KEY", text, app.id)
+
+    def test_chat_apps_keys_cannot_reach_the_voice_route(self):
+        for app_id in ("open-webui", "lobehub", "surfsense"):
+            app = self.catalog.get(app_id)
+            rule = next(rule for rule in rules_for(app.manifest) if rule.name == "gateway_key")
+            self.assertNotIn("mu3lab-voice", rule.params.models, app_id)
 
 
 if __name__ == "__main__":

@@ -41,10 +41,23 @@ secrets:
 # Mu3Lab's own administrator key: it adds each operator's app assistants (ctl/openwebui_ops.py).
 - env: OPEN_WEBUI_ADMIN_API_KEY
   length: 48
+# The value of its own AI gateway key (gateway_key rule); LiteLLM keys start with sk-.
+- env: LITELLM_APP_KEY
+  kind: hex
+  length: 24
 env:
   OPEN_WEBUI_URL: '{{public_url}}'
-  LITELLM_MASTER_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
+  MU3LAB_LLM_API_KEY: 'sk-{{LITELLM_APP_KEY}}'
+# Registers its key again when the gateway is reinstalled.
+integrates_with:
+- capability: model_proxy
 rules:
+# Its own AI gateway key, for chat and document search only: never the voice assistant's route.
+- rule: gateway_key
+  with:
+    key_env: MU3LAB_LLM_API_KEY
+    models: [mu3lab-chat, mu3lab-fast, mu3lab-local, mu3lab-embed]
+    rpm_limit: 3000
 # Before anyone can sign in, the owner's administrator account is created already
 # linked to their Authentik sign-in, so no one else can become the first user.
 - rule: container_script
