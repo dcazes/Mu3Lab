@@ -5,14 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions, job_guard
+from ctl import actions, job_guard, setup_checks
 from ctl.app_settings import AppSettings
 from ctl.chat_ops import sync_agents
 from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.engine.compose import Compose
+from ctl.engine.hooks import StepFailed
+from ctl.engine.install import context as hook_context
 from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
+from ctl.engine.project import Facts
 from ctl.engine.rewire import rewire_consumers
 from ctl.jobs import JobStore
 from ctl.lifecycle import app_control, compute_switch, maintenance
@@ -21,9 +24,12 @@ from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
 from ctl.lifecycle.uninstall import uninstall_application
 from ctl.mcp_ops import sync_application
 from ctl.registry import Registry, RegistryError, Service, load
+from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import write_atomic
 from ctl.secrets import read_runtime_env, runtime_env_text
+from ctl.service_state import tailnet_dns_name
+from ctl.store import onboarding as onboarding_state
 
 SUPPORTED_ACTIONS = frozenset(
     {
@@ -95,7 +101,7 @@ def allowed_actions(service: Service, state: str) -> list[str]:
     uninstall = ["uninstall"] if service.stage == "optional" else []
     if state in {"failed", "needs_attention", "needs_setup", "degraded"}:
         return ["restart"] if service.stage != "optional" else ["retry_setup", "restart", *uninstall]
-    if state == "stopped":
+    if state in {"stopped", "setup_required"}:
         return ["start", *uninstall]
     if state in {"ready", "running", "starting", "configured", "installed", "checking", "stale"}:
         result = ["restart"]
@@ -150,6 +156,7 @@ def _uninstall(
         return
     if state:
         state.reset_service(service.id)
+    setup_checks.forget(service.id, RuntimePaths())
     # Apps that used this one (Open WebUI using speech) drop those settings now.
     rewire_consumers(registry.catalog.get(service.id), registry.catalog, log)
     _sync_chat_assistants(log)
@@ -178,6 +185,46 @@ def _switch_compute(
     if state:
         state.set_installation(service.id, "running" if running else "stopped", job_id=job_id, route_state="ready")
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
+
+
+def _ready_to_start(
+    store: JobStore, job: dict, service: Service, registry: Registry, actor: str, log: Callable[[str], None]
+) -> bool:
+    """Check again what the app waits on (``ctl.setup_checks``); when something is missing it stays stopped.
+
+    The job ends with the sentence saying what to open; the app keeps its stopped
+    state rather than turning into a failed install.
+    """
+    job_id = str(job["id"])
+    if service.stage != "optional":
+        return True
+    paths = RuntimePaths()
+    app = registry.catalog.get(service.id)
+    rules = rules_for(app.manifest)
+    ctx = hook_context(
+        app,
+        Facts(tailnet_dns_name(), paths, registry.catalog),
+        rules,
+        onboarding_state.read(app.id, paths).get("owner"),
+        log,
+        lambda name, detail: _event(store, job_id, name, detail),
+    )
+    try:
+        missing = setup_checks.first_missing(ctx, rules)
+    except (StepFailed, OSError, ValueError, RuntimeError) as exc:
+        failure = exc if isinstance(exc, StepFailed) else StepFailed("setup_check", "setup_check_failed", str(exc))
+        store.transition(
+            job_id, "failed", actor=actor, detail=failure.message, error_code=failure.code, step_id=failure.stage
+        )
+        return False
+    if missing:
+        setup_checks.remember(app.id, missing, paths)
+        store.transition(
+            job_id, "failed", actor=actor, detail=missing.message, error_code=missing.code, step_id=missing.stage
+        )
+        return False
+    setup_checks.forget(app.id, paths)
+    return True
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
@@ -252,6 +299,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             return
         if state:
             state.reset_service(service.id)
+        setup_checks.forget(service.id, RuntimePaths())
         _sync_chat_assistants(log)
         store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
         return
@@ -295,6 +343,8 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "mcp_stop_failed",
             "An enabled MCP could not stop safely.",
         )
+        return
+    if action == "start" and not _ready_to_start(store, job, service, registry, actor, log):
         return
     compose = Compose(project, gpu_mode=app_mode(project, service.uses_gpu))
     rc, output = compose.action(action, log)

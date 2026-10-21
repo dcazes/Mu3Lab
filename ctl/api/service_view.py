@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from ctl import __version__, backup_service, service_config
+from ctl import __version__, backup_service, service_config, setup_checks
 from ctl.api import models
 from ctl.api.security import IdentityData
 from ctl.control_state import ControlState
@@ -22,7 +22,10 @@ from ctl.status.display import projection as display_projection
 from ctl.store import db, records
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTALLED_STATES = frozenset({"ready", "running", "starting", "stopped", "needs_setup", "checking", "stale"})
+# "setup_required": installed and stopped until the owner makes a choice its rules wait on (ctl.setup_checks).
+INSTALLED_STATES = frozenset(
+    {"ready", "running", "starting", "stopped", "setup_required", "needs_setup", "checking", "stale"}
+)
 USABLE_STATES = frozenset({"ready", "running", "needs_setup"})
 ACTIVE_WORKFLOW_STATES = frozenset({"queued", "installing", "starting", "verifying", "uninstalling", "config_required"})
 
@@ -105,6 +108,11 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
             if item["state"] not in INSTALLED_STATES:
                 item["route_state"] = installation["route_state"]
             item["last_error"] = installation.get("last_error", {})
+        if service.stage == "optional" and item["state"] == "stopped":
+            waiting = setup_checks.waiting(service.id)
+            if waiting:
+                item["state"] = item["lifecycle_state"] = "setup_required"
+                item["detail"] = waiting
         item["initialization"] = initialization or {
             "mode": service.account.get("mode", "none"),
             "state": "pending" if service.account.get("mode", "none") != "none" else "not_required",

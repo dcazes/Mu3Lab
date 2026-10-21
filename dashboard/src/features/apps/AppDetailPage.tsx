@@ -117,6 +117,13 @@ function NextSteps({ service }: { service: Service }) {
       </Callout>,
     );
 
+  if (service.display_state === 'needs_setup')
+    steps.push(
+      <Callout key="setup" tone="warning" title={`Finish setting up ${service.name}`}>
+        {service.detail} It stays stopped until then.
+      </Callout>,
+    );
+
   if (
     service.display_state === 'needs_attention' &&
     !service.installed &&

@@ -5149,6 +5149,7 @@
               "working",
               "checking",
               "not_installed",
+              "needs_setup",
               "needs_attention"
             ],
             "title": "Display State",

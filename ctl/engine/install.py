@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from ctl import actions, image_fetch
+from ctl import actions, image_fetch, setup_checks
 from ctl.chat_ops import sync_agents
 from ctl.compute import app_mode
 from ctl.control_state import ControlState
@@ -139,6 +139,8 @@ def run_install(
         hooks = load_app_hooks(app)
         for rule in rules:
             rule.before_start(ctx)
+        # A choice the owner still has to make does not stop a catalog app's install; it is left stopped at the end.
+        setup = setup_checks.first_missing(ctx, rules) if service.stage == "optional" else None
         failure_code = "compose_invalid"
         stage("validate_configuration", "Validating generated Compose configuration.")
         rc, output = ctx.compose.validate(log)
@@ -268,9 +270,15 @@ def run_install(
         # Apps that work with this one (LiteLLM routing speech) pick it up now.
         rewire_consumers(app, registry.catalog, log, paths)
         finished = f"{service.name} installed and verified."
-        if job.get("request_namespace") == BATCH_NAMESPACE:
+        batch = job.get("request_namespace") == BATCH_NAMESPACE
+        if setup:
+            setup_checks.remember(app.id, setup, paths)
+        else:
+            setup_checks.forget(app.id, paths)
+        if batch or setup:
             # Apps chosen in Discover are set up one at a time and then wait stopped, so installing
-            # many never runs them all at once; the owner starts the ones they want.
+            # many never runs them all at once; the owner starts the ones they want. An app still
+            # waiting on the owner's choice waits stopped too, and its card says what to open.
             failure_code = "stop_after_setup_failed"
             stage("stop_after_setup", f"Setup finished; stopping {service.name} until you start it.")
             app_control.stop(service, root, log)
@@ -278,7 +286,11 @@ def run_install(
                 state.set_installation(
                     app.id, "stopped", job_id=job_id, manifest_version="3", image_digests=images, route_state="ready"
                 )
-            finished = f"{service.name} installed and verified; start it when you want to use it."
+            finished = (
+                f"{service.name} installed and verified. It needs setup before it starts: {setup.message}"
+                if setup
+                else f"{service.name} installed and verified; start it when you want to use it."
+            )
         if complete_job:
             store.transition(job_id, "succeeded", actor=actor, detail=finished, step_id="finalize")
         return True

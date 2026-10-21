@@ -87,6 +87,8 @@ rules:
     key_env: MU3LAB_LLM_API_KEY
     models: [mu3lab-chat, mu3lab-fast, mu3lab-local, mu3lab-embed]
     rpm_limit: 3000
+# Stays stopped until an outside provider or a local chat model can answer; the card says what to open.
+- rule: needs_chat_model
 - rule: hide_model_providers
   with:
     providers_file: blocked-model-providers.txt

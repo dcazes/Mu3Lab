@@ -16,6 +16,7 @@ export const stateLabel: Record<Service['display_state'], string> = {
   working: 'Working',
   checking: 'Checking',
   not_installed: 'Not installed',
+  needs_setup: 'Needs setup',
   needs_attention: 'Needs attention',
 };
 
@@ -28,6 +29,7 @@ export function stateTone(state: string): Tone {
         working: 'blue',
         checking: 'blue',
         not_installed: 'gray',
+        needs_setup: 'amber',
         needs_attention: 'red',
       } as Record<string, Tone>
     )[state] || 'gray'
@@ -74,7 +76,8 @@ export interface LaunchTarget {
 
 /** Where "Open" should take the user, or null when the app has nothing to open right now. */
 export function launchTarget(service: Service): LaunchTarget | null {
-  if (service.display_state === 'stopped' || !isInstalled(service)) return null;
+  if (service.display_state === 'stopped' || service.display_state === 'needs_setup' || !isInstalled(service))
+    return null;
   const identity = service.identity;
   const ui = service.ui;
   const routeUrl = ui?.state === 'ready' && ui.url ? ui.url : '';

@@ -20,6 +20,7 @@ from ctl.registry import Registry, load, service_from
 from ctl.rules import Params, Rule, rules_for
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.setup_checks import waiting
 from ctl.store import onboarding as onboarding_state
 
 OWNER = {"owner_uid": "owner", "username": "owner@test", "email": "owner@test", "display_name": "Owner"}
@@ -212,6 +213,40 @@ class InstallTests(unittest.TestCase):
         with patch("ctl.engine.install.app_control.stop") as stop:
             self.assertEqual(self.run_install()["state"], "succeeded")
         stop.assert_not_called()
+
+    def test_an_app_waiting_on_the_owners_choice_installs_then_stays_stopped_with_the_sentence(self):
+        missing = ["Connect a provider in Settings, AI. Then start this app again."]
+
+        class WaitsOnChoice(Rule):
+            def setup_check(self, ctx):
+                if missing:
+                    ctx.needs_setup("chat_check", "no_outside_provider", missing[0])
+
+        with (
+            patch("ctl.engine.install.rules_for", return_value=[WaitsOnChoice(Params())]),
+            patch("ctl.engine.install.app_control.stop") as stop,
+        ):
+            job = self.run_install()
+            self.assertEqual(job["state"], "succeeded")
+            stop.assert_called_once()
+            self.assertEqual(self.state.installation(self.app.id)["state"], "stopped")
+            self.assertIn("needs setup before it starts: Connect a provider", job["detail"])
+            self.assertEqual(waiting(self.app.id, self.paths), missing[0])
+            missing.clear()
+            self.assertEqual(self.run_install()["state"], "succeeded")
+        self.assertEqual(waiting(self.app.id, self.paths), "")
+        self.assertEqual(self.state.installation(self.app.id)["state"], "running")
+
+    def test_a_real_failure_in_a_setup_check_still_fails_the_install(self):
+        class GatewayDown(Rule):
+            def setup_check(self, ctx):
+                ctx.fail("gateway_routes", "gateway_not_answering", "The AI gateway is not answering.")
+
+        with patch("ctl.engine.install.rules_for", return_value=[GatewayDown(Params())]):
+            job = self.run_install()
+        self.assertEqual(job["state"], "failed")
+        self.assertEqual(self.state.installation(self.app.id)["state"], "failed")
+        self.assertNotIn("start", self.calls)
 
     def test_adventurelog_keeps_naming_its_owner_so_no_default_admin_appears(self):
         # AdventureLog creates admin/admin whenever its admin settings are missing after first start.

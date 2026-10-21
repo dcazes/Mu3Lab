@@ -113,7 +113,7 @@ rules:
   with:
     key_env: MU3LAB_LLM_API_KEY
     models: [mu3lab-voice, mu3lab-stt, mu3lab-tts]
-# Start only when the voice model is ready and the models above are routed; otherwise the card says what to open.
+# Stays stopped until the voice model is ready and the models above are routed; the card says what to open.
 - rule: needs_voice_model
   with:
     models: [mu3lab-voice, mu3lab-stt, mu3lab-tts]

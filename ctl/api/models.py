@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_attention"]
+DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_setup", "needs_attention"]
 
 
 class ApiModel(BaseModel):

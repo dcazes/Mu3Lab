@@ -7,10 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ctl.engine.hooks import SetupNeeded
 from ctl.jobs import JobStore
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.service_ops import allowed_actions, execute_claimed, project_path
+from ctl.setup_checks import waiting
 from tests.support import runtime_paths
 
 
@@ -32,6 +34,43 @@ class ServiceOperationTests(unittest.TestCase):
 
     def test_stopped_service_offers_start_without_restart(self):
         self.assertEqual(allowed_actions(load().get("actual-budget"), "stopped"), ["start", "uninstall"])
+
+    def test_app_waiting_on_setup_offers_start_to_check_again(self):
+        self.assertEqual(allowed_actions(load().get("lobehub"), "setup_required"), ["start", "uninstall"])
+
+    def test_start_checks_setup_again_and_stays_stopped_until_nothing_is_missing(self):
+        sentence = "LobeChat is set to use outside providers, but none is connected."
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            store = JobStore(paths.runtime / "control.sqlite")
+            project = paths.projects / "lobehub"
+            project.mkdir(parents=True)
+            (project / "docker-compose.yml").write_text("services: {}")
+
+            def start(missing):
+                created = store.create(kind="lifecycle", service_id="lobehub", action="start", actor="owner")
+                claimed = store.claim("worker")
+                assert claimed is not None
+                with (
+                    runtime_paths(paths),
+                    patch("ctl.service_ops.tailnet_dns_name", return_value="host.test"),
+                    patch("ctl.service_ops.setup_checks.first_missing", return_value=missing),
+                    patch("ctl.service_ops.actions.compose_action", return_value=(0, "started")) as action,
+                    patch("ctl.service_ops.wait_healthy", return_value=(True, "HTTP 200")),
+                ):
+                    execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
+                return store.get(created["id"]), action
+
+            job, action = start(SetupNeeded("chat_check", "no_outside_provider", sentence))
+            self.assertEqual(
+                (job["state"], job["error_code"], job["detail"]), ("failed", "no_outside_provider", sentence)
+            )
+            action.assert_not_called()
+            self.assertEqual(waiting("lobehub", paths), sentence)
+            job, action = start(None)
+            self.assertEqual(job["state"], "succeeded")
+            action.assert_called_once()
+            self.assertEqual(waiting("lobehub", paths), "")
 
     def test_only_catalog_apps_can_be_uninstalled(self):
         self.assertIn("uninstall", allowed_actions(load().get("nextcloud"), "ready"))
