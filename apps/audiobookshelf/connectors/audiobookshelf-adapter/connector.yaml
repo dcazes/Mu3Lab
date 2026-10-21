@@ -1,0 +1,33 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Audiobookshelf has no maintained MCP server; Mu3Lab's small adapter calls its REST API (/api).
+id: audiobookshelf-adapter
+name: Audiobookshelf MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://github.com/advplyr/audiobookshelf
+revision: v2.37.1-api
+transport: streamable-http
+endpoint: http://audiobookshelf-mcp:8080/mcp
+local_health: http://127.0.0.1:8826/health
+credentials:
+- key: api_key
+  env: ABS_API_KEY
+  type: secret
+  label: Audiobookshelf API key
+  required: true
+provision:
+  service: audiobookshelf
+  script: provision.js
+  interpreter:
+  - node
+  - '-'
+provision_note: Creates a dedicated "Mu3Lab MCP" API key for the owner's Audiobookshelf account (Settings, API Keys).
+review_note: Mu3Lab adapter with five read-only tools, listing libraries, searching one, listing recent additions, and
+  the owner's in-progress items and listening time. Everyone in the household shares the assistant, so the two
+  listening tools (the owner's progress) start switched off in ContextForge.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

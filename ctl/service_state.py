@@ -7,6 +7,7 @@ WHY: The browser must never infer service state from a hard-coded card or a
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import socket
@@ -87,6 +88,29 @@ def tailscale_status(run=process.completed) -> dict[str, object]:
 def tailnet_dns_name(run=process.completed) -> str:
     """Return this node's MagicDNS name without exposing local fallback URLs."""
     return str(tailscale_status(run=run)["dns_name"])
+
+
+def tailnet_ip(run=process.completed) -> str:
+    """This node's tailnet IPv4 address, or "" when Tailscale cannot say.
+
+    Ports that HTTPS routes cannot carry (WebRTC media) are published on this
+    address only, so they are reachable over the tailnet and nowhere else.
+    """
+    try:
+        proc = run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    for line in proc.stdout.splitlines():
+        try:
+            address = ipaddress.IPv4Address(line.strip())
+        except ValueError:
+            continue
+        # Tailscale hands out addresses from the shared 100.64.0.0/10 range only.
+        if address in ipaddress.IPv4Network("100.64.0.0/10"):
+            return str(address)
+    return ""
 
 
 def public_url(service: Service, dns_name: str) -> str:
@@ -506,6 +530,12 @@ def status(
         ),
         "url": url,
         "route_ready": route_ready,
+        # The app's other private addresses, offered once its main route works.
+        "links": [
+            {"label": target.label, "url": f"https://{dns_name}:{target.private_https_port}"}
+            for target in service.route_targets[1:]
+            if route_ready and dns_name and getattr(target.route, "link", True)
+        ],
         "ui": {
             "state": ui_state,
             "url": url or None,

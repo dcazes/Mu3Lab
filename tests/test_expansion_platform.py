@@ -21,6 +21,7 @@ import yaml
 
 from ctl import hostinfo, voice_keys
 from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint
+from ctl.control_state import ControlState
 from ctl.core_wiring import RoutingParams, speech_models
 from ctl.engine import rewire
 from ctl.engine.compose import Compose, ScriptResult
@@ -28,7 +29,7 @@ from ctl.engine.hooks import HookContext
 from ctl.engine.launch import caddy_handler
 from ctl.engine.project import Facts, build_env, render
 from ctl.integrations.litellm import LiteLLM
-from ctl.lifecycle.signin_check import _form_launch
+from ctl.lifecycle.signin_check import _form_launch, _json_launch
 from ctl.manifest.catalog import load
 from ctl.manifest.models import Oidc
 from ctl.registry import load as load_registry
@@ -116,17 +117,14 @@ class IntegrationTests(unittest.TestCase):
     def test_absent_provider_uses_the_fallback_and_drops_provider_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            env = self._env(paths, "open-webui")
-            self.assertEqual(env["AUDIO_STT_ENGINE"], "web")
-            self.assertNotIn("AUDIO_STT_MODEL", env)
+            env = self._env(paths, "nextcloud")
+            self.assertEqual(env["MU3LAB_MUSIC_SHARED"], "0")
+            self.assertTrue(env["MU3LAB_MUSIC_FOLDER"].endswith("/nextcloud/no-music"))
 
     def test_installed_provider_supplies_its_published_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             self._install(paths, "speaches", "MU3LAB_TTS_VOICE=af_heart\nMU3LAB_SPEECH_URL=http://speaches:8000/v1\n")
-            env = self._env(paths, "open-webui")
-            self.assertEqual(env["AUDIO_STT_ENGINE"], "openai")
-            self.assertEqual(env["AUDIO_TTS_VOICE"], "af_heart")
             litellm = self._env(paths, "litellm")
             self.assertEqual(litellm["MU3LAB_SPEECH_URL"], "http://speaches:8000/v1")
 
@@ -145,23 +143,27 @@ class IntegrationTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             catalog = load()
             self._install(paths, "open-webui")
+            # LiteLLM is core (always present); Open WebUI's chat voice has its own Whisper.
             names = {app.id for app in rewire.consumers(catalog.get("speaches"), catalog, paths)}
-            # LiteLLM is core (always present); Open WebUI is installed here; Dawarich is not.
-            self.assertEqual(names, {"litellm", "open-webui"})
+            self.assertEqual(names, {"litellm"})
+            self.assertEqual({app.id for app in rewire.consumers(catalog.get("navidrome"), catalog, paths)}, set())
+            self._install(paths, "nextcloud")
+            names = {app.id for app in rewire.consumers(catalog.get("navidrome"), catalog, paths)}
+            self.assertEqual(names, {"nextcloud"})
 
     def test_rewire_restarts_only_a_running_consumer_whose_files_changed(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             catalog = load()
             facts = Facts("box.test", paths, catalog)
-            render(catalog.get("open-webui"), facts)
+            render(catalog.get("nextcloud"), facts)
             with (
                 patch.object(rewire, "_running", return_value=True),
                 patch.object(Compose, "up", return_value=(0, "")) as up,
             ):
-                self.assertFalse(rewire.rewire_one(catalog.get("open-webui"), facts, lambda _line: None))
-                self._install(paths, "speaches", "MU3LAB_TTS_VOICE=af_heart\n")
-                self.assertTrue(rewire.rewire_one(catalog.get("open-webui"), facts, lambda _line: None))
+                self.assertFalse(rewire.rewire_one(catalog.get("nextcloud"), facts, lambda _line: None))
+                self._install(paths, "navidrome")
+                self.assertTrue(rewire.rewire_one(catalog.get("nextcloud"), facts, lambda _line: None))
             self.assertEqual(up.call_count, 1)
 
 
@@ -194,11 +196,17 @@ class PerPersonAccountsTests(unittest.TestCase):
         self.assertEqual([p["username"] for p in household("household", self.PEOPLE)], ["owner", "sam"])
         self.assertEqual([p["username"] for p in household("operators", self.PEOPLE)], ["owner"])
 
+    @staticmethod
+    def _set_state(paths: RuntimePaths, state: str) -> None:
+        paths.runtime.mkdir(parents=True, exist_ok=True)
+        ControlState.runtime(paths).set_installation("beaver-habits", state)
+
     def test_periodic_runs_the_script_only_when_the_household_changed(self):
         rule = rules_for(load().get("beaver-habits").manifest)[0]
         self.assertIsInstance(rule, PerPersonAccounts)
         with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
             paths = RuntimePaths(Path(tmp))
+            self._set_state(paths, "running")
             people.return_value = self.PEOPLE
             ctx = scripted("beaver-habits", paths, [ok("MU3LAB_BEAVER_PEOPLE_OK created=2")])
             self.assertIn("match the household", rule.periodic(ctx))
@@ -208,10 +216,24 @@ class PerPersonAccountsTests(unittest.TestCase):
             self.assertEqual(rule.periodic(ctx), "")  # unchanged: no script run
             self.assertEqual(len(ctx.calls), 1)
 
+    def test_periodic_leaves_a_stopped_app_alone_until_it_runs_again(self):
+        rule = rules_for(load().get("beaver-habits").manifest)[0]
+        with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
+            paths = RuntimePaths(Path(tmp))
+            people.return_value = self.PEOPLE
+            ctx = scripted("beaver-habits", paths, [ok("MU3LAB_BEAVER_PEOPLE_OK created=2")])
+            self.assertEqual(rule.periodic(ctx), "")  # not installed yet
+            self._set_state(paths, "stopped")
+            self.assertEqual(rule.periodic(ctx), "")
+            self.assertEqual(ctx.calls, [])
+            self._set_state(paths, "running")
+            self.assertIn("match the household", rule.periodic(ctx))
+
     def test_a_failed_sync_is_retried_later_and_fails_an_install(self):
         rule = rules_for(load().get("beaver-habits").manifest)[0]
         with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
             paths = RuntimePaths(Path(tmp))
+            self._set_state(paths, "running")
             people.return_value = self.PEOPLE
             ctx = scripted("beaver-habits", paths, [ScriptResult(ok=False, error="boom"), ScriptResult(ok=False)])
             self.assertEqual(rule.periodic(ctx), "")
@@ -275,6 +297,22 @@ class RouteAndSignInTests(unittest.TestCase):
         self.assertIn("handle /__mu3lab/login", handler)
         self.assertIn("form-action 'self' https://{http.request.host}", handler)
         self.assertIn('"action": "/users/auth/openid_connect"', handler)
+
+    def test_contextforge_launch_asks_its_sso_endpoint_by_get(self):
+        seen: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"], seen["url"] = request.method, str(request.url)
+            return httpx.Response(200, json={"authorization_url": "https://box.test/application/o/authorize/?x=1"})
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            reply = _json_launch("contextforge", client, "https://box.test:8475")
+        self.assertEqual(seen["method"], "GET")
+        self.assertIn("redirect_uri=https%3A%2F%2Fbox.test%3A8475%2Fauth%2Fsso%2Fcallback%2Fmu3lab", seen["url"])
+        self.assertEqual(reply.headers["location"], "https://box.test/application/o/authorize/?x=1")
+        handler_text = caddy_handler(load().get("contextforge").manifest)
+        self.assertIn("handle /__mu3lab/login", handler_text)
+        self.assertIn('"method": "GET"', handler_text)
 
     def test_form_launch_check_submits_the_hidden_fields(self):
         page = (

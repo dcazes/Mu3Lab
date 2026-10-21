@@ -58,6 +58,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "outline",
                 "audiobookshelf",
                 "romm",
+                "livekit",
                 "dawarich",
                 "lobehub",
                 "speaches",
@@ -80,7 +81,8 @@ class RegistryV3Tests(unittest.TestCase):
     def test_mcp_catalog_never_contains_vaultwarden_or_infrastructure(self):
         registry = load()
         servers = load_mcp_catalog(registry)
-        excluded = {"vaultwarden", "ingress", "authentik", "ollama", "litellm", "lobehub"}
+        # Authentik and Kopia have read-only, administrators-only connectors (tests/test_mcp_registry.py).
+        excluded = {"vaultwarden", "ingress", "ollama", "litellm", "lobehub"}
         self.assertFalse(excluded.intersection(server.service_id for server in servers))
         preferred: dict[str, int] = {}
         for server in servers:

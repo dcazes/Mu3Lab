@@ -37,6 +37,8 @@ def main() -> int:
             "AUTHENTIK_ENV_FILE": "/dev/null",
             "MU3LAB_VAULT_ENV_FILE": "/dev/null",
             "MU3LAB_RELAY_CONFIG": "/dev/null",  # written by ctl.tailnet_relay when the relay starts
+            # Asked of Tailscale at install; a checker without Tailscale gets a placeholder tailnet address.
+            "MU3LAB_TAILNET_IP": "100.64.0.1",
             "MU3LAB_UID": str(os.getuid()),
             "MU3LAB_GID": str(os.getgid()),
         }
@@ -52,6 +54,8 @@ def main() -> int:
             envfile.write_text(envfile.read_text() + runtime_env_text(values))
             projects.append(project / "docker-compose.yml")
             for connector in app.connectors:
+                if connector.builtin:
+                    continue  # the app serves MCP itself; its Compose project is validated above
                 # Clone source into a private temp folder: no `.env` in the checkout.
                 source = app.connector_folder(connector.id)
                 target = paths.projects / ("mcp-" + connector.id)

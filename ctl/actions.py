@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json as _json
 import os as _os
+import re as _re
 import shlex as _shlex
+import shutil as _shutil
 import subprocess as _subprocess
 import urllib.request
 from collections.abc import Callable
@@ -170,6 +172,65 @@ def docker_cmd_stream(
     return result.returncode, result.output
 
 
+_ANSI = _re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+# Redrawn many times a second under a terminal; worth showing, not logging.
+_PULL_NOISE = ("Downloading", "Extracting", "Waiting", "Verifying Checksum")
+
+
+def docker_pull(
+    image: str,
+    log: Callable[[str], None],
+    *,
+    on_output: Callable[[str], None] | None = None,
+    timeout: int = 6 * 3600,
+    idle_timeout: int = 300,
+) -> tuple[int, str]:
+    """Pull one image, stopping only when the download stalls.
+
+    ``docker pull`` reports bytes downloaded only to a terminal, so it runs
+    under ``script`` (util-linux) for a pseudo-terminal. With byte progress
+    flowing, ``idle_timeout`` seconds of silence means a stalled download;
+    ``timeout`` is just a backstop. Without ``script`` there is no progress
+    between layers, so only the backstop applies.
+    """
+    job_guard.checkpoint()
+    argv = ["docker", "pull", image]
+    log("$ " + " ".join(argv))
+    tty = _shutil.which("script") is not None
+    inner = ["script", "-qfec", _shlex.join(argv), "/dev/null"] if tty else argv
+    command = _docker_invocation(inner)
+    if command is None:
+        return 1, (
+            "docker unavailable: no live group and no DB membership (installer should have added you — report this)"
+        )
+
+    def forward(raw: str) -> None:
+        line = _ANSI.sub("", raw).strip()
+        if not line:
+            return
+        if not any(word in line for word in _PULL_NOISE):
+            log(line)
+        if on_output:
+            on_output(line)
+
+    result = process.run(
+        command,
+        timeout=timeout,
+        idle_timeout=idle_timeout if tty else None,
+        split_cr=tty,
+        forward_limit=10**9,
+        env={**_os.environ, **_docker_config_env()},
+        on_line=forward,
+    )
+    lines = (_ANSI.sub("", line).strip() for line in result.output.splitlines())
+    output = "\n".join(line for line in lines if line and not any(word in line for word in _PULL_NOISE))
+    if result.status == "timeout":
+        if result.stderr.endswith("without any output"):
+            return 124, f"{output}\nThe download made no progress for {idle_timeout // 60} minutes.".strip()
+        return 124, f"{output}\nThe download did not finish within {timeout // 3600} hours.".strip()
+    return result.returncode, output
+
+
 def docker_cmd_with_stdin(
     argv: list[str], stdin_data: str, log: Callable[[str], None], *, timeout: int = 60
 ) -> tuple[int, str]:
@@ -218,6 +279,7 @@ def compose_up(
     recreate: bool = False,
     services: list[str] | tuple[str, ...] | None = None,
     on_output: Callable[[str], None] | None = None,
+    build: bool = False,
 ) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
@@ -228,6 +290,10 @@ def compose_up(
     argv = [*_compose_project_command(projdir, extra_files), "up", "-d"]
     if recreate:
         argv.append("--force-recreate")
+    # Rebuilds images Mu3Lab builds from source (``build:``), so changed build files take effect;
+    # Docker's build cache keeps this quick when nothing changed. Release installs have no ``build:``.
+    if build:
+        argv.append("--build")
     if wait_timeout is not None:
         argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
     # Service names are always source-owned curated Compose names.  Keeping

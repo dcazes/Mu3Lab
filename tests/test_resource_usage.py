@@ -35,7 +35,7 @@ class OwnerTests(unittest.TestCase):
         self.assertEqual(owner("/srv/mu3lab/projects/mcp-grocy-community"), "grocy")
         # Sign-in, the proxy and the vault, plus the tool gateway and relay, are Mu3Lab's core.
         self.assertEqual(owner(str(ROOT / "apps" / "authentik")), "core")
-        self.assertEqual(owner("/srv/mu3lab/projects/mcp-gateway"), "core")
+        self.assertEqual(owner("/srv/mu3lab/projects/tailnet-relay"), "core")
         self.assertEqual(owner(str(ROOT / "platform" / "tailnet-relay")), "core")
         # Apps no longer in the catalog.
         self.assertEqual(owner("/srv/mu3lab/projects/unsloth"), "removed")
@@ -59,18 +59,58 @@ class MemoryTests(unittest.TestCase):
             )
             cgroup(base / "system.slice" / "docker-ddd.scope", 999, 0)
             with patch("ctl.resource_usage._own_services", return_value=7):
-                by_name, by_owner = resource_usage.memory(
+                by_name, by_owner, parts = resource_usage.memory(
                     load(), ROOT, run=lambda *a, **k: result(listing), base=base, paths=PATHS
                 )
         self.assertEqual(by_name, {"mu3lab-immich-server-1": 200, "mu3lab-ingress-caddy-1": 50, "mine": 999})
         # Mu3Lab's own services count as core.
         self.assertEqual(by_owner, {"immich": 200, "core": 57})
+        # Core is also reported part by part: the proxy, and Mu3Lab's own services.
+        self.assertEqual(parts, {"ingress": 50, "mu3lab": 7})
 
     def test_docker_unreachable_reports_nothing(self):
         with patch("ctl.resource_usage._own_services", return_value=0):
             self.assertEqual(
-                resource_usage.memory(load(), ROOT, run=lambda *a, **k: result("", 1), paths=PATHS), ({}, {})
+                resource_usage.memory(load(), ROOT, run=lambda *a, **k: result("", 1), paths=PATHS), ({}, {}, {})
             )
+
+
+class GpuMemoryTests(unittest.TestCase):
+    OLLAMA = "a" * 64
+    CADDY = "b" * 64
+
+    def fake_run(self, argv, **_kwargs):
+        if argv[0] != "nvidia-smi":
+            return result(
+                f"{self.OLLAMA}\tmu3lab-ollama-ollama-1\t/srv/mu3lab/projects/ollama\n"
+                f"{self.CADDY}\tmu3lab-ingress-caddy-1\t{ROOT / 'apps' / 'ingress'}\n"
+            )
+        if "--query-gpu=name,memory.total,memory.used" in argv:
+            return result("NVIDIA GeForce RTX 3060, 12288, 3000\n")
+        # Ollama, the proxy (core), and the desktop, which is no container.
+        return result("101, 2300\n102, 100\n103, 500\n")
+
+    def test_each_gpu_process_belongs_to_its_containers_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = Path(tmp)
+            for pid, scope in (("101", f"/system.slice/docker-{self.OLLAMA}.scope"), ("102", f"/docker/{self.CADDY}")):
+                (proc / pid).mkdir()
+                (proc / pid / "cgroup").write_text(f"0::{scope}\n")
+            (proc / "103").mkdir()
+            (proc / "103" / "cgroup").write_text("0::/user.slice/user-1000.slice/session-2.scope\n")
+            gpu = resource_usage.gpu_memory(load(), ROOT, run=self.fake_run, paths=PATHS, proc_root=proc)
+        mib = 1024**2
+        self.assertEqual(gpu["name"], "NVIDIA GeForce RTX 3060")
+        self.assertEqual((gpu["total"], gpu["used"]), (12288 * mib, 3000 * mib))
+        # The desktop's 500 MiB is not Mu3Lab's; the charts show it as "Other".
+        self.assertEqual(gpu["by_owner"], {"ollama": 2300 * mib, "core": 100 * mib})
+        self.assertEqual(gpu["by_core_part"], {"ingress": 100 * mib})
+
+    def test_no_nvidia_gpu_reports_nothing(self):
+        def missing(*_args, **_kwargs):
+            raise FileNotFoundError("nvidia-smi")
+
+        self.assertIsNone(resource_usage.gpu_memory(load(), ROOT, run=missing, paths=PATHS))
 
 
 class DiskTests(unittest.TestCase):
@@ -149,6 +189,10 @@ class DiskTests(unittest.TestCase):
         self.assertEqual(owners["removed"], {"data": 2048, "program": 0})
         self.assertEqual(owners["romm"], {"data": 3072, "program": 0})
         self.assertEqual(owners["core"], {"data": 4096 + 5120, "program": 0})
+        # Core part by part: Mu3Lab's own state, and Authentik's data.
+        self.assertEqual(
+            measured["core_parts"], {"mu3lab": {"data": 4096, "program": 0}, "authentik": {"data": 5120, "program": 0}}
+        )
 
     def test_installs_updates_and_removals_ask_for_a_new_measurement(self):
         self.assertTrue(resource_usage.touches_disk({"action": "install"}))

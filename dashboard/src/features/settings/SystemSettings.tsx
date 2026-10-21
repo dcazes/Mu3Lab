@@ -1,40 +1,29 @@
-import { AlertTriangle, CheckCircle2, Copy, Network, RefreshCw, Rocket } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Network, RefreshCw, Rocket, Sparkles } from 'lucide-react';
 import { useState } from 'react';
-import {
-  api,
-  postApi,
-  postJsonApi,
-  putJsonApi,
-  type Mu3LabUpdate,
-  type SystemConfig,
-  type TailscaleStatus,
-} from '../../api';
+import { api, postApi, postJsonApi, type Mu3LabUpdate, type SystemResponse, type TailscaleStatus } from '../../api';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { copyText } from '../../components/CopyField';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Facts, PageHeader } from '../../components/Layout';
 import { Badge, Dot, StateBadge } from '../../components/Status';
-import { duration } from '../../lib/format';
+import { bytes } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { JobDialog, JobRow } from '../activity/JobDialog';
 import { ResourceCharts } from '../home/ResourceCharts';
 
-function Meter({ label, percent, detail }: { label: string; percent: number; detail: string }) {
-  const tone = percent > 90 ? 'red' : percent > 75 ? 'amber' : 'green';
-  return (
-    <div className="meter">
-      <div className="meter-label">
-        <span>{label}</span>
-        <b>{Math.round(percent)}%</b>
-      </div>
-      <div className={`meter-bar meter-${tone}`}>
-        <span style={{ width: `${Math.min(100, Math.max(2, percent))}%` }} />
-      </div>
-      <small>{detail}</small>
-    </div>
-  );
+/** One line for the Server card's header, so it says something useful while folded. */
+function serverSummary(system: SystemResponse): string {
+  const part = (label: string, used: number, total: number) => `${label} ${bytes(used)} of ${bytes(total)}`;
+  return [
+    part('Memory', system.memory.used, system.memory.total),
+    part('Disk', system.disk.used, system.disk.total),
+    system.gpu ? part('Graphics', system.gpu.used, system.gpu.total) : '',
+    `CPU ${Math.round(system.cpu_percent)}%`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** Setup normally finishes in the installer; this shows only when a setup step has failed. */
@@ -179,15 +168,20 @@ export function Mu3LabUpdates() {
         update ? `Version ${update.version} · ${update.commit} (${update.date})` : 'Checking the installed version…'
       }
       actions={
-        <Button
-          size="sm"
-          icon={RefreshCw}
-          loading={pending === 'check'}
-          disabled={running}
-          onClick={() => void check()}
-        >
-          Check now
-        </Button>
+        <>
+          <LinkButton size="sm" variant="ghost" icon={Sparkles} to="/settings/whats-new">
+            What’s new
+          </LinkButton>
+          <Button
+            size="sm"
+            icon={RefreshCw}
+            loading={pending === 'check'}
+            disabled={running}
+            onClick={() => void check()}
+          >
+            Check now
+          </Button>
+        </>
       }
     >
       {finished ? (
@@ -247,48 +241,6 @@ export function Mu3LabUpdates() {
   );
 }
 
-function Compute() {
-  const config = useApi<SystemConfig>('/api/v1/system/config');
-  const confirm = useConfirm();
-  const { pending, run } = useAction();
-  const modes = ['auto', 'cpu', 'nvidia', 'amd'] as const;
-  const select = async (mode: SystemConfig['compute_mode']) => {
-    if (
-      !(await confirm({
-        title: `Use ${mode === 'auto' ? 'automatic' : mode.toUpperCase()} acceleration?`,
-        description:
-          'New installs use it straight away. Apps already installed keep their version until you press Switch on their page.',
-      }))
-    )
-      return;
-    await run('compute', () => putJsonApi('/api/v1/system/config', { compute_mode: mode }), 'Compute mode saved');
-    void config.reload();
-  };
-  return (
-    <Card
-      title="AI acceleration"
-      description={`Used by local AI models, photo recognition and document reading. Automatic currently uses ${config.data?.resolved_compute_mode?.toUpperCase() || '…'}.`}
-    >
-      <div className="segmented" role="radiogroup" aria-label="Compute mode">
-        {modes.map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            role="radio"
-            aria-checked={config.data?.compute_mode === mode}
-            disabled={
-              Boolean(pending) || !config.data || (mode !== 'auto' && !config.data.available_modes.includes(mode))
-            }
-            onClick={() => void select(mode)}
-          >
-            {mode === 'auto' ? 'Automatic' : mode.toUpperCase()}
-          </button>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
 export function SystemSettings() {
   const { data } = useDashboard();
   const { system } = data;
@@ -303,19 +255,9 @@ export function SystemSettings() {
   };
   return (
     <>
-      <PageHeader
-        title="System"
-        description="Keep Mu3Lab up to date, and monitor server health, network access, and local AI acceleration."
-      />
+      <PageHeader title="System" description="Keep Mu3Lab up to date, and monitor server health and network access." />
       <SetupProblem />
-      <Card title="Server">
-        <div className="meters">
-          <Meter
-            label="CPU"
-            percent={system.cpu_percent}
-            detail={`Up ${duration(system.uptime_seconds ?? undefined)}`}
-          />
-        </div>
+      <Card title="Server" description={serverSummary(system)} collapsible>
         <ResourceCharts detailed />
         <Facts
           items={[
@@ -329,7 +271,6 @@ export function SystemSettings() {
       </Card>
       <Mu3LabUpdates />
       <Tailnet status={tailscale} />
-      <Compute />
       <Card
         title="Activity"
         description="Recent installation, maintenance, and configuration jobs."

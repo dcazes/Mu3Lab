@@ -21,7 +21,8 @@ services:
       OAUTH_CLIENT_SECRET: ${OPEN_WEBUI_OIDC_CLIENT_SECRET:?OPEN_WEBUI_OIDC_CLIENT_SECRET is required}
       OPENID_PROVIDER_URL: ${OPEN_WEBUI_OIDC_DISCOVERY_URL:?OPEN_WEBUI_OIDC_DISCOVERY_URL is required}
       OAUTH_PROVIDER_NAME: Mu3Lab
-      OAUTH_SCOPES: openid email profile
+      # offline_access: a refresh token, so app tools keep acting as the signed-in person (ContextForge).
+      OAUTH_SCOPES: openid email profile offline_access
       # Mu3Lab operators are administrators; everyone else in the household is a user.
       ENABLE_OAUTH_ROLE_MANAGEMENT: "true"
       OAUTH_ROLES_CLAIM: groups
@@ -29,32 +30,35 @@ services:
       OAUTH_ALLOWED_ROLES: mu3lab-users,mu3lab-operators
       DEFAULT_USER_ROLE: user
       # Models come only from LiteLLM, which also routes the local model (mu3lab-local) and local only.
+      # Open WebUI's own key reaches chat and document search only (gateway_key in app.yaml).
       ENABLE_OLLAMA_API: "false"
       OPENAI_API_BASE_URL: http://litellm:4000/v1
-      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      OPENAI_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       RAG_EMBEDDING_ENGINE: openai
       RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      RAG_OPENAI_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       RAG_EMBEDDING_MODEL: mu3lab-embed
-      AUDIO_STT_ENGINE: ${AUDIO_STT_ENGINE:-web}
-      AUDIO_STT_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      AUDIO_STT_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
-      AUDIO_STT_MODEL: ${AUDIO_STT_MODEL:-}
-      AUDIO_TTS_ENGINE: ${AUDIO_TTS_ENGINE:-}
-      AUDIO_TTS_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      AUDIO_TTS_OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
-      AUDIO_TTS_MODEL: ${AUDIO_TTS_MODEL:-}
-      AUDIO_TTS_VOICE: ${AUDIO_TTS_VOICE:-}
+      # Voice in chat: Open WebUI's own Whisper turns speech into text on this server, in any browser,
+      # and replies are read aloud with the browser's voices. It never depends on the Speech app.
+      AUDIO_STT_ENGINE: ""
+      WHISPER_MODEL: small
+      AUDIO_TTS_ENGINE: ""
       # Mu3Lab adds each operator's app assistants with its own administrator key; each
       # person's tool connections and assistants are private to them, administrators included.
       ENABLE_API_KEYS: "true"
       BYPASS_ADMIN_ACCESS_CONTROL: "false"
       MU3LAB_ADMIN_API_KEY: ${OPEN_WEBUI_ADMIN_API_KEY:?OPEN_WEBUI_ADMIN_API_KEY is required}
+      # Every new chat starts with Mu3Lab's main assistant (ctl/integrations/openwebui.py), listed first;
+      # people reach an app's assistant from the model menu or by typing @ and its name.
+      DEFAULT_MODELS: mu3lab-assistant
+      DEFAULT_PINNED_MODELS: mu3lab-assistant
+      MODEL_ORDER_LIST: '["mu3lab-assistant"]'
       ENABLE_VERSION_UPDATE_CHECK: "false"
       ENABLE_COMMUNITY_SHARING: "false"
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/open-webui:/app/backend/data
-    networks: [mu3lab_frontend, mu3lab_backend]
+    # mu3lab_mcp: app tools, through ContextForge.
+    networks: [mu3lab_frontend, mu3lab_backend, mu3lab_mcp]
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
@@ -67,3 +71,4 @@ services:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

@@ -3,7 +3,8 @@
 The browser trusts Authentik (Caddy passes the username), but phone apps sign
 in with a Navidrome password. So Mu3Lab keeps its own Navidrome administrator
 (``mu3lab-service``, a generated password) and gives every household member an
-account with a generated password, saved to their vault. Administrators in
+account with a generated password, saved to their vault. The chat connector
+signs in as that administrator too. Administrators in
 Mu3Lab are administrators in Navidrome. A deactivated person's password is
 replaced with one nobody knows, which keeps their playlists and history for
 when they come back.
@@ -16,11 +17,16 @@ import secrets
 import time
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ctl.engine.hooks import AppHooks, HookContext
 from ctl.engine.loopback import LoopbackError, request
+from ctl.runtime import RuntimePaths
+from ctl.secrets import read_runtime_env
 from ctl.store import person_logins
+
+if TYPE_CHECKING:
+    from ctl.manifest.catalog import App
 
 SERVICE = "mu3lab-service"
 PASSWORD_ENV = "NAVIDROME_ADMIN_PASSWORD"
@@ -105,6 +111,13 @@ class Hooks(AppHooks):
                 f"Navidrome's Mu3Lab administrator could not be created or signed in: {exc}",
             )
         return "Navidrome's Mu3Lab administrator already exists."
+
+    def connector_credentials(self, app: App, connector_id: str, paths: RuntimePaths) -> dict[str, str]:
+        """The chat connector signs in as Mu3Lab's own administrator: no person's login is shared."""
+        password = read_runtime_env(paths.projects / app.id / ".env").get(PASSWORD_ENV, "")
+        if not password:
+            raise RuntimeError("Navidrome's Mu3Lab administrator has no password yet; reinstall Navidrome.")
+        return {"password": password}
 
     def sync_people(self, ctx: HookContext, people: list[dict[str, Any]]) -> None:
         port = ctx.app.manifest.service.local_port

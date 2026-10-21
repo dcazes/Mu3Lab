@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -141,8 +142,100 @@ def status(root: Path, *, refresh: bool = False) -> dict[str, Any]:
     return result
 
 
+_PR_MERGE = re.compile(r"^Merge pull request #\d+ from [^/\s]+/(\S+)")
+_BRANCH_MERGE = re.compile(r"^Merge (?:remote-tracking )?branch '(?:origin/)?([^']+)'")
+_NAMED_MERGE = re.compile(r"^Merge (\S+/\S+?):\s*(.+)$")
+
+
+_CONVENTIONAL = re.compile(r"^(\w+)(?:\(([^)]+)\))?!?:\s*")
+
+
+def _sentence(text: str) -> str:
+    """ "fix(chat): switch assistants off" -> "Switch assistants off"."""
+    text = _CONVENTIONAL.sub("", text.strip())
+    return text[:1].upper() + text[1:]
+
+
+def _scopes_title(changes: list[str]) -> str:
+    """A run of direct commits, named by the areas it touched most ("Changes to livekit and install")."""
+    counts: dict[str, int] = {}
+    for change in changes:
+        if (match := _CONVENTIONAL.match(change)) and match.group(2):
+            for scope in match.group(2).split(","):
+                counts[scope.strip()] = counts.get(scope.strip(), 0) + 1
+    top = sorted(counts, key=lambda scope: -counts[scope])[:3]
+    if not top:
+        return "Smaller changes"
+    return "Changes to " + (top[0] if len(top) == 1 else f"{', '.join(top[:-1])} and {top[-1]}")
+
+
+def _branch_title(branch: str) -> str:
+    """ "feature/livekit-voice" -> "Livekit voice"."""
+    words = branch.rsplit("/", 1)[-1].replace("-", " ").replace("_", " ").strip()
+    return words[:1].upper() + words[1:]
+
+
+def _merge_name(subject: str, body: str) -> tuple[str, str]:
+    """(title, branch) of a merge commit, from GitHub's, git's or a hand-written merge message."""
+    if match := _PR_MERGE.match(subject):
+        # GitHub puts the pull request's title on the body's first line.
+        first = body.strip().splitlines()[0].strip() if body.strip() else ""
+        return _sentence(first) if first else _branch_title(match.group(1)), match.group(1)
+    if match := _BRANCH_MERGE.match(subject):
+        return _branch_title(match.group(1)), match.group(1)
+    if match := _NAMED_MERGE.match(subject):
+        return _sentence(match.group(2)), match.group(1)
+    return _sentence(subject.removeprefix("Merge ")), ""
+
+
+def _developments(root: Path, since: list[str], *, limit: int = 12, per: int = 30) -> list[dict[str, Any]]:
+    """The changes in a range, one group per development: each merged branch or pull request, and each
+    run of commits made straight on the line (named after the current branch when it is the newest)."""
+    # Not \x1e/\x1f: Python counts those as whitespace, and _git strips its output.
+    sep, end = "\x01", "\x02"
+    _rc, out = _git(
+        root, "log", "--first-parent", f"--format=%H{sep}%P{sep}%cs{sep}%s{sep}%b{end}", "-n", "200", *since
+    )
+    _rc, current = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    groups: list[dict[str, Any]] = []
+    run: dict[str, Any] | None = None
+    for record in out.split(end):
+        fields = record.strip("\n").split(sep)
+        if len(fields) < 5 or not fields[0]:
+            continue
+        sha, parents, date, subject, body = fields[0], fields[1].split(), fields[2], fields[3], fields[4]
+        if len(parents) > 1:
+            run = None
+            _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", str(per), f"{parents[0]}..{sha}")
+            title, branch = _merge_name(subject, body)
+            if not changes:
+                continue
+            if branch and groups and groups[-1]["branch"] == branch:
+                # The same branch merged again: one development.
+                groups[-1]["changes"] += changes.splitlines()[: per - len(groups[-1]["changes"])]
+            else:
+                groups.append({"title": title, "branch": branch, "date": date, "changes": changes.splitlines()})
+        else:
+            if run is None:
+                newest = not groups and current not in ("", "HEAD")
+                run = {
+                    "title": _branch_title(current) if newest else "",
+                    "branch": current if newest else "",
+                    "date": date,
+                    "changes": [],
+                }
+                groups.append(run)
+            if len(run["changes"]) < per:
+                run["changes"].append(subject)
+        if len(groups) > limit:
+            break
+    for group in groups:
+        group["title"] = group["title"] or _scopes_title(group["changes"])
+    return groups[:limit]
+
+
 def history(root: Path, releases: int = 5, per_release: int = 30) -> list[dict[str, Any]]:
-    """What changed in each recent release up to this copy, newest first.
+    """What changed in each recent release up to this copy, newest first, also split by development.
 
     A development checkout with no release tags shows its latest changes as one entry.
     """
@@ -157,13 +250,24 @@ def history(root: Path, releases: int = 5, per_release: int = 30) -> list[dict[s
     )[: releases + 1]
     if not tags:
         _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", str(per_release))
-        return [{"version": "", **_head(root), "changes": changes.splitlines()}] if changes else []
+        if not changes:
+            return []
+        return [
+            {"version": "", **_head(root), "changes": changes.splitlines(), "developments": _developments(root, [])}
+        ]
     entries = []
     for index, (_version, tag) in enumerate(tags[:releases]):
         since = [f"{tags[index + 1][1]}..{tag}"] if index + 1 < len(tags) else [tag]
         _rc, changes = _git(root, "log", "--no-merges", "--format=%s", "-n", str(per_release), *since)
         _rc, date = _git(root, "log", "-1", "--format=%cs", tag)
-        entries.append({"version": tag.removeprefix("v"), "date": date, "changes": changes.splitlines()})
+        entries.append(
+            {
+                "version": tag.removeprefix("v"),
+                "date": date,
+                "changes": changes.splitlines(),
+                "developments": _developments(root, since),
+            }
+        )
     return entries
 
 

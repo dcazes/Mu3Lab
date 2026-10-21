@@ -188,7 +188,9 @@ class RegistryTests(unittest.TestCase):
             self.assertNotIn("{{sign_in_launch}}", launcher)
             self.assertEqual(values["AUTH_SSO_PROVIDERS"], "authentik")
             self.assertEqual(values["AUTH_DISABLE_EMAIL_PASSWORD"], "1")
-            self.assertEqual(values["LITELLM_MASTER_KEY"], "test-master-key")
+            # LobeChat gets its own gateway key, never LiteLLM's master key.
+            self.assertNotIn("LITELLM_MASTER_KEY", values)
+            self.assertRegex(values["MU3LAB_LLM_API_KEY"], r"^sk-[0-9a-f]{48}$")
             self.assertEqual(values["APP_URL"], "https://mu3lab.example.ts.net:8457")
             self.assertIn("/api/auth/callback/authentik", service.manifest.sign_in.oidc.redirect_paths)
             self.assertFalse((paths.projects / "authentik" / "blueprints").exists())
@@ -223,7 +225,9 @@ class RegistryTests(unittest.TestCase):
         registry = load()
         root = Path(__file__).resolve().parents[1]
         core = [service for service in registry.services if service.manifest.tier == "core"]
-        self.assertEqual({service.id for service in core}, {"ollama", "freellmapi", "litellm", "open-webui"})
+        self.assertEqual(
+            {service.id for service in core}, {"ollama", "freellmapi", "litellm", "open-webui", "contextforge"}
+        )
         for service in core:
             images = compose_images(service.compose_path(root) / "docker-compose.yml")
             self.assertTrue(images, service.id)
@@ -271,7 +275,7 @@ class RegistryTests(unittest.TestCase):
         from ctl.api.routes.system import catalog
 
         profile = catalog({}).model_dump()["profiles"][0]
-        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "open-webui"})
+        self.assertEqual(set(profile["services"]), {"ollama", "freellmapi", "litellm", "open-webui", "contextforge"})
 
     def test_nextcloud_is_a_curated_documents_app_with_unique_private_ports(self):
         registry = load()

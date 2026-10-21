@@ -11,15 +11,15 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, job_guard, mcp_gateway, platform_releases
+from ctl import actions, job_guard, platform_releases
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
 from ctl.mcp_catalog import load as load_catalog
 from ctl.mcp_credentials import ensure as ensure_credentials
+from ctl.mcp_credentials import revoke as revoke_credentials
 from ctl.mcp_registry import credential_path, missing_credentials
 from ctl.platform_apps import by_capability
 from ctl.registry import load as load_registry
@@ -35,56 +35,27 @@ def _app_name(service_id: str) -> str:
 
 
 def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
-    """Attach a live connector to its app's assistant, through the gateway when reviewed."""
+    """Register a live connector in ContextForge, then give everyone its app's assistant."""
     job_guard.checkpoint()
-    from ctl.chat_ops import sync_gateway, sync_mcp
+    from ctl import contextforge_ops
+    from ctl.chat_ops import sync_agents
 
-    if not server.gateway:
-        token = read_runtime_env(credential_path(server.id)).get("MCP_AUTH_TOKEN", "")
-        return sync_mcp(server, tools, token, enabled=True, log=log)
-    from ctl import mcp_gateway
-
-    ok, detail = mcp_gateway.refresh(log)
+    ok, detail = contextforge_ops.connect(server, _app_name(server.service_id), log)
     if not ok:
         return False, detail
-    try:
-        surface = mcp_gateway.surface(server.service_id)
-    except (OSError, ValueError, KeyError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        return False, f"The tool gateway did not list {server.name}'s tools: {redact(str(exc))}"
-    return sync_gateway(server.service_id, _app_name(server.service_id), surface, enabled=True, log=log)
+    return sync_agents(log)
 
 
 def unbind(server, log) -> tuple[bool, str]:
-    """Detach a connector from its app's assistant; call after its state is updated."""
+    """Switch a connector off in ContextForge and take its assistant out of chat; call after its state is updated."""
     job_guard.checkpoint()
-    from ctl.chat_ops import sync_gateway, sync_mcp
+    from ctl import contextforge_ops
+    from ctl.chat_ops import sync_agents
 
-    if not server.gateway:
-        return sync_mcp(server, [], "", enabled=False, log=log)
-    from ctl import mcp_gateway
-
-    try:
-        mcp_gateway.write_policy()
-    except (OSError, ValueError) as exc:
-        log(f"Tool gateway policy could not be written: {exc}")
-    return sync_gateway(server.service_id, _app_name(server.service_id), [], enabled=False, log=log)
-
-
-def rebind_app(service_id: str, log) -> tuple[bool, str]:
-    """Apply changed switches: new policy, new tool list, new category map."""
-    state = ControlState.runtime()
-    for server in load_catalog(load_registry()):
-        runtime = state.mcp_server(server.id) if state else None
-        if server.service_id == service_id and runtime and runtime["enabled"] and runtime["state"] == "live":
-            return bind(server, runtime.get("tool_snapshot") or [], log)
-    if state:
-        from ctl import mcp_gateway
-
-        try:
-            mcp_gateway.write_policy()
-        except (OSError, ValueError) as exc:
-            return False, str(exc)
-    return True, "No live connector; the switches apply when it connects."
+    ok, detail = contextforge_ops.disconnect(server, log)
+    if not ok:
+        return False, detail
+    return sync_agents(log)
 
 
 def _siblings(server, state: ControlState) -> list:
@@ -100,24 +71,27 @@ def _siblings(server, state: ControlState) -> list:
 
 
 def _stop_connector(server, state: ControlState, log) -> tuple[bool, str]:
-    with mcp_gateway.policy_change() if server.gateway else nullcontext():
-        project = credential_path(server.id).parent
-        if (project / "docker-compose.yml").is_file():
-            rc, output = actions.compose_action(project, "stop", log)
-            if rc:
-                return False, redact(output)
-        state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-        ok, detail = unbind(server, log)
-        return ok, detail
+    project = credential_path(server.id).parent
+    if (project / "docker-compose.yml").is_file():
+        rc, output = actions.compose_action(project, "stop", log)
+        if rc:
+            return False, redact(output)
+    state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+    return unbind(server, log)
+
+
+def _ready(server, project: Path) -> bool:
+    """Whether the connector's files are in place: its .env for a built-in one, else its Compose project."""
+    return (project / (".env" if server.builtin else "docker-compose.yml")).is_file()
 
 
 def _materialize(server, root: Path) -> Path:
     source = server.compose_path(root)
-    if source is None or not (source / "docker-compose.yml").is_file():
+    if not server.builtin and (source is None or not (source / "docker-compose.yml").is_file()):
         raise ValueError("reviewed MCP runtime is not available")
     target = credential_path(server.id).parent
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
-    for item in source.iterdir():
+    for item in () if server.builtin else source.iterdir():
         if item.name.startswith(".env") or item.is_symlink():
             continue
         destination = target / item.name
@@ -136,21 +110,23 @@ def _materialize(server, root: Path) -> Path:
     store.put("connector", server.id, values)
     env_path.write_text(runtime_env_text(values), encoding="utf-8")
     os.chmod(env_path, 0o600)
-    platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
+    if not server.builtin:
+        platform_releases.pin_compose(root, source / "docker-compose.yml", target / "docker-compose.yml")
     return target
 
 
-def _probe(url: str) -> tuple[bool, str]:
+def _probe(url: str, headers: tuple[tuple[str, str], ...] = ()) -> tuple[bool, str]:
     if not url:
         return False, "MCP health contract is missing"
     try:
-        request = urllib.request.Request(url, method="GET")
+        request = urllib.request.Request(url, headers=dict(headers), method="GET")
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status < 500, f"HTTP {response.status}"
     except urllib.error.HTTPError as exc:
-        # MCP POST endpoints commonly return 404/405 to a GET while the
-        # process is healthy. Authentication and tool discovery are separate.
-        return exc.code in {400, 401, 403, 404, 405}, f"HTTP {exc.code}"
+        # MCP POST endpoints commonly return 404/405 (or 406 without an event-stream
+        # Accept header) to a GET while the process is healthy. Authentication and
+        # tool discovery are separate.
+        return exc.code in {400, 401, 403, 404, 405, 406}, f"HTTP {exc.code}"
     except (urllib.error.URLError, OSError) as exc:
         return False, str(exc)
 
@@ -181,7 +157,14 @@ def _decode_rpc_response(payload: bytes, content_type: str) -> dict:
 
 
 def _rpc_request(
-    url: str, method: str, request_id: int, *, token: str = "", session_id: str = "", params: dict | None = None
+    url: str,
+    method: str,
+    request_id: int,
+    *,
+    token: str = "",
+    session_id: str = "",
+    params: dict | None = None,
+    extra: tuple[tuple[str, str], ...] = (),
 ) -> tuple[dict, str]:
     if params is None:
         params = (
@@ -194,6 +177,7 @@ def _rpc_request(
             else {}
         )
     headers = {
+        **dict(extra),
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": "2025-03-26",
@@ -212,8 +196,11 @@ def _rpc_request(
         return decoded, response.headers.get("Mcp-Session-Id", session_id)
 
 
-def _rpc_notification(url: str, method: str, *, token: str = "", session_id: str = "") -> None:
+def _rpc_notification(
+    url: str, method: str, *, token: str = "", session_id: str = "", extra: tuple[tuple[str, str], ...] = ()
+) -> None:
     headers = {
+        **dict(extra),
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
         "MCP-Protocol-Version": "2025-03-26",
@@ -286,9 +273,10 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
     if not url:
         raise ValueError("MCP verification endpoint is missing")
     token = values.get("MCP_AUTH_TOKEN", "")
-    _, session_id = _rpc_request(url, "initialize", 1, token=token)
-    _rpc_notification(url, "notifications/initialized", token=token, session_id=session_id)
-    response, _ = _rpc_request(url, "tools/list", 2, token=token, session_id=session_id)
+    extra = getattr(server, "headers", ())
+    _, session_id = _rpc_request(url, "initialize", 1, token=token, extra=extra)
+    _rpc_notification(url, "notifications/initialized", token=token, session_id=session_id, extra=extra)
+    response, _ = _rpc_request(url, "tools/list", 2, token=token, session_id=session_id, extra=extra)
     result = response.get("result", {})
     raw_tools = result.get("tools", []) if isinstance(result, dict) else []
     tools = [
@@ -342,13 +330,13 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
         if not runtime or not runtime["enabled"]:
             continue
         project = credential_path(server.id).parent
-        if not (project / "docker-compose.yml").is_file():
+        if not _ready(server, project):
             # Enabled before its files were copied (or they were deleted): restore them from the repo.
             try:
                 project = _materialize(server, root)
             except (OSError, ValueError) as exc:
                 log(f"Could not restore {server.name}: {redact(str(exc))}")
-        if not (project / "docker-compose.yml").is_file():
+        if not _ready(server, project):
             state.set_mcp_server(
                 server.id,
                 service_id,
@@ -361,7 +349,7 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
         if not running:
             if runtime["state"] in {"prepared", "authentication_required"}:
                 continue
-            rc, output = actions.compose_action(project, "stop", log)
+            rc, output = (0, "") if server.builtin else actions.compose_action(project, "stop", log)
             state.set_mcp_server(
                 server.id,
                 service_id,
@@ -389,12 +377,12 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
                 error={"message": provision_detail},
             )
             continue
-        rc, output = actions.compose_up(project, log, wait_timeout=120)
+        rc, output = (0, "") if server.builtin else actions.compose_up(project, log, wait_timeout=120)
         if rc:
             state.set_mcp_server(server.id, service_id, enabled=True, state="failed", error={"message": redact(output)})
             success = False
             continue
-        healthy, detail = _probe(server.local_health)
+        healthy, detail = _probe(server.local_health, server.headers)
         if not healthy:
             state.set_mcp_server(
                 server.id, service_id, enabled=True, state="degraded", error={"message": redact(detail)}
@@ -445,6 +433,9 @@ def reconcile_lifecycle(root: Path, log) -> None:
     state = ControlState.runtime()
     if state is None:
         return
+    from ctl import contextforge_ops
+
+    contextforge_ops.retire_old_gateway(log)
     registry = load_registry()
     from ctl.service_state import _healthy
 
@@ -452,11 +443,11 @@ def reconcile_lifecycle(root: Path, log) -> None:
         runtime = state.mcp_server(server.id)
         if not runtime or not runtime["enabled"] or server.status != "accepted":
             continue
-        installation = state.installation(server.service_id)
+        installation = state.app_installation(server.service_id)
         app_healthy = bool(
             installation and installation.get("state") == "running" and _healthy(registry.get(server.service_id))[0]
         )
-        mcp_healthy = _probe(server.local_health)[0] if runtime["state"] == "live" else False
+        mcp_healthy = _probe(server.local_health, server.headers)[0] if runtime["state"] == "live" else False
         if app_healthy and (runtime["state"] != "live" or not mcp_healthy):
             sync_application(server.service_id, running=True, root=root, log=log)
         elif not app_healthy and runtime["state"] not in {"stopped", "prepared", "authentication_required"}:
@@ -526,7 +517,7 @@ def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path
             rc, output = actions.compose_up(target, log, recreate=True, wait_timeout=120)
             if rc:
                 raise ValueError("Updated MCP did not start: " + redact(output))
-            healthy, detail = _probe(server.local_health)
+            healthy, detail = _probe(server.local_health, server.headers)
             if not healthy:
                 raise ValueError("Updated MCP health check failed: " + redact(detail))
             tools = _discover_tools(server, read_runtime_env(credential_path(server.id)))
@@ -597,7 +588,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             step_id="validate",
         )
         return
-    installation = state.installation(server.service_id)
+    installation = state.app_installation(server.service_id)
     if action != "disable" and (not installation or installation.get("state") != "running"):
         if action == "prepare" and installation and installation.get("installed_at"):
             try:
@@ -658,34 +649,39 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             )
         return
     if action == "disable":
-        with mcp_gateway.policy_change() if server.gateway else nullcontext():
-            project = credential_path(server.id).parent
-            if (project / "docker-compose.yml").is_file():
-                rc, output = actions.compose_action(project, "stop", log)
-                if rc:
-                    store.transition(
-                        job_id,
-                        "failed",
-                        actor=actor,
-                        detail=redact(output),
-                        error_code="mcp_stop_failed",
-                        step_id="stop",
-                    )
-                    return
-            state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
-            linked, link_detail = unbind(server, log)
-            if not linked:
+        project = credential_path(server.id).parent
+        if (project / "docker-compose.yml").is_file():
+            rc, output = actions.compose_action(project, "stop", log)
+            if rc:
                 store.transition(
                     job_id,
                     "failed",
                     actor=actor,
-                    detail=link_detail,
-                    error_code="lobehub_registration_failed",
-                    step_id="register",
+                    detail=redact(output),
+                    error_code="mcp_stop_failed",
+                    step_id="stop",
                 )
                 return
-            store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
+        state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+        linked, link_detail = unbind(server, log)
+        if not linked:
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=link_detail,
+                error_code="contextforge_registration_failed",
+                step_id="register",
+            )
             return
+        revoked, revoke_detail = revoke_credentials(server, log)
+        if not revoked:
+            # Switched off either way; the key is replaced the next time it is switched on.
+            log(f"{server.name}'s chat key could not be deleted yet: {redact(revoke_detail)}")
+        elif revoke_detail:
+            log(revoke_detail)
+        store.transition(job_id, "succeeded", actor=actor, detail=f"{server.name} disabled.", step_id="complete")
+        return
     for other in others:
         log(f"Switching off {other.name}.")
         stopped, stop_detail = _stop_connector(other, state, log)
@@ -737,7 +733,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     state.set_mcp_server(server.id, server.service_id, enabled=True, state="starting")
-    rc, output = actions.compose_up(project, log, wait_timeout=120)
+    rc, output = (0, "") if server.builtin else actions.compose_up(project, log, wait_timeout=120)
     if rc:
         state.set_mcp_server(
             server.id, server.service_id, enabled=True, state="failed", error={"message": redact(output)}
@@ -746,7 +742,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             job_id, "failed", actor=actor, detail=redact(output), error_code="mcp_start_failed", step_id="start"
         )
         return
-    healthy, detail = _probe(server.local_health)
+    healthy, detail = _probe(server.local_health, server.headers)
     if not healthy:
         state.set_mcp_server(
             server.id, server.service_id, enabled=True, state="degraded", error={"message": redact(detail)}
@@ -782,7 +778,7 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "failed",
             actor=actor,
             detail=link_detail,
-            error_code="lobehub_registration_failed",
+            error_code="contextforge_registration_failed",
             step_id="register_lobehub",
         )
         return

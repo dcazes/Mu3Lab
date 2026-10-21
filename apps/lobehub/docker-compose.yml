@@ -32,7 +32,7 @@ services:
       AUTH_AUTHENTIK_ISSUER: ${AUTH_AUTHENTIK_ISSUER:?AUTH_AUTHENTIK_ISSUER is required}
       AUTH_DISABLE_EMAIL_PASSWORD: "1"
       ENABLED_OPENAI: "1"
-      OPENAI_API_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
+      OPENAI_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       OPENAI_PROXY_URL: http://litellm:4000/v1
       # Mu3Lab chat, plus the private local model once one is chosen (hide_model_providers).
       OPENAI_MODEL_LIST: ${OPENAI_MODEL_LIST:--all,+mu3lab-chat}

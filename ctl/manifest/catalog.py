@@ -118,17 +118,55 @@ def _check_images(compose: Path) -> None:
             raise CatalogError(f"{compose}: service {service} must pin its image to a sha256 digest, not {image!r}")
 
 
-def published_ports(compose: Path) -> list[int]:
-    """The host ports a compose file publishes (``127.0.0.1:<host>:<container>``)."""
+# ``<address>:<host port>:<container port>[/tcp|/udp]``
+_PUBLISH = re.compile(r"(?:(?P<address>.+):)?(?P<port>\d+):\d+(?:/(?P<protocol>tcp|udp))?")
+# This server's tailnet address. The ``:?`` form makes Compose refuse to start without it:
+# an empty address would publish the port on every network the computer is on.
+_TAILNET_ADDRESS = re.compile(r"\$\{MU3LAB_TAILNET_IP:\?[^}:]*\}")
+
+
+def published(compose: Path) -> list[tuple[int, str, str]]:
+    """``(port, protocol, listen)`` for every host port a compose file publishes.
+
+    ``listen`` is ``loopback`` (``127.0.0.1``) or ``tailnet`` (``${MU3LAB_TAILNET_IP:?...}``);
+    any other address is refused.
+    """
     ports = []
     for definition in _services(compose).values():
         for entry in definition.get("ports") or []:
-            parts = str(entry).split(":")
-            if len(parts) < 2 or not parts[-2].isdigit():
+            match = _PUBLISH.fullmatch(str(entry))
+            if not match:
                 raise CatalogError(f"{compose}: publish ports as 127.0.0.1:<host>:<container>, not {entry!r}")
-            if len(parts) != 3 or parts[0] != "127.0.0.1":
-                raise CatalogError(f"{compose}: {entry!r} must listen on 127.0.0.1 only")
-            ports.append(int(parts[-2]))
+            address = match["address"] or ""  # none at all means every address
+            if address == "127.0.0.1":
+                listen = "loopback"
+            elif _TAILNET_ADDRESS.fullmatch(address):
+                listen = "tailnet"
+            else:
+                raise CatalogError(
+                    f"{compose}: {entry!r} must listen on 127.0.0.1 only "
+                    "(or on ${MU3LAB_TAILNET_IP:?...} for a tailnet extra port)"
+                )
+            ports.append((int(match["port"]), match["protocol"] or "tcp", listen))
+    return ports
+
+
+def published_ports(compose: Path) -> list[int]:
+    """The host port numbers a compose file publishes."""
+    return [port for port, _protocol, _listen in published(compose)]
+
+
+def _host_listen_ports(compose: Path) -> list[int]:
+    """Ports a host-network Mu3Lab adapter listens on (``MCP_LISTEN``), on loopback and Docker's host address only."""
+    ports = []
+    for definition in _services(compose).values():
+        if definition.get("network_mode") != "host":
+            continue
+        for item in str((definition.get("environment") or {}).get("MCP_LISTEN", "")).split(","):
+            host, _, port = item.strip().rpartition(":")
+            if host not in {"127.0.0.1", "@docker0"} or not port.isdigit():
+                raise CatalogError(f"{compose}: MCP_LISTEN may use 127.0.0.1 and @docker0 only, not {item!r}")
+            ports.append(int(port))
     return ports
 
 
@@ -139,10 +177,31 @@ def _check_compose(compose: Path, project: str) -> None:
     _check_images(compose)
 
 
+def _check_read_only(connector: Connector, directory: Path) -> None:
+    """An infrastructure connector is reviewed, and every tool its review offers only reads."""
+    from ctl.mcp_review import load as load_review
+
+    if not connector.reviewed:
+        raise CatalogError(f"{directory}: an infrastructure connector needs a review")
+    root = directory.parents[3]  # <checkout>/apps/<app>/connectors/<id>
+    try:
+        review = load_review(connector.id, str((directory / "review.yaml").relative_to(root)), root)
+    except (OSError, ValueError) as exc:
+        raise CatalogError(f"{directory}: {exc}") from None
+    writes = sorted(name for name, tool in review.tools.items() if tool.access != "read")
+    if writes:
+        raise CatalogError(f"{directory}: an infrastructure connector may only read; it offers {', '.join(writes)}")
+
+
 def _load_connectors(manifest: AppManifest, folder: Path) -> tuple[Connector, ...]:
-    if manifest.chat.connectors and (manifest.group == "infrastructure" or manifest.chat.assistant is None):
-        # Chat may use app data only; platform services (Vaultwarden, Authentik, Caddy) never get tools.
-        raise CatalogError(f"{manifest.id}: only apps with a chat assistant, never infrastructure, may have connectors")
+    assistant = manifest.chat.assistant
+    if manifest.chat.connectors and assistant is None:
+        raise CatalogError(f"{manifest.id}: only apps with a chat assistant may have connectors")
+    # Platform services (Authentik, Kopia) may only be read, and only by administrators:
+    # their assistant shows the whole server's people, sign-ins or backups.
+    infrastructure = manifest.group == "infrastructure"
+    if infrastructure and assistant is not None and assistant.audience != "operators":
+        raise CatalogError(f"{manifest.id}: an infrastructure app's assistant is for administrators only")
     connectors: list[Connector] = []
     for connector_id in manifest.chat.connectors:
         directory = folder / "connectors" / connector_id
@@ -150,11 +209,20 @@ def _load_connectors(manifest: AppManifest, folder: Path) -> tuple[Connector, ..
         assert isinstance(connector, Connector)
         if connector.id != connector_id:
             raise CatalogError(f"{directory}: connector id must match its folder name")
-        if not (directory / COMPOSE_FILE).is_file():
+        if connector.builtin:
+            # The app serves MCP itself: it must be reachable by ContextForge, and nothing else runs.
+            if (directory / COMPOSE_FILE).is_file():
+                raise CatalogError(f"{directory}: a built-in connector has no {COMPOSE_FILE}")
+            if "mu3lab_mcp_upstream" not in (folder / COMPOSE_FILE).read_text(encoding="utf-8"):
+                raise CatalogError(f"{manifest.id}: a built-in connector needs the app on mu3lab_mcp_upstream")
+        elif not (directory / COMPOSE_FILE).is_file():
             raise CatalogError(f"{directory}: missing {COMPOSE_FILE}")
         if connector.reviewed and not (directory / "review.yaml").is_file():
             raise CatalogError(f"{directory}: a reviewed connector needs review.yaml")
-        _check_images(directory / COMPOSE_FILE)
+        if infrastructure:
+            _check_read_only(connector, directory)
+        if not connector.builtin:
+            _check_images(directory / COMPOSE_FILE)
         if connector.provision and not (directory / connector.provision.script).is_file():
             raise CatalogError(f"{directory}: missing credential script {connector.provision.script}")
         for relative in connector.include:
@@ -193,15 +261,22 @@ def _check_across(apps: list[App], platform_dir: Path = PLATFORM_DIR) -> None:
         if unknown:
             raise CatalogError(f"{app.id}: unknown dependencies {sorted(unknown)}")
         claim(manifest.service.local_port, app.id)
-        for port in published_ports(app.folder / COMPOSE_FILE):
-            if port != manifest.service.local_port:
+        declared = {(manifest.service.local_port, "tcp", "loopback")}
+        for extra in manifest.service.extra_ports:
+            claim(extra.port, f"{app.id}'s {extra.purpose}", app.id)
+            declared.add((extra.port, extra.protocol, extra.listen))
+        for port, protocol, listen in published(app.folder / COMPOSE_FILE):
+            if (port, protocol, listen) not in declared:
                 raise CatalogError(
                     f"{app.id}: its compose file publishes port {port}, but service.local_port is "
-                    f"{manifest.service.local_port}"
+                    f"{manifest.service.local_port} and service.extra_ports does not list it as {protocol} on {listen}"
                 )
-        if manifest.route:
-            claim(manifest.route.https_port, f"{app.id}'s tailnet address", app.id)
-            claim(manifest.route.caddy_port, f"{app.id}'s Caddy listener", app.id)
+        for route in (manifest.route, *manifest.extra_routes):
+            if route:
+                name = getattr(route, "name", "")
+                where = f"{app.id}'s {name} route" if name else f"{app.id}'s"
+                claim(route.https_port, f"{where} tailnet address", app.id)
+                claim(route.caddy_port, f"{where} Caddy listener", app.id)
         for connector in app.connectors:
             if connector.id in connector_ids:
                 raise CatalogError(f"connector id {connector.id!r} is used twice")
@@ -209,10 +284,20 @@ def _check_across(apps: list[App], platform_dir: Path = PLATFORM_DIR) -> None:
             health = connector.local_health.port
             if health is None:
                 raise CatalogError(f"{connector.id}: local_health must name its port")
-            published = published_ports(app.connector_folder(connector.id) / COMPOSE_FILE)
-            if published != [health]:
+            if connector.builtin:
+                # The app's own port, already claimed by the app.
+                if health != app.manifest.service.local_port:
+                    raise CatalogError(f"{connector.id}: a built-in connector's local_health uses the app's port")
+                continue
+            compose = app.connector_folder(connector.id) / COMPOSE_FILE
+            connector_ports = published_ports(compose)
+            if not connector_ports and health in _host_listen_ports(compose):
+                # On the host network (Kopia's reader): it publishes nothing and listens itself.
+                claim(health, f"connector {connector.id}")
+                continue
+            if connector_ports != [health]:
                 raise CatalogError(
-                    f"{connector.id}: its compose file publishes {published}, but local_health uses port {health}"
+                    f"{connector.id}: its compose file publishes {connector_ports}, but local_health uses port {health}"
                 )
             claim(health, f"connector {connector.id}")
     _check_no_cycles({app.id: app.manifest.depends_on for app in apps})

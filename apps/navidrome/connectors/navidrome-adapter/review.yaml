@@ -1,0 +1,25 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: navidrome-adapter
+revision: v0.64.2-subsonic
+reviewed_at: '2026-10-18'
+guidance: |
+  Search before answering questions about the music library, and use the IDs the tools return when listing
+  an album or building a playlist. Ask before creating a playlist; the whole household will see it.
+
+categories:
+  - id: library
+    title: Music library
+    summary: Search artists, albums and songs; list albums and playlists.
+  - id: playlists
+    title: Playlists
+    summary: Create playlists shared with the household.
+
+tools:
+  search_music: {category: library, access: read, core: true}
+  list_albums: {category: library, access: read, core: true}
+  get_album: {category: library, access: read}
+  list_playlists: {category: library, access: read}
+  get_playlist: {category: library, access: read}
+  create_playlist: {category: playlists, access: write}

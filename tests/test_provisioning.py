@@ -201,7 +201,7 @@ class CoreWiringTests(unittest.TestCase):
     def test_core_order_respects_manifest_dependencies(self):
         ordered = [service.id for service in core_services()]
         # Backups (Kopia) and web research (Firecrawl) are the owner's choice, installed from Discover.
-        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "open-webui"})
+        self.assertEqual(set(ordered), {"ollama", "freellmapi", "litellm", "open-webui", "contextforge"})
         self.assertLess(ordered.index("ollama"), ordered.index("litellm"))
         self.assertLess(ordered.index("freellmapi"), ordered.index("litellm"))
         self.assertLess(ordered.index("litellm"), ordered.index("open-webui"))
@@ -244,7 +244,7 @@ class CoreWiringTests(unittest.TestCase):
                     patch("ctl.core_setup.plan", return_value={"ready": True}),
                     patch("ctl.core_setup.run_install", side_effect=install_app),
                     patch("ctl.core_setup.configure_wiring", return_value={"chat_configured": False}),
-                    patch("ctl.core_setup._verify_platform", return_value=(False, "Add a provider")) as verify,
+                    patch("ctl.core_setup._verify_services", return_value=(True, "")) as verify,
                 ):
                     execute_claimed(store, claimed, "worker", Path(tmp))
                 if failed_app:
@@ -253,9 +253,48 @@ class CoreWiringTests(unittest.TestCase):
                     verify.assert_not_called()
                 else:
                     self.assertEqual(calls, ordered)
-                    self.assertEqual(store.get(parent["id"])["state"], "waiting_for_confirmation")
+                    self.assertEqual(store.get(parent["id"])["state"], "succeeded")
                     verify.assert_called_once()
                 self.assertEqual(len(store.jobs()), 1)
+
+    def _finish_core_without_provider(self, tmp: str, services: tuple[bool, str]):
+        store = JobStore(Path(tmp) / "control.sqlite3")
+        provisioning = ProvisioningStore(Path(tmp) / "runtime" / "mu3lab.db")
+        parent = store.create(kind="lifecycle", service_id="core-suite", action="install", actor="owner")
+        claimed = store.claim("worker")
+        with (
+            patch("ctl.core_setup.ProvisioningStore.runtime", return_value=provisioning),
+            patch("ctl.core_setup.ControlState.runtime", return_value=None),
+            patch("ctl.core_setup.plan", return_value={"ready": True}),
+            patch("ctl.core_setup.core_services", return_value=[]),
+            patch("ctl.core_setup._wait_for_sign_in"),
+            patch("ctl.core_setup.configure_wiring", return_value={"chat_configured": False}),
+            patch("ctl.core_setup._verify_services", return_value=services),
+            patch("ctl.core_setup._verify_platform") as full_check,
+        ):
+            execute_claimed(store, claimed, "worker", Path(tmp))
+        full_check.assert_not_called()
+        phases = {phase["phase_id"]: phase["actual_state"] for phase in provisioning.summary()["phases"]}
+        return store, store.get(parent["id"]), phases
+
+    def test_setup_without_a_provider_finishes_and_leaves_nothing_running(self):
+        # A parked setup job once blocked "Free up space" and updates until a provider was added.
+        with tempfile.TemporaryDirectory() as tmp:
+            store, job, phases = self._finish_core_without_provider(tmp, (True, ""))
+            self.assertEqual(job["state"], "succeeded")
+            self.assertIn("Add an AI provider", job["detail"])
+            self.assertEqual(store.active_jobs(), [])
+            self.assertEqual(phases["core"], "verified")
+            self.assertEqual(phases["configuration"], "waiting_for_user")
+
+    def test_setup_without_a_provider_still_fails_when_its_own_checks_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _store, job, phases = self._finish_core_without_provider(
+                tmp, (False, "Ollama model registry did not answer")
+            )
+            self.assertEqual(job["state"], "failed")
+            self.assertEqual(job["detail"], "Ollama model registry did not answer")
+            self.assertEqual(phases["core"], "failed")
 
     def test_preenable_switches_on_the_preferred_mcp_but_respects_later_choices(self):
         with tempfile.TemporaryDirectory() as tmp:

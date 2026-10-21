@@ -177,7 +177,7 @@ export function VaultSetupCard({ onSaved }: { onSaved?: () => void }) {
   return (
     <Card
       title="Password vault"
-      description="Mu3Lab saves the logins it creates for each person into their own Vaultwarden vault, in a collection called Mu3Lab that only they can see. The Bitwarden app or browser extension then fills them in, including for apps that ask for their own login after Authentik."
+      description="Mu3Lab saves each person's app logins into a private Mu3Lab collection in their vault. Bitwarden then fills them in."
       actions={
         <Button icon={Vault} loading={pending === 'sync'} onClick={() => void saveNow()}>
           Save now

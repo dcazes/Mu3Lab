@@ -52,14 +52,22 @@ secrets:
   length: 48
 - env: ZERO_ADMIN_PASSWORD
 - env: SEARXNG_SECRET
+# The value of its own AI gateway key (gateway_key rule); LiteLLM keys start with sk-.
+- env: LITELLM_APP_KEY
+  kind: hex
+  length: 24
 env:
   AUTH_TYPE: LOCAL
   SANDBOX_ENABLED: 'FALSE'
   # The local search model, through LiteLLM, whichever model runner serves it (Settings, AI).
   EMBEDDING_MODEL: litellm://openai/mu3lab-embed
   EMBEDDING_BASE_URL: http://litellm:4000/v1
-  OPENAI_API_KEY: '{{app:litellm:LITELLM_MASTER_KEY}}'
+  # Its own AI gateway key, for the search model only (gateway_key rule).
+  OPENAI_API_KEY: 'sk-{{LITELLM_APP_KEY}}'
   SURFSENSE_PUBLIC_URL: '{{public_url}}'
+# Registers its key again when the gateway is reinstalled.
+integrates_with:
+- capability: model_proxy
 configuration:
 - key: registration_enabled
   env: REGISTRATION_ENABLED
@@ -67,6 +75,11 @@ configuration:
   label: Enable local sign-in
   default: true
 rules:
+- rule: gateway_key
+  with:
+    key_env: OPENAI_API_KEY
+    models: [mu3lab-embed]
+    rpm_limit: 3000
 - rule: needs_embedding_model
   with:
     # SurfSense sizes its search index for one model when it is installed.

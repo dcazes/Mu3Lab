@@ -1,0 +1,29 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Read-only and for administrators only (an infrastructure app): Mu3Lab's small adapter calls
+# Authentik's REST API (/api/v3) with a service account that can only view.
+id: authentik-reader
+name: Authentik MCP (read-only)
+preferred: false
+provenance: mu3lab-adapter
+repository: https://github.com/goauthentik/authentik
+revision: 2026.8.3-api
+transport: streamable-http
+endpoint: http://authentik-mcp:8080/mcp
+local_health: http://127.0.0.1:8829/health
+credentials:
+- key: api_token
+  env: AUTHENTIK_API_TOKEN
+  type: secret
+  label: Authentik read-only API token
+  required: true
+provision_hook: true
+provision_note: Creates the "mu3lab-mcp" service account in Authentik, whose only role views people, groups and
+  sign-in events, with its own API token.
+review_note: Mu3Lab adapter with three read-only tools, listing people, groups and recent sign-in events. Only
+  administrators see its assistant, and its Authentik token cannot change anything.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

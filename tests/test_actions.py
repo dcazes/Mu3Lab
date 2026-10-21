@@ -298,6 +298,20 @@ class ComposeTests(unittest.TestCase):
             actions.compose_up(project, _silent, wait_timeout=600)
         self.assertEqual(seen[0][-4:], ["-d", "--wait", "--wait-timeout", "600"])
 
+    def test_up_rebuilds_source_built_images_only_when_asked(self):
+        seen: list[list[str]] = []
+
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            return 0, "ok"
+
+        project = Path("/srv/mu3lab/projects/livekit")
+        with patch.object(actions, "docker_cmd", fake):
+            actions.compose_up(project, _silent, recreate=True, build=True)
+            actions.compose_up(project, _silent, recreate=True)
+        self.assertEqual(seen[0][-3:], ["-d", "--force-recreate", "--build"])
+        self.assertNotIn("--build", seen[1])
+
     def test_exec_uses_curated_project_and_never_a_shell(self):
         seen: list[list[str]] = []
 

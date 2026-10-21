@@ -9,7 +9,7 @@ opened (a database folder is useless without its password):
   configuration, release history, jobs) copied with SQLite's backup API, so
   it is consistent while the dashboard keeps running;
 - the encryption key that opens those secrets;
-- the saved deployment copies (R12) and the tool gateway's database;
+- the saved deployment copies (R12);
 - the runtime projects (rendered Compose files and settings).
 
 Kopia's backup service saves these as the source ``mu3lab``: just before
@@ -116,12 +116,6 @@ def export_control_plane(paths: RuntimePaths) -> Path:
     deployments = paths.state / "deployments"
     if deployments.is_dir():
         shutil.copytree(deployments, target / "deployments", symlinks=False)
-    authority = paths.projects / "mcp-gateway" / "authority" / "authority.db"
-    if authority.is_file():
-        _sqlite_copy(authority, target / "gateway-authority.db")
-        arguments_key = authority.parent / "arguments.key"
-        if arguments_key.is_file():
-            write_atomic(target / "gateway-arguments.key", arguments_key.read_bytes())
     from ctl import __version__
 
     manifest = {"created_at": _now(), "mu3lab_version": __version__, "files": sorted(_listing(target))}

@@ -1,0 +1,31 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Read-only and for administrators only (an infrastructure app): Mu3Lab's small adapter reads
+# Kopia's control API. Kopia's server listens on this computer's loopback only, so the adapter
+# runs on the host network and listens on loopback (for Mu3Lab's checks) and on Docker's host
+# address, which ContextForge reaches as host.docker.internal.
+id: kopia-reader
+name: Kopia MCP (read-only)
+preferred: false
+provenance: mu3lab-adapter
+repository: https://github.com/kopia/kopia
+revision: v0.23.1-control-api
+transport: streamable-http
+endpoint: http://host.docker.internal:8830/mcp
+local_health: http://127.0.0.1:8830/health
+credentials:
+- key: password
+  env: KOPIA_PASSWORD
+  type: secret
+  label: Kopia control password for mu3lab-control
+  required: true
+provision_hook: true
+provision_note: Uses the control login Mu3Lab already keeps for Kopia (mu3lab-control); the adapter only reads with it.
+review_note: Mu3Lab adapter with two read-only tools, each app's backup status and whether the backup storage is
+  connected. It calls only Kopia's two read routes, never one that starts, stops or changes a backup. Only
+  administrators see its assistant.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

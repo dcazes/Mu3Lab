@@ -2,7 +2,7 @@ name: mu3lab-baby-buddy
 
 services:
   baby-buddy:
-    image: lscr.io/linuxserver/babybuddy:version-v2.11.0@sha256:d03f380d9bc4a0139015744dd0c402818aed83dbedf5d36a01754e5e600f7f77
+    image: lscr.io/linuxserver/babybuddy:version-v2.11.0@sha256:69235a527e02788aeb367b2bd9bac33365690cf18e2183330999225bb0a7f97b
     restart: unless-stopped
     ports: ["127.0.0.1:8002:8000"]
     environment:

@@ -5,10 +5,12 @@ WHAT: The installer the user sees. Runs every step of ctl/install.py in the
       do happens in the first few minutes: choose their Mu3Lab name, email and
       password (or confirm them on a re-run), then approve this computer in
       Tailscale (the browser opens by itself and the installer continues on its
-      own once approved). The long downloads run afterwards, unattended. It
-      then waits for the core apps, saves the generated logins to the owner's
-      vault, checks that every private address really loads, and opens the
-      dashboard for the owner to sign in.
+      own once approved). The rest runs unattended: it sets up the vault and
+      sign-in, saves the owner's sign-in to their vault, checks that every
+      private address really loads, and opens the dashboard for the owner to
+      sign in. The core AI apps download and install in the background worker
+      and the dashboard shows their progress, so setup ends without waiting
+      for them.
 WHY:  Anything that needs no decision should just happen; anything that does
       needs step-by-step instructions written for someone new to all of this,
       and must come first so the owner can walk away during the downloads.
@@ -33,7 +35,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,6 @@ from ctl.service_state import tailscale_status
 
 ROOT = Path(__file__).resolve().parents[2]
 MIN_PASSWORD = 12
-CORE_TIMEOUT = 45 * 60
 # How long to wait for the owner's first dashboard sign-in before reminding them.
 SIGN_IN_REMINDER = 5 * 60
 # Checks that pass without anything ever being installed; "already set up" would mislead.
@@ -286,99 +286,6 @@ def wait_for_tailscale(screen: Screen, job: dict, ctx: dict) -> None:
 # --- After the foundation --------------------------------------------------------------
 
 
-# What each install stage means while an app starts, in the installer's words.
-PHASES = {
-    "validate_service": "getting ready",
-    "materialize_runtime": "preparing its settings",
-    "validate_configuration": "checking its settings",
-    "pull_images": "loading its files",
-    "resolve_digests": "checking its files",
-    "authentik_ready": "setting up its sign-in",
-    "start_service": "starting its containers",
-    "account_cleanup": "starting its containers",
-    "account_bootstrap": "creating its account",
-    "account_verified": "creating its account",
-    "verify_application": "waiting for it to answer",
-    "configure_route": "publishing its private address",
-    "verify_sign_in": "checking its sign-in",
-    "finalize": "finishing",
-}
-
-
-def core_progress(events: list[dict], names: dict[str, str], now: datetime) -> dict:
-    """Which core apps are done and what the current one is doing, from the core job's events."""
-    by_name = {name: service_id for service_id, name in names.items()}
-    done: list[str] = []
-    current, started, phase = "", None, ""
-    for event in events:
-        kind, detail = str(event.get("event") or ""), str(event.get("detail") or "")
-        if kind == "step.started" and detail.startswith("Installing "):
-            current = by_name.get(detail.removeprefix("Installing ").rstrip("."), "")
-            phase = ""
-            try:
-                started = datetime.fromisoformat(str(event.get("created_at")).replace("Z", "+00:00"))
-            except ValueError:
-                started = None
-        elif kind == "step.verified" and detail in names:
-            done.append(detail)
-            if detail == current:
-                current, started, phase = "", None, ""
-        elif kind == "stage" and current:
-            phase = PHASES.get(detail.partition(":")[0], phase)
-    elapsed = int((now - started).total_seconds()) if started else 0
-    return {"done": done, "current": current, "phase": phase, "elapsed": max(0, elapsed)}
-
-
-def wait_for_core_apps(screen: Screen) -> tuple[bool, str]:
-    from ctl.core_setup import core_services
-    from ctl.jobs import JobStore
-
-    store = JobStore.runtime()
-    if store is None:
-        return False, "The dashboard database is not available."
-    names = {service.id: service.name for service in core_services()}
-    total = len(names)
-    screen.say("    " + screen.color(DIM, "Starting " + ", ".join(names.values())))
-    label = f"Starting apps: 0 of {total}"
-    screen.start(label)
-    announced: set[str] = set()
-
-    def show(text: str) -> None:
-        # Restart the line only when its label changes; a log file gets each label once.
-        nonlocal label
-        if text != label:
-            label = text
-            screen.start(text)
-
-    deadline = time.monotonic() + CORE_TIMEOUT
-    while time.monotonic() < deadline:
-        jobs = store.jobs_for_service("core-suite", limit=1)
-        if jobs:
-            latest = jobs[0]
-            progress = core_progress(store.events(latest["id"], limit=1000), names, datetime.now(UTC))
-            for service_id in progress["done"]:
-                if service_id not in announced:
-                    announced.add(service_id)
-                    screen.say(f"    {screen.color(GREEN, '✓')} {names[service_id]}")
-            if latest["state"] == "succeeded":
-                return True, ""
-            if latest["state"] == "waiting_for_confirmation":
-                # Normal on a new install: the apps run, AI chat waits for a provider.
-                return True, "needs_provider"
-            if latest["state"] in {"failed", "cancelled"}:
-                return False, str(latest.get("detail") or latest.get("error") or "")
-            if progress["current"]:
-                minutes, seconds = divmod(progress["elapsed"], 60)
-                show(f"Starting apps: {len(progress['done']) + 1} of {total}")
-                screen.progress(
-                    f"{names[progress['current']]} ({progress['phase'] or 'getting ready'}, {minutes}:{seconds:02d})"
-                )
-            elif len(progress["done"]) == total:
-                show("Checking that chat and AI models work together")
-        time.sleep(1)
-    return False, "The core apps are taking longer than expected."
-
-
 def save_logins(account: dict[str, str], host: str) -> tuple[bool, str]:
     from ctl import vault_setup
     from ctl.control_state import ControlState
@@ -399,8 +306,11 @@ def save_logins(account: dict[str, str], host: str) -> tuple[bool, str]:
             result = vault_setup.seed(session, items)
     except vaultwarden_api.VaultError as exc:
         return False, str(exc)
+    # "Seeded" tells the automatic vault sync the FreeLLMAPI login is already
+    # in this person's vault; it is installed after setup hands off, so the
+    # sync usually saves it later.
     state = ControlState.runtime()
-    if state:
+    if state and any(item.mu3lab_id == "service:freellmapi" for item in items):
         state.mark_vault_seeded(account["email"])
     return True, f"{len(result.created) + len(result.updated)} logins saved"
 
@@ -542,6 +452,7 @@ def run(restoring: bool = False) -> int:
     job = install.new_job()
     labels = {step["id"]: step["label"] for step in job["steps"]}
     shown_phases: set[str] = set()
+    running = {"step": ""}
 
     def emit(event: dict) -> None:
         step_id = str(event.get("id", ""))
@@ -554,6 +465,7 @@ def run(restoring: bool = False) -> int:
                 if phase not in shown_phases:
                     shown_phases.add(phase)
                     screen.say("\n" + screen.color(BOLD, phase))
+                running["step"] = step_id
                 screen.start(labels[step_id])
             elif status == "ready":
                 quiet = step_id in NO_SKIP_NOTE
@@ -570,8 +482,9 @@ def run(restoring: bool = False) -> int:
     def log_fn(step_id: str):
         return lambda line: screen.log(step_id, line)
 
-    def progress(_step_id: str, update: dict) -> None:
-        if update.get("activity"):
+    def progress(step_id: str, update: dict) -> None:
+        # Background downloads report while other steps run; show each step's own news only.
+        if update.get("activity") and step_id == running["step"]:
             screen.progress(str(update["activity"]))
 
     ctx: dict[str, Any] = {
@@ -592,19 +505,9 @@ def run(restoring: bool = False) -> int:
         return report_failure(screen, job, log_path)
 
     screen.say("\n" + screen.color(BOLD, "Finish setting up"))
-    ok, detail = wait_for_core_apps(screen)
-    needs_provider = detail == "needs_provider"
-    if ok:
-        screen.finish(screen.color(GREEN, "✓"), "Core apps are running")
-    else:
-        screen.finish(screen.color(RED, "!"), "Some core apps did not start yet")
-        screen.say(
-            f"    {detail or 'See the dashboard for details.'} In the dashboard, Settings → System has a button to try again."
-        )
-
     host = tailnet_name()
     if account and fresh:
-        screen.start("Saving your app logins to your vault")
+        screen.start("Saving your sign-in to your vault")
         saved, message = save_logins(account, host)
         screen.finish(screen.color(GREEN, "✓") if saved else screen.color(RED, "!"), f"Vault: {message}")
     account.clear()
@@ -617,7 +520,7 @@ def run(restoring: bool = False) -> int:
         screen.log("dashboard_readiness", error)
         screen.say(f"  Installer log: {log_path}")
         return 1
-    return report_success(screen, dashboard, needs_provider)
+    return report_success(screen, dashboard)
 
 
 def print_intro(screen: Screen, fresh: bool) -> None:
@@ -625,7 +528,8 @@ def print_intro(screen: Screen, fresh: bool) -> None:
     if fresh:
         print("\n  Setup asks you a few things first: your first name, email and a password,")
         print("  then you connect this computer to Tailscale in your browser.")
-        print("  After that it runs by itself, so you can walk away while it downloads.")
+        print("  After that it runs by itself, then opens your dashboard, where the AI apps")
+        print("  finish downloading while you look around.")
     else:
         print("\n  Anything setup needs from you comes first; after that it runs by itself.")
 
@@ -633,7 +537,7 @@ def print_intro(screen: Screen, fresh: bool) -> None:
 def print_walk_away(screen: Screen) -> None:
     screen.say("")
     screen.say(screen.color(BOLD, "  That's everything setup needs from you for now."))
-    screen.say("  The rest runs by itself and can take a while: feel free to walk away.")
+    screen.say("  The rest runs by itself: feel free to walk away.")
     screen.say("  When it is done, your dashboard opens in the browser; sign in there to finish.")
 
 
@@ -669,7 +573,7 @@ def report_failure(screen: Screen, job: dict, log_path: Path) -> int:
     return 1
 
 
-def report_success(screen: Screen, dashboard: str, needs_provider: bool) -> int:
+def report_success(screen: Screen, dashboard: str) -> int:
     print()
     print(screen.color(BOLD, "Mu3Lab is installed."))
     print()
@@ -684,9 +588,10 @@ def report_success(screen: Screen, dashboard: str, needs_provider: bool) -> int:
             print(f"  Bitwarden (fills in your passwords) was added to {' and '.join(browsers)}.")
             print("  If the browser was already open, close it and open it again. Then click the")
             print("  Bitwarden shield next to the address bar and sign in with the same email and password.")
-        if needs_provider:
-            print("  First thing to do there: connect a free AI provider so the AI chat works.")
-        print("  The dashboard's Home page lists every next step in order.")
+        print()
+        print("  Your AI apps are still downloading and installing in the background.")
+        print("  The dashboard's Home page shows their progress and lists every next step;")
+        print("  you can start on the ones that don't need them right away.")
     else:
         print("  Tailscale is not connected, so the dashboard address is unknown.")
         print("  Run ./install.sh again to finish connecting.")

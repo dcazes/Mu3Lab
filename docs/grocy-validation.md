@@ -21,10 +21,11 @@ and temporary data; no running Mu3Lab installation was touched.
   on its first request after an install or update.
 - Android and iOS client instructions, plus mobile web fallback.
 - `connectors/grocy-community`: MIT-licensed `mcp-grocy@2.8.0` (lockfile-pinned), Streamable
-  HTTP, reachable only through the tool gateway network. `provision.php` mints a dedicated
+  HTTP, reachable only from ContextForge (`mu3lab_mcp_upstream`). `provision.php` mints a dedicated
   `Mu3Lab MCP` key through Grocy's ApiKeyService and refuses when more than one administrator exists.
 - 56 tool definitions reviewed: 47 offered, nine blocked (raw API, user listing, printers),
-  six core tools; gateway writes start off, and blocked tools are also disabled in the connector.
+  six core tools; ContextForge's virtual server starts with the reviewed tools, and blocked tools are
+  also disabled in the connector.
 
 ## Checks performed after the port
 

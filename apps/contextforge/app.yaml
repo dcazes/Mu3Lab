@@ -1,0 +1,79 @@
+# ContextForge — see ctl/manifest/models.py for every field.
+# The one front door between chat and every app's MCP connector: Open WebUI and
+# LobeChat reach each app's tools through its virtual server here, and operators
+# see, switch and audit those tools in ContextForge's own screens.
+id: contextforge
+capabilities: [tool_gateway]
+name: ContextForge
+tier: core
+group: ai
+category: ai
+tagline: Every app's AI tools in one place
+summary: Connects chat to your apps' tools. Each app gets its own set of tools for its assistant; operators choose
+  which tools are on, who can use them, and see every call in ContextForge's screens.
+version: v1.0.11
+upstream: IBM/mcp-context-forge
+service:
+  local_port: 4444
+  health:
+    path: /health
+  start_timeout_seconds: 600
+route:
+  https_port: 8475
+  caddy_port: 19492
+  access: open
+  # Only operators can sign in to its screens; household members use the tools through chat.
+  audience: operators
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-contextforge
+    redirect_paths:
+    - /auth/sso/callback/mu3lab
+    # Its login page asks first; the launcher starts Authentik sign-in straight away.
+    launch_path: /__mu3lab/login
+    launch: json_post
+    json_launch:
+      method: GET
+      path: /auth/sso/login/mu3lab
+      body:
+        redirect_uri: '{origin}/auth/sso/callback/mu3lab'
+      url_key:
+      - authorization_url
+      launcher: true
+    env:
+      client_id: CONTEXTFORGE_OIDC_CLIENT_ID
+      client_secret: CONTEXTFORGE_OIDC_CLIENT_SECRET
+account:
+  mode: oidc_first_login
+  user_action: Open ContextForge and choose Mu3Lab; Authentik signs you in as an administrator.
+secrets:
+- env: CONTEXTFORGE_JWT_SECRET
+  kind: hex
+  length: 64
+- env: CONTEXTFORGE_AUTH_ENCRYPTION_SECRET
+  kind: hex
+  length: 64
+- env: CONTEXTFORGE_DB_PASSWORD
+  length: 32
+# Mu3Lab's own administrator: it registers connectors and keeps teams and chat keys (ctl/contextforge.py).
+- env: CONTEXTFORGE_ADMIN_PASSWORD
+  length: 40
+# Required by ContextForge whenever its screens are on; nobody signs in with it.
+- env: CONTEXTFORGE_BASIC_AUTH_PASSWORD
+  length: 40
+# ContextForge refuses to start on its weak built-in default; SSO users never use it.
+- env: CONTEXTFORGE_DEFAULT_USER_PASSWORD
+  length: 40
+env:
+  CONTEXTFORGE_URL: '{{public_url}}'
+  CONTEXTFORGE_ORIGINS: '["{{public_url}}"]'
+  CONTEXTFORGE_OIDC_ISSUER: https://{{dns_name}}/application/o/mu3lab-contextforge/
+  CONTEXTFORGE_OIDC_JWKS: https://{{dns_name}}/application/o/mu3lab-contextforge/jwks/
+  CONTEXTFORGE_OIDC_AUTHORIZE: https://{{dns_name}}/application/o/authorize/
+  CONTEXTFORGE_OIDC_TOKEN: https://{{dns_name}}/application/o/token/
+  CONTEXTFORGE_OIDC_USERINFO: https://{{dns_name}}/application/o/userinfo/
+ui:
+  path: /admin/
+resource_guidance: Low to moderate; a few hundred MB of memory plus its own small database.
+setup_action: Sign in with Authentik, then review each app's tools under Virtual Servers.

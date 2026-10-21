@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 470" width="1200" height="470" role="img" aria-labelledby="t d">
+  <title id="t">How chat reaches your apps</title>
+  <desc id="d">Each installed app with a connector gets its own assistant in Open WebUI or LobeChat. The assistant calls that app's virtual server in ContextForge, which forwards the call to the app's connector container, which uses the app's API. Starting the app switches its connector on; stopping it switches the connector and its assistant off, keeping them for next time.</desc>
+  <style>
+    .bg { fill: #ffffff; }
+    .card { fill: #f7f7f9; stroke: #dedee6; }
+    .accent { fill: #eef0ff; stroke: #5e6ad2; }
+    .tool { fill: #f4efff; stroke: #8b5cf6; }
+    .h { fill: #15151c; }
+    .s { fill: #5d5d6e; }
+    .lbl { fill: #7a7a8c; }
+    .mcp { stroke: #8b5cf6; fill: none; }
+    .arrowm { fill: #8b5cf6; }
+    .chip { fill: #ffffff; stroke: #dedee6; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0f0f14; }
+      .card { fill: #17171f; stroke: #2c2c38; }
+      .accent { fill: #1c1d33; stroke: #6f78e0; }
+      .tool { fill: #221a36; stroke: #a78bfa; }
+      .h { fill: #f0f0f6; }
+      .s { fill: #a3a3b6; }
+      .lbl { fill: #8a8a9e; }
+      .mcp { stroke: #a78bfa; }
+      .arrowm { fill: #a78bfa; }
+      .chip { fill: #1f1f29; stroke: #34343f; }
+    }
+    text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .h { font-size: 16px; font-weight: 600; }
+    .s { font-size: 13px; }
+    .lbl { font-size: 12px; font-weight: 600; letter-spacing: 1.2px; }
+  </style>
+  <defs>
+    <marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" class="arrowm"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="470" rx="20"/>
+
+  <text x="40" y="48" class="lbl">CHAT</text>
+  <text x="340" y="48" class="lbl">TOOL GATEWAY</text>
+  <text x="640" y="48" class="lbl">CONNECTORS</text>
+  <text x="920" y="48" class="lbl">APPS</text>
+
+  <!-- Chat -->
+  <rect x="40" y="68" width="250" height="250" rx="14" class="accent"/>
+  <text x="60" y="100" class="h">Open WebUI or LobeChat</text>
+  <text x="60" y="122" class="s">Pick an assistant in the</text>
+  <text x="60" y="140" class="s">model menu:</text>
+  <rect x="60" y="156" width="210" height="34" rx="17" class="chip"/><text x="80" y="178" class="s">Mealie assistant</text>
+  <rect x="60" y="198" width="210" height="34" rx="17" class="chip"/><text x="80" y="220" class="s">Paperless assistant</text>
+  <rect x="60" y="240" width="210" height="34" rx="17" class="chip"/><text x="80" y="262" class="s">Immich assistant</text>
+  <text x="60" y="300" class="s">One per installed app</text>
+
+  <!-- ContextForge -->
+  <rect x="340" y="68" width="250" height="250" rx="14" class="tool"/>
+  <text x="360" y="100" class="h">ContextForge</text>
+  <text x="360" y="122" class="s">One virtual server per app,</text>
+  <text x="360" y="140" class="s">holding the tools it may use</text>
+  <rect x="360" y="156" width="210" height="34" rx="17" class="chip"/><text x="380" y="178" class="s">Mealie tools</text>
+  <rect x="360" y="198" width="210" height="34" rx="17" class="chip"/><text x="380" y="220" class="s">Paperless tools</text>
+  <rect x="360" y="240" width="210" height="34" rx="17" class="chip"/><text x="380" y="262" class="s">Immich tools</text>
+  <text x="360" y="300" class="s">Knows who called; logs each call</text>
+
+  <!-- Connectors -->
+  <rect x="640" y="68" width="230" height="250" rx="14" class="card"/>
+  <text x="660" y="100" class="h">MCP connectors</text>
+  <text x="660" y="122" class="s">Pinned containers on a</text>
+  <text x="660" y="140" class="s">network only ContextForge sees</text>
+  <rect x="660" y="156" width="190" height="34" rx="17" class="chip"/><text x="680" y="178" class="s">mealie-community</text>
+  <rect x="660" y="198" width="190" height="34" rx="17" class="chip"/><text x="680" y="220" class="s">paperless-community</text>
+  <rect x="660" y="240" width="190" height="34" rx="17" class="chip"/><text x="680" y="262" class="s">immich-control</text>
+
+  <!-- Apps -->
+  <rect x="920" y="68" width="240" height="250" rx="14" class="card"/>
+  <text x="940" y="100" class="h">Your apps</text>
+  <text x="940" y="122" class="s">Each connector uses its</text>
+  <text x="940" y="140" class="s">app's own API</text>
+  <rect x="940" y="156" width="200" height="34" rx="17" class="chip"/><text x="960" y="178" class="s">Mealie</text>
+  <rect x="940" y="198" width="200" height="34" rx="17" class="chip"/><text x="960" y="220" class="s">Paperless-ngx</text>
+  <rect x="940" y="240" width="200" height="34" rx="17" class="chip"/><text x="960" y="262" class="s">Immich</text>
+
+  <path d="M270 173 H358" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M270 215 H358" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M270 257 H358" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M570 173 H658" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M570 215 H658" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M570 257 H658" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M850 173 H938" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M850 215 H938" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+  <path d="M850 257 H938" class="mcp" stroke-width="2" marker-end="url(#am)"/>
+
+  <!-- Lifecycle -->
+  <rect x="40" y="346" width="555" height="88" rx="12" class="card"/>
+  <text x="60" y="376" class="h">App starts</text>
+  <text x="60" y="398" class="s">Its connector starts, is registered in ContextForge and switched</text>
+  <text x="60" y="416" class="s">on, and the app's assistant appears for everyone in the household.</text>
+
+  <rect x="605" y="346" width="555" height="88" rx="12" class="card"/>
+  <text x="625" y="376" class="h">App stops</text>
+  <text x="625" y="398" class="s">Its connector and assistant are switched off, not deleted; they</text>
+  <text x="625" y="416" class="s">and the tool choices in ContextForge are kept for next time.</text>
+</svg>

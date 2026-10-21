@@ -9,7 +9,6 @@ from pathlib import Path
 
 from ctl import history
 from ctl.jobs import JobStore
-from ctl.mcp_activity import McpActivity
 from ctl.store import db
 
 NOW = datetime.now(UTC)
@@ -64,16 +63,6 @@ class PruneTests(unittest.TestCase):
             left = {row[0] for row in connection.execute("SELECT DISTINCT job_id FROM audit")}
         self.assertNotIn(finished, left)
         self.assertIn(waiting, left)
-
-    def test_the_tool_call_log_is_kept_ninety_days(self):
-        activity = McpActivity(self.database)
-        activity.record("demo", "search", "chat", "owner", "succeeded", 5)
-        with db.connect(self.database) as connection:
-            connection.execute("UPDATE calls SET created_at = ?", (_ago(100),))
-        activity.record("demo", "search", "chat", "owner", "succeeded", 5)
-        history.prune(self.database, NOW)
-        with db.connect(self.database) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM calls").fetchone()[0], 1)
 
 
 if __name__ == "__main__":

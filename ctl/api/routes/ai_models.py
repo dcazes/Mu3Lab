@@ -96,3 +96,51 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
     except JobConflict as conflict:
         raise ApiError(409, "The AI model settings are already being changed.") from conflict
     return models.JobResponse.model_validate({"ok": True, "job": job})
+
+
+@router.put("/voice", response_model=models.JobResponse, response_model_exclude_none=True)
+def change_voice(payload_model: models.AiVoiceRequest, request: Request, operator: OperatorMutation):
+    """Queue the voice assistant's change: a local model downloads and is checked before voice switches over."""
+    store = runtime.job_store()
+    paths = RuntimePaths()
+    try:
+        chosen = local_models.voice_validate(payload_model.model_dump())
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    if chosen["privacy"] == "outside_allowed":
+        chosen["model"] = ""  # only a local choice names a model
+    current = local_models.voice_settings(paths)
+    if not current["matches_chat"] and all(chosen[key] == current[key] for key in chosen):
+        raise ApiError(422, "These are already the current settings.")
+    if chosen["privacy"] == "local_only" and not model_runners.installed(local_models.runner(paths).id):
+        raise ApiError(422, "Install the model runner from Apps first.")
+    key = runtime.idempotency_key(request)
+    subject = runtime.mutation_subject(operator)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="wiring",
+        service_id=local_models.SERVICE_ID,
+        action=local_models.VOICE_ACTION,
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace=NAMESPACE,
+        request=chosen,
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    try:
+        job = store.create(
+            kind="wiring",
+            service_id=local_models.SERVICE_ID,
+            action=local_models.VOICE_ACTION,
+            actor=operator["username"],
+            actor_subject=subject,
+            namespace=NAMESPACE,
+            request=chosen,
+            params=chosen,
+            detail="Operator changed the voice assistant's model.",
+            idempotency_key=key,
+        )
+    except JobConflict as conflict:
+        raise ApiError(409, "The AI model settings are already being changed.") from conflict
+    return models.JobResponse.model_validate({"ok": True, "job": job})

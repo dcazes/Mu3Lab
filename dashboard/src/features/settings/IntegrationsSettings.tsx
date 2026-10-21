@@ -19,7 +19,16 @@ import {
 } from '../integrations/mcp';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 
-function IntegrationRow({ server, reload }: { server: McpServer; reload: () => void }) {
+function IntegrationRow({
+  server,
+  assistant,
+  reload,
+}: {
+  server: McpServer;
+  /** The app's assistant in chat, when the chat app reports one. */
+  assistant?: ChatAssistant;
+  reload: () => void;
+}) {
   const { pending, run } = useAction();
   const { data } = useDashboard();
   const appName = data.services.services.find((service) => service.id === server.service_id)?.name || server.name;
@@ -34,6 +43,8 @@ function IntegrationRow({ server, reload }: { server: McpServer; reload: () => v
         <span className="row-text">
           <b>{server.name}</b>
           <small>{summary.detail}</small>
+          {/* Why the app's assistant is not in chat yet; a ready one needs no extra line. */}
+          {assistant && assistant.status !== 'ready' && <small>Assistant: {assistant.detail}</small>}
         </span>
       </Link>
       <Badge tone={summary.tone}>
@@ -107,42 +118,6 @@ function WithoutIntegration({ servers }: { servers: McpServer[] }) {
   );
 }
 
-/** Which installed apps have an assistant in chat, and why the others don't yet (moved from the Chat page). */
-function AssistantsCard({ assistants }: { assistants: ChatAssistant[] }) {
-  const isAdmin = useIsAdmin();
-  if (!assistants.length && !isAdmin) return null;
-  const ready = assistants.filter((item) => item.status === 'ready').length;
-  return (
-    <Card
-      title="Assistants in chat"
-      description={
-        assistants.length
-          ? `${ready} of ${assistants.length} apps have an assistant in chat. App connectors use shared service credentials, and each change an assistant asks for waits for approval of its exact inputs.`
-          : 'App connectors use shared service credentials, and each change an assistant asks for waits for approval of its exact inputs.'
-      }
-      actions={
-        isAdmin && (
-          <LinkButton size="sm" to="/tool-approvals">
-            Review change requests
-          </LinkButton>
-        )
-      }
-    >
-      {assistants.some((item) => item.status !== 'ready') && (
-        <ul className="assistant-list">
-          {assistants
-            .filter((item) => item.status !== 'ready')
-            .map((item) => (
-              <li key={item.id}>
-                <b>{item.name}</b> — {item.detail}
-              </li>
-            ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
-
 export function IntegrationsSettings() {
   const registry = useMcpRegistry();
   const servers = primaryConnectors(registry.data?.servers || []);
@@ -151,11 +126,18 @@ export function IntegrationsSettings() {
   const live = servers.filter((server) => server.state === 'live').length;
   const reload = () => void registry.reload();
   const { data } = useDashboard();
+  const isAdmin = useIsAdmin();
+  const assistants = data.chat.assistants || [];
+  const assistantFor = (server: McpServer) => assistants.find((item) => item.id === server.service_id);
+  const ready = assistants.filter((item) => item.status === 'ready').length;
+  const row = (server: McpServer) => (
+    <IntegrationRow key={server.id} server={server} assistant={assistantFor(server)} reload={reload} />
+  );
   return (
     <>
       <PageHeader
         title="Chat integrations"
-        description="Connect supported apps to chat and control which tools can run or require approval."
+        description="Connect supported apps to chat. ContextForge chooses which of their tools chat can use."
       />
       {registry.data && servers.length > 0 && (
         <div className="stat-row" aria-label="Integration summary">
@@ -170,7 +152,6 @@ export function IntegrationsSettings() {
           </span>
         </div>
       )}
-      <AssistantsCard assistants={data.chat.assistants || []} />
       {!registry.data ? (
         <p className="muted">{registry.error || 'Loading integrations…'}</p>
       ) : !servers.length ? (
@@ -188,15 +169,22 @@ export function IntegrationsSettings() {
         <>
           <Card
             title="Set up automatically"
-            description="Mu3Lab can create the credentials for these integrations when you connect them."
+            description={`Mu3Lab can create the credentials for these integrations when you connect them.${
+              assistants.length
+                ? ` ${ready} of ${assistants.length} apps have an assistant in chat, the same for everyone.`
+                : ''
+            } ContextForge chooses each assistant's tools and logs every call.`}
+            actions={
+              isAdmin && (
+                <LinkButton size="sm" to="/apps/contextforge">
+                  Manage tools
+                </LinkButton>
+              )
+            }
             flush
           >
             <section className="rows" aria-label="Set up automatically">
-              {automatic.length ? (
-                automatic.map((server) => <IntegrationRow key={server.id} server={server} reload={reload} />)
-              ) : (
-                <p className="muted card-pad">None yet.</p>
-              )}
+              {automatic.length ? automatic.map(row) : <p className="muted card-pad">None yet.</p>}
             </section>
           </Card>
           {manual.length > 0 && (
@@ -206,9 +194,7 @@ export function IntegrationsSettings() {
               flush
             >
               <section className="rows" aria-label="Manual integration">
-                {manual.map((server) => (
-                  <IntegrationRow key={server.id} server={server} reload={reload} />
-                ))}
+                {manual.map(row)}
               </section>
             </Card>
           )}
@@ -217,7 +203,8 @@ export function IntegrationsSettings() {
             <ul className="bullets">
               <li>Credentials are scoped to one app, stored encrypted, and never shown again.</li>
               <li>Tools become available only after the connection is verified.</li>
-              <li>Actions that change data ask for your approval by default.</li>
+              <li>Chat reaches apps only through ContextForge, which checks who is asking and logs every call.</li>
+              <li>Tools that change data run without asking; switch off any you don't want in ContextForge.</li>
               <li>Vaultwarden and infrastructure services are never exposed to chat.</li>
             </ul>
             {registry.data.policy && <p className="muted">{registry.data.policy}</p>}

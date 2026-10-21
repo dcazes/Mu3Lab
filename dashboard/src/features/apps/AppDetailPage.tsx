@@ -17,6 +17,7 @@ import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
 import { ConfigurationForm } from './ConfigurationForm';
 import { DevicesSection } from './DevicesSection';
+import { JobProgress } from './JobProgress';
 import { UninstallDialog } from './UninstallDialog';
 import { ACTIONS, type ServiceAction, useServiceActions } from './useServiceActions';
 
@@ -33,6 +34,12 @@ function HeaderActions({ service }: { service: Service }) {
   return (
     <>
       {service.id === 'freellmapi' && <LinkButton to="/settings/ai">Manage providers</LinkButton>}
+      {target &&
+        (service.links || []).map((link) => (
+          <ExternalButton key={link.url} href={link.url}>
+            {link.label}
+          </ExternalButton>
+        ))}
       {target ? (
         <ExternalButton variant="primary" href={target.url}>
           {target.label}
@@ -330,6 +337,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
         }
         actions={<HeaderActions service={service} />}
       />
+      <JobProgress service={service} />
       {tabs.length > 1 && <Tabs label={`${service.name} sections`} items={tabs} />}
       {active === 'overview' && <Overview service={service} address={address} devices={hasDevices} />}
       {active === 'chat' && mcp && (

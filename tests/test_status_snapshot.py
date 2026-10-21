@@ -48,6 +48,17 @@ class SnapshotTests(unittest.TestCase):
         self.assertTrue(response.json()["identity"]["is_admin"])
         self.assertTrue(bootstrap_state.dashboard_ready_since(0))
 
+    def test_a_dismissed_warning_follows_the_person_not_the_household(self):
+        response = self.client.post("/api/v1/dismissed", headers=MEMBER | MUTATION, json={"warning": "mealie|down"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["dismissed"], ["mealie|down"])
+        self.assertEqual(self.client.get("/api/v1/snapshot", headers=MEMBER).json()["dismissed"], ["mealie|down"])
+        # Someone else in the household still sees it.
+        other = MEMBER | {"x-authentik-username": "kid", "x-authentik-uid": "kid-uid"}
+        self.assertEqual(self.client.get("/api/v1/snapshot", headers=other).json()["dismissed"], [])
+        # Without the same-origin check nothing is saved.
+        self.assertEqual(self.client.post("/api/v1/dismissed", headers=MEMBER, json={"warning": "x"}).status_code, 403)
+
     def test_failed_snapshot_and_household_snapshot_do_not_verify_installer(self):
         response = self.client.get("/api/v1/snapshot", headers=MEMBER)
         self.assertEqual(response.status_code, 200, response.text)

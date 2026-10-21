@@ -15,7 +15,7 @@ services:
     - 127.0.0.1:8817:8080
     networks:
     - mu3lab_backend
-    - mu3lab_mcp
+    - mu3lab_mcp_upstream
     read_only: true
     tmpfs:
     - /tmp
@@ -40,5 +40,5 @@ services:
 networks:
   mu3lab_backend:
     external: true
-  mu3lab_mcp:
+  mu3lab_mcp_upstream:
     external: true

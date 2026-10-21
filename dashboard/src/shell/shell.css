@@ -3,6 +3,11 @@
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   min-height: 100%;
+  transition: grid-template-columns 0.15s ease;
+}
+
+.shell.sidebar-collapsed {
+  grid-template-columns: var(--sidebar-collapsed-width) 1fr;
 }
 
 .sidebar {
@@ -15,6 +20,21 @@
   padding: 14px 12px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.sidebar-top .brand {
+  flex: 1;
+}
+
+.sidebar-toggle {
+  flex-shrink: 0;
+  color: var(--text-3);
 }
 
 .brand {
@@ -327,4 +347,71 @@ kbd {
 .mobile-top,
 .mobile-tabs {
   display: none;
+}
+
+/* ---------- Folded menu: icons only, each name on hover ---------- */
+.sidebar {
+  min-width: 0;
+  overflow: visible;
+}
+
+.sidebar.is-collapsed {
+  /* Above the page, so the user menu can open over it. */
+  z-index: 20;
+  padding: 14px 10px;
+}
+
+.sidebar.is-collapsed .sidebar-top {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.sidebar.is-collapsed .brand {
+  padding: 4px 0;
+}
+
+.sidebar.is-collapsed .search-trigger,
+.sidebar.is-collapsed .nav a,
+.sidebar.is-collapsed .system-pill {
+  justify-content: center;
+  width: 36px;
+  padding: 0;
+  margin-inline: auto;
+}
+
+.sidebar.is-collapsed .search-trigger {
+  margin-bottom: 8px;
+}
+
+.sidebar.is-collapsed .system-pill {
+  height: 32px;
+}
+
+.sidebar.is-collapsed .nav a {
+  position: relative;
+}
+
+.sidebar.is-collapsed .nav-count {
+  position: absolute;
+  top: 1px;
+  right: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 10px;
+}
+
+.sidebar.is-collapsed .user-menu {
+  display: flex;
+  justify-content: center;
+}
+
+/* Folded, the user menu still opens upwards from the bottom of the menu. */
+.sidebar.is-collapsed .user-menu.is-compact .user-menu-list {
+  top: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
 }

@@ -43,6 +43,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/voice': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Voice
+     * @description Queue the voice assistant's change: a local model downloads and is checked before voice switches over.
+     */
+    put: operations['change_voice_api_v1_ai_voice_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/app-sizes': {
     parameters: {
       query?: never;
@@ -368,6 +388,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/dismissed': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Dismiss
+     * @description Hide one Home warning for this person until it changes.
+     */
+    post: operations['dismiss_api_v1_dismissed_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/identity': {
     parameters: {
       query?: never;
@@ -527,40 +567,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/mcp/servers/{server_id}/activity': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Activity */
-    get: operations['activity_api_v1_mcp_servers__server_id__activity_get'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/mcp/servers/{server_id}/categories/{category_id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /** Put Category */
-    put: operations['put_category_api_v1_mcp_servers__server_id__categories__category_id__put'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/mcp/servers/{server_id}/configuration': {
     parameters: {
       query?: never;
@@ -623,57 +629,6 @@ export interface paths {
     get: operations['list_tools_api_v1_mcp_servers__server_id__tools_get'];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/mcp/servers/{server_id}/tools/{tool_name}/execute': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Execute Tool Call */
-    post: operations['execute_tool_call_api_v1_mcp_servers__server_id__tools__tool_name__execute_post'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/mcp/servers/{server_id}/tools/{tool_name}/permission': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /** Put Tool Permission */
-    put: operations['put_tool_permission_api_v1_mcp_servers__server_id__tools__tool_name__permission_put'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/mcp/servers/{server_id}/tools/{tool_name}/prepare': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Prepare Tool Call */
-    post: operations['prepare_tool_call_api_v1_mcp_servers__server_id__tools__tool_name__prepare_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1445,74 +1400,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/tool-approvals': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Approvals */
-    get: operations['approvals_api_v1_tool_approvals_get'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/tool-approvals/{operation_id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Approval */
-    get: operations['approval_api_v1_tool_approvals__operation_id__get'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/tool-approvals/{operation_id}/decision': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Decide */
-    post: operations['decide_api_v1_tool_approvals__operation_id__decision_post'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/tool-approvals/{operation_id}/execute': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Execute */
-    post: operations['execute_api_v1_tool_approvals__operation_id__execute_post'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/vault/setup': {
     parameters: {
       query?: never;
@@ -1633,6 +1520,7 @@ export interface components {
       /** Runners */
       runners: components['schemas']['ModelRunnerOption'][];
       settings: components['schemas']['AiModelSettings'];
+      voice: components['schemas']['AiVoiceSettings'];
     };
     /** AiModelsRequest */
     AiModelsRequest: {
@@ -1653,6 +1541,38 @@ export interface components {
        * @default
        */
       runner?: string;
+    };
+    /** AiVoiceRequest */
+    AiVoiceRequest: {
+      /**
+       * Model
+       * @default
+       */
+      model?: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
+    };
+    /**
+     * AiVoiceSettings
+     * @description Where the voice assistant's answers come from, independent of chat.
+     */
+    AiVoiceSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Matches Chat */
+      matches_chat: boolean;
+      /** Model */
+      model: string;
+      /**
+       * Privacy
+       * @enum {string}
+       */
+      privacy: 'outside_allowed' | 'local_only';
     };
     /** ApiErrorResponse */
     ApiErrorResponse: {
@@ -1719,78 +1639,6 @@ export interface components {
       needed_disk_bytes: number;
       /** Updated At */
       updated_at: string;
-    };
-    /** ApprovalDecisionRequest */
-    ApprovalDecisionRequest: {
-      /**
-       * Decision
-       * @enum {string}
-       */
-      decision: 'approve' | 'reject';
-    };
-    /** ApprovalOperation */
-    ApprovalOperation: {
-      /** App */
-      app: string;
-      /** Arguments */
-      arguments?: {
-        [key: string]: components['schemas']['JsonValue'];
-      } | null;
-      /** Completed At */
-      completed_at: number;
-      /** Connector Revision */
-      connector_revision: string;
-      /** Created At */
-      created_at: number;
-      /** Credential Version */
-      credential_version: number;
-      /** Dispatch At */
-      dispatch_at: number;
-      /** Expires At */
-      expires_at: number;
-      /** Id */
-      id: string;
-      /** Policy Revision */
-      policy_revision: number;
-      /** Provider */
-      provider: string;
-      /** Server */
-      server: string;
-      /**
-       * State
-       * @enum {string}
-       */
-      state:
-        | 'pending'
-        | 'approved'
-        | 'dispatching'
-        | 'succeeded'
-        | 'failed'
-        | 'outcome_unknown'
-        | 'rejected'
-        | 'revoked'
-        | 'expired';
-      /** Subject */
-      subject: string;
-      /** Tool */
-      tool: string;
-    };
-    /** ApprovalResponse */
-    ApprovalResponse: {
-      /** Execution */
-      execution?: {
-        [key: string]: components['schemas']['JsonValue'];
-      } | null;
-      /** Ok */
-      ok: boolean;
-      operation: components['schemas']['ApprovalOperation'];
-    };
-    /** ApprovalsResponse */
-    ApprovalsResponse: {
-      /** Ok */
-      ok: boolean;
-      /** Operations */
-      operations: components['schemas']['ApprovalOperation'][];
     };
     /** AuditEvent */
     AuditEvent: {
@@ -2231,7 +2079,15 @@ export interface components {
        * Status
        * @enum {string}
        */
-      status: 'ready' | 'pending' | 'failed' | 'not_connected' | 'connector_down' | 'needs_review' | 'operator_only';
+      status:
+        | 'ready'
+        | 'paused'
+        | 'pending'
+        | 'failed'
+        | 'not_connected'
+        | 'connector_down'
+        | 'needs_review'
+        | 'operator_only';
     };
     /** ChatConnectResponse */
     ChatConnectResponse: {
@@ -2359,8 +2215,23 @@ export interface components {
        */
       reason?: string;
     };
+    /** CoreAppProgress */
+    CoreAppProgress: {
+      download?: components['schemas']['ImageDownload'] | null;
+      /** Name */
+      name: string;
+      /** Service Id */
+      service_id: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'waiting' | 'downloading' | 'downloaded' | 'installing' | 'ready' | 'failed';
+    };
     /** CoreSetupResponse */
     CoreSetupResponse: {
+      /** Apps */
+      apps?: components['schemas']['CoreAppProgress'][] | null;
       capacity?: components['schemas']['CoreSetupResponseCapacity'] | null;
       current_job?: components['schemas']['Job'] | null;
       /** Missing Manifests */
@@ -2397,6 +2268,10 @@ export interface components {
     };
     /** DiskUsage */
     DiskUsage: {
+      /** Core Parts */
+      core_parts?: {
+        [key: string]: components['schemas']['DiskShare'];
+      };
       /** Measured At */
       measured_at: string;
       /** Owners */
@@ -2405,6 +2280,41 @@ export interface components {
       };
       /** Removed Folders */
       removed_folders?: string[];
+    };
+    /** DismissRequest */
+    DismissRequest: {
+      /** Warning */
+      warning: string;
+    };
+    /** DismissedResponse */
+    DismissedResponse: {
+      /** Dismissed */
+      dismissed: string[];
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+    };
+    /**
+     * GpuMemory
+     * @description Graphics memory of the NVIDIA GPUs, all cards added up, in bytes.
+     */
+    GpuMemory: {
+      /** By Core Part */
+      by_core_part?: {
+        [key: string]: number;
+      };
+      /** By Owner */
+      by_owner?: {
+        [key: string]: number;
+      };
+      /** Name */
+      name: string;
+      /** Total */
+      total: number;
+      /** Used */
+      used: number;
     };
     /** Health */
     Health: {
@@ -2593,6 +2503,7 @@ export interface components {
     };
     /** JobDetailResponse */
     JobDetailResponse: {
+      download?: components['schemas']['ImageDownload'] | null;
       /** Events */
       events: components['schemas']['AuditEvent'][];
       job: components['schemas']['Job'];
@@ -2646,51 +2557,6 @@ export interface components {
       /** Tag */
       tag: string;
     };
-    /** McpActivityResponse */
-    McpActivityResponse: {
-      /** Calls */
-      calls: components['schemas']['McpCall'][];
-      /** Ok */
-      ok: boolean;
-      /** Server Id */
-      server_id: string;
-    };
-    /** McpCall */
-    McpCall: {
-      /** Actor */
-      actor: string;
-      /** Created At */
-      created_at: string;
-      /** Detail */
-      detail: string;
-      /** Duration Ms */
-      duration_ms: number;
-      /** Id */
-      id: number;
-      /** Outcome */
-      outcome: string;
-      /** Server Id */
-      server_id: string;
-      /** Source */
-      source: string;
-      /** Source Ref */
-      source_ref?: string | null;
-      /** Tool Name */
-      tool_name: string;
-    };
-    /** McpCategory */
-    McpCategory: {
-      /** Default On */
-      default_on: boolean;
-      /** Enabled */
-      enabled: boolean;
-      /** Id */
-      id: string;
-      /** Summary */
-      summary: string;
-      /** Title */
-      title: string;
-    };
     /** McpJobsResponse */
     McpJobsResponse: {
       /** Jobs */
@@ -2727,24 +2593,20 @@ export interface components {
       /** App State */
       app_state: string;
       auth: components['schemas']['McpServerAuth'];
-      /** Blocked */
-      blocked?: components['schemas']['McpServerBlockedItem'][] | null;
-      /** Categories */
-      categories?: components['schemas']['McpCategory'][] | null;
       /** Configuration */
       configuration?: components['schemas']['ServiceConfigField'][] | null;
       /** Enabled */
       enabled: boolean;
       /** Error */
       error?: string | null;
-      /** Gateway */
-      gateway?: boolean | null;
       /** Id */
       id: string;
       /** Kind */
       kind: string;
       /** Last Verified At */
       last_verified_at?: string | null;
+      /** Manage Url */
+      manage_url?: string | null;
       /** Name */
       name: string;
       /** Prepared */
@@ -2768,8 +2630,6 @@ export interface components {
       tools: components['schemas']['McpServerToolsItem'][];
       /** Transport */
       transport: string;
-      /** Unreviewed */
-      unreviewed?: string[] | null;
     };
     /** McpServerAuth */
     McpServerAuth: {
@@ -2781,13 +2641,6 @@ export interface components {
       configured: boolean;
       /** Type */
       type: string;
-    };
-    /** McpServerBlockedItem */
-    McpServerBlockedItem: {
-      /** Id */
-      id: string;
-      /** Reason */
-      reason: string;
     };
     /** McpServerResponse */
     McpServerResponse: {
@@ -2810,22 +2663,14 @@ export interface components {
     };
     /** McpServerToolsItem */
     McpServerToolsItem: {
-      /** Category */
-      category?: string | null;
-      /** Core */
-      core?: boolean | null;
       /** Enabled */
       enabled: boolean;
       /** Id */
       id: string;
-      /** Offered */
-      offered?: boolean | null;
       /** Parameters */
       parameters?: {
         [key: string]: components['schemas']['JsonValue'];
       } | null;
-      /** Permission */
-      permission?: string | null;
       /** Risk */
       risk: string;
       /** Title */
@@ -2916,6 +2761,23 @@ export interface components {
       releases: components['schemas']['Mu3LabRelease'][];
     };
     /**
+     * Mu3LabDevelopment
+     * @description One merged branch or pull request (or a run of direct commits) inside a release.
+     */
+    Mu3LabDevelopment: {
+      /**
+       * Branch
+       * @default
+       */
+      branch?: string;
+      /** Changes */
+      changes: string[];
+      /** Date */
+      date: string;
+      /** Title */
+      title: string;
+    };
+    /**
      * Mu3LabRelease
      * @description One release's changes; a development copy has no version.
      */
@@ -2929,6 +2791,8 @@ export interface components {
       commit?: string;
       /** Date */
       date: string;
+      /** Developments */
+      developments?: components['schemas']['Mu3LabDevelopment'][];
       /** Version */
       version: string;
     };
@@ -3340,6 +3204,8 @@ export interface components {
        * @enum {string}
        */
       display_state: 'running' | 'stopped' | 'working' | 'checking' | 'not_installed' | 'needs_attention';
+      /** Extra Routes */
+      extra_routes?: components['schemas']['ServiceExtraRoute'][];
       /** Group */
       group: 'apps' | 'ai' | 'infrastructure';
       /** Health State */
@@ -3365,6 +3231,8 @@ export interface components {
       last_job_id: string;
       /** Lifecycle */
       lifecycle: 'always_on' | 'shared' | 'optional';
+      /** Links */
+      links?: components['schemas']['ServiceLink'][];
       mobile?: components['schemas']['ServiceMobile0'] | null;
       /** Name */
       name: string;
@@ -3521,6 +3389,15 @@ export interface components {
       /** Status */
       status: string;
     };
+    /** ServiceExtraRoute */
+    ServiceExtraRoute: {
+      /** Label */
+      label: string;
+      /** Name */
+      name: string;
+      /** Private Https Port */
+      private_https_port: number;
+    };
     /** ServiceIdentity */
     ServiceIdentity: {
       /** Detail */
@@ -3560,6 +3437,16 @@ export interface components {
       initialization: components['schemas']['ServiceInitialization'];
       /** Ok */
       ok: boolean;
+    };
+    /**
+     * ServiceLink
+     * @description Another private address of an app (``extra_routes``), shown beside its Open button.
+     */
+    ServiceLink: {
+      /** Label */
+      label: string;
+      /** Url */
+      url: string;
     };
     /** ServiceLogsResponse */
     ServiceLogsResponse: {
@@ -3659,6 +3546,11 @@ export interface components {
       catalog: components['schemas']['CatalogResponse'];
       chat: components['schemas']['ChatStatus'];
       core: components['schemas']['CoreSetupResponse'];
+      /**
+       * Dismissed
+       * @default []
+       */
+      dismissed?: string[];
       identity: components['schemas']['IdentityResponse'];
       jobs: components['schemas']['JobsResponse'];
       /**
@@ -3698,7 +3590,12 @@ export interface components {
       disk_usage?: components['schemas']['DiskUsage'] | null;
       /** Docker Ready */
       docker_ready: boolean;
+      gpu?: components['schemas']['GpuMemory'] | null;
       memory: components['schemas']['Metric'];
+      /** Memory By Core Part */
+      memory_by_core_part?: {
+        [key: string]: number;
+      } | null;
       /** Memory By Owner */
       memory_by_owner?: {
         [key: string]: number;
@@ -3740,72 +3637,6 @@ export interface components {
       serve: components['schemas']['TailscaleServeStatus'];
       /** State */
       state: 'connected' | 'disconnected' | 'unavailable';
-    };
-    /** ToolCallRequest */
-    ToolCallRequest: {
-      /** Arguments */
-      arguments?: {
-        [key: string]: components['schemas']['JsonValue'];
-      };
-      /**
-       * Confirmation Token
-       * @default
-       */
-      confirmation_token?: string;
-    };
-    /** ToolExecuteResponse */
-    ToolExecuteResponse: {
-      /** Ok */
-      ok: boolean;
-      /** Outcome */
-      outcome: string;
-      /** Result */
-      result: {
-        [key: string]: components['schemas']['JsonValue'];
-      };
-    };
-    /** ToolPermissionRequest */
-    ToolPermissionRequest: {
-      /**
-       * Permission
-       * @enum {string}
-       */
-      permission: 'auto' | 'needs_approval' | 'disabled';
-    };
-    /** ToolPermissionResponse */
-    ToolPermissionResponse: {
-      /** Ok */
-      ok: boolean;
-      /** Permission */
-      permission: string;
-      /** Server Id */
-      server_id: string;
-      /** Tool Name */
-      tool_name: string;
-    };
-    /** ToolPrepareResponse */
-    ToolPrepareResponse: {
-      /** Confirmation Required */
-      confirmation_required: boolean;
-      /** Confirmation Token */
-      confirmation_token: string;
-      /** Expires In Seconds */
-      expires_in_seconds: number;
-      /** Ok */
-      ok: boolean;
-      /** Permission */
-      permission: string;
-      /** Risk */
-      risk: string;
-      /** Server Id */
-      server_id: string;
-      /** Tool Name */
-      tool_name: string;
-    };
-    /** ToolSwitchRequest */
-    ToolSwitchRequest: {
-      /** Enabled */
-      enabled: boolean;
     };
     /** UpdateResponse */
     UpdateResponse: {
@@ -4132,6 +3963,93 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['AiModelsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_api_v1_ai_voice_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiVoiceRequest'];
       };
     };
     responses: {
@@ -6158,6 +6076,93 @@ export interface operations {
       };
     };
   };
+  dismiss_api_v1_dismissed_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DismissRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DismissedResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   identity_api_v1_identity_get: {
     parameters: {
       query?: never;
@@ -6913,184 +6918,6 @@ export interface operations {
       };
     };
   };
-  activity_api_v1_mcp_servers__server_id__activity_get: {
-    parameters: {
-      query?: {
-        before?: number;
-        limit?: number;
-      };
-      header?: never;
-      path: {
-        server_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['McpActivityResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  put_category_api_v1_mcp_servers__server_id__categories__category_id__put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        server_id: string;
-        category_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ToolSwitchRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['McpServerResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
   put_configuration_api_v1_mcp_servers__server_id__configuration_put: {
     parameters: {
       query?: never;
@@ -7372,276 +7199,6 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['McpToolsResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  execute_tool_call_api_v1_mcp_servers__server_id__tools__tool_name__execute_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        server_id: string;
-        tool_name: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ToolCallRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ToolExecuteResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  put_tool_permission_api_v1_mcp_servers__server_id__tools__tool_name__permission_put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        server_id: string;
-        tool_name: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ToolPermissionRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ToolPermissionResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  prepare_tool_call_api_v1_mcp_servers__server_id__tools__tool_name__prepare_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        server_id: string;
-        tool_name: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ToolCallRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ToolPrepareResponse'];
         };
       };
       /** @description Bad Request */
@@ -10873,7 +10430,9 @@ export interface operations {
   };
   snapshot_api_v1_snapshot_get: {
     parameters: {
-      query?: never;
+      query?: {
+        status?: boolean;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -11897,348 +11456,6 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['JobResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  approvals_api_v1_tool_approvals_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApprovalsResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  approval_api_v1_tool_approvals__operation_id__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        operation_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApprovalResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  decide_api_v1_tool_approvals__operation_id__decision_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        operation_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ApprovalDecisionRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApprovalResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  execute_api_v1_tool_approvals__operation_id__execute_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        operation_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApprovalResponse'];
         };
       };
       /** @description Bad Request */

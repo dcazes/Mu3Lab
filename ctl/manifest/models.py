@@ -51,14 +51,38 @@ class Health(Model):
         return value
 
 
+class ExtraPort(Model):
+    """Another port the app's compose file publishes, beside ``local_port``.
+
+    ``loopback`` ports are for this computer only (an extra route's upstream,
+    MQTT, a health port). ``tailnet`` ports listen on this server's tailnet
+    address only, for traffic HTTPS routes cannot carry, such as WebRTC media;
+    the compose file binds them to ``${MU3LAB_TAILNET_IP}``.
+    """
+
+    port: Port
+    purpose: str
+    protocol: Literal["tcp", "udp"] = "tcp"
+    listen: Literal["loopback", "tailnet"] = "loopback"
+
+
 class ServiceSpec(Model):
     local_port: Port
+    # Every other host port the compose file publishes; the catalog rejects any it does not list.
+    extra_ports: tuple[ExtraPort, ...] = ()
     health: Health = Health()
     start_timeout_seconds: int = Field(default=120, ge=10, le=3600)
     stoppable: bool = True
     # Said in the Stop confirmation when stopping this app affects more than the app itself.
     stop_warning: str = ""
     uses_gpu: bool = False
+
+    @model_validator(mode="after")
+    def _distinct_ports(self) -> ServiceSpec:
+        ports = [(self.local_port, "tcp"), *((extra.port, extra.protocol) for extra in self.extra_ports)]
+        if len(ports) != len(set(ports)):
+            raise ValueError("service ports must be distinct")
+        return self
 
 
 # --- Private address (Tailscale Serve → Caddy → app) ------------------------------------
@@ -124,12 +148,28 @@ class Route(Model):
     blocked_paths: tuple[BlockedPath, ...] = ()
     redirects: tuple[Redirect, ...] = ()
     forwarded_host: Literal["host", "hostport"] = "hostport"
-    # Who Authentik admits through a gate: everyone in the household, or administrators only.
+    # Who Authentik admits, through a gate or to an OIDC app: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"
     upstream_basic_auth: UpstreamBasicAuth | None = None
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
     # apps/ingress/Caddyfile; every other route is generated from its manifest.
     generated: bool = True
+
+
+class ExtraRoute(Route):
+    """Another private address for the same app, proxied to one of its loopback ``extra_ports``.
+
+    For apps with more than one browser-facing part (LiveKit: the voice page,
+    its signalling server and an admin page). The dashboard shows each as a
+    link labelled ``label`` beside the app's main Open button.
+    """
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,20}$")
+    # Plain words: it also names the route's sign-in provider in Authentik.
+    label: str = Field(pattern=r"^[A-Za-z0-9 .-]{1,40}$")
+    local_port: Port
+    # False for an address only programs use (LiveKit's signalling server): no link on the app's page.
+    link: bool = True
 
 
 # --- Sign-in --------------------------------------------------------------------------
@@ -144,10 +184,12 @@ class OidcEnv(Model):
 
 
 class JsonLaunch(Model):
-    """The app's login page starts sign-in with a JSON POST that returns Authentik's address."""
+    """The app's login page starts sign-in with a JSON request that returns Authentik's address."""
 
     path: str
     body: dict[str, Any]  # "{origin}" in a string value becomes the app's private address
+    # GET sends ``body`` as query parameters (ContextForge's /auth/sso/login).
+    method: Literal["POST", "GET"] = "POST"
     url_key: tuple[str, ...]
     # Serve a same-origin page at the launch path that runs this POST in the
     # browser, for apps whose own login page would otherwise ask first.
@@ -293,6 +335,9 @@ class Assistant(Model):
     title: str
     description: str
     instructions: str
+    # Who may use it: the whole household, or administrators only (an infrastructure app's
+    # read-only assistant, which shows the whole server's people, sign-ins or backups).
+    audience: Literal["household", "operators"] = "household"
 
 
 class Chat(Model):
@@ -330,6 +375,11 @@ class CredentialScript(Model):
     # Pass the installing owner's username as the script's only argument, so it can
     # find the owner's account even after other household members become admins.
     owner_username: bool = False
+    # Or the owner's email, for apps that identify people by email.
+    owner_email: bool = False
+    # Optional script, in the same folder and interpreter, that deletes the credential when the
+    # connector is switched off. Only for credentials minted for Mu3Lab alone, never a phone's.
+    revoke_script: str = ""
 
 
 class ReviewedUpdate(Model):
@@ -353,17 +403,32 @@ class Connector(Model):
     local_health: HttpUrl
     credentials: tuple[CredentialField, ...] = ()
     provision: CredentialScript | None = None
+    # Or Mu3Lab mints the credential itself, through the app's API with a login Mu3Lab already
+    # holds (``connector_credentials`` in apps/<id>/hooks.py), when no script inside the app can.
+    provision_hook: bool = False
     provision_note: str = ""
     review_note: str = ""
     secrets: tuple[Secret, ...] = ()
     # Shared Mu3Lab files copied into the connector's project, e.g. the generic adapter.
     include: tuple[str, ...] = ()
-    reviewed: bool = False  # a review.yaml sits next to it; served through the tool gateway
+    reviewed: bool = False  # a review.yaml sits next to it: the tools ContextForge starts it with
     reviewed_update: ReviewedUpdate | None = None
+    # The app serves MCP itself (``endpoint`` is the app's own service): no connector container
+    # to build, start or stop, and the app joins mu3lab_mcp_upstream so ContextForge can reach it.
+    builtin: bool = False
+    # Fixed headers sent with every call besides the credential, e.g. X-Forwarded-Proto for an app
+    # that redirects plain HTTP because it expects to sit behind an HTTPS proxy.
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _one_provisioner(self) -> Connector:
+        if self.provision is not None and self.provision_hook:
+            raise ValueError("a connector is provisioned by a script or by its app's hooks, not both")
+        return self
 
     @property
     def auto_provision(self) -> bool:
-        return self.provision is not None
+        return self.provision is not None or self.provision_hook
 
 
 # --- Phones -----------------------------------------------------------------------------
@@ -490,6 +555,8 @@ class AppManifest(Model):
     backup: BackupSpec = BackupSpec()
     service: ServiceSpec
     route: Route | None = None
+    # More private addresses, each with its own tailnet port, Caddy listener and access rule.
+    extra_routes: tuple[ExtraRoute, ...] = ()
     sign_in: SignIn
     account: Account = Account()
     secrets: tuple[Secret, ...] = ()
@@ -525,9 +592,33 @@ class AppManifest(Model):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":
             raise ValueError("a trusted_header route needs trusted_header sign-in")
-        if self.route and self.route.upstream_basic_auth and self.route.access == "open":
-            # The login it adds would be handed to anyone who reached the address.
-            raise ValueError("upstream_basic_auth needs a route Authentik guards")
+        for route in (self.route, *self.extra_routes):
+            if route and route.upstream_basic_auth and route.access == "open":
+                # The login it adds would be handed to anyone who reached the address.
+                raise ValueError("upstream_basic_auth needs a route Authentik guards")
+        if self.extra_routes:
+            if self.route is None:
+                raise ValueError("extra_routes need a main route")
+            names = [route.name for route in self.extra_routes]
+            if len(names) != len(set(names)):
+                raise ValueError("extra route names must be unique")
+            routes = (self.route, *self.extra_routes)
+            for field in ("https_port", "caddy_port"):
+                values = [getattr(route, field) for route in routes]
+                if len(values) != len(set(values)):
+                    raise ValueError(f"each route needs its own {field}")
+            upstreams = [self.service.local_port, *(route.local_port for route in self.extra_routes)]
+            if len(upstreams) != len(set(upstreams)):
+                raise ValueError("each route needs its own local_port")
+            loopback = {extra.port for extra in self.service.extra_ports if extra.listen == "loopback"}
+            for route in self.extra_routes:
+                if route.local_port not in loopback:
+                    raise ValueError(
+                        f"extra route {route.name!r} needs its local_port in service.extra_ports (loopback)"
+                    )
+                if route.access == "trusted_header":
+                    # One app, one trusted identity header: only its main route may carry it.
+                    raise ValueError("an extra route cannot use trusted_header access")
         secret_names = [secret.env for secret in self.secrets]
         if len(secret_names) != len(set(secret_names)):
             raise ValueError("secret env names must be unique")

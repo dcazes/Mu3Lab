@@ -30,16 +30,12 @@ export const mcpStateLabel: Record<McpServer['state'], string> = {
 /** A short, plain-language status line for a connection. */
 export function mcpSummary(server: McpServer, appName: string): { label: string; tone: Tone; detail: string } {
   switch (server.state) {
-    case 'live': {
-      const on = server.gateway ? server.tools.filter(toolIsOn(server)).length : server.tools.length;
+    case 'live':
       return {
         label: 'Connected',
         tone: 'green',
-        detail: server.gateway
-          ? `${on} of ${server.tools.length} tools on`
-          : `${on} tool${on === 1 ? '' : 's'} available in chat`,
+        detail: `${server.tools.length} tool${server.tools.length === 1 ? '' : 's'} offered; ContextForge chooses which chat uses`,
       };
-    }
     case 'stopped':
       return { label: 'App stopped', tone: 'gray', detail: `Start ${appName} to use it from chat.` };
     case 'authentication_required':
@@ -71,12 +67,6 @@ export function useMcpRegistry() {
 }
 
 export type McpAction = 'prepare' | 'install' | 'restart' | 'disable' | 'verify' | 'update' | 'switch';
-
-/** A gateway tool is usable when both it and its category are switched on. */
-export const toolIsOn =
-  (server: McpServer) =>
-  (tool: McpServer['tools'][number]): boolean =>
-    tool.enabled && Boolean(server.categories?.find((category) => category.id === tool.category)?.enabled);
 
 /** An app's connectors: the enabled one first, then the default, then the rest. */
 export function connectorsFor(servers: McpServer[], serviceId: string): McpServer[] {

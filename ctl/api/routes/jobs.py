@@ -11,8 +11,9 @@ from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, Operator, OperatorMutation
+from ctl.core_setup import app_progress, start_verify
 from ctl.core_setup import start as start_core_setup
-from ctl.core_setup import start_verify
+from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
@@ -53,8 +54,11 @@ def _recent_job(store: JobStore, job_id: str) -> dict[str, JsonValue]:
 @router.get("/jobs/{job_id}", response_model=models.JobDetailResponse, response_model_exclude_none=True)
 def job_detail(job_id: str, _operator: Member) -> models.JobDetailResponse:
     store = runtime.job_store()
+    job = _recent_job(store, job_id)
+    downloads = ImageDownloadStore.runtime()
+    download = downloads.for_jobs([job_id]).get(job_id) if downloads else None
     return models.JobDetailResponse.model_validate(
-        {"ok": True, "job": _recent_job(store, job_id), "events": store.events(job_id)}
+        {"ok": True, "job": job, "events": store.events(job_id), "download": download}
     )
 
 
@@ -130,9 +134,10 @@ def core_setup(_member: Member) -> models.CoreSetupResponse:
     provisioning_store = ProvisioningStore.runtime()
     provisioned = {"available": True, **provisioning_store.summary(initialize=False)} if provisioning_store else None
     waiting = (provisioned or {}).get("waiting")
+    # Setup itself has finished; only the owner's provider step is left.
     waiting_for_provider = bool(
         current_job
-        and current_job.get("state") == "waiting_for_confirmation"
+        and current_job.get("state") in {"succeeded", "waiting_for_confirmation"}
         and waiting
         and waiting.get("phase_id") == "configuration"
     )
@@ -145,6 +150,7 @@ def core_setup(_member: Member) -> models.CoreSetupResponse:
             "capacity": execution["capacity"],
             "provisioning": provisioned,
             "current_job": current_job,
+            "apps": app_progress(store, current_job, ImageDownloadStore.runtime()) if store and current_job else None,
             "next_action": (
                 "Add an inference provider to finish chat verification"
                 if waiting_for_provider

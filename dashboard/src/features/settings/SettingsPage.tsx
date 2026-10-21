@@ -26,22 +26,26 @@ const PAGES: Record<string, () => JSX.Element> = {
 
 export function SettingsPage({ section }: { section: string }) {
   const sections = settingsSectionsFor(useIsAdmin());
-  const Page = sections.some((item) => item.id === section) ? PAGES[section] : undefined;
+  const current = sections.find((item) => item.id === section);
+  const Page = current ? PAGES[section] : undefined;
+  const highlighted = current?.within || section;
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Settings">
         <h1 className="settings-nav-title">Settings</h1>
-        {sections.map(({ id, label, icon: Icon }) => (
-          <Link
-            key={id}
-            to={`/settings/${id}`}
-            className={id === section ? 'active' : ''}
-            aria-current={id === section ? 'page' : undefined}
-          >
-            <Icon />
-            {label}
-          </Link>
-        ))}
+        {sections
+          .filter((item) => !item.within)
+          .map(({ id, label, icon: Icon }) => (
+            <Link
+              key={id}
+              to={`/settings/${id}`}
+              className={id === highlighted ? 'active' : ''}
+              aria-current={id === section ? 'page' : undefined}
+            >
+              <Icon />
+              {label}
+            </Link>
+          ))}
       </nav>
       <div className="settings-content page">{Page ? <Page /> : <EmptyState title="Settings page not found" />}</div>
     </div>

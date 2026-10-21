@@ -92,3 +92,12 @@ mobile:
 resource_guidance: Light to run. The music library is kept on the server and included in backups, so allow disk space
   for both.
 setup_action: Install Navidrome to stream the household's music library.
+chat:
+  assistant:
+    title: Navidrome
+    description: Find music and build playlists from the household library.
+    instructions: Help with the household's Navidrome music library. Search before answering, and use the IDs the
+      tools return. Ask before creating a playlist, since everyone in the household will see it. Use only Navidrome
+      tools assigned to this agent.
+  connectors:
+  - navidrome-adapter

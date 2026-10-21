@@ -1,0 +1,18 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: kopia-reader
+revision: v0.23.1-control-api
+reviewed_at: '2026-10-18'
+guidance: |
+  Read-only: you can report each app's backup status and the backup storage, but cannot start, stop or
+  restore a backup. For those, point the administrator to Security & backups in the Mu3Lab dashboard.
+
+categories:
+  - id: backups
+    title: Backups
+    summary: Each app's latest backup, its size and errors, the next one due, and the backup storage.
+
+tools:
+  backup_status: {category: backups, access: read, core: true}
+  repository_status: {category: backups, access: read, core: true}

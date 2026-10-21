@@ -1,0 +1,23 @@
+name: mu3lab-mcp-romm-adapter
+services:
+  romm-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      MCP_APP: romm
+      APP_URL: http://romm:8080
+      ROMM_API_TOKEN: ${ROMM_API_TOKEN:?ROMM_API_TOKEN is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8828:8080
+    networks:
+    - mu3lab_frontend
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-romm-adapter:development
+networks:
+  mu3lab_frontend:
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

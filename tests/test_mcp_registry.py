@@ -12,7 +12,9 @@ from ctl.mcp_catalog import load as load_mcp_catalog
 from ctl.mcp_registry import snapshot
 from ctl.registry import load
 
-INFRASTRUCTURE = {"vaultwarden", "ingress", "authentik", "ollama", "litellm", "freellmapi", "lobehub"}
+INFRASTRUCTURE = {"vaultwarden", "ingress", "ollama", "litellm", "freellmapi", "lobehub"}
+# Platform services whose connector only reads, for administrators only (catalog-enforced).
+READ_ONLY_INFRASTRUCTURE = {"authentik", "kopia-ui"}
 
 
 class McpRegistryTests(unittest.TestCase):
@@ -36,6 +38,17 @@ class McpRegistryTests(unittest.TestCase):
     def test_infrastructure_services_never_have_an_mcp_server(self):
         exposed = {server.service_id for server in load_mcp_catalog(load())}
         self.assertFalse(exposed & INFRASTRUCTURE)
+
+    def test_platform_connectors_only_read_and_start_switched_off(self):
+        from ctl import mcp_review
+
+        servers = [server for server in load_mcp_catalog(load()) if server.service_id in READ_ONLY_INFRASTRUCTURE]
+        self.assertEqual({server.service_id for server in servers}, READ_ONLY_INFRASTRUCTURE)
+        for server in servers:
+            with self.subTest(server=server.id):
+                self.assertFalse(server.preferred)
+                review = mcp_review.load(server.id, server.review)
+                self.assertEqual({tool.access for tool in review.tools.values()}, {"read"})
 
     def test_uninstalled_application_mcp_cards_are_hidden(self):
         registry = load()

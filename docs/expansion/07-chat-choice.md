@@ -163,9 +163,9 @@ selected** (§6). VERIFY how core apps are chosen by core setup and add a
   `ENABLE_OLLAMA_API=false` (**no chat models from Ollama**).
 - Embeddings: `RAG_EMBEDDING_ENGINE=openai`, `RAG_OPENAI_API_BASE_URL`,
   `RAG_OPENAI_API_KEY`, `RAG_EMBEDDING_MODEL` (LiteLLM's embedding alias).
-- Audio: `AUDIO_STT_ENGINE=openai`, `AUDIO_STT_OPENAI_API_BASE_URL`,
-  `AUDIO_STT_MODEL`, `AUDIO_TTS_ENGINE=openai`, `AUDIO_TTS_OPENAI_API_BASE_URL`,
-  `AUDIO_TTS_MODEL`, `AUDIO_TTS_VOICE` (see [08-speech.md](08-speech.md)).
+- Audio: Open WebUI's own Whisper (`AUDIO_STT_ENGINE=""`, `WHISPER_MODEL=small`)
+  and the browser's voices (`AUDIO_TTS_ENGINE=""`), so chat voice never depends
+  on the Speech app ([08-speech.md](08-speech.md)).
 - Images: `ENABLE_IMAGE_GENERATION`, `IMAGE_GENERATION_ENGINE=comfyui`,
   `COMFYUI_BASE_URL`, and how the ComfyUI workflow JSON and node mapping are
   supplied (env or admin API).

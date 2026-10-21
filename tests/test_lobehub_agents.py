@@ -27,8 +27,18 @@ DESIRED = [
         "instructions": "Help cook",
         "url": "http://gateway:8810/recipes/mcp",
         "token": "gateway-secret",
+        "active": True,
     }
 ]
+# The same app while it is stopped: no key is made for it.
+STOPPED = [{**{k: v for k, v in DESIRED[0].items() if k != "token"}, "active": False}]
+
+
+PEOPLE = {
+    "owner": {"email": "owner@example.test", "operator": True},
+    "first": {"email": "first@example.test", "operator": False},
+    "second": {"email": "second@example.test", "operator": False},
+}
 
 
 class ApiServer:
@@ -37,6 +47,8 @@ class ApiServer:
         self.servers = []
         self.topics = []
         self.calls = []
+        # What LobeChat's tool sync finds at each connector.
+        self.tool_count = 3
 
     def handle(self, request):
         path = request.url.path
@@ -59,7 +71,7 @@ class ApiServer:
         elif path == "/api/v1/topics":
             data = {"topics": self.topics, "total": len(self.topics)}
         elif request.method == "POST" and path.endswith("/sync"):
-            data = {"tools": []}
+            data = {"id": path.split("/")[-2], "status": "connected", "toolCount": self.tool_count}
         elif request.method == "POST":
             data = {"id": "created-" + str(len(self.calls)), **body}
             (self.agents if path.endswith("agents") else self.servers).append(data)
@@ -144,11 +156,50 @@ class AgentSyncTests(unittest.TestCase):
             broken["fail"] = True
             with self.assertRaises(AssistantSyncError) as caught:
                 client.ensure_assistants([*DESIRED, pantry], managed)
-        self.assertIn("Recipes", str(caught.exception))
-        self.assertIn("HTTP 502", str(caught.exception))
+        self.assertIn("Recipes: LobeChat could not reach this app's tools", str(caught.exception))
         self.assertEqual(set(caught.exception.managed), {"recipes", "pantry"})
-        self.assertEqual(caught.exception.managed["recipes"], managed["recipes"])
+        # The failing assistant is still saved, with the reason; the other one works.
+        self.assertEqual(caught.exception.managed["recipes"]["check"]["status"], "failed")
+        self.assertEqual(caught.exception.managed["pantry"]["check"]["status"], "ready")
         self.assertIn("Pantry", [agent["title"] for agent in server.agents])
+
+    def test_the_check_is_lobechats_own_tool_sync(self):
+        server = ApiServer()
+        with LobeHub("https://chat.test", "person-key", transport=httpx.MockTransport(server.handle)) as client:
+            managed = client.ensure_assistants(DESIRED, {})
+            server.tool_count = 0
+            with self.assertRaises(AssistantSyncError) as caught:
+                client.ensure_assistants(DESIRED, managed)
+        self.assertEqual(
+            managed["recipes"]["check"], {"status": "ready", "tools": 3, "detail": "LobeChat reached 3 tools."}
+        )
+        self.assertIn("none are switched on", caught.exception.managed["recipes"]["check"]["detail"])
+
+    def test_a_stopped_apps_assistant_is_switched_off_and_comes_back(self):
+        server = ApiServer()
+        with LobeHub("https://chat.test", "person-key", transport=httpx.MockTransport(server.handle)) as client:
+            managed = client.ensure_assistants(DESIRED, {})
+            paused = client.ensure_assistants(STOPPED, managed)
+            agent = dict(server.agents[0])
+            enabled_while_stopped = server.servers[0]["isEnabled"]
+            back = client.ensure_assistants(DESIRED, paused)
+        # Kept with its connector, which is switched off, and it says why.
+        self.assertEqual(paused["recipes"]["agent_id"], managed["recipes"]["agent_id"])
+        self.assertEqual(paused["recipes"]["check"]["status"], "paused")
+        self.assertFalse(enabled_while_stopped)
+        self.assertEqual(agent["plugins"], [{"identifier": "mu3lab-recipes", "mode": "pinned"}])
+        self.assertIn("Off while the app is stopped", agent["description"])
+        self.assertEqual(len(server.agents), 1)
+        # Starting the app switches it back on.
+        self.assertTrue(server.servers[0]["isEnabled"])
+        self.assertEqual(server.agents[0]["description"], "Meals")
+        self.assertEqual(back["recipes"]["check"]["status"], "ready")
+
+    def test_a_stopped_app_never_set_up_gets_nothing(self):
+        server = ApiServer()
+        with LobeHub("https://chat.test", "person-key", transport=httpx.MockTransport(server.handle)) as client:
+            self.assertEqual(client.ensure_assistants(STOPPED, {}), {})
+        self.assertEqual((server.agents, server.servers), ([], []))
 
     def test_partial_sync_saves_the_assistants_that_worked(self):
         class Client:
@@ -166,11 +217,12 @@ class AgentSyncTests(unittest.TestCase):
 
         state = Mock()
         state.installation.return_value = None
+        state.app_installation.return_value = None
         with (
             patch.object(lobehub_ops.chat_connections, "records", return_value={"owner": {"key": "sk-lh-working"}}),
             patch.object(lobehub_ops.chat_connections, "save") as save,
             patch.object(lobehub_ops.chat_ops, "desired_assistants", return_value=[]),
-            patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
+            patch.object(lobehub_ops, "chat_people", return_value=PEOPLE),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
             patch.object(lobehub_ops, "LobeHub", Client),
@@ -202,12 +254,13 @@ class AgentSyncTests(unittest.TestCase):
 
         state = Mock()
         state.installation.return_value = None
+        state.app_installation.return_value = None
         records = {"first": {"key": "sk-lh-revoked"}, "second": {"key": "sk-lh-working"}}
         with (
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
             patch.object(lobehub_ops.chat_connections, "save") as save,
             patch.object(lobehub_ops.chat_ops, "desired_assistants", return_value=[]),
-            patch.object(lobehub_ops, "operator_subjects", return_value={"owner", "first", "second"}),
+            patch.object(lobehub_ops, "chat_people", return_value=PEOPLE),
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops, "origin", return_value="https://chat.test"),
             patch.object(lobehub_ops, "LobeHub", Client),
@@ -229,25 +282,29 @@ class AgentSyncTests(unittest.TestCase):
             manifest.name = app_id.title()
             return Mock(id=app_id, manifest=manifest)
 
-        def connector(app_id, reviewed):
-            return Mock(id=app_id + "-mcp", service_id=app_id, gateway=reviewed)
+        def connector(app_id):
+            return Mock(id=app_id + "-mcp", service_id=app_id)
 
-        apps = [app(name) for name in ("unreviewed", "down", "ready", "waiting")]
+        apps = [app(name) for name in ("unconnected", "down", "ready", "waiting", "stopped", "broken")]
         servers = {
             "down-mcp": {"enabled": True, "state": "authentication_required"},
             "ready-mcp": {"enabled": True, "state": "live"},
             "waiting-mcp": {"enabled": True, "state": "live"},
+            "stopped-mcp": {"enabled": True, "state": "stopped"},
+            "broken-mcp": {"enabled": True, "state": "live"},
         }
         state = Mock()
         state.installation.return_value = {"state": "running"}
+        state.app_installation.return_value = {"state": "running"}
         state.mcp_server.side_effect = servers.get
-        connectors = [
-            connector("unreviewed", False),
-            connector("down", True),
-            connector("ready", True),
-            connector("waiting", True),
-        ]
-        records = {"me": {"key": "sk-lh-key", "managed": {"ready": {"agent_id": "a"}}}}
+        # "unconnected" has no chat connector at all.
+        connectors = [connector(name) for name in ("down", "ready", "waiting", "stopped", "broken")]
+        managed = {
+            "ready": {"agent_id": "a", "check": {"status": "ready", "detail": "LobeChat reached 3 tools."}},
+            "stopped": {"agent_id": "b", "check": {"status": "paused", "detail": "Switched off."}},
+            "broken": {"agent_id": "c", "check": {"status": "failed", "detail": "LobeChat could not reach it."}},
+        }
+        records = {"me": {"key": "sk-lh-key", "managed": managed}}
         with (
             patch.object(lobehub_ops.ControlState, "runtime", return_value=state),
             patch.object(lobehub_ops.chat_connections, "records", return_value=records),
@@ -260,7 +317,15 @@ class AgentSyncTests(unittest.TestCase):
                 item["id"]: item["status"] for item in lobehub_ops.assistant_report("someone-else", operator=True)
             }
         self.assertEqual(
-            report, {"unreviewed": "needs_review", "down": "connector_down", "ready": "ready", "waiting": "pending"}
+            report,
+            {
+                "unconnected": "needs_review",
+                "down": "connector_down",
+                "ready": "ready",
+                "waiting": "pending",
+                "stopped": "paused",
+                "broken": "failed",
+            },
         )
         self.assertEqual(stranger["ready"], "not_connected")
 

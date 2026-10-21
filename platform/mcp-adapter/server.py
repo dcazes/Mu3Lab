@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
@@ -47,8 +48,137 @@ elif MODE == "adventurelog":
             schema({"name": TEXT, "description": {"type": "string"}}, ["name"]),
         ),
     ]
+elif MODE == "beaver":
+    DAY = {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": "A date as YYYY-MM-DD"}
+    TOOLS = [
+        tool("list_habits", "List the owner's active habits with their IDs", schema({})),
+        tool(
+            "list_completions",
+            "List the days one habit was done, newest first",
+            schema(
+                {
+                    "habit_id": TEXT,
+                    "date_start": DAY,
+                    "date_end": DAY,
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 366, "default": 30},
+                },
+                ["habit_id"],
+            ),
+        ),
+        tool(
+            "mark_habit",
+            "Mark one habit as done, or not done, on one day",
+            schema({"habit_id": TEXT, "date": DAY, "done": {"type": "boolean"}}, ["habit_id", "date", "done"]),
+        ),
+    ]
+elif MODE == "audiobookshelf":
+    LIMIT = {"type": "integer", "minimum": 1, "maximum": 50, "default": 10}
+    TOOLS = [
+        tool("list_libraries", "List the Audiobookshelf libraries (audiobooks, podcasts) with their IDs", schema({})),
+        tool(
+            "search_library",
+            "Search one library for books, podcasts, authors and series",
+            schema({"library_id": TEXT, "query": TEXT, "limit": LIMIT}, ["library_id", "query"]),
+        ),
+        tool(
+            "list_recent_items",
+            "List the items most recently added to one library",
+            schema({"library_id": TEXT, "limit": LIMIT}, ["library_id"]),
+        ),
+        tool("list_in_progress", "List the books and podcasts the owner is part-way through", schema({})),
+        tool("listening_stats", "The owner's listening time: total, today, and the most listened items", schema({})),
+    ]
+elif MODE == "navidrome":
+    LIMIT = {"type": "integer", "minimum": 1, "maximum": 50, "default": 20}
+    TOOLS = [
+        tool(
+            "search_music",
+            "Search the music library for artists, albums and songs",
+            schema({"query": TEXT, "limit": LIMIT}, ["query"]),
+        ),
+        tool(
+            "list_albums",
+            "List albums: newest added, recently played, most played, random, alphabetical or starred",
+            schema(
+                {
+                    "order": {
+                        "type": "string",
+                        "enum": ["newest", "recent", "frequent", "random", "alphabeticalByName", "starred"],
+                        "default": "newest",
+                    },
+                    "limit": LIMIT,
+                }
+            ),
+        ),
+        tool("get_album", "List one album's songs", schema({"album_id": TEXT}, ["album_id"])),
+        tool("list_playlists", "List the playlists Mu3Lab's assistant can see (its own and public ones)", schema({})),
+        tool("get_playlist", "List one playlist's songs", schema({"playlist_id": TEXT}, ["playlist_id"])),
+        tool(
+            "create_playlist",
+            "Create a playlist from song IDs, shared with everyone in the household",
+            schema(
+                {"name": TEXT, "song_ids": {"type": "array", "items": TEXT, "minItems": 1, "maxItems": 500}},
+                ["name", "song_ids"],
+            ),
+        ),
+    ]
+elif MODE == "authentik":
+    EVENT_ACTIONS = ["login", "login_failed", "logout", "user_write", "password_set", "suspicious_request"]
+    TOOLS = [
+        tool("list_people", "List everyone who can sign in: name, email, groups, admin, last sign-in", schema({})),
+        tool("list_groups", "List the sign-in groups and how many people are in each", schema({})),
+        tool(
+            "recent_events",
+            "List recent sign-in and account events, newest first, optionally of one kind",
+            schema(
+                {
+                    "action": {"type": "string", "enum": EVENT_ACTIONS},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                }
+            ),
+        ),
+    ]
+elif MODE == "kopia":
+    TOOLS = [
+        tool(
+            "backup_status",
+            "Each app's backup: status, when the last backup ran, its size and errors, and when the next is due",
+            schema({}),
+        ),
+        tool("repository_status", "Whether Kopia is connected to the backup storage, and which storage", schema({})),
+    ]
+elif MODE == "romm":
+    TOOLS = [
+        tool("list_platforms", "List the game systems in the RomM library with how many games each has", schema({})),
+        tool(
+            "search_games",
+            "Search the game library by name, optionally on one system",
+            schema(
+                {
+                    "query": TEXT,
+                    "platform_id": {"type": "integer", "minimum": 1},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                },
+                ["query"],
+            ),
+        ),
+        tool(
+            "get_game",
+            "Details of one game: system, summary, genres, release date",
+            schema({"game_id": {"type": "integer", "minimum": 1}}, ["game_id"]),
+        ),
+        tool("list_collections", "List the RomM collections", schema({})),
+    ]
 else:
     raise SystemExit("unsupported adapter mode")
+
+
+BEARER = {
+    "beaver": ("BEAVER_API_TOKEN", "Beaver Habits API token"),
+    "audiobookshelf": ("ABS_API_KEY", "Audiobookshelf API key"),
+    "romm": ("ROMM_API_TOKEN", "RomM API token"),
+    "authentik": ("AUTHENTIK_API_TOKEN", "Authentik read-only token"),
+}
 
 
 def _auth() -> str:
@@ -57,6 +187,20 @@ def _auth() -> str:
         password = os.environ.get("NEXTCLOUD_APP_PASSWORD", "")
         if not username or not password:
             raise ValueError("Nextcloud app credential is not configured")
+        return "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
+    if MODE in BEARER:
+        env, label = BEARER[MODE]
+        token = os.environ.get(env, "")
+        if not token:
+            raise ValueError(f"{label} is not configured")
+        return "Bearer " + token
+    if MODE == "navidrome":
+        return ""  # the Subsonic API signs each request in its query (_subsonic)
+    if MODE == "kopia":
+        username = os.environ.get("KOPIA_USERNAME", "")
+        password = os.environ.get("KOPIA_PASSWORD", "")
+        if not username or not password:
+            raise ValueError("Kopia's control login is not configured")
         return "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
     token = os.environ.get("ADVENTURELOG_API_KEY", "")
     if not token:
@@ -79,7 +223,10 @@ def _path(value: str) -> str:
 def _request(
     path: str, method: str = "GET", payload: bytes | None = None, content_type: str = "application/json"
 ) -> tuple[bytes, int]:
-    headers = {"Authorization": _auth(), "Accept": "application/xml" if method == "PROPFIND" else "application/json"}
+    headers = {"Accept": "application/xml" if method == "PROPFIND" else "application/json"}
+    auth = _auth()
+    if auth:
+        headers["Authorization"] = auth
     if MODE == "nextcloud":
         headers["OCS-APIRequest"] = "true"
     if payload is not None:
@@ -133,6 +280,335 @@ def _adventurelog(name: str, args: dict):
     raise ValueError("unknown tool")
 
 
+def _beaver(name: str, args: dict):
+    if name == "list_habits":
+        data, _ = _request("/api/v1/habits")
+        return json.loads(data)
+    habit_id = args.get("habit_id")
+    if not isinstance(habit_id, str) or not habit_id.strip():
+        raise ValueError("habit_id is required")
+    route = f"/api/v1/habits/{quote(habit_id, safe='')}/completions"
+    if name == "list_completions":
+        limit = args.get("limit", 30)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 366:
+            raise ValueError("limit must be a whole number from 1 to 366")
+        query = {"date_fmt": "%Y-%m-%d", "sort": "desc", "limit": limit}
+        query |= {key: args[key] for key in ("date_start", "date_end") if args.get(key)}
+        data, _ = _request(route + "?" + urlencode(query))
+        return json.loads(data)
+    if name == "mark_habit":
+        if not isinstance(args.get("done"), bool) or not isinstance(args.get("date"), str):
+            raise ValueError("date and done are required")
+        value = {"date": args["date"], "date_fmt": "%Y-%m-%d", "done": args["done"]}
+        data, _ = _request(route, "POST", json.dumps(value).encode())
+        return json.loads(data)
+    raise ValueError("unknown tool")
+
+
+def _get(path: str, query: dict | None = None):
+    data, _ = _request(path + ("?" + urlencode(query, doseq=True) if query else ""))
+    return json.loads(data)
+
+
+def _text(args: dict, key: str) -> str:
+    value = args.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} is required")
+    return value.strip()
+
+
+def _id(args: dict, key: str) -> str:
+    return quote(_text(args, key), safe="")
+
+
+def _dicts(value) -> list[dict]:
+    """The objects in a list from an app's reply, skipping anything else."""
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _limit(args: dict, default: int) -> int:
+    value = args.get("limit", default)
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 50:
+        raise ValueError("limit must be a whole number from 1 to 50")
+    return value
+
+
+def _short(text, size: int = 400):
+    return text[:size] if isinstance(text, str) else text
+
+
+def _book(item: dict) -> dict:
+    """One Audiobookshelf library item, without covers, files and chapters."""
+    media = item.get("media") or {}
+    meta = media.get("metadata") or {}
+    return {
+        "id": item.get("id"),
+        "type": item.get("mediaType"),
+        "title": meta.get("title"),
+        "author": meta.get("authorName") or [a.get("name") for a in _dicts(meta.get("authors"))],
+        "narrator": meta.get("narratorName"),
+        "series": meta.get("seriesName"),
+        "published": meta.get("publishedYear"),
+        "genres": meta.get("genres"),
+        "description": _short(meta.get("description")),
+        "duration_seconds": media.get("duration"),
+    }
+
+
+def _audiobookshelf(name: str, args: dict):
+    if name == "list_libraries":
+        libraries = _dicts(_get("/api/libraries").get("libraries"))
+        return [{"id": lib.get("id"), "name": lib.get("name"), "type": lib.get("mediaType")} for lib in libraries]
+    if name == "list_in_progress":
+        items = _dicts(_get("/api/me/items-in-progress").get("libraryItems"))
+        return [_book(item) | {"last_listened": item.get("progressLastUpdate")} for item in items]
+    if name == "listening_stats":
+        stats = _get("/api/me/listening-stats")
+        items = sorted(
+            _dicts(list((stats.get("items") or {}).values())),
+            key=lambda item: item.get("timeListening") or 0,
+            reverse=True,
+        )
+        return {
+            "total_seconds": stats.get("totalTime"),
+            "today_seconds": stats.get("today"),
+            "most_listened": [
+                {
+                    "title": (item.get("mediaMetadata") or {}).get("title"),
+                    "seconds": item.get("timeListening"),
+                }
+                for item in items[:10]
+            ],
+        }
+    library = "/api/libraries/" + _id(args, "library_id")
+    if name == "search_library":
+        found = _get(library + "/search", {"q": _text(args, "query"), "limit": _limit(args, 10)})
+        return {
+            "books": [_book(match.get("libraryItem") or {}) for match in _dicts(found.get("book"))],
+            "podcasts": [_book(match.get("libraryItem") or {}) for match in _dicts(found.get("podcast"))],
+            "authors": [author.get("name") for author in _dicts(found.get("authors"))],
+            "series": [(match.get("series") or {}).get("name") for match in _dicts(found.get("series"))],
+        }
+    if name == "list_recent_items":
+        found = _get(library + "/items", {"sort": "addedAt", "desc": 1, "limit": _limit(args, 10)})
+        return [_book(item) for item in _dicts(found.get("results"))]
+    raise ValueError("unknown tool")
+
+
+def _subsonic(method: str, query: dict | None = None) -> dict:
+    """One Subsonic API call as Mu3Lab's Navidrome account, signed with a salted token."""
+    password = os.environ.get("NAVIDROME_PASSWORD", "")
+    if not password:
+        raise ValueError("Navidrome password is not configured")
+    salt = secrets.token_hex(8)
+    # MD5 of password + salt is the Subsonic protocol's own scheme; the password itself never travels.
+    signed = {
+        "u": os.environ.get("NAVIDROME_USERNAME", ""),
+        "t": hashlib.md5((password + salt).encode()).hexdigest(),
+        "s": salt,
+        "v": "1.16.1",
+        "c": "mu3lab-mcp",
+        "f": "json",
+    }
+    reply = _get(f"/rest/{method}", signed | (query or {})).get("subsonic-response") or {}
+    if reply.get("status") != "ok":
+        raise ValueError("Navidrome refused: " + str((reply.get("error") or {}).get("message") or "unknown error"))
+    return reply
+
+
+def _album(album: dict) -> dict:
+    keys = ("id", "name", "artist", "year", "genre", "songCount", "playCount", "starred")
+    return {key: album[key] for key in keys if key in album}
+
+
+def _song(song: dict) -> dict:
+    keys = ("id", "title", "artist", "album", "track", "year", "duration", "playCount")
+    return {key: song[key] for key in keys if key in song}
+
+
+def _playlist(playlist: dict) -> dict:
+    keys = ("id", "name", "owner", "public", "songCount", "duration", "comment")
+    return {key: playlist[key] for key in keys if key in playlist}
+
+
+def _navidrome(name: str, args: dict):
+    if name == "search_music":
+        size = _limit(args, 20)
+        query = {"query": _text(args, "query"), "artistCount": size, "albumCount": size, "songCount": size}
+        found = _subsonic("search3", query).get("searchResult3") or {}
+        return {
+            "artists": [{"id": a.get("id"), "name": a.get("name")} for a in _dicts(found.get("artist"))],
+            "albums": [_album(album) for album in _dicts(found.get("album"))],
+            "songs": [_song(song) for song in _dicts(found.get("song"))],
+        }
+    if name == "list_albums":
+        order = args.get("order", "newest")
+        if order not in {"newest", "recent", "frequent", "random", "alphabeticalByName", "starred"}:
+            raise ValueError("unknown album order")
+        found = _subsonic("getAlbumList2", {"type": order, "size": _limit(args, 20)}).get("albumList2") or {}
+        return [_album(album) for album in _dicts(found.get("album"))]
+    if name == "get_album":
+        album = _subsonic("getAlbum", {"id": _text(args, "album_id")}).get("album") or {}
+        return _album(album) | {"songs": [_song(song) for song in _dicts(album.get("song"))]}
+    if name == "list_playlists":
+        found = _subsonic("getPlaylists").get("playlists") or {}
+        return [_playlist(playlist) for playlist in _dicts(found.get("playlist"))]
+    if name == "get_playlist":
+        playlist = _subsonic("getPlaylist", {"id": _text(args, "playlist_id")}).get("playlist") or {}
+        return _playlist(playlist) | {"songs": [_song(song) for song in _dicts(playlist.get("entry"))]}
+    if name == "create_playlist":
+        title, songs = _text(args, "name"), args.get("song_ids")
+        if not isinstance(songs, list) or not songs or not all(isinstance(song, str) and song for song in songs):
+            raise ValueError("song_ids must be a list of song IDs")
+        playlist = _subsonic("createPlaylist", {"name": title, "songId": songs[:500]}).get("playlist") or {}
+        if playlist.get("id"):
+            # Playlists belong to Mu3Lab's own account; public ones show up for everyone.
+            _subsonic("updatePlaylist", {"playlistId": playlist["id"], "public": "true"})
+            playlist["public"] = True
+        return _playlist(playlist)
+    raise ValueError("unknown tool")
+
+
+def _game(rom: dict, full: bool = False) -> dict:
+    meta = rom.get("metadatum") or {}
+    game = {
+        "id": rom.get("id"),
+        "name": rom.get("name") or rom.get("fs_name"),
+        "system": rom.get("platform_display_name"),
+        "platform_id": rom.get("platform_id"),
+        "genres": meta.get("genres"),
+        "first_release_date": meta.get("first_release_date"),
+        "summary": _short(rom.get("summary"), 2000 if full else 300),
+    }
+    if full:
+        keys = ("developers", "publishers", "franchises", "game_modes", "player_count", "average_rating")
+        game |= {key: meta.get(key) for key in keys}
+        game |= {"file": rom.get("fs_name"), "size_bytes": rom.get("fs_size_bytes"), "regions": rom.get("regions")}
+    return game
+
+
+def _romm(name: str, args: dict):
+    if name == "list_platforms":
+        keys = ("id", "name", "display_name", "slug", "rom_count")
+        return [{key: item.get(key) for key in keys if key in item} for item in _dicts(_get("/api/platforms"))]
+    if name == "list_collections":
+        keys = ("id", "name", "description", "rom_count")
+        return [{key: item.get(key) for key in keys if key in item} for item in _dicts(_get("/api/collections"))]
+    if name == "get_game":
+        game_id = args.get("game_id")
+        if not isinstance(game_id, int) or isinstance(game_id, bool) or game_id < 1:
+            raise ValueError("game_id must be a game's number")
+        return _game(_get(f"/api/roms/{game_id}"), full=True)
+    if name == "search_games":
+        params = {
+            "search_term": _text(args, "query"),
+            "limit": _limit(args, 20),
+            "with_char_index": "false",
+            "with_filter_values": "false",
+            "with_rom_id_index": "false",
+        }
+        platform = args.get("platform_id")
+        if platform is not None:
+            if not isinstance(platform, int) or isinstance(platform, bool) or platform < 1:
+                raise ValueError("platform_id must be a system's number")
+            params["platform_ids"] = platform
+        found = _get("/api/roms", params)
+        return {"total": found.get("total"), "games": [_game(rom) for rom in _dicts(found.get("items"))]}
+    raise ValueError("unknown tool")
+
+
+def _kopia(name: str, args: dict):
+    """Read-only: only the control API's two GET routes; it never starts, stops or changes a backup."""
+    if name == "repository_status":
+        status = _get("/api/v1/control/status")
+        keys = ("connected", "description", "storage", "readonly", "encryption")
+        return {key: status.get(key) for key in keys if key in status}
+    if name == "backup_status":
+        backups = []
+        for item in _dicts(_get("/api/v1/control/sources").get("sources")):
+            path = str((item.get("source") or {}).get("path") or "")
+            last = item.get("lastSnapshot") if isinstance(item.get("lastSnapshot"), dict) else {}
+            stats = last.get("stats") if isinstance(last.get("stats"), dict) else {}
+            backups.append(
+                {
+                    # Mu3Lab mounts each app's data at /data/<app>.
+                    "app": path.removeprefix("/data/") if path.startswith("/data/") else path,
+                    "status": item.get("status"),
+                    "running_now": item.get("currentTask") or None,
+                    "last_started": last.get("startTime"),
+                    "last_finished": last.get("endTime"),
+                    "last_incomplete": last.get("incomplete") or None,
+                    "last_size_bytes": stats.get("totalSize"),
+                    "last_errors": stats.get("errorCount"),
+                    "next_due": item.get("nextSnapshotTime"),
+                }
+            )
+        return backups
+    raise ValueError("unknown tool")
+
+
+def _authentik(name: str, args: dict):
+    """Read-only: the token's own Authentik role can only view people, groups and events."""
+    if name == "list_people":
+        found = _get("/api/v3/core/users/", {"type": "internal", "include_groups": "true", "page_size": 100})
+        return [
+            {
+                "username": user.get("username"),
+                "name": user.get("name"),
+                "email": user.get("email"),
+                "active": user.get("is_active"),
+                "admin": user.get("is_superuser"),
+                "groups": [group.get("name") for group in _dicts(user.get("groups_obj"))],
+                "last_sign_in": user.get("last_login"),
+            }
+            for user in _dicts(found.get("results"))
+        ]
+    if name == "list_groups":
+        found = _get("/api/v3/core/groups/", {"include_users": "false", "page_size": 100})
+        return [
+            {
+                "name": group.get("name"),
+                "admin": group.get("is_superuser"),
+                "people": len(group.get("users") or []),
+            }
+            for group in _dicts(found.get("results"))
+        ]
+    if name == "recent_events":
+        query = {"ordering": "-created", "page_size": _limit(args, 20)}
+        action = args.get("action")
+        if action is not None:
+            if action not in EVENT_ACTIONS:
+                raise ValueError("unknown event kind")
+            query["action"] = action
+        events = []
+        for event in _dicts(_get("/api/v3/events/events/", query).get("results")):
+            context = event.get("context") if isinstance(event.get("context"), dict) else {}
+            user = event.get("user") if isinstance(event.get("user"), dict) else {}
+            events.append(
+                {
+                    "when": event.get("created"),
+                    "action": event.get("action"),
+                    "username": user.get("username") or context.get("username"),
+                    "from_ip": event.get("client_ip"),
+                    "message": _short(context.get("message"), 200),
+                }
+            )
+        return events
+    raise ValueError("unknown tool")
+
+
+HANDLERS = {
+    "nextcloud": _nextcloud,
+    "adventurelog": _adventurelog,
+    "beaver": _beaver,
+    "audiobookshelf": _audiobookshelf,
+    "navidrome": _navidrome,
+    "romm": _romm,
+    "authentik": _authentik,
+    "kopia": _kopia,
+}
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/health":
@@ -175,12 +651,12 @@ class Handler(BaseHTTPRequestHandler):
                 args = params.get("arguments") or {}
                 if not isinstance(args, dict):
                     raise ValueError("arguments must be an object")
-                output = _nextcloud(name, args) if MODE == "nextcloud" else _adventurelog(name, args)
+                output = HANDLERS[MODE](name, args)
                 result = {"content": [{"type": "text", "text": json.dumps(output)}]}
             else:
                 raise ValueError("unsupported MCP method")
             self._send(200, {"jsonrpc": "2.0", "id": request_id, "result": result})
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        except (ValueError, TypeError, KeyError, AttributeError, json.JSONDecodeError) as exc:
             self._send(
                 200,
                 {
@@ -202,4 +678,38 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+def _interface_address(name: str) -> str:
+    """The IPv4 address of one network interface (SIOCGIFADDR)."""
+    import fcntl
+    import socket
+    import struct
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        packed = fcntl.ioctl(sock.fileno(), 0x8915, struct.pack("256s", name.encode()[:15]))
+    return socket.inet_ntoa(packed[20:24])
+
+
+def _listeners() -> list[tuple[str, int]]:
+    """Where to listen: inside its own container, everywhere on 8080. On the host network (Kopia,
+    which listens on loopback only), ``MCP_LISTEN`` lists ``host:port`` pairs, where ``@docker0``
+    means that interface's address, the one containers reach as ``host-gateway``."""
+    spec = os.environ.get("MCP_LISTEN", "")
+    if not spec:
+        return [("0.0.0.0", 8080)]
+    found = []
+    for item in spec.split(","):
+        host, _, port = item.strip().rpartition(":")
+        found.append((_interface_address(host[1:]) if host.startswith("@") else host, int(port)))
+    return found
+
+
+def _serve() -> None:
+    import threading
+
+    *others, last = [ThreadingHTTPServer(address, Handler) for address in _listeners()]
+    for server in others:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    last.serve_forever()
+
+
+_serve()

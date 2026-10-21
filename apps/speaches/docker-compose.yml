@@ -6,7 +6,8 @@ services:
     restart: unless-stopped
     ports: ["127.0.0.1:8092:8000"]
     environment:
-      ENABLE_UI: "false"
+      # The web UI lets you try models and voices directly. It is served on the local port only.
+      ENABLE_UI: "true"
       LOG_LEVEL: info
       # Free memory (graphics memory too) after five idle minutes; Speaches loads again on demand.
       WHISPER__TTL: "300"

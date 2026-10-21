@@ -1,0 +1,24 @@
+name: mu3lab-mcp-authentik-reader
+services:
+  authentik-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      MCP_APP: authentik
+      # The container's own name: "server" alone is ambiguous on the shared network.
+      APP_URL: http://mu3lab-authentik-server-1:9000
+      AUTHENTIK_API_TOKEN: ${AUTHENTIK_API_TOKEN:?AUTHENTIK_API_TOKEN is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8829:8080
+    networks:
+    - mu3lab_frontend
+    - mu3lab_mcp_upstream
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-authentik-reader:development
+networks:
+  mu3lab_frontend:
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

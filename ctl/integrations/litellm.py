@@ -45,16 +45,25 @@ class LiteLLM:
         data = self._call("GET", "/key/list", params={"user_id": user_id, "return_full_object": "true"})
         return [item for item in data.get("keys", []) if isinstance(item, dict)]
 
-    def generate(self, *, user_id: str, alias: str, models: list[str], rpm_limit: int) -> str:
-        data = self._call(
-            "POST",
-            "/key/generate",
-            json={"user_id": user_id, "key_alias": alias, "models": models, "rpm_limit": rpm_limit},
-        )
+    def generate(self, *, user_id: str, alias: str, models: list[str], rpm_limit: int, key: str = "") -> str:
+        """Create a key; ``key`` sets its value (an app's generated secret) instead of a random one."""
+        body: dict[str, Any] = {"user_id": user_id, "key_alias": alias, "models": models, "rpm_limit": rpm_limit}
+        if key:
+            body["key"] = key
+        data = self._call("POST", "/key/generate", json=body)
         key = data.get("key")
         if not isinstance(key, str) or not key:
             raise LiteLLMError("LiteLLM did not return a key.")
         return key
+
+    def update(self, *, key: str, models: list[str], rpm_limit: int) -> None:
+        """Change an existing key's models and limit; LiteLLMError when LiteLLM has no such key."""
+        self._call("POST", "/key/update", json={"key": key, "models": models, "rpm_limit": rpm_limit})
+
+    def model_names(self) -> set[str]:
+        """The model names LiteLLM routes right now (the names apps ask for)."""
+        data = self._call("GET", "/v1/models")
+        return {str(item["id"]) for item in data.get("data", []) if isinstance(item, dict) and item.get("id")}
 
     def delete(self, aliases: list[str]) -> None:
         if aliases:

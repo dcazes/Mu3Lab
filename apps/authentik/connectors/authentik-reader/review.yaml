@@ -1,0 +1,22 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: authentik-reader
+revision: 2026.8.3-api
+reviewed_at: '2026-10-18'
+guidance: |
+  Read-only: you can see who can sign in, their groups, and recent sign-in events, but cannot change
+  anything. To add, remove or change someone, point the administrator to the Mu3Lab dashboard's People page.
+
+categories:
+  - id: people
+    title: People and groups
+    summary: List everyone who can sign in, their groups, and when they last signed in.
+  - id: events
+    title: Sign-in events
+    summary: Recent sign-ins, failed sign-ins and account changes.
+
+tools:
+  list_people: {category: people, access: read, core: true}
+  list_groups: {category: people, access: read}
+  recent_events: {category: events, access: read, core: true}

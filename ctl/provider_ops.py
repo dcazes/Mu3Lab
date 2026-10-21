@@ -344,14 +344,15 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         return
     if action == "enable":
         action = "verify"
-    if local_models.local_only():
-        # The key stays saved; it is checked once outside providers are allowed again.
+    if not local_models.outside_used():
+        # The key stays saved; it is checked once chat or voice may use outside providers again.
         store.transition(
             job_id,
             "failed",
             actor=actor,
-            detail=f"{provider.name} is saved, but Mu3Lab is set to local only, so no outside provider is used "
-            "or checked. Allow outside providers in Settings, AI models, then verify it.",
+            detail=f"{provider.name} is saved, but chat and the voice assistant are both set to local only, so no "
+            "outside provider is used or checked. Allow outside providers in Settings, AI or Settings, Voice "
+            "Assistant, then verify it.",
             error_code="local_only",
             step_id="validate",
         )

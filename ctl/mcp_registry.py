@@ -1,11 +1,10 @@
-"""Browser-safe projection of reviewed application-data MCP integrations."""
+"""Browser-safe projection of application-data MCP connectors."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from ctl.control_state import ControlState
-from ctl.mcp_activity import McpActivity
 from ctl.mcp_catalog import load as load_catalog
 from ctl.registry import Registry
 from ctl.runtime import RuntimePaths
@@ -23,57 +22,20 @@ def missing_credentials(server) -> list[str]:
     ]
 
 
-def _gateway_view(server, offered_tools: list[dict], activity: McpActivity) -> dict[str, Any]:
-    """Categories and switches for a connector served through the tool gateway."""
-    from ctl.mcp_gateway import review_for, tool_states
-
-    review = review_for(server)
-    states = tool_states(server, review, activity)
-    offered = {str(tool.get("id", "")): tool for tool in offered_tools}
-    discovered = bool(offered) and any(tool.get("title") for tool in offered.values())
-    tools = [
-        {
-            "id": name,
-            "title": str((offered.get(name) or {}).get("title", "")),
-            "risk": tool.access,
-            "category": tool.category,
-            "core": tool.core,
-            "enabled": states["tools"][name],
-            "offered": name in offered if discovered else True,
-            "permission": ("auto" if tool.access == "read" else "needs_approval")
-            if states["tools"][name]
-            else "disabled",
-        }
-        for name, tool in review.tools.items()
-    ]
-    return {
-        "gateway": True,
-        "categories": [
-            {
-                "id": category.id,
-                "title": category.title,
-                "summary": category.summary,
-                "enabled": states["categories"][category.id],
-                "default_on": category.default_on,
-            }
-            for category in review.categories
-        ],
-        "blocked": [{"id": name, "reason": reason} for name, reason in review.blocked.items()],
-        "unreviewed": sorted(name for name in offered if name not in review.tools and name not in review.blocked)
-        if discovered
-        else [],
-        "tools": tools,
-    }
-
-
 def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, Any]:
     services = {service.id: service for service in registry.services}
     persisted = ControlState.runtime()
-    activity = McpActivity()
+    from ctl import contextforge, contextforge_ops
+
     servers: list[dict[str, Any]] = []
+    manage = ""
+    if any(contextforge_ops.virtual_server(server.id) for server in load_catalog(registry)):
+        # ContextForge's Virtual Servers page, where operators choose each connector's tools.
+        origin = contextforge.public_origin()
+        manage = f"{origin}/admin/#catalog" if origin else ""
     for server in load_catalog(registry):
         service = services[server.service_id]
-        installation = persisted.installation(service.id) if persisted else None
+        installation = persisted.app_installation(service.id) if persisted else None
         # MCP is an enhancement for an application the operator has actually
         # installed, never an alternate application installer.
         if not installation or not installation.get("installed_at"):
@@ -109,17 +71,8 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
             state, error = "disabled", None
         # Tools are only ever what the connector itself reported when it was checked.
         tools = list(runtime.get("tool_snapshot") or []) if runtime else []
-        tools = [
-            tool
-            | {"permission": activity.permission(server.id, str(tool.get("id", "")), str(tool.get("risk", "write")))}
-            for tool in tools
-        ]
-        gateway_view = _gateway_view(server, tools, activity) if server.gateway else {}
-        if gateway_view:
-            tools = gateway_view.pop("tools")
         servers.append(
-            gateway_view
-            | {
+            {
                 "id": server.id,
                 "name": server.name,
                 "service_id": server.service_id,
@@ -158,6 +111,7 @@ def snapshot(registry: Registry, service_states: dict[str, str]) -> dict[str, An
                     for field in server.credentials
                 ],
                 "tools": tools,
+                "manage_url": (manage if contextforge_ops.virtual_server(server.id) else "") or None,
             }
         )
     summary_states = (

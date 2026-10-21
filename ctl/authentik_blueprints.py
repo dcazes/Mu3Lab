@@ -47,6 +47,7 @@ class OidcApp:
     initial_owner: str = ""  # while set, only this username may sign in
     # (claim, admin value, user value, list?) for apps that read the role in their own words.
     role_claim: tuple[str, str, str, bool] | None = None
+    audience: str = "household"  # household | operators (who may sign in)
 
 
 def quote(value: str) -> str:
@@ -374,6 +375,8 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        # Refresh tokens, for clients that keep acting for a signed-in person (Open WebUI's tool calls).
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
         - !KeyOf mu3lab-{app.id}-claims{"" if not app.role_claim else chr(10) + f"        - !KeyOf mu3lab-{app.id}-roles"}
       redirect_uris:
 {redirects}
@@ -390,6 +393,15 @@ entries:
       policy_engine_mode: any
 """
     if not app.initial_owner:
+        if app.audience == "operators":
+            # The household binding (order 2) goes if the app was once open to everyone.
+            absent = f"""  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf {key}
+      order: 2
+"""
+            return content + _bindings(key, ADMIN_GROUPS) + absent + _absent_owner_policy(app)
         return content + _bindings(key, (*ADMIN_GROUPS, HOUSEHOLD_GROUP)) + _absent_owner_policy(app)
     # The first person to sign in becomes the app's owner (Actual Budget), so
     # until the installer has, only they are admitted.
@@ -471,3 +483,49 @@ entries:
     identifiers:
       name: Mu3Lab {name} provider
 {extra}"""
+
+
+CHAT_READER = "mu3lab-mcp"
+CHAT_READER_BLUEPRINT = "Mu3Lab chat read-only access"
+CHAT_READER_PERMISSIONS = ("authentik_core.view_user", "authentik_core.view_group", "authentik_events.view_event")
+_TOKEN_KEY = re.compile(r"[A-Za-z0-9_-]{40,128}")
+
+
+def render_chat_reader_blueprint(key: str) -> str:
+    """A service account that can only view people, groups and sign-in events, with an API token ``key``.
+
+    The administrators-only Authentik assistant uses it; it cannot sign in, and its role grants
+    nothing beyond viewing. Applying it again replaces the token's key.
+    """
+    if not _TOKEN_KEY.fullmatch(key):
+        raise ValueError("The chat token for Authentik is not a plain random key.")
+    permissions = "".join(f"\n        - {permission}" for permission in CHAT_READER_PERMISSIONS)
+    return f"""# yaml-language-server: $schema=https://goauthentik.io/blueprints/schema.json
+version: 1
+metadata:
+  name: {CHAT_READER_BLUEPRINT}
+entries:
+  - model: authentik_rbac.role
+    identifiers:
+      name: Mu3Lab chat read-only
+    attrs:
+      permissions:{permissions}
+  - model: authentik_core.user
+    identifiers:
+      username: {CHAT_READER}
+    attrs:
+      name: Mu3Lab chat (read-only)
+      type: service_account
+      is_active: true
+      roles:
+        - !Find [authentik_rbac.role, [name, Mu3Lab chat read-only]]
+  - model: authentik_core.token
+    identifiers:
+      identifier: {CHAT_READER}-read-only
+    attrs:
+      user: !Find [authentik_core.user, [username, {CHAT_READER}]]
+      intent: api
+      expiring: false
+      description: Mu3Lab's administrators-only chat assistant reads people, groups and sign-in events.
+      key: {quote(key)}
+"""

@@ -13,17 +13,22 @@ import os
 import platform
 import shutil
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from ctl import actions, chat_ops, local_models, process
+from ctl import actions, chat_ops, image_fetch, job_guard, local_models, process
+from ctl.compute import app_mode
 from ctl.control_state import ControlState
 from ctl.core_wiring import configure as configure_wiring
 from ctl.engine.install import run_install
+from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore, redact
+from ctl.lifecycle import app_releases
+from ctl.people import owner_identity
 from ctl.platform_apps import by_capability
 from ctl.provider_ops import CHECK_MODEL, PROBE_MAX_TOKENS
 from ctl.provisioning import ProvisioningStore
@@ -31,6 +36,7 @@ from ctl.registry import Registry, RegistryError, Service, load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
 from ctl.service_state import tailnet_dns_name, tailnet_serve_ports
+from ctl.store import workflows as workflow_secrets
 
 
 def capacity() -> dict:
@@ -266,8 +272,8 @@ def _turned_off(runtime: RuntimePaths) -> str:
     return _stopped_service(runtime, [*checked, chat_ops.default_app().id])
 
 
-def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
-    """Check application-level contracts after container health has passed."""
+def _verify_services(runtime: RuntimePaths) -> tuple[bool, str]:
+    """Check what setup wires up by itself, none of which needs a provider key."""
     litellm_env = read_runtime_env(runtime.projects / by_capability("model_proxy").id / ".env")
     key = litellm_env.get("LITELLM_MASTER_KEY", "")
     if not key or not _http_ok("http://127.0.0.1:4000/v1/models", headers={"Authorization": f"Bearer {key}"}):
@@ -283,6 +289,17 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     chat_env = read_runtime_env(runtime.projects / chat.id / ".env")
     if oidc and not all(chat_env.get(key) for key in (oidc.env.client_id, oidc.env.client_secret)):
         return False, f"{name}'s Authentik sign-in configuration is incomplete"
+    return True, ""
+
+
+def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
+    """Check application-level contracts after container health has passed."""
+    ok, detail = _verify_services(runtime)
+    if not ok:
+        return False, detail
+    key = read_runtime_env(runtime.projects / by_capability("model_proxy").id / ".env").get("LITELLM_MASTER_KEY", "")
+    chat = chat_ops.default_app()
+    name = chat.manifest.name
     local = local_models.local_only(runtime)
     if not wiring["chat_configured"]:
         if local:
@@ -322,6 +339,122 @@ def _verify_platform(runtime: RuntimePaths, wiring: dict) -> tuple[bool, str]:
     )
 
 
+SIGN_IN_POLL_SECONDS = 5
+
+
+def _images(service: Service, root: Path) -> list[str]:
+    """The images this app's install will run: its kept release, else the approved one for its build."""
+    paths = RuntimePaths()
+    variant = app_mode(paths.projects / service.id, service.manifest.service.uses_gpu)
+    release = app_releases.installed(service, root, paths) or app_releases.approved(service, root, variant)
+    return list(release.images.values())
+
+
+class _DownloadsAhead:
+    """Download every core app's images, in install order, while the job waits and installs.
+
+    A new install queues the core job before the owner's sign-in exists, so
+    the big AI images download during the rest of setup and after the
+    terminal hands off. Anything that fails here is downloaded again by the
+    app's own install, which falls back to Docker's pull.
+    """
+
+    def __init__(self, services: list[Service], root: Path, job_id: str, log: Callable[[str], None]) -> None:
+        self.services, self.root, self.job_id, self.log = services, root, job_id, log
+        self.ready = {service.id: threading.Event() for service in services}
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, name="mu3lab-core-downloads", daemon=True)
+
+    def _run(self) -> None:
+        downloads = ImageDownloadStore.runtime()
+        try:
+            for service in self.services:
+                if self.stop.is_set():
+                    return
+
+                def report(snapshot: dict, service_id: str = service.id) -> None:
+                    if downloads:
+                        downloads.update(service_id, self.job_id, snapshot)
+
+                try:
+                    images = _images(service, self.root)
+                    image_fetch.fetch_images(
+                        images, RuntimePaths().runtime / "image-cache", self.log, report=report, stop=self.stop
+                    )
+                except image_fetch.Paused:
+                    return
+                except Exception as exc:  # the app's own install downloads it again
+                    self.log(f"{service.name}: early download stopped ({redact(str(exc))}); retried when it installs.")
+                finally:
+                    self.ready[service.id].set()
+        finally:
+            for event in self.ready.values():
+                event.set()
+
+    def wait(self, service_id: str) -> None:
+        while not self.ready[service_id].wait(SIGN_IN_POLL_SECONDS):
+            job_guard.checkpoint()
+
+
+def _sign_in_ready(job_id: str, actor: str) -> bool:
+    """Whether the core apps can install: the dashboard is protected and, for setup's own job, the owner is known."""
+    provisioning = ProvisioningStore.runtime()
+    if provisioning is None:
+        return True
+    phases = {item["phase_id"]: item["actual_state"] for item in provisioning.summary()["phases"]}
+    if phases.get("dashboard_protection") != "verified":
+        return False
+    if actor != "bootstrap":
+        return True
+    return workflow_secrets.job_identity(job_id) is not None or owner_identity() is None
+
+
+def _wait_for_sign_in(job_id: str, actor: str, log: Callable[[str], None]) -> None:
+    if _sign_in_ready(job_id, actor):
+        return
+    log("Downloading the core apps; they install once sign-in setup has finished.")
+    while not _sign_in_ready(job_id, actor):
+        job_guard.checkpoint()
+        time.sleep(SIGN_IN_POLL_SECONDS)
+
+
+def app_progress(store: JobStore, job: dict, downloads: ImageDownloadStore | None) -> list[dict]:
+    """Where each core app is in the core job, for the dashboard's Home page."""
+    job_id = str(job["id"])
+    started, verified = "", set()
+    for event in store.events(job_id, limit=1000):
+        kind, detail = str(event.get("event") or ""), str(event.get("detail") or "")
+        if kind == "step.started" and detail.startswith("Installing "):
+            started = detail.removeprefix("Installing ").rstrip(".")
+        elif kind == "step.verified":
+            verified.add(detail)
+    finished = job.get("state") in {"succeeded", "waiting_for_confirmation"}
+    failed = job.get("state") in {"failed", "cancelled"}
+    progress = downloads.for_job(job_id) if downloads else {}
+    apps = []
+    for service in core_services():
+        download = progress.get(service.id)
+        if finished or service.id in verified:
+            state = "ready"
+        elif service.name == started:
+            state = "failed" if failed else "installing"
+        elif download and download["state"] == "done":
+            state = "downloaded"
+        elif download and not failed:
+            state = "downloading"
+        else:
+            state = "waiting"
+        apps.append(
+            {
+                "service_id": service.id,
+                "name": service.name,
+                "state": state,
+                "download": download if state == "downloading" else None,
+            }
+        )
+    return apps
+
+
 def _run(
     store: JobStore,
     job_id: str,
@@ -344,33 +477,48 @@ def _run(
         registry = load()
         control = ControlState.runtime()
         parent = {"id": job_id}
-        for service in core_services(registry):
-            current = service.id
-            if worker_id and not store.heartbeat(job_id, worker_id, step_id=current):
-                raise RuntimeError("job lease was lost")
-            store.append_event(job_id, "step.started", f"Installing {service.name}.")
-            if not run_install(store, control, parent, service, registry, actor, root, complete_job=False):
-                if provisioning:
-                    provisioning.update(
-                        "core", "failed", error=f"{service.name} installation failed; see the core job for details."
-                    )
-                return
-            log(f"{service.name}: installed and verified")
-            store.append_event(job_id, "step.verified", service.id)
+        services = core_services(registry)
+        ahead = _DownloadsAhead(services, root, job_id, log)
+        ahead.thread.start()
+        try:
+            _wait_for_sign_in(job_id, actor, log)
+            for service in services:
+                current = service.id
+                ahead.wait(service.id)
+                if worker_id and not store.heartbeat(job_id, worker_id, step_id=current):
+                    raise RuntimeError("job lease was lost")
+                store.append_event(job_id, "step.started", f"Installing {service.name}.")
+                if not run_install(store, control, parent, service, registry, actor, root, complete_job=False):
+                    if provisioning:
+                        provisioning.update(
+                            "core",
+                            "failed",
+                            error=f"{service.name} installation failed; see the core job for details.",
+                        )
+                    return
+                log(f"{service.name}: installed and verified")
+                store.append_event(job_id, "step.verified", service.id)
+        finally:
+            ahead.stop.set()
         runtime = RuntimePaths()
         wiring = configure_wiring(runtime, registry.catalog)
-        verified, detail = _verify_platform(runtime, wiring)
-        if not verified:
-            state = "waiting_for_confirmation" if not wiring["chat_configured"] else "failed"
-            store.transition(job_id, state, actor=actor, detail=detail)
-            if provisioning:
-                if state == "waiting_for_confirmation":
-                    provisioning.update(
-                        "core", "verified", detail="Core services and their private routes are healthy."
-                    )
+        if not wiring["chat_configured"]:
+            # Setup ends with what it can do by itself. Adding a provider is the
+            # owner's step; it queues its own verification job when it passes.
+            verified, detail = _verify_services(runtime)
+            if verified:
+                detail = "Core apps installed. Add an AI provider to finish the chat checks."
+                if provisioning:
+                    _mark_verified(provisioning, "core", "Core services and their private routes are healthy.")
                     provisioning.update("configuration", "waiting_for_user", detail=detail)
-                else:
-                    provisioning.update("core", "failed", detail=detail, error=detail)
+                store.transition(job_id, "succeeded", actor=actor, detail=detail)
+                return
+        else:
+            verified, detail = _verify_platform(runtime, wiring)
+        if not verified:
+            store.transition(job_id, "failed", actor=actor, detail=detail)
+            if provisioning:
+                provisioning.update("core", "failed", detail=detail, error=detail)
             return
         if provisioning:
             _mark_verified(provisioning, "core", "Core services and private integration checks passed.")

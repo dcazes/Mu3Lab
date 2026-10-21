@@ -67,6 +67,19 @@ class ServiceUi(ApiModel):
     launch_label: str | None = None
 
 
+class ServiceLink(ApiModel):
+    """Another private address of an app (``extra_routes``), shown beside its Open button."""
+
+    label: str
+    url: str
+
+
+class ServiceExtraRoute(ApiModel):
+    name: str
+    label: str
+    private_https_port: float
+
+
 class ServiceCheck(ApiModel):
     state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
     detail: str
@@ -146,6 +159,7 @@ class Service(ApiModel):
     stage: Literal["foundation"] | Literal["core"] | Literal["optional"]
     group: Literal["apps"] | Literal["ai"] | Literal["infrastructure"]
     routable: bool
+    extra_routes: list[ServiceExtraRoute] = Field(default_factory=list)
     required: bool
     identity_note: str
     resource_guidance: str
@@ -157,6 +171,7 @@ class Service(ApiModel):
     detail: str
     url: str
     route_ready: bool
+    links: list[ServiceLink] = Field(default_factory=list)
     compose_present: bool
     ui: ServiceUi | None = None
     allowed_actions: (
@@ -307,10 +322,23 @@ class DiskUsage(ApiModel):
     owners: dict[str, DiskShare]
     # Data folders removed apps left behind; "Free up space" deletes them only when asked.
     removed_folders: list[str] = Field(default_factory=list)
+    # "core" part by part: platform app ids, "tailnet-relay" and "mu3lab" (Mu3Lab's own services).
+    core_parts: dict[str, DiskShare] = Field(default_factory=dict)
 
 
 class CleanupRequest(ApiModel):
     delete_data: bool = False
+
+
+class GpuMemory(ApiModel):
+    """Graphics memory of the NVIDIA GPUs, all cards added up, in bytes."""
+
+    name: str
+    total: float
+    used: float
+    # As memory_by_owner; use that is not a Mu3Lab container is left out.
+    by_owner: dict[str, float] = Field(default_factory=dict)
+    by_core_part: dict[str, float] = Field(default_factory=dict)
 
 
 class SystemResponse(ApiModel):
@@ -323,7 +351,11 @@ class SystemResponse(ApiModel):
     container_memory: dict[str, float] | None = None
     # By owner: an app's id, "core" or "removed" (apps no longer offered).
     memory_by_owner: dict[str, float] | None = None
+    # "core" part by part, as in DiskUsage.core_parts.
+    memory_by_core_part: dict[str, float] | None = None
     disk_usage: DiskUsage | None = None
+    # None without an NVIDIA GPU.
+    gpu: GpuMemory | None = None
     tailnet_dns_name: str
     tailscale: TailscaleStatus | None = None
     runtime_root: str
@@ -366,12 +398,21 @@ class CoreSetupResponseCapacity(ApiModel):
     docker_ready: bool | None = None
 
 
+class CoreAppProgress(ApiModel):
+    service_id: str
+    name: str
+    state: Literal["waiting", "downloading", "downloaded", "installing", "ready", "failed"]
+    download: ImageDownload | None = None
+
+
 class CoreSetupResponse(ApiModel):
     ok: bool
     ready_to_run: bool
     services: list[str]
     missing_manifests: list[str]
     current_job: Job | None = None
+    # Each core app's progress while the core setup job runs, in install order.
+    apps: list[CoreAppProgress] | None = None
     next_action: str
     capacity: CoreSetupResponseCapacity | None = None
     provisioning: ProvisioningResponse | None = None
@@ -633,6 +674,8 @@ class JobDetailResponse(ApiModel):
     ok: bool
     job: Job
     events: list[AuditEvent]
+    # Image download progress while an install job downloads.
+    download: ImageDownload | None = None
 
 
 class BackupSnapshot(ApiModel):
@@ -744,6 +787,18 @@ class AiModelSettings(ApiModel):
     changed_by: str
 
 
+class AiVoiceSettings(ApiModel):
+    """Where the voice assistant's answers come from, independent of chat."""
+
+    privacy: AiPrivacy
+    # The local model voice runs on (a chat model id); used only with local only.
+    model: str
+    # True until the owner saves a voice choice: voice then reads chat's settings.
+    matches_chat: bool
+    changed_at: str
+    changed_by: str
+
+
 class ModelRunnerOption(ApiModel):
     id: str
     name: str
@@ -757,6 +812,7 @@ class AiModels(ApiModel):
 
     ok: bool
     settings: AiModelSettings
+    voice: AiVoiceSettings
     chat_models: list[LocalModel]
     embedding_models: list[LocalModel]
     # The runner that serves requests now, and every runner Mu3Lab knows.
@@ -773,6 +829,11 @@ class AiModelsRequest(ApiModel):
     chat_model: str = Field(default="", max_length=64)
     embedding_model: str = Field(max_length=64)
     runner: str = Field(default="", max_length=64)
+
+
+class AiVoiceRequest(ApiModel):
+    privacy: AiPrivacy
+    model: str = Field(default="", max_length=64)
 
 
 class RecoverySheet(ApiModel):
@@ -821,6 +882,15 @@ class Mu3LabUpdate(ApiModel):
     last_update: Mu3LabUpdateResult | None = None
 
 
+class Mu3LabDevelopment(ApiModel):
+    """One merged branch or pull request (or a run of direct commits) inside a release."""
+
+    title: str
+    branch: str = ""
+    date: str
+    changes: list[str]
+
+
 class Mu3LabRelease(ApiModel):
     """One release's changes; a development copy has no version."""
 
@@ -828,6 +898,8 @@ class Mu3LabRelease(ApiModel):
     date: str
     commit: str = ""
     changes: list[str]
+    # The same changes grouped by development, newest first.
+    developments: list[Mu3LabDevelopment] = Field(default_factory=list)
 
 
 class Mu3LabChangelog(ApiModel):
@@ -869,16 +941,7 @@ class McpServerToolsItem(ApiModel):
     title: str
     risk: str
     enabled: bool
-    permission: str | None = None
     parameters: dict[str, JsonValue] | None = None
-    category: str | None = None
-    core: bool | None = None
-    offered: bool | None = None
-
-
-class McpServerBlockedItem(ApiModel):
-    id: str
-    reason: str
 
 
 class McpServer(ApiModel):
@@ -908,18 +971,8 @@ class McpServer(ApiModel):
     review: McpServerReview | None = None
     configuration: list[ServiceConfigField] | None = None
     tools: list[McpServerToolsItem]
-    gateway: bool | None = None
-    categories: list[McpCategory] | None = None
-    blocked: list[McpServerBlockedItem] | None = None
-    unreviewed: list[str] | None = None
-
-
-class McpCategory(ApiModel):
-    id: str
-    title: str
-    summary: str
-    enabled: bool
-    default_on: bool
+    # Where operators choose this connector's tools: its virtual server in ContextForge.
+    manage_url: str | None = None
 
 
 class McpRegistryResponse(ApiModel):
@@ -941,7 +994,9 @@ class ChatProvider(ApiModel):
 class ChatAssistant(ApiModel):
     id: str
     name: str
-    status: Literal["ready", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"]
+    status: Literal[
+        "ready", "paused", "pending", "failed", "not_connected", "connector_down", "needs_review", "operator_only"
+    ]
     detail: str
 
 
@@ -1176,19 +1231,6 @@ class BatchOrderRequest(RequestModel):
     service_ids: list[str]
 
 
-class ToolSwitchRequest(RequestModel):
-    enabled: bool
-
-
-class ToolPermissionRequest(RequestModel):
-    permission: Literal["auto", "needs_approval", "disabled"]
-
-
-class ToolCallRequest(RequestModel):
-    arguments: dict[str, JsonValue] = Field(default_factory=dict)
-    confirmation_token: str = ""
-
-
 class QueuedJob(ApiModel):
     id: str
     state: str
@@ -1239,6 +1281,17 @@ class SnapshotResponse(ApiModel):
     backup_attention: list[BackupAttention] = []
     # The app that runs local models now (Settings, AI): Ollama.
     model_runner: str = ""
+    # Home warnings this person dismissed (ctl/dismissals.py), on every device.
+    dismissed: list[str] = []
+
+
+class DismissRequest(RequestModel):
+    warning: str = Field(min_length=1, max_length=500)
+
+
+class DismissedResponse(ApiModel):
+    ok: bool = True
+    dismissed: list[str]
 
 
 class ParallelDownloadsRequest(RequestModel):
@@ -1318,25 +1371,6 @@ class McpToolsResponse(ApiModel):
     tools: list[McpServerToolsItem]
 
 
-class McpCall(ApiModel):
-    id: int
-    server_id: str
-    tool_name: str
-    source: str
-    actor: str
-    outcome: str
-    duration_ms: int
-    created_at: str
-    detail: str
-    source_ref: str | None = None
-
-
-class McpActivityResponse(ApiModel):
-    ok: bool
-    server_id: str
-    calls: list[McpCall]
-
-
 class McpJobsResponse(ApiModel):
     ok: bool
     server_id: str
@@ -1355,26 +1389,6 @@ class McpLogsResponse(ApiModel):
     ok: bool
     server_id: str
     lines: list[str]
-
-
-class ToolPermissionResponse(ApiModel):
-    ok: bool
-    server_id: str
-    tool_name: str
-    permission: str
-
-
-class ToolPrepareResponse(ToolPermissionResponse):
-    risk: str
-    confirmation_required: bool
-    confirmation_token: str
-    expires_in_seconds: int
-
-
-class ToolExecuteResponse(ApiModel):
-    ok: bool
-    result: dict[str, JsonValue]
-    outcome: str
 
 
 class VoiceKeyStatus(ApiModel):
@@ -1419,38 +1433,3 @@ class PersonInvite(ApiModel):
 
 
 PersonResponse.model_rebuild()
-
-
-class ApprovalOperation(ApiModel):
-    id: str
-    subject: str
-    provider: str
-    credential_version: int
-    app: str
-    server: str
-    tool: str
-    connector_revision: str
-    policy_revision: int
-    state: Literal[
-        "pending", "approved", "dispatching", "succeeded", "failed", "outcome_unknown", "rejected", "revoked", "expired"
-    ]
-    created_at: float
-    expires_at: float
-    dispatch_at: float
-    completed_at: float
-    arguments: dict[str, JsonValue] | None = None
-
-
-class ApprovalResponse(ApiModel):
-    ok: bool
-    operation: ApprovalOperation
-    execution: dict[str, JsonValue] | None = None
-
-
-class ApprovalsResponse(ApiModel):
-    ok: bool
-    operations: list[ApprovalOperation]
-
-
-class ApprovalDecisionRequest(RequestModel):
-    decision: Literal["approve", "reject"]

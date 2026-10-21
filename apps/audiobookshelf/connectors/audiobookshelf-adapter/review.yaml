@@ -1,0 +1,26 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: audiobookshelf-adapter
+revision: v2.37.1-api
+reviewed_at: '2026-10-18'
+guidance: |
+  List the libraries first to get their IDs, then search or list one of them. Progress and listening time
+  are the owner's own. Use the titles and authors the tools return rather than guessing.
+
+categories:
+  - id: library
+    title: Library
+    summary: List libraries, search them, and see what was added recently.
+  # Off at first: the assistant is shared, and this is the owner's own listening.
+  - id: listening
+    title: Listening
+    summary: The owner's in-progress books and podcasts, and their listening time.
+    default_on: false
+
+tools:
+  list_libraries: {category: library, access: read, core: true}
+  search_library: {category: library, access: read, core: true}
+  list_recent_items: {category: library, access: read}
+  list_in_progress: {category: listening, access: read}
+  listening_stats: {category: listening, access: read}

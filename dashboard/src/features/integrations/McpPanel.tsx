@@ -1,67 +1,38 @@
-import { ArrowLeftRight, CheckCircle2, MessageSquare, PlugZap, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CheckCircle2,
+  MessageSquare,
+  PlugZap,
+  RefreshCw,
+  ShieldCheck,
+  SlidersHorizontal,
+  Unplug,
+} from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { api, type McpServer, putJsonApi } from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Collapsible } from '../../components/Layout';
-import { Badge, Dot } from '../../components/Status';
+import { Dot } from '../../components/Status';
 import { useAction } from '../../lib/useAction';
 import { useIsAdmin } from '../../state/dashboard';
 import { mcpSummary, nextMcpStep, openChatFor, queueMcp, setsUpAutomatically } from './mcp';
-import { ToolCategories } from './ToolCategories';
-import { ToolConsole } from './ToolConsole';
 
-const PERMISSION_LABEL: Record<string, string> = {
-  auto: 'Allowed',
-  needs_approval: 'Ask first',
-  disabled: 'Off',
-};
-
+/** What the connector offers; ContextForge decides which of these chat can use. */
 function Tools({ server }: { server: McpServer }) {
-  const isAdmin = useIsAdmin();
-  const { run } = useAction();
-  const [permissions, setPermissions] = useState<Record<string, string>>({});
   if (!server.tools.length) return <p className="muted">Tools appear here once the connection is verified.</p>;
   return (
     <div className="rows">
-      {server.tools.map((tool) => {
-        const value = permissions[tool.id] || tool.permission || (tool.risk === 'read' ? 'auto' : 'needs_approval');
-        return (
-          <div className="row" key={tool.id}>
-            <span className="row-text">
-              <b>{tool.title || tool.id}</b>
-              <small>
-                {tool.risk === 'read' ? 'Reads data' : tool.risk === 'draft' ? 'Prepares a draft' : 'Changes data'}
-              </small>
-            </span>
-            {server.state === 'live' && isAdmin ? (
-              <select
-                className="select-sm"
-                aria-label={`${tool.title} permission`}
-                value={value}
-                onChange={async (event) => {
-                  const next = event.target.value;
-                  const saved = await run(
-                    tool.id,
-                    () =>
-                      putJsonApi(`/api/v1/mcp/servers/${server.id}/tools/${encodeURIComponent(tool.id)}/permission`, {
-                        permission: next,
-                      }),
-                    `${tool.title}: ${PERMISSION_LABEL[next]}`,
-                  );
-                  if (saved) setPermissions((current) => ({ ...current, [tool.id]: next }));
-                }}
-              >
-                {tool.risk === 'read' && <option value="auto">Allowed</option>}
-                <option value="needs_approval">Ask first</option>
-                <option value="disabled">Off</option>
-              </select>
-            ) : (
-              <Badge>{PERMISSION_LABEL[value]}</Badge>
-            )}
-          </div>
-        );
-      })}
+      {server.tools.map((tool) => (
+        <div className="row" key={tool.id}>
+          <span className="row-text">
+            <b>{tool.title || tool.id}</b>
+            <small>
+              {tool.risk === 'read' ? 'Reads data' : tool.risk === 'draft' ? 'Prepares a draft' : 'Changes data'}
+            </small>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -88,7 +59,7 @@ function ConnectorPicker({
       server.enabled &&
       !(await confirm({
         title: `Switch ${appName} to ${target.name}?`,
-        description: `${server.name} is stopped first, so only one connector runs. ${appName}'s assistant and its chats stay the same, and each connector keeps its own switches.`,
+        description: `${server.name} is stopped first, so only one connector runs. ${appName}'s assistant and its chats stay the same, and each connector keeps its own tool choices in ContextForge.`,
         confirmLabel: 'Switch',
       }))
     )
@@ -244,7 +215,8 @@ export function McpPanel({
       </Card>
       {!isAdmin && (
         <Callout title="Only an administrator can change what chat can do">
-          You can see which tools {appName}'s assistant has. Ask an administrator to switch tools on or off.
+          You can see the tools {appName}'s connector offers. Administrators choose which ones chat uses in
+          ContextForge.
         </Callout>
       )}
       {isAdmin && connectors.length > 1 && (
@@ -252,17 +224,17 @@ export function McpPanel({
       )}
       <Card
         title="What chat can do"
-        description={
-          server.gateway
-            ? 'Switch tool categories and individual tools on or off.'
-            : 'Control which tools are available in chat. Tools that change data require approval or can be disabled.'
+        description="Everyone's assistant for this app uses the tools chosen in ContextForge, which also logs every call."
+        actions={
+          isAdmin &&
+          server.manage_url && (
+            <ExternalButton icon={SlidersHorizontal} href={server.manage_url}>
+              Manage in ContextForge
+            </ExternalButton>
+          )
         }
       >
-        {server.gateway ? (
-          <ToolCategories server={server} reload={reload} readOnly={!isAdmin} />
-        ) : (
-          <Tools server={server} />
-        )}
+        <Tools server={server} />
       </Card>
       {isAdmin && (
         <Collapsible title="Advanced">
@@ -298,7 +270,6 @@ export function McpPanel({
               {server.review?.note && ` · ${server.review.note}`}
             </p>
             {logs && <pre className="log">{logs.join('\n') || 'No recent log lines.'}</pre>}
-            <ToolConsole server={server} />
           </div>
         </Collapsible>
       )}

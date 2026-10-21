@@ -10,6 +10,7 @@ import { Link } from '../../lib/router';
 import { isInstalled, launchTarget } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
+import { useCoreSetupActive } from './CoreSetupProgress';
 
 const EXTENSION_URL = 'https://bitwarden.com/download/#downloads-web-browser';
 const TAILSCALE_DOWNLOAD_URL = 'https://tailscale.com/download';
@@ -152,6 +153,7 @@ function useGetStarted() {
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null);
   const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null);
   const [manual, mark, setItem] = useGetStartedChecklist();
+  const coreInstalling = useCoreSetupActive();
   const [checking, setChecking] = useState(false);
   const checkExtension = async () => {
     setChecking(true);
@@ -196,7 +198,13 @@ function useGetStarted() {
       : []),
     { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
     { key: 'devices', text: 'Use Mu3Lab on your phone or laptop', done: Boolean(manual.devices), guide: 'devices' },
-    { key: 'chat', text: 'Start chatting with your AI', done: Boolean(manual.chat), to: '/chat' },
+    {
+      key: 'chat',
+      text: 'Start chatting with your AI',
+      done: Boolean(manual.chat),
+      to: '/chat',
+      waiting: coreInstalling ? 'Ready once your AI apps finish installing.' : '',
+    },
   ];
   const finished = steps.filter((step) => step.done).length;
   return {
@@ -219,6 +227,8 @@ interface Step {
   done: boolean;
   guide?: Guide;
   to?: string;
+  // Why the step can't be done yet; it is shown instead of a link.
+  waiting?: string;
 }
 
 function StepList({
@@ -230,7 +240,7 @@ function StepList({
 }) {
   const [guide, setGuide] = useState<Guide | null>(null);
   const { steps, markDone, checking, checkExtension } = state;
-  const next = steps.find((step) => !step.done)?.key;
+  const next = steps.find((step) => !step.done && !step.waiting)?.key;
   return (
     <>
       <ol className={`get-started-list${compact ? ' is-compact' : ''}`}>
@@ -250,6 +260,14 @@ function StepList({
             <li key={step.key}>
               {step.done ? (
                 <div className={className}>{content}</div>
+              ) : step.waiting ? (
+                <div className={`${className} is-waiting`}>
+                  <Circle />
+                  <span>
+                    {index + 1}. {step.text}
+                    <small className="get-started-hint">{step.waiting}</small>
+                  </span>
+                </div>
               ) : step.key === 'extension' ? (
                 <div className={`${className} get-started-extension`}>
                   <button type="button" className="get-started-guide" onClick={() => setGuide('extension')}>
