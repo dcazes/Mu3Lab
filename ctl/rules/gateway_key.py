@@ -8,7 +8,7 @@ accepts it only for ``models`` and at most ``rpm_limit`` requests a minute.
 
 The key is registered once the app is healthy, and again whenever the
 gateway is reinstalled (``rewire``), since its database then starts empty.
-Registering replaces any earlier key of the same app, so it is safe to repeat.
+Registering updates the app's key in place, or replaces an earlier key of the same app, so it is safe to repeat.
 """
 
 from __future__ import annotations
@@ -62,14 +62,15 @@ class GatewayKey(Rule):
         alias = key_alias(ctx.app.id)
         try:
             with LiteLLM(f"http://127.0.0.1:{gateway.manifest.service.local_port}", master) as client:
+                models = list(self.params.models)
                 if client.keys(alias):
-                    client.delete([alias])
-                client.generate(
-                    user_id=alias,
-                    alias=alias,
-                    models=list(self.params.models),
-                    rpm_limit=self.params.rpm_limit,
-                    key=key,
-                )
+                    try:
+                        # The same key value: update it in place, so the app never goes without one.
+                        client.update(key=key, models=models, rpm_limit=self.params.rpm_limit)
+                        return
+                    except LiteLLMError:
+                        # A different value under this alias (the secret changed): replace it.
+                        client.delete([alias])
+                client.generate(user_id=alias, alias=alias, models=models, rpm_limit=self.params.rpm_limit, key=key)
         except LiteLLMError as exc:
             ctx.fail("gateway_key", "gateway_key_failed", f"The AI gateway did not accept this app's key: {exc}")

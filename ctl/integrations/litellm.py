@@ -56,6 +56,10 @@ class LiteLLM:
             raise LiteLLMError("LiteLLM did not return a key.")
         return key
 
+    def update(self, *, key: str, models: list[str], rpm_limit: int) -> None:
+        """Change an existing key's models and limit; LiteLLMError when LiteLLM has no such key."""
+        self._call("POST", "/key/update", json={"key": key, "models": models, "rpm_limit": rpm_limit})
+
     def model_names(self) -> set[str]:
         """The model names LiteLLM routes right now (the names apps ask for)."""
         data = self._call("GET", "/v1/models")

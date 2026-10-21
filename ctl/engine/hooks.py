@@ -12,7 +12,7 @@ import importlib.util
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from ctl.engine.compose import Compose, ScriptResult
 from ctl.runtime import RuntimePaths
@@ -92,7 +92,7 @@ class HookContext:
         write_atomic(self.env_path, runtime_env_text(merged).encode())
         return True
 
-    def fail(self, stage: str, code: str, message: str) -> None:
+    def fail(self, stage: str, code: str, message: str) -> NoReturn:
         raise StepFailed(stage, code, message)
 
     def run_script(

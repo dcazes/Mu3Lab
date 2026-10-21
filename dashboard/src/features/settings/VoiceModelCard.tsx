@@ -45,7 +45,11 @@ export function VoiceModelCard({ readOnly = false }: { readOnly?: boolean }) {
     );
   const saved = data.voice;
   const draft = edits ?? { privacy: saved.privacy, model: saved.model };
-  const changed = draft.privacy !== saved.privacy || (draft.privacy === 'local_only' && draft.model !== saved.model);
+  // While voice matches chat, saving the same choice keeps it when chat changes later.
+  const changed =
+    saved.matches_chat ||
+    draft.privacy !== saved.privacy ||
+    (draft.privacy === 'local_only' && draft.model !== saved.model);
   const busy = running || Boolean(data.active_job_id);
   const missingLocal = draft.privacy === 'local_only' && !draft.model;
   const chosen = data.chat_models.find((model) => model.id === draft.model);
