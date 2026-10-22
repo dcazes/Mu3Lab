@@ -22,7 +22,7 @@ service:
   health:
     path: /health
   uses_gpu: true
-  # The first install builds WhisperLiveKit (about 5 GB of PyTorch and CUDA downloads) and downloads its model.
+  # The first install builds WhisperLiveKit (several GB of CUDA libraries) and downloads its model.
   start_timeout_seconds: 2400
 sign_in:
   method: none
@@ -63,7 +63,6 @@ env:
   MU3LAB_TTS_URL: http://speech-tts:8880/v1
   # Kokoro-FastAPI's own model name.
   MU3LAB_TTS_MODEL: kokoro
-resource_guidance: The recognition model stays loaded so it can listen live, using about 2 GB of graphics memory with
-  the larger model; the voice adds about 1 GB. With an NVIDIA graphics card the two images and the models need about
-  30 GB of disk (about 10 GB without one).
+resource_guidance: The recognition model stays loaded so it can listen live, using about 3 GB of graphics memory with
+  the larger model; the voice adds about 1 GB. Models and the built image need about 15 GB of disk.
 setup_action: Install Speech to talk to the voice assistant, and to dictate on your own devices.

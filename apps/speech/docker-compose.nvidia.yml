@@ -3,7 +3,8 @@ services:
     build:
       context: ./stt
       args:
-        # PyTorch's CUDA 12.9 wheels, which bring the CUDA libraries with them.
+        BUILDER_BASE: nvidia/cuda:12.9.2-cudnn-devel-ubuntu24.04@sha256:5a480db8cbf90098ca816d7e77f07ce5cb4c43353530b6a84915c2dd99c4e0b6
+        RUNTIME_BASE: nvidia/cuda:12.9.2-cudnn-runtime-ubuntu24.04@sha256:070f8f2672df1b05b84c0409a5fd1d54ddfd646e5b9d8dee7878131271b563fc
         EXTRAS: cu129
     deploy:
       resources:
