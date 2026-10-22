@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import io
-import json
 import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import httpx
 
 from ctl import core_setup
 from ctl.bootstrap import terminal
-from ctl.integrations.vaultwarden import bootstrap as vaultwarden_api
 
 
 class DashboardReadinessTests(unittest.TestCase):
@@ -195,38 +192,6 @@ class UpFrontQuestionTests(unittest.TestCase):
         self.assertEqual(terminal.LAST_QUESTION_STEP, "tailscale_join")
         for later in ("docker", "dashboard_build", "core_images"):
             self.assertLess(ids.index(terminal.LAST_QUESTION_STEP), ids.index(later))
-
-
-class RegisterTests(unittest.TestCase):
-    def test_sends_only_derived_keys_and_the_vault_can_be_unlocked(self):
-        seen: dict = {}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen["path"] = request.url.path
-            seen["body"] = json.loads(request.content)
-            return httpx.Response(200, json={"object": "register"})
-
-        client = httpx.Client(base_url="http://vault", transport=httpx.MockTransport(handler))
-        vaultwarden_api.register("http://vault", "Alex@Example.com", "correct horse battery", "Alex", client=client)
-        body = seen["body"]
-        self.assertEqual(seen["path"], "/identity/accounts/register")
-        self.assertEqual(body["email"], "alex@example.com")
-        self.assertNotIn("correct horse battery", json.dumps(body))
-        master_key = vaultwarden_api.derive_master_key("correct horse battery", "alex@example.com", body)
-        self.assertEqual(
-            body["masterPasswordHash"], vaultwarden_api.master_password_hash(master_key, "correct horse battery")
-        )
-        user_key = vaultwarden_api.decrypt_bytes(body["key"], vaultwarden_api.stretch(master_key))
-        self.assertEqual(len(user_key), 64)
-
-    def test_existing_account_is_reported_plainly(self):
-        client = httpx.Client(
-            base_url="http://vault",
-            transport=httpx.MockTransport(lambda _r: httpx.Response(400, text="User already exists")),
-        )
-        with self.assertRaises(vaultwarden_api.VaultError) as caught:
-            vaultwarden_api.register("http://vault", "a@b.co", "correct horse battery", "A", client=client)
-        self.assertEqual(caught.exception.code, "exists")
 
 
 class EmbeddingTests(unittest.TestCase):

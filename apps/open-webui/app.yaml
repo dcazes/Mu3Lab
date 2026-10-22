@@ -28,6 +28,7 @@ sign_in:
     redirect_paths:
     - /oauth/oidc/callback
     launch_path: /oauth/oidc/login
+    forwards_sign_in: true
     env:
       client_id: OPEN_WEBUI_OIDC_CLIENT_ID
       client_secret: OPEN_WEBUI_OIDC_CLIENT_SECRET

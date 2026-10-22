@@ -12,7 +12,7 @@ import secrets
 import shutil
 from collections.abc import Callable
 
-from ctl.contextforge import KEY_PREFIX, ContextForgeError, client, tool_ids
+from ctl.contextforge import KEY_PREFIX, ContextForgeError, client, safe_name, tool_ids
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import load as load_review
 from ctl.runtime import RuntimePaths
@@ -37,7 +37,7 @@ def starting_tools(server) -> set[str] | None:
 
 
 def server_name(app_name: str, server) -> str:
-    return f"{app_name} ({server.name})"
+    return safe_name(f"{app_name} - {server.name}")
 
 
 def connect(server, app_name: str, log: Log) -> tuple[bool, str]:
@@ -63,6 +63,8 @@ def connect(server, app_name: str, log: Log) -> tuple[bool, str]:
             virtual = api.ensure_server(
                 server_name(app_name, server), f"The tools {app_name}'s assistant can use.", tool_ids(tools, wanted)
             )
+            if dns_name:
+                api.accept_chat_sign_ins(virtual, dns_name)
     except ContextForgeError as exc:
         log(f"{server.name} was not registered in ContextForge: {exc}")
         return False, str(exc)
@@ -86,6 +88,16 @@ def disconnect(server, log: Log) -> tuple[bool, str]:
 
 def virtual_server(connector_id: str) -> str:
     return str(records.get(SCOPE, connector_id).get("server_id") or "")
+
+
+def ensure_accounts(emails: list[str]) -> None:
+    """A ContextForge account for each person, so the sign-in Open WebUI passes on finds them.
+
+    ContextForge does not create accounts for sign-ins reaching its MCP endpoint.
+    """
+    with client() as api:
+        for email in emails:
+            api.ensure_user(email, email.split("@")[0], secrets.token_urlsafe(32))
 
 
 def person_key(uid: str, email: str, connector_id: str, server_id: str, paths: RuntimePaths | None = None) -> str:

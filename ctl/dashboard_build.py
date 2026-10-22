@@ -16,6 +16,9 @@ COMMANDS = {
     "api-schema": "npm ci && npm run gen:api",
     "format": "npm ci && npm run format",
 }
+# npm prints these when a download drops mid-way; a fresh attempt usually works.
+NETWORK_ERRORS = ("ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "ECONNREFUSED", "npm error network")
+BUILD_ATTEMPTS = 3
 
 
 def command(root: Path, task: str) -> list[str]:
@@ -42,9 +45,20 @@ def command(root: Path, task: str) -> list[str]:
 
 
 def build(root: Path, log) -> tuple[bool, str]:
-    rc, output = actions.docker_cmd_stream(command(root, "build"), log, timeout=1800)
+    for attempt in range(1, BUILD_ATTEMPTS + 1):
+        rc, output = actions.docker_cmd_stream(command(root, "build"), log, timeout=1800)
+        if not rc or not any(marker in output for marker in NETWORK_ERRORS):
+            break
+        if attempt < BUILD_ATTEMPTS:
+            log(f"Download interrupted; trying again ({attempt + 1} of {BUILD_ATTEMPTS}).")
+    if rc and any(marker in output for marker in NETWORK_ERRORS):
+        return False, (
+            "Could not download the dashboard's parts: the internet connection kept dropping. "
+            "Check your connection, then run ./install.sh again."
+        )
     if rc:
-        return False, "Dashboard build failed. Review the build log and retry. " + output[-500:]
+        tail = "\n".join(output.strip().splitlines()[-8:])
+        return False, "Dashboard build failed. Review the build log and retry.\n" + tail
     if not (root / "dashboard/dist/index.html").is_file():
         return False, "Dashboard build completed without producing the interface."
     stamps.write(root / stamps.BUILD_STAMP, stamps.dashboard_digest(root))

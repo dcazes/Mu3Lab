@@ -20,6 +20,7 @@ never reach logs.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -35,6 +36,8 @@ INTERNAL = "http://contextforge:4444"
 # The trusted issuer for sign-ins Open WebUI passes on with tool calls.
 CHAT_PROVIDER = "mu3lab-chat"
 KEY_PREFIX = "mu3lab-lobechat-"
+# ContextForge refuses (HTTP 422) any connector, virtual server or sign-in provider name with other characters.
+UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_.\- ]+")
 
 
 class ContextForgeError(RuntimeError):
@@ -43,6 +46,11 @@ class ContextForgeError(RuntimeError):
     def __init__(self, message: str, status: int = 0) -> None:
         super().__init__(message)
         self.status = status
+
+
+def safe_name(text: str) -> str:
+    """``text`` as a name ContextForge accepts: "Kopia MCP (read-only)" becomes "Kopia MCP read-only"."""
+    return " ".join(UNSAFE_NAME.sub(" ", text).split())
 
 
 def app() -> App:
@@ -145,6 +153,7 @@ class ContextForge:
         self, name: str, url: str, token: str, description: str, headers: dict[str, str] | None = None
     ) -> dict[str, Any]:
         """Register a connector, or point an existing registration at its current address, key and headers."""
+        name = safe_name(name)
         body: dict[str, Any] = {
             "name": name,
             "url": url,
@@ -180,11 +189,32 @@ class ContextForge:
 
     def ensure_server(self, name: str, description: str, tool_ids: list[str]) -> dict[str, Any]:
         """Create a virtual server once; an existing one is left exactly as operators made it."""
+        name = safe_name(name)
         current = next((item for item in self.servers() if item.get("name") == name), None)
         if current is not None:
             return current
         server = {"name": name, "description": description, "associated_tools": tool_ids}
         return self.request("POST", "/v1/servers", json={"server": server, "visibility": "public"})
+
+    def accept_chat_sign_ins(self, server: dict[str, Any], dns_name: str) -> None:
+        """Let a virtual server take the Authentik sign-ins Open WebUI passes on.
+
+        ContextForge's MCP endpoint takes an outside sign-in only on a virtual server
+        with OAuth on and that issuer listed, checked against ``client_id`` as the audience
+        (the trusted provider from ``ensure_chat_provider`` covers its REST API alone). The
+        person must already have an account here (``contextforge_ops.ensure_accounts``).
+        Mu3Lab's own keys keep working: ContextForge issued them.
+        """
+        issuer, client_id = _chat_issuer(dns_name)
+        wanted = {"authorization_servers": [issuer], "client_id": client_id}
+        config = _field(server, "oauth_config") or {}
+        if _field(server, "oauth_enabled") and all(config.get(key) == value for key, value in wanted.items()):
+            return
+        self.request(
+            "PUT",
+            f"/v1/servers/{server['id']}",
+            json={"oauth_enabled": True, "oauth_config": {**config, **wanted}},
+        )
 
     # --- People and their keys (LobeChat) -----------------------------------------
 
@@ -255,27 +285,19 @@ class ContextForge:
         Only tokens Authentik issued to Open WebUI are accepted (``api_audience``).
         Its sign-in button is not for people: the client secret is not ContextForge's.
         """
-        from ctl.chat_ops import by_workspace
-
-        chat = by_workspace("open_webui")
-        oidc = chat.manifest.sign_in.oidc
-        if oidc is None:
-            raise ContextForgeError("Open WebUI has no Authentik sign-in to trust.")
-        client_id = oidc.client_id
+        issuer, client_id = _chat_issuer(dns_name)
         base = f"https://{dns_name}/application/o"
-        # Authentik's per-application issuer (ctl/authentik_blueprints.py names the application).
-        slug = f"mu3lab-{chat.id}"
         body = {
             "name": CHAT_PROVIDER,
-            "display_name": "Mu3Lab chat (used by Open WebUI; not for signing in here)",
+            "display_name": "Mu3Lab chat - used by Open WebUI - not for signing in here",
             "provider_type": "oidc",
             "client_id": client_id,
             "client_secret": "not-used-for-sign-in",
             "authorization_url": f"{base}/authorize/",
             "token_url": f"{base}/token/",
             "userinfo_url": f"{base}/userinfo/",
-            "issuer": f"{base}/{slug}/",
-            "jwks_uri": f"{base}/{slug}/jwks/",
+            "issuer": issuer,
+            "jwks_uri": f"{issuer}jwks/",
             "scope": "openid profile email",
             "auto_create_users": True,
             "provider_metadata": {"groups_claim": "groups", "admin_groups": ["mu3lab-operators"]},
@@ -287,6 +309,18 @@ class ContextForge:
             self.request("PUT", f"/v1/auth/sso/admin/providers/{CHAT_PROVIDER}", json=body)
         else:
             self.request("POST", "/v1/auth/sso/admin/providers", json={"id": CHAT_PROVIDER, **body})
+
+
+def _chat_issuer(dns_name: str) -> tuple[str, str]:
+    """Open WebUI's Authentik issuer and client ID: who signs the tokens it passes on, and for whom."""
+    from ctl.chat_ops import by_workspace
+
+    chat = by_workspace("open_webui")
+    oidc = chat.manifest.sign_in.oidc
+    if oidc is None:
+        raise ContextForgeError("Open WebUI has no Authentik sign-in to trust.")
+    # Authentik's per-application issuer (ctl/authentik_blueprints.py names the application).
+    return f"https://{dns_name}/application/o/mu3lab-{chat.id}/", oidc.client_id
 
 
 def tool_ids(tools: list[dict[str, Any]], wanted: set[str] | None) -> list[str]:

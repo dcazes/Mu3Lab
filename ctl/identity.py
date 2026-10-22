@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from ctl import resource_locks
 from ctl.authentik_blueprints import (
     DASHBOARD_BLUEPRINT,
@@ -66,7 +68,9 @@ def projection(service: Service, item: dict, state: ControlState | None) -> dict
     # the legacy ui.url is only a fallback for mixed-version rollouts.
     launch_url = str(item.get("url") or (item.get("ui") or {}).get("url") or "")
     if service.manifest.sign_in.oidc and launch_url:
-        launch_url = launch_url.rstrip("/") + launch_path(service.manifest)
+        # The launch path starts at the app's origin, not its start page (ContextForge's is /admin/).
+        address = urlsplit(launch_url)
+        launch_url = f"{address.scheme}://{address.netloc}" + launch_path(service.manifest)
     if saved:
         current = str(saved["state"])
         detail = str(saved.get("detail") or "")
@@ -179,6 +183,7 @@ def _oidc_settings(app: App, paths: RuntimePaths) -> OidcApp | None:
         if oidc.role_claim
         else None,
         manifest.route.audience,
+        oidc.forwards_sign_in,
     )
 
 

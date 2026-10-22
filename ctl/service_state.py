@@ -113,6 +113,40 @@ def tailnet_ip(run=process.completed) -> str:
     return ""
 
 
+# The Docker networks app connectors listen on; ContextForge may reach these and nothing else private.
+CONNECTOR_NETWORKS = ("mu3lab_mcp", "mu3lab_mcp_upstream")
+
+
+def connector_networks(run=process.completed) -> str:
+    """ContextForge's SSRF allowlist as a JSON list of CIDRs, or "" when Docker cannot say.
+
+    ContextForge refuses to register a connector at a private address unless it
+    is listed. The list holds the connector networks' subnets (Docker picks them
+    from its address pool) and this computer's address on Docker's default
+    bridge, which ``host.docker.internal`` names (Kopia's connector listens there).
+    """
+    argv = ["docker", "network", "inspect", *CONNECTOR_NETWORKS, "bridge"]
+    try:
+        proc = run(docker_argv(argv), capture_output=True, text=True, timeout=15)
+        networks = json.loads(proc.stdout) if proc.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return ""
+    allowed: list[str] = []
+    for network in networks if isinstance(networks, list) else []:
+        for config in (network.get("IPAM") or {}).get("Config") or []:
+            try:
+                if network.get("Name") == "bridge":
+                    allowed.append(f"{ipaddress.ip_address(config.get('Gateway', ''))}/32")
+                else:
+                    allowed.append(str(ipaddress.ip_network(config.get("Subnet", ""))))
+            except ValueError:
+                continue
+    named = {network.get("Name") for network in networks if isinstance(network, dict)}
+    if not set(CONNECTOR_NETWORKS) <= named:
+        return ""
+    return json.dumps(allowed)
+
+
 def public_url(service: Service, dns_name: str) -> str:
     """Build a browser URL only for a manifest-declared UI contract."""
     if not dns_name or service.route != "ready" or not bool(service.ui.get("available", False)):

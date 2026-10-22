@@ -61,6 +61,9 @@ services:
       # Pick up tools a connector adds; they stay off until an operator adds them to a virtual server.
       AUTO_REFRESH_SERVERS: "true"
       MCPGATEWAY_A2A_ENABLED: "false"
+      # Connectors live at private Docker addresses, which ContextForge blocks by default.
+      # Allow only the connector networks (and Kopia's host address), not every private range.
+      SSRF_ALLOWED_NETWORKS: ${CONTEXTFORGE_CONNECTOR_NETWORKS:?CONTEXTFORGE_CONNECTOR_NETWORKS is required}
       PLUGINS_ENABLED: "false"
     depends_on:
       db: {condition: service_healthy}

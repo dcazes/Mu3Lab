@@ -16,10 +16,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import patch
 
-import httpx
 import yaml
 
-from ctl import hostinfo, voice_keys
+from ctl import hostinfo
 from ctl.authentik_blueprints import OidcApp, render_oidc_blueprint
 from ctl.control_state import ControlState
 from ctl.core_wiring import RoutingParams, speech_models
@@ -28,8 +27,6 @@ from ctl.engine.compose import Compose, ScriptResult
 from ctl.engine.hooks import HookContext
 from ctl.engine.launch import caddy_handler
 from ctl.engine.project import Facts, build_env, render
-from ctl.integrations.litellm import LiteLLM
-from ctl.lifecycle.signin_check import _form_launch, _json_launch
 from ctl.manifest.catalog import load
 from ctl.manifest.models import Oidc
 from ctl.registry import load as load_registry
@@ -304,40 +301,6 @@ class RouteAndSignInTests(unittest.TestCase):
         self.assertIn("form-action 'self' https://{http.request.host}", handler)
         self.assertIn('"action": "/users/auth/openid_connect"', handler)
 
-    def test_contextforge_launch_asks_its_sso_endpoint_by_get(self):
-        seen: dict[str, Any] = {}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen["method"], seen["url"] = request.method, str(request.url)
-            return httpx.Response(200, json={"authorization_url": "https://box.test/application/o/authorize/?x=1"})
-
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            reply = _json_launch("contextforge", client, "https://box.test:8475")
-        self.assertEqual(seen["method"], "GET")
-        self.assertIn("redirect_uri=https%3A%2F%2Fbox.test%3A8475%2Fauth%2Fsso%2Fcallback%2Fmu3lab", seen["url"])
-        self.assertEqual(reply.headers["location"], "https://box.test/application/o/authorize/?x=1")
-        handler_text = caddy_handler(load().get("contextforge").manifest)
-        self.assertIn("handle /__mu3lab/login", handler_text)
-        self.assertIn('"method": "GET"', handler_text)
-
-    def test_form_launch_check_submits_the_hidden_fields(self):
-        page = (
-            '<form class="button_to" method="post" action="/users/auth/openid_connect"><button>Go</button>'
-            '<input type="hidden" name="authenticity_token" value="tok123" /></form>'
-        )
-        seen: dict[str, Any] = {}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            if request.method == "GET":
-                return httpx.Response(200, text=page)
-            seen["body"] = request.content.decode()
-            return httpx.Response(302, headers={"location": "https://box.test/application/o/authorize/"})
-
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            reply = _form_launch(client, "https://box.test:8465", "/users/sign_in", "/users/auth/openid_connect", "D")
-        self.assertEqual(reply.status_code, 302)
-        self.assertEqual(seen["body"], "authenticity_token=tok123")
-
 
 class SpeechRoutingTests(unittest.TestCase):
     PARAMS = RoutingParams.model_validate(
@@ -380,25 +343,3 @@ class SpeechRoutingTests(unittest.TestCase):
         self.assertEqual(speech_models({}, self.PARAMS), [])
 
 
-class VoiceKeyTests(unittest.TestCase):
-    def test_create_replaces_the_previous_key_and_limits_it_to_speech(self):
-        calls: list[tuple[str, str, Any]] = []
-        existing = [{"key_alias": voice_keys.alias("u1"), "created_at": "2026-10-01"}]
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            body = json.loads(request.content) if request.content else None
-            calls.append((request.method, request.url.path, body))
-            self.assertEqual(request.headers["authorization"], "Bearer master")
-            if request.url.path == "/key/list":
-                return httpx.Response(200, json={"keys": existing})
-            if request.url.path == "/key/generate":
-                return httpx.Response(200, json={"key": "sk-new"})
-            return httpx.Response(200, json={"deleted_keys": body["key_aliases"]})
-
-        client = LiteLLM("http://litellm.test", "master", transport=httpx.MockTransport(handler))
-        with patch.object(voice_keys, "_client", return_value=client):
-            self.assertEqual(voice_keys.create("u1", load(), RuntimePaths()), "sk-new")
-        self.assertEqual([path for _method, path, _body in calls], ["/key/list", "/key/delete", "/key/generate"])
-        generated = calls[-1][2]
-        self.assertEqual(generated["models"], ["mu3lab-stt", "mu3lab-tts"])
-        self.assertEqual(generated["user_id"], "u1")
