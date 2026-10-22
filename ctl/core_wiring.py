@@ -32,8 +32,11 @@ class RoutingParams(Params):
     # Where the chosen model runner answers, and its key; both follow the owner's choice (ctl.local_models).
     runner_api_base_env: str = ""
     runner_api_key_env: str = ""
-    # Set by integrates_with when a speech app is installed; empty otherwise.
-    speech_url_env: str = ""
+    # Set by integrates_with when a speech app is installed; empty otherwise. Speech recognition
+    # and the voice may answer at different addresses; recognition may also want a key.
+    stt_url_env: str = ""
+    tts_url_env: str = ""
+    stt_key_env: str = ""
     admin_email_env: str = ""
     admin_password_env: str = ""
     bootstrap_flag_env: str = ""
@@ -108,20 +111,23 @@ TEXT_TO_SPEECH = "mu3lab-tts"
 
 def speech_models(env: dict[str, str], params: RoutingParams) -> list[dict]:
     """Route the stable speech names to the installed speech app, if there is one."""
-    base = env.get(params.speech_url_env, "") if params.speech_url_env else ""
+    stt_base = env.get(params.stt_url_env, "") if params.stt_url_env else ""
+    tts_base = env.get(params.tts_url_env, "") if params.tts_url_env else ""
     stt, tts = env.get("MU3LAB_STT_MODEL", ""), env.get("MU3LAB_TTS_MODEL", "")
-    if not base or not stt or not tts:
+    if not stt_base or not tts_base or not stt or not tts:
         return []
+    # LiteLLM reads the recognition key from its own environment, so config.yaml never holds it.
+    # The voice is internal-only and needs no key; LiteLLM's client still requires one.
+    stt_key = f"os.environ/{params.stt_key_env}" if params.stt_key_env and env.get(params.stt_key_env) else "unused"
     return [
         {
             "model_name": name,
-            # The speech app is internal-only and needs no key; LiteLLM's client still requires one.
-            "litellm_params": {"model": f"openai/{model}", "api_base": base, "api_key": "unused"},
+            "litellm_params": {"model": f"openai/{model}", "api_base": base, "api_key": key},
             "model_info": {"mode": mode},
         }
-        for name, model, mode in (
-            (SPEECH_TO_TEXT, stt, "audio_transcription"),
-            (TEXT_TO_SPEECH, tts, "audio_speech"),
+        for name, model, base, key, mode in (
+            (SPEECH_TO_TEXT, stt, stt_base, stt_key, "audio_transcription"),
+            (TEXT_TO_SPEECH, tts, tts_base, "unused", "audio_speech"),
         )
     ]
 

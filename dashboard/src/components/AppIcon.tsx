@@ -63,7 +63,7 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   romm: { icon: Gamepad2, color: '#7c3aed' },
   dawarich: { icon: MapPinned, color: '#0891b2' },
   'open-webui': { icon: MessagesSquare, color: '#64748b' },
-  speaches: { icon: AudioLines, color: '#db2777' },
+  speech: { icon: AudioLines, color: '#db2777' },
   tailnet: { icon: Network, color: '#64748b' },
   'kopia-ui': { icon: ArchiveRestore, color: '#2563eb' },
   navidrome: { icon: Music, color: '#0284c7' },

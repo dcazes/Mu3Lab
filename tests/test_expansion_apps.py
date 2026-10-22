@@ -6,6 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
+
+import httpx
 
 from ctl.engine.compose import Compose
 from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
@@ -115,10 +118,80 @@ class AudiobookshelfSetupTests(unittest.TestCase):
         self.assertIn("owner Mu3Lab did not create", raised.exception.message)
 
 
+class FakeSpeech:
+    """Stands in for httpx.Client against WhisperLiveKit and Kokoro, and records the requests."""
+
+    def __init__(self, *, heard: str = "Mu3Lab is ready.", spoken: bytes = b"RIFF") -> None:
+        self.heard, self.spoken = heard, spoken
+        self.posts: list[tuple[str, dict[str, Any]]] = []
+
+    def __call__(self, **_: Any) -> FakeSpeech:
+        return self
+
+    def __enter__(self) -> FakeSpeech:
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        return None
+
+    def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        self.posts.append((url, kwargs))
+        request = httpx.Request("POST", url)
+        if url.endswith("/audio/speech"):
+            return httpx.Response(200, content=self.spoken, request=request)
+        return httpx.Response(200, json={"text": self.heard}, request=request)
+
+
+class SpeechCheckTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.paths = RuntimePaths(Path(self.tmp.name))
+        self.catalog = load()
+        self.app = self.catalog.get("speech")
+        self.project = self.paths.projects / self.app.id
+        self.project.mkdir(parents=True)
+        (self.project / ".env").write_text("WLK_API_TOKEN=t0ken\nMU3LAB_TTS_MODEL=kokoro\nMU3LAB_TTS_VOICE=af_heart\n")
+        self.hooks = load_app_hooks(self.app)
+
+    def run_hook(self, fake: FakeSpeech) -> None:
+        ctx = HookContext(
+            self.app,
+            self.project,
+            Compose(self.project),
+            lambda _line: None,
+            lambda *_: None,
+            None,
+            Facts("box.tail1234.ts.net", self.paths, self.catalog),
+        )
+        with patch.object(self.hooks.after_healthy.__globals__["httpx"], "Client", fake):
+            self.hooks.after_healthy(ctx)
+
+    def test_speaks_with_kokoro_and_transcribes_with_the_speech_key(self):
+        fake = FakeSpeech()
+        self.run_hook(fake)
+        (spoken_url, spoken), (heard_url, heard) = fake.posts
+        self.assertEqual(spoken_url, "http://127.0.0.1:8095/v1/audio/speech")
+        self.assertEqual(spoken["json"]["model"], "kokoro")
+        self.assertEqual(spoken["json"]["voice"], "af_heart")
+        self.assertEqual(heard_url, "http://127.0.0.1:8092/v1/audio/transcriptions")
+        self.assertEqual(heard["headers"], {"Authorization": "Bearer t0ken"})
+
+    def test_a_silent_voice_fails_the_install(self):
+        with self.assertRaises(StepFailed) as raised:
+            self.run_hook(FakeSpeech(spoken=b""))
+        self.assertIn("Kokoro", raised.exception.message)
+
+    def test_a_wrong_transcription_fails_the_install(self):
+        with self.assertRaises(StepFailed) as raised:
+            self.run_hook(FakeSpeech(heard="something else"))
+        self.assertIn("WhisperLiveKit", raised.exception.message)
+
+
 class ManifestContractTests(unittest.TestCase):
     def test_internal_services_have_no_screen_and_no_sign_in(self):
         catalog = load()
-        for app_id in ("speaches",):
+        for app_id in ("speech",):
             with self.subTest(app=app_id):
                 manifest = catalog.get(app_id).manifest
                 self.assertIsNone(manifest.route)

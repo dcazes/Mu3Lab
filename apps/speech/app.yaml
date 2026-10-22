@@ -1,0 +1,68 @@
+# Speech — see ctl/manifest/models.py for every field.
+# Two containers: WhisperLiveKit turns speech into text (live while someone talks, or a whole
+# recording), and Kokoro-FastAPI reads text aloud. The voice assistant streams to WhisperLiveKit
+# directly; everything else reaches both through LiteLLM's mu3lab-stt and mu3lab-tts.
+id: speech
+capabilities: [speech]
+name: Speech (Whisper and Kokoro)
+tier: optional
+group: ai
+category: ai
+tagline: Private speech-to-text and text-to-speech
+summary: Turns speech into text with Whisper, as you talk, and reads text aloud with natural Kokoro voices, on your
+  own server. The voice assistant, other apps and your own devices use it; audio never leaves home.
+version: v0.2.26
+upstream: QuentinFuxa/WhisperLiveKit
+service:
+  # WhisperLiveKit; Kokoro follows. The health check asks WhisperLiveKit, which answers once its model is loaded.
+  local_port: 8092
+  extra_ports:
+  - port: 8095
+    purpose: Kokoro text-to-speech
+  health:
+    path: /health
+  uses_gpu: true
+  # The first install builds WhisperLiveKit (several GB of CUDA libraries) and downloads its model.
+  start_timeout_seconds: 2400
+sign_in:
+  method: none
+  note: Internal speech service. The voice assistant and LiteLLM reach it with Mu3Lab's own speech key; devices use
+    LiteLLM with their own voice keys.
+ui:
+  available: false
+  unavailable_reason: Speech has no screen of its own; use it from the voice assistant, or with your personal voice key.
+  parts:
+    stt: Speech recognition (WhisperLiveKit)
+    tts: Voice (Kokoro)
+backup:
+  include: false
+  reason: It holds only downloaded speech models, which are fetched again on install.
+secrets:
+# WhisperLiveKit asks for this key on every transcription request.
+- env: WLK_API_TOKEN
+  kind: hex
+  length: 32
+configuration:
+- key: stt_model
+  env: MU3LAB_STT_MODEL
+  type: enum
+  label: Speech recognition model (the larger one needs an NVIDIA graphics card to keep up while you talk)
+  default: large-v3-turbo
+  options:
+  - large-v3-turbo
+  - small
+- key: tts_voice
+  env: MU3LAB_TTS_VOICE
+  type: string
+  label: Default voice
+  default: af_heart
+env:
+  # What apps using speech connect to (see integrates_with in LiteLLM and the voice assistant).
+  # Speech recognition: OpenAI-style REST at /audio/transcriptions, live streaming at /listen.
+  MU3LAB_STT_URL: http://speech-stt:8000/v1
+  MU3LAB_TTS_URL: http://speech-tts:8880/v1
+  # Kokoro-FastAPI's own model name.
+  MU3LAB_TTS_MODEL: kokoro
+resource_guidance: The recognition model stays loaded so it can listen live, using about 3 GB of graphics memory with
+  the larger model; the voice adds about 1 GB. Models and the built image need about 15 GB of disk.
+setup_action: Install Speech to talk to the voice assistant, and to dictate on your own devices.

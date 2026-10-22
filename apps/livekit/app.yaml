@@ -1,7 +1,8 @@
 # LiveKit voice assistant — see ctl/manifest/models.py for every field.
 # One app, four containers: the LiveKit server, the voice agent, the voice page people
-# talk on, and LiveKit's admin dashboard. Everything runs on this server; the agent
-# reaches the chat model and speech through LiteLLM with a key of its own.
+# talk on, and LiveKit's admin dashboard. Everything runs on this server. The agent streams
+# what people say straight to the Speech app's WhisperLiveKit, and reaches the chat model
+# and the voice (Kokoro) through LiteLLM with a key of its own.
 id: livekit
 capabilities: [voice_assistant]
 name: Voice assistant
@@ -9,15 +10,15 @@ tier: optional
 group: ai
 category: ai
 tagline: Talk to your private AI assistant
-summary: A voice assistant you talk to in the browser. Your speech is turned into text by Whisper and read back by a
-  natural voice, both on this server. The answer comes from the model chosen in Settings, Voice Assistant, which can be
-  a local model or your outside providers. Built on LiveKit, with its admin dashboard for checking that the assistant
+summary: A voice assistant you talk to in the browser. Your speech is turned into text by Whisper word by word as you
+  talk, and read back by a natural voice, both on this server. The answer comes from the model chosen in Settings,
+  Voice Assistant, which can be a local model or your outside providers. Built on LiveKit, with its admin dashboard for checking that the assistant
   is connected.
 version: v1.13.10
 upstream: livekit/livekit
 depends_on:
 - litellm
-- speaches
+- speech
 service:
   # The voice page. LiveKit's own ports follow; the health check asks the LiveKit server.
   local_port: 8093
@@ -102,9 +103,11 @@ env:
   MU3LAB_LLM_API_KEY: 'sk-{{VOICE_AGENT_KEY}}'
   LIVEKIT_ADMIN_USER: admin
 integrates_with:
-# The voice the speech app reads with.
+# Live speech recognition (WhisperLiveKit's Deepgram-style stream) and the voice Kokoro reads with.
 - capability: speech
   env:
+    MU3LAB_STT_STREAM_URL: '{{provider:MU3LAB_STT_URL}}/listen'
+    MU3LAB_STT_KEY: '{{provider:WLK_API_TOKEN}}'
     MU3LAB_TTS_VOICE: '{{provider:MU3LAB_TTS_VOICE}}'
 # Registers the agent's key again when the gateway is reinstalled.
 - capability: model_proxy
@@ -112,11 +115,11 @@ rules:
 - rule: gateway_key
   with:
     key_env: MU3LAB_LLM_API_KEY
-    models: [mu3lab-voice, mu3lab-stt, mu3lab-tts]
+    models: [mu3lab-voice, mu3lab-tts]
 # Stays stopped until the voice model is ready and the models above are routed; the card says what to open.
 - rule: needs_voice_model
   with:
-    models: [mu3lab-voice, mu3lab-stt, mu3lab-tts]
+    models: [mu3lab-voice, mu3lab-tts]
 resource_guidance: The assistant itself is light (under 1 GB of memory). The speech models and a local voice model
   need about 7 GB of graphics memory together with the 4B model; with outside providers, only speech runs here. Uses
   the model chosen in Settings, Voice Assistant.
