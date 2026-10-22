@@ -1,12 +1,13 @@
 # WhisperLiveKit, built from one reviewed release (v0.2.26) with its own locked dependencies.
-# Follows upstream's Dockerfile and Dockerfile.cpu, with every base image pinned by digest.
-# CPU by default; docker-compose.nvidia.yml swaps in the CUDA bases and the cu129 extra.
-ARG BUILDER_BASE=debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
-ARG RUNTIME_BASE=debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+# Follows upstream's Dockerfile.cpu, with every base image pinned by digest. CPU by default;
+# docker-compose.nvidia.yml picks the cu129 extra. Upstream's GPU build starts from NVIDIA's CUDA
+# images, but PyTorch's cu129 wheels already carry every CUDA library WhisperLiveKit uses, so the
+# GPU build keeps the plain base and is about 4 GB smaller (and skips a 5 GB builder download).
+ARG BASE=debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
 
 FROM ghcr.io/astral-sh/uv:0.12.10@sha256:2bb3ebca0a796a155094a27773d290c4b074572e6107f171d88d086682fd2500 AS uvbin
 
-FROM ${BUILDER_BASE} AS build
+FROM ${BASE} AS build
 
 ARG REPOSITORY=https://github.com/QuentinFuxa/WhisperLiveKit.git
 # The v0.2.26 tag.
@@ -39,7 +40,7 @@ RUN set -eux; \
   for extra in $(echo "$EXTRAS" | tr ',' ' '); do set -- "$@" --extra "$extra"; done; \
   uv sync --frozen --no-editable --no-cache "$@"
 
-FROM ${RUNTIME_BASE} AS runtime
+FROM ${BASE} AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
@@ -54,6 +55,11 @@ RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin wlk
 USER wlk
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH"
+# CTranslate2 (the fast Whisper encoder) finds cuBLAS and cuDNN in the wheels PyTorch installed.
+# The NVIDIA runtime adds the driver for containers given a GPU; on the CPU build these paths are empty.
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV PYTHONUNBUFFERED=1
 ENV UV_PYTHON_DOWNLOADS=0
 EXPOSE 8000

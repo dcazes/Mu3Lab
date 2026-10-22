@@ -1,7 +1,8 @@
 # Streaming speech: WhisperLiveKit and Kokoro-FastAPI replace Speaches
 
 Branch: `feature/streaming-speech` (from `feature/livekit-voice` at `e77fff3`).
-Status: built. The Speech images were built and checked on this computer; a real call is left to the owner.
+Status: built. The Speech images were built and checked on this computer, including the GPU build on the
+RTX 3060; a real call is left to the owner.
 
 ## Decisions from the owner (2026-10-21)
 
@@ -28,8 +29,7 @@ Status: built. The Speech images were built and checked on this computer; a real
 | --- | --- | --- |
 | WhisperLiveKit | tag `v0.2.26`, commit `aceed595a43e9eed5008c142d90a3f6e86747fbf`, built from source with its `uv.lock` | `git ls-remote`; PyPI 0.2.26 |
 | uv (build stage) | `ghcr.io/astral-sh/uv:0.12.10@sha256:2bb3eb…2500` | upstream Dockerfile's tag; imagetools |
-| CPU bases | `debian:bookworm-slim@sha256:7ff6ba…e3f8` | upstream `Dockerfile.cpu`; imagetools |
-| CUDA bases | `nvidia/cuda:12.9.2-cudnn-{devel,runtime}-ubuntu24.04` by digest | upstream `Dockerfile`; imagetools |
+| Base (CPU and GPU) | `debian:bookworm-slim@sha256:7ff6ba…e3f8` | upstream `Dockerfile.cpu`; imagetools |
 | Kokoro-FastAPI | `ghcr.io/remsky/kokoro-fastapi-{cpu,gpu}:v0.9.0` by digest | latest GitHub release (2026-09-10); imagetools |
 | livekit-plugins-deepgram | `1.8.8`, matching livekit-agents | `uv lock` |
 
@@ -42,6 +42,25 @@ Status: built. The Speech images were built and checked on this computer; a real
   never written to `config.yaml`); `mu3lab-tts` → Kokoro. Voice keys keep working unchanged.
 - Voice assistant: `deepgram.STT(base_url=<stt>/v1/listen, language="en", interim_results=True)`;
   its LiteLLM key now covers only `mu3lab-voice` and `mu3lab-tts`.
+
+## Measured on this computer (RTX 3060, 2026-10-22)
+
+| | Result |
+| --- | --- |
+| Live stream (LiveKit's Deepgram plugin → `/v1/listen`, `large-v3-turbo`) | first words while still talking; final text and end-of-speech about 0.8 s after the recording ends, about 1.1 s after the last word |
+| Old path for comparison (Silero 0.55 s, then Speaches' REST call) | about 1.25 s after the last word when warm; 3.4 s on the first turn after Speaches unloaded its model |
+| Whole recording (`/v1/audio/transcriptions`, 1.7 s clip) | 0.66 s; 401 without the key |
+| Kokoro GPU, one sentence | 0.07 s (CPU image: 0.5 s) |
+| Graphics memory, both loaded | WhisperLiveKit 1.9 GB, Kokoro 0.9 GB |
+| Images (Docker's disk usage) | WhisperLiveKit GPU 14.3 GB, Kokoro GPU 12.8 GB (Speaches was 11 GB) |
+
+- WhisperLiveKit's GPU image is built on the plain Debian base: PyTorch's cu129 wheels already carry cuBLAS
+  and cuDNN, and `LD_LIBRARY_PATH` points CTranslate2 at them. Upstream's CUDA base image made it 22 GB.
+- WhisperLiveKit's own end-of-speech pause is only 0.1 s; the rest is decoding. LocalAgreement with
+  faster-whisper was no faster (0.85 s) and gave no early words, so SimulStreaming stays.
+- Triton warns "missing CUDA toolkit" and uses a slower median filter for word timings; the full CUDA
+  toolkit would add gigabytes for little gain. Its cache lives in the models folder (`TRITON_CACHE_DIR`),
+  because the default under the home folder is not writable.
 
 ## Known gaps
 

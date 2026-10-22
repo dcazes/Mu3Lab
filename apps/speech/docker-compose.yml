@@ -20,6 +20,8 @@ services:
       # Whisper checkpoints go to $XDG_CACHE_HOME/whisper, Hugging Face downloads to $HF_HOME.
       XDG_CACHE_HOME: /models
       HF_HOME: /models/huggingface
+      # Triton's compiled GPU kernels; its default (~/.triton) is not writable, and keeping them saves time at start.
+      TRITON_CACHE_DIR: /models/triton
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/speech/models:/models
       - ./sample.wav:/app/sample.wav:ro
