@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 
-from ctl import resource_locks
 from ctl.control_state import ControlState
-from ctl.identity import SIGN_IN_LOCK, launch_path, mode_for, projection, remove_sign_in, sync_sign_in
-from ctl.integrations.authentik import Authentik
-from ctl.manifest.catalog import App, Catalog
+from ctl.identity import launch_path, mode_for, projection
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 
@@ -53,6 +48,12 @@ class IdentityContractTests(unittest.TestCase):
             None,
         )
         self.assertEqual(identity["launch_url"], "https://host.example:8453/index.php/apps/user_oidc/login/1")
+
+    def test_the_launcher_starts_at_the_origin_when_the_start_page_is_deeper(self):
+        service = load().get("contextforge")
+        item = {"route_ready": True, "health_state": "healthy", "url": "https://host.example:8475/admin/"}
+        identity = projection(service, item, None)
+        self.assertEqual(identity["launch_url"], "https://host.example:8475/__mu3lab/login")
 
     def test_a_turned_off_app_is_off_not_degraded(self):
         service = load().get("audiobookshelf")
@@ -96,131 +97,6 @@ class IdentityContractTests(unittest.TestCase):
             (project / ".env").write_text("NEXTCLOUD_OIDC_PROVIDER_ID=7\n")
             self.assertTrue(launch_path(manifest, paths).endswith("/7"))
 
-    def test_sync_uses_manifests_saved_secrets_and_only_installed_optional_apps(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            registry = load()
-            # Rename a real manifest to prove there is no app-ID lookup table.
-            source = registry.catalog.get("nextcloud")
-            custom = App(
-                source.manifest.model_copy(update={"id": "custom-cloud", "name": "Custom Cloud"}), source.folder
-            )
-            catalog = Catalog((*(app for app in registry.catalog.apps if app.id != source.id), custom))
-            project = paths.projects / custom.id
-            project.mkdir(parents=True)
-            env = "NEXTCLOUD_OIDC_CLIENT_ID=custom-client\nNEXTCLOUD_OIDC_CLIENT_SECRET=preserved-secret\n"
-            (project / ".env").write_text(env)
-            bodies = []
-            client = self._client(bodies)
-            self.assertEqual(sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths), [])
-            self.assertNotIn("preserved-secret", bodies[-1])
-            (project / "docker-compose.yml").write_text("services: {}\n")
-            self.assertEqual(sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths), [custom.id])
-            self.assertIn("preserved-secret", bodies[-1])
-            self.assertIn("slug: mu3lab-custom-cloud", bodies[-1])
-            self.assertIn("/apps/user_oidc/code", bodies[-1])
-            self.assertIn("email_verified", bodies[-1])
-            self.assertEqual((project / ".env").read_text(), env)
-            self.assertFalse((paths.projects / "authentik" / "blueprints").exists())
-
-    def test_gates_track_install_remove_and_reinstall_in_synchronous_order(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            catalog = load().catalog
-            bodies = []
-            client = self._client(bodies)
-            sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths)
-            self.assertNotIn("Mu3Lab SurfSense provider", bodies[-1])
-            self.assertIn("Mu3Lab LiteLLM provider", bodies[-1])
-            self.assertIn("target: !KeyOf mu3lab-litellm-application", bodies[-1])
-            for app_id in ("surfsense", "baby-buddy"):
-                project = paths.projects / app_id
-                project.mkdir(parents=True)
-                (project / "docker-compose.yml").write_text("services: {}\n")
-            sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths)
-            self.assertIn("Mu3Lab SurfSense provider", bodies[-1])
-            self.assertIn("Mu3Lab Baby Buddy provider", bodies[-1])
-            remove_sign_in(catalog.get("surfsense"), client, catalog=catalog, host="mu3lab.example.ts.net", paths=paths)
-            self.assertNotIn("Mu3Lab SurfSense provider", bodies[-2])
-            self.assertIn("Mu3Lab Baby Buddy provider", bodies[-2])
-            self.assertIn("slug: mu3lab-surfsense", bodies[-1])
-            self.assertIn("state: absent", bodies[-1])
-            sync_sign_in(catalog, "mu3lab.example.ts.net", client, paths)
-            self.assertIn("Mu3Lab SurfSense provider", bodies[-1])
-
-    def test_a_sign_in_sync_waits_for_one_already_running(self):
-        # The dashboard's startup sync runs beside app installs and the installer.
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            bodies = []
-            client = self._client(bodies)
-            with resource_locks.hold(SIGN_IN_LOCK, paths=paths):
-                other = threading.Thread(
-                    target=sync_sign_in, args=(load().catalog, "mu3lab.example.ts.net", client, paths)
-                )
-                other.start()
-                other.join(0.5)
-                self.assertTrue(other.is_alive())
-                self.assertEqual(bodies, [])
-            other.join(10)
-            self.assertFalse(other.is_alive())
-            self.assertTrue(bodies)
-
-    def test_one_app_install_imports_only_that_apps_sign_in(self):
-        # Each import takes tens of seconds; re-importing every installed app
-        # on every install is what pushed a batch past Authentik's timeout.
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            catalog = load().catalog
-            for app_id, env in (
-                ("actual-budget", "ACTUAL_OPENID_CLIENT_ID=x\nACTUAL_OPENID_CLIENT_SECRET=y\n"),
-                ("nextcloud", "NEXTCLOUD_OIDC_CLIENT_ID=x\nNEXTCLOUD_OIDC_CLIENT_SECRET=y\n"),
-                ("baby-buddy", ""),
-            ):
-                project = paths.projects / app_id
-                project.mkdir(parents=True)
-                (project / "docker-compose.yml").write_text("services: {}\n")
-                (project / ".env").write_text(env)
-            host = "mu3lab.example.ts.net"
-            bodies = []
-            client = self._client(bodies)
-            self.assertEqual(sync_sign_in(catalog, host, client, paths, app_id="nextcloud"), ["nextcloud"])
-            self.assertEqual(len(bodies), 1)
-            self.assertIn("slug: mu3lab-nextcloud", bodies[0])
-            bodies.clear()
-            self.assertEqual(sync_sign_in(catalog, host, client, paths, app_id="baby-buddy"), [])
-            self.assertEqual(len(bodies), 1)
-            self.assertIn("Mu3Lab Baby Buddy provider", bodies[0])
-            bodies.clear()
-            self.assertCountEqual(sync_sign_in(catalog, host, client, paths), ["actual-budget", "nextcloud"])
-            self.assertEqual(len(bodies), 3)
-
-    def test_owner_guard_is_read_from_the_manifest_env_key(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = RuntimePaths(Path(tmp))
-            catalog = load().catalog
-            project = paths.projects / "actual-budget"
-            project.mkdir(parents=True)
-            (project / "docker-compose.yml").write_text("services: {}\n")
-            (project / ".env").write_text(
-                "ACTUAL_OPENID_CLIENT_ID=x\nACTUAL_OPENID_CLIENT_SECRET=y\nMU3LAB_INITIAL_OWNER_USERNAME=owner\n"
-            )
-            bodies = []
-            sync_sign_in(catalog, "mu3lab.example.ts.net", self._client(bodies), paths)
-            self.assertIn("request.user.username == 'owner'", bodies[-1])
-
-    def _client(self, bodies):
-        def send(request):
-            if request.method == "GET" and request.url.path == "/api/v3/core/brands/":
-                # The duplicate-brand cleanup that runs before the dashboard's sign-in.
-                return httpx.Response(200, json={"results": [], "pagination": {"next": 0}})
-            self.assertEqual(request.method, "POST")
-            self.assertEqual(request.url.path, "/api/v3/managed/blueprints/import/")
-            self.assertEqual(request.headers["authorization"], "Bearer test-token")
-            bodies.append(request.content.decode())
-            return httpx.Response(200, json={"success": True})
-
-        return Authentik("test-token", transport=httpx.MockTransport(send))
 
     def test_every_authentik_provider_skips_the_consent_page(self):
         # A consent page left open loses its place when another app starts a

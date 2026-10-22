@@ -350,12 +350,14 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
             if runtime["state"] in {"prepared", "authentication_required"}:
                 continue
             rc, output = (0, "") if server.builtin else actions.compose_action(project, "stop", log)
+            # A connector ContextForge refused keeps saying so while stopped (install stops apps after setup).
+            unregistered = runtime["last_error"] if runtime["state"] == "incompatible" else {}
             state.set_mcp_server(
                 server.id,
                 service_id,
                 enabled=True,
                 state="stopped" if rc == 0 else "failed",
-                error={} if rc == 0 else {"message": redact(output)},
+                error=unregistered if rc == 0 else {"message": redact(output)},
             )
             success = success and rc == 0
             linked, detail = unbind(server, log)

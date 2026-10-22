@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, DatabaseBackup, Loader2, Plus, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, ChevronDown, DatabaseBackup, Loader2, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import type { DismissedResponse, Service } from '../../api';
@@ -7,7 +7,7 @@ import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
 import { Link } from '../../lib/router';
 import {
-  isEverydayApp,
+  appSections,
   isInstalled,
   isRunning,
   isWorking,
@@ -25,6 +25,47 @@ import { SystemStatus } from './SystemStatus';
 function greeting() {
   const hour = new Date().getHours();
   return hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+const FOLDED_KEY = 'mu3lab.homeFolded';
+
+/** Sections folded to a row of icons, remembered in this browser. */
+function useFolded() {
+  const [folded, setFolded] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(FOLDED_KEY) || '[]');
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const toggle = (id: string) => {
+    const next = folded.includes(id) ? folded.filter((item) => item !== id) : [...folded, id];
+    setFolded(next);
+    try {
+      localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
+    } catch {
+      // Storage can be unavailable (private mode); the choice just won't persist.
+    }
+  };
+  return [folded, toggle] as const;
+}
+
+/** A folded tile is the icon alone; its name is the tooltip. */
+function MiniTile({ service, onOpen }: { service: Service; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`mini-tile${launchTarget(service) ? '' : ' tile-muted'}`}
+      aria-label={`${service.name}: ${stateLabel[service.display_state]}`}
+      title={service.name}
+      aria-haspopup="dialog"
+      onClick={onOpen}
+    >
+      <AppIcon id={service.id} />
+      {!isRunning(service) && <Dot tone={stateTone(service.display_state)} />}
+    </button>
+  );
 }
 
 /** A tile opens the app's quick panel; the panel's Open button opens the app itself. */
@@ -181,7 +222,8 @@ function Attention() {
 export function HomePage() {
   const { data } = useDashboard();
   const services = data.services.services;
-  const apps = services.filter((service) => isEverydayApp(service) && isInstalled(service));
+  const sections = appSections(services.filter(isInstalled));
+  const [folded, toggleFolded] = useFolded();
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   const [panel, setPanel] = useState('');
   // Look the app up each render so the panel follows its live state.
@@ -204,17 +246,29 @@ export function HomePage() {
           <h2 id="apps-heading">Your apps</h2>
           <Link to="/apps">Manage</Link>
         </div>
-        <div className="launcher">
-          {apps.map((service) => (
-            <LauncherTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
-          ))}
-          <Link to="/apps/discover" className="tile tile-add" aria-label="Add apps">
-            <span className="app-icon app-icon-lg">
-              <Plus />
-            </span>
-            <span className="tile-name">Add apps</span>
-          </Link>
-        </div>
+        {sections.map(({ id, label, apps }) => {
+          const open = !folded.includes(id);
+          return (
+            <section key={id} className={`launcher-group${open ? '' : ' is-folded'}`}>
+              <h3>
+                <button type="button" className="launcher-toggle" aria-expanded={open} onClick={() => toggleFolded(id)}>
+                  <ChevronDown />
+                  {label}
+                  <span className="launcher-count">{apps.length}</span>
+                </button>
+              </h3>
+              <div className={open ? 'launcher' : 'launcher-mini'}>
+                {apps.map((service) =>
+                  open ? (
+                    <LauncherTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
+                  ) : (
+                    <MiniTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
+                  ),
+                )}
+              </div>
+            </section>
+          );
+        })}
       </section>
       {selected && <AppQuickPanel service={selected} onClose={() => setPanel('')} />}
     </div>

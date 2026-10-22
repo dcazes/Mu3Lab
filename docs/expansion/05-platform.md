@@ -54,11 +54,11 @@ table in your task.
 | `kopia` | 51515 (51515) | | 8470 | 19487 |
 | `open-webui` | 3212 (8080) | | 8471 | 19488 |
 | `hermes-agent` | 9119 (9119 dashboard) | 8642 api | 8472 | 19489 |
-| `speaches` | 8092 (8000) | | none (reached via LiteLLM) | |
+| `speech` | 8092 (8000) WhisperLiveKit | 8095 Kokoro | none (LiteLLM; the voice assistant streams to 8000) | |
 | `wyoming-bridge` | 10300 (10300, tcp health) | | none | |
 | `mosquitto` | 1883 (1883, tcp health) | | none | |
 | `photon` | 2322 (2322) | | none | |
-| `unsloth` | 8095 (8000) | | 8473 | 19490 |
+| `unsloth` (removed) | ~~8095~~, now Speech's Kokoro | | 8473 | 19490 |
 | `navidrome` | 4533 (4533) | | 8474 | 19491 |
 | `contextforge` | 4444 (4444) | | 8475 | 19492 |
 | `livekit` | 8093 (3000) voice page | 7880 signalling, 8094 admin; tailnet 7881/tcp, 7882/udp | 8476, 8477 signal, 8478 admin | 19493–19495 |

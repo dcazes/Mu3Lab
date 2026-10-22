@@ -31,7 +31,7 @@ export interface Share {
 
 type SortKey = 'ram' | 'disk' | 'gpu';
 
-const SERIES = 8;
+const SERIES = 16;
 const MIN_FREEABLE = 100 * 1024 ** 2;
 // Core parts that are not catalog apps.
 const PART_NAMES: Record<string, string> = {
@@ -41,7 +41,7 @@ const PART_NAMES: Record<string, string> = {
 
 /**
  * Every app, ranked by its combined share of memory and disk so it keeps the same colour in both
- * donuts and on both pages (the biggest eight get one of their own); then Mu3Lab core with its
+ * donuts and on both pages (sixteen colours, repeating after that); then Mu3Lab core with its
  * parts, and the rows that always come last: what can be freed and what is not Mu3Lab's.
  */
 export function buildShares(system: SystemResponse, services: Service[]) {
@@ -74,7 +74,7 @@ export function buildShares(system: SystemResponse, services: Service[]) {
     .sort((a, b) => b.ram / ramTotal + b.disk / diskTotal - (a.ram / ramTotal + a.disk / diskTotal))
     .map((app, index) => ({
       ...app,
-      color: index < SERIES ? `var(--series-${index + 1})` : 'var(--chart-other-apps)',
+      color: `var(--series-${(index % SERIES) + 1})`,
     }));
   const partRam = system.memory_by_core_part || {};
   const partDisk = system.disk_usage?.core_parts || {};
@@ -338,7 +338,7 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
   return (
     <div className="resources-frame">
       <div className="resources">
-        <div className={hasGpu ? 'donuts donuts-four' : 'donuts'}>
+        <div className="donuts">
           <Donut
             label="Memory"
             total={system.memory.total}

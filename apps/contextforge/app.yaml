@@ -68,6 +68,8 @@ secrets:
 env:
   CONTEXTFORGE_URL: '{{public_url}}'
   CONTEXTFORGE_ORIGINS: '["{{public_url}}"]'
+  # The only private addresses it may register connectors at (ctl/service_state.py).
+  CONTEXTFORGE_CONNECTOR_NETWORKS: '{{connector_networks}}'
   CONTEXTFORGE_OIDC_ISSUER: https://{{dns_name}}/application/o/mu3lab-contextforge/
   CONTEXTFORGE_OIDC_JWKS: https://{{dns_name}}/application/o/mu3lab-contextforge/jwks/
   CONTEXTFORGE_OIDC_AUTHORIZE: https://{{dns_name}}/application/o/authorize/

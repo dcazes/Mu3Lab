@@ -16,12 +16,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ctl import chat_ops, contextforge
+from ctl import chat_ops, contextforge, contextforge_ops
 from ctl.contextforge import ContextForgeError
 from ctl.control_state import ControlState
 from ctl.integrations.openwebui import ChatError, OpenWebUI
 from ctl.manifest.catalog import App, cached
 from ctl.mcp_catalog import load as load_connectors
+from ctl.people import PeopleError, chat_people
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
@@ -62,10 +63,12 @@ def _sync(log: Log) -> tuple[bool, str]:
     paths = RuntimePaths()
     try:
         desired = chat_ops.desired_assistants()
+        if any(item["active"] for item in desired):
+            contextforge_ops.ensure_accounts(sorted({p["email"] for p in chat_people().values() if p["email"]}))
         with client() as api:
             managed = api.ensure(desired)
             checks = api.check(desired, _check_token() if any(item["active"] for item in desired) else "")
-    except (ChatError, ContextForgeError, OSError, ValueError, KeyError) as exc:
+    except (ChatError, ContextForgeError, PeopleError, OSError, ValueError, KeyError) as exc:
         log(f"Open WebUI assistants were not updated: {exc}")
         records.put(SCOPE, RECORD, {**records.get(SCOPE, RECORD, paths), "error": str(exc)}, paths)
         return False, str(exc)

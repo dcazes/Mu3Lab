@@ -1,0 +1,87 @@
+name: mu3lab-speech
+
+services:
+  # WhisperLiveKit: speech to text, live (Deepgram-style /v1/listen) and for whole recordings
+  # (OpenAI-style /v1/audio/transcriptions). Built here from one reviewed release.
+  stt:
+    build: ./stt
+    restart: unless-stopped
+    command:
+      - --model
+      - ${MU3LAB_STT_MODEL:-large-v3-turbo}
+      - --language
+      - en
+      # Warm up with Mu3Lab's own recording instead of downloading one at every start.
+      - --warmup-file
+      - /app/sample.wav
+    ports: ["127.0.0.1:8092:8000"]
+    environment:
+      WLK_API_TOKEN: ${WLK_API_TOKEN:?WLK_API_TOKEN is required}
+      # Whisper checkpoints go to $XDG_CACHE_HOME/whisper, Hugging Face downloads to $HF_HOME.
+      XDG_CACHE_HOME: /models
+      HF_HOME: /models/huggingface
+      # Triton's compiled GPU kernels; its default (~/.triton) is not writable, and keeping them saves time at start.
+      TRITON_CACHE_DIR: /models/triton
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/speech/models:/models
+      - ./sample.wav:/app/sample.wav:ro
+    depends_on:
+      models-init: {condition: service_completed_successfully}
+    networks:
+      # The frontend network reaches the internet for the first model download.
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [speech-stt]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      # Answers once the model is loaded and warmed up.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      timeout: 8s
+      start_period: 600s
+      start_interval: 15s
+      interval: 5m
+      retries: 3
+
+  # The image runs as "wlk" (10001); a folder Docker creates belongs to root.
+  models-init:
+    image: debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "10001:10001", "/models"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/speech/models:/models
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
+  # Kokoro-FastAPI: text to speech on an OpenAI-style /v1/audio/speech. The model is inside the image.
+  tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0@sha256:ee3111d6a2c903ed62f3b4fa19543c6901205ed39fce3c177e895b34a8386b9c
+    restart: unless-stopped
+    ports: ["127.0.0.1:8095:8880"]
+    environment:
+      # The model is baked into the image; never fetch it again at start.
+      DOWNLOAD_MODEL: "false"
+      DEFAULT_VOICE: ${MU3LAB_TTS_VOICE:-af_heart}
+      # The browser player is not reachable from outside this computer anyway.
+      ENABLE_WEB_PLAYER: "false"
+    networks:
+      # Docker publishes no ports for a container on internal networks only; this one carries the port above.
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [speech-tts]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=5)"]
+      timeout: 8s
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

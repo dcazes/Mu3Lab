@@ -10,32 +10,14 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { api, type McpServer, putJsonApi } from '../../api';
-import { Button, ExternalButton } from '../../components/Button';
+import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
-import { Callout, Card, Collapsible } from '../../components/Layout';
+import { Callout, Card } from '../../components/Layout';
 import { Dot } from '../../components/Status';
 import { useAction } from '../../lib/useAction';
-import { useIsAdmin } from '../../state/dashboard';
+import { isRunning } from '../../lib/services';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { mcpSummary, nextMcpStep, openChatFor, queueMcp, setsUpAutomatically } from './mcp';
-
-/** What the connector offers; ContextForge decides which of these chat can use. */
-function Tools({ server }: { server: McpServer }) {
-  if (!server.tools.length) return <p className="muted">Tools appear here once the connection is verified.</p>;
-  return (
-    <div className="rows">
-      {server.tools.map((tool) => (
-        <div className="row" key={tool.id}>
-          <span className="row-text">
-            <b>{tool.title || tool.id}</b>
-            <small>
-              {tool.risk === 'read' ? 'Reads data' : tool.risk === 'draft' ? 'Prepares a draft' : 'Changes data'}
-            </small>
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** Apps with more than one reviewed connector: pick which one chat uses. Only one runs at a time. */
 function ConnectorPicker({
@@ -116,12 +98,10 @@ export function McpPanel({
   appName: string;
   reload: () => void;
 }) {
-  const confirm = useConfirm();
   const isAdmin = useIsAdmin();
   const summary = mcpSummary(server, appName);
   const { pending, run } = useAction();
   const [values, setValues] = useState<Record<string, string>>({});
-  const [logs, setLogs] = useState<string[] | null>(null);
   const step = nextMcpStep(server);
   const manual = !setsUpAutomatically(server);
   const help =
@@ -130,17 +110,7 @@ export function McpPanel({
       ? 'In SurfSense, create a personal token under API Playground → API Keys, enable its workspace, then paste the ss_pat_… token here.'
       : '');
 
-  const act = async (action: 'prepare' | 'install' | 'restart' | 'disable' | 'verify') => {
-    if (
-      ['restart', 'disable'].includes(action) &&
-      !(await confirm({
-        title: `${action === 'disable' ? 'Disconnect' : 'Restart'} ${server.name}?`,
-        description: action === 'disable' ? 'Chat loses access to this app until you connect it again.' : undefined,
-        confirmLabel: action === 'disable' ? 'Disconnect' : 'Restart',
-        tone: action === 'disable' ? 'danger' : 'primary',
-      }))
-    )
-      return;
+  const act = async (action: 'prepare' | 'install') => {
     await run(action, () => queueMcp(server, action), 'Connection job started.');
     window.setTimeout(reload, 1200);
   };
@@ -156,12 +126,6 @@ export function McpPanel({
       reload();
     }
   };
-  const loadLogs = () =>
-    run('logs', async () => {
-      const result = await api<{ lines: string[] }>(`/api/v1/mcp/servers/${server.id}/logs?tail=120`);
-      setLogs(result.lines);
-    });
-
   return (
     <div className="stack">
       <Card
@@ -215,64 +179,105 @@ export function McpPanel({
       </Card>
       {!isAdmin && (
         <Callout title="Only an administrator can change what chat can do">
-          You can see the tools {appName}'s connector offers. Administrators choose which ones chat uses in
-          ContextForge.
+          Administrators choose which of {appName}'s tools chat uses in ContextForge.
         </Callout>
       )}
       {isAdmin && connectors.length > 1 && (
         <ConnectorPicker key={server.id} server={server} connectors={connectors} appName={appName} reload={reload} />
       )}
-      <Card
-        title="What chat can do"
-        description="Everyone's assistant for this app uses the tools chosen in ContextForge, which also logs every call."
-        actions={
-          isAdmin &&
-          server.manage_url && (
-            <ExternalButton icon={SlidersHorizontal} href={server.manage_url}>
-              Manage in ContextForge
-            </ExternalButton>
-          )
-        }
-      >
-        <Tools server={server} />
-      </Card>
-      {isAdmin && (
-        <Collapsible title="Advanced">
-          <div className="stack">
-            <div className="button-row">
-              {server.state === 'live' && (
-                <>
-                  <Button icon={CheckCircle2} loading={pending === 'verify'} onClick={() => void act('verify')}>
-                    Verify
-                  </Button>
-                  <Button icon={RefreshCw} loading={pending === 'restart'} onClick={() => void act('restart')}>
-                    Restart
-                  </Button>
-                  <Button icon={Unplug} className="danger-text" onClick={() => void act('disable')}>
-                    Disconnect
-                  </Button>
-                </>
-              )}
-              {server.enabled && (
-                <Button loading={pending === 'logs'} onClick={() => void loadLogs()}>
-                  View logs
-                </Button>
-              )}
-              {server.review?.repository && (
-                <ExternalButton icon={ShieldCheck} href={server.review.repository}>
-                  Reviewed source
-                </ExternalButton>
-              )}
-            </div>
-            <p className="muted">
-              {server.kind} · {server.transport}
-              {server.last_verified_at && ` · verified ${new Date(server.last_verified_at).toLocaleString()}`}
-              {server.review?.note && ` · ${server.review.note}`}
-            </p>
-            {logs && <pre className="log">{logs.join('\n') || 'No recent log lines.'}</pre>}
-          </div>
-        </Collapsible>
-      )}
+      {isAdmin && <ContextForgeCard server={server} appName={appName} />}
     </div>
+  );
+}
+
+/** Which tools chat may use is chosen in ContextForge, which also logs every call. */
+function ContextForgeCard({ server, appName }: { server: McpServer; appName: string }) {
+  const { data } = useDashboard();
+  const contextforge = data.services.services.find((service) => service.id === 'contextforge');
+  const running = Boolean(contextforge && isRunning(contextforge));
+  return (
+    <Card
+      title="Choose what chat can do"
+      description={
+        running
+          ? `Pick which of ${appName}'s tools chat can use in ContextForge, which also logs every call.`
+          : `ContextForge needs to be started to view and choose ${appName}'s tools.`
+      }
+      actions={
+        running && server.manage_url ? (
+          <ExternalButton icon={SlidersHorizontal} href={server.manage_url}>
+            Open ContextForge
+          </ExternalButton>
+        ) : (
+          <LinkButton to="/apps/contextforge">Go to ContextForge</LinkButton>
+        )
+      }
+    />
+  );
+}
+
+/** Checking, restarting or disconnecting an app's chat connection, on the app's Advanced tab. */
+export function McpConnectionCard({ server, reload }: { server: McpServer; reload: () => void }) {
+  const confirm = useConfirm();
+  const { pending, run } = useAction();
+  const [logs, setLogs] = useState<string[] | null>(null);
+  const act = async (action: 'restart' | 'disable' | 'verify') => {
+    if (
+      action !== 'verify' &&
+      !(await confirm({
+        title: `${action === 'disable' ? 'Disconnect' : 'Restart'} ${server.name}?`,
+        description: action === 'disable' ? 'Chat loses access to this app until you connect it again.' : undefined,
+        confirmLabel: action === 'disable' ? 'Disconnect' : 'Restart',
+        tone: action === 'disable' ? 'danger' : 'primary',
+      }))
+    )
+      return;
+    await run(action, () => queueMcp(server, action), 'Connection job started.');
+    window.setTimeout(reload, 1200);
+  };
+  const loadLogs = () =>
+    run('logs', async () => {
+      const result = await api<{ lines: string[] }>(`/api/v1/mcp/servers/${server.id}/logs?tail=120`);
+      setLogs(result.lines);
+    });
+  if (!server.enabled) return null;
+  return (
+    <Card
+      title="Chat connection"
+      description={
+        <>
+          {server.kind} · {server.transport}
+          {server.last_verified_at && ` · verified ${new Date(server.last_verified_at).toLocaleString()}`}
+          {server.review?.note && ` · ${server.review.note}`}
+        </>
+      }
+    >
+      <div className="stack">
+        <div className="button-row">
+          {server.state === 'live' && (
+            <>
+              <Button icon={CheckCircle2} loading={pending === 'verify'} onClick={() => void act('verify')}>
+                Verify
+              </Button>
+              <Button icon={RefreshCw} loading={pending === 'restart'} onClick={() => void act('restart')}>
+                Restart
+              </Button>
+              <Button icon={Unplug} className="danger-text" onClick={() => void act('disable')}>
+                Disconnect
+              </Button>
+            </>
+          )}
+          <Button loading={pending === 'logs'} onClick={() => void loadLogs()}>
+            View logs
+          </Button>
+          {server.review?.repository && (
+            <ExternalButton icon={ShieldCheck} href={server.review.repository}>
+              Reviewed source
+            </ExternalButton>
+          )}
+        </div>
+        {logs && <pre className="log">{logs.join('\n') || 'No recent log lines.'}</pre>}
+      </div>
+    </Card>
   );
 }

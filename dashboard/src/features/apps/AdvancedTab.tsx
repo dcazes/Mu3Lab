@@ -1,17 +1,22 @@
 import { ArrowUpCircle, Copy, Download, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { api, postJsonApi, type Service, type ServiceLogsResponse, type UpdateResponse } from '../../api';
+import {
+  api,
+  type McpServer,
+  postJsonApi,
+  type Service,
+  type ServiceLogsResponse,
+  type UpdateResponse,
+} from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { copyText } from '../../components/CopyField';
 import { useConfirm } from '../../components/Dialog';
-import { Card, Facts } from '../../components/Layout';
+import { Card } from '../../components/Layout';
 import { StateBadge } from '../../components/Status';
-import { humanize } from '../../lib/format';
-import { signInSummary } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useAction } from '../../lib/useAction';
 import { useDashboard } from '../../state/dashboard';
-import { JobDialog, JobRow } from '../activity/JobDialog';
+import { McpConnectionCard } from '../integrations/McpPanel';
 import { BackupsCard } from './BackupsCard';
 
 function Logs({ service }: { service: Service }) {
@@ -86,29 +91,12 @@ function Logs({ service }: { service: Service }) {
   );
 }
 
-function Updates({ service }: { service: Service }) {
+/** Updating an app, confirmed first; the Installed page's Update button and the Updates card share it. */
+export function useApplyUpdate(service: Service) {
   const confirm = useConfirm();
   const { refresh } = useDashboard();
   const { pending, run } = useAction();
-  const installed = service.update?.installed_version ?? '';
-  // A local comparison with the release Mu3Lab approves, so it loads straight away.
-  const { data: update, reload } = useApi<UpdateResponse>(
-    service.update?.repository ? `/api/v1/services/${service.id}/updates` : null,
-  );
-  // An update, a restore or a newer Mu3Lab changed what is installed or approved.
-  const approved = service.update?.approved_version ?? '';
-  const seen = useRef(`${installed} ${approved}`);
-  useEffect(() => {
-    if (seen.current === `${installed} ${approved}`) return;
-    seen.current = `${installed} ${approved}`;
-    void reload();
-  }, [installed, approved, reload]);
-  if (!service.update?.repository) return null;
-  const target = update?.supporting_only
-    ? `updated supporting services for ${update.approved_version}`
-    : update?.approved_version;
-  const apply = async () => {
-    if (!update) return;
+  const apply = async (update: { approved_version: string; supporting_only: boolean }) => {
     if (
       !(await confirm({
         title: update.supporting_only
@@ -127,13 +115,33 @@ function Updates({ service }: { service: Service }) {
     if (result === undefined) return;
     void refresh();
   };
+  return { run: apply, pending: pending === 'update' };
+}
+
+function Updates({ service }: { service: Service }) {
+  const apply = useApplyUpdate(service);
+  const installed = service.update?.installed_version ?? '';
+  // A local comparison with the release Mu3Lab approves, so it loads straight away.
+  const { data: update, reload } = useApi<UpdateResponse>(
+    service.update?.repository ? `/api/v1/services/${service.id}/updates` : null,
+  );
+  // An update, a restore or a newer Mu3Lab changed what is installed or approved.
+  const approved = service.update?.approved_version ?? '';
+  const seen = useRef(`${installed} ${approved}`);
+  useEffect(() => {
+    if (seen.current === `${installed} ${approved}`) return;
+    seen.current = `${installed} ${approved}`;
+    void reload();
+  }, [installed, approved, reload]);
+  if (!service.update?.repository) return null;
+  const target = update?.supporting_only
+    ? `updated supporting services for ${update.approved_version}`
+    : update?.approved_version;
   return (
     <Card
       title="Updates"
       description={
-        service.stage === 'optional'
-          ? `Installed version ${installed || 'unknown'}. Mu3Lab offers a new version once it has been tested with Mu3Lab.`
-          : `Version ${installed || 'unknown'}. Updated together with Mu3Lab.`
+        service.stage === 'optional' ? undefined : `Version ${installed || 'unknown'}. Updated together with Mu3Lab.`
       }
     >
       {update && service.stage === 'optional' && installed && (
@@ -157,8 +165,8 @@ function Updates({ service }: { service: Service }) {
               <Button
                 variant="primary"
                 icon={ArrowUpCircle}
-                loading={pending === 'update'}
-                onClick={() => void apply()}
+                loading={apply.pending}
+                onClick={() => update && void apply.run(update)}
               >
                 {update.supporting_only ? 'Update' : `Update to ${update.approved_version}`}
               </Button>
@@ -173,61 +181,38 @@ function Updates({ service }: { service: Service }) {
   );
 }
 
-export function AdvancedTab({ service }: { service: Service }) {
-  const { data } = useDashboard();
-  const [jobId, setJobId] = useState<string | null>(null);
-  const jobs = data.jobs.jobs.filter((job) => job.service_id === service.id).slice(0, 8);
+export function AdvancedTab({
+  service,
+  mcp,
+  reloadMcp,
+}: {
+  service: Service;
+  mcp?: McpServer;
+  reloadMcp?: () => void;
+}) {
   return (
     <div className="stack">
       {service.compose_present && <Logs service={service} />}
-      <Card title="Activity" flush>
-        {jobs.length ? (
-          <div className="rows">
-            {jobs.map((job) => (
-              <JobRow key={job.id} job={job} showService={false} onOpen={() => setJobId(job.id)} />
-            ))}
-          </div>
-        ) : (
-          <p className="muted card-pad">No recorded activity.</p>
-        )}
-      </Card>
+      {mcp && <McpConnectionCard server={mcp} reload={reloadMcp || (() => undefined)} />}
       <Updates service={service} />
       {service.stage === 'optional' && <BackupsCard service={service} />}
-      <Card title="Technical details">
-        <Facts
-          items={[
-            { label: 'Health', value: humanize(service.health_state) },
-            { label: 'Private route', value: humanize(service.route_ready ? 'ready' : 'not_ready') },
-            { label: 'Sign-in method', value: signInSummary(service).label },
-            { label: 'Lifecycle', value: humanize(service.lifecycle) },
-            ...(service.containers?.length
-              ? [
-                  {
-                    label: 'Containers',
-                    value: (
-                      <div className="rows compact">
-                        {service.containers.map((container) => (
-                          <div className="row" key={container.name}>
-                            <span className="row-text">
-                              <b>{container.service}</b>
-                              <small>{container.image}</small>
-                            </span>
-                            <StateBadge
-                              state={
-                                container.health && container.health !== 'unknown' ? container.health : container.state
-                              }
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    ),
-                  },
-                ]
-              : []),
-          ]}
-        />
-      </Card>
-      <JobDialog jobId={jobId} onClose={() => setJobId(null)} />
+      {Boolean(service.containers?.length) && (
+        <Card title="Containers">
+          <div className="rows compact">
+            {(service.containers || []).map((container) => (
+              <div className="row" key={container.name}>
+                <span className="row-text">
+                  <b>{container.service}</b>
+                  <small>{container.image}</small>
+                </span>
+                <StateBadge
+                  state={container.health && container.health !== 'unknown' ? container.health : container.state}
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

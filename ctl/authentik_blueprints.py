@@ -48,6 +48,7 @@ class OidcApp:
     # (claim, admin value, user value, list?) for apps that read the role in their own words.
     role_claim: tuple[str, str, str, bool] | None = None
     audience: str = "household"  # household | operators (who may sign in)
+    forwards_sign_in: bool = False  # passes people's access tokens on to ContextForge
 
 
 def quote(value: str) -> str:
@@ -309,6 +310,23 @@ def _role_scope(app: OidcApp) -> str:
         return {{{quote(claim)}: {value}}}"""
 
 
+def _forwarded_tokens(app: OidcApp) -> str:
+    """Token lifetimes for an app that passes people's access tokens on to ContextForge.
+
+    Authentik copies the sign-in's nonce into the first access token, and ContextForge
+    refuses any token with a nonce as an ID token. Refreshed access tokens carry none, and
+    Open WebUI refreshes any token within 5 minutes of expiry, so a 4-minute token is always
+    refreshed before it is passed on. Refresh tokens are kept (not replaced on every use)
+    until their last week, so tool calls refreshing at the same moment do not revoke each other.
+    """
+    if not app.forwards_sign_in:
+        return ""
+    return """
+      access_token_validity: minutes=4
+      refresh_token_validity: days=30
+      refresh_token_threshold: days=7"""
+
+
 def render_oidc_blueprint(host: str, app: OidcApp) -> str:
     """One app's confidential OIDC client, its claims and who may sign in."""
     host = validate_host(host)
@@ -364,6 +382,8 @@ entries:
       client_type: confidential
       grant_types:
         - authorization_code
+        # Without it Authentik refuses the refresh tokens offline_access hands out.
+        - refresh_token{_forwarded_tokens(app)}
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
       client_id: {quote(app.client_id)}
       client_secret: {quote(app.client_secret)}

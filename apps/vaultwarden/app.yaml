@@ -3,7 +3,7 @@ id: vaultwarden
 capabilities: [password_store]
 name: Vaultwarden
 tier: foundation
-group: apps
+group: infrastructure
 category: system
 tagline: Password manager for Bitwarden apps
 summary: Stores passwords, secure notes, and other vault items on your server. Vaultwarden works with Bitwarden

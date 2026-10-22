@@ -3203,7 +3203,8 @@ export interface components {
        * Display State
        * @enum {string}
        */
-      display_state: 'running' | 'stopped' | 'working' | 'checking' | 'not_installed' | 'needs_attention';
+      display_state:
+        'running' | 'stopped' | 'working' | 'checking' | 'not_installed' | 'needs_setup' | 'needs_attention';
       /** Extra Routes */
       extra_routes?: components['schemas']['ServiceExtraRoute'][];
       /** Group */

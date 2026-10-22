@@ -3,7 +3,9 @@
 Install steps call shared rules (``ctl.rules``) and, for the few things only
 one app does, that app's ``apps/<id>/hooks.py``. Both receive a ``HookContext``:
 the app, its project, its Compose commands, the installing owner, a logger,
-and ``fail()`` to stop the install with a plain-language reason.
+``fail()`` to stop the install with a plain-language reason, and
+``needs_setup()`` when the owner still has a choice to make before the app can
+be used.
 """
 
 from __future__ import annotations
@@ -34,6 +36,10 @@ class StepFailed(Exception):
     def __init__(self, stage: str, code: str, message: str) -> None:
         super().__init__(message)
         self.stage, self.code, self.message = stage, code, message
+
+
+class SetupNeeded(StepFailed):
+    """The app installs, but the owner must make a choice before it starts; the message says which."""
 
 
 @dataclass
@@ -94,6 +100,9 @@ class HookContext:
 
     def fail(self, stage: str, code: str, message: str) -> NoReturn:
         raise StepFailed(stage, code, message)
+
+    def needs_setup(self, stage: str, code: str, message: str) -> NoReturn:
+        raise SetupNeeded(stage, code, message)
 
     def run_script(
         self,

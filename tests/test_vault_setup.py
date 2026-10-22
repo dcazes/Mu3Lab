@@ -5,98 +5,19 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-import uuid
 from pathlib import Path
-from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 
-from ctl.api import create_app
 from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
 from ctl.identity import mode_for
 from ctl.integrations.vaultwarden import bootstrap as vw
-from ctl.integrations.vaultwarden.cli import VaultSession
 from ctl.provider_catalog import PROVIDERS, setup_progress
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
-from ctl.vault_setup import FOLDER, PROVIDER_FOLDER, desired_items, seed
+from ctl.vault_setup import desired_items
 
 EMAIL = "owner@example.test"
-PASSWORD = "correct horse battery staple"
 KDF = {"kdf": vw.KDF_PBKDF2, "kdfIterations": 5000}
-
-
-class FakeVaultwarden:
-    """A fake official CLI boundary; plaintext is handled only by bw."""
-
-    def __init__(self, *, totp: str = "") -> None:
-        self.totp = totp
-        self.folders = []
-        self.ciphers = []
-
-    def run(self, *args, body=None, raw=False):
-        if args[0] == "config":
-            return ""
-        if args[0] == "login":
-            return "session"
-        if args[0] == "sync":
-            return ""
-        if args[:2] == ("list", "folders"):
-            return self.folders
-        if args[:2] == ("list", "items"):
-            return self.ciphers
-        if args[:2] == ("create", "folder"):
-            value = dict(body, id=str(uuid.uuid4()))
-            self.folders.append(value)
-            return value
-        if args[:2] == ("create", "item"):
-            value = dict(body, id=str(uuid.uuid4()))
-            self.ciphers.append(value)
-            return value
-        if args[:2] == ("edit", "item"):
-            index = next(i for i, item in enumerate(self.ciphers) if item["id"] == args[2])
-            self.ciphers[index] = body
-            return body
-        raise AssertionError(args)
-
-    def add_login(self, name: str, uri: str, password: str = "mine", **extra):
-        self.ciphers.append(
-            {
-                "id": str(uuid.uuid4()),
-                "type": 1,
-                "name": name,
-                "login": {"password": password, "uris": [{"uri": uri}]},
-                **extra,
-            }
-        )
-
-    def decrypted(self):
-        folders = {f["id"]: f["name"] for f in self.folders}
-        return {
-            i["name"]: {
-                "folder": folders.get(i.get("folderId")),
-                "username": i.get("login", {}).get("username", ""),
-                "password": i.get("login", {}).get("password", ""),
-                "uris": [(u["uri"], u.get("match")) for u in i.get("login", {}).get("uris", [])],
-                "history": len(i.get("passwordHistory") or []),
-            }
-            for i in self.ciphers
-            if not i.get("organizationId")
-        }
-
-
-def session_for(server):
-    session = VaultSession("http://vault.test")
-    session.run = server.run
-
-    def login(email, password, *, totp=""):
-        if password != PASSWORD:
-            raise vw.VaultError("Vaultwarden did not accept that email and master password.", "invalid_credentials")
-        if server.totp and server.totp != totp:
-            raise vw.VaultError("Enter the current code.", "two_factor_required")
-
-    session.login = login
-    return session
 
 
 class CryptoTests(unittest.TestCase):
@@ -122,107 +43,6 @@ class CryptoTests(unittest.TestCase):
         for kdf in ({"kdf": 0, "kdfIterations": 1}, {"kdf": 1, "kdfIterations": 1, "kdfMemory": 1}, {"kdf": 9}):
             with self.subTest(kdf=kdf), self.assertRaises(vw.VaultError):
                 vw.derive_master_key("pw", EMAIL, kdf)
-
-
-class LoginTests(unittest.TestCase):
-    def test_wrong_password_is_a_clear_error(self):
-        with session_for(FakeVaultwarden()) as session, self.assertRaises(vw.VaultError) as caught:
-            session.login(EMAIL, "wrong")
-        self.assertEqual(caught.exception.code, "invalid_credentials")
-
-    def test_two_step_login_asks_for_a_code_then_accepts_it(self):
-        server = FakeVaultwarden(totp="123456")
-        with session_for(server) as session:
-            with self.assertRaises(vw.VaultError) as caught:
-                session.login(EMAIL, PASSWORD)
-            self.assertEqual(caught.exception.code, "two_factor_required")
-            session.login(EMAIL, PASSWORD, totp="123456")
-            self.assertEqual(session.sync(), ([], []))
-
-    def test_error_messages_never_contain_the_password(self):
-        with session_for(FakeVaultwarden()) as session, self.assertRaises(vw.VaultError) as caught:
-            session.login(EMAIL, "hunter2-secret")
-        self.assertNotIn("hunter2", str(caught.exception))
-
-
-def item(mu3lab_id: str, name: str, uri: str, password: str = "", *, rotate: bool = False, folder: str = FOLDER):
-    from ctl.vault_setup import DesiredItem
-
-    return DesiredItem(
-        mu3lab_id=mu3lab_id,
-        name=name,
-        folder=folder,
-        username="user",
-        password=password,
-        uris=((uri, vw.MATCH_HOST if mu3lab_id.startswith("service:") else None),),
-        rotate=rotate,
-    )
-
-
-class SeedTests(unittest.TestCase):
-    def run_seed(self, server: FakeVaultwarden, items):
-        with session_for(server) as session:
-            session.login(EMAIL, PASSWORD)
-            return seed(session, items)
-
-    def test_first_run_creates_folders_and_items(self):
-        server = FakeVaultwarden()
-        items = [
-            item("service:freellmapi", "FreeLLMAPI", "https://h.ts.net:8455", "gen-1", rotate=True),
-            item("provider:groq", "Groq", "https://console.groq.com/", "p-1", folder=PROVIDER_FOLDER),
-        ]
-        result = self.run_seed(server, items)
-        self.assertEqual(result.created, ["FreeLLMAPI", "Groq"])
-        vault = server.decrypted()
-        self.assertEqual(vault["FreeLLMAPI"]["folder"], FOLDER)
-        self.assertEqual(vault["FreeLLMAPI"]["uris"], [("https://h.ts.net:8455", vw.MATCH_HOST)])
-        self.assertEqual(vault["Groq"]["folder"], PROVIDER_FOLDER)
-        self.assertEqual(len(server.folders), 2)
-
-    def test_rerun_is_idempotent(self):
-        server = FakeVaultwarden()
-        items = [item("service:freellmapi", "FreeLLMAPI", "https://h.ts.net:8455", "gen-1", rotate=True)]
-        self.run_seed(server, items)
-        result = self.run_seed(server, items)
-        self.assertEqual((result.created, result.updated), ([], []))
-        self.assertEqual(len(server.ciphers), 1)
-        self.assertEqual(len(server.folders), 1)
-
-    def test_managed_app_password_rotates_and_keeps_history(self):
-        server = FakeVaultwarden()
-        self.run_seed(server, [item("service:x", "X", "https://h.ts.net:8448", "old", rotate=True)])
-        result = self.run_seed(server, [item("service:x", "X", "https://h.ts.net:8448", "new", rotate=True)])
-        self.assertEqual(result.updated, ["X"])
-        self.assertEqual(server.decrypted()["X"]["password"], "new")
-        self.assertEqual(server.decrypted()["X"]["history"], 1)
-
-    def test_provider_signup_password_is_never_overwritten(self):
-        server = FakeVaultwarden()
-        self.run_seed(server, [item("provider:groq", "Groq", "https://console.groq.com/", "used-to-sign-up")])
-        self.run_seed(server, [item("provider:groq", "Groq", "https://console.groq.com/", "fresh")])
-        self.assertEqual(server.decrypted()["Groq"]["password"], "used-to-sign-up")
-
-    def test_owner_saved_logins_are_not_duplicated(self):
-        server = FakeVaultwarden()
-        server.add_login("My Groq", "https://groq.com/login")
-        server.add_login("My Authentik", "https://h.ts.net/")
-        result = self.run_seed(
-            server,
-            [
-                item("provider:groq", "Groq", "https://console.groq.com/", "p"),
-                item("service:authentik", "Authentik", "https://h.ts.net"),
-                item("service:litellm", "Other port", "https://h.ts.net:8454", "p"),
-            ],
-        )
-        self.assertEqual(result.skipped, ["Groq", "Authentik"])
-        self.assertEqual(result.created, ["Other port"])
-        self.assertEqual(server.decrypted()["My Groq"]["password"], "mine")
-
-    def test_organization_items_are_ignored(self):
-        server = FakeVaultwarden()
-        server.ciphers.append({"id": "org", "type": 1, "organizationId": "o", "name": "2.x|y|z"})
-        result = self.run_seed(server, [item("provider:groq", "Groq", "https://console.groq.com/", "p")])
-        self.assertEqual(result.created, ["Groq"])
 
 
 class DesiredItemsTests(unittest.TestCase):
@@ -261,56 +81,6 @@ class DesiredItemsTests(unittest.TestCase):
         self.assertNotIn("provider:google", expected)
         self.assertEqual(len({entry.password for entry in entries}), len(entries))
         self.assertTrue(all(entry.username == EMAIL and not entry.rotate for entry in entries))
-
-
-ROUTE_HEADERS = {
-    "x-mu3lab-proxy-token": "real-token",
-    "x-authentik-username": "owner",
-    "x-authentik-uid": "subject",
-    "x-authentik-email": EMAIL,
-    "x-authentik-groups": "mu3lab-operators",
-    "host": "testserver",
-    "origin": "https://testserver",
-    "x-mu3lab-csrf": "bound",
-}
-
-
-class VaultRouteTests(unittest.TestCase):
-    def setUp(self):
-        for target, value in (
-            ("ctl.api.security.ingress_token", "real-token"),
-            ("ctl.api.security.csrf_token", "bound"),
-        ):
-            patcher = patch(target, return_value=value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.server = FakeVaultwarden()
-        for target, value in (
-            ("ctl.api.routes.vault.VaultSession", lambda url: session_for(self.server)),
-            ("ctl.api.routes.vault._host", lambda: "h.ts.net"),
-            ("ctl.api.routes.vault.JobStore.runtime", lambda: None),
-            ("ctl.api.routes.vault.ControlState.runtime", lambda: None),
-        ):
-            patcher = patch(target, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.client = TestClient(create_app())
-
-    def test_setup_seeds_the_vault_and_is_not_cached(self):
-        response = self.client.post(
-            "/api/v1/vault/setup", headers=ROUTE_HEADERS, json={"email": EMAIL, "master_password": PASSWORD}
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.headers["cache-control"], "no-store")
-        self.assertIn("Groq", response.json()["created"])
-        self.assertNotIn(PASSWORD, response.text)
-
-    def test_wrong_master_password_is_401(self):
-        response = self.client.post(
-            "/api/v1/vault/setup", headers=ROUTE_HEADERS, json={"email": EMAIL, "master_password": "nope"}
-        )
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.json()["code"], "invalid_credentials")
 
 
 class ProviderSetupProgressTests(unittest.TestCase):

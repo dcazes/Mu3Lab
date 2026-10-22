@@ -41,10 +41,10 @@ class CatalogContractTests(unittest.TestCase):
         self.assertGreater(len(catalog.load(self.apps).apps), 20)
 
     def test_a_malformed_or_missing_digest_is_refused(self):
-        compose = "apps/speaches/docker-compose.yml"
+        compose = "apps/speech/docker-compose.yml"
         image = next(iter(catalog.compose_images(self.root / compose).values()))
         self.edit(compose, image, image[:-1])  # 63 hex characters
-        self.refused("speaches.*sha256 digest")
+        self.refused("speech.*sha256 digest")
 
     def test_a_connector_image_that_is_neither_built_nor_pinned_is_refused(self):
         compose = "apps/immich/connectors/immich-photo-manager/docker-compose.yml"
@@ -53,26 +53,26 @@ class CatalogContractTests(unittest.TestCase):
         self.refused("immich-photo-manager.*sha256 digest")
 
     def test_an_app_port_used_by_a_connector_is_refused(self):
-        self.edit("apps/speaches/app.yaml", "local_port: 8092", "local_port: 8814")
-        self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:8814:")
+        self.edit("apps/speech/app.yaml", "local_port: 8092", "local_port: 8814")
+        self.edit("apps/speech/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:8814:")
         self.refused("both use port 8814")
 
     def test_an_app_port_used_by_another_apps_caddy_listener_is_refused(self):
-        self.edit("apps/speaches/app.yaml", "local_port: 8092", "local_port: 19467")
-        self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:19467:")
+        self.edit("apps/speech/app.yaml", "local_port: 8092", "local_port: 19467")
+        self.edit("apps/speech/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:19467:")
         self.refused("both use port 19467")
 
     def test_the_dashboards_port_is_reserved(self):
-        self.edit("apps/speaches/app.yaml", "local_port: 8092", "local_port: 8787")
-        self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:8787:")
+        self.edit("apps/speech/app.yaml", "local_port: 8092", "local_port: 8787")
+        self.edit("apps/speech/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:8787:")
         self.refused("dashboard")
 
     def test_a_compose_port_that_differs_from_the_manifest_is_refused(self):
-        self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:2323:")
+        self.edit("apps/speech/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:2323:")
         self.refused("publishes port 2323, but service.local_port is 8092")
 
     def test_a_port_open_beyond_loopback_is_refused(self):
-        self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:8000", "8092:8000")
+        self.edit("apps/speech/docker-compose.yml", "127.0.0.1:8092:8000", "8092:8000")
         self.refused("127.0.0.1 only")
 
     def test_a_connector_whose_port_differs_from_its_health_check_is_refused(self):
@@ -81,9 +81,9 @@ class CatalogContractTests(unittest.TestCase):
 
     def test_a_changed_compose_file_is_seen_by_the_cached_catalog(self):
         self.assertTrue(catalog.cached(self.apps))
-        self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:2323:")
+        self.edit("apps/speech/docker-compose.yml", "127.0.0.1:8092:", "127.0.0.1:2323:")
         later = time.time() + 5
-        os.utime(self.apps / "speaches/docker-compose.yml", (later, later))
+        os.utime(self.apps / "speech/docker-compose.yml", (later, later))
         with self.assertRaises(catalog.CatalogError):
             catalog.cached(self.apps)
 

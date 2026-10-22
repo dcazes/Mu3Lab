@@ -11,7 +11,9 @@ deleting it and rendering again reproduces it (R16).
 
 Every output is computed before any is written, and each is published
 privately (0600 from its first byte) and atomically. Rendering holds the
-app's resource lock. Nothing here talks to Docker or another app.
+app's resource lock. Nothing here changes Docker or another app; the one
+thing it asks Docker (the connector networks ContextForge may reach) is
+read-only.
 """
 
 from __future__ import annotations
@@ -188,6 +190,13 @@ class Facts:
 
         return tailnet_ip()
 
+    @cached_property
+    def connector_networks(self) -> str:
+        """Asked of Docker once per render, and only by an app whose settings name it (ContextForge)."""
+        from ctl.service_state import connector_networks
+
+        return connector_networks()
+
 
 def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
     """Resolve ``{{name}}`` for this app; None for names that cannot be known yet."""
@@ -195,6 +204,8 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
     def lookup(name: str) -> str | None:
         if name == "tailnet_ip":
             return facts.tailnet_ip or None
+        if name == "connector_networks":
+            return facts.connector_networks or None
         if name.startswith("route_url:"):
             return facts.route_url(app, name.split(":", 1)[1]) or None
         if name.startswith("app:"):

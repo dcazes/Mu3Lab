@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_attention"]
+DisplayState = Literal["running", "stopped", "working", "checking", "not_installed", "needs_setup", "needs_attention"]
 WORKING = frozenset({"queued", "installing", "starting", "verifying", "uninstalling", "updating"})
 
 
@@ -19,6 +19,9 @@ def projection(item: dict) -> dict:
         display = "checking"
     elif state == "stopped":
         display = "stopped"
+    elif state == "setup_required":
+        # Installed and stopped until the owner makes a choice; "detail" says what to open.
+        display = "needs_setup"
     elif state in {"planned", "not_installed"}:
         display = "not_installed"
     else:

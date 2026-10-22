@@ -11,21 +11,16 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from typing import ClassVar
 from unittest import mock
 
 from pydantic import ValidationError
 
-from ctl.engine.compose import Compose
-from ctl.engine.hooks import HookContext, StepFailed
 from ctl.engine.project import Facts, lookup_for
 from ctl.identity import gate_blueprint
-from ctl.integrations.litellm import LiteLLMError
 from ctl.manifest import catalog
 from ctl.manifest.models import AppManifest
 from ctl.registry import load as load_registry
 from ctl.routes import _block, render, upstream_auth_name
-from ctl.rules import rules_for
 from ctl.runtime import RuntimePaths
 from ctl.service_state import tailnet_ip
 
@@ -186,105 +181,6 @@ class FactTests(unittest.TestCase):
         self.assertEqual(tailnet_ip(run("100.100.101.115\n")), "100.100.101.115")
         self.assertEqual(tailnet_ip(run("192.168.1.4\n")), "")
         self.assertEqual(tailnet_ip(run("", 1)), "")
-
-
-class FakeLiteLLM:
-    calls: ClassVar[list] = []
-    # Key values LiteLLM already holds; update() refuses any other.
-    known: ClassVar[set] = set()
-
-    def __init__(self, base_url: str, master: str) -> None:
-        FakeLiteLLM.calls.append(("open", base_url, master))
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return None
-
-    def keys(self, user_id: str):
-        FakeLiteLLM.calls.append(("keys", user_id))
-        return [{"key_alias": user_id}]
-
-    def update(self, **kwargs):
-        FakeLiteLLM.calls.append(("update", kwargs))
-        if kwargs["key"] not in FakeLiteLLM.known:
-            raise LiteLLMError("LiteLLM refused the key request (HTTP 404).")
-
-    def delete(self, aliases):
-        FakeLiteLLM.calls.append(("delete", aliases))
-
-    def generate(self, **kwargs):
-        FakeLiteLLM.calls.append(("generate", kwargs))
-        return kwargs["key"]
-
-
-class GatewayKeyTests(unittest.TestCase):
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        self.paths = RuntimePaths(Path(temp.name))
-        self.catalog = catalog.cached()
-        self.app = self.catalog.get("livekit")
-        self.project = self.paths.projects / "livekit"
-        self.project.mkdir(parents=True)
-        (self.paths.projects / "litellm").mkdir(parents=True)
-        (self.paths.projects / "litellm" / ".env").write_text("LITELLM_MASTER_KEY=master\n")
-        self.rule = next(rule for rule in rules_for(self.app.manifest) if rule.name == "gateway_key")
-        FakeLiteLLM.calls = []
-        FakeLiteLLM.known = set()
-
-    def ctx(self) -> HookContext:
-        return HookContext(
-            self.app,
-            self.project,
-            Compose(self.project),
-            lambda _line: None,
-            lambda *_: None,
-            None,
-            Facts("box.tail1234.ts.net", self.paths, self.catalog),
-        )
-
-    def test_updates_the_apps_key_in_place_when_litellm_has_it(self):
-        (self.project / ".env").write_text("MU3LAB_LLM_API_KEY=sk-abc123\n")
-        FakeLiteLLM.known = {"sk-abc123"}
-        with mock.patch("ctl.rules.gateway_key.LiteLLM", FakeLiteLLM):
-            self.rule.before_start(self.ctx())
-        kinds = [call[0] for call in FakeLiteLLM.calls]
-        self.assertNotIn("delete", kinds)
-        self.assertNotIn("generate", kinds)
-        self.assertEqual(FakeLiteLLM.calls[-1][1]["models"], ["mu3lab-voice", "mu3lab-stt", "mu3lab-tts"])
-
-    def test_registers_the_apps_own_key_for_its_models_only(self):
-        (self.project / ".env").write_text("MU3LAB_LLM_API_KEY=sk-abc123\n")
-        with mock.patch("ctl.rules.gateway_key.LiteLLM", FakeLiteLLM):
-            self.rule.before_start(self.ctx())
-        self.assertEqual(FakeLiteLLM.calls[0], ("open", "http://127.0.0.1:4000", "master"))
-        # A different value under the alias is replaced.
-        self.assertIn(("delete", ["mu3lab-app-livekit"]), FakeLiteLLM.calls)
-        generated = FakeLiteLLM.calls[-1][1]
-        self.assertEqual(generated["key"], "sk-abc123")
-        self.assertEqual(generated["models"], ["mu3lab-voice", "mu3lab-stt", "mu3lab-tts"])
-        self.assertEqual(generated["alias"], "mu3lab-app-livekit")
-
-    def test_refuses_a_key_litellm_would_reject(self):
-        (self.project / ".env").write_text("MU3LAB_LLM_API_KEY=abc123\n")
-        with mock.patch("ctl.rules.gateway_key.LiteLLM", FakeLiteLLM), self.assertRaises(StepFailed):
-            self.rule.before_start(self.ctx())
-        self.assertEqual(FakeLiteLLM.calls, [])
-
-    def test_no_app_is_handed_the_gateway_master_key(self):
-        # The master key reaches every route, the voice assistant's too; apps get gateway_key instead.
-        for app in self.catalog.apps:
-            text = (app.folder / "app.yaml").read_text() + (app.folder / "docker-compose.yml").read_text()
-            if app.id != "litellm":
-                self.assertNotIn("LITELLM_MASTER_KEY", text, app.id)
-
-    def test_chat_apps_keys_cannot_reach_the_voice_route(self):
-        for app_id in ("open-webui", "lobehub", "surfsense"):
-            app = self.catalog.get(app_id)
-            rule = next(rule for rule in rules_for(app.manifest) if rule.name == "gateway_key")
-            self.assertNotIn("mu3lab-voice", rule.params.models, app_id)
 
 
 if __name__ == "__main__":

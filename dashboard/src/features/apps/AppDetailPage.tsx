@@ -1,22 +1,24 @@
 import { AlertTriangle, Cpu, KeyRound, Plug, UserPlus } from 'lucide-react';
 import { useState } from 'react';
-import { postJsonApi, type Service } from '../../api';
+import { type AppSizesResponse, postJsonApi, type Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button, ExternalButton, LinkButton } from '../../components/Button';
 import { Callout, Card, Facts, PageHeader, Tabs } from '../../components/Layout';
 import { Menu } from '../../components/Menu';
 import { Badge, Dot, StatusBadge } from '../../components/Status';
 import { CopyField } from '../../components/CopyField';
-import { humanize, relativeTime } from '../../lib/format';
+import { bytes, humanize, relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { Link } from '../../lib/router';
-import { isInstalled, isRunning, launchTarget, requiredChecks, signInSummary } from '../../lib/services';
+import { isInstalled, isRunning, launchTarget } from '../../lib/services';
+import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
 import { connectorsFor, useMcpRegistry } from '../integrations/mcp';
 import { AdvancedTab } from './AdvancedTab';
 import { ConfigurationForm } from './ConfigurationForm';
 import { DevicesSection } from './DevicesSection';
+import { sizeLabel } from './InstallPlanDialog';
 import { JobProgress } from './JobProgress';
 import { UninstallDialog } from './UninstallDialog';
 import { ACTIONS, type ServiceAction, useServiceActions } from './useServiceActions';
@@ -117,6 +119,13 @@ function NextSteps({ service }: { service: Service }) {
       </Callout>,
     );
 
+  if (service.display_state === 'needs_setup')
+    steps.push(
+      <Callout key="setup" tone="warning" title={`Finish setting up ${service.name}`}>
+        {service.detail} It stays stopped until then.
+      </Callout>,
+    );
+
   if (
     service.display_state === 'needs_attention' &&
     !service.installed &&
@@ -180,7 +189,6 @@ function NextSteps({ service }: { service: Service }) {
 function Overview({ service, address, devices }: { service: Service; address: string; devices: boolean }) {
   const { data } = useDashboard();
   const info = data.catalog.services[service.id];
-  const signIn = signInSummary(service);
   const summary = info?.summary || service.detail;
   const note = service.identity_note && service.identity_note !== summary ? service.identity_note : '';
   const dependencies = service.dependencies
@@ -195,23 +203,6 @@ function Overview({ service, address, devices }: { service: Service; address: st
         <Facts
           items={[
             { label: 'Status', value: <StatusBadge state={service.display_state} /> },
-            {
-              label: 'Sign-in',
-              value: (
-                <span className="inline">
-                  <Dot tone={signIn.tone} />
-                  {signIn.label}
-                  {service.identity &&
-                    service.identity.state !== 'ready' &&
-                    service.identity.state !== 'unsupported' && (
-                      <span className="muted">· {humanize(service.identity.state)}</span>
-                    )}
-                </span>
-              ),
-            },
-            ...(isInstalled(service) && requiredChecks(service).length
-              ? [{ label: 'Checks', value: <Checks service={service} /> }]
-              : []),
             // With a devices section below, its server address card carries the address.
             ...(address && !devices
               ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }]
@@ -247,7 +238,7 @@ function Overview({ service, address, devices }: { service: Service; address: st
                   },
                 ]
               : []),
-            ...(info?.resource_guidance ? [{ label: 'Resources', value: info.resource_guidance }] : []),
+            { label: 'Resources', value: <Resources service={service} /> },
           ]}
         />
       </Card>
@@ -275,20 +266,23 @@ function Parts({ service }: { service: Service }) {
   );
 }
 
-function Checks({ service }: { service: Service }) {
+/** What the app uses now, or what installing it takes. */
+function Resources({ service }: { service: Service }) {
+  const { data } = useDashboard();
+  const installed = isInstalled(service);
+  const size = useApi<AppSizesResponse>(installed ? null : `/api/v1/app-sizes?ids=${encodeURIComponent(service.id)}`, {
+    interval: (sizes) => (sizes && sizes.measured ? 0 : 10000),
+  }).data?.apps?.[service.id];
+  if (!installed) return <>{sizeLabel(size)}</>;
+  const system = data.system;
+  const disk = system.disk_usage?.owners?.[service.id];
+  const graphics = system.gpu?.by_owner?.[service.id];
   return (
-    <ul className="check-list">
-      {requiredChecks(service).map((check) => (
-        <li key={check.name} className="inline wrap">
-          <Dot tone={check.tone} />
-          {check.label}
-          <span className="muted">
-            · {humanize(check.state === 'pass' ? 'OK' : check.state)}
-            {check.state !== 'pass' && check.last_success_at && `, last OK ${relativeTime(check.last_success_at)}`}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <span className="inline wrap">
+      Memory {bytes(system.memory_by_owner?.[service.id] || 0)}
+      {graphics ? ` · Graphics memory ${bytes(graphics)}` : ''}
+      {system.disk_usage ? ` · Disk ${bytes((disk?.data || 0) + (disk?.program || 0))}` : ''}
+    </span>
   );
 }
 
@@ -344,7 +338,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
         <McpPanel server={mcp} connectors={connectors} appName={service.name} reload={() => void registry.reload()} />
       )}
       {active === 'settings' && <ConfigurationForm service={service} />}
-      {active === 'advanced' && <AdvancedTab service={service} />}
+      {active === 'advanced' && <AdvancedTab service={service} mcp={mcp} reloadMcp={() => void registry.reload()} />}
     </div>
   );
 }

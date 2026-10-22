@@ -243,6 +243,8 @@ class Oidc(Model):
     env: OidcEnv
     first_run_checks: tuple[FirstRunCheck, ...] = ()
     initial_owner_env: str = ""  # env var holding the only username allowed on first sign-in
+    # The app passes each person's Authentik access token on to ContextForge (Open WebUI's tool calls).
+    forwards_sign_in: bool = False
 
     @model_validator(mode="after")
     def _launch_details(self) -> Oidc:

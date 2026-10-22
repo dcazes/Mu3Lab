@@ -237,7 +237,7 @@ describe('Get started', () => {
     expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
   });
 
-  it('saves logins by itself and only asks the owner when saving is stuck', async () => {
+  it('leaves the vault out of Get started even when saving logins is stuck', async () => {
     const { HomePage } = await import('../home/HomePage');
     const base = api(false, [connection('groq', 'Groq')]);
     stubFetch((path) => {
@@ -247,9 +247,8 @@ describe('Get started', () => {
         : body;
     });
     renderWithDashboard(<HomePage />, dashboardData([]));
-    expect(
-      await screen.findByRole('link', { name: /Check why your app logins are not being saved/ }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    expect(screen.queryByText(/app logins are not being saved/)).not.toBeInTheDocument();
   });
 
   it('has no vault step while logins are being saved automatically', async () => {

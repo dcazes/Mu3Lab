@@ -16,6 +16,7 @@ export const stateLabel: Record<Service['display_state'], string> = {
   working: 'Working',
   checking: 'Checking',
   not_installed: 'Not installed',
+  needs_setup: 'Needs setup',
   needs_attention: 'Needs attention',
 };
 
@@ -24,10 +25,11 @@ export function stateTone(state: string): Tone {
     (
       {
         running: 'green',
-        stopped: 'gray',
+        stopped: 'red',
         working: 'blue',
         checking: 'blue',
         not_installed: 'gray',
+        needs_setup: 'amber',
         needs_attention: 'red',
       } as Record<string, Tone>
     )[state] || 'gray'
@@ -45,6 +47,18 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'ai', label: 'AI & voice' },
   { id: 'system', label: 'Backups & system' },
 ];
+
+/** Apps grouped into Discover's sections, in order; an unknown category still shows, last. */
+export function appSections(services: Service[]) {
+  return [
+    ...CATEGORIES,
+    ...[...new Set(services.map((service) => service.category))]
+      .filter((id) => !CATEGORIES.some((item) => item.id === id))
+      .map((id) => ({ id, label: categoryLabel(id) })),
+  ]
+    .map((category) => ({ ...category, apps: services.filter((service) => service.category === category.id) }))
+    .filter((category) => category.apps.length > 0);
+}
 
 export function categoryLabel(category: string) {
   if (!category) return '';
@@ -74,7 +88,8 @@ export interface LaunchTarget {
 
 /** Where "Open" should take the user, or null when the app has nothing to open right now. */
 export function launchTarget(service: Service): LaunchTarget | null {
-  if (service.display_state === 'stopped' || !isInstalled(service)) return null;
+  if (service.display_state === 'stopped' || service.display_state === 'needs_setup' || !isInstalled(service))
+    return null;
   const identity = service.identity;
   const ui = service.ui;
   const routeUrl = ui?.state === 'ready' && ui.url ? ui.url : '';

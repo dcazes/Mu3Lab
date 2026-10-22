@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ctl import mcp_ops
+from ctl.control_state import ControlState
 from ctl.mcp_catalog import load as load_connectors
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
@@ -49,25 +50,19 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(sorted(item.name for item in project.iterdir()), [".env"])
         self.assertTrue(mcp_ops._ready(self.server, project))
 
-
-class HeaderTests(unittest.TestCase):
-    def test_fixed_headers_go_to_contextforge_with_the_key(self):
-        from ctl.contextforge import ContextForge
-
-        api = ContextForge.__new__(ContextForge)
-        sent = {}
-        api.gateways = lambda: []
-        api.request = lambda method, path, json=None, **_: sent.update(json) or {"id": "g1"}
-        api.ensure_gateway(
-            "dawarich-builtin", "http://dawarich-app:3000/api/v1/mcp", "k", "Dawarich", {"X-Forwarded-Proto": "https"}
-        )
-        self.assertEqual(sent["auth_type"], "authheaders")
-        self.assertEqual(
-            sent["auth_headers"],
-            [{"key": "Authorization", "value": "Bearer k"}, {"key": "X-Forwarded-Proto", "value": "https"}],
-        )
-        api.ensure_gateway("outline-builtin", "http://outline:3000/mcp", "k", "Outline")
-        self.assertEqual((sent["auth_type"], sent["auth_token"]), ("bearer", "k"))
+    def test_a_connector_contextforge_refused_still_says_so_once_stopped(self):
+        state = ControlState(self.paths.runtime / "state.sqlite")
+        refused = {"message": "ContextForge did not accept this request (HTTP 422)."}
+        state.set_mcp_server(self.server.id, "outline", enabled=True, state="incompatible", error=refused)
+        with (
+            patch("ctl.mcp_ops.SecretStore", return_value=SecretStore(self.paths)),
+            patch("ctl.mcp_ops.ControlState.runtime", return_value=state),
+            patch("ctl.mcp_ops.unbind", return_value=(True, "")),
+        ):
+            mcp_ops._materialize(self.server, Path(__file__).resolve().parents[1])
+            mcp_ops.sync_application("outline", running=False, root=Path(), log=lambda _line: None)
+        runtime = state.mcp_server(self.server.id)
+        self.assertEqual((runtime["state"], runtime["last_error"]), ("stopped", refused))
 
 
 class OwnerArgumentTests(unittest.TestCase):

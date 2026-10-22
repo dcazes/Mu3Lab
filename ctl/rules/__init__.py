@@ -7,6 +7,8 @@ in this order:
 
 ``prepare_env``  while the project's private settings are generated
 ``before_start`` checks that must pass before any container starts
+``setup_check``  choices the owner must make before the app is used; an app
+                 still waiting for one installs but stays stopped (``ctl.setup_checks``)
 ``plan_start``   how the containers start the first time
 ``after_start``  setup steps once the containers run
 ``after_healthy`` setup steps once the app answers its health check
@@ -57,6 +59,10 @@ class Rule:
         return None
 
     def before_start(self, ctx: HookContext) -> None:
+        return None
+
+    def setup_check(self, ctx: HookContext) -> None:
+        """Call ``ctx.needs_setup`` with a sentence saying what to open when the app cannot be used yet."""
         return None
 
     def plan_start(self, ctx: HookContext, plan: StartPlan) -> None:
@@ -125,6 +131,7 @@ def _load_all() -> None:
         gateway_key,
         hide_model_providers,
         initial_owner_guard,
+        needs_chat_model,
         needs_embedding_model,
         needs_voice_model,
         password_login_off_after_setup,
