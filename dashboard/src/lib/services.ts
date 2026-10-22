@@ -25,7 +25,7 @@ export function stateTone(state: string): Tone {
     (
       {
         running: 'green',
-        stopped: 'gray',
+        stopped: 'red',
         working: 'blue',
         checking: 'blue',
         not_installed: 'gray',
@@ -47,6 +47,18 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'ai', label: 'AI & voice' },
   { id: 'system', label: 'Backups & system' },
 ];
+
+/** Apps grouped into Discover's sections, in order; an unknown category still shows, last. */
+export function appSections(services: Service[]) {
+  return [
+    ...CATEGORIES,
+    ...[...new Set(services.map((service) => service.category))]
+      .filter((id) => !CATEGORIES.some((item) => item.id === id))
+      .map((id) => ({ id, label: categoryLabel(id) })),
+  ]
+    .map((category) => ({ ...category, apps: services.filter((service) => service.category === category.id) }))
+    .filter((category) => category.apps.length > 0);
+}
 
 export function categoryLabel(category: string) {
   if (!category) return '';

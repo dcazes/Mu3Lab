@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('opens a quick panel for each everyday app, with Open and its controls', () => {
+  it('opens a quick panel for every installed app, grouped by category, with Open and its controls', () => {
     stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
@@ -34,10 +34,18 @@ describe('Home', () => {
       identity: identity(),
       allowed_actions: ['start'],
     });
-    const ollama = service('ollama', 'Ollama', 'core');
+    const ollama = service('ollama', 'Ollama', 'core', { category: 'ai' });
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    const launcher = screen.getByRole('region', { name: 'Your apps' });
-    expect(within(launcher).queryByText('Ollama')).not.toBeInTheDocument();
+    // AI and infrastructure apps show too, each under its Discover section.
+    expect(screen.getByRole('button', { name: /AI & voice/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
+    // A folded section keeps its apps as icons.
+    fireEvent.click(screen.getByRole('button', { name: /AI & voice/ }));
+    expect(screen.getByRole('button', { name: /AI & voice/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
+    fireEvent.click(screen.getByRole('button', { name: /AI & voice/ }));
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).not.toHaveAttribute('title');
 
     fireEvent.click(screen.getByRole('button', { name: 'Immich: Running' }));
     let panel = screen.getByRole('dialog', { name: 'Immich' });

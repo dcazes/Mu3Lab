@@ -277,17 +277,74 @@
   opacity: 0.7;
 }
 
-.tile-add {
-  border-style: dashed;
-  box-shadow: none;
-  background: transparent;
-  color: var(--text-2);
+.launcher-group + .launcher-group {
+  margin-top: 14px;
 }
 
-.tile-add .app-icon {
-  --icon-color: var(--text-3);
-  background: var(--surface-2);
-  border-style: dashed;
+.launcher-group h3 {
+  margin: 0 0 8px;
+  font-size: inherit;
+}
+
+.launcher-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.launcher-toggle:hover {
+  color: var(--text);
+}
+
+.launcher-toggle svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.14s;
+}
+
+.is-folded .launcher-toggle svg {
+  transform: rotate(-90deg);
+}
+
+.launcher-count {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.launcher-mini {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mini-tile {
+  position: relative;
+  display: inline-flex;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.mini-tile:hover {
+  border-color: var(--border-strong);
+}
+
+.mini-tile .dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
 }
 
 .status-strip {
@@ -388,11 +445,6 @@
 }
 
 /* With graphics memory there are four: two by two, so the card does not grow so tall. */
-.donuts-four {
-  display: grid;
-  grid-template-columns: repeat(2, auto);
-  gap: 18px 16px;
-}
 
 .resources-list {
   display: flex;
@@ -601,8 +653,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .donuts,
-  .donuts-four {
+  .donuts {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;

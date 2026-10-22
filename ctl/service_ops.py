@@ -17,7 +17,7 @@ from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
 from ctl.engine.project import Facts
 from ctl.engine.rewire import rewire_consumers
-from ctl.jobs import JobStore
+from ctl.jobs import JobStore, redact
 from ctl.lifecycle import app_control, compute_switch, maintenance
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
@@ -227,6 +227,63 @@ def _ready_to_start(
     return True
 
 
+def _start_needed_apps(
+    store: JobStore,
+    state: ControlState | None,
+    job: dict,
+    service: Service,
+    registry: Registry,
+    actor: str,
+    root: Path,
+) -> bool:
+    """Start the stopped catalog apps this one needs (theirs first), so the voice assistant brings up Speech.
+
+    Core apps run by themselves; an app that is not installed is the install batch's job. A failure
+    ends the job with the needed app named and leaves this app's own state as it was.
+    """
+    job_id = str(job["id"])
+    seen: set[str] = set()
+
+    def needed(current: Service) -> list[Service]:
+        found: list[Service] = []
+        for dependency_id in current.dependencies:
+            if dependency_id in seen:
+                continue
+            seen.add(dependency_id)
+            try:
+                dependency = registry.get(dependency_id)
+            except RegistryError:
+                continue
+            found += needed(dependency)
+            record = state.installation(dependency.id) if state else None
+            if dependency.stage == "optional" and record and record["state"] == "stopped":
+                found.append(dependency)
+        return found
+
+    log = _job_log(store, job_id)
+    for dependency in needed(service):
+        _event(store, job_id, "start_dependencies", f"Starting {dependency.name}, which {service.name} needs.")
+        project = project_path(dependency, root)
+        rc, output = Compose(project, gpu_mode=app_mode(project, dependency.uses_gpu)).action("start", log)
+        healthy, detail = (False, output) if rc else wait_healthy(dependency)
+        if not healthy:
+            # The app itself keeps its state; the needed app is the one to look at.
+            store.transition(
+                job_id,
+                "failed",
+                actor=actor,
+                detail=redact(f"{dependency.name}, which {service.name} needs, did not start: {detail}"),
+                error_code="dependency_start_failed",
+                step_id="start_dependencies",
+            )
+            return False
+        if not sync_application(dependency.id, running=True, root=root, log=log):
+            log(f"One enabled MCP of {dependency.name} needs attention after its start.")
+        if state:
+            state.set_installation(dependency.id, "running", job_id=job_id, route_state="ready")
+    return True
+
+
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:
     job_id = str(job["id"])
     service_id = str(job.get("service_id") or "")
@@ -261,7 +318,8 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     if action in {"install", "retry_setup"}:
-        run_install(store, state, job, service, registry, actor, root)
+        if _start_needed_apps(store, state, job, service, registry, actor, root):
+            run_install(store, state, job, service, registry, actor, root)
         return
     if action in UNINSTALL_ACTIONS:
         _uninstall(store, state, job, service, registry, actor, root)
@@ -345,6 +403,8 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
         )
         return
     if action == "start" and not _ready_to_start(store, job, service, registry, actor, log):
+        return
+    if action in {"start", "restart"} and not _start_needed_apps(store, state, job, service, registry, actor, root):
         return
     compose = Compose(project, gpu_mode=app_mode(project, service.uses_gpu))
     rc, output = compose.action(action, log)

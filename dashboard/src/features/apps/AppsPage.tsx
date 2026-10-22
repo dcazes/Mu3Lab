@@ -1,4 +1,4 @@
-import { Check, ChevronRight, PackageSearch, Plus, Search } from 'lucide-react';
+import { ArrowUpCircle, Check, ChevronRight, PackageSearch, Plus, Search } from 'lucide-react';
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 import type { AppSize, AppSizesResponse, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
@@ -8,7 +8,7 @@ import { Badge, StatusBadge } from '../../components/Status';
 import { bytes } from '../../lib/format';
 import { Link } from '../../lib/router';
 import {
-  CATEGORIES,
+  appSections,
   canInstall,
   categoryLabel,
   type Group,
@@ -18,7 +18,8 @@ import {
   signInSummary,
 } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
-import { useDashboard } from '../../state/dashboard';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
+import { useApplyUpdate } from './AdvancedTab';
 import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
 import { activeJob, JobProgress } from './JobProgress';
@@ -58,7 +59,6 @@ function InstalledHeader() {
       <span>App</span>
       <span>Status</span>
       <span>Sign-in</span>
-      <span>Update</span>
       <span />
       <span />
     </div>
@@ -67,7 +67,11 @@ function InstalledHeader() {
 
 function InstalledRow({ service, summary }: { service: Service; summary: string }) {
   const target = launchTarget(service);
-  const signIn = signInSummary(service);
+  const isAdmin = useIsAdmin();
+  const update = useApplyUpdate(service);
+  const mode = service.identity?.mode;
+  const sso = mode === 'native_oidc' || mode === 'trusted_header';
+  const updatable = isAdmin && service.stage === 'optional' && service.update?.update_available;
   return (
     <div className="row installed-row">
       <Link to={`/apps/${service.id}`} className="row-main">
@@ -81,12 +85,21 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
         <StatusBadge state={service.display_state} />
       </span>
       <span className="installed-cell hide-mobile">
-        {service.identity && service.identity.mode !== 'none' && <Badge tone="gray">{signIn.label}</Badge>}
+        {mode && mode !== 'none' && (
+          <Badge tone={sso ? 'green' : 'red'}>{sso ? 'SSO' : signInSummary(service).label}</Badge>
+        )}
       </span>
-      <span className="installed-cell hide-mobile">
-        {service.update?.update_available && <Badge tone="blue">Update ready</Badge>}
-      </span>
-      <span className="installed-cell">
+      <span className="installed-cell installed-actions">
+        {updatable && (
+          <Button
+            size="sm"
+            icon={ArrowUpCircle}
+            loading={update.pending}
+            onClick={() => void update.run(service.update!)}
+          >
+            Update
+          </Button>
+        )}
         {/* Always "Open", so every button is the same width; the specific label is its tooltip. */}
         {target && (
           <ExternalButton size="sm" href={target.url} className="installed-open" title={target.label}>
@@ -212,15 +225,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const shown = (discover ? available : installed).filter((service) =>
     matches(service, term, catalog[service.id]?.summary),
   );
-  // Discover's sections in catalog order; an app with an unknown category still shows, last.
-  const sections = [
-    ...CATEGORIES,
-    ...[...new Set(shown.map((service) => service.category))]
-      .filter((id) => !CATEGORIES.some((item) => item.id === id))
-      .map((id) => ({ id, label: categoryLabel(id) })),
-  ]
-    .map((category) => ({ ...category, apps: shown.filter((service) => service.category === category.id) }))
-    .filter((category) => category.apps.length > 0);
+  const sections = appSections(shown);
   const names = (ids: string[]) => ids.map((id) => services.find((service) => service.id === id)?.name || id);
   const toggle = (id: string) =>
     setSelected(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);

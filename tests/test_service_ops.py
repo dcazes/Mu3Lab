@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ctl.control_state import ControlState
 from ctl.engine.hooks import SetupNeeded
 from ctl.jobs import JobStore
 from ctl.registry import load
@@ -124,6 +125,43 @@ class ServiceOperationTests(unittest.TestCase):
             self.assertEqual(verb, "start")
             final = next(item for item in store.jobs() if item["id"] == created["id"])
             self.assertEqual(final["state"], "succeeded")
+
+    def test_start_first_starts_the_stopped_apps_it_needs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = RuntimePaths(Path(tmp))
+            store = JobStore(paths.runtime / "control.sqlite")
+            state = ControlState(paths.runtime / "state.sqlite")
+            state.set_installation("speech", "stopped")
+            state.set_installation("livekit", "stopped")
+            for app in ("speech", "livekit"):
+                (paths.projects / app).mkdir(parents=True)
+                (paths.projects / app / "docker-compose.yml").write_text("services: {}")
+
+            def start(healthy):
+                created = store.create(kind="lifecycle", service_id="livekit", action="start", actor="owner")
+                claimed = store.claim("worker")
+                assert claimed is not None
+                with (
+                    runtime_paths(paths),
+                    patch("ctl.service_ops.ControlState.runtime", return_value=state),
+                    patch("ctl.service_ops.tailnet_dns_name", return_value="host.test"),
+                    patch("ctl.service_ops.setup_checks.first_missing", return_value=None),
+                    patch("ctl.service_ops.sync_application", return_value=True),
+                    patch("ctl.service_ops.actions.compose_action", return_value=(0, "started")) as action,
+                    patch("ctl.service_ops.wait_healthy", side_effect=healthy),
+                ):
+                    execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
+                return store.get(created["id"]), [call.args[0].name for call in action.call_args_list]
+
+            job, started = start(lambda service: (service.id != "speech", "not ready"))
+            self.assertEqual((job["state"], job["error_code"]), ("failed", "dependency_start_failed"))
+            self.assertIn("Speech", job["detail"])
+            self.assertEqual(started, ["speech"])
+            self.assertEqual(state.installation("livekit")["state"], "stopped")
+            job, started = start(lambda _service: (True, "HTTP 200"))
+            self.assertEqual(job["state"], "succeeded")
+            self.assertEqual(started, ["speech", "livekit"])
+            self.assertEqual(state.installation("speech")["state"], "running")
 
     def test_worker_rejects_unregistered_action(self):
         with tempfile.TemporaryDirectory() as tmp:
