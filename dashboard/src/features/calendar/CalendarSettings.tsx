@@ -11,6 +11,9 @@ import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 import { toast } from 'sonner';
 
+/** States a callout in the panel explains, with what to do. */
+const BLOCKED = ['service_stopped', 'sso_not_ready', 'authentication_expired'];
+
 /** Connecting a Nextcloud calendar; shown in a side panel on the Calendar page. */
 export function CalendarSettings() {
   const { data } = useDashboard();
@@ -90,7 +93,10 @@ export function CalendarSettings() {
         <div className="calendar-settings">
           <div className="calendar-settings-head">
             <h3>Nextcloud calendar</h3>
-            {connection.data && <StateBadge state={state === 'connected' ? 'connected' : state || 'unknown'} />}
+            {/* A problem below explains itself, so the badge shows only the plain states. */}
+            {connection.data && !BLOCKED.includes(state || '') && (
+              <StateBadge state={state === 'connected' ? 'connected' : state || 'unknown'} />
+            )}
           </div>
           <p className="muted">
             Choose one Nextcloud calendar to show and edit here. Mu3Lab keeps an encrypted app credential for it; you
@@ -100,7 +106,7 @@ export function CalendarSettings() {
             <Callout
               tone="warning"
               title="Nextcloud is stopped"
-              action={<LinkButton to="/apps/nextcloud">Open Nextcloud</LinkButton>}
+              action={<LinkButton to="/apps/nextcloud">Go to Nextcloud</LinkButton>}
             >
               Start it to connect the calendar.
             </Callout>
@@ -168,17 +174,15 @@ export function CalendarSettings() {
             </Callout>
           )}
           <div className="button-row">
-            {(!connected || state === 'authentication_expired') && !waiting && (
-              <Button
-                variant="primary"
-                icon={Link2}
-                loading={pending === 'connect'}
-                disabled={state === 'service_stopped' || state === 'sso_not_ready'}
-                onClick={() => void connect()}
-              >
-                {state === 'authentication_expired' ? 'Reconnect' : 'Connect calendar'}
-              </Button>
-            )}
+            {/* Nothing to press until the problem above is fixed. */}
+            {(!connected || state === 'authentication_expired') &&
+              !waiting &&
+              state !== 'service_stopped' &&
+              state !== 'sso_not_ready' && (
+                <Button variant="primary" icon={Link2} loading={pending === 'connect'} onClick={() => void connect()}>
+                  {state === 'authentication_expired' ? 'Reconnect' : 'Connect calendar'}
+                </Button>
+              )}
             {waiting && (
               <Button
                 onClick={async () => {

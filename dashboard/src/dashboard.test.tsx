@@ -765,8 +765,10 @@ describe('Calendar', () => {
         : undefined,
     );
     renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
-    expect(await screen.findByText('Planning')).toBeInTheDocument();
+    expect((await screen.findAllByText('Planning')).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Personal' })).toBeInTheDocument();
+    // What's next sits beside the month.
+    expect(screen.getByRole('complementary', { name: 'Coming up' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     expect(screen.getByRole('dialog', { name: 'New event' })).toBeInTheDocument();
   });
@@ -788,7 +790,8 @@ describe('Calendar', () => {
         : { ok: true, id: 'local-1' },
     );
     renderWithDashboard(<CalendarPage />, dashboardData([]));
-    expect(await screen.findByText(/Saved on Mu3Lab/)).toBeInTheDocument();
+    // Where events are kept is said once, in the page's description.
+    expect(await screen.findByText(/Kept privately on Mu3Lab/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Install Nextcloud' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     const dialog = screen.getByRole('dialog', { name: 'New event' });
