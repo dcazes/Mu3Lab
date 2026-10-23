@@ -66,8 +66,9 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
 
     session = AgentSession(
-        # Voice activity: local Silero model, so no LiveKit Cloud call.
-        vad=silero.VAD.load(),
+        # Voice activity: local Silero model, so no LiveKit Cloud call. A 0.3 s pause (default
+        # 0.55 s) ends speech sooner; the turn detector still waits when someone sounds unfinished.
+        vad=silero.VAD.load(min_silence_duration=0.3),
         stt=openai.STT(
             base_url=SPEECH_BASE_URL,
             api_key=SPEECH_API_KEY,
@@ -92,7 +93,8 @@ async def entrypoint(ctx: JobContext) -> None:
         # "v1" would call LiveKit's hosted gateway.
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
-            preemptive_generation={"enabled": True},
+            # Prepare the answer and its first spoken sentence before the turn is confirmed.
+            preemptive_generation={"enabled": True, "preemptive_tts": True},
         ),
     )
 

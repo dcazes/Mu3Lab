@@ -4,7 +4,7 @@
 # reaches the chat model and speech through LiteLLM with a key of its own.
 id: livekit
 capabilities: [voice_assistant]
-name: Voice assistant
+name: LiveKit
 tier: optional
 group: ai
 category: ai

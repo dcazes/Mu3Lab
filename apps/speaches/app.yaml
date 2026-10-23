@@ -1,7 +1,7 @@
 # Speaches — see ctl/manifest/models.py for every field.
 id: speaches
 capabilities: [speech]
-name: Speech (Whisper and Kokoro)
+name: Speaches
 tier: optional
 group: ai
 category: ai
