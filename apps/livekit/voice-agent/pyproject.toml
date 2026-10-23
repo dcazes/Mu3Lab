@@ -13,8 +13,6 @@ dependencies = [
     "livekit-agents[openai]~=1.8.8",
     # Silero: local voice activity detection. Without it the agent asks LiveKit Cloud for one.
     "livekit-plugins-silero~=1.8.8",
-    # Deepgram's live protocol, pointed at the Speech app's WhisperLiveKit (never Deepgram's cloud).
-    "livekit-plugins-deepgram~=1.8.8",
     "python-dotenv",
 ]
 

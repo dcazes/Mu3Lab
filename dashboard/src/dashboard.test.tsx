@@ -137,7 +137,7 @@ describe('Home', () => {
   it('adds graphics memory to the chip, a donut and a column when the server has an NVIDIA GPU', () => {
     stubFetch(() => ({}));
     const GB = 1024 ** 3;
-    const data = dashboardData([service('ollama', 'Ollama', 'core'), service('speech', 'Speech', 'optional')]);
+    const data = dashboardData([service('ollama', 'Ollama', 'core'), service('speaches', 'Speech', 'optional')]);
     data.system = {
       ...data.system,
       cpu_percent: 5,
@@ -149,7 +149,7 @@ describe('Home', () => {
         name: 'RTX 3060',
         total: 12 * GB,
         used: 3 * GB,
-        by_owner: { ollama: 2 * GB, speech: 0.5 * GB },
+        by_owner: { ollama: 2 * GB, speaches: 0.5 * GB },
         by_core_part: {},
       },
     };

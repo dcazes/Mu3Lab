@@ -58,7 +58,7 @@ export function VoiceSettings() {
         <EmptyState
           icon={Mic}
           title="Speech isn’t installed"
-          action={<LinkButton to="/apps/speech">View Speech</LinkButton>}
+          action={<LinkButton to="/apps/speaches">View Speech</LinkButton>}
         >
           Install Speech first; your voice key uses it.
         </EmptyState>

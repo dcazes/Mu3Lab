@@ -42,16 +42,15 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
       MU3LAB_AGENT_NAME: mu3lab-agent
-      # The chat model and the voice go through LiteLLM with the agent's own key (see README.md).
+      # Chat and speech both go through LiteLLM with the agent's own key. To bypass LiteLLM,
+      # point these at http://ollama:11434/v1 and http://speaches:8000/v1 (see README.md).
       MU3LAB_LLM_BASE_URL: http://litellm:4000/v1
       MU3LAB_LLM_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       MU3LAB_LLM_MODEL: mu3lab-voice
       MU3LAB_SPEECH_URL: http://litellm:4000/v1
+      MU3LAB_STT_MODEL: mu3lab-stt
       MU3LAB_TTS_MODEL: mu3lab-tts
       MU3LAB_TTS_VOICE: ${MU3LAB_TTS_VOICE:-af_heart}
-      # What people say streams straight to the Speech app's WhisperLiveKit, word by word.
-      MU3LAB_STT_STREAM_URL: ${MU3LAB_STT_STREAM_URL:?MU3LAB_STT_STREAM_URL is required}
-      MU3LAB_STT_KEY: ${MU3LAB_STT_KEY:?MU3LAB_STT_KEY is required}
     depends_on:
       server: {condition: service_healthy}
     networks: [mu3lab_backend]

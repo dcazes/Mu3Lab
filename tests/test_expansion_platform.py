@@ -121,24 +121,18 @@ class IntegrationTests(unittest.TestCase):
     def test_installed_provider_supplies_its_published_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
-            self._install(
-                paths,
-                "speech",
-                "MU3LAB_TTS_VOICE=af_heart\nMU3LAB_STT_URL=http://speech-stt:8000/v1\nWLK_API_TOKEN=t0ken\n",
-            )
+            self._install(paths, "speaches", "MU3LAB_TTS_VOICE=af_heart\nMU3LAB_SPEECH_URL=http://speaches:8000/v1\n")
             litellm = self._env(paths, "litellm")
-            self.assertEqual(litellm["MU3LAB_STT_URL"], "http://speech-stt:8000/v1")
-            self.assertEqual(litellm["MU3LAB_STT_KEY"], "t0ken")
+            self.assertEqual(litellm["MU3LAB_SPEECH_URL"], "http://speaches:8000/v1")
 
     def test_removing_the_provider_removes_its_settings_on_the_next_render(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             catalog = load()
             facts = Facts("box.test", paths, catalog)
-            before = {"MU3LAB_STT_URL": "http://speech-stt:8000/v1", "MU3LAB_STT_KEY": "t", "MU3LAB_STT_MODEL": "x"}
+            before = {"MU3LAB_SPEECH_URL": "http://speaches:8000/v1", "MU3LAB_STT_MODEL": "x"}
             env = build_env(catalog.get("litellm"), facts, before, [])
-            self.assertNotIn("MU3LAB_STT_URL", env)
-            self.assertNotIn("MU3LAB_STT_KEY", env)
+            self.assertNotIn("MU3LAB_SPEECH_URL", env)
             self.assertNotIn("MU3LAB_STT_MODEL", env)
 
     def test_consumers_are_installed_apps_using_one_of_the_providers_capabilities(self):
@@ -147,7 +141,7 @@ class IntegrationTests(unittest.TestCase):
             catalog = load()
             self._install(paths, "open-webui")
             # LiteLLM is core (always present); Open WebUI's chat voice has its own Whisper.
-            names = {app.id for app in rewire.consumers(catalog.get("speech"), catalog, paths)}
+            names = {app.id for app in rewire.consumers(catalog.get("speaches"), catalog, paths)}
             self.assertEqual(names, {"litellm"})
             self.assertEqual({app.id for app in rewire.consumers(catalog.get("navidrome"), catalog, paths)}, set())
             self._install(paths, "nextcloud")
@@ -313,31 +307,15 @@ class SpeechRoutingTests(unittest.TestCase):
             "api_base_env": "A",
             "runner_api_base_env": "R",
             "runner_api_key_env": "RK",
-            "stt_url_env": "MU3LAB_STT_URL",
-            "tts_url_env": "MU3LAB_TTS_URL",
-            "stt_key_env": "MU3LAB_STT_KEY",
+            "speech_url_env": "MU3LAB_SPEECH_URL",
         }
     )
-    ENV: ClassVar[dict[str, str]] = {
-        "MU3LAB_STT_URL": "http://speech-stt:8000/v1",
-        "MU3LAB_TTS_URL": "http://speech-tts:8880/v1",
-        "MU3LAB_STT_KEY": "t0ken",
-        "MU3LAB_STT_MODEL": "w",
-        "MU3LAB_TTS_MODEL": "k",
-    }
 
     def test_stable_names_route_to_the_configured_models(self):
-        models = {item["model_name"]: item for item in speech_models(self.ENV, self.PARAMS)}
+        env = {"MU3LAB_SPEECH_URL": "http://speaches:8000/v1", "MU3LAB_STT_MODEL": "w", "MU3LAB_TTS_MODEL": "k"}
+        models = {item["model_name"]: item for item in speech_models(env, self.PARAMS)}
         self.assertEqual(models["mu3lab-stt"]["litellm_params"]["model"], "openai/w")
-        self.assertEqual(models["mu3lab-stt"]["litellm_params"]["api_base"], "http://speech-stt:8000/v1")
-        self.assertEqual(models["mu3lab-tts"]["litellm_params"]["api_base"], "http://speech-tts:8880/v1")
         self.assertEqual(models["mu3lab-tts"]["model_info"]["mode"], "audio_speech")
-
-    def test_the_recognition_key_is_read_from_the_environment_never_written_into_the_config(self):
-        models = {item["model_name"]: item for item in speech_models(self.ENV, self.PARAMS)}
-        self.assertEqual(models["mu3lab-stt"]["litellm_params"]["api_key"], "os.environ/MU3LAB_STT_KEY")
-        self.assertNotIn("t0ken", str(models))
-        self.assertEqual(models["mu3lab-tts"]["litellm_params"]["api_key"], "unused")
 
     def test_no_speech_app_means_no_speech_routes(self):
         self.assertEqual(speech_models({}, self.PARAMS), [])

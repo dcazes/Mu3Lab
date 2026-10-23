@@ -42,14 +42,13 @@ class SpeechImagesTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.paths = RuntimePaths(Path(tmp.name))
-        self.project = self.paths.projects / "speech"
+        self.project = self.paths.projects / "speaches"
         self.project.mkdir(parents=True)
         for name in ("docker-compose.yml", "docker-compose.nvidia.yml"):
-            shutil.copyfile(ROOT / "apps" / "speech" / name, self.project / name)
-        self.service = load().get("speech")
+            shutil.copyfile(ROOT / "apps" / "speaches" / name, self.project / name)
+        self.service = load().get("speaches")
         self.cpu = app_releases.compose_images(self.project / "docker-compose.yml")
-        # The GPU file swaps some images; the rest come from the main file.
-        self.cuda = {**self.cpu, **app_releases.compose_images(self.project / "docker-compose.nvidia.yml")}
+        self.cuda = app_releases.compose_images(self.project / "docker-compose.nvidia.yml")
 
     def test_validation_download_fallback_and_start_use_the_same_files(self):
         for mode, expected in (("cpu", self.cpu), ("nvidia", self.cuda)):
@@ -75,7 +74,7 @@ class SpeechImagesTests(unittest.TestCase):
                 ):
                     compose.validate(lambda _: None)
                     self.assertEqual(
-                        download_images(self.project, "speech", "job", lambda _: None, compose=compose), (0, "")
+                        download_images(self.project, "speaches", "job", lambda _: None, compose=compose), (0, "")
                     )
                     compose.up(lambda _: None, wait_seconds=300)
                 self.assertEqual(fetch.call_args.args[0], list(dict.fromkeys(expected.values())))
@@ -91,8 +90,8 @@ class SpeechImagesTests(unittest.TestCase):
         self.assertEqual(app_releases.pin(self.service, ROOT, lambda _: None, self.paths, gpu_mode="nvidia"), pinned)
 
     def test_download_uses_retained_release_record(self):
-        old = {name: image.replace("v0.9.0", "v0.8.2") for name, image in self.cpu.items()}
-        app_releases.write("speech", app_releases.Release("v0.2.25", old), self.paths)
+        old = {name: image.replace("0.8.3-cpu", "0.8.2-cpu") for name, image in self.cpu.items()}
+        app_releases.write("speaches", app_releases.Release("v0.8.2", old), self.paths)
         with patch("ctl.actions.docker_cmd", return_value=(0, json.dumps({"services": {}}))) as command:
             actions.compose_image_list(self.project, lambda _: None)
         self.assertIn(str(self.project / "docker-compose.digest.yml"), command.call_args.args[0])

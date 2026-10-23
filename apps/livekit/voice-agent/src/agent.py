@@ -1,9 +1,8 @@
 """Mu3Lab voice agent: speech in, a language model, speech out.
 
-What people say streams to the Speech app's WhisperLiveKit, which sends words back
-while they talk. The answer model (chosen in Mu3Lab's Settings, Voice Assistant) and
-the voice go through Mu3Lab's LiteLLM gateway with the agent's own key. Voice
-activity and turn taking run inside this container. Every address and model name comes
+The answer model (chosen in Mu3Lab's Settings, Voice Assistant) and speech both
+go through Mu3Lab's LiteLLM gateway with the agent's own key, and voice activity
+and turn taking run inside this container. Every address and model name comes
 from the environment, so the same code runs on a desktop for
 testing (localhost ports) and inside Mu3Lab (service names).
 """
@@ -21,7 +20,7 @@ from livekit.agents import (
     cli,
     inference,
 )
-from livekit.plugins import deepgram, openai, silero
+from livekit.plugins import openai, silero
 
 logger = logging.getLogger("mu3lab-voice-agent")
 
@@ -40,13 +39,11 @@ AGENT_NAME = _env("MU3LAB_AGENT_NAME", "mu3lab-agent")
 LLM_BASE_URL = _env("MU3LAB_LLM_BASE_URL", "http://litellm:4000/v1")
 LLM_API_KEY = _env("MU3LAB_LLM_API_KEY", "not-needed")
 LLM_MODEL = _env("MU3LAB_LLM_MODEL", "mu3lab-voice")
-# Live speech recognition: WhisperLiveKit's Deepgram-compatible stream, with the Speech app's key.
-STT_STREAM_URL = _env("MU3LAB_STT_STREAM_URL", "http://speech-stt:8000/v1/listen")
-STT_KEY = _env("MU3LAB_STT_KEY")
-# Speech output on an OpenAI-compatible API: LiteLLM's mu3lab-tts in Mu3Lab, or Kokoro-FastAPI
-# itself (model "kokoro") when LiteLLM is bypassed.
+# Speech recognition and speech output, on one OpenAI-compatible API: LiteLLM's mu3lab-stt and
+# mu3lab-tts in Mu3Lab, or Speaches itself (real model names) when LiteLLM is bypassed.
 SPEECH_BASE_URL = _env("MU3LAB_SPEECH_URL", "http://litellm:4000/v1")
 SPEECH_API_KEY = _env("MU3LAB_SPEECH_API_KEY", LLM_API_KEY)
+STT_MODEL = _env("MU3LAB_STT_MODEL", "mu3lab-stt")
 TTS_MODEL = _env("MU3LAB_TTS_MODEL", "mu3lab-tts")
 TTS_VOICE = _env("MU3LAB_TTS_VOICE", "af_heart")
 
@@ -69,16 +66,15 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
 
     session = AgentSession(
-        # Voice activity: local Silero model, so no LiveKit Cloud call. A 0.3 s pause (default
-        # 0.55 s) ends speech sooner; the turn detector still waits when someone sounds unfinished.
-        vad=silero.VAD.load(min_silence_duration=0.3),
-        stt=deepgram.STT(
-            base_url=STT_STREAM_URL,
-            api_key=STT_KEY,
-            # A Whisper language code; the plugin's default "en-US" is not one.
+        # Voice activity: local Silero model, so no LiveKit Cloud call.
+        vad=silero.VAD.load(),
+        stt=openai.STT(
+            base_url=SPEECH_BASE_URL,
+            api_key=SPEECH_API_KEY,
+            model=STT_MODEL,
             language="en",
-            # Words while people talk, revised until final.
-            interim_results=True,
+            # Speaches' REST transcription endpoint, one request per utterance.
+            use_realtime=False,
         ),
         llm=openai.LLM(
             model=LLM_MODEL,
@@ -96,8 +92,7 @@ async def entrypoint(ctx: JobContext) -> None:
         # "v1" would call LiveKit's hosted gateway.
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
-            # Prepare the answer and its first spoken sentence before the turn is confirmed.
-            preemptive_generation={"enabled": True, "preemptive_tts": True},
+            preemptive_generation={"enabled": True},
         ),
     )
 

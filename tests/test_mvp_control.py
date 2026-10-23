@@ -61,7 +61,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "livekit",
                 "dawarich",
                 "lobehub",
-                "speech",
+                "speaches",
                 "firecrawl",
                 "kopia-ui",
                 "navidrome",

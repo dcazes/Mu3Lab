@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ManifestContractTests(unittest.TestCase):
     def test_internal_services_have_no_screen_and_no_sign_in(self):
         catalog = load()
-        for app_id in ("speech",):
+        for app_id in ("speaches",):
             with self.subTest(app=app_id):
                 manifest = catalog.get(app_id).manifest
                 self.assertIsNone(manifest.route)

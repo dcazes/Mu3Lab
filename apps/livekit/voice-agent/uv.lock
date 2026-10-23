@@ -1182,21 +1182,6 @@ wheels = [
 ]
 
 [[package]]
-name = "livekit-plugins-deepgram"
-version = "1.8.8"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "livekit-agents", extra = ["codecs"] },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/0e/9ab5e846bfdd326919b3feeadb03076039317c2089131bc9fc5dbf6ea864/livekit_plugins_deepgram-1.8.8.tar.gz", hash = "sha256:3e0635c3ffc3ad3ac82252cdfac0faf559e339834f9a46548bd7e4202d488a8b", size = 26568, upload-time = "2026-10-15T06:07:26.582Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/e7/f498e6a32b53a89810c99e22b642760ca61ea4cc231f48b42dafdf3ecf18/livekit_plugins_deepgram-1.8.8-py3-none-any.whl", hash = "sha256:1633fa719b2dee591019383016ff425ddc0af8e15611f2ab0cf6a13ff212210a", size = 33440, upload-time = "2026-10-15T06:07:25.362Z" },
-]
-
-[[package]]
 name = "livekit-plugins-openai"
 version = "1.8.8"
 source = { registry = "https://pypi.org/simple" }
@@ -1277,7 +1262,6 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "livekit-agents", extra = ["openai"] },
-    { name = "livekit-plugins-deepgram" },
     { name = "livekit-plugins-silero" },
     { name = "python-dotenv" },
 ]
@@ -1285,7 +1269,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "livekit-agents", extras = ["openai"], specifier = "~=1.8.8" },
-    { name = "livekit-plugins-deepgram", specifier = "~=1.8.8" },
     { name = "livekit-plugins-silero", specifier = "~=1.8.8" },
     { name = "python-dotenv" },
 ]
