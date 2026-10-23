@@ -81,9 +81,9 @@ async def entrypoint(ctx: JobContext) -> None:
             model=LLM_MODEL,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
-            # Lowest level every reasoning model accepts: Google's Gemini 3 models can't take
-            # "none". FreeLLMAPI turns it into a zero thinking budget for Gemini.
-            reasoning_effort="minimal",
+            # "low" is the lowest level every provider accepts: Gemini 3, GitHub Models, Groq and
+            # xAI reject "none" or "minimal". FreeLLMAPI adapts it per provider, or drops it.
+            reasoning_effort="low",
         ),
         tts=openai.TTS(
             base_url=SPEECH_BASE_URL,

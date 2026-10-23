@@ -10,6 +10,27 @@ from ctl.engine.hooks import AppHooks, HookContext
 from ctl.engine.loopback import request
 
 PROFILE_NAME = "Mu3Lab LiteLLM"
+# FreeLLMAPI benches a model on every failed attempt, bad requests included, and
+# lengthens the bench on repeats. With few keys one bad request can bench every
+# model; a 1-minute cap (its lowest) lets them come back quickly.
+COOLDOWN_CEILING_MS = 60_000
+
+
+def _sign_in(ctx: HookContext, stage: str) -> str:
+    values = ctx.env()
+    session = request(
+        ctx.app.manifest.service.local_port,
+        "/api/auth/login",
+        method="POST",
+        data={
+            "email": values.get("FREELLMAPI_ADMIN_EMAIL", ""),
+            "password": values.get("FREELLMAPI_ADMIN_PASSWORD", ""),
+        },
+    )
+    token = session.get("token", "") if isinstance(session, dict) else ""
+    if not token:
+        ctx.fail(stage, "account_provisioning_failed", "The provider gateway did not accept its administrator login.")
+    return token
 
 
 class Hooks(AppHooks):
@@ -19,22 +40,7 @@ class Hooks(AppHooks):
             ctx.set_env({"MU3LAB_ADMIN_BOOTSTRAPPED": "true"})
             return "The internal provider gateway credential is already saved."
         port = ctx.app.manifest.service.local_port
-        session = request(
-            port,
-            "/api/auth/login",
-            method="POST",
-            data={
-                "email": values.get("FREELLMAPI_ADMIN_EMAIL", ""),
-                "password": values.get("FREELLMAPI_ADMIN_PASSWORD", ""),
-            },
-        )
-        token = session.get("token", "") if isinstance(session, dict) else ""
-        if not token:
-            ctx.fail(
-                "account_bootstrap",
-                "account_provisioning_failed",
-                "The provider gateway did not accept its administrator login.",
-            )
+        token = _sign_in(ctx, "account_bootstrap")
         profiles = request(port, "/api/client-profiles", token=token)
         if not isinstance(profiles, list):
             ctx.fail(
@@ -60,3 +66,14 @@ class Hooks(AppHooks):
             )
         ctx.set_env({"FREELLMAPI_SERVICE_KEY": key, "MU3LAB_ADMIN_BOOTSTRAPPED": "true"})
         return "The internal provider gateway credential was created and saved."
+
+    def after_healthy(self, ctx: HookContext) -> None:
+        # The declarative config has no cooldown field, so set it through the
+        # routing API. "smartest" repeats the strategy the config already sets.
+        request(
+            ctx.app.manifest.service.local_port,
+            "/api/fallback/routing",
+            method="PUT",
+            data={"strategy": "smartest", "cooldownCeilingMs": COOLDOWN_CEILING_MS},
+            token=_sign_in(ctx, "routing_settings"),
+        )
