@@ -81,7 +81,9 @@ async def entrypoint(ctx: JobContext) -> None:
             model=LLM_MODEL,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
-            reasoning_effort="none",
+            # Lowest level every reasoning model accepts: Google's Gemini 3 models can't take
+            # "none". FreeLLMAPI turns it into a zero thinking budget for Gemini.
+            reasoning_effort="minimal",
         ),
         tts=openai.TTS(
             base_url=SPEECH_BASE_URL,
@@ -100,8 +102,10 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(agent=Assistant(), room=ctx.room)
     await ctx.connect()
-    # Speak first, so the person hears at once that the call is working.
-    session.generate_reply(instructions="Greet the person in one short sentence and offer your help.")
+    # Speak first, so the person hears at once that the call is working. A fixed sentence needs
+    # no model call: an instruction-only request has no messages, which Gemini rejects. Kept out
+    # of the chat history so the model's first request still starts with the person's words.
+    session.say("Hi, how can I help?", add_to_chat_ctx=False)
 
 
 if __name__ == "__main__":
