@@ -428,7 +428,27 @@ def compose_down(
     for compose_file in files:
         command.extend(["-f", str(compose_file)])
     command.extend(["--project-directory", str(projdir), "down", "--remove-orphans"])
-    return docker_cmd(command, log, timeout=timeout, env=env)
+    rc, output = docker_cmd(command, log, timeout=timeout, env=env)
+    if rc == 0 or not _COMPOSE_UNREADABLE.search(output):
+        return rc, output
+    # The file on disk can stop matching its settings (an app's wiring changed
+    # after install); Docker still knows the containers by their project label.
+    log("Compose file could not be read; removing the containers by project name.")
+    fallback = ["docker", "compose", "-p", _compose_project_name(projdir), "down", "--remove-orphans"]
+    return docker_cmd(fallback, log, timeout=timeout, env=env)
+
+
+_COMPOSE_UNREADABLE = _re.compile(r"error while interpolating|required variable|no such file|not found", _re.I)
+
+
+def _compose_project_name(projdir: Path) -> str:
+    """The project's `name:` line, or Compose's default (the folder's name)."""
+    try:
+        text = (projdir / "docker-compose.yml").read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    match = _re.search(r"^name:\s*['\"]?([a-z0-9][a-z0-9_-]*)", text, _re.M)
+    return match.group(1) if match else _re.sub(r"[^a-z0-9_-]", "", projdir.name.lower())
 
 
 def compose_logs(projdir: Path, log: Callable[[str], None], *, tail: int = 120, container: str = "") -> tuple[int, str]:

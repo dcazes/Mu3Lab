@@ -12,6 +12,7 @@ DEBUG: Patch target is `ctl.actions.privilege` (module attribute) so production
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -259,6 +260,24 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(seen[0][-4:], ["--project-directory", str(project), "down", "--remove-orphans"])
         self.assertNotIn("--volumes", seen[0])
+
+    def test_down_falls_back_to_project_name_when_the_file_cannot_be_read(self):
+        seen: list[list[str]] = []
+
+        def fake(argv, log, timeout=300, env=None):
+            seen.append(argv)
+            if len(seen) == 1:
+                return 1, "error while interpolating services.agent.environment.KEY: required variable KEY is missing"
+            return 0, "removed"
+
+        with tempfile.TemporaryDirectory() as folder:
+            project = Path(folder) / "livekit"
+            project.mkdir()
+            (project / "docker-compose.yml").write_text("name: mu3lab-livekit\n\nservices: {}\n")
+            with patch.object(actions, "docker_cmd", fake):
+                rc, _ = actions.compose_down(project, _silent)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen[1], ["docker", "compose", "-p", "mu3lab-livekit", "down", "--remove-orphans"])
 
     def test_extra_compose_file_is_appended_after_base(self):
         seen: list[list[str]] = []
