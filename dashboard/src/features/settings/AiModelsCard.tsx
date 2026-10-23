@@ -196,7 +196,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
               <strong>Local only</strong>
               <small>
                 Every chat runs on this server. If the local model stops working, chat stops too: it never falls back to
-                an outside provider. The voice assistant has its own setting in Settings, Voice Assistant.
+                an outside provider. The voice assistant has its own setting in Settings, Voice assistant.
               </small>
             </span>
           </label>

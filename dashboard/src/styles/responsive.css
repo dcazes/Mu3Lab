@@ -14,7 +14,8 @@
     padding-bottom: 8px;
   }
 
-  .settings-nav-title {
+  .settings-nav-title,
+  .settings-nav-group {
     display: none;
   }
 

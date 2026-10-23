@@ -393,6 +393,7 @@
 
 .tile-state {
   display: inline-flex;
+  white-space: nowrap;
   align-items: center;
   gap: 5px;
   margin-top: -6px;
@@ -544,15 +545,47 @@
   transform: rotate(180deg);
 }
 
-/* Home's quick panel for one app. */
-.quick-panel-head {
+/* Home's quick panel for one app: status, then what you can do, then a few facts. */
+.quick-panel-status {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
-.quick-panel-details {
-  align-self: flex-start;
+.quick-panel-busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.quick-panel-busy svg {
+  width: 15px;
+  height: 15px;
+  color: var(--blue);
+}
+
+.quick-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Opening the app is the main thing a person came for, so it gets the whole first row. */
+.quick-panel-open {
+  flex: 1 1 100%;
+  justify-content: center;
+}
+
+.quick-panel-actions .btn:not(.quick-panel-open) {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.dialog-footer .quick-panel-details {
+  margin-right: auto;
 }
 
 /* ---------- Memory, disk and CPU per app ---------- */

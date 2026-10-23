@@ -50,7 +50,7 @@ export function VoiceSettings() {
   return (
     <>
       <PageHeader
-        title="Voice Assistant"
+        title="Voice assistant"
         description="Choose where the voice assistant gets its answers, and use Mu3Lab's private speech on your own devices."
       />
       <VoiceModelCard readOnly={!isAdmin} />

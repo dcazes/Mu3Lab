@@ -1,4 +1,13 @@
-import { CheckCircle2, ClipboardCheck, ClipboardPaste, KeyRound, Pencil, Power, Sparkles, Trash2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ClipboardCheck,
+  ClipboardPaste,
+  KeyRound,
+  Pencil,
+  Power,
+  Trash2,
+} from 'lucide-react';
 import { useIsAdmin } from '../../state/dashboard';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -373,6 +382,7 @@ function ProviderChecklist({
   saved: () => void;
 }) {
   const [awaiting, setAwaiting] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const clearAwaiting = useCallback(() => setAwaiting(''), []);
   const title = setup?.recommendation_met ? 'More free providers' : 'Get free AI capacity';
   if (!catalog)
@@ -389,27 +399,40 @@ function ProviderChecklist({
   const ordered = catalog
     .filter((item) => !byId.has(item.id))
     .sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended));
+  // One sentence says where setup stands and what to do next.
+  const status = !setup?.complete
+    ? 'Connect one provider to finish setup. Recommended providers have the most free capacity.'
+    : !setup.recommendation_met
+      ? `Chat works. A second recommended provider keeps it going when one reaches its limit — ${Math.min(done, minimum)} of ${minimum} connected.`
+      : 'Optional: more providers add capacity. Free-tier quotas vary by provider.';
+  const recommended = ordered.filter((item) => item.recommended);
+  const others = ordered.filter((item) => !item.recommended);
+  // The rest wait behind one row, unless there is nothing recommended left to show.
+  const showOthers = showAll || !recommended.length;
+  const row = (item: ProviderCatalogItem) => (
+    <div className="row" key={item.id}>
+      <span className="row-text">
+        <b>
+          {item.name} {item.recommended && <Badge tone="blue">Recommended</Badge>}{' '}
+          {item.payment_required && <Badge tone="amber">Payment method required</Badge>}
+        </b>
+        <small>{item.free_tier}</small>
+      </span>
+      <span className="row-actions">
+        {item.keys_url && (
+          <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
+            Get key
+          </ExternalButton>
+        )}
+      </span>
+    </div>
+  );
   return (
     <section className="provider-add" aria-label={title}>
       <header className="provider-add-header">
         <h3>{title}</h3>
-        <p>
-          Free-tier quotas and availability vary by provider. Connect {minimum} recommended providers for fallback
-          capacity — {Math.min(done, minimum)} of {minimum} connected.
-        </p>
+        <p>{status}</p>
       </header>
-      {setup && !setup.complete && (
-        <Callout tone="info" icon={Sparkles} title="Connect one provider to finish setup">
-          Connect and verify a supported provider. Recommended providers are selected for their available free-tier
-          capacity.
-        </Callout>
-      )}
-      {setup?.complete && !setup.recommendation_met && (
-        <Callout tone="warning" icon={Sparkles} title="Chat works — add a backup provider">
-          Another verified provider can help keep chat available when a provider reaches its quota or is temporarily
-          unavailable.
-        </Callout>
-      )}
       <KeyPaste
         catalog={catalog}
         providers={providers}
@@ -419,32 +442,22 @@ function ProviderChecklist({
       />
       {ordered.length > 0 && (
         <div className="rows">
-          {ordered.map((item) => (
-            <div className="row" key={item.id}>
-              <span className="row-text">
-                <b>
-                  {item.name} {item.recommended && <Badge tone="blue">Recommended</Badge>}{' '}
-                  {item.payment_required && <Badge tone="amber">Payment method required</Badge>}
-                </b>
-                <small>{item.free_tier}</small>
-              </span>
-              <span className="row-actions">
-                {item.keys_url && (
-                  <ExternalButton size="sm" href={item.keys_url} onClick={() => setAwaiting(item.id)}>
-                    Get key
-                  </ExternalButton>
-                )}
-              </span>
-            </div>
-          ))}
+          {recommended.map(row)}
+          {showOthers
+            ? others.map(row)
+            : others.length > 0 && (
+                <button type="button" className="row row-more" onClick={() => setShowAll(true)}>
+                  <ChevronDown />
+                  {others.length} more {others.length === 1 ? 'provider' : 'providers'}
+                </button>
+              )}
         </div>
       )}
       <p className="hint">
         <KeyRound />
         <span>
-          For email registration, Mu3Lab can save suggested logins with unique passwords in the{' '}
-          <b>Mu3Lab/AI providers</b> folder in Vaultwarden. These entries help you register; they do not create provider
-          accounts. <Link to="/settings/sign-in">Save registration entries</Link> if you haven&apos;t yet.
+          Signing up with email? Mu3Lab can save a login with a unique password for each provider in Vaultwarden (
+          <b>Mu3Lab/AI providers</b>). <Link to="/settings/sign-in">Save registration logins</Link>
         </span>
       </p>
     </section>
@@ -496,9 +509,9 @@ export function AiSettings() {
           You can see which providers chat uses. Ask an administrator to connect or change one.
         </Callout>
       )}
-      <ChatAppCard readOnly={!isAdmin} />
+      {/* Where AI runs decides whether providers are used at all, so it leads; providers are what
+          most people come here for; the chat app and acceleration are set once and rarely changed. */}
       <AiModelsCard models={models} readOnly={!isAdmin} />
-      {isAdmin && <ComputeCard />}
       {/* One card for providers: the ones connected, then the ones to add. */}
       <Card
         title="Providers"
@@ -542,6 +555,8 @@ export function AiSettings() {
           />
         )}
       </Card>
+      <ChatAppCard readOnly={!isAdmin} />
+      {isAdmin && <ComputeCard />}
       {dialog && (
         <ProviderDialog
           key={dialog.id}

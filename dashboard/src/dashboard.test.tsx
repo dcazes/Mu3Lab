@@ -668,8 +668,10 @@ describe('Settings', () => {
     expect(without).not.toHaveTextContent('Actual Budget');
     expect(without).not.toHaveTextContent('RomM');
     const manual = screen.getByRole('region', { name: 'Manual integration' });
-    expect(automatic).toHaveTextContent('Firecrawl MCP');
-    expect(manual).toHaveTextContent('Actual Budget MCP');
+    expect(automatic).toHaveTextContent('Firecrawl');
+    // Rows carry the installed app's name, not the connector's.
+    expect(manual).toHaveTextContent('Actual Budget');
+    expect(manual).not.toHaveTextContent('Actual Budget MCP');
     expect(within(manual).getByRole('link', { name: 'Add credential' })).toHaveAttribute(
       'href',
       '/apps/actual-budget/chat',

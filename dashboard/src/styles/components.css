@@ -513,6 +513,51 @@ a.chip:hover {
   border-bottom: 1px solid var(--border);
 }
 
+/* The last row of a short list that shows the rest when clicked. */
+.row.row-more {
+  width: 100%;
+  min-height: 44px;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row.row-more:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.row.row-more > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.row-more-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.row-more-text small {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.row-more-icons {
+  display: flex;
+  gap: 4px;
+  opacity: 0.75;
+}
+
 .rows > :last-child,
 .rows > :last-child .row,
 .rows > .row:last-child {
@@ -1233,6 +1278,29 @@ a.row-main:hover b,
   border-width: 0 0 0 1px;
 }
 
+/* A floating panel at the right, only as tall as what it shows. */
+.dialog-sheet {
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100% - 24px);
+  margin: 12px 12px auto auto;
+}
+
+.dialog-sheet[open] {
+  animation: slide-in 0.18s ease-out;
+}
+
+.dialog.dialog-sheet::backdrop {
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  backdrop-filter: none;
+}
+
+.dialog-sheet .dialog-panel {
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
 @keyframes slide-in {
   from {
     transform: translateX(24px);
@@ -1249,6 +1317,19 @@ a.row-main:hover b,
   }
 
   .dialog-drawer .dialog-panel {
+    border-width: 1px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .dialog-sheet {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 85vh;
+    margin: auto 0 0;
+  }
+
+  .dialog-sheet .dialog-panel {
     border-width: 1px 0 0;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     padding-bottom: env(safe-area-inset-bottom);
@@ -1286,6 +1367,15 @@ a.row-main:hover b,
   padding: 18px 20px 0;
 }
 
+.dialog-header.has-icon {
+  align-items: center;
+}
+
+.dialog-heading {
+  flex: 1;
+  min-width: 0;
+}
+
 .dialog-header h2 {
   font-size: 15px;
   font-weight: 600;
@@ -1294,6 +1384,11 @@ a.row-main:hover b,
 .dialog-header p {
   margin-top: 6px;
   color: var(--text-2);
+}
+
+.dialog-header.has-icon p {
+  margin-top: 1px;
+  font-size: 13px;
 }
 
 .dialog-body {

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { stateLabel, stateTone, type Tone } from '../lib/services';
+import { stateLabel, stateTone, statusText, type Tone } from '../lib/services';
 import type { Service } from '../api';
 
 export function Dot({ tone }: { tone: Tone }) {
@@ -10,12 +10,13 @@ export function Badge({ tone = 'gray', children }: { tone?: Tone; children: Reac
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-export function StatusBadge({ state }: { state: Service['display_state'] }) {
-  const tone = stateTone(state);
+/** An app's status; given the app itself, a busy one says what it is doing ("Stopping…"). */
+export function StatusBadge({ state, service }: { state: Service['display_state']; service?: Service }) {
+  const tone = service?.backing_up ? 'blue' : stateTone(state);
   return (
     <Badge tone={tone}>
       <Dot tone={tone} />
-      {stateLabel[state] || state}
+      {service ? statusText(service) : stateLabel[state] || state}
     </Badge>
   );
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, type JobDetailResponse, type Service } from '../../api';
 import { Collapsible } from '../../components/Layout';
-import { humanize } from '../../lib/format';
 import { DownloadStatus } from './InstallProgress';
+import { stepLabel } from './steps';
 
 /** Single-app jobs that get a progress card (an Apps-page install shows its batch card instead). */
 const TRACKED = ['install', 'retry_setup', 'update'];
@@ -68,23 +68,16 @@ export function JobProgress({ service, showName = false }: { service: Service; s
     ...events.map((event) => STEPS.indexOf(event.detail.split(': ', 1)[0])),
   );
   const percent = Math.round(((furthest + 1) / STEPS.length) * 100);
-  const message = [...events].reverse().find((event) => step && event.detail.startsWith(`${step}: `));
   const download = fresh?.download;
   const log = events.map((event) => `${new Date(event.created_at).toLocaleTimeString()}  ${event.detail}`);
-  const verb = job.action === 'update' ? 'Updating' : 'Setting up';
+  const verb = job.action === 'update' ? 'Updating' : job.action === 'install' ? 'Installing' : 'Setting up';
 
   return (
     <section className="card install-progress" aria-live="polite" aria-label={`${service.name} progress`}>
       <header className="install-header">
         <div>
           <b>{showName ? `${verb} ${service.name}` : verb}</b>
-          <p>
-            {current.state === 'queued'
-              ? 'Waiting for the worker to start'
-              : message
-                ? message.detail.slice(step.length + 2)
-                : humanize(step || 'starting')}
-          </p>
+          <p>{current.state === 'queued' ? 'Waiting its turn' : stepLabel(step)}</p>
         </div>
       </header>
       {step === 'pull_images' && download && download.state !== 'done' ? (

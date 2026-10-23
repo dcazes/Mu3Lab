@@ -19,20 +19,25 @@ export interface SettingsSection {
   adminOnly?: boolean;
   /** Not in the Settings menu: reached from this section's page (and search), which stays highlighted. */
   within?: string;
+  /** The heading it sits under in the Settings menu. */
+  group: SettingsGroup;
 }
 
+export type SettingsGroup = 'AI' | 'Household' | 'Server' | 'Help';
+
+/** The menu in groups a person can scan: what AI does, who uses Mu3Lab, the server itself, then help. */
 export const SETTINGS_SECTIONS: SettingsSection[] = [
-  { id: 'get-started', label: 'Get started', icon: Rocket },
-  { id: 'ai', label: 'AI', icon: Bot },
-  { id: 'integrations', label: 'Chat integrations', icon: Plug },
-  { id: 'voice', label: 'Voice Assistant', icon: Mic },
-  { id: 'people', label: 'People', icon: Users, adminOnly: true },
-  { id: 'security', label: 'Security & backups', icon: ShieldCheck },
-  { id: 'system', label: 'System', icon: ServerCog, adminOnly: true },
-  // Rarely needed once set up, so it sits near the end.
-  { id: 'sign-in', label: 'Sign-in', icon: KeyRound },
+  { id: 'ai', label: 'AI', icon: Bot, group: 'AI' },
+  { id: 'integrations', label: 'Chat integrations', icon: Plug, group: 'AI' },
+  { id: 'voice', label: 'Voice assistant', icon: Mic, group: 'AI' },
+  { id: 'people', label: 'People', icon: Users, adminOnly: true, group: 'Household' },
+  { id: 'sign-in', label: 'Sign-in', icon: KeyRound, group: 'Household' },
+  { id: 'security', label: 'Security & backups', icon: ShieldCheck, group: 'Server' },
+  { id: 'system', label: 'System', icon: ServerCog, adminOnly: true, group: 'Server' },
   // Linked from System's Mu3Lab updates card and the user menu.
-  { id: 'whats-new', label: "What's new", icon: Sparkles, adminOnly: true, within: 'system' },
+  { id: 'whats-new', label: "What's new", icon: Sparkles, adminOnly: true, within: 'system', group: 'Server' },
+  // First-run help; once done it is rarely opened, so it comes last.
+  { id: 'get-started', label: 'Get started', icon: Rocket, group: 'Help' },
 ];
 
 export const settingsSectionsFor = (isAdmin: boolean) =>

@@ -82,7 +82,7 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
         </span>
       </Link>
       <span className="installed-cell">
-        <StatusBadge state={service.display_state} />
+        <StatusBadge state={service.display_state} service={service} />
       </span>
       {/* Single sign-on is the usual case, so only the apps with their own login are marked. */}
       <span className="installed-cell hide-mobile">

@@ -20,6 +20,29 @@ export const stateLabel: Record<Service['display_state'], string> = {
   needs_attention: 'Needs attention',
 };
 
+/** What a working app is doing, from the job that made it busy. */
+const WORKING_LABEL: Record<string, string> = {
+  install: 'Installing',
+  retry_setup: 'Setting up',
+  start: 'Starting',
+  stop: 'Stopping',
+  restart: 'Restarting',
+  update: 'Updating',
+  restore: 'Restoring',
+  uninstall: 'Uninstalling',
+  uninstall_delete_data: 'Uninstalling',
+};
+
+/** The status word for one app: "Starting…" rather than "Working" while its job runs. */
+export function statusText(service: Service): string {
+  if (service.backing_up) return 'Backing up…';
+  if (service.display_state === 'working') {
+    const verb = WORKING_LABEL[service.last_job?.action || ''];
+    if (verb && ['queued', 'running'].includes(service.last_job?.state || '')) return `${verb}…`;
+  }
+  return stateLabel[service.display_state] || service.display_state;
+}
+
 /** Red is kept for failures, so it stands out; a stopped app is a choice, shown in neutral grey. */
 export function stateTone(state: string): Tone {
   return (

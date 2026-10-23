@@ -10,8 +10,8 @@ import {
   isInstalled,
   isRunning,
   launchTarget,
-  stateLabel,
   stateTone,
+  statusText,
 } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { AppQuickPanel } from './AppQuickPanel';
@@ -61,7 +61,7 @@ function MiniTile({ service, onOpen }: { service: Service; onOpen: () => void })
     <button
       type="button"
       className={`mini-tile${launchTarget(service) ? '' : ' tile-muted'}`}
-      aria-label={`${service.name}: ${stateLabel[service.display_state]}`}
+      aria-label={`${service.name}: ${statusText(service)}`}
       title={service.name}
       aria-haspopup="dialog"
       onClick={onOpen}
@@ -79,7 +79,7 @@ function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => voi
     <button
       type="button"
       className={`tile${launchTarget(service) ? '' : ' tile-muted'}`}
-      aria-label={`${service.name}: ${stateLabel[service.display_state]}`}
+      aria-label={`${service.name}: ${statusText(service)}`}
       aria-haspopup="dialog"
       onClick={onOpen}
     >
@@ -88,7 +88,7 @@ function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => voi
       {!isRunning(service) && (
         <span className="tile-state">
           <Dot tone={tone} />
-          {stateLabel[service.display_state]}
+          {statusText(service)}
         </span>
       )}
     </button>

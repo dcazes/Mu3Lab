@@ -74,7 +74,10 @@ describe('AI provider checklist', () => {
   it('lists recommended providers first with one key link each', async () => {
     stubFetch(providersApi([], []));
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    expect(await screen.findByText('Connect one provider to finish setup')).toBeInTheDocument();
+    expect(await screen.findByText(/Connect one provider to finish setup/)).toBeInTheDocument();
+    // Recommended providers show at once; the rest wait behind one row.
+    expect(screen.getAllByRole('link', { name: /Get key/ })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /3 more providers/ }));
     const rows = screen.getAllByRole('link', { name: /Get key/ });
     expect(rows.map((link) => link.getAttribute('href'))).toEqual([
       'https://groq.example/keys',
@@ -92,8 +95,11 @@ describe('AI provider checklist', () => {
   it('accepts one provider but recommends a backup', async () => {
     stubFetch(providersApi([connection('groq', 'Groq')], ['groq']));
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    expect(await screen.findByText('Chat works — add a backup provider')).toBeInTheDocument();
-    expect(screen.getByText(/1 of 2 connected/)).toBeInTheDocument();
+    // One line says chat works and why a second provider helps.
+    expect(
+      await screen.findByText(/Chat works\. A second recommended provider .* 1 of 2 connected/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /3 more providers/ }));
     // Groq now lives under Connected providers, so the checklist no longer offers it.
     const keyLinks = screen.getAllByRole('link', { name: /Get key/ }).map((link) => link.getAttribute('href'));
     expect(keyLinks).not.toContain('https://groq.example/keys');
@@ -104,7 +110,7 @@ describe('AI provider checklist', () => {
     stubFetch(providersApi([connection('groq', 'Groq'), connection('nvidia', 'NVIDIA')], ['groq', 'nvidia']));
     renderWithDashboard(<AiSettings />, dashboardData([]));
     expect(await screen.findByText('More free providers')).toBeInTheDocument();
-    expect(screen.queryByText('Chat works — add a backup provider')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Chat works/)).not.toBeInTheDocument();
   });
 });
 
@@ -186,6 +192,7 @@ describe('One key field for every provider', () => {
     });
     renderWithDashboard(<AiSettings />, dashboardData([]));
     // The pickup only takes a key for the provider just opened.
+    fireEvent.click(await screen.findByRole('button', { name: /more providers/ }));
     fireEvent.click(
       (await screen.findAllByRole('link', { name: /Get key/ })).find(
         (link) => link.getAttribute('href') === 'https://cerebras.example/keys',

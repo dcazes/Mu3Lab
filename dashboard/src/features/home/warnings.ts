@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import type { DismissedResponse } from '../../api';
 import { postJsonApi } from '../../api/client';
-import { isWorking, needsAttention, stateLabel } from '../../lib/services';
+import { isWorking, needsAttention, stateLabel, statusText } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { useCoreSetupActive } from './CoreSetupProgress';
 
@@ -100,7 +100,9 @@ export function useHomeNotices() {
         service.id,
         // An app that recovered in between has a newer last success, so a new failure shows again.
         `app|${service.id}|${service.display_state}|${service.reason}|${service.checks?.process?.last_success_at || ''}`,
-        `${service.name}: ${stateLabel[service.display_state].toLowerCase()}`,
+        service.reason
+          ? `${service.name} needs attention: ${service.reason}`
+          : `${service.name}: ${stateLabel[service.display_state].toLowerCase()}`,
         `/apps/${service.id}`,
       ),
     ),
@@ -125,7 +127,7 @@ export function useHomeNotices() {
     warnings: [],
     icon: Loader2,
     tone: 'progress',
-    text: `${service.name} is ${stateLabel[service.display_state].toLowerCase()}…`,
+    text: `${service.name} is ${statusText(service).toLowerCase()}`,
     more: 0,
     to: `/apps/${service.id}`,
   }));
