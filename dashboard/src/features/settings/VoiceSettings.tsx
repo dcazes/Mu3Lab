@@ -57,10 +57,10 @@ export function VoiceSettings() {
       {data && !data.available ? (
         <EmptyState
           icon={Mic}
-          title="Speech isn’t installed"
-          action={<LinkButton to="/apps/speaches">View Speech</LinkButton>}
+          title="Speaches isn’t installed"
+          action={<LinkButton to="/apps/speaches">View Speaches</LinkButton>}
         >
-          Install Speech first; your voice key uses it.
+          Install Speaches first; your voice key uses it.
         </EmptyState>
       ) : (
         <Card

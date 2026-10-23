@@ -1,4 +1,4 @@
-# Voice assistant (LiveKit)
+# LiveKit (voice assistant)
 
 A voice assistant people talk to in the browser. Everything runs on this server.
 
@@ -48,7 +48,7 @@ Install and remove it from the Mu3Lab dashboard (Apps). It needs:
 - the voice model in **Settings, Voice Assistant** (the agent uses `mu3lab-voice`). Until you save a
   choice there it matches chat's setting in **Settings, AI**. Start stops with a message when the
   model is not chosen, downloaded or routed (`needs_voice_model` rule);
-- the Speech app.
+- the Speaches app.
 
 Start and Stop are on the app's page.
 
@@ -63,7 +63,7 @@ Start and Stop are on the app's page.
 
 - **Answer model:** choose outside providers or a local model in **Settings, Voice Assistant**,
   independently of chat. The agent always asks for `mu3lab-voice`, so it follows that choice.
-- **Voice:** change the Speech app's default voice. The agent picks it up when the app is re-wired.
+- **Voice:** change the Speaches app's default voice. The agent picks it up when the app is re-wired.
 
 ## Bypassing LiteLLM
 

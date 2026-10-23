@@ -120,5 +120,5 @@ rules:
 resource_guidance: The assistant itself is light (under 1 GB of memory). The speech models and a local voice model
   need about 7 GB of graphics memory together with the 4B model; with outside providers, only speech runs here. Uses
   the model chosen in Settings, Voice Assistant.
-setup_action: Install Speech, check the model in Settings, Voice Assistant, then install the voice assistant and
+setup_action: Install Speaches, check the model in Settings, Voice Assistant, then install LiveKit and
   open Talk.

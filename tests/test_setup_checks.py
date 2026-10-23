@@ -82,7 +82,7 @@ class VoiceModelTests(unittest.TestCase):
     def test_missing_speech_route_needs_setup(self):
         with self.assertRaises(SetupNeeded) as caught:
             self.check(provider=True, routed=("mu3lab-voice",))
-        self.assertIn("Install Speech", caught.exception.message)
+        self.assertIn("Install Speaches", caught.exception.message)
 
     def test_the_rule_no_longer_blocks_before_start(self):
         rule = NeedsVoiceModel(NeedsVoiceModelParams(models=self.MODELS))

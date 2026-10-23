@@ -7,7 +7,7 @@ group: ai
 category: ai
 tagline: AI chat with your apps, voice and documents
 summary: Mu3Lab's chat. Chat with Mu3Lab's models, use an assistant for each of your apps, talk and listen with
-  local voice when Speech is installed, and ask questions about your own documents.
+  local voice when Speaches is installed, and ask questions about your own documents.
 version: v0.11.4
 upstream: open-webui/open-webui
 depends_on:
@@ -98,5 +98,5 @@ mobile:
     - Use the browser's share or menu button and choose Add to Home Screen.
 chat:
   workspace: open_webui
-resource_guidance: Moderate; a few hundred MB of memory. Models run through LiteLLM, voice through Speech.
+resource_guidance: Moderate; a few hundred MB of memory. Models run through LiteLLM, voice through Speaches.
 setup_action: Connect Open WebUI to LiteLLM, sign in with Authentik, and add an assistant for each app.

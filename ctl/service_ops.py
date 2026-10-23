@@ -236,7 +236,7 @@ def _start_needed_apps(
     actor: str,
     root: Path,
 ) -> bool:
-    """Start the stopped catalog apps this one needs (theirs first), so the voice assistant brings up Speech.
+    """Start the stopped catalog apps this one needs (theirs first), so LiveKit brings up Speaches.
 
     Core apps run by themselves; an app that is not installed is the install batch's job. A failure
     ends the job with the needed app named and leaves this app's own state as it was.

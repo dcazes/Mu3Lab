@@ -23,7 +23,7 @@ _NO_STORE = {"Cache-Control": "no-store"}
 
 def _require_speech() -> None:
     if not voice_keys.speech_installed(cached(), RuntimePaths()):
-        raise ApiError(409, "Install Speech first; voice keys use it.", code="speech_not_installed")
+        raise ApiError(409, "Install Speaches first; voice keys use it.", code="speech_not_installed")
 
 
 @router.get("", response_model=models.VoiceKeyStatus, response_model_exclude_none=True)

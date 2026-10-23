@@ -21,7 +21,7 @@ sign_in:
   note: Internal speech service; apps and devices reach it through LiteLLM with their own keys.
 ui:
   available: false
-  unavailable_reason: Speech has no screen of its own; use it from chat, Home Assistant, or with your personal voice key.
+  unavailable_reason: Speaches has no screen of its own; use it from chat, Home Assistant, or with your personal voice key.
 configuration:
 - key: stt_model
   env: MU3LAB_STT_MODEL
@@ -48,4 +48,4 @@ env:
   MU3LAB_SPEECH_URL: http://speaches:8000/v1
 resource_guidance: The best recognition model uses about 2.5 GB of graphics memory while in use and is unloaded after
   five idle minutes. Models need about 2 GB of disk.
-setup_action: Install Speech to talk to chat and Home Assistant, and to dictate on your own devices.
+setup_action: Install Speaches to talk to chat and Home Assistant, and to dictate on your own devices.
