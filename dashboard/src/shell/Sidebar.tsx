@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Dot } from '../components/Status';
+import { useHomeNotices } from '../features/home/warnings';
 import { Link, usePath } from '../lib/router';
 import { needsAttention } from '../lib/services';
 import type { ThemePreference } from '../lib/theme';
@@ -80,10 +81,14 @@ export function Sidebar({
   const path = usePath();
   const { data } = useDashboard();
   const issues = data.services.services.filter(needsAttention).length;
+  // The same warnings Home lists, so this never says "normal" while Home shows a problem.
+  const warnings = useHomeNotices().count;
   // Folded, each label stays for screen readers and shows on hover.
   const label = (text: string) => <span className={collapsed ? 'sr-only' : undefined}>{text}</span>;
   const hint = (text: string) => (collapsed ? text : undefined);
-  const health = issues ? `${issues} app${issues === 1 ? '' : 's'} need attention` : 'All systems normal';
+  const health = warnings
+    ? `${warnings} ${warnings === 1 ? 'thing needs' : 'things need'} attention`
+    : 'All systems normal';
   return (
     <aside className={`sidebar${collapsed ? ' is-collapsed' : ''}`}>
       <div className="sidebar-top">
@@ -136,8 +141,8 @@ export function Sidebar({
         ))}
       </nav>
       <div className="sidebar-footer">
-        <Link to="/settings/system" className="system-pill" title={hint(health)}>
-          <Dot tone={issues ? 'amber' : 'green'} />
+        <Link to={warnings ? '/' : '/settings/system'} className="system-pill" title={hint(health)}>
+          <Dot tone={warnings ? 'amber' : 'green'} />
           {label(health)}
         </Link>
         <UserMenu theme={theme} setTheme={setTheme} compact={collapsed} />

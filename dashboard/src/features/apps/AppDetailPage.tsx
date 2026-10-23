@@ -202,7 +202,7 @@ function Overview({ service, address, devices }: { service: Service; address: st
         {note && <p className="muted">{note}</p>}
         <Facts
           items={[
-            { label: 'Status', value: <StatusBadge state={service.display_state} /> },
+            // The status badge sits under the app's name in the header, so it isn't repeated here.
             // With a devices section below, its server address card carries the address.
             ...(address && !devices
               ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }]

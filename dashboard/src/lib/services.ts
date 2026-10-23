@@ -20,12 +20,13 @@ export const stateLabel: Record<Service['display_state'], string> = {
   needs_attention: 'Needs attention',
 };
 
+/** Red is kept for failures, so it stands out; a stopped app is a choice, shown in neutral grey. */
 export function stateTone(state: string): Tone {
   return (
     (
       {
         running: 'green',
-        stopped: 'red',
+        stopped: 'gray',
         working: 'blue',
         checking: 'blue',
         not_installed: 'gray',

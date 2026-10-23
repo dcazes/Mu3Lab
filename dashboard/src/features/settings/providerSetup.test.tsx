@@ -285,6 +285,9 @@ describe('Get started', () => {
     signedIn = true;
     fireEvent.click(check);
     expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    // Home folds finished steps into one row that shows them again.
+    expect(screen.queryByText(/Sign in to Bitwarden/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /1 step done/ }));
     expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
   });
 
@@ -293,6 +296,9 @@ describe('Get started', () => {
     stubFetch(api(true, [], ['Google Chrome'], true));
     renderWithDashboard(<HomePage />, dashboardData([]));
     expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    // Home folds finished steps into one row that shows them again.
+    expect(screen.queryByText(/Sign in to Bitwarden/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /1 step done/ }));
     expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
   });
 

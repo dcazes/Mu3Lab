@@ -35,17 +35,20 @@ describe('Home', () => {
       allowed_actions: ['start'],
     });
     const ollama = service('ollama', 'Ollama', 'core', { category: 'ai' });
+    localStorage.removeItem('mu3lab.homeFolded');
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    // AI and infrastructure apps show too, each under its Discover section.
-    expect(screen.getByRole('button', { name: /AI & voice/ })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
-    // A folded section keeps its apps as icons.
-    fireEvent.click(screen.getByRole('button', { name: /AI & voice/ }));
-    expect(screen.getByRole('button', { name: /AI & voice/ })).toHaveAttribute('aria-expanded', 'false');
+    // AI and infrastructure apps share one last group, folded to icons until opened.
+    const plumbing = () => screen.getByRole('button', { name: /AI & system/ });
+    expect(plumbing()).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
-    fireEvent.click(screen.getByRole('button', { name: /AI & voice/ }));
+    expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
+    fireEvent.click(plumbing());
+    expect(plumbing()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Ollama: Running' })).not.toHaveAttribute('title');
+    fireEvent.click(plumbing());
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
+    // Everyday apps stay open under their own section.
+    expect(screen.getByRole('button', { name: /Productivity/ })).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.click(screen.getByRole('button', { name: 'Immich: Running' }));
     let panel = screen.getByRole('dialog', { name: 'Immich' });

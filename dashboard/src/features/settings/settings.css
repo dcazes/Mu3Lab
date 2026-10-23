@@ -15,11 +15,9 @@
 }
 
 .settings-nav-title {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  color: var(--text-2);
   padding: 0 8px 8px;
 }
 

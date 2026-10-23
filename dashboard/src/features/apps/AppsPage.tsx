@@ -84,10 +84,9 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
       <span className="installed-cell">
         <StatusBadge state={service.display_state} />
       </span>
+      {/* Single sign-on is the usual case, so only the apps with their own login are marked. */}
       <span className="installed-cell hide-mobile">
-        {mode && mode !== 'none' && (
-          <Badge tone={sso ? 'green' : 'red'}>{sso ? 'SSO' : signInSummary(service).label}</Badge>
-        )}
+        {mode && mode !== 'none' && !sso && <Badge tone="gray">{signInSummary(service).label}</Badge>}
       </span>
       <span className="installed-cell installed-actions">
         {updatable && (

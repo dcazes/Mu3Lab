@@ -1,26 +1,24 @@
-import { AlertTriangle, ArrowRight, ChevronDown, DatabaseBackup, Loader2, X } from 'lucide-react';
-import { useState } from 'react';
-import { toast } from 'sonner';
-import type { DismissedResponse, Service } from '../../api';
-import { postJsonApi } from '../../api/client';
+import { ArrowRight, ChevronDown, X } from 'lucide-react';
+import { type CSSProperties, useState } from 'react';
+import type { Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Dot } from '../../components/Status';
 import { Link } from '../../lib/router';
 import {
   appSections,
+  isEverydayApp,
   isInstalled,
   isRunning,
-  isWorking,
   launchTarget,
-  needsAttention,
   stateLabel,
   stateTone,
 } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { AppQuickPanel } from './AppQuickPanel';
-import { CoreSetupProgress, useCoreSetupActive } from './CoreSetupProgress';
+import { CoreSetupProgress } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
+import { useHomeNotices } from './warnings';
 
 function greeting() {
   const hour = new Date().getHours();
@@ -28,10 +26,14 @@ function greeting() {
 }
 
 const FOLDED_KEY = 'mu3lab.homeFolded';
+/** The AI and system apps most people never open: one group, last, folded until opened. */
+const BEHIND_THE_SCENES = 'behind-the-scenes';
+// Stored for that group when it is open, since it starts folded.
+const OPENED = `${BEHIND_THE_SCENES}:open`;
 
 /** Sections folded to a row of icons, remembered in this browser. */
 function useFolded() {
-  const [folded, setFolded] = useState<string[]>(() => {
+  const [stored, setStored] = useState<string[]>(() => {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(FOLDED_KEY) || '[]');
       return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
@@ -39,16 +41,18 @@ function useFolded() {
       return [];
     }
   });
+  const isFolded = (id: string) => (id === BEHIND_THE_SCENES ? !stored.includes(OPENED) : stored.includes(id));
   const toggle = (id: string) => {
-    const next = folded.includes(id) ? folded.filter((item) => item !== id) : [...folded, id];
-    setFolded(next);
+    const item = id === BEHIND_THE_SCENES ? OPENED : id;
+    const next = stored.includes(item) ? stored.filter((value) => value !== item) : [...stored, item];
+    setStored(next);
     try {
       localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
     } catch {
       // Storage can be unavailable (private mode); the choice just won't persist.
     }
   };
-  return [folded, toggle] as const;
+  return [isFolded, toggle] as const;
 }
 
 /** A folded tile is the icon alone; its name is the tooltip. */
@@ -91,124 +95,29 @@ function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => voi
   );
 }
 
-/**
- * Warnings the person dismissed, on all their devices. Each warning is named by what it says and
- * when its problem began, so a dismissal lasts only while that same problem continues.
- */
-function useDismissed() {
-  const { data, refresh } = useDashboard();
-  // Hidden at once on a click, before the server has answered.
-  const [pending, setPending] = useState<string[]>([]);
-  const dismissed = [...(data.dismissed || []), ...pending];
-  const dismiss = (warning: string) => {
-    setPending((current) => [...current, warning]);
-    postJsonApi<DismissedResponse>('/api/v1/dismissed', { warning })
-      .then(() => refresh())
-      .catch(() => {
-        setPending((current) => current.filter((item) => item !== warning));
-        toast.error('That warning could not be hidden. Try again.');
-      });
-  };
-  return [dismissed, dismiss] as const;
-}
-
 function Attention() {
-  const { data } = useDashboard();
-  const [dismissed, dismiss] = useDismissed();
-  const failing = data.services.services.filter(needsAttention);
-  // The core apps' own progress card covers them while their setup runs.
-  const coreActive = useCoreSetupActive();
-  const coreApps = new Set(coreActive ? (data.core.apps || []).map((app) => app.service_id) : []);
-  const working = data.services.services.filter((service) => isWorking(service) && !coreApps.has(service.id));
-  const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
-  const setupFailed = setupIncomplete && (data.provisioning.blocked || data.core.current_job?.state === 'failed');
-  const worker = data.system.worker_state || '';
-  const workerDown = data.system.ok && !['', 'active', 'activating', 'unknown'].includes(worker);
-  const warnings = [
-    // Nothing runs without these two, so they lead.
-    ...(data.system.ok && !data.system.docker_ready
-      ? [
-          {
-            key: 'docker',
-            warning: 'docker|down',
-            icon: AlertTriangle,
-            tone: 'warning',
-            text: 'Docker isn’t reachable, so apps can’t start or run. Open System settings for details.',
-            to: '/settings/system',
-          },
-        ]
-      : []),
-    ...(workerDown
-      ? [
-          {
-            key: 'worker',
-            warning: `worker|${worker}`,
-            icon: AlertTriangle,
-            tone: 'warning',
-            text: `Mu3Lab’s background worker is ${worker}, so installs, backups and repairs wait until it runs again.`,
-            to: '/settings/system',
-          },
-        ]
-      : []),
-    // The button that tries again sits in System settings.
-    ...(setupFailed
-      ? [
-          {
-            key: 'setup-failed',
-            warning: `setup-failed|${data.core.current_job?.id || ''}`,
-            icon: AlertTriangle,
-            tone: 'warning',
-            text: 'A setup step didn’t finish. Open System settings to try again.',
-            to: '/settings/system',
-          },
-        ]
-      : []),
-    ...failing.map((service) => ({
-      key: service.id,
-      // An app that recovered in between has a newer last success, so a new failure shows again.
-      warning: `app|${service.id}|${service.display_state}|${service.reason}|${service.checks?.process?.last_success_at || ''}`,
-      icon: AlertTriangle,
-      tone: 'warning',
-      text: `${service.name}: ${stateLabel[service.display_state].toLowerCase()}`,
-      to: `/apps/${service.id}`,
-    })),
-    // Sent to administrators only, and only while backups fall behind the schedule.
-    ...(setupIncomplete ? [] : data.backup_attention || []).map((item) => ({
-      key: item.key,
-      warning: `backup|${item.key}|${item.message}`,
-      icon: DatabaseBackup,
-      tone: 'warning',
-      text: item.message,
-      to: '/settings/security',
-    })),
-  ].filter((item) => !dismissed.includes(item.warning));
-  // Progress clears by itself, so it cannot be dismissed.
-  const progress = working.map((service) => ({
-    key: `working-${service.id}`,
-    warning: '',
-    icon: Loader2,
-    tone: 'progress',
-    text: `${service.name} is ${stateLabel[service.display_state].toLowerCase()}…`,
-    to: `/apps/${service.id}`,
-  }));
-  const items = [...warnings, ...progress];
+  const { notices, progress, dismiss } = useHomeNotices();
+  const items = [...notices, ...progress];
   if (!items.length) return null;
   return (
     <section className="attention" aria-label="Needs attention">
-      {items.map(({ key, warning, icon: Icon, tone, text, to }) => (
+      {items.map(({ key, warnings, icon: Icon, tone, text, more, to }) => (
         <div key={key} className="attention-row">
           <Link to={to} className={`attention-item attention-${tone}`}>
             <Icon className={tone === 'progress' ? 'spin' : ''} />
-            <span>{text}</span>
+            <span>
+              {text}
+              {more > 0 && <small className="attention-more"> +{more} more</small>}
+            </span>
             <ArrowRight className="attention-arrow" />
           </Link>
-          {warning && (
+          {warnings.length > 0 && (
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-icon"
               aria-label="Hide this warning until it changes"
               title="Hide until it changes"
-              onClick={() => dismiss(warning)}
+              onClick={() => dismiss(warnings)}
             >
               <X />
             </button>
@@ -222,8 +131,13 @@ function Attention() {
 export function HomePage() {
   const { data } = useDashboard();
   const services = data.services.services;
-  const sections = appSections(services.filter(isInstalled));
-  const [folded, toggleFolded] = useFolded();
+  const installed = services.filter(isInstalled);
+  const plumbing = installed.filter((service) => !isEverydayApp(service));
+  const sections = [
+    ...appSections(installed.filter(isEverydayApp)),
+    ...(plumbing.length ? [{ id: BEHIND_THE_SCENES, label: 'AI & system', apps: plumbing }] : []),
+  ];
+  const [isFolded, toggleFolded] = useFolded();
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   const [panel, setPanel] = useState('');
   // Look the app up each render so the panel follows its live state.
@@ -231,13 +145,15 @@ export function HomePage() {
   return (
     <div className="home">
       <header className="home-header">
-        <h1>
-          {greeting()}
-          {name ? `, ${name}` : ''}
-        </h1>
-        <p>{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+        <div>
+          <h1>
+            {greeting()}
+            {name ? `, ${name}` : ''}
+          </h1>
+          <p>{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+        </div>
+        <SystemStatus />
       </header>
-      <SystemStatus />
       <Attention />
       <CoreSetupProgress />
       <GetStarted />
@@ -246,29 +162,42 @@ export function HomePage() {
           <h2 id="apps-heading">Your apps</h2>
           <Link to="/apps">Manage</Link>
         </div>
-        {sections.map(({ id, label, apps }) => {
-          const open = !folded.includes(id);
-          return (
-            <section key={id} className={`launcher-group${open ? '' : ' is-folded'}`}>
-              <h3>
-                <button type="button" className="launcher-toggle" aria-expanded={open} onClick={() => toggleFolded(id)}>
-                  <ChevronDown />
-                  {label}
-                  <span className="launcher-count">{apps.length}</span>
-                </button>
-              </h3>
-              <div className={open ? 'launcher' : 'launcher-mini'}>
-                {apps.map((service) =>
-                  open ? (
-                    <LauncherTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
-                  ) : (
-                    <MiniTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
-                  ),
-                )}
-              </div>
-            </section>
-          );
-        })}
+        <div className="launcher-groups">
+          {sections.map(({ id, label, apps }) => {
+            const open = !isFolded(id);
+            // A group wider than about half the page keeps a row of its own.
+            const wide = id === BEHIND_THE_SCENES || apps.length > 4;
+            return (
+              <section
+                key={id}
+                className={`launcher-group${open ? '' : ' is-folded'}${wide ? ' is-wide' : ''}`}
+                style={{ '--tiles': apps.length } as CSSProperties}
+              >
+                <h3>
+                  <button
+                    type="button"
+                    className="launcher-toggle"
+                    aria-expanded={open}
+                    onClick={() => toggleFolded(id)}
+                  >
+                    <ChevronDown />
+                    {label}
+                    <span className="launcher-count">{apps.length}</span>
+                  </button>
+                </h3>
+                <div className={open ? 'launcher' : 'launcher-mini'}>
+                  {apps.map((service) =>
+                    open ? (
+                      <LauncherTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
+                    ) : (
+                      <MiniTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
+                    ),
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </section>
       {selected && <AppQuickPanel service={selected} onClose={() => setPanel('')} />}
     </div>

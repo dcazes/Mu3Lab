@@ -230,17 +230,38 @@ interface Step {
 function StepList({
   state,
   compact = false,
+  foldDone = false,
 }: {
   state: NonNullable<ReturnType<typeof useGetStarted>>;
   compact?: boolean;
+  /** Finished steps fold into one row that shows them again, so the next step leads. */
+  foldDone?: boolean;
 }) {
   const [guide, setGuide] = useState<Guide | null>(null);
-  const { steps, markDone, checking, checkExtension } = state;
+  const [showDone, setShowDone] = useState(false);
+  const { steps, finished, markDone, checking, checkExtension } = state;
   const next = steps.find((step) => !step.done && !step.waiting)?.key;
+  const folded = foldDone && !showDone && finished > 0;
   return (
     <>
       <ol className={`get-started-list${compact ? ' is-compact' : ''}`}>
+        {folded && (
+          <li>
+            <button
+              type="button"
+              className="get-started-item is-done get-started-fold"
+              onClick={() => setShowDone(true)}
+            >
+              <CheckCircle2 className="get-started-done" />
+              <span>
+                {finished} {finished === 1 ? 'step' : 'steps'} done
+              </span>
+              <small>Show</small>
+            </button>
+          </li>
+        )}
         {steps.map((step, index) => {
+          if (folded && step.done) return null;
           const content = (
             <>
               {step.done ? <CheckCircle2 className="get-started-done" /> : <Circle />}
@@ -313,12 +334,18 @@ export function GetStarted() {
         <h2 id="get-started-heading">Get started</h2>
         <span className="get-started-count">
           {state.finished} of {state.steps.length} complete
+          <button type="button" className="get-started-hide" onClick={() => state.setHidden(true)}>
+            Hide
+          </button>
         </span>
       </div>
-      <StepList state={state} />
-      <button type="button" className="get-started-hide" onClick={() => state.setHidden(true)}>
-        Hide this list
-      </button>
+      <progress
+        className="get-started-progress"
+        value={state.finished}
+        max={state.steps.length}
+        aria-label={`${state.finished} of ${state.steps.length} steps complete`}
+      />
+      <StepList state={state} foldDone />
     </section>
   );
 }
