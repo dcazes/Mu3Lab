@@ -182,6 +182,15 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
         if uid and email and item["active"]:
             item["token"] = contextforge_ops.person_key(uid, email, connector_id, server_id)
         result.append(item)
+    # Everyone's own calendar tools (ctl/calendar_tools.py).
+    from ctl import calendar_tools
+
+    for item in calendar_tools.assistants(uid):
+        if uid and email:
+            item["token"] = contextforge_ops.person_key(
+                uid, email, "calendar", item["server_id"], team_id=item["team_id"]
+            )
+        result.append(item)
     return result
 
 
@@ -215,6 +224,9 @@ def _personal_servers(app_id: str, connector_id: str) -> list[tuple[str, str, st
 
 def sync_agents(log: Log) -> tuple[bool, str]:
     """Keep every installed chat app's assistants in step; the household one decides the answer."""
+    from ctl import calendar_tools
+
+    calendar_tools.sync(log)
     household = selected()
     result = (True, "Assistants are prepared when chat is installed.")
     for app in chat_apps():
@@ -234,9 +246,11 @@ def revoke(subject: str) -> None:
     """Take a person's app tools out of every installed chat app, and remove their own copies of private apps' tools."""
     import logging
 
-    from ctl import person_connectors
+    from ctl import calendar_tools, person_connectors
 
     for app in chat_apps():
         if installed(app.id):
             backend(app).revoke(subject)
-    person_connectors.forget(subject, logging.getLogger("mu3lab.access").info)
+    log = logging.getLogger("mu3lab.access").info
+    person_connectors.forget(subject, log)
+    calendar_tools.forget(subject, log)

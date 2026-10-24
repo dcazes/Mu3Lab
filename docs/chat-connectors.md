@@ -128,6 +128,23 @@ administrators (Mu3Lab's operators) can still reach every team's tools in Contex
 ContextForge requires keys to expire, so Mu3Lab's keys last 90 days and are replaced when they lapse.
 Revoked keys keep their names, so each new key gets a fresh suffix.
 
+## Calendar: one per person, shared with the dashboard and phone
+
+Chat reads and changes each person's own Mu3Lab calendar, the one the dashboard's Calendar page,
+Nextcloud and their phone show (`ctl/calendar_tools.py`). Open WebUI's own calendar is switched off
+(`ENABLE_CALENDAR: "false"`), since nothing else would see it.
+
+- Each person has a calendar key (`mu3cal_…`) that reaches only their calendar, through
+  `/api/v1/chat-tools/calendar` (`ctl/api/routes/chat_calendar.py`). The route does the dashboard's own
+  calendar work, refuses anything relayed by Caddy, and refuses the key of someone removed.
+- One adapter (`platform/calendar-tools`, the shared adapter's `calendar` mode) holds no secret. It
+  passes each call's key on, and listens where ContextForge reaches it (`host.docker.internal:8831`).
+- Each person gets a ContextForge gateway and virtual server holding their key, kept to their own team.
+- Open WebUI puts each person's calendar connection on the main assistant (it skips the ones a person
+  isn't granted). LobeChat gets a Calendar assistant per person.
+
+Tools: list events (by default the next 30 days, optionally by title), add, change and delete one.
+
 ## Platform services: read-only, administrators only
 
 Infrastructure apps (`group: infrastructure`) may have a connector only if its assistant is

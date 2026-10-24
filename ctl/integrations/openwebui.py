@@ -144,6 +144,8 @@ class OpenWebUI:
                     "info": {"id": server_id, "name": item["title"], "description": item["description"]},
                 }
             )
+            if item.get("tools_only"):
+                continue  # the main assistant carries these (main_model)
             wanted_models[server_id] = {
                 "id": server_id,
                 "base_model_id": BASE_MODEL,
@@ -171,8 +173,15 @@ class OpenWebUI:
                 item["title"]: item for item in assistants if item.get("active", True) and not operators_only(item)
             }.values()
         )
-        paused = bool(assistants) and not listed
-        self.save_model(main_model(listed, guide, paused=paused), exists=MAIN in existing)
+        listed = [item for item in listed if not item.get("tools_only")]
+        paused = bool([item for item in assistants if not item.get("tools_only")]) and not listed
+        # Each person's own calendar connection; Open WebUI skips those a person is not granted.
+        tool_ids = [
+            f"server:mcp:{PREFIX}{item['id']}"
+            for item in assistants
+            if item.get("tools_only") and f"{PREFIX}{item['id']}" in {c["info"]["id"] for c in wanted_connections}
+        ]
+        self.save_model(main_model(listed, guide, paused=paused, tool_ids=tool_ids), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
         for model_id, model in wanted_models.items():
@@ -196,6 +205,8 @@ class OpenWebUI:
             active = bool(item.get("active", True))
             connection, model = connections.get(server_id), models.get(server_id)
             result = {"status": "failed", "tools": 0}
+            if item.get("tools_only"):
+                model = model or {"meta": {"toolIds": [f"server:mcp:{server_id}"]}, "is_active": active}
             if (connection is None or model is None) and item.get("person"):
                 result |= {"status": "pending", "detail": "Added once you have opened Open WebUI."}
             elif connection is None or model is None:
@@ -256,7 +267,9 @@ def hidden_model(model_id: str) -> dict[str, Any]:
     }
 
 
-def main_model(assistants: list[dict[str, Any]], guide: str = "", *, paused: bool = False) -> dict[str, Any]:
+def main_model(
+    assistants: list[dict[str, Any]], guide: str = "", *, paused: bool = False, tool_ids: list[str] | None = None
+) -> dict[str, Any]:
     """The main assistant, told which app assistants exist and what every installed app is for.
 
     ``guide`` (``agent_context.household_guide``) lets it answer questions about the apps themselves,
@@ -292,10 +305,17 @@ def main_model(assistants: list[dict[str, Any]], guide: str = "", *, paused: boo
         if guide
         else ""
     )
+    calendar = (
+        "\n\nCalendar: you have tools for the person's own Mu3Lab calendar, the same one the Mu3Lab dashboard, "
+        "Nextcloud and their phone show. List events before changing one, use the IDs the tools return, give times "
+        "in the person's time zone, and ask before moving or deleting an event."
+        if tool_ids
+        else ""
+    )
     instructions = (
         "You are Mu3Lab, this household's general assistant. You can help with general questions, writing and "
-        "planning. You have no app tools: you cannot see or change anything inside the household's apps, so never "
-        f"claim to have done so.\n\n{apps}{household}\n\n"
+        "planning. Apart from the calendar, you have no app tools: you cannot see or change anything inside the "
+        f"household's apps, so never claim to have done so.\n\n{apps}{household}{calendar}\n\n"
         "People manage Mu3Lab itself (apps, people, AI settings, backups) in the Mu3Lab dashboard."
     )
     return {
@@ -303,10 +323,11 @@ def main_model(assistants: list[dict[str, Any]], guide: str = "", *, paused: boo
         "base_model_id": BASE_MODEL,
         "name": "Mu3Lab",
         "meta": {
-            "description": "General help, and directions to the right app assistant.",
+            "description": "General help, your calendar, and directions to the right app assistant.",
             "capabilities": {"function_calling": True},
+            **({"toolIds": tool_ids} if tool_ids else {}),
         },
-        "params": {"system": instructions},
+        "params": {"system": instructions, **({"function_calling": "native"} if tool_ids else {})},
         "access_grants": EVERYONE,
         "is_active": True,
     }
