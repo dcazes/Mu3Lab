@@ -17,8 +17,10 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -80,6 +82,21 @@ ASK_FIRST = (
     "Not done: this changes something. Tell the person exactly what you will change and ask them to say yes. "
     "Call this tool again only after they say yes."
 )
+
+
+def now_line() -> str:
+    """Today's date and time where the household lives, so "tomorrow at 10" means 10 here."""
+    name = _env("TZ", "UTC")
+    try:
+        zone = ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        name, zone = "UTC", ZoneInfo("UTC")
+    now = datetime.now(zone)
+    offset = now.strftime("%z")
+    return (
+        f"It is now {now:%A %d %B %Y, %H:%M} in {name} (UTC{offset[:3]}:{offset[3:]}). Give and take times in this "
+        "time zone, and send tools times with this UTC offset."
+    )
 
 
 def load_people() -> dict[str, Any]:
@@ -154,7 +171,7 @@ class Assistant(Agent):
                 f"You are talking with {person['name']}. No app assistants are switched on for voice yet, so you "
                 "cannot see or change anything in their apps; an administrator turns them on in Mu3Lab."
             )
-        instructions = f"{INSTRUCTIONS}\n\n{situation}"
+        instructions = f"{INSTRUCTIONS}\n\n{now_line()}\n\n{situation}"
         if guide:
             instructions += f"\n\nThe household's apps, for general questions:\n{guide}"
         super().__init__(
@@ -192,7 +209,7 @@ class AppAssistant(Agent):
             client_session_timeout_seconds=30,
         )
         super().__init__(
-            instructions=spec["instructions"],
+            instructions=f"{now_line()}\n\n{spec['instructions']}",
             # back_to_main below joins these by itself.
             tools=[ConfirmedToolset(id=spec["id"], mcp_server=server, reads=spec.get("reads", []))],
             chat_ctx=chat_ctx,
