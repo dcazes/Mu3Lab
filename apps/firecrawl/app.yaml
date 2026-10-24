@@ -27,6 +27,11 @@ chat:
     description: Collect and analyze web content.
     instructions: Help collect web content with Firecrawl tools assigned to this agent. Explain when a request will
       fetch external pages or start a crawl. Ask before starting large crawls.
+    faq:
+    - question: "What does Firecrawl do?"
+      answer: "Fetches web pages and turns them into clean text, so assistants can read, summarise or compare them."
+    - question: "Does it go on the internet?"
+      answer: "Yes: it visits the pages you ask about. Large crawls of a whole site take longer and are confirmed first."
   connectors:
   - firecrawl-official
 ui:

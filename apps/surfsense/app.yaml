@@ -94,6 +94,13 @@ chat:
     description: Search and organize research sources.
     instructions: Help search and organize SurfSense research. Use only SurfSense tools assigned to this agent.
       Ask before changing sources or workspaces.
+    faq:
+    - question: "What is SurfSense for?"
+      answer: "A private research space: collect web pages, files and notes as sources, then ask questions across them."
+    - question: "Who can see my research?"
+      answer: "Only you: each person has their own SurfSense account and workspace."
+    - question: "How do I sign in?"
+      answer: "Bitwarden fills in the SurfSense login Mu3Lab saved in your vault."
   connectors:
   - surfsense-official
 mobile:

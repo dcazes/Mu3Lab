@@ -108,7 +108,7 @@ class OpenWebUI:
         )
         return list((data or {}).get("specs") or [])
 
-    def ensure(self, assistants: list[dict[str, Any]]) -> list[str]:
+    def ensure(self, assistants: list[dict[str, Any]], guide: str = "") -> list[str]:
         """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
@@ -171,7 +171,8 @@ class OpenWebUI:
                 item["title"]: item for item in assistants if item.get("active", True) and not operators_only(item)
             }.values()
         )
-        self.save_model(main_model(listed), exists=MAIN in existing)
+        paused = bool(assistants) and not listed
+        self.save_model(main_model(listed, guide, paused=paused), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
         for model_id, model in wanted_models.items():
@@ -255,8 +256,12 @@ def hidden_model(model_id: str) -> dict[str, Any]:
     }
 
 
-def main_model(assistants: list[dict[str, Any]]) -> dict[str, Any]:
-    """The main assistant, told which app assistants exist so it can send people to them."""
+def main_model(assistants: list[dict[str, Any]], guide: str = "", *, paused: bool = False) -> dict[str, Any]:
+    """The main assistant, told which app assistants exist and what every installed app is for.
+
+    ``guide`` (``agent_context.household_guide``) lets it answer questions about the apps themselves,
+    such as what one is for or how to get it on a phone, without sending people elsewhere.
+    """
     if assistants:
         listing = "\n".join(f"- {item['title']}: {item['description']}" for item in assistants)
         apps = (
@@ -265,16 +270,33 @@ def main_model(assistants: list[dict[str, Any]]) -> dict[str, Any]:
             "When a request needs one of these apps, name the assistant to use and tell the person to type @ "
             "followed by its name in the message box, or to choose it from the model menu at the top of the chat."
         )
+    elif paused:
+        apps = (
+            "The app assistants are switched off right now because their apps are stopped. When someone asks for "
+            "one, explain that an administrator can start the app from the Mu3Lab dashboard (Apps), and its "
+            "assistant comes back with it."
+        )
     else:
         apps = (
             "No app assistants are available yet. When someone asks about their apps, explain that an "
             "administrator can install apps from the Mu3Lab dashboard (Apps, then Discover); apps with chat "
             "support then get their own assistant here."
         )
+    household = (
+        "\n\nThe household's installed apps (all private to this server; reach them on devices connected to the "
+        f"household's Tailscale network, signing in with the Mu3Lab account):\n{guide}\n\n"
+        "Answer questions about what these apps are for, which to use, or how to open them or get them on a "
+        "phone yourself. Anything that needs the person's data in an app goes to that app's assistant. Do not "
+        "guess at who else can see something, such as administrators: what an administrator can see differs "
+        "by app, and each app's assistant knows."
+        if guide
+        else ""
+    )
     instructions = (
         "You are Mu3Lab, this household's general assistant. You can help with general questions, writing and "
         "planning. You have no app tools: you cannot see or change anything inside the household's apps, so never "
-        f"claim to have done so.\n\n{apps}"
+        f"claim to have done so.\n\n{apps}{household}\n\n"
+        "People manage Mu3Lab itself (apps, people, AI settings, backups) in the Mu3Lab dashboard."
     )
     return {
         "id": MAIN,

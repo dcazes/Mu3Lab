@@ -63,6 +63,15 @@ chat:
     description: Find and organize photos and videos.
     instructions: Help find and organize Immich photos and albums. Ask before uploads, edits, or deletions. Use
       only Immich tools assigned to this agent.
+    faq:
+    - question: "What is Immich for?"
+      answer: "Backing up and browsing your photos and videos on this server instead of a cloud service, with search by place, date, faces and what's in the picture."
+    - question: "Who can see my photos?"
+      answer: "Only you. Each person's library is private; you choose what to share using shared albums or partner sharing in Immich."
+    - question: "How do I back up my phone?"
+      answer: "Install the Immich app, enter Mu3Lab's Immich address, choose OAuth to sign in, then pick the albums to back up; the steps are above, under Opening."
+    - question: "Does face recognition send photos anywhere?"
+      answer: "No. Recognition and search run on this server."
   connectors:
   - immich-photo-manager
   - immich-control

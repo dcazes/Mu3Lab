@@ -70,5 +70,12 @@ chat:
     instructions: Help log and review Baby Buddy records for the household's children. Confirm the child, time and
       details before logging, ask before changing or deleting records, and give times in the household's time zone.
       Use only Baby Buddy tools assigned to this agent.
+    faq:
+    - question: "What is Baby Buddy for?"
+      answer: "Logging a baby's feedings, sleep, nappy changes, pumping and growth, so every caregiver sees the same picture."
+    - question: "Who can see and add records?"
+      answer: "Everyone in the household: the records are shared by all caregivers."
+    - question: "Can I log from my phone?"
+      answer: "Yes: open its address in your phone's browser and add it to the home screen, or ask this assistant to log it."
   connectors:
   - babybuddy-official

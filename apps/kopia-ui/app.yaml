@@ -60,5 +60,10 @@ chat:
       backup storage; to back up now, restore or change the schedule, point them to Security & backups in the Mu3Lab
       dashboard. Use only Kopia tools assigned to this agent.
     audience: operators
+    faq:
+    - question: "When do backups run?"
+      answer: "On the schedule set in the Mu3Lab dashboard under Security & backups (weekly, Sunday 03:30, unless someone changed it)."
+    - question: "How do I back up now or restore an app?"
+      answer: "In the Mu3Lab dashboard: Security & backups, or the app's own Backups card. This assistant can only read backup status."
   connectors:
   - kopia-reader

@@ -83,6 +83,15 @@ chat:
     description: Find and organize documents.
     instructions: Help find and organize Paperless documents. Ask before changing metadata, uploading, or deleting
       documents. Use only Paperless tools assigned to this agent.
+    faq:
+    - question: "What is Paperless for?"
+      answer: "Turning paperwork into a searchable archive: scan or upload a letter, bill or payslip, and Paperless reads the text so you can find it later."
+    - question: "Who can see my documents?"
+      answer: "Only you, unless you share a document with someone. Administrators manage Paperless but do not see other people's private documents."
+    - question: "How do I add documents?"
+      answer: "Upload them in Paperless, use a phone app to scan them (steps above, under Opening), or ask this assistant to upload one."
+    - question: "If I delete a document, is it gone?"
+      answer: "It goes to Paperless's trash first, where you can restore it."
   connectors:
   - paperless-community
 mobile:

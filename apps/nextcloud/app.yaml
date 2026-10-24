@@ -106,6 +106,13 @@ chat:
     description: Work with files and calendars.
     instructions: Help with Nextcloud files and calendars. Do not claim to have accessed live data unless a reviewed
       Nextcloud tool is assigned. Ask before changing data.
+    faq:
+    - question: "What is Nextcloud for?"
+      answer: "Your files, calendar and contacts on this server, synced to your computer and phone."
+    - question: "Who can see my files?"
+      answer: "Only you, unless you share a file or folder. The Music folder is shared with everyone when a music app is installed."
+    - question: "How do I get my calendar on my phone?"
+      answer: "Add Mu3Lab's Nextcloud as a calendar account on the phone (CalDAV), or use the Nextcloud app; the Mu3Lab dashboard's Calendar page shows the same events."
   connectors:
   - nextcloud-context-agent
 mobile:

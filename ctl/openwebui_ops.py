@@ -66,7 +66,7 @@ def _sync(log: Log) -> tuple[bool, str]:
         if any(item["active"] for item in desired):
             contextforge_ops.ensure_accounts(sorted({p["email"] for p in chat_people().values() if p["email"]}))
         with client() as api:
-            managed = api.ensure(desired)
+            managed = api.ensure(desired, _guide({str(item["id"]).split("--")[0] for item in desired}))
             checks = api.check(desired, _check_token() if any(item["active"] for item in desired) else "")
     except (ChatError, ContextForgeError, PeopleError, OSError, ValueError, KeyError) as exc:
         log(f"Open WebUI assistants were not updated: {exc}")
@@ -139,3 +139,21 @@ def _personal_detail(uid: str, connectors: list) -> str:
         if record.get("error"):
             return str(record["error"])
     return "Your own copy of this app's tools is being prepared."
+
+
+def _guide(with_assistant: set[str]) -> str:
+    """The main assistant's guide to every installed app."""
+    from ctl import agent_context
+    from ctl.service_state import tailnet_dns_name
+
+    state = ControlState.runtime()
+    if state is None:
+        return ""
+    installed = [
+        app
+        for app in cached().apps
+        if (record := state.app_installation(app.id))
+        and record.get("installed_at")
+        and record["state"] != "not_installed"
+    ]
+    return agent_context.household_guide(installed, with_assistant, tailnet_dns_name() or "")

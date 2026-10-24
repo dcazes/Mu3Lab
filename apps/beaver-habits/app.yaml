@@ -80,9 +80,16 @@ setup_action: Install Beaver Habits to track daily habits and streaks.
 chat:
   assistant:
     title: Beaver Habits
-    description: Check and tick off the owner's daily habits.
-    instructions: Help with the owner's Beaver Habits. Look up habits by name before acting, confirm the habit and date
+    description: Check and tick off your daily habits.
+    instructions: Help with the person's own Beaver Habits. Look up habits by name before acting, confirm the habit and date
       before marking it, and report streaks from the days the tools return. Use only Beaver Habits tools assigned to
       this agent.
+    faq:
+    - question: "What is Beaver Habits for?"
+      answer: "Tracking daily habits: tick a habit off each day and watch your streaks."
+    - question: "Who can see my habits?"
+      answer: "Nobody else: each person has their own private habit list."
+    - question: "Can I use it on my phone?"
+      answer: "Yes: open its address in your phone's browser and add it to the home screen."
   connectors:
   - beaver-adapter

@@ -333,13 +333,21 @@ class RuleRef(Model):
 # --- Chat -------------------------------------------------------------------------------
 
 
+class Faq(Model):
+    question: str
+    answer: str
+
+
 class Assistant(Model):
     title: str
     description: str
+    # The app's own rules; ctl/agent_context.py adds the rest of the assistant's context.
     instructions: str
     # Who may use it: the whole household, or administrators only (an infrastructure app's
     # read-only assistant, which shows the whole server's people, sign-ins or backups).
     audience: Literal["household", "operators"] = "household"
+    # Questions people ask about the app itself, answered without tools.
+    faq: tuple[Faq, ...] = ()
 
 
 class Chat(Model):

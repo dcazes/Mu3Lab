@@ -122,6 +122,16 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
         if not active.get(connector.service_id):
             live[connector.service_id] = connector.id
             active[connector.service_id] = runtime["state"] == "live"
+    from ctl import agent_context
+    from ctl.mcp_review import load as load_review
+
+    dns_name = tailnet_dns_name() or ""
+    # Every assistant names the others, so it can send people to the right one.
+    titles = {
+        app.id: app.manifest.chat.assistant.title
+        for app in cached().apps
+        if app.manifest.chat.assistant and app.id in live and app.manifest.chat.assistant.audience == "household"
+    }
     result = []
     for app in cached().apps:
         assistant = app.manifest.chat.assistant
@@ -134,17 +144,29 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
         ):
             continue
         connector_id = live[app.id]
+        connector = connectors[connector_id]
+        try:
+            review = load_review(connector.id, connector.review) if connector.review else None
+        except (OSError, ValueError):
+            review = None
+        instructions = agent_context.app_instructions(
+            app,
+            per_person=connector.per_person,
+            review=review,
+            dns_name=dns_name,
+            others=[title for other, title in titles.items() if other != app.id],
+        )
         item = {
             "id": app.id,
             "title": assistant.title,
             "description": assistant.description,
-            "instructions": assistant.instructions,
+            "instructions": instructions,
             "active": active[app.id],
             "audience": assistant.audience,
         }
         if uid and assistant.audience == "operators" and not operator:
             continue
-        if connectors[connector_id].per_person:
+        if connector.per_person:
             for person_uid, person_email, server_id, team_id in _personal_servers(app.id, connector_id):
                 if uid and person_uid != uid:
                     continue
