@@ -10,7 +10,8 @@ requires-python = ">=3.10, <3.15"
 
 dependencies = [
     # openai: the STT, TTS and LLM plugins, pointed at Mu3Lab's own gateway (LiteLLM) and speech service.
-    "livekit-agents[openai]~=1.8.8",
+    # mcp: each app's tools, reached through ContextForge as the person talking.
+    "livekit-agents[openai,mcp]~=1.8.8",
     # Silero: local voice activity detection. Without it the agent asks LiveKit Cloud for one.
     "livekit-plugins-silero~=1.8.8",
     "python-dotenv",

@@ -8,6 +8,7 @@ import { Callout, Card, EmptyState, Facts, PageHeader } from '../../components/L
 import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useIsAdmin } from '../../state/dashboard';
+import { VoiceAppsCard } from './VoiceAppsCard';
 import { VoiceModelCard } from './VoiceModelCard';
 
 export function VoiceSettings() {
@@ -54,6 +55,7 @@ export function VoiceSettings() {
         description="Choose where the voice assistant gets its answers, and use Mu3Lab's private speech on your own devices."
       />
       <VoiceModelCard readOnly={!isAdmin} />
+      <VoiceAppsCard readOnly={!isAdmin} />
       {data && !data.available ? (
         <EmptyState
           icon={Mic}

@@ -865,6 +865,27 @@ class AiVoiceRequest(ApiModel):
     model: str = Field(default="", max_length=64)
 
 
+class VoiceApp(ApiModel):
+    """An app assistant the voice assistant can hand people to, and whether it may."""
+
+    id: str
+    title: str
+    description: str
+    operators_only: bool
+    on: bool
+
+
+class VoiceApps(ApiModel):
+    ok: bool
+    # Whether the voice app is installed; the switches matter only then.
+    installed: bool
+    apps: list[VoiceApp]
+
+
+class VoiceAppRequest(ApiModel):
+    on: bool
+
+
 class RecoverySheet(ApiModel):
     """What a new computer needs to open the backups. Sent once, never cached."""
 

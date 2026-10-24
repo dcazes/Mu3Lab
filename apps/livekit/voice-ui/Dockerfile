@@ -13,6 +13,9 @@ RUN git init -q . \
  && git checkout -q FETCH_HEAD \
  && rm -rf .git
 
+# Mu3Lab's token route: the room token names the signed-in person (see token-route.ts).
+COPY token-route.ts app/api/token/route.ts
+
 # The page reads LIVEKIT_URL to choose between this server and LiveKit's hosted demo agent.
 # Read it on every request, never once at build time when it is not set yet.
 RUN printf "\nexport const dynamic = 'force-dynamic';\n" >> app/page.tsx

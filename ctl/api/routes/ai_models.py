@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl import local_models, model_runners
+from ctl import chat_ops, local_models, model_runners, voice_tools
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -167,3 +167,27 @@ def change_voice(payload_model: models.AiVoiceRequest, request: Request, operato
     except JobConflict as conflict:
         raise ApiError(409, "The AI model settings are already being changed.") from conflict
     return models.JobResponse.model_validate({"ok": True, "job": job})
+
+
+def _voice_apps() -> models.VoiceApps:
+    return models.VoiceApps.model_validate(
+        {"ok": True, "installed": chat_ops.installed(voice_tools.app().id), "apps": voice_tools.available()}
+    )
+
+
+@router.get("/voice/apps", response_model=models.VoiceApps, response_model_exclude_none=True)
+async def voice_apps(_member: Member) -> models.VoiceApps:
+    """The app assistants the voice assistant can hand people to."""
+    return await run_in_threadpool(_voice_apps)
+
+
+@router.put("/voice/apps/{app_id}", response_model=models.VoiceApps, response_model_exclude_none=True)
+async def change_voice_app(
+    app_id: str, payload: models.VoiceAppRequest, operator: OperatorMutation
+) -> models.VoiceApps:
+    """Switch one app's assistant on or off for voice; the agent sees it from the next call."""
+    if app_id not in {item["id"] for item in await run_in_threadpool(voice_tools.available)}:
+        raise ApiError(404, "That app has no assistant for the voice assistant to use.")
+    voice_tools.set_switch(app_id, payload.on)
+    await run_in_threadpool(voice_tools.sync, lambda _line: None)
+    return await run_in_threadpool(_voice_apps)

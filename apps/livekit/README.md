@@ -11,6 +11,7 @@ browser ──WebRTC─> LiveKit media (tailnet address only: 7881/tcp, 7882/udp
                                     ├─ mu3lab-voice  → Ollama or outside providers (Settings, Voice Assistant)
                                     ├─ mu3lab-stt    → Speaches (Whisper)
                                     └─ mu3lab-tts    → Speaches (Kokoro)
+                  voice agent ──> ContextForge (the person's own key) ──> each app's tools
 admin ──HTTPS──> LiveKit admin dashboard (:8478, Authentik operators; its login is sent for you)
 ```
 
@@ -31,6 +32,29 @@ The admin dashboard lists the rooms that are open now and who is in each one, in
 The agent reaches LiveKit's media over Mu3Lab's private container network, not the tailnet
 address browsers use, so `livekit.yaml` sets `advertise_internal_ip: true`. Without it the agent
 joins the room but its audio never connects ("wait_pc_connection timed out" in its log).
+
+## Apps, as the person talking
+
+The voice page puts the signed-in person in the room token: Caddy passes their verified email
+and name from Authentik (`copy_identity_headers`), and `voice-ui/token-route.ts` replaces the
+starter's token route, so a token always names a real person and the page refuses anyone else.
+
+The agent then works like chat's assistants:
+
+- A **main assistant** answers general questions (it has the household's app guide) and has one
+  `open_<app>` tool per app assistant this person may use.
+- Calling one **hands the conversation over** to that app's assistant: the app's own
+  instructions and only its tools, reached through ContextForge with the person's own key, so it
+  sees what they see in the app. `back_to_main` hands it back.
+- A tool the app's review does not mark read-only runs **only right after the person says yes**,
+  and each yes allows one change (`ConfirmedToolset`). Without a yes the tool tells the model to
+  ask first.
+
+Mu3Lab writes each person's assistants, keys and read-only tool names to
+`voice-tools/people.json` (`ctl/voice_tools.py`), whenever chat's assistants are synced; the
+agent reads it at the start of each call. The folder above it is Mu3Lab's user's alone, and
+the agent mounts it read-only. Administrators switch an app off for voice in **Settings, Voice
+assistant**.
 
 ## Containers
 

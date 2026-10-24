@@ -235,6 +235,10 @@ def sync_agents(log: Log) -> tuple[bool, str]:
         ok, detail = backend(app).sync_agents(log)
         if app.id == household.id:
             result = (ok, detail)
+    # The voice assistant hands the same tools to whoever is talking.
+    from ctl import voice_tools
+
+    voice_tools.sync(log)
     return result
 
 
@@ -254,3 +258,7 @@ def revoke(subject: str) -> None:
     log = logging.getLogger("mu3lab.access").info
     person_connectors.forget(subject, log)
     calendar_tools.forget(subject, log)
+    # Their voice tools go with the file rewritten without them.
+    from ctl import voice_tools
+
+    voice_tools.sync(log)

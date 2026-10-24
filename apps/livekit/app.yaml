@@ -45,6 +45,11 @@ route:
   # The voice page hands out LiveKit room tokens, so Authentik admits the household first.
   access: gate
   audience: household
+  # Who signed in: the page puts them in the room token, so the agent acts as them (ctl/voice_tools.py).
+  # Caddy replaces any copy of these the browser sends.
+  copy_identity_headers:
+  - X-Authentik-Email
+  - X-Authentik-Name
 extra_routes:
 - name: signal
   label: LiveKit server
