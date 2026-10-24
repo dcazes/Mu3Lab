@@ -12,6 +12,7 @@ import secrets
 import shutil
 from collections.abc import Callable
 
+from ctl import person_connectors
 from ctl.contextforge import KEY_PREFIX, ContextForgeError, client, safe_name, tool_ids
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import load as load_review
@@ -54,21 +55,38 @@ def connect(server, app_name: str, log: Log) -> tuple[bool, str]:
             dns_name = tailnet_dns_name()
             if dns_name:
                 api.ensure_chat_provider(dns_name)
+            # A private app's own connector holds the owner's key, so only the owner may reach it;
+            # everyone else gets their own copy (ctl/person_connectors.py).
+            team_id = person_connectors.owner_team(api, server.service_id) if server.per_person else ""
+            if server.per_person and not team_id:
+                return False, f"{app_name}'s owner is not in the household, so nobody may use its tools."
             gateway = api.ensure_gateway(
-                server.id, server.endpoint, token, f"{app_name}: {server.name}", dict(getattr(server, "headers", ()))
+                server.id,
+                server.endpoint,
+                token,
+                f"{app_name}: {server.name}",
+                dict(getattr(server, "headers", ())),
+                team_id=team_id,
             )
             tools = api.tools(str(gateway["id"]))
             if not tools:
                 return False, f"ContextForge found no tools on {server.name}."
             virtual = api.ensure_server(
-                server_name(app_name, server), f"The tools {app_name}'s assistant can use.", tool_ids(tools, wanted)
+                server_name(app_name, server),
+                f"The tools {app_name}'s assistant can use.",
+                tool_ids(tools, wanted),
+                team_id=team_id,
             )
+            if team_id:
+                api.keep_server_to_team(virtual, team_id)
             if dns_name:
                 api.accept_chat_sign_ins(virtual, dns_name)
     except ContextForgeError as exc:
         log(f"{server.name} was not registered in ContextForge: {exc}")
         return False, str(exc)
-    records.put(SCOPE, server.id, {"gateway_id": str(gateway["id"]), "server_id": str(virtual["id"])})
+    records.put(
+        SCOPE, server.id, {"gateway_id": str(gateway["id"]), "server_id": str(virtual["id"]), "team_id": team_id}
+    )
     return True, f"{server.name} is connected through ContextForge."
 
 
@@ -90,6 +108,11 @@ def virtual_server(connector_id: str) -> str:
     return str(records.get(SCOPE, connector_id).get("server_id") or "")
 
 
+def server_team(connector_id: str) -> str:
+    """The team an app's own virtual server is kept to ("" when everyone may use it)."""
+    return str(records.get(SCOPE, connector_id).get("team_id") or "")
+
+
 def ensure_accounts(emails: list[str]) -> None:
     """A ContextForge account for each person, so the sign-in Open WebUI passes on finds them.
 
@@ -100,7 +123,9 @@ def ensure_accounts(emails: list[str]) -> None:
             api.ensure_user(email, email.split("@")[0], secrets.token_urlsafe(32))
 
 
-def person_key(uid: str, email: str, connector_id: str, server_id: str, paths: RuntimePaths | None = None) -> str:
+def person_key(
+    uid: str, email: str, connector_id: str, server_id: str, paths: RuntimePaths | None = None, *, team_id: str = ""
+) -> str:
     """This person's LobeChat key for one virtual server, created the first time.
 
     A saved key is reused only while ContextForge still lists it as active, so a key
@@ -111,7 +136,8 @@ def person_key(uid: str, email: str, connector_id: str, server_id: str, paths: R
     saved = store.get(KEY_SCOPE, name)
     label = f"{KEY_PREFIX}{connector_id}"
     with client(paths) as api:
-        if isinstance(saved, dict) and saved.get("server_id") == server_id and saved.get("token"):
+        same = isinstance(saved, dict) and saved.get("server_id") == server_id and saved.get("team_id", "") == team_id
+        if same and saved.get("token"):
             try:
                 live = {str(key.get("id")) for key in api.keys(email) if key.get("is_active", True)}
             except ContextForgeError:
@@ -122,10 +148,15 @@ def person_key(uid: str, email: str, connector_id: str, server_id: str, paths: R
         api.ensure_user(email, email.split("@")[0], secrets.token_urlsafe(32))
         # A key whose text Mu3Lab no longer holds (or for another server) cannot be shown again; replace it.
         for key in api.keys(email):
-            if key.get("name") == label:
+            if key.get("name") == label or str(key.get("name", "")).startswith(f"{label}-"):
                 api.revoke_key(str(key["id"]))
-        key_id, token = api.create_key(email, label, server_id)
-    store.put(KEY_SCOPE, name, {"server_id": server_id, "key_id": key_id, "email": email, "token": token})
+        # Revoked keys keep their names in ContextForge, so each new one gets its own.
+        key_id, token = api.create_key(email, f"{label}-{secrets.token_hex(3)}", server_id, team_id)
+    store.put(
+        KEY_SCOPE,
+        name,
+        {"server_id": server_id, "team_id": team_id, "key_id": key_id, "email": email, "token": token},
+    )
     return token
 
 

@@ -2,6 +2,8 @@
 id: paperless-community
 name: Paperless-ngx MCP
 preferred: true
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: community
 repository: https://github.com/cubinet-code/paperless-ngx-mcp
 revision: b83d992e000df5456b21e35b5c61bfa3283ac959
@@ -20,7 +22,7 @@ provision:
   script: provision.py
   interpreter:
   - python
-  - manage.py
-  - shell
-provision_note: Creates or reuses a Paperless API token for the single active superuser.
+  - '-'
+  owner_email: true
+provision_note: Creates or reuses a Paperless API token for the owner's account.
 reviewed: true

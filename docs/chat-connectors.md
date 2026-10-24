@@ -16,8 +16,8 @@ Open WebUI / LobeChat ──► ContextForge ──► connector (one per app) �
 - **Connectors** stay Mu3Lab's own pinned containers in `apps/<app>/connectors/<id>/`, started after
   their app is healthy and stopped before it stops. They share a network (`mu3lab_mcp_upstream`)
   with ContextForge only; chat apps reach ContextForge on `mu3lab_mcp`.
-- **Everyone in the household gets the same assistants.** Tools that change data run without a
-  separate approval; switch off any you don't want in ContextForge.
+- **Shared apps give everyone the same assistant; private apps give each person their own.** Tools
+  that change data run without a separate approval; switch off any you don't want in ContextForge.
 
 ## Connectors and virtual servers
 
@@ -83,12 +83,33 @@ Apps that sign people in through Authentik only (Audiobookshelf, RomM) have no p
 use, so their scripts run inside the app and make a dedicated "Mu3Lab MCP" key with the app's own code.
 RomM's token can only read the library.
 
-## Off by default
+## Private apps: one set of tools per person
 
-Assistants are shared by the household, and their connectors use the owner's credential. For apps
-that keep each person's data private, that would share the owner's data with everyone, so those
-connectors are not switched on at install (`preferred: false`): Dawarich (location history) and
-Beaver Habits (habits). An administrator can switch them on in the dashboard.
+Some apps keep each person's data private: Paperless-ngx, Immich, Nextcloud, Outline, AdventureLog,
+Actual Budget, SurfSense, Dawarich and Beaver Habits. One connector holding the owner's key would show
+the owner's data to anyone who asked chat. Their connectors say `per_person: true`, and
+`ctl/person_connectors.py` gives everyone their own:
+
+- **A key minted for them in the app.** The provision script takes their username or email
+  (`owner_username` / `owner_email`), never "the only administrator".
+- **Their own copy of the connector**, named `mcp-<connector>--p<hash>`. The copy gets its own Compose
+  project and service names and no host port. A built-in MCP server needs no copy.
+- **Their own gateway and virtual server in ContextForge**, kept to a team with only them in it
+  (`Mu3Lab <username>`). Other household members can neither list nor call it.
+
+The owner keeps the connector Mu3Lab already runs, and its gateway and server are kept to the owner's
+team too. Open WebUI gets one assistant per person, granted to their account only, and named for the
+app as usual. LobeChat gets the person's own server, with a key made in their team.
+
+Someone who has not opened the app yet has no account there, so their copy waits; it is retried every
+ten minutes. The app stopping stops the copies. Someone leaving the household has every copy, key and
+team removed, as part of revoking their access. Switching the connector off removes them all.
+
+Actual Budget's key is typed in by hand, so only its owner has an assistant. ContextForge's
+administrators (Mu3Lab's operators) can still reach every team's tools in ContextForge's own screens.
+
+ContextForge requires keys to expire, so Mu3Lab's keys last 90 days and are replaced when they lapse.
+Revoked keys keep their names, so each new key gets a fresh suffix.
 
 ## Platform services: read-only, administrators only
 
@@ -124,7 +145,4 @@ Where only some tools touch one person's data, the connector is on but those too
 
 ## Later
 
-- **Per-person app access.** ContextForge knows who is calling, but connectors use one credential
-  per app. Passing each person's own app credential would let private apps (Dawarich, Beaver Habits)
-  be on for everyone.
 - **Approval for changes**, once ContextForge's human-approval hook ships.

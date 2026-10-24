@@ -34,8 +34,8 @@ route:
     status: 403
 sign_in:
   method: gate
-  note: Authentik guards the private address. SurfSense has no single sign-on, so Mu3Lab creates its login at install
-    and saves it to your vault; Bitwarden fills it in.
+  note: Authentik guards the private address. SurfSense has no single sign-on, so Mu3Lab creates each person's login
+    and saves it to their own vault; Bitwarden fills it in.
 account:
   mode: api_bootstrap
   save_login_to_vault: true
@@ -84,6 +84,10 @@ rules:
   with:
     # SurfSense sizes its search index for one model when it is installed.
     index_tied: true
+- rule: per_person_logins
+  with:
+    audience: household
+    purpose: Create a SurfSense account and private workspace for each household member
 chat:
   assistant:
     title: SurfSense

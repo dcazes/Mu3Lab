@@ -99,8 +99,12 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
     With ``uid`` and ``email`` (LobeChat), each carries that person's own ContextForge key, and
     administrators-only assistants are left out unless ``operator``; Open WebUI passes each
     person's Authentik sign-in instead and keeps those assistants to its administrators.
+
+    A private app (``per_person`` connector) has one assistant per person instead, pointing at
+    their own virtual server (``ctl.person_connectors``): for LobeChat only that person's, and for
+    Open WebUI everyone's, each with ``person`` (whose it is) and an ID of its own.
     """
-    from ctl import contextforge, contextforge_ops
+    from ctl import contextforge, contextforge_ops, person_connectors
     from ctl.mcp_catalog import load as load_connectors
     from ctl.registry import load as load_registry
 
@@ -110,7 +114,8 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
     # Per app: its switched-on connector, a live one first, and whether that one is live.
     live: dict[str, str] = {}
     active: dict[str, bool] = {}
-    for connector in load_connectors(load_registry()):
+    connectors = {connector.id: connector for connector in load_connectors(load_registry())}
+    for connector in connectors.values():
         runtime = state.mcp_server(connector.id)
         if not runtime or not runtime["enabled"] or not contextforge_ops.virtual_server(connector.id):
             continue
@@ -128,22 +133,62 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
             or installation["state"] not in {"running", "stopped", "degraded"}
         ):
             continue
-        server_id = contextforge_ops.virtual_server(live[app.id])
+        connector_id = live[app.id]
         item = {
             "id": app.id,
             "title": assistant.title,
             "description": assistant.description,
             "instructions": assistant.instructions,
-            "url": contextforge.endpoint(server_id),
             "active": active[app.id],
             "audience": assistant.audience,
         }
         if uid and assistant.audience == "operators" and not operator:
             continue
+        if connectors[connector_id].per_person:
+            for person_uid, person_email, server_id, team_id in _personal_servers(app.id, connector_id):
+                if uid and person_uid != uid:
+                    continue
+                own = item | {"url": contextforge.endpoint(server_id), "person": person_email}
+                if not uid:
+                    own["id"] = f"{app.id}--{person_connectors.tag(person_uid)}"
+                if uid and email and own["active"]:
+                    own["token"] = contextforge_ops.person_key(uid, email, connector_id, server_id, team_id=team_id)
+                result.append(own)
+            continue
+        server_id = contextforge_ops.virtual_server(connector_id)
+        item["url"] = contextforge.endpoint(server_id)
         if uid and email and item["active"]:
-            item["token"] = contextforge_ops.person_key(uid, email, live[app.id], server_id)
+            item["token"] = contextforge_ops.person_key(uid, email, connector_id, server_id)
         result.append(item)
     return result
+
+
+def _personal_servers(app_id: str, connector_id: str) -> list[tuple[str, str, str, str]]:
+    """Each person's own server for a private app: (uid, email, server ID, team ID).
+
+    The owner's is the app's own connector; everyone else's is their copy, once it is live.
+    """
+    from ctl import contextforge_ops, person_connectors
+    from ctl.people import PeopleError
+
+    try:
+        people = person_connectors.household()
+    except PeopleError:
+        return []
+    owner = person_connectors.owner_email(app_id)
+    found = []
+    for person in people:
+        if person["email"] == owner:
+            server_id, team_id = (
+                contextforge_ops.virtual_server(connector_id),
+                contextforge_ops.server_team(connector_id),
+            )
+        else:
+            record = person_connectors.servers(person["uid"]).get(connector_id) or {}
+            server_id, team_id = str(record.get("server_id") or ""), str(record.get("team_id") or "")
+        if server_id and team_id:
+            found.append((person["uid"], person["email"], server_id, team_id))
+    return found
 
 
 def sync_agents(log: Log) -> tuple[bool, str]:
@@ -164,7 +209,12 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
 
 
 def revoke(subject: str) -> None:
-    """Take a person's app tools out of every installed chat app."""
+    """Take a person's app tools out of every installed chat app, and remove their own copies of private apps' tools."""
+    import logging
+
+    from ctl import person_connectors
+
     for app in chat_apps():
         if installed(app.id):
             backend(app).revoke(subject)
+    person_connectors.forget(subject, logging.getLogger("mu3lab.access").info)

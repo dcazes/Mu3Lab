@@ -105,11 +105,17 @@ class RevokeTests(unittest.TestCase):
         server = self.connectors["outline-builtin"]
         with patch("ctl.mcp_config.SecretStore", return_value=SecretStore(self.paths)):
             mcp_config.write(server, {"api_key": "ol_api_secret"}, self.paths)
-        with patch("ctl.mcp_credentials.Compose") as compose:
+        owner = {"owner": {"email": "owner@example.com"}}
+        with (
+            patch("ctl.mcp_credentials.Compose") as compose,
+            patch("ctl.mcp_credentials.onboarding_state.read", return_value=owner),
+        ):
             compose.return_value.run_script.return_value.ok = True
             ok, _detail = mcp_credentials.revoke(server, lambda _line: None)
         self.assertTrue(ok)
         self.assertIn("ApiKey.destroy", compose.return_value.run_script.call_args.args[2])
+        # Only the owner's key: everyone has their own (ctl/person_connectors.py).
+        self.assertEqual(compose.return_value.run_script.call_args.kwargs["args"], ["owner@example.com"])
         self.assertNotIn("MCP_AUTH_TOKEN", SecretStore(self.paths).get("connector", server.id))
         self.assertEqual(mcp_ops.missing_credentials(server), ["api_key"])
 

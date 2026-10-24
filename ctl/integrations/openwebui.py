@@ -5,7 +5,7 @@ app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
 app's assistant, plus the main assistant every new chat starts with. All are
 shared by everyone, except an infrastructure app's read-only assistant, which only
-Open WebUI's administrators see. An app that is stopped keeps its assistant switched off
+Open WebUI's administrators see, and a private app's, which each person has their own of. An app that is stopped keeps its assistant switched off
 (out of the model menu, settings kept) rather than deleted; ``check`` then
 asks Open WebUI itself whether each one is set up and its tools answer. It also hides the AI gateway's own names from the model
 menu (``HIDDEN``). Connections and models Mu3Lab did not create are never
@@ -113,11 +113,22 @@ class OpenWebUI:
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
         admins = grants_for(self.admin_ids()) if any(operators_only(item) for item in assistants) else []
+        # A private app's assistant belongs to one person, granted to their Open WebUI account by ID.
+        accounts = (
+            {str(user.get("email") or "").lower(): str(user["id"]) for user in self.users() if user.get("id")}
+            if any(item.get("person") for item in assistants)
+            else {}
+        )
         for item in assistants:
             server_id = f"{PREFIX}{item['id']}"
             # Switched off while its app is stopped: kept, but out of the menu and unreachable.
             active = bool(item.get("active", True))
             restricted = operators_only(item)
+            if item.get("person"):
+                account = accounts.get(str(item["person"]).lower())
+                if not account:
+                    continue  # they have not opened Open WebUI yet; the next sync adds it
+                personal = grants_for([account])
             wanted_connections.append(
                 {
                     "url": item["url"],
@@ -126,7 +137,10 @@ class OpenWebUI:
                     # Each person's own Authentik sign-in, which ContextForge trusts.
                     "auth_type": "system_oauth",
                     "key": "",
-                    "config": {"enable": active, "access_grants": ADMINS_ONLY if restricted else EVERYONE},
+                    "config": {
+                        "enable": active,
+                        "access_grants": personal if item.get("person") else ADMINS_ONLY if restricted else EVERYONE,
+                    },
                     "info": {"id": server_id, "name": item["title"], "description": item["description"]},
                 }
             )
@@ -140,7 +154,7 @@ class OpenWebUI:
                     "capabilities": {"function_calling": True},
                 },
                 "params": {"system": item["instructions"], "function_calling": "native"},
-                "access_grants": admins if restricted else EVERYONE,
+                "access_grants": personal if item.get("person") else admins if restricted else EVERYONE,
                 "is_active": active,
             }
 
@@ -151,8 +165,12 @@ class OpenWebUI:
         others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
-        # The main assistant is everyone's, so it names only the household's assistants.
-        listed = [item for item in assistants if item.get("active", True) and not operators_only(item)]
+        # The main assistant is everyone's, so it names only the household's assistants, each app once.
+        listed = list(
+            {
+                item["title"]: item for item in assistants if item.get("active", True) and not operators_only(item)
+            }.values()
+        )
         self.save_model(main_model(listed), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
@@ -161,7 +179,7 @@ class OpenWebUI:
         for model_id in existing:
             if ours(model_id) and model_id not in wanted_models:
                 self.delete_model(model_id)
-        return [item["id"] for item in assistants]
+        return [item["id"] for item in assistants if f"{PREFIX}{item['id']}" in wanted_models]
 
     def check(self, assistants: list[dict[str, Any]], token: str) -> dict[str, dict[str, Any]]:
         """Read back what Open WebUI holds for each assistant and, for those switched on, have it list their tools.
@@ -177,7 +195,9 @@ class OpenWebUI:
             active = bool(item.get("active", True))
             connection, model = connections.get(server_id), models.get(server_id)
             result = {"status": "failed", "tools": 0}
-            if connection is None or model is None:
+            if (connection is None or model is None) and item.get("person"):
+                result |= {"status": "pending", "detail": "Added once you have opened Open WebUI."}
+            elif connection is None or model is None:
                 missing = "tool connection" if connection is None else "assistant"
                 result["detail"] = f"Open WebUI does not have this app's {missing}."
             elif connection.get("url") != item["url"] or (model.get("meta") or {}).get("toolIds") != [

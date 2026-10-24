@@ -11,8 +11,12 @@ for app in calendar user_oidc; do
   occ app:enable "$app" >/dev/null || { echo "MU3LAB_ERROR Nextcloud could not enable $app"; exit 3; }
 done
 occ app:disable firstrunwizard >/dev/null 2>&1 || true
+# Each sign-in puts Mu3Lab administrators in Nextcloud's admin group and takes everyone else out of it.
+# The whitelist leaves every other group alone, such as ones made in Nextcloud for sharing.
 occ user_oidc:provider mu3lab --clientid="$MU3LAB_OIDC_CLIENT_ID" --clientsecret="$MU3LAB_OIDC_CLIENT_SECRET" \
-  --discoveryuri="$MU3LAB_OIDC_DISCOVERY_URL" --mapping-uid=preferred_username --unique-uid=0 >/dev/null \
+  --discoveryuri="$MU3LAB_OIDC_DISCOVERY_URL" --mapping-uid=preferred_username --unique-uid=0 \
+  --scope="openid email profile nextcloud_groups" --mapping-groups=nextcloud_groups \
+  --group-provisioning=1 --group-whitelist-regex='/^admin$/' >/dev/null \
   || { echo "MU3LAB_ERROR Nextcloud could not register Authentik"; exit 3; }
 id=$(occ user_oidc:providers --output=json | php -r '
   foreach (preg_split("/\r?\n/", stream_get_contents(STDIN)) as $line) {

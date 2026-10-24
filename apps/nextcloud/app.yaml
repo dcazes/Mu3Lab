@@ -29,6 +29,11 @@ sign_in:
     env:
       client_id: NEXTCLOUD_OIDC_CLIENT_ID
       client_secret: NEXTCLOUD_OIDC_CLIENT_SECRET
+    # Mu3Lab administrators are in Nextcloud's admin group; scripts/configure.sh syncs only that group.
+    role_claim:
+      claim: nextcloud_groups
+      admin: admin
+      user: mu3lab-users
   note: Signs in only through Authentik; there is no separate Nextcloud password.
 account:
   mode: environment_bootstrap

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ctl import chat_ops, contextforge, contextforge_ops
+from ctl import chat_ops, contextforge, contextforge_ops, person_connectors
 from ctl.contextforge import ContextForgeError
 from ctl.control_state import ControlState
 from ctl.integrations.openwebui import ChatError, OpenWebUI
@@ -106,7 +106,8 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
         own = [connector for connector in connectors if connector.service_id == app.id]
         runtimes = [state.mcp_server(connector.id) for connector in own]
         live = any(runtime and runtime["enabled"] and runtime["state"] == "live" for runtime in runtimes)
-        check = (record.get("checks") or {}).get(app.id) or {}
+        checks = record.get("checks") or {}
+        check = checks.get(app.id) or checks.get(f"{app.id}--{person_connectors.tag(uid)}") or {}
         if not own:
             status, detail = "needs_review", "This app has no chat connector yet."
         elif check.get("status") == "failed":
@@ -119,9 +120,22 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
                 status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
         elif check.get("status") == "ready":
             status, detail = "ready", f"Available in chat. {check['detail']}"
+        elif check.get("status") == "pending":
+            status, detail = "pending", str(check["detail"])
+        elif any(connector.per_person for connector in own) and not check:
+            status, detail = "pending", _personal_detail(uid, own)
         elif record.get("error"):
             status, detail = "failed", str(record["error"])
         else:
             status, detail = "pending", "Adding to chat and checking it within five minutes."
         report.append({"id": app.id, "name": app.manifest.name, "status": status, "detail": detail})
     return report
+
+
+def _personal_detail(uid: str, connectors: list) -> str:
+    """Why someone does not have their own assistant for a private app yet."""
+    for connector in connectors:
+        record = records.get(person_connectors.SCOPE, f"{connector.id}:{uid}")
+        if record.get("error"):
+            return str(record["error"])
+    return "Your own copy of this app's tools is being prepared."

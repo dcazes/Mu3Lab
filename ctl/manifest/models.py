@@ -421,11 +421,21 @@ class Connector(Model):
     # Fixed headers sent with every call besides the credential, e.g. X-Forwarded-Proto for an app
     # that redirects plain HTTP because it expects to sit behind an HTTPS proxy.
     headers: dict[str, str] = Field(default_factory=dict)
+    # The app keeps each person's data private, so everyone gets their own key, connector copy and
+    # ContextForge server rather than one shared assistant (ctl/person_connectors.py). Its provision
+    # script takes the person's username or email.
+    per_person: bool = False
 
     @model_validator(mode="after")
     def _one_provisioner(self) -> Connector:
         if self.provision is not None and self.provision_hook:
             raise ValueError("a connector is provisioned by a script or by its app's hooks, not both")
+        if (
+            self.per_person
+            and self.provision is not None
+            and not (self.provision.owner_username or self.provision.owner_email)
+        ):
+            raise ValueError("a per-person connector's provision script must take the person's username or email")
         return self
 
     @property

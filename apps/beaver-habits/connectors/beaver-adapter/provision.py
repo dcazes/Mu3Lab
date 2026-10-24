@@ -1,4 +1,4 @@
-# Prints the owner's Beaver Habits API token, creating one if they have none. An existing token is
+# Prints one person's Beaver Habits API token, found by email, creating one if they have none. An existing token is
 # reused because a phone or script may already use it.
 import asyncio
 import sys
@@ -10,7 +10,7 @@ from beaverhabits.app.crud import create_user_api_token, get_user_api_token
 async def main(email: str) -> None:
     user = await user_get_by_email(email)
     if user is None:
-        raise RuntimeError("the owner has no Beaver Habits account yet")
+        raise RuntimeError("Open Beaver Habits once; chat connects after your account exists")
     token = await get_user_api_token(user) or await create_user_api_token(user)
     print("MU3LAB_OUTPUT api_token=" + token)
 
