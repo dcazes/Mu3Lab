@@ -75,6 +75,9 @@ def removal_blueprint_name(app_id: str) -> str:
     return f"Mu3Lab {app_id} removal"
 
 
+# How long one sign-in lasts on a device. Every app and the dashboard renew their own sign-in
+# from it without asking; signing out, or being removed from the household, ends it at once.
+SESSION = "days=30"
 _FLOWS = """      authentication_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
       # Implicit consent: no "Continue to app?" page. A consent page left open
       # loses its place when another app starts a sign-in in the same browser.
@@ -180,6 +183,16 @@ WELCOME_FLOW = """  - model: authentik_stages_prompt.prompt
     state: present
     identifiers:
       name: mu3lab-welcome-user-login
+    attrs:
+      session_duration: {SESSION}
+  # Authentik's own password sign-in. Left at 0 it lasts a day whatever the browser does, after
+  # which every app and the dashboard ask for the password again.
+  - model: authentik_stages_user_login.userloginstage
+    state: present
+    identifiers:
+      name: default-authentication-login
+    attrs:
+      session_duration: {SESSION}
   - model: authentik_flows.flow
     id: mu3lab-welcome-flow
     state: present
@@ -217,7 +230,7 @@ WELCOME_FLOW = """  - model: authentik_stages_prompt.prompt
       default: true
     attrs:
       flow_recovery: !KeyOf mu3lab-welcome-flow
-"""
+""".replace("{SESSION}", SESSION)
 
 
 def render_gate_blueprint(host: str, dashboard_port: int, gated: tuple[GatedApp, ...] = ()) -> str:

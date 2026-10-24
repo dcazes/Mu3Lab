@@ -852,7 +852,8 @@ describe('Calendar sync', () => {
       return undefined;
     });
     renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
-    fireEvent.click(await screen.findByText('⚠ Piano'));
+    // The month's event; "Coming up" lists it too when it is still ahead of today.
+    fireEvent.click((await screen.findAllByText('⚠ Piano'))[0]);
     const dialog = screen.getByRole('dialog', { name: 'Edit event' });
     expect(within(dialog).getByText('Two versions of this event')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keep mine' }));
