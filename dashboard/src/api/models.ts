@@ -3,6 +3,8 @@ import type { components } from './schema';
 export type AiModelSettings = components['schemas']['AiModelSettings'];
 export type AiModels = components['schemas']['AiModels'];
 export type AiModelsRequest = components['schemas']['AiModelsRequest'];
+export type AiTryRequest = components['schemas']['AiTryRequest'];
+export type AiTryResult = components['schemas']['AiTryResult'];
 export type AiVoiceRequest = components['schemas']['AiVoiceRequest'];
 export type AiVoiceSettings = components['schemas']['AiVoiceSettings'];
 export type ApiErrorResponse = components['schemas']['ApiErrorResponse'];

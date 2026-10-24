@@ -106,11 +106,18 @@ In **Settings → AI**, an administrator chooses the household's AI setup.
 
 For an outside provider, follow a provider link, create an account there, complete its verification steps and copy the access key it gives you into Mu3Lab. An access key is a private code that lets Mu3Lab use your account. Mu3Lab checks the key before reporting the connection as working. It does not finish the provider's registration for you. Some providers require payment details or offer only a limited trial. Free allowances, availability and any charges are controlled by that provider; do not assume unlimited free use.
 
-Outside providers are allowed by default. When you use them, messages and any app information included in a conversation may be sent to that company. Being on your private home cloud does not prevent that.
+During setup, Mu3Lab measures this computer's memory and graphics card, leaves room for the apps you have installed (and the ones that use the graphics card), and suggests the largest reviewed local model that still fits. If you accept, it downloads after setup and chat answers on your computer first, with outside providers as a choice in chat for harder questions. If no local model fits, setup suggests connecting an outside provider instead. You can always change this in Settings, then AI.
 
-For AI on your own computer, choose a local chat model in the same settings and wait for it to download. A model is the downloaded AI that produces answers. Check the displayed space and memory estimates. Choose **Local only** if you want Mu3Lab's managed chat requests to stay on your server. The settings require you to select a local chat model for Local only. If that model later becomes unavailable, chat cannot answer; it does not secretly switch to an outside provider.
+In Settings, then AI, turn on **Local models**, **Outside providers** or both, under "Where chat runs":
 
-Local only does not stop web searches, app downloads, map downloads or other apps' outside connections. Changing the model used to search documents can require processing the documents again; some installed research apps prevent that change.
+- **Local models** answer privately on this server with the chat model you choose.
+- **Outside providers** answer through the providers you connect. Messages and any app information included in a conversation may be sent to that company. Being on your private home cloud does not prevent that.
+
+With both on, the one marked **First** answers in every app; use **Move up** to change the order. The second is a choice in chat's model menu, for example outside providers for a harder question. It never answers on its own when the first fails, so a private chat is never sent outside without someone choosing to. With only local models on, chat cannot answer if the local model stops working.
+
+Each local model is marked **Runs well here**, **Slow here** or **Too big for this computer now**, judged against what your other apps need, and **Suggested** marks the best fit. **Try it** asks a downloaded model (or your outside providers) one test question and shows the answer and how fast it came. Models you stop using stay downloaded, so switching back is instant; **Remove** frees a model's disk space.
+
+Turning outside providers off does not stop web searches, app downloads, map downloads or other apps' outside connections. Changing the model used to search documents can require processing the documents again; some installed research apps prevent that change.
 
 ### Install personal apps
 

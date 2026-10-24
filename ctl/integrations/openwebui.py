@@ -28,7 +28,11 @@ BASE_MODEL = "mu3lab-chat"
 # LiteLLM's names, which Open WebUI would list as chat models: the main assistant is built on
 # mu3lab-chat, and the rest serve Mu3Lab's own checks, document search, speech and the voice
 # assistant. Hidden from the model menu only; they keep working.
-HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-local", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts", "mu3lab-voice")
+# The second-ranked source, offered in the model menu beside the main assistant: outside providers
+# while local models come first, the local model while outside providers do (ctl.local_models).
+OUTSIDE = "mu3lab-outside"
+LOCAL = "mu3lab-local"
+HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts", "mu3lab-voice")
 
 
 class ChatError(RuntimeError):
@@ -108,7 +112,9 @@ class OpenWebUI:
         )
         return list((data or {}).get("specs") or [])
 
-    def ensure(self, assistants: list[dict[str, Any]], guide: str = "") -> list[str]:
+    def ensure(
+        self, assistants: list[dict[str, Any]], guide: str = "", *, outside_choice: bool = False, local_choice: str = ""
+    ) -> list[str]:
         """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
@@ -184,6 +190,9 @@ class OpenWebUI:
         self.save_model(main_model(listed, guide, paused=paused, tool_ids=tool_ids), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
+        # The second-ranked source is a choice in the model menu, named for what it does.
+        self.save_model(outside_model() if outside_choice else hidden_model(OUTSIDE), exists=OUTSIDE in existing)
+        self.save_model(local_model(local_choice) if local_choice else hidden_model(LOCAL), exists=LOCAL in existing)
         for model_id, model in wanted_models.items():
             self.save_model(model, exists=model_id in existing)
         for model_id in existing:
@@ -252,6 +261,37 @@ def _public(grants: Any) -> bool:
         isinstance(grant, dict) and grant.get("principal_type") == "user" and grant.get("principal_id") == "*"
         for grant in grants or []
     )
+
+
+def outside_model() -> dict[str, Any]:
+    """Outside providers as a chat choice beside the local model (local first)."""
+    return {
+        "id": OUTSIDE,
+        "base_model_id": None,
+        "name": "Outside providers",
+        "meta": {
+            "description": "For harder questions: sends your messages to the outside AI providers set up in Mu3Lab.",
+        },
+        "params": {},
+        "access_grants": EVERYONE,
+        "is_active": True,
+    }
+
+
+def local_model(name: str) -> dict[str, Any]:
+    """The local model as a private chat choice beside outside providers (outside first)."""
+    return {
+        "id": LOCAL,
+        "base_model_id": None,
+        "name": f"{name} (private, on this server)",
+        "meta": {
+            "description": "Answers on this server: nothing you send leaves it. Slower and less capable than outside "
+            "providers.",
+        },
+        "params": {},
+        "access_grants": EVERYONE,
+        "is_active": True,
+    }
 
 
 def hidden_model(model_id: str) -> dict[str, Any]:

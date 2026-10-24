@@ -760,7 +760,8 @@ class BackupHookResponse(ApiModel):
     detail: str
 
 
-AiPrivacy = Literal["outside_allowed", "local_only"]
+AiPrivacy = Literal["outside_allowed", "local_first", "local_only"]
+AiSource = Literal["local", "outside"]
 
 
 class LocalModel(ApiModel):
@@ -775,10 +776,19 @@ class LocalModel(ApiModel):
     dimensions: int
     # Downloaded in the model runner that serves requests now.
     downloaded: bool
+    # Used by a setting now (chat, voice or search), so it cannot be removed.
+    in_use: bool = False
+    # How it fits this computer beside the other apps (ctl/model_fit.py): good, slow or too_big; gpu or cpu.
+    fit: str = ""
+    fit_where: str = ""
 
 
 class AiModelSettings(ApiModel):
+    # Where chat may run, in order: the first answers by default, the second is a choice in chat.
+    sources: list[AiSource]
+    # The same order in three words: outside_allowed, local_first or local_only.
     privacy: AiPrivacy
+    # Kept while local models are off, so turning them back on needs no new choice.
     chat_model: str
     embedding_model: str
     # The chosen model runner's app id; empty means the default (the one the installer sets up).
@@ -813,6 +823,9 @@ class AiModels(ApiModel):
     ok: bool
     settings: AiModelSettings
     voice: AiVoiceSettings
+    # The reviewed chat model that fits best, or "" to suggest outside providers; and why.
+    suggested: str = ""
+    suggestion_reason: str = ""
     chat_models: list[LocalModel]
     embedding_models: list[LocalModel]
     # The runner that serves requests now, and every runner Mu3Lab knows.
@@ -825,10 +838,26 @@ class AiModels(ApiModel):
 
 
 class AiModelsRequest(ApiModel):
-    privacy: AiPrivacy
+    sources: list[AiSource] = Field(min_length=1, max_length=2)
     chat_model: str = Field(default="", max_length=64)
     embedding_model: str = Field(max_length=64)
     runner: str = Field(default="", max_length=64)
+
+
+class AiTryRequest(ApiModel):
+    # A local chat model's id, or "outside" for the outside providers.
+    target: str = Field(min_length=1, max_length=64)
+    prompt: str = Field(default="", max_length=2000)
+
+
+class AiTryResult(ApiModel):
+    ok: bool
+    where: str
+    name: str
+    answer: str
+    seconds: float
+    loading_seconds: float
+    tokens_per_second: float
 
 
 class AiVoiceRequest(ApiModel):

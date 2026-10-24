@@ -9,9 +9,15 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-
 from ctl import core_setup
 from ctl.bootstrap import terminal
+
+
+def setUpModule():
+    # The local-AI question measures this computer and waits for an answer; these tests are about the rest.
+    patcher = patch.object(terminal, "ask_local_ai", return_value={})
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
 
 
 class DashboardReadinessTests(unittest.TestCase):

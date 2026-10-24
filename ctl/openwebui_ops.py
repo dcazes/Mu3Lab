@@ -66,7 +66,15 @@ def _sync(log: Log) -> tuple[bool, str]:
         if any(item["active"] for item in desired):
             contextforge_ops.ensure_accounts(sorted({p["email"] for p in chat_people().values() if p["email"]}))
         with client() as api:
-            managed = api.ensure(desired, _guide({str(item["id"]).split("--")[0] for item in desired}))
+            from ctl import local_models
+
+            chosen, local = local_models.settings(), local_models.chat_model()
+            managed = api.ensure(
+                desired,
+                _guide({str(item["id"]).split("--")[0] for item in desired}),
+                outside_choice=chosen["privacy"] == "local_first",
+                local_choice=local.name if local and chosen["sources"][0] == "outside" else "",
+            )
             checks = api.check(desired, _check_token() if any(item["active"] for item in desired) else "")
     except (ChatError, ContextForgeError, PeopleError, OSError, ValueError, KeyError) as exc:
         log(f"Open WebUI assistants were not updated: {exc}")

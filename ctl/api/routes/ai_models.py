@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 
 from ctl import local_models, model_runners
 from ctl.api import models, runtime
@@ -39,6 +40,28 @@ def _view(store: JobStore | None) -> dict:
 def ai_models(_member: Member) -> models.AiModels:
     """Everyone may see where AI requests go; only administrators change it."""
     return models.AiModels.model_validate(_view(JobStore.runtime()))
+
+
+@router.post("/models/try", response_model=models.AiTryResult, response_model_exclude_none=True)
+async def try_model(payload: models.AiTryRequest, operator: OperatorMutation) -> models.AiTryResult:
+    """One test answer from a downloaded model or the outside providers, before switching to it."""
+    try:
+        result = await run_in_threadpool(local_models.try_model, payload.target, payload.prompt)
+    except (ValueError, *model_runners.ENGINE_ERRORS) as exc:
+        raise ApiError(422, str(exc)) from exc
+    return models.AiTryResult.model_validate({"ok": True, **result})
+
+
+@router.post("/models/{model_id}/remove", response_model=models.OkResponse, response_model_exclude_none=True)
+async def remove_model(model_id: str, operator: OperatorMutation) -> models.OkResponse:
+    """Delete one downloaded model no setting uses, to free its disk space."""
+    if _view(JobStore.runtime())["active_job_id"]:
+        raise ApiError(409, "Wait for the AI settings change to finish.")
+    try:
+        detail = await run_in_threadpool(local_models.remove, model_id)
+    except (ValueError, *model_runners.ENGINE_ERRORS) as exc:
+        raise ApiError(422, str(exc)) from exc
+    return models.OkResponse.model_validate({"ok": True, "message": detail})
 
 
 @router.put("/models", response_model=models.JobResponse, response_model_exclude_none=True)
@@ -89,7 +112,7 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
             actor_subject=subject,
             namespace=NAMESPACE,
             request=chosen,
-            params=chosen,
+            params=local_models.as_params(chosen),
             detail="Operator changed the AI model settings.",
             idempotency_key=key,
         )

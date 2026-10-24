@@ -79,6 +79,7 @@ class Engine(Protocol):
     def delete(self, model: Model) -> None: ...
     def check_chat(self, model: Model) -> None: ...
     def check_embedding(self, model: Model) -> None: ...
+    def try_chat(self, model: Model, prompt: str) -> dict[str, Any]: ...
 
 
 class OllamaEngine:
@@ -175,6 +176,28 @@ class OllamaEngine:
         )
         if not isinstance(answer.get("message"), dict):
             raise RuntimeError(f"{model.name} gave no answer.")
+
+    def try_chat(self, model: Model, prompt: str) -> dict[str, Any]:
+        """One answer straight from Ollama, with its own timings, for Settings' Try it."""
+        answer = self._call(
+            "/api/chat",
+            {
+                "model": model.tag,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"num_predict": 400},
+            },
+            timeout=600,
+        )
+        message = answer.get("message") if isinstance(answer.get("message"), dict) else {}
+        tokens = int(answer.get("eval_count") or 0)
+        writing = int(answer.get("eval_duration") or 0) / 1e9
+        return {
+            "answer": str(message.get("content") or "").strip(),
+            "seconds": round(int(answer.get("total_duration") or 0) / 1e9, 1),
+            "loading_seconds": round(int(answer.get("load_duration") or 0) / 1e9, 1),
+            "tokens_per_second": round(tokens / writing, 1) if writing else 0.0,
+        }
 
     def check_embedding(self, model: Model) -> None:
         answer = self._call("/api/embed", {"model": model.tag, "input": "Mu3Lab readiness"}, timeout=600)

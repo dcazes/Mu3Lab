@@ -1,7 +1,13 @@
 import { ArrowRight, CheckCircle2, Circle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { putJsonApi, type ChecklistResponse, type ProviderMetadataResponse, type VaultStatus } from '../../api';
+import {
+  putJsonApi,
+  type AiModels,
+  type ChecklistResponse,
+  type ProviderMetadataResponse,
+  type VaultStatus,
+} from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
@@ -151,6 +157,8 @@ function useGetStarted() {
   const { data } = useDashboard();
   const operator = data.identity.writes_enabled;
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null);
+  // A downloaded local model answers chat on its own; outside providers are then optional.
+  const ai = useApi<AiModels>(operator ? '/api/v1/ai/models' : null);
   const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null);
   const [manual, mark, setItem] = useGetStartedChecklist();
   const coreInstalling = useCoreSetupActive();
@@ -169,6 +177,8 @@ function useGetStarted() {
     }
   };
   const setup = providers.data?.setup;
+  const localModel = ai.data?.chat_models?.find((model) => model.id === ai.data?.settings?.chat_model);
+  const localReady = Boolean(localModel?.downloaded) && Boolean(ai.data?.settings?.sources?.includes('local'));
   if (!operator || !setup || !vault.data) return null;
   // Only apps the owner chose count; setup installs the core ones by itself.
   const hasApp = data.services.services.some(
@@ -190,7 +200,19 @@ function useGetStarted() {
     },
     // Connecting AI providers is administration; members skip it.
     ...(data.identity.is_admin
-      ? [{ key: 'provider', text: 'Connect an AI provider for chat', done: setup.complete, to: '/settings/ai' }]
+      ? [
+          {
+            key: 'provider',
+            text: 'Choose how your AI runs',
+            hint: localReady
+              ? ''
+              : ai.data?.suggested
+                ? 'This computer can run a local model privately; Settings, then AI, suggests one. Or connect an outside provider.'
+                : 'Connect an outside AI provider; this computer has no room for a local model beside your apps.',
+            done: setup.complete || localReady,
+            to: '/settings/ai',
+          },
+        ]
       : []),
     { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
     { key: 'devices', text: 'Use Mu3Lab on your phone or laptop', done: Boolean(manual.devices), guide: 'devices' },

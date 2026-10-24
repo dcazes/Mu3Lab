@@ -227,7 +227,7 @@ describe('Get started', () => {
     renderWithDashboard(<HomePage />, dashboardData([]));
     const first = await screen.findByRole('button', { name: /1\. Add Bitwarden/ });
     expect(first.closest('.get-started-item')).toHaveClass('is-next');
-    expect(screen.getByRole('link', { name: /2\. Connect an AI provider/ })).toHaveAttribute('href', '/settings/ai');
+    expect(screen.getByRole('link', { name: /2\. Choose how your AI runs/ })).toHaveAttribute('href', '/settings/ai');
     expect(screen.getByRole('link', { name: /3\. Install your first personal app/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /4\. Use Mu3Lab on your phone or laptop/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /5\. Start chatting/ })).toHaveAttribute('href', '/chat');
