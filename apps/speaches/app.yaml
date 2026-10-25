@@ -34,10 +34,15 @@ configuration:
 - key: tts_model
   env: MU3LAB_TTS_MODEL
   type: enum
-  label: Voice model
+  label: Voice model (the full one for an NVIDIA graphics card, the small one without)
+  # The small (int8) model cannot run on a graphics card: ONNX Runtime moves it between the card and
+  # the processor hundreds of times per sentence, about 3 s for one sentence on an RTX 3060 against
+  # 0.15 s for the full model. Without a card the small one is the faster.
   default: speaches-ai/Kokoro-82M-v1.0-ONNX-int8
+  gpu_default: speaches-ai/Kokoro-82M-v1.0-ONNX
   options:
   - speaches-ai/Kokoro-82M-v1.0-ONNX-int8
+  - speaches-ai/Kokoro-82M-v1.0-ONNX
 - key: tts_voice
   env: MU3LAB_TTS_VOICE
   type: string

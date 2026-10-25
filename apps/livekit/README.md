@@ -103,7 +103,50 @@ MU3LAB_STT_MODEL: deepdml/faster-whisper-large-v3-turbo-ct2
 MU3LAB_TTS_MODEL: speaches-ai/Kokoro-82M-v1.0-ONNX-int8
 ```
 
-Thinking stays off either way: the agent always sends `reasoning_effort: "none"`.
+Bypassing LiteLLM also bypasses its per-route thinking setting: the agent sends no reasoning
+level, so a model that thinks by default (Qwen 3.5) thinks before every answer. Keep LiteLLM in
+the path for local models.
+
+## Speed
+
+A reply waits for, in turn: the end of speech, speech recognition, the answer model's first
+sentence and the voice's first sentence. What keeps each short:
+
+- **End of speech:** 0.2 s of silence (`END_OF_SPEECH_SECONDS`; LiveKit's default is 0.5 s).
+  The turn detector still waits up to 3 s when the person sounds unfinished. Preemptive
+  generation starts the answer before the turn is confirmed.
+- **Models already loaded:** Speaches unloads idle models after five minutes and Ollama after ten.
+  At the start of each call the agent uses speech recognition and the voice once, and loads a
+  local answer model with the call's own instructions; the greeting waits for that (at most
+  60 s). Outside providers are not warmed: there is nothing to load, and a request would spend
+  their free allowance.
+- **Routes, in order, with thinking off:** LiteLLM holds up to three routes for `mu3lab-voice`
+  (`ctl/local_models.py`) and tries the next when one fails or its first words are late:
+  1. the local model, if one is chosen (Local only or Local first), with thinking `none`: any
+     other level becomes Ollama's `think: true`, about 10 s of thinking for Qwen 3.5 4B;
+  2. if outside providers are allowed, FreeLLMAPI's voice list `auto:mu3lab-voice` with
+     thinking `none`: only models tested to accept it and call tools, in order
+     (`apps/freellmapi/hooks.py`, saved at FreeLLMAPI's install);
+  3. any outside model (`auto:smartest`) with `low`, the lowest level every model accepts, for
+     when the list is used up (each free Gemini model allows about 20 requests a day) or busy.
+
+  A route with another after it gives up after 8 s (local) or 4 s (the list) without first
+  words, and without retrying, so a stuck free model (some wait a full minute) hands over
+  while the person is still listening. The agent waits up to 30 s for first words.
+- **Local context:** Ollama gives every model 51,200 tokens with an 8-bit conversation cache
+  (`apps/ollama/docker-compose.yml`); Qwen 3.5 4B then uses 4.1 GiB on the graphics card.
+- **The voice on a graphics card:** Speaches' GPU build uses the full Kokoro model; the small
+  int8 one moves between card and processor hundreds of times per sentence (about 3 s against
+  0.15 s for one sentence on an RTX 3060).
+- **Raw audio:** the voice is fetched as 24 kHz PCM, so nothing is encoded or decoded as MP3.
+- **Saying what is happening:** handing over to an app's assistant says "Let me check
+  Calendar." at once, and a tool that runs over a second with nothing being said gets "One
+  moment.", then "Still working on it."
+
+Measured on the owner's server (RTX 3060), October 2026: speech recognition 0.4 s once
+loaded; a local Qwen 3.5 4B starts answering in 0.1 to 0.3 s and streams; outside providers
+through FreeLLMAPI send each answer in one piece, in about 1 s from Gemini 3 Flash Preview and
+anywhere from 1 to 60 s from the other free Gemini models.
 
 ## Local development
 

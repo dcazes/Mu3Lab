@@ -11,29 +11,39 @@ assistant talks with them and hands the conversation to an app's assistant, whic
 app's tools, reached through ContextForge with the person's own key, and hands it back when they
 are done. Mu3Lab writes each person's app assistants to MU3LAB_VOICE_TOOLS (ctl/voice_tools.py).
 A tool that changes something runs only right after the person says yes.
+
+Speed: the greeting waits until speech recognition, the voice and a local answer model are loaded
+(their services unload idle models), and the person hears what is happening while an app is checked.
 """
 
+import asyncio
+import io
 import json
 import logging
 import os
 import re
+import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import aiohttp
+import httpx2
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
     JobContext,
+    JobProcess,
     RunContext,
     TurnHandlingOptions,
     cli,
     function_tool,
     inference,
     mcp,
+    utils,
 )
 from livekit.agents.llm import ChatContext, ToolError
 from livekit.agents.llm.mcp import MCPToolset
@@ -51,8 +61,8 @@ def _env(name: str, default: str = "") -> str:
 
 
 AGENT_NAME = _env("MU3LAB_AGENT_NAME", "mu3lab-agent")
-# Mu3Lab's gateway holds the real chat model. Qwen 3.5 thinks by default and is far too slow
-# for voice, so the agent always sends reasoning_effort="none".
+# Mu3Lab's gateway holds the real chat model. Its routes, tried in order, set how much the model
+# thinks and when a late model hands over to the next (ctl/local_models.py).
 LLM_BASE_URL = _env("MU3LAB_LLM_BASE_URL", "http://litellm:4000/v1")
 LLM_API_KEY = _env("MU3LAB_LLM_API_KEY", "not-needed")
 LLM_MODEL = _env("MU3LAB_LLM_MODEL", "mu3lab-voice")
@@ -70,6 +80,19 @@ INSTRUCTIONS = (
     "You are Mu3Lab's voice assistant for a household. Speak in short, plain sentences "
     "that sound natural when read aloud. Do not use lists, markdown or emoji."
 )
+# The person has stopped talking after this much silence (LiveKit's default is 0.5 s). The turn
+# detector still waits longer, up to 3 s, when they sound unfinished.
+END_OF_SPEECH_SECONDS = 0.2
+# Speaches unloads idle models after five minutes and Ollama after ten, and loading one takes
+# seconds; the greeting waits at most this long for them.
+WARM_SECONDS = 60
+# How long the agent waits for the answer's first words. Longer than the plugin's 5 s, so the
+# gateway can try its next route when one is late (8 s local, then 4 s for the outside list).
+ANSWER_WAIT_SECONDS = 30
+# What the person hears while an app's tool runs and nothing else is being said.
+FILLERS = ("One moment.", "Still working on it.")
+FILLER_DELAY_SECONDS = 1.0
+FILLER_INTERVAL_SECONDS = 5.0
 # How much of the conversation an app's assistant (or the main one, back again) is given: enough
 # for the request at hand, little enough for a small local model.
 HANDOFF_ITEMS = 8
@@ -108,6 +131,88 @@ def load_people() -> dict[str, Any]:
         return {}
 
 
+def _silence() -> bytes:
+    """Half a second of silence as a WAV file: enough to load the speech recognition model."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(bytes(16000))
+    return buffer.getvalue()
+
+
+async def _post(url: str, key: str, **request: Any) -> None:
+    http = utils.http_context.http_session()
+    timeout = aiohttp.ClientTimeout(total=WARM_SECONDS)
+    async with http.post(url, headers={"Authorization": f"Bearer {key}"}, timeout=timeout, **request) as reply:
+        reply.raise_for_status()
+        await reply.read()
+
+
+async def warm_speech() -> None:
+    """Load speech recognition and the voice by using each once."""
+    form = aiohttp.FormData()
+    form.add_field("model", STT_MODEL)
+    form.add_field("language", "en")
+    form.add_field("file", _silence(), filename="silence.wav", content_type="audio/wav")
+    await asyncio.gather(
+        _post(f"{SPEECH_BASE_URL}/audio/transcriptions", SPEECH_API_KEY, data=form),
+        _post(
+            f"{SPEECH_BASE_URL}/audio/speech",
+            SPEECH_API_KEY,
+            json={"model": TTS_MODEL, "voice": TTS_VOICE, "input": "Hi.", "response_format": "pcm"},
+        ),
+    )
+
+
+async def warm_answer_model(instructions: str) -> None:
+    """Load a local answer model with this call's instructions, which Ollama then keeps ready too.
+
+    Outside providers have nothing to load, and a request would spend their free allowance, so
+    only a first route to Ollama is warmed. The agent's own key may read where its model runs.
+    """
+    http = utils.http_context.http_session()
+    async with http.get(
+        f"{LLM_BASE_URL}/model/info",
+        headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+        timeout=aiohttp.ClientTimeout(total=10),
+    ) as reply:
+        reply.raise_for_status()
+        routes = (await reply.json()).get("data", [])
+    voice = sorted(
+        (r.get("litellm_params") or {} for r in routes if r.get("model_name") == LLM_MODEL),
+        key=lambda params: params.get("order") or 0,
+    )
+    if not voice or not str(voice[0].get("model", "")).startswith("ollama"):
+        return
+    await _post(
+        f"{LLM_BASE_URL}/chat/completions",
+        LLM_API_KEY,
+        json={
+            "model": LLM_MODEL,
+            "max_tokens": 1,
+            "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": "Hi"}],
+        },
+    )
+
+
+async def wait_until_warm(*tasks: asyncio.Task) -> None:
+    """Wait for the warm-up; a model that did not load is logged, and the call goes on."""
+    try:
+        results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), WARM_SECONDS)
+    except TimeoutError:
+        logger.warning("Models were still loading after %s s; greeting anyway.", WARM_SECONDS)
+        return
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.warning("A model could not be loaded before the call: %s", result)
+
+
+def _filler(step: int) -> str | None:
+    return FILLERS[step] if step < len(FILLERS) else None
+
+
 def _handoff_context(agent: Agent) -> ChatContext:
     """The recent conversation, without tool calls or the other assistant's instructions."""
     return agent.chat_ctx.copy(exclude_function_call=True, exclude_instructions=True).truncate(max_items=HANDOFF_ITEMS)
@@ -124,7 +229,8 @@ def _latest_words(history: ChatContext) -> tuple[str, str] | None:
 class ConfirmedToolset(MCPToolset):
     """One app's tools through ContextForge; a tool that is not read-only runs only after a spoken yes.
 
-    Each yes allows one change, so a second change needs its own.
+    Each yes allows one change, so a second change needs its own. While a tool runs and nothing is
+    being said, the person hears that it is still working.
     """
 
     def __init__(self, *, id: str, mcp_server: mcp.MCPServer, reads: list[str]) -> None:
@@ -134,16 +240,20 @@ class ConfirmedToolset(MCPToolset):
 
     async def setup(self, *, reload: bool = False):
         await super().setup(reload=reload)
-        self._tools = [tool if tool.info.name.endswith(self._reads) else self._guard(tool) for tool in self._tools]
+        self._tools = [self._wrap(tool, read=tool.info.name.endswith(self._reads)) for tool in self._tools]
         return self
 
-    def _guard(self, tool):
+    def _wrap(self, tool, *, read: bool):
         async def call(raw_arguments: dict[str, Any], context: RunContext) -> Any:
-            said = _latest_words(context.session.history)
-            if said is None or said[0] in self._used or not YES.search(said[1]):
-                raise ToolError(ASK_FIRST)
-            self._used.add(said[0])
-            return await tool(raw_arguments=raw_arguments)
+            if not read:
+                said = _latest_words(context.session.history)
+                if said is None or said[0] in self._used or not YES.search(said[1]):
+                    raise ToolError(ASK_FIRST)
+                self._used.add(said[0])
+            async with context.with_filler(
+                _filler, delay=FILLER_DELAY_SECONDS, interval=FILLER_INTERVAL_SECONDS, max_steps=len(FILLERS)
+            ):
+                return await tool(raw_arguments=raw_arguments)
 
         return function_tool(call, raw_schema=tool.info.raw_schema)
 
@@ -201,7 +311,7 @@ class AppAssistant(Agent):
     """One app's assistant, with only that app's tools, acting as the person talking."""
 
     def __init__(self, spec: dict[str, Any], person: dict[str, Any], guide: str, chat_ctx: ChatContext) -> None:
-        self.person, self.guide = person, guide
+        self.person, self.guide, self.title = person, guide, spec["title"]
         server = mcp.MCPServerHTTP(
             url=spec["url"],
             headers={"Authorization": f"Bearer {spec['token']}"},
@@ -221,6 +331,9 @@ class AppAssistant(Agent):
         return Assistant(self.person, self.guide, _handoff_context(self))
 
     async def on_enter(self) -> None:
+        # Say what is happening at once; the answer is worked out while this plays. Kept out of the
+        # history, so the model does not say it again.
+        self.session.say(f"Let me check {self.title}.", add_to_chat_ctx=False)
         # Answer the request the main assistant handed over.
         self.session.generate_reply()
 
@@ -228,14 +341,23 @@ class AppAssistant(Agent):
 server = AgentServer()
 
 
+def prewarm(proc: JobProcess) -> None:
+    # Voice activity: local Silero model, so no LiveKit Cloud call. Loaded once per worker
+    # process, before any call, instead of at the start of each.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=END_OF_SPEECH_SECONDS)
+
+
+server.setup_fnc = prewarm
+
+
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
+    # Speech models load while the person joins.
+    speech_ready = asyncio.create_task(warm_speech())
 
     session = AgentSession(
-        # Voice activity: local Silero model, so no LiveKit Cloud call. A 0.3 s pause (default
-        # 0.55 s) ends speech sooner; the turn detector still waits when someone sounds unfinished.
-        vad=silero.VAD.load(min_silence_duration=0.3),
+        vad=ctx.proc.userdata["vad"],
         stt=openai.STT(
             base_url=SPEECH_BASE_URL,
             api_key=SPEECH_API_KEY,
@@ -244,24 +366,26 @@ async def entrypoint(ctx: JobContext) -> None:
             # Speaches' REST transcription endpoint, one request per utterance.
             use_realtime=False,
         ),
+        # No reasoning level here: the route in LiteLLM sets it (see LLM_BASE_URL above).
         llm=openai.LLM(
             model=LLM_MODEL,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
-            # "low" is the lowest level every provider accepts: Gemini 3, GitHub Models, Groq and
-            # xAI reject "none" or "minimal". FreeLLMAPI adapts it per provider, or drops it.
-            reasoning_effort="low",
+            timeout=httpx2.Timeout(connect=15.0, read=ANSWER_WAIT_SECONDS, write=5.0, pool=5.0),
         ),
         tts=openai.TTS(
             base_url=SPEECH_BASE_URL,
             api_key=SPEECH_API_KEY,
             model=TTS_MODEL,
             voice=TTS_VOICE,
+            # Raw 24 kHz audio, as the plugin plays it: no MP3 to encode in Speaches and decode here.
+            response_format="pcm",
         ),
         # End-of-turn model that runs locally. "v1-mini" is the local model; the default
         # "v1" would call LiveKit's hosted gateway.
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
+            endpointing={"min_delay": END_OF_SPEECH_SECONDS},
             # Prepare the answer and its first spoken sentence before the turn is confirmed.
             preemptive_generation={"enabled": True, "preemptive_tts": True},
         ),
@@ -274,8 +398,11 @@ async def entrypoint(ctx: JobContext) -> None:
     person = (people.get("people") or {}).get(participant.identity.lower())
     if person is None:
         logger.warning("No voice tools for this caller; answering without app tools.")
-    await session.start(agent=Assistant(person, str(people.get("guide") or "")), room=ctx.room)
-    # Speak first, so the person hears at once that the call is working. A fixed sentence needs
+    assistant = Assistant(person, str(people.get("guide") or ""))
+    answer_ready = asyncio.create_task(warm_answer_model(assistant.instructions))
+    await session.start(agent=assistant, room=ctx.room)
+    await wait_until_warm(speech_ready, answer_ready)
+    # Speak first, once everything is loaded, so the first answer is quick. A fixed sentence needs
     # no model call: an instruction-only request has no messages, which Gemini rejects. Kept out
     # of the chat history so the model's first request still starts with the person's words.
     session.say("Hi, how can I help?", add_to_chat_ctx=False)

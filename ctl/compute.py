@@ -47,6 +47,12 @@ def app_mode(project: Path, uses_gpu: bool) -> str:
     return recorded_mode(project) or resolved_mode()
 
 
+def gpu_build(folder: Path, project: Path, uses_gpu: bool) -> bool:
+    """Whether the app runs (or would install) a GPU build: its mode is not cpu and ``folder`` ships that build."""
+    mode = app_mode(project, uses_gpu)
+    return mode != "cpu" and (folder / f"docker-compose.{mode}.yml").is_file()
+
+
 def compose_overrides(service_id: str, project: Path) -> list[Path]:
     """Return only checked-in/runtime-materialized overrides, never browser paths."""
     mode = recorded_mode(project) or resolved_mode()

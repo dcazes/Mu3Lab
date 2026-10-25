@@ -314,8 +314,19 @@ class ConfigField(Model):
     type: Literal["string", "boolean", "integer", "enum", "secret"]
     label: str = ""
     default: str | bool | int | None = None
+    # The default when the app runs its GPU build (service.uses_gpu and a docker-compose.<mode>.yml).
+    gpu_default: str | bool | int | None = None
     required: bool = False
     options: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _defaults_are_options(self) -> ConfigField:
+        if self.type == "enum":
+            for value in (self.default, self.gpu_default):
+                # A default naming a fact ({{country_code}}) is checked when it is rendered.
+                if value is not None and "{{" not in str(value) and str(value) not in self.options:
+                    raise ValueError(f"{self.key}: default {value!r} is not one of its options")
+        return self
 
 
 # --- Rules (shared behaviors; see ctl/rules) ---------------------------------------------

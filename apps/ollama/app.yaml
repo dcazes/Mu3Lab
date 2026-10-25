@@ -23,7 +23,8 @@ sign_in:
 ui:
   available: false
   unavailable_reason: Ollama is an internal model and embedding API; it does not ship a browser UI.
-resource_guidance: Model downloads determine disk and memory use.
+resource_guidance: Model downloads determine disk and memory use. Each chat model has room for a 51,200-token
+  conversation with an 8-bit cache, which Settings counts in each model's memory.
 backup:
   include: false
   reason: Its data is downloaded AI models, which Mu3Lab downloads again when needed.

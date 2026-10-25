@@ -13,6 +13,14 @@ services:
       # after ten idle minutes.
       OLLAMA_KEEP_ALIVE: 10m
       OLLAMA_MAX_LOADED_MODELS: "2"
+      # Room for long conversations and the assistants' instructions (Ollama's own default is
+      # 4,096 tokens); a model trained on less uses its own maximum. The memory estimates in
+      # ctl/local_models.py assume this length and the cache below.
+      OLLAMA_CONTEXT_LENGTH: "51200"
+      # The conversation cache in 8 bits instead of 16: about half its memory, with no
+      # noticeable change in answers. It needs flash attention, which is also faster.
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/ollama:/root/.ollama
     networks: [mu3lab_frontend, mu3lab_backend]

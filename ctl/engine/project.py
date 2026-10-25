@@ -33,6 +33,7 @@ from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from ctl import hostinfo, resource_locks
 from ctl.app_settings import AppSettings, fixed_names
+from ctl.compute import gpu_build
 from ctl.engine import template
 from ctl.engine.launch import caddy_handler
 from ctl.manifest.catalog import App, Catalog
@@ -142,12 +143,13 @@ def _integrations(app: App, facts: Facts, env: dict[str, str]) -> None:
                 env.pop(name, None)  # the provider has not published that setting yet
 
 
-def _config_default(field: ConfigField) -> str | None:
-    if field.default is None:
+def _config_default(field: ConfigField, gpu: bool = False) -> str | None:
+    default = field.gpu_default if gpu and field.gpu_default is not None else field.default
+    if default is None:
         return None
-    if isinstance(field.default, bool):
-        return "true" if field.default else "false"
-    return str(field.default)
+    if isinstance(default, bool):
+        return "true" if default else "false"
+    return str(default)
 
 
 def _rendered_default(field: ConfigField, default: str, lookup: template.Lookup) -> str | None:
@@ -267,12 +269,16 @@ def build_env(
             store.put(scope, "env:" + oidc.env.client_secret, env[oidc.env.client_secret])
         if oidc.env.discovery_url and facts.dns_name:
             env[oidc.env.discovery_url] = discovery_url(facts.dns_name, app.id)
+    # Asked only when a field has a GPU default: finding the build may ask the graphics driver.
+    gpu = any(field.gpu_default is not None for field in manifest.configuration) and gpu_build(
+        app.folder, facts.paths.projects / app.id, manifest.service.uses_gpu
+    )
     for field in manifest.configuration:
         chosen = (config or {}).get(field.key)
         if chosen:
             env[field.env] = chosen
             continue
-        default = _config_default(field)
+        default = _config_default(field, gpu)
         if default is not None and field.env not in env:
             default = _rendered_default(field, default, lookup_for(app, facts, env))
             if default is not None:

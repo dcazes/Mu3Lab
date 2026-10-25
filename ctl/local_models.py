@@ -32,6 +32,7 @@ Every other app needs its documents indexed again; the dashboard says so.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,6 +63,13 @@ OUTSIDE_ALIAS = "mu3lab-outside"
 # The voice assistant's chat name, routed by its own setting (outside or a local model).
 VOICE_ALIAS = "mu3lab-voice"
 VOICE_SETTINGS = ("ai", "voice")
+# FreeLLMAPI's list of outside models that answer with thinking off, quickly enough to talk to
+# (apps/freellmapi/hooks.py keeps it); requests pick it as "auto:mu3lab-voice".
+VOICE_OUTSIDE_LIST = "mu3lab-voice"
+# Seconds a voice route may take to its first words before the next route is tried: a loaded
+# local model starts in well under a second; an outside model answers whole, usually in 1 to 2 s.
+VOICE_LOCAL_DEADLINE = 8
+VOICE_OUTSIDE_DEADLINE = 4
 
 
 @dataclass(frozen=True)
@@ -71,13 +79,18 @@ class Model:
     # The exact Ollama tag, quantization included, so a download is the same model every time.
     tag: str
     download_gb: float
-    # An estimate of the memory it needs while answering, with a modest conversation.
+    # An estimate of the memory (GiB) it needs while answering with Ollama's whole context
+    # (51,200 tokens, 8-bit cache; apps/ollama/docker-compose.yml) filled.
     memory_gb: float
     note: str
     dimensions: int = 0  # embedding models only
 
 
-# Reviewed by the owner on 2026-10-10. Sizes are Ollama's published download sizes.
+# Reviewed by the owner on 2026-10-10. Sizes are Ollama's published download sizes. Memory raised
+# on 2026-10-25 for the 51,200-token context, from each file's layer layout: Phi-4-mini and
+# Qwen3 keep a cache in every layer (about 3.5 GiB at that length); Qwen 3.5 in one layer of four
+# and Gemma 4 mostly over a short window, so theirs stay well inside the earlier estimates
+# (Qwen 3.5 4B measured 4.1 GiB on an RTX 3060).
 CHAT: tuple[Model, ...] = (
     Model(
         "qwen3.5-2b",
@@ -92,7 +105,7 @@ CHAT: tuple[Model, ...] = (
         "Phi-4-mini 3.8B",
         "phi4-mini:3.8b-q4_K_M",
         2.5,
-        4,
+        6,
         "Small and quick; English-first.",
     ),
     Model(
@@ -108,7 +121,7 @@ CHAT: tuple[Model, ...] = (
         "Qwen3 8B",
         "qwen3:8b-q4_K_M",
         5.2,
-        7,
+        9,
         "Stronger reasoning; slower without a GPU.",
     ),
     Model(
@@ -421,14 +434,41 @@ def litellm_models(
         routes += [outside("mu3lab-chat", "openai/auto:smartest"), outside("mu3lab-fast", "openai/auto:fastest")]
     if local:
         routes.append(on_runner(LOCAL_ALIAS, engine.chat_route(local)))
-    # Voice follows its own setting. Local only with no model leaves no route, and the voice app will not start.
-    voice = voice_settings(paths)
-    if voice["privacy"] == "outside_allowed" or (voice["privacy"] == "local_first" and not voice["model"]):
-        routes.append(outside(VOICE_ALIAS, "openai/auto:smartest"))
-    elif voice_local := CHAT_BY_ID.get(voice["model"]):
-        routes.append(on_runner(VOICE_ALIAS, engine.chat_route(voice_local)))
+    routes += _voice_routes(on_runner, outside, engine, paths)
     routes.append(on_runner("mu3lab-embed", engine.embedding_route(EMBEDDING_BY_ID[chosen["embedding_model"]])))
     return routes
+
+
+def _voice_routes(
+    on_runner: Callable[[str, str], dict],
+    outside: Callable[[str, str], dict],
+    engine: model_runners.Engine,
+    paths: RuntimePaths,
+) -> list[dict]:
+    """The voice name's routes, tried in order: the local model, then outside if allowed.
+
+    Outside, FreeLLMAPI's voice list comes first, then any model as a last resort, for when the
+    list is used up (each free model allows a few dozen requests a day) or missing. Thinking is set
+    per route, because the agent cannot tell where its model runs: "none" turns it off (LiteLLM
+    turns any other level into Ollama's think: true, about 10 s of thinking), and "low" is the
+    lowest level every outside model accepts. A route with another after it gives up when its
+    first words are late, without retrying, so a stuck model (free models sometimes wait a
+    minute) hands over to the next while the person is still listening. Local only with no model
+    leaves no route, and the voice app will not start.
+    """
+    voice = voice_settings(paths)
+    routes: list[tuple[dict, str, int]] = []
+    local = CHAT_BY_ID.get(voice["model"]) if voice["privacy"] in {"local_only", "local_first"} else None
+    if local:
+        routes.append((on_runner(VOICE_ALIAS, engine.chat_route(local)), "none", VOICE_LOCAL_DEADLINE))
+    if voice["privacy"] != "local_only":
+        routes.append((outside(VOICE_ALIAS, f"openai/auto:{VOICE_OUTSIDE_LIST}"), "none", VOICE_OUTSIDE_DEADLINE))
+        routes.append((outside(VOICE_ALIAS, "openai/auto:smartest"), "low", 0))
+    for order, (route, effort, deadline) in enumerate(routes, 1):
+        route["litellm_params"] |= {"reasoning_effort": effort, "order": order}
+        if order < len(routes):
+            route["litellm_params"] |= {"stream_timeout": deadline, "max_retries": 0, "num_retries": 0}
+    return [route for route, _, _ in routes]
 
 
 # --- Apps that follow these settings ------------------------------------------
