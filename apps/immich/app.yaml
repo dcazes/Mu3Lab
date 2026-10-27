@@ -8,7 +8,7 @@ category: media
 tagline: Photo and video backup
 summary: Manages your photo and video library on your server. Upload media from your phone, organize shared albums,
   and find images using metadata, facial recognition, and visual search.
-version: v3.2.4
+version: "v3.3.5"
 upstream: immich-app/immich
 service:
   uses_gpu: true
