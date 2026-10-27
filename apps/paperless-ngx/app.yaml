@@ -8,7 +8,7 @@ category: documents
 tagline: Searchable scanned document archive
 summary: Turns scanned paperwork and digital files into a searchable document archive. Extract text with OCR, organize
   documents by tags and correspondents, and find records without sorting through folders.
-version: v3.2.1
+version: "v3.3.4"
 upstream: paperless-ngx/paperless-ngx
 data_dir: paperless
 service:

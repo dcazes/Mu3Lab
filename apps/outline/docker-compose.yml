@@ -2,7 +2,7 @@ name: mu3lab-outline
 
 services:
   outline:
-    image: outlinewiki/outline:1.10.1@sha256:832051f039b446c87aa23929cf92c00980c66aaa2d744d118c48c016ec816ad8
+    image: outlinewiki/outline:1.12.0@sha256:25d6a2ced2f1f0cf03c09abd776d87ba31941ed96d3a99992aa84b3bd0afc074
     extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     ports: ["127.0.0.1:3005:3000"]
@@ -81,7 +81,7 @@ services:
 
   # Outline runs as nodejs (1001); a folder Docker creates belongs to root.
   files-init:
-    image: outlinewiki/outline:1.10.1@sha256:832051f039b446c87aa23929cf92c00980c66aaa2d744d118c48c016ec816ad8
+    image: outlinewiki/outline:1.12.0@sha256:25d6a2ced2f1f0cf03c09abd776d87ba31941ed96d3a99992aa84b3bd0afc074
     restart: "no"
     user: "0:0"
     entrypoint: ["chown", "-R", "1001:1001", "/var/lib/outline/data"]

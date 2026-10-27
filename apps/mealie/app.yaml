@@ -8,7 +8,7 @@ category: home
 tagline: Recipes, meal plans, and shopping lists
 summary: Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own,
   schedule meals, and turn recipe ingredients into shopping lists.
-version: v3.28.0
+version: "v3.29.0"
 upstream: mealie-recipes/mealie
 service:
   local_port: 9925

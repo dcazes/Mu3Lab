@@ -280,6 +280,7 @@ def compose_up(
     services: list[str] | tuple[str, ...] | None = None,
     on_output: Callable[[str], None] | None = None,
     build: bool = False,
+    remove_orphans: bool = False,
 ) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
@@ -294,6 +295,8 @@ def compose_up(
     # Docker's build cache keeps this quick when nothing changed. Release installs have no ``build:``.
     if build:
         argv.append("--build")
+    if remove_orphans:
+        argv.append("--remove-orphans")
     if wait_timeout is not None:
         argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
     # Service names are always source-owned curated Compose names.  Keeping

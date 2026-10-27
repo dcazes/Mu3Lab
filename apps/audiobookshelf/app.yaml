@@ -8,7 +8,7 @@ category: media
 tagline: Audiobooks and podcasts
 summary: Stream your audiobooks and podcasts with synced listening progress, bookmarks, and sleep timers. Official
   phone apps download books for offline listening.
-version: v2.37.1
+version: "v2.37.2"
 upstream: advplyr/audiobookshelf
 media:
 - name: audiobooks

@@ -8,7 +8,7 @@ category: media
 tagline: Retro games, playable in your browser
 summary: Organizes the game files you own into a library with box art and details, and plays many classic
   systems right in the browser with saves kept on your server.
-version: 5.3.1
+version: "5.4.1"
 upstream: rommapp/romm
 media:
 - name: roms
@@ -17,7 +17,8 @@ service:
   local_port: 8091
   health:
     path: /api/heartbeat
-  start_timeout_seconds: 300
+  # RomM 5.4 rewrites its games table on first start: 15-20 minutes on a big library.
+  start_timeout_seconds: 1800
 route:
   https_port: 8464
   caddy_port: 19481

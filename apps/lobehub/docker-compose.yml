@@ -6,7 +6,7 @@ x-logging: &default-logging
 
 services:
   app:
-    image: lobehub/lobehub:2.2.18@sha256:b7c843911259c54c92f03864d9dd2e9099e18525de1d37498b64cc15751d087d
+    image: lobehub/lobehub:2.2.20@sha256:8a46ff8c76aef731b6d228d92edfc384aa77335593187b670be23ce78a690716
     restart: unless-stopped
     env_file: [".env"]
     environment:

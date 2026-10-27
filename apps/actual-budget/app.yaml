@@ -8,7 +8,7 @@ category: finance
 tagline: Envelope budgeting and spending
 summary: A personal finance app built around envelope budgeting. Track accounts and transactions, plan spending,
   and review financial reports, with budget data synced through your own server.
-version: v26.9.0
+version: "v26.10.0"
 upstream: actualbudget/actual
 service:
   local_port: 5006

@@ -1,7 +1,7 @@
 name: mu3lab-dawarich
 
 x-dawarich: &dawarich
-  image: freikin/dawarich:1.15.3@sha256:589e3606b11b61c3fa2d9661832cb73645a9b93a9cc7d807a071e2bc6c584498
+  image: freikin/dawarich:1.18.1@sha256:a2b93286a973b2e4b55d6a1ebd8009a65b8624639687ca95e909d0aac27324f5
   extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
   restart: unless-stopped
   environment: &dawarich-env
@@ -43,6 +43,15 @@ services:
     <<: *dawarich
     entrypoint: web-entrypoint.sh
     command: ["bin/rails", "server", "-p", "3000", "-b", "::"]
+    environment:
+      <<: *dawarich-env
+      # Background jobs run inside this container (Dawarich 1.17+). One web
+      # process only: each extra one would start its own set of job threads.
+      SIDEKIQ_EMBEDDED: "true"
+      WEB_CONCURRENCY: "0"
+      BACKGROUND_PROCESSING_CONCURRENCY: "2"
+    # Lets running jobs finish or go back to the queue on stop.
+    stop_grace_period: 60s
     ports: ["127.0.0.1:3006:3000"]
     depends_on:
       db: {condition: service_healthy}
@@ -58,24 +67,6 @@ services:
       test: ["CMD-SHELL", "wget --header='X-Forwarded-Proto: https' -qO- http://127.0.0.1:3000/api/v1/health | grep -q '\"ok\"'"]
       timeout: 10s
       start_period: 570s
-      start_interval: 15s
-      interval: 5m
-      retries: 3
-
-  sidekiq:
-    <<: *dawarich
-    entrypoint: sidekiq-entrypoint.sh
-    command: ["sidekiq"]
-    environment:
-      <<: *dawarich-env
-      BACKGROUND_PROCESSING_CONCURRENCY: "3"
-    depends_on:
-      app: {condition: service_healthy}
-    networks: [mu3lab_frontend, mu3lab_backend, dawarich_internal]
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f sidekiq"]
-      timeout: 10s
-      start_period: 510s
       start_interval: 15s
       interval: 5m
       retries: 3

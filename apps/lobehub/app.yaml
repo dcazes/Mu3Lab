@@ -9,7 +9,7 @@ tagline: A second chat app, with app assistants
 summary: An AI chat workspace for conversations, assistants, and connected tools. Mu3Lab connects LobeChat to configured
   models through LiteLLM and stores conversation history on your server. Choose it as the household chat in Settings >
   AI instead of Open WebUI.
-version: v2.2.18
+version: "v2.2.20"
 upstream: lobehub/lobehub
 depends_on:
 - litellm

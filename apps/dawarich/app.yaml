@@ -9,7 +9,7 @@ tagline: Your private location history
 summary: A private replacement for Google Timeline. Phones record where you go, and you browse trips, visits, and
   places you have been on a map. Each person's history is private to them. Place names come from Photon, a map
   lookup that runs inside Dawarich, so your locations never go to a public map service.
-version: 1.15.3
+version: "1.18.1"
 upstream: Freika/dawarich
 service:
   local_port: 3006

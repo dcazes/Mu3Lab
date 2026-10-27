@@ -8,7 +8,7 @@ category: documents
 tagline: Household wiki and notes
 summary: A fast, collaborative wiki for household notes, plans, recipes, and manuals. Shared collections for
   everyone, private documents for each person, and real-time editing together.
-version: v1.10.1
+version: "v1.12.0"
 upstream: outline/outline
 service:
   local_port: 3005
