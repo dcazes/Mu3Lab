@@ -236,9 +236,10 @@ def _start_needed_apps(
     actor: str,
     root: Path,
 ) -> bool:
-    """Start the stopped catalog apps this one needs (theirs first), so LiveKit brings up Speaches.
+    """Start the stopped apps this one needs (theirs first), so LiveKit brings up Speaches.
 
-    Core apps run by themselves; an app that is not installed is the install batch's job. A failure
+    Core apps count too: an administrator can stop LiteLLM, and an app installed then could not
+    register its gateway key. An app that is not installed is the install batch's job. A failure
     ends the job with the needed app named and leaves this app's own state as it was.
     """
     job_id = str(job["id"])
@@ -256,7 +257,7 @@ def _start_needed_apps(
                 continue
             found += needed(dependency)
             record = state.installation(dependency.id) if state else None
-            if dependency.stage == "optional" and record and record["state"] == "stopped":
+            if record and record["state"] == "stopped":
                 found.append(dependency)
         return found
 
