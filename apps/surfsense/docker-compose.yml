@@ -94,6 +94,7 @@ services:
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
+      - ./global_llm_config.yaml:/app/app/config/global_llm_config.yaml:ro
     # Also on the shared networks: Ollama embeddings and web research need them. Its own
     # database, Redis and SearXNG use unique names so they cannot resolve to another app's.
     networks: [surfsense_internal, mu3lab_backend, mu3lab_frontend]
@@ -127,6 +128,7 @@ services:
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
+      - ./global_llm_config.yaml:/app/app/config/global_llm_config.yaml:ro
     # Also on the shared networks: Ollama embeddings and web research need them. Its own
     # database, Redis and SearXNG use unique names so they cannot resolve to another app's.
     networks: [surfsense_internal, mu3lab_backend, mu3lab_frontend]
