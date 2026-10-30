@@ -12,6 +12,9 @@ app's tools, reached through ContextForge with the person's own key, and hands i
 are done. Mu3Lab writes each person's app assistants to MU3LAB_VOICE_TOOLS (ctl/voice_tools.py).
 A tool that changes something runs only right after the person says yes.
 
+Mu3Lab can switch the assistant to one full-duplex model instead (duplex.py): it listens and speaks
+at once, and its only tool is web search.
+
 Speed: the greeting waits until speech recognition, the voice and a local answer model are loaded
 (their services unload idle models), and the person hears what is happening while an app is checked.
 """
@@ -29,6 +32,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
+import duplex
 import httpx2
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -75,14 +79,18 @@ TTS_MODEL = _env("MU3LAB_TTS_MODEL", "mu3lab-tts")
 TTS_VOICE = _env("MU3LAB_TTS_VOICE", "af_heart")
 
 VOICE_TOOLS = Path(_env("MU3LAB_VOICE_TOOLS", "voice-tools/people.json"))
+# How the assistant talks, beside the app tools: separate steps, or one full-duplex model
+# (Settings, Voice Assistant; ctl/duplex_voice.py).
+VOICE_ENGINE = VOICE_TOOLS.with_name("engine.json")
 
 INSTRUCTIONS = (
     "You are Mu3Lab's voice assistant for a household. Speak in short, plain sentences "
     "that sound natural when read aloud. Do not use lists, markdown or emoji."
 )
 # The person has stopped talking after this much silence (LiveKit's default is 0.5 s). The turn
-# detector still waits longer, up to 3 s, when they sound unfinished.
-END_OF_SPEECH_SECONDS = 0.2
+# detector still waits longer, up to 3 s, when they sound unfinished. LiveKit refuses to start a
+# call with the turn detector below 0.25 s.
+END_OF_SPEECH_SECONDS = 0.25
 # Speaches unloads idle models after five minutes and Ollama after ten, and loading one takes
 # seconds; the greeting waits at most this long for them.
 WARM_SECONDS = 60
@@ -129,6 +137,15 @@ def load_people() -> dict[str, Any]:
     except (OSError, ValueError):
         logger.warning("No voice tools file at %s; the assistant has no app tools.", VOICE_TOOLS)
         return {}
+
+
+def load_engine() -> dict[str, Any]:
+    """How this call talks; separate steps until Mu3Lab says otherwise."""
+    try:
+        data = json.loads(VOICE_ENGINE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"engine": "pipeline"}
+    return data if isinstance(data, dict) else {"engine": "pipeline"}
 
 
 def _silence() -> bytes:
@@ -350,9 +367,27 @@ def prewarm(proc: JobProcess) -> None:
 server.setup_fnc = prewarm
 
 
+async def duplex_entrypoint(ctx: JobContext, engine: dict[str, Any]) -> None:
+    """A full-duplex call: the model listens and speaks itself, with web search as its one tool."""
+    await ctx.connect()
+    participant = await ctx.wait_for_participant()
+    person = (load_people().get("people") or {}).get(participant.identity.lower())
+    who = f"You are talking with {person['name']}. " if person else ""
+    instructions = (
+        f"{INSTRUCTIONS}\n\n{now_line()}\n\n{who}In this mode you cannot see or change anything in the "
+        "household's apps; if asked, say that the household can switch the voice assistant back to separate "
+        "steps in Mu3Lab's Settings to use them."
+    )
+    await duplex.run_call(ctx.room, participant, engine, instructions)
+
+
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
+    engine = load_engine()
+    if engine.get("engine") == "duplex":
+        await duplex_entrypoint(ctx, engine)
+        return
     # Speech models load while the person joins.
     speech_ready = asyncio.create_task(warm_speech())
 

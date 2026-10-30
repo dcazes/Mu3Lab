@@ -9,6 +9,7 @@ import { useAction } from '../../lib/useAction';
 import { useApi } from '../../lib/useApi';
 import { useIsAdmin } from '../../state/dashboard';
 import { VoiceAppsCard } from './VoiceAppsCard';
+import { VoiceEngineCard } from './VoiceEngineCard';
 import { VoiceModelCard } from './VoiceModelCard';
 
 export function VoiceSettings() {
@@ -54,6 +55,7 @@ export function VoiceSettings() {
         title="Voice assistant"
         description="Choose where the voice assistant gets its answers, and use Mu3Lab's private speech on your own devices."
       />
+      <VoiceEngineCard readOnly={!isAdmin} />
       <VoiceModelCard readOnly={!isAdmin} />
       <VoiceAppsCard readOnly={!isAdmin} />
       {data && !data.available ? (

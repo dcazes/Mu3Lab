@@ -76,19 +76,30 @@ function TryResult({ result }: { result: AiTryResult }) {
   );
 }
 
-export function JobLog({ id, finished }: { id: string; finished: () => void }) {
+/**
+ * A settings change's progress. ``finished`` runs when it ends, and also when its progress cannot be read:
+ * the card then goes by the server's own active job (``active_job_id``), so it never stays locked.
+ */
+export function JobLog({ id, finished }: { id: string; finished: (lost: boolean) => void }) {
   const job = useApi<JobDetailResponse>(`/api/v1/jobs/${id}`, {
     interval: (data) => (jobActive(data?.job.state) ? JOB_POLL_MS : 0),
   });
   const state = job.data?.job.state;
   const running = !state || ['queued', 'running'].includes(state);
+  const lost = Boolean(job.error);
   useEffect(() => {
-    if (!running) finished();
-  }, [running, finished]);
+    if (!running || lost) finished(lost);
+  }, [running, lost, finished]);
+  if (lost && running)
+    return (
+      <Callout tone="warning" title="Progress could not be shown">
+        {job.error} The change goes on; this card unlocks when it finishes.
+      </Callout>
+    );
   if (!job.data) return null;
   if (state === 'failed')
     return (
-      <Callout tone="danger" title="The AI model settings were not changed">
+      <Callout tone="danger" title="Nothing was changed">
         {job.data.job.detail}
       </Callout>
     );
@@ -125,10 +136,15 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
   const [jobId, setJobId] = useState('');
   const [running, setRunning] = useState(false);
   const [tried, setTried] = useState<Record<string, AiTryResult>>({});
-  const finished = useCallback(() => {
-    setRunning(false);
-    void reload();
-  }, [reload]);
+  const finished = useCallback(
+    (lost: boolean) => {
+      setRunning(false);
+      // Unread progress: the server's active job (polled below) keeps the card locked while it runs.
+      if (lost) setJobId('');
+      void reload();
+    },
+    [reload],
+  );
   const title = 'Where AI runs';
   const description =
     'Choose where chat runs and which models run on this server. Only models reviewed for Mu3Lab are offered, each marked by how well it fits beside your other apps.';
@@ -225,6 +241,12 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
       chosenChat && !chosenChat.downloaded && !runnerChanged
         ? `${chosenChat.name} is downloaded first (${chosenChat.download_gb} GB).`
         : '',
+      // Voice reads chat's setting until it has its own, so say which way it goes.
+      draft.sources.join() !== saved.sources.join() || draft.chat_model !== saved.chat_model
+        ? data.voice.matches_chat
+          ? 'The voice assistant follows this setting too.'
+          : 'The voice assistant keeps its own setting (Settings, Voice Assistant).'
+        : '',
     ].filter(Boolean);
     if (
       warnings.length &&
@@ -313,6 +335,12 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
                 ? 'If the local model stops working, chat stops too: it never falls back to an outside provider. The voice assistant has its own setting.'
                 : 'Turn on local models too to offer a private choice in chat.'}
           </small>
+          {localOn && draft.sources[0] === 'outside' && (
+            <Callout tone="info" title="Local models are second">
+              Chat{data.voice.matches_chat ? ' and the voice assistant' : ''} still answer through outside providers by
+              default. Move local models up to answer on this server first.
+            </Callout>
+          )}
         </fieldset>
         {/* The runner and the local chat model matter only while chat stays on this server. */}
         {/* The runner is only worth a choice when more than one exists. */}
@@ -433,6 +461,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
             <Button type="submit" size="sm" loading={pending === 'models'} disabled={!changed || missingLocal || busy}>
               Save and apply
             </Button>
+            {changed && !busy && <small className="muted">Not saved yet: nothing changes until you save.</small>}
           </div>
         )}
       </form>

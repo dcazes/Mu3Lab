@@ -472,7 +472,10 @@ export function AiSettings() {
   const providers = useApi<ProviderMetadataResponse>('/api/v1/providers', {
     interval: (data) => (data?.providers?.some((provider) => provider.state === 'verifying') ? 3000 : 0),
   });
-  const models = useApi<AiModels>('/api/v1/ai/models');
+  // Followed while a settings change runs, so the card unlocks when it ends.
+  const models = useApi<AiModels>('/api/v1/ai/models', {
+    interval: (data) => (data?.active_job_id ? JOB_POLL_MS : 0),
+  });
   const localOnly = models.data?.settings.privacy === 'local_only';
   const catalog = useApi<{ providers: ProviderCatalogItem[] }>('/api/v1/providers/catalog');
   const [dialog, setDialog] = useState<{ id: string } | null>(null);

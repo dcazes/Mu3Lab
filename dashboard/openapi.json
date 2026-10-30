@@ -118,12 +118,16 @@
           },
           "voice": {
             "$ref": "#/components/schemas/AiVoiceSettings"
+          },
+          "voice_engine": {
+            "$ref": "#/components/schemas/AiVoiceEngineSettings"
           }
         },
         "required": [
           "ok",
           "settings",
           "voice",
+          "voice_engine",
           "chat_models",
           "embedding_models",
           "runner",
@@ -239,8 +243,94 @@
         "title": "AiTryResult",
         "type": "object"
       },
+      "AiVoiceEngineRequest": {
+        "properties": {
+          "engine": {
+            "enum": [
+              "pipeline",
+              "duplex"
+            ],
+            "title": "Engine",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine"
+        ],
+        "title": "AiVoiceEngineRequest",
+        "type": "object"
+      },
+      "AiVoiceEngineSettings": {
+        "description": "How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card.",
+        "properties": {
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "string"
+          },
+          "download_gb": {
+            "title": "Download Gb",
+            "type": "number"
+          },
+          "downloaded": {
+            "title": "Downloaded",
+            "type": "boolean"
+          },
+          "engine": {
+            "enum": [
+              "pipeline",
+              "duplex"
+            ],
+            "title": "Engine",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "stopped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stopped",
+            "type": "array"
+          },
+          "stops": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stops",
+            "type": "array"
+          },
+          "unavailable_reason": {
+            "title": "Unavailable Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine",
+          "model",
+          "download_gb",
+          "downloaded",
+          "stops",
+          "stopped",
+          "unavailable_reason",
+          "changed_at",
+          "changed_by"
+        ],
+        "title": "AiVoiceEngineSettings",
+        "type": "object"
+      },
       "AiVoiceRequest": {
         "properties": {
+          "matches_chat": {
+            "default": false,
+            "title": "Matches Chat",
+            "type": "boolean"
+          },
           "model": {
             "default": "",
             "maxLength": 64,
@@ -3020,7 +3110,7 @@
           },
           "events": {
             "items": {
-              "$ref": "#/components/schemas/AuditEvent"
+              "$ref": "#/components/schemas/JobEvent"
             },
             "title": "Events",
             "type": "array"
@@ -3041,11 +3131,52 @@
         "title": "JobDetailResponse",
         "type": "object"
       },
+      "JobEvent": {
+        "description": "One line of a job's progress. Unlike an audit event it names no actor: the job does.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "number"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "event",
+          "created_at",
+          "detail"
+        ],
+        "title": "JobEvent",
+        "type": "object"
+      },
       "JobEventsResponse": {
         "properties": {
           "events": {
             "items": {
-              "$ref": "#/components/schemas/AuditEvent"
+              "$ref": "#/components/schemas/JobEvent"
             },
             "title": "Events",
             "type": "array"
@@ -8002,6 +8133,108 @@
           }
         },
         "summary": "Change Voice App",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/voice/engine": {
+      "put": {
+        "description": "Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps.",
+        "operationId": "change_voice_engine_api_v1_ai_voice_engine_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiVoiceEngineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Change Voice Engine",
         "tags": [
           "ai"
         ]

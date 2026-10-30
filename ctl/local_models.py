@@ -324,19 +324,18 @@ def voice_validate(new: dict[str, Any]) -> dict[str, str]:
     return {"privacy": privacy, "model": model}
 
 
+def voice_from_chat(paths: RuntimePaths | None = None) -> dict[str, str]:
+    """The voice setting that chat's setting gives, while voice matches chat."""
+    chat = settings(paths)
+    return {"privacy": chat["privacy"], "model": chat["chat_model"] if "local" in chat["sources"] else ""}
+
+
 def voice_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Where the voice assistant's chat runs; ``matches_chat`` until the owner saves a voice choice."""
     paths = paths or RuntimePaths()
     stored = records.get(*VOICE_SETTINGS, paths)
     if not stored:
-        chat = settings(paths)
-        return {
-            "privacy": chat["privacy"],
-            "model": chat["chat_model"] if "local" in chat["sources"] else "",
-            "matches_chat": True,
-            "changed_at": "",
-            "changed_by": "",
-        }
+        return {**voice_from_chat(paths), "matches_chat": True, "changed_at": "", "changed_by": ""}
     try:
         clean = voice_validate(stored)
     except ValueError:
@@ -511,7 +510,8 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
     except model_runners.ENGINE_ERRORS:
         present, reachable = set(), False
 
-    from ctl import model_fit
+    from ctl import duplex_voice, model_fit
+    from ctl.registry import ROOT
 
     try:
         fit = model_fit.report(paths)
@@ -534,6 +534,7 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "suggestion_reason": fit["reason"],
         "settings": settings(paths),
         "voice": voice_settings(paths),
+        "voice_engine": duplex_voice.view(ROOT, paths),
         "chat_models": [view(model) for model in CHAT],
         "embedding_models": [view(model) for model in EMBEDDING],
         "runner": current.id,
@@ -647,8 +648,9 @@ def _apply(paths: RuntimePaths, root: Path, log) -> None:
 VOICE_ACTION = "voice"
 
 
-def _pull(engine, model: Model, log, job_id: str) -> None:
-    """Download a model, keeping its byte progress where the dashboard reads it (the same bar as app images)."""
+def _pull_reporter(service_id: str, job_id: str) -> tuple[Callable[[int, int], None], Callable[[], None]]:
+    """A byte-progress reporter for a download, where the dashboard reads it (the same bar as app
+    images), and the call that marks it done."""
     from ctl.image_downloads import ImageDownloadStore
 
     downloads = ImageDownloadStore.runtime()
@@ -663,11 +665,20 @@ def _pull(engine, model: Model, log, job_id: str) -> None:
             return
         last = now
         rate = done / (now - started) if now > started else 0
-        downloads.update(SERVICE_ID, job_id, {"total_bytes": total, "done_bytes": done, "rate_bps": rate})
+        downloads.update(service_id, job_id, {"total_bytes": total, "done_bytes": done, "rate_bps": rate})
 
+    def finish() -> None:
+        if downloads is not None:
+            downloads.update(service_id, job_id, {"state": "done"})
+
+    return report, finish
+
+
+def _pull(engine, model: Model, log, job_id: str) -> None:
+    """Download a model into the runner, showing its byte progress."""
+    report, finish = _pull_reporter(SERVICE_ID, job_id)
     engine.pull(model, log, report)
-    if downloads is not None:
-        downloads.update(SERVICE_ID, job_id, {"state": "done"})
+    finish()
 
 
 def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
@@ -685,8 +696,11 @@ def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
     def fail(detail: str, code: str, step: str) -> None:
         store.transition(job_id, "failed", actor=actor, detail=redact(detail), error_code=code, step_id=step)
 
+    params = job_params(job)
+    # Following chat again stores no voice record; the routes then read chat's setting.
+    follow = params.get("matches_chat") == "yes"
     try:
-        chosen = voice_validate(job_params(job))
+        chosen = voice_validate(voice_from_chat(paths) if follow else params)
     except ValueError as exc:
         fail(str(exc), "invalid_settings", "validate")
         return
@@ -713,7 +727,7 @@ def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
             )
             return
     # 2. Route voice by the new setting, and check that it answers through LiteLLM.
-    save_voice(chosen, actor, paths)
+    save_voice(None if follow else chosen, actor, paths)
     try:
         _apply(paths, root, log)
         _probe_litellm(log, VOICE_ALIAS)
@@ -735,11 +749,14 @@ def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
         fail(f"The earlier voice setting was kept: {exc}", "routing_failed", "route")
         return
     # Models no longer used are kept, so switching back is instant; Settings removes one (``remove``).
-    detail = (
-        f"The voice assistant now uses {model.name}, only on this server."
-        if model
-        else "The voice assistant now uses your outside providers."
-    )
+    if model is None:
+        detail = "The voice assistant now uses your outside providers."
+    elif chosen["privacy"] == "local_first":
+        detail = f"The voice assistant now uses {model.name} on this server first, then your outside providers."
+    else:
+        detail = f"The voice assistant now uses {model.name}, only on this server."
+    if follow:
+        detail += " It follows chat's setting again."
     store.record_audit(actor=actor, event="ai.voice_changed", detail=detail, job_id=job_id)
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
 
@@ -747,6 +764,11 @@ def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
 def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
     if job.get("action") == VOICE_ACTION:
         _execute_voice(store, job, worker_id, root)
+        return
+    from ctl import duplex_voice
+
+    if job.get("action") == duplex_voice.ACTION:
+        duplex_voice.execute(store, job, worker_id, root)
         return
     from ctl import resource_locks
     from ctl.engine.hooks import StepFailed

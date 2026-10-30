@@ -269,6 +269,13 @@ def _compose_project_command(projdir: Path, extra_files: list[Path] | None = Non
     return [*command, "--project-directory", str(projdir)]
 
 
+def _gpu_start_refused(projdir: Path) -> str:
+    """Why an app must not start now: the voice assistant's full-duplex model holds the graphics card."""
+    from ctl import duplex_voice
+
+    return duplex_voice.start_refused(projdir)
+
+
 def compose_up(
     projdir: Path,
     log: Callable[[str], None],
@@ -288,6 +295,10 @@ def compose_up(
     string, no shell games beyond one quoted layer) stays exact. Extra files
     are reviewed service-owned overrides, never browser-provided paths.
     """
+    refused = _gpu_start_refused(projdir)
+    if refused:
+        log(refused)
+        return 1, refused
     argv = [*_compose_project_command(projdir, extra_files), "up", "-d"]
     if recreate:
         argv.append("--force-recreate")
@@ -402,6 +413,10 @@ def compose_action(
     }
     if action not in verbs:
         return 2, "unsupported curated lifecycle action"
+    refused = _gpu_start_refused(projdir) if action != "stop" else ""
+    if refused:
+        log(refused)
+        return 1, refused
     files = [projdir / "docker-compose.yml"]
     digest_override = projdir / "docker-compose.digest.yml"
     if digest_override.is_file():

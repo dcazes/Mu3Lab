@@ -134,6 +134,17 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
       ...settings,
     },
     // Voice matches chat until the owner saves a voice choice.
+    voice_engine: {
+      engine: 'pipeline',
+      model: 'MiniCPM-o 4.5 (4-bit)',
+      download_gb: 8.9,
+      downloaded: false,
+      stops: ['Ollama', 'Speaches'],
+      stopped: [],
+      unavailable_reason: '',
+      changed_at: '',
+      changed_by: '',
+    },
     voice: {
       privacy,
       model: sources.includes('local') ? (settings.chat_model ?? '') : '',

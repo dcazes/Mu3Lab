@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from ctl import local_models
+from ctl import duplex_voice, local_models
 from ctl.engine.hooks import HookContext
 from ctl.rules import Params, Rule, model_ready, register
 
@@ -40,6 +40,9 @@ class NeedsVoiceModel(Rule):
 
     def setup_check(self, ctx: HookContext) -> None:
         assert ctx.facts is not None
+        # The full-duplex model hears and speaks itself; none of these models is used meanwhile.
+        if duplex_voice.duplex_on(ctx.facts.paths):
+            return
         if local_models.VOICE_ALIAS in self.params.models:
             self._check_voice(ctx)
         self._check_routes(ctx)

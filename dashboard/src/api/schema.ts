@@ -143,6 +143,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/voice/engine': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Voice Engine
+     * @description Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps.
+     */
+    put: operations['change_voice_engine_api_v1_ai_voice_engine_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/app-sizes': {
     parameters: {
       query?: never;
@@ -1649,6 +1669,7 @@ export interface components {
        */
       suggestion_reason?: string;
       voice: components['schemas']['AiVoiceSettings'];
+      voice_engine: components['schemas']['AiVoiceEngineSettings'];
     };
     /** AiModelsRequest */
     AiModelsRequest: {
@@ -1694,8 +1715,48 @@ export interface components {
       /** Where */
       where: string;
     };
+    /** AiVoiceEngineRequest */
+    AiVoiceEngineRequest: {
+      /**
+       * Engine
+       * @enum {string}
+       */
+      engine: 'pipeline' | 'duplex';
+    };
+    /**
+     * AiVoiceEngineSettings
+     * @description How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card.
+     */
+    AiVoiceEngineSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Download Gb */
+      download_gb: number;
+      /** Downloaded */
+      downloaded: boolean;
+      /**
+       * Engine
+       * @enum {string}
+       */
+      engine: 'pipeline' | 'duplex';
+      /** Model */
+      model: string;
+      /** Stopped */
+      stopped: string[];
+      /** Stops */
+      stops: string[];
+      /** Unavailable Reason */
+      unavailable_reason: string;
+    };
     /** AiVoiceRequest */
     AiVoiceRequest: {
+      /**
+       * Matches Chat
+       * @default false
+       */
+      matches_chat?: boolean;
       /**
        * Model
        * @default
@@ -2657,15 +2718,31 @@ export interface components {
     JobDetailResponse: {
       download?: components['schemas']['ImageDownload'] | null;
       /** Events */
-      events: components['schemas']['AuditEvent'][];
+      events: components['schemas']['JobEvent'][];
       job: components['schemas']['Job'];
       /** Ok */
       ok: boolean;
     };
+    /**
+     * JobEvent
+     * @description One line of a job's progress. Unlike an audit event it names no actor: the job does.
+     */
+    JobEvent: {
+      /** Created At */
+      created_at: string;
+      /** Detail */
+      detail: string;
+      /** Event */
+      event: string;
+      /** Id */
+      id: number;
+      /** Job Id */
+      job_id: string | null;
+    };
     /** JobEventsResponse */
     JobEventsResponse: {
       /** Events */
-      events: components['schemas']['AuditEvent'][];
+      events: components['schemas']['JobEvent'][];
       /** Ok */
       ok: boolean;
     };
@@ -4602,6 +4679,93 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['VoiceApps'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_engine_api_v1_ai_voice_engine_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiVoiceEngineRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */

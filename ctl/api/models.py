@@ -657,6 +657,16 @@ class AuditEvent(ApiModel):
     detail: str
 
 
+class JobEvent(ApiModel):
+    """One line of a job's progress. Unlike an audit event it names no actor: the job does."""
+
+    id: float
+    job_id: str | None
+    event: str
+    created_at: str
+    detail: str
+
+
 class AuditResponse(ApiModel):
     ok: bool
     available: bool
@@ -673,7 +683,7 @@ class ServiceLogsResponse(ApiModel):
 class JobDetailResponse(ApiModel):
     ok: bool
     job: Job
-    events: list[AuditEvent]
+    events: list[JobEvent]
     # Image download progress while an install job downloads.
     download: ImageDownload | None = None
 
@@ -801,12 +811,37 @@ class AiVoiceSettings(ApiModel):
     """Where the voice assistant's answers come from, independent of chat."""
 
     privacy: AiPrivacy
-    # The local model voice runs on (a chat model id); used only with local only.
+    # The local model voice runs on (a chat model id); used with local first and local only.
     model: str
     # True until the owner saves a voice choice: voice then reads chat's settings.
     matches_chat: bool
     changed_at: str
     changed_by: str
+
+
+AiVoiceEngine = Literal["pipeline", "duplex"]
+
+
+class AiVoiceEngineSettings(ApiModel):
+    """How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card."""
+
+    engine: AiVoiceEngine
+    # The full-duplex model, its download size and whether its files are here and checked.
+    model: str
+    download_gb: float
+    downloaded: bool
+    # Apps that use the graphics card and stop while the full-duplex model is on (names).
+    stops: list[str]
+    # The apps this mode stopped, which start again when it is switched off.
+    stopped: list[str]
+    # Why it cannot be switched on here, or "".
+    unavailable_reason: str
+    changed_at: str
+    changed_by: str
+
+
+class AiVoiceEngineRequest(ApiModel):
+    engine: AiVoiceEngine
 
 
 class ModelRunnerOption(ApiModel):
@@ -823,6 +858,7 @@ class AiModels(ApiModel):
     ok: bool
     settings: AiModelSettings
     voice: AiVoiceSettings
+    voice_engine: AiVoiceEngineSettings
     # The reviewed chat model that fits best, or "" to suggest outside providers; and why.
     suggested: str = ""
     suggestion_reason: str = ""
@@ -863,6 +899,8 @@ class AiTryResult(ApiModel):
 class AiVoiceRequest(ApiModel):
     privacy: AiPrivacy
     model: str = Field(default="", max_length=64)
+    # True goes back to following chat's setting; privacy and model are then ignored.
+    matches_chat: bool = False
 
 
 class VoiceApp(ApiModel):
@@ -1401,7 +1439,7 @@ class ProviderModelsResponse(ApiModel):
 
 class JobEventsResponse(ApiModel):
     ok: bool
-    events: list[AuditEvent]
+    events: list[JobEvent]
 
 
 class ServiceInitializationResponse(ApiModel):
