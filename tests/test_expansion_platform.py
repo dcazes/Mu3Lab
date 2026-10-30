@@ -319,5 +319,3 @@ class SpeechRoutingTests(unittest.TestCase):
 
     def test_no_speech_app_means_no_speech_routes(self):
         self.assertEqual(speech_models({}, self.PARAMS), [])
-
-

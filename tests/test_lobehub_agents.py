@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-
 from ctl import chat_connections, lobehub_ops
 from ctl.runtime import RuntimePaths
 
@@ -18,8 +17,6 @@ from ctl.runtime import RuntimePaths
 
 
 class AgentSyncTests(unittest.TestCase):
-
-
     def test_report_says_why_each_app_has_no_assistant(self):
         def app(app_id):
             manifest = Mock(id=app_id)
@@ -73,7 +70,6 @@ class AgentSyncTests(unittest.TestCase):
         )
         self.assertEqual(stranger["ready"], "not_connected")
 
-
     def test_device_approval_mints_once_and_discards_tokens(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
@@ -103,4 +99,3 @@ class AgentSyncTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 chat_connections.begin("person", {"device_code": "new"}, paths)
             self.assertEqual(chat_connections.records(paths)["person"]["key"], "sk-lh-existing")
-

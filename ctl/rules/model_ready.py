@@ -56,7 +56,7 @@ def local_model(ctx: HookContext, chosen: Model, place: str) -> None:
         )
 
 
-def routed(ctx: HookContext) -> list[str]:
+def routed(ctx: HookContext) -> set[str]:
     """Every model name the AI gateway routes; the gateway being down fails the step."""
     assert ctx.facts is not None
     gateway = by_capability("model_proxy", ctx.facts.catalog)

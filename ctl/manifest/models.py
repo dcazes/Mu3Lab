@@ -645,8 +645,8 @@ class AppManifest(Model):
                 raise ValueError("extra route names must be unique")
             routes = (self.route, *self.extra_routes)
             for field in ("https_port", "caddy_port"):
-                values = [getattr(route, field) for route in routes]
-                if len(values) != len(set(values)):
+                ports = [getattr(route, field) for route in routes]
+                if len(ports) != len(set(ports)):
                     raise ValueError(f"each route needs its own {field}")
             upstreams = [self.service.local_port, *(route.local_port for route in self.extra_routes)]
             if len(upstreams) != len(set(upstreams)):

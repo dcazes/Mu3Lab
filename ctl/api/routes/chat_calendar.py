@@ -49,7 +49,14 @@ def list_events(request: Request, uid: Caller) -> models.CalendarEvents:
         now = datetime.now(UTC)
         start, end = now.isoformat(), (now + timedelta(days=DEFAULT_DAYS)).isoformat()
     elif not end:
-        end = (calendar._parse_time(start) + timedelta(days=DEFAULT_DAYS)).isoformat()
+        try:
+            begins = calendar._parse_time(start) or datetime.now(UTC)
+        except ValueError as exc:
+            # The same answer the calendar gives for any other bad range, not a server error.
+            raise ApiError(
+                400, "Calendar range values must be valid ISO 8601 datetimes.", state="invalid_range"
+            ) from exc
+        end = (begins + timedelta(days=DEFAULT_DAYS)).isoformat()
     elif not start:
         start = datetime.now(UTC).isoformat()
     result = calendar.events_for(uid, start, end, request.query_params.get("limit", "50"))

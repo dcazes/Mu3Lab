@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-
 from ctl.control_state import ControlState
 from ctl.identity import launch_path, mode_for, projection
 from ctl.registry import load
@@ -96,7 +95,6 @@ class IdentityContractTests(unittest.TestCase):
             project.mkdir(parents=True)
             (project / ".env").write_text("NEXTCLOUD_OIDC_PROVIDER_ID=7\n")
             self.assertTrue(launch_path(manifest, paths).endswith("/7"))
-
 
     def test_every_authentik_provider_skips_the_consent_page(self):
         # A consent page left open loses its place when another app starts a

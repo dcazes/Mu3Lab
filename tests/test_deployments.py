@@ -49,6 +49,19 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(self.settings.config(), {"currency": "EUR"})
         self.assertEqual(self.settings.generated(), {"DB_PASSWORD": "secret"})
 
+    def test_restore_gives_each_file_its_permissions_back(self):
+        # Another container's user reads some project files (the voice agent's people.json).
+        shared = self.project / "voice-tools" / "people.json"
+        shared.parent.mkdir()
+        shared.write_text("{}", encoding="utf-8")
+        shared.chmod(0o644)
+        (self.project / "docker-compose.yml").chmod(0o600)
+        self.capture()
+        shared.chmod(0o600)
+        deployments.restore(self.service, "b1", self.paths)
+        self.assertEqual(shared.stat().st_mode & 0o777, 0o644)
+        self.assertEqual((self.project / "docker-compose.yml").stat().st_mode & 0o777, 0o600)
+
     def test_a_damaged_bundle_is_refused_before_anything_changes(self):
         self.capture()
         bundle = self.paths.state / "deployments" / "mealie" / "b1" / "files" / "docker-compose.yml"

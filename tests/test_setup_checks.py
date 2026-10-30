@@ -61,6 +61,7 @@ class VoiceModelTests(unittest.TestCase):
         ctx = context("livekit")
         rule = NeedsVoiceModel(NeedsVoiceModelParams(models=self.MODELS))
         with (
+            patch("ctl.rules.needs_voice_model.duplex_voice.duplex_on", return_value=False),
             patch("ctl.rules.needs_voice_model.local_models.voice_settings", return_value={"privacy": privacy}),
             patch("ctl.rules.needs_voice_model.local_models.voice_model", return_value=MODEL),
             patch("ctl.rules.needs_voice_model.model_ready.provider_connected", return_value=provider),

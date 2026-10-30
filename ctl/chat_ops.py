@@ -188,7 +188,7 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
     for item in calendar_tools.assistants(uid):
         if uid and email:
             item["token"] = contextforge_ops.person_key(
-                uid, email, "calendar", item["server_id"], team_id=item["team_id"]
+                uid, email, "calendar", str(item["server_id"]), team_id=str(item["team_id"])
             )
         result.append(item)
     return result
