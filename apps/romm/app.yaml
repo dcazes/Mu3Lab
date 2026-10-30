@@ -1,6 +1,6 @@
 # RomM — see ctl/manifest/models.py for every field.
 id: romm
-capabilities: [games]
+capabilities: [games, media_folders]
 name: RomM
 tier: optional
 group: apps
@@ -89,8 +89,8 @@ mobile:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private RomM address and sign in with Authentik.
     - Use the browser menu to add RomM to the Home Screen.
-resource_guidance: Moderate; library scans use CPU for a while. Game files live under /srv/mu3lab/media, which
-  backups leave out; saves and states are backed up.
+resource_guidance: Moderate; library scans use CPU for a while. Game files live under /srv/mu3lab/media (the Roms folder
+  in Nextcloud); backups include them, and saves and states.
 setup_action: Install RomM to organize and play the retro games you own.
 chat:
   assistant:

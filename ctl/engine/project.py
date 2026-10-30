@@ -193,6 +193,13 @@ class Facts:
         return tailnet_ip()
 
     @cached_property
+    def media_folders(self) -> str:
+        """The libraries under the media root, comma-separated; "none" while there are none."""
+        media = self.paths.media
+        names = sorted(item.name for item in media.iterdir() if item.is_dir()) if media.is_dir() else []
+        return ",".join(names) or "none"
+
+    @cached_property
     def connector_networks(self) -> str:
         """Asked of Docker once per render, and only by an app whose settings name it (ContextForge)."""
         from ctl.service_state import connector_networks
@@ -224,6 +231,8 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
             "https_port": str(app.manifest.route.https_port) if app.manifest.route else None,
             "discovery_url": discovery_url(facts.dns_name, app.id) if facts.dns_name else None,
             "data_root": str(facts.paths.data),
+            "media_root": str(facts.paths.media),
+            "media_folders": facts.media_folders,
             "tz": env.get("TZ") or None,
             "country_code": hostinfo.country_code(env.get("TZ")) or None,
             "currency_code": hostinfo.currency_code(hostinfo.country_code(env.get("TZ"))),

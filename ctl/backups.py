@@ -69,6 +69,8 @@ POLICY = [
 REASONS = frozenset({"pre-update"})
 # The Kopia source for Mu3Lab's own state (control database, key, deployments).
 PLATFORM_SOURCE = "mu3lab"
+# The Kopia source for the media libraries people fill (/srv/mu3lab/media/<name>), apart from any app.
+MEDIA_SOURCE = "media"
 _SNAPSHOT_ID = re.compile(r"^[0-9a-f]{16,64}$")
 _VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
 _RELEASE_ID = re.compile(r"^[0-9a-f]{16}$")

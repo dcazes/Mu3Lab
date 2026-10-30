@@ -62,9 +62,13 @@ services:
       MU3LAB_OIDC_DISCOVERY_URL: ${NEXTCLOUD_OIDC_DISCOVERY_URL:-}
       # 1 while a music app is installed: scripts/music.sh shares its library as Music.
       MU3LAB_MUSIC_SHARED: ${MU3LAB_MUSIC_SHARED:-0}
+      # The media libraries scripts/media.sh shares, by folder name (comma-separated).
+      MU3LAB_MEDIA_FOLDERS: ${MU3LAB_MEDIA_FOLDERS:-}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
       - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/mnt/mu3lab-music
+      # Every app's media library (audiobooks, games), shown as shared folders by scripts/media.sh.
+      - ${MU3LAB_MEDIA_ROOT:?MU3LAB_MEDIA_ROOT is required}:/mnt/mu3lab-media
     networks:
       mu3lab_frontend: {}
       mu3lab_backend:
@@ -91,6 +95,7 @@ services:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
       # Background jobs scan external storage too.
       - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/mnt/mu3lab-music
+      - ${MU3LAB_MEDIA_ROOT:?MU3LAB_MEDIA_ROOT is required}:/mnt/mu3lab-media
     networks: [nextcloud_internal]
     security_opt: [no-new-privileges:true]
 

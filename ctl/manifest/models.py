@@ -540,7 +540,9 @@ class MediaFolder(Model):
     """A library under the media root (``/srv/mu3lab/media/<name>``) that people fill themselves.
 
     Compose files mount it as ``${MU3LAB_MEDIA_<NAME>}``. Uninstall never deletes
-    it, and backups leave it out: it is large and people already have the files.
+    it. Backups hold every library as one ``media`` source, apart from any app,
+    and Nextcloud shows each one as a shared folder. An app with media offers
+    ``media_folders``, so Nextcloud re-renders when such an app comes or goes.
     """
 
     name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$")

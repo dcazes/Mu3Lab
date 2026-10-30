@@ -263,7 +263,7 @@ The common engine does not erase upstream differences. The current optional cata
 | --- | --- |
 | Actual Budget | Native OIDC, initial-owner guard and a connector requiring an Actual server password and selected Budget Sync ID. Mu3Lab cannot infer these; OIDC setup alone does not establish connector readiness. The app still owns budget creation/import and budgeting behavior. |
 | AdventureLog | Environment/bootstrap owner setup, registered OIDC social application and a small API-backed connector. |
-| Audiobookshelf | API bootstrap of the initial owner, OIDC and role claims, default libraries and mobile callback configuration. Large media is outside normal backups. |
+| Audiobookshelf | API bootstrap of the initial owner, OIDC and role claims, default libraries and mobile callback configuration. Its libraries are in the `media` backup and shown in Nextcloud. |
 | Baby Buddy | Trusted-header user creation via app-side authentication integration; household users get caregiver access. Native clients use device tokens. |
 | Beaver Habits | Trusted email identity with a script reconciling per-person accounts and separate habit lists. |
 | Dawarich | OIDC owner adoption, configurable local Photon region and phone-client setup metadata. Location data is backed up; the downloadable Photon index is excluded. |
@@ -275,7 +275,7 @@ The common engine does not erase upstream differences. The current optional cata
 | Nextcloud | Staged/environment owner setup, configuration scripts, OIDC, shared music integration, CalDAV calendar integration and a file-oriented MCP adapter. Dashboard calendar credentials are distinct from the shared connector credential. |
 | Outline | OIDC and an app-owned script that establishes the owner's workspace before ordinary users can become first administrator. |
 | Paperless-ngx | First-admin bootstrap and native OIDC, with a separate connector. Mobile clients can require app-issued tokens. |
-| RomM | OIDC, media mounts for supplied ROMs and optional metadata-service secrets. App database and save data are included in backups; ROM media is excluded. |
+| RomM | OIDC, media mounts for supplied ROMs and optional metadata-service secrets. App database and save data are in its backup; ROMs are in the `media` backup and shown in Nextcloud. |
 | SurfSense | Authentik gate plus an API-provisioned local account saved to the vault, managed AI/embedding configuration and connector. Its privileged sandbox is disabled; the search index constrains embedding-model changes. |
 | LobeChat | Optional chat workspace with OIDC, private object storage and per-person connection approval. |
 | Speech | Internal local audio APIs integrated through LiteLLM and chat; model configuration and CPU/NVIDIA variants. |

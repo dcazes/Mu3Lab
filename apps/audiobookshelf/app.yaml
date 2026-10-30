@@ -1,6 +1,6 @@
 # Audiobookshelf — see ctl/manifest/models.py for every field.
 id: audiobookshelf
-capabilities: [audiobooks]
+capabilities: [audiobooks, media_folders]
 name: Audiobookshelf
 tier: optional
 group: apps
@@ -40,7 +40,7 @@ sign_in:
       user: user
 account:
   mode: api_bootstrap
-  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to /srv/mu3lab/media/audiobooks.
+  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to the Audiobooks folder in Nextcloud, or to /srv/mu3lab/media/audiobooks.
 mobile:
   primary: audiobookshelf-app
   clients:
@@ -79,7 +79,7 @@ mobile:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private Audiobookshelf address and sign in with Authentik.
     - Use the browser menu to add it to the Home Screen.
-resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups leave out.
+resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups include.
 setup_action: Install Audiobookshelf to listen to your audiobooks and podcasts anywhere.
 chat:
   assistant:
@@ -92,7 +92,7 @@ chat:
     - question: "What is Audiobookshelf for?"
       answer: "Listening to the household's audiobooks and podcasts from any browser or phone, picking up where you left off."
     - question: "How do books get into the library?"
-      answer: "An administrator copies them into the audiobooks folder on the server (/srv/mu3lab/media/audiobooks); Audiobookshelf picks them up."
+      answer: "Put them in the shared Audiobooks folder in Nextcloud (one folder per book), or copy them into /srv/mu3lab/media/audiobooks on the server; Audiobookshelf picks them up."
     - question: "Is my listening progress shared?"
       answer: "The library is shared, but each person's progress and listening history are their own."
   connectors:
