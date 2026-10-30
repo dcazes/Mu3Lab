@@ -70,6 +70,13 @@ chat:
     description: Check stock, expiry dates, shopping lists, and chores.
     instructions: Help with Grocy stock, expiry dates, shopping lists, recipes, and chores. Ask before consuming,
       purchasing, or changing products or lists. Use only Grocy tools assigned to this agent.
+    faq:
+    - question: "What is Grocy for?"
+      answer: "The household's shared kitchen inventory: what's in stock, what expires soon, shopping lists, recipes and chores."
+    - question: "Who sees the stock and lists?"
+      answer: "Everyone in the household; there is one shared inventory."
+    - question: "Can I scan barcodes?"
+      answer: "Yes, with a Grocy phone app; the setup steps are above, under Opening."
   connectors:
   - grocy-community
 mobile:

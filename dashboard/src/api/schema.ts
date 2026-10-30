@@ -43,6 +43,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/models/try': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Try Model
+     * @description One test answer from a downloaded model or the outside providers, before switching to it.
+     */
+    post: operations['try_model_api_v1_ai_models_try_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/models/{model_id}/remove': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove Model
+     * @description Delete one downloaded model no setting uses, to free its disk space.
+     */
+    post: operations['remove_model_api_v1_ai_models__model_id__remove_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ai/voice': {
     parameters: {
       query?: never;
@@ -56,6 +96,152 @@ export interface paths {
      * @description Queue the voice assistant's change: a local model downloads and is checked before voice switches over.
      */
     put: operations['change_voice_api_v1_ai_voice_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/apps': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Voice Apps
+     * @description The app assistants the voice assistant can hand people to.
+     */
+    get: operations['voice_apps_api_v1_ai_voice_apps_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/apps/check': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Check Voice Apps
+     * @description Whether each app's tools answer for the person looking, with the keys a call of theirs would use.
+     */
+    get: operations['check_voice_apps_api_v1_ai_voice_apps_check_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/apps/{app_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Voice App
+     * @description Switch one app's assistant on or off for voice; the agent sees it from the next call.
+     */
+    put: operations['change_voice_app_api_v1_ai_voice_apps__app_id__put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/engine': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Voice Engine
+     * @description Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps.
+     */
+    put: operations['change_voice_engine_api_v1_ai_voice_engine_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/sample': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Voice Sample
+     * @description One sentence read aloud in a voice, so people can hear it before choosing it.
+     */
+    post: operations['voice_sample_api_v1_ai_voice_sample_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Voice Page
+     * @description Everyone may see how the voice assistant is set up; only administrators change it.
+     */
+    get: operations['voice_page_api_v1_ai_voice_settings_get'];
+    /**
+     * Change Voice Settings
+     * @description Save responsiveness, interruptions, the voice or web search; the next call uses them, no restart.
+     */
+    put: operations['change_voice_settings_api_v1_ai_voice_settings_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/speech': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Speech Models
+     * @description Choose Speaches' models, which every app using speech shares: set Speaches up again with them.
+     *
+     *     Setting up downloads and checks the new models, and points the AI gateway's speech names at them.
+     */
+    put: operations['change_speech_models_api_v1_ai_voice_speech_put'];
     post?: never;
     delete?: never;
     options?: never;
@@ -308,6 +494,42 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/chat-tools/calendar/events': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Events */
+    get: operations['list_events_api_v1_chat_tools_calendar_events_get'];
+    put?: never;
+    /** Create Event */
+    post: operations['create_event_api_v1_chat_tools_calendar_events_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/chat-tools/calendar/events/{event_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Update Event */
+    put: operations['update_event_api_v1_chat_tools_calendar_events__event_id__put'];
+    post?: never;
+    /** Delete Event */
+    delete: operations['delete_event_api_v1_chat_tools_calendar_events__event_id__delete'];
     options?: never;
     head?: never;
     patch?: never;
@@ -1494,9 +1716,11 @@ export interface components {
        * Privacy
        * @enum {string}
        */
-      privacy: 'outside_allowed' | 'local_only';
+      privacy: 'outside_allowed' | 'local_first' | 'local_only';
       /** Runner */
       runner: string;
+      /** Sources */
+      sources: ('local' | 'outside')[];
     };
     /**
      * AiModels
@@ -1520,7 +1744,18 @@ export interface components {
       /** Runners */
       runners: components['schemas']['ModelRunnerOption'][];
       settings: components['schemas']['AiModelSettings'];
+      /**
+       * Suggested
+       * @default
+       */
+      suggested?: string;
+      /**
+       * Suggestion Reason
+       * @default
+       */
+      suggestion_reason?: string;
       voice: components['schemas']['AiVoiceSettings'];
+      voice_engine: components['schemas']['AiVoiceEngineSettings'];
     };
     /** AiModelsRequest */
     AiModelsRequest: {
@@ -1532,18 +1767,82 @@ export interface components {
       /** Embedding Model */
       embedding_model: string;
       /**
-       * Privacy
-       * @enum {string}
-       */
-      privacy: 'outside_allowed' | 'local_only';
-      /**
        * Runner
        * @default
        */
       runner?: string;
+      /** Sources */
+      sources: ('local' | 'outside')[];
+    };
+    /** AiTryRequest */
+    AiTryRequest: {
+      /**
+       * Prompt
+       * @default
+       */
+      prompt?: string;
+      /** Target */
+      target: string;
+    };
+    /** AiTryResult */
+    AiTryResult: {
+      /** Answer */
+      answer: string;
+      /** Loading Seconds */
+      loading_seconds: number;
+      /** Name */
+      name: string;
+      /** Ok */
+      ok: boolean;
+      /** Seconds */
+      seconds: number;
+      /** Tokens Per Second */
+      tokens_per_second: number;
+      /** Where */
+      where: string;
+    };
+    /** AiVoiceEngineRequest */
+    AiVoiceEngineRequest: {
+      /**
+       * Engine
+       * @enum {string}
+       */
+      engine: 'pipeline' | 'duplex';
+    };
+    /**
+     * AiVoiceEngineSettings
+     * @description How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card.
+     */
+    AiVoiceEngineSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Download Gb */
+      download_gb: number;
+      /** Downloaded */
+      downloaded: boolean;
+      /**
+       * Engine
+       * @enum {string}
+       */
+      engine: 'pipeline' | 'duplex';
+      /** Model */
+      model: string;
+      /** Stopped */
+      stopped: string[];
+      /** Stops */
+      stops: string[];
+      /** Unavailable Reason */
+      unavailable_reason: string;
     };
     /** AiVoiceRequest */
     AiVoiceRequest: {
+      /**
+       * Matches Chat
+       * @default false
+       */
+      matches_chat?: boolean;
       /**
        * Model
        * @default
@@ -1553,7 +1852,7 @@ export interface components {
        * Privacy
        * @enum {string}
        */
-      privacy: 'outside_allowed' | 'local_only';
+      privacy: 'outside_allowed' | 'local_first' | 'local_only';
     };
     /**
      * AiVoiceSettings
@@ -1572,7 +1871,7 @@ export interface components {
        * Privacy
        * @enum {string}
        */
-      privacy: 'outside_allowed' | 'local_only';
+      privacy: 'outside_allowed' | 'local_first' | 'local_only';
     };
     /** ApiErrorResponse */
     ApiErrorResponse: {
@@ -2505,15 +2804,31 @@ export interface components {
     JobDetailResponse: {
       download?: components['schemas']['ImageDownload'] | null;
       /** Events */
-      events: components['schemas']['AuditEvent'][];
+      events: components['schemas']['JobEvent'][];
       job: components['schemas']['Job'];
       /** Ok */
       ok: boolean;
     };
+    /**
+     * JobEvent
+     * @description One line of a job's progress. Unlike an audit event it names no actor: the job does.
+     */
+    JobEvent: {
+      /** Created At */
+      created_at: string;
+      /** Detail */
+      detail: string;
+      /** Event */
+      event: string;
+      /** Id */
+      id: number;
+      /** Job Id */
+      job_id: string | null;
+    };
     /** JobEventsResponse */
     JobEventsResponse: {
       /** Events */
-      events: components['schemas']['AuditEvent'][];
+      events: components['schemas']['JobEvent'][];
       /** Ok */
       ok: boolean;
     };
@@ -2546,8 +2861,23 @@ export interface components {
       download_gb: number;
       /** Downloaded */
       downloaded: boolean;
+      /**
+       * Fit
+       * @default
+       */
+      fit?: string;
+      /**
+       * Fit Where
+       * @default
+       */
+      fit_where?: string;
       /** Id */
       id: string;
+      /**
+       * In Use
+       * @default false
+       */
+      in_use?: boolean;
       /** Memory Gb */
       memory_gb: number;
       /** Name */
@@ -3563,6 +3893,13 @@ export interface components {
       services: components['schemas']['ServicesResponse'];
       system: components['schemas']['SystemResponse'];
     };
+    /** SpeechModelChoice */
+    SpeechModelChoice: {
+      /** Options */
+      options: string[];
+      /** Value */
+      value: string;
+    };
     /** SystemConfig */
     SystemConfig: {
       /** Available Modes */
@@ -3747,6 +4084,41 @@ export interface components {
       /** Ok */
       ok: boolean;
     };
+    /**
+     * VoiceApp
+     * @description An app assistant the voice assistant can hand people to, and whether it may.
+     */
+    VoiceApp: {
+      /** Description */
+      description: string;
+      /** Id */
+      id: string;
+      /** On */
+      on: boolean;
+      /** Operators Only */
+      operators_only: boolean;
+      /**
+       * Ready
+       * @default true
+       */
+      ready?: boolean;
+      /** Title */
+      title: string;
+    };
+    /** VoiceAppRequest */
+    VoiceAppRequest: {
+      /** On */
+      on: boolean;
+    };
+    /** VoiceApps */
+    VoiceApps: {
+      /** Apps */
+      apps: components['schemas']['VoiceApp'][];
+      /** Installed */
+      installed: boolean;
+      /** Ok */
+      ok: boolean;
+    };
     /** VoiceKeyCreated */
     VoiceKeyCreated: {
       /** Base Url */
@@ -3776,6 +4148,117 @@ export interface components {
       exists: boolean;
       /** Models */
       models: string[];
+      /** Ok */
+      ok: boolean;
+    };
+    /** VoiceOption */
+    VoiceOption: {
+      /** Accent */
+      accent: string;
+      /** Gender */
+      gender: string;
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /** VoicePage */
+    VoicePage: {
+      /** Active Job Id */
+      active_job_id: string;
+      /** Installed */
+      installed: boolean;
+      /** Ok */
+      ok: boolean;
+      /** Search App Id */
+      search_app_id: string;
+      /** Search Installed */
+      search_installed: boolean;
+      settings: components['schemas']['VoiceSettings'];
+      speech: components['schemas']['VoiceSpeech'];
+      /** Voices */
+      voices: components['schemas']['VoiceOption'][];
+    };
+    /** VoiceSample */
+    VoiceSample: {
+      /** Audio */
+      audio: string;
+      /** Ok */
+      ok: boolean;
+    };
+    /** VoiceSampleRequest */
+    VoiceSampleRequest: {
+      /** Voice */
+      voice: string;
+    };
+    /**
+     * VoiceSettings
+     * @description The household's voice assistant choices (ctl/voice_settings.py).
+     */
+    VoiceSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Interruptions */
+      interruptions: boolean;
+      /**
+       * Responsiveness
+       * @enum {string}
+       */
+      responsiveness: 'fast' | 'balanced' | 'patient';
+      /** Search */
+      search: boolean;
+      /** Voice */
+      voice: string;
+    };
+    /** VoiceSettingsRequest */
+    VoiceSettingsRequest: {
+      /** Interruptions */
+      interruptions?: boolean | null;
+      /** Responsiveness */
+      responsiveness?: ('fast' | 'balanced' | 'patient') | null;
+      /** Search */
+      search?: boolean | null;
+      /** Voice */
+      voice?: string | null;
+    };
+    /**
+     * VoiceSpeech
+     * @description Speaches' models, which every app using speech shares.
+     */
+    VoiceSpeech: {
+      /** App Id */
+      app_id: string;
+      /** Default Voice */
+      default_voice: string;
+      /** Installed */
+      installed: boolean;
+      stt: components['schemas']['SpeechModelChoice'];
+      tts: components['schemas']['SpeechModelChoice'];
+    };
+    /** VoiceSpeechRequest */
+    VoiceSpeechRequest: {
+      /** Stt Model */
+      stt_model: string;
+      /** Tts Model */
+      tts_model: string;
+    };
+    /** VoiceToolCheck */
+    VoiceToolCheck: {
+      /** Detail */
+      detail: string;
+      /** Id */
+      id: string;
+      /** Ok */
+      ok: boolean;
+      /** Tools */
+      tools: number;
+    };
+    /** VoiceToolChecks */
+    VoiceToolChecks: {
+      /** Apps */
+      apps: components['schemas']['VoiceToolCheck'][];
       /** Ok */
       ok: boolean;
     };
@@ -4041,6 +4524,178 @@ export interface operations {
       };
     };
   };
+  try_model_api_v1_ai_models_try_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiTryRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AiTryResult'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  remove_model_api_v1_ai_models__model_id__remove_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   change_voice_api_v1_ai_voice_put: {
     parameters: {
       query?: never;
@@ -4051,6 +4706,692 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['AiVoiceRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_apps_api_v1_ai_voice_apps_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceApps'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  check_voice_apps_api_v1_ai_voice_apps_check_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceToolChecks'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_app_api_v1_ai_voice_apps__app_id__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        app_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceAppRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceApps'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_engine_api_v1_ai_voice_engine_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AiVoiceEngineRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_sample_api_v1_ai_voice_sample_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceSampleRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceSample'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_page_api_v1_ai_voice_settings_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoicePage'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_settings_api_v1_ai_voice_settings_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceSettingsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoicePage'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_speech_models_api_v1_ai_voice_speech_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceSpeechRequest'];
       };
     };
     responses: {
@@ -5591,6 +6932,354 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['CatalogResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  list_events_api_v1_chat_tools_calendar_events_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CalendarEvents'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  create_event_api_v1_chat_tools_calendar_events_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CalendarEventRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  update_event_api_v1_chat_tools_calendar_events__event_id__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CalendarEventRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  delete_event_api_v1_chat_tools_calendar_events__event_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['CalendarDeleteRequest'] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
         };
       };
       /** @description Bad Request */

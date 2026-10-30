@@ -15,12 +15,22 @@
 }
 
 .settings-nav-title {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  color: var(--text-2);
   padding: 0 8px 8px;
+}
+
+.settings-nav-group {
+  margin: 0;
+  padding: 14px 8px 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-nav-title + .settings-nav-group {
+  padding-top: 0;
 }
 
 .settings-content {
@@ -172,4 +182,96 @@
   margin: 0 0 12px;
   color: var(--text-2);
   font-size: 13px;
+}
+
+/* Local models: one row each, its fit beside the name, Try it and Remove on the right. */
+.model-list {
+  display: grid;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.model-list legend {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.model-entry {
+  display: grid;
+  gap: 6px;
+}
+.model-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.model-row:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.model-row input {
+  margin-top: 3px;
+}
+.model-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.model-row-text strong {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.model-row-text small {
+  color: var(--text-2);
+}
+.model-row-actions {
+  display: flex;
+  gap: 4px;
+}
+.model-try {
+  margin-left: 32px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.model-try p {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+}
+@media (max-width: 640px) {
+  .model-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .model-row-actions {
+    grid-column: 2;
+  }
+  .model-try {
+    margin-left: 0;
+  }
+}
+
+/* Where chat runs: each source turned on or off, in the owner's order. */
+.source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-row .choice {
+  flex: 1;
+}
+
+.source-row .choice strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }

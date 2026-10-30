@@ -1,6 +1,6 @@
 # Audiobookshelf — see ctl/manifest/models.py for every field.
 id: audiobookshelf
-capabilities: [audiobooks]
+capabilities: [audiobooks, media_folders]
 name: Audiobookshelf
 tier: optional
 group: apps
@@ -8,7 +8,7 @@ category: media
 tagline: Audiobooks and podcasts
 summary: Stream your audiobooks and podcasts with synced listening progress, bookmarks, and sleep timers. Official
   phone apps download books for offline listening.
-version: v2.37.1
+version: "v2.37.2"
 upstream: advplyr/audiobookshelf
 media:
 - name: audiobooks
@@ -40,7 +40,7 @@ sign_in:
       user: user
 account:
   mode: api_bootstrap
-  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to /srv/mu3lab/media/audiobooks.
+  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to the Audiobooks folder in Nextcloud, or to /srv/mu3lab/media/audiobooks.
 mobile:
   primary: audiobookshelf-app
   clients:
@@ -79,7 +79,7 @@ mobile:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private Audiobookshelf address and sign in with Authentik.
     - Use the browser menu to add it to the Home Screen.
-resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups leave out.
+resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups include.
 setup_action: Install Audiobookshelf to listen to your audiobooks and podcasts anywhere.
 chat:
   assistant:
@@ -88,5 +88,12 @@ chat:
     instructions: Help with the household's Audiobookshelf library. List the libraries before searching one, and use
       the titles and authors the tools return. Progress and listening time are the owner's. Use only Audiobookshelf
       tools assigned to this agent.
+    faq:
+    - question: "What is Audiobookshelf for?"
+      answer: "Listening to the household's audiobooks and podcasts from any browser or phone, picking up where you left off."
+    - question: "How do books get into the library?"
+      answer: "Put them in the shared Audiobooks folder in Nextcloud (one folder per book), or copy them into /srv/mu3lab/media/audiobooks on the server; Audiobookshelf picks them up."
+    - question: "Is my listening progress shared?"
+      answer: "The library is shared, but each person's progress and listening history are their own."
   connectors:
   - audiobookshelf-adapter

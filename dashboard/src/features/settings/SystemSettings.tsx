@@ -257,7 +257,9 @@ export function SystemSettings() {
     <>
       <PageHeader title="System" description="Keep Mu3Lab up to date, and monitor server health and network access." />
       <SetupProblem />
-      <Card title="Server" description={serverSummary(system)} collapsible>
+      <Mu3LabUpdates />
+      {/* Its one-line summary says enough most days; the per-app table opens on demand. */}
+      <Card title="Server" description={serverSummary(system)} collapsible defaultOpen={false}>
         <ResourceCharts detailed />
         <Facts
           items={[
@@ -269,7 +271,6 @@ export function SystemSettings() {
           ]}
         />
       </Card>
-      <Mu3LabUpdates />
       <Tailnet status={tailscale} />
       <Card
         title="Activity"

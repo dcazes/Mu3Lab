@@ -98,8 +98,8 @@ describe('Chat integrations', () => {
     renderWithDashboard(<IntegrationsSettings />, data);
     const automatic = await screen.findByRole('region', { name: 'Set up automatically' });
     expect(screen.queryByText('Assistants in chat')).not.toBeInTheDocument();
-    // The count and the tools link moved into the card below.
-    expect(screen.getByText(/1 of 2 apps have an assistant in chat/)).toBeInTheDocument();
+    // The assistant count sits in the summary line; the tools link in the card below.
+    expect(screen.getByLabelText('Integration summary')).toHaveTextContent('1 of 2 assistants in chat');
     expect(screen.getByRole('link', { name: 'Manage tools' })).toHaveAttribute('href', '/apps/contextforge');
     // Only an assistant that is not ready yet adds a line, to its own app.
     expect(

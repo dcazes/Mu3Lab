@@ -1,0 +1,21 @@
+# Chat's calendar tools: each person's own Mu3Lab calendar (ctl/calendar_tools.py).
+# It holds no secret: every call carries the caller's own calendar key, which Mu3Lab's
+# control plane checks. It runs on the host network to reach the control plane on
+# loopback, and listens on Docker's host address, which ContextForge reaches as
+# host.docker.internal.
+name: mu3lab-calendar-tools
+
+services:
+  calendar-mcp:
+    build:
+      context: ../mcp-adapter
+    image: ghcr.io/dcazes/mu3lab-calendar-tools:development
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MCP_APP: calendar
+      APP_URL: http://127.0.0.1:8787
+      MCP_LISTEN: 127.0.0.1:8831,@docker0:8831
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]

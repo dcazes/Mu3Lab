@@ -434,6 +434,9 @@ def run(restoring: bool = False) -> int:
         verify = install.vaultwarden_health().get("state") == "ready"
         account.update(ask_existing_account(screen, verify=verify))
         verified = verify
+    # Asked once, on a computer that has not chosen where its AI runs yet.
+    # A rebuild brings back its own AI settings.
+    local_ai = ask_local_ai(screen) if not restoring and _ai_unchosen() else {}
 
     def get_account() -> dict[str, str]:
         nonlocal verified
@@ -512,6 +515,9 @@ def run(restoring: bool = False) -> int:
         screen.finish(screen.color(GREEN, "✓") if saved else screen.color(RED, "!"), f"Vault: {message}")
     account.clear()
 
+    ai_line = queue_local_ai(screen, local_ai) if local_ai else ""
+    if ai_line:
+        screen.finish(screen.color(GREEN, "✓"), ai_line)
     dashboard = f"https://{host}:{install.DASHBOARD_SERVE_PORT}/" if host else ""
     verified, error = verify_dashboard(screen, host, stop.is_set)
     if not verified:
@@ -521,6 +527,93 @@ def run(restoring: bool = False) -> int:
         screen.say(f"  Installer log: {log_path}")
         return 1
     return report_success(screen, dashboard)
+
+
+AI_ASKED = ("ai", "installer-asked")
+
+
+def _ai_unchosen() -> bool:
+    """No local chat model is chosen and the owner was not asked before (``./install.sh`` runs again)."""
+    from ctl import local_models
+    from ctl.store import records
+
+    try:
+        return not local_models.settings()["chat_model"] and not records.get(*AI_ASKED)
+    except Exception:
+        return True
+
+
+def ask_local_ai(screen: Screen) -> dict[str, str]:
+    """The suggested local model for this computer, and whether to download it after setup.
+
+    Asked with the other questions, before anything is downloaded. Returns the model's id when the
+    owner accepts, else nothing; a computer without room for one is told to use outside providers.
+    """
+    from ctl import local_models, model_fit
+
+    try:
+        fit = model_fit.report()
+    except Exception as exc:  # never block an install on a measurement
+        screen.log("local_ai", f"could not measure this computer: {exc}")
+        return {}
+    model = local_models.CHAT_BY_ID.get(fit["suggested"])
+    screen.pause()
+    print("\n  " + screen.color(BOLD, "AI on this computer"))
+    if model is None:
+        print(f"  {fit['reason']}")
+        print("  After setup, connect one in the dashboard: Settings, then AI. Several are free.")
+        return {}
+    where = "its graphics card" if fit["fits"][model.id]["where"] == "gpu" else "its processor"
+    print(f"  This computer can run {model.name} privately on {where}, with room left for your other apps.")
+    print(f"  {model.note} It is a {model.download_gb} GB download, made in the background after setup.")
+    print("  Chat then answers on this computer first; outside providers stay a choice for harder questions.")
+    answer = _ask(f"  Download {model.name} after setup? [Y/n] ").lower()
+    choice = {} if answer.startswith("n") else {"chat_model": model.id}
+    try:
+        from ctl.store import records
+
+        records.put(*AI_ASKED, {"answer": "yes" if choice else "no", "model": model.id})
+    except OSError:
+        pass  # before the runtime folders exist; asking again on the next run is harmless
+    return choice
+
+
+def queue_local_ai(screen: Screen, choice: dict[str, str]) -> str:
+    """Save "local first" with the chosen model and queue its download; returns a line for the owner."""
+    from ctl import local_models
+    from ctl.jobs import JobConflict, JobStore
+
+    model = local_models.CHAT_BY_ID.get(choice.get("chat_model", ""))
+    store = JobStore.runtime()
+    if model is None or store is None:
+        return ""
+    current = local_models.settings()
+    chosen = local_models.validate(
+        {
+            "sources": ["local", "outside"],
+            "chat_model": model.id,
+            "embedding_model": current["embedding_model"],
+            "runner": current["runner"],
+        }
+    )
+    try:
+        store.create(
+            kind="wiring",
+            service_id=local_models.SERVICE_ID,
+            action="apply",
+            actor="installer",
+            actor_subject="installer",
+            namespace="ai.models",
+            request=chosen,
+            params=local_models.as_params(chosen),
+            detail="The installer set up local AI.",
+        )
+    except JobConflict:
+        return "Your AI settings are already being changed; the dashboard shows the progress."
+    except (OSError, ValueError) as exc:
+        screen.log("local_ai", f"could not queue the model download: {exc}")
+        return f"{model.name} was not queued; choose it in the dashboard under Settings, then AI."
+    return f"{model.name} is downloading in the background; Settings, then AI, shows its progress."
 
 
 def print_intro(screen: Screen, fresh: bool) -> None:

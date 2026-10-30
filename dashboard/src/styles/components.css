@@ -131,11 +131,10 @@
 }
 
 .group-title {
-  font-size: 12px;
+  /* The same quiet sentence-case label as Home's app groups and the Settings menu. */
+  font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-3);
-  text-transform: uppercase;
+  color: var(--text-2);
 }
 
 /* ---------- Buttons ---------- */
@@ -276,7 +275,9 @@
 }
 
 .dot-gray {
-  background: var(--gray);
+  /* A hollow ring: off or not started, told apart from a coloured state by shape as well as colour. */
+  background: transparent;
+  border: 1.5px solid var(--gray);
 }
 
 .badge {
@@ -305,22 +306,22 @@
 
 .badge-green {
   background: var(--green-soft);
-  color: var(--green);
+  color: var(--green-text);
 }
 
 .badge-amber {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .badge-red {
   background: var(--red-soft);
-  color: var(--red);
+  color: var(--red-text);
 }
 
 .badge-blue {
   background: var(--blue-soft);
-  color: var(--blue);
+  color: var(--blue-text);
 }
 
 .badge-gray {
@@ -510,6 +511,51 @@ a.chip:hover {
   min-height: 52px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--border);
+}
+
+/* The last row of a short list that shows the rest when clicked. */
+.row.row-more {
+  width: 100%;
+  min-height: 44px;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row.row-more:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.row.row-more > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.row-more-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.row-more-text small {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.row-more-icons {
+  display: flex;
+  gap: 4px;
+  opacity: 0.75;
 }
 
 .rows > :last-child,
@@ -952,11 +998,11 @@ a.row-main:hover b,
 }
 
 .key-paste-note.is-error {
-  color: var(--red);
+  color: var(--red-text);
 }
 
 .key-paste-note.is-warning {
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .key-paste-note.is-success {
@@ -1012,6 +1058,64 @@ a.row-main:hover b,
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* A select with its button beside it (a voice and Try). */
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-field select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A group of fields with a caption and no box of its own. */
+.plain-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.plain-fieldset legend {
+  margin-bottom: 10px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* One line under a page title saying how something stands now. */
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 16px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.status-line strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* A switch row whose label also carries a status. */
+.switch-field .switch-label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.switch-field .switch-label small {
+  color: var(--text-2);
+  line-height: 1.45;
 }
 
 .choice-list {
@@ -1232,6 +1336,29 @@ a.row-main:hover b,
   border-width: 0 0 0 1px;
 }
 
+/* A floating panel at the right, only as tall as what it shows. */
+.dialog-sheet {
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100% - 24px);
+  margin: 12px 12px auto auto;
+}
+
+.dialog-sheet[open] {
+  animation: slide-in 0.18s ease-out;
+}
+
+.dialog.dialog-sheet::backdrop {
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  backdrop-filter: none;
+}
+
+.dialog-sheet .dialog-panel {
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
 @keyframes slide-in {
   from {
     transform: translateX(24px);
@@ -1248,6 +1375,19 @@ a.row-main:hover b,
   }
 
   .dialog-drawer .dialog-panel {
+    border-width: 1px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .dialog-sheet {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 85vh;
+    margin: auto 0 0;
+  }
+
+  .dialog-sheet .dialog-panel {
     border-width: 1px 0 0;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     padding-bottom: env(safe-area-inset-bottom);
@@ -1285,6 +1425,15 @@ a.row-main:hover b,
   padding: 18px 20px 0;
 }
 
+.dialog-header.has-icon {
+  align-items: center;
+}
+
+.dialog-heading {
+  flex: 1;
+  min-width: 0;
+}
+
 .dialog-header h2 {
   font-size: 15px;
   font-weight: 600;
@@ -1293,6 +1442,11 @@ a.row-main:hover b,
 .dialog-header p {
   margin-top: 6px;
   color: var(--text-2);
+}
+
+.dialog-header.has-icon p {
+  margin-top: 1px;
+  font-size: 13px;
 }
 
 .dialog-body {

@@ -29,6 +29,11 @@ sign_in:
     env:
       client_id: NEXTCLOUD_OIDC_CLIENT_ID
       client_secret: NEXTCLOUD_OIDC_CLIENT_SECRET
+    # Mu3Lab administrators are in Nextcloud's admin group; scripts/configure.sh syncs only that group.
+    role_claim:
+      claim: nextcloud_groups
+      admin: admin
+      user: mu3lab-users
   note: Signs in only through Authentik; there is no separate Nextcloud password.
 account:
   mode: environment_bootstrap
@@ -49,7 +54,13 @@ integrates_with:
     # An empty stand-in inside Nextcloud's own folder, so the mount always has a source.
     MU3LAB_MUSIC_FOLDER: '{{data_root}}/nextcloud/no-music'
     MU3LAB_MUSIC_SHARED: '0'
+# Installing or removing an app with a media library (Audiobookshelf, RomM) re-renders Nextcloud,
+# so MU3LAB_MEDIA_FOLDERS below is read again and scripts/media.sh shares the new library.
+- capability: media_folders
 env:
+  # Every library under the media root appears in everyone's files (scripts/media.sh), one copy on disk.
+  MU3LAB_MEDIA_ROOT: '{{media_root}}'
+  MU3LAB_MEDIA_FOLDERS: '{{media_folders}}'
   NEXTCLOUD_TRUSTED_DOMAINS: '{{dns_name}} localhost 127.0.0.1'
   NEXTCLOUD_TRUSTED_PROXIES: 127.0.0.1
   NEXTCLOUD_OVERWRITEHOST: '{{dns_name}}:{{https_port}}'
@@ -95,12 +106,31 @@ rules:
     purpose: Share the music library as everyone's Music folder
     # Again whenever a music app (Navidrome) is installed or removed.
     rerun_when: [MU3LAB_MUSIC_SHARED]
+- rule: container_script
+  with:
+    at: after_healthy
+    service: app
+    script: scripts/media.sh
+    interpreter: [sh, -s]
+    expect: MU3LAB_MEDIA_OK
+    purpose: Share the media libraries as everyone's folders
+    # Again whenever a library appears (an app with media is installed).
+    rerun_when: [MU3LAB_MEDIA_FOLDERS]
 chat:
   assistant:
     title: Nextcloud
     description: Work with files and calendars.
     instructions: Help with Nextcloud files and calendars. Do not claim to have accessed live data unless a reviewed
       Nextcloud tool is assigned. Ask before changing data.
+    faq:
+    - question: "What is Nextcloud for?"
+      answer: "Your files, calendar and contacts on this server, synced to your computer and phone."
+    - question: "Who can see my files?"
+      answer: "Only you, unless you share a file or folder. The Music folder (with a music app) and the media folders such as Audiobooks and Roms are shared with everyone."
+    - question: "How do I add audiobooks or games?"
+      answer: "Drop them into the shared Audiobooks or Roms folder in Nextcloud, one folder per book or system. They are the app's own library, so Audiobookshelf or RomM picks them up without a second copy."
+    - question: "How do I get my calendar on my phone?"
+      answer: "Add Mu3Lab's Nextcloud as a calendar account on the phone (CalDAV), or use the Nextcloud app; the Mu3Lab dashboard's Calendar page shows the same events."
   connectors:
   - nextcloud-context-agent
 mobile:

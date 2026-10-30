@@ -657,6 +657,16 @@ class AuditEvent(ApiModel):
     detail: str
 
 
+class JobEvent(ApiModel):
+    """One line of a job's progress. Unlike an audit event it names no actor: the job does."""
+
+    id: float
+    job_id: str | None
+    event: str
+    created_at: str
+    detail: str
+
+
 class AuditResponse(ApiModel):
     ok: bool
     available: bool
@@ -673,7 +683,7 @@ class ServiceLogsResponse(ApiModel):
 class JobDetailResponse(ApiModel):
     ok: bool
     job: Job
-    events: list[AuditEvent]
+    events: list[JobEvent]
     # Image download progress while an install job downloads.
     download: ImageDownload | None = None
 
@@ -760,7 +770,8 @@ class BackupHookResponse(ApiModel):
     detail: str
 
 
-AiPrivacy = Literal["outside_allowed", "local_only"]
+AiPrivacy = Literal["outside_allowed", "local_first", "local_only"]
+AiSource = Literal["local", "outside"]
 
 
 class LocalModel(ApiModel):
@@ -775,10 +786,19 @@ class LocalModel(ApiModel):
     dimensions: int
     # Downloaded in the model runner that serves requests now.
     downloaded: bool
+    # Used by a setting now (chat, voice or search), so it cannot be removed.
+    in_use: bool = False
+    # How it fits this computer beside the other apps (ctl/model_fit.py): good, slow or too_big; gpu or cpu.
+    fit: str = ""
+    fit_where: str = ""
 
 
 class AiModelSettings(ApiModel):
+    # Where chat may run, in order: the first answers by default, the second is a choice in chat.
+    sources: list[AiSource]
+    # The same order in three words: outside_allowed, local_first or local_only.
     privacy: AiPrivacy
+    # Kept while local models are off, so turning them back on needs no new choice.
     chat_model: str
     embedding_model: str
     # The chosen model runner's app id; empty means the default (the one the installer sets up).
@@ -791,12 +811,37 @@ class AiVoiceSettings(ApiModel):
     """Where the voice assistant's answers come from, independent of chat."""
 
     privacy: AiPrivacy
-    # The local model voice runs on (a chat model id); used only with local only.
+    # The local model voice runs on (a chat model id); used with local first and local only.
     model: str
     # True until the owner saves a voice choice: voice then reads chat's settings.
     matches_chat: bool
     changed_at: str
     changed_by: str
+
+
+AiVoiceEngine = Literal["pipeline", "duplex"]
+
+
+class AiVoiceEngineSettings(ApiModel):
+    """How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card."""
+
+    engine: AiVoiceEngine
+    # The full-duplex model, its download size and whether its files are here and checked.
+    model: str
+    download_gb: float
+    downloaded: bool
+    # Apps that use the graphics card and stop while the full-duplex model is on (names).
+    stops: list[str]
+    # The apps this mode stopped, which start again when it is switched off.
+    stopped: list[str]
+    # Why it cannot be switched on here, or "".
+    unavailable_reason: str
+    changed_at: str
+    changed_by: str
+
+
+class AiVoiceEngineRequest(ApiModel):
+    engine: AiVoiceEngine
 
 
 class ModelRunnerOption(ApiModel):
@@ -813,6 +858,10 @@ class AiModels(ApiModel):
     ok: bool
     settings: AiModelSettings
     voice: AiVoiceSettings
+    voice_engine: AiVoiceEngineSettings
+    # The reviewed chat model that fits best, or "" to suggest outside providers; and why.
+    suggested: str = ""
+    suggestion_reason: str = ""
     chat_models: list[LocalModel]
     embedding_models: list[LocalModel]
     # The runner that serves requests now, and every runner Mu3Lab knows.
@@ -825,15 +874,147 @@ class AiModels(ApiModel):
 
 
 class AiModelsRequest(ApiModel):
-    privacy: AiPrivacy
+    sources: list[AiSource] = Field(min_length=1, max_length=2)
     chat_model: str = Field(default="", max_length=64)
     embedding_model: str = Field(max_length=64)
     runner: str = Field(default="", max_length=64)
 
 
+class AiTryRequest(ApiModel):
+    # A local chat model's id, or "outside" for the outside providers.
+    target: str = Field(min_length=1, max_length=64)
+    prompt: str = Field(default="", max_length=2000)
+
+
+class AiTryResult(ApiModel):
+    ok: bool
+    where: str
+    name: str
+    answer: str
+    seconds: float
+    loading_seconds: float
+    tokens_per_second: float
+
+
 class AiVoiceRequest(ApiModel):
     privacy: AiPrivacy
     model: str = Field(default="", max_length=64)
+    # True goes back to following chat's setting; privacy and model are then ignored.
+    matches_chat: bool = False
+
+
+class VoiceApp(ApiModel):
+    """An app assistant the voice assistant can hand people to, and whether it may."""
+
+    id: str
+    title: str
+    description: str
+    operators_only: bool
+    on: bool
+    # Whether the app's connector is live now; a stopped app's tools wait until it starts.
+    ready: bool = True
+
+
+class VoiceApps(ApiModel):
+    ok: bool
+    # Whether the voice app is installed; the switches matter only then.
+    installed: bool
+    apps: list[VoiceApp]
+
+
+class VoiceAppRequest(ApiModel):
+    on: bool
+
+
+VoiceResponsiveness = Literal["fast", "balanced", "patient"]
+
+
+class VoiceSettings(ApiModel):
+    """The household's voice assistant choices (ctl/voice_settings.py)."""
+
+    # How long the assistant waits when someone sounds unfinished.
+    responsiveness: VoiceResponsiveness
+    # Whether talking over the assistant stops it.
+    interruptions: bool
+    # The assistant's voice; "" uses Speaches' default voice.
+    voice: str
+    # Web search for current facts; it works once SearXNG is installed.
+    search: bool
+    changed_at: str
+    changed_by: str
+
+
+class VoiceSettingsRequest(ApiModel):
+    responsiveness: VoiceResponsiveness | None = None
+    interruptions: bool | None = None
+    voice: str | None = Field(default=None, max_length=40)
+    search: bool | None = None
+
+
+class VoiceOption(ApiModel):
+    id: str
+    name: str
+    accent: str
+    gender: str
+
+
+class SpeechModelChoice(ApiModel):
+    value: str
+    options: list[str]
+
+
+class VoiceSpeech(ApiModel):
+    """Speaches' models, which every app using speech shares."""
+
+    app_id: str
+    installed: bool
+    # Speech recognition (Whisper) and the voice model (Kokoro).
+    stt: SpeechModelChoice
+    tts: SpeechModelChoice
+    default_voice: str
+
+
+class VoicePage(ApiModel):
+    ok: bool
+    # Whether LiveKit, the voice app, is installed.
+    installed: bool
+    settings: VoiceSettings
+    speech: VoiceSpeech
+    # The English voices Speaches can speak with now; empty while it is not answering.
+    voices: list[VoiceOption]
+    # Whether the household's SearXNG app is installed; web search needs it.
+    search_installed: bool
+    search_app_id: str
+    # A running change of the speech models (Speaches' setup), or "".
+    active_job_id: str
+
+
+class VoiceSpeechRequest(ApiModel):
+    stt_model: str = Field(min_length=1, max_length=200)
+    tts_model: str = Field(min_length=1, max_length=200)
+
+
+class VoiceSampleRequest(ApiModel):
+    voice: str = Field(min_length=1, max_length=40)
+
+
+class VoiceSample(ApiModel):
+    ok: bool
+    # One spoken sentence as base64 MP3.
+    audio: str
+
+
+class VoiceToolCheck(ApiModel):
+    id: str
+    ok: bool
+    tools: int
+    detail: str
+
+
+class VoiceToolChecks(ApiModel):
+    ok: bool
+    # Checked with the viewer's own keys, as a call of theirs would; empty when they have none.
+    apps: list[VoiceToolCheck]
 
 
 class RecoverySheet(ApiModel):
@@ -1351,7 +1532,7 @@ class ProviderModelsResponse(ApiModel):
 
 class JobEventsResponse(ApiModel):
     ok: bool
-    events: list[AuditEvent]
+    events: list[JobEvent]
 
 
 class ServiceInitializationResponse(ApiModel):

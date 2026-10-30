@@ -8,7 +8,7 @@ category: home
 tagline: Recipes, meal plans, and shopping lists
 summary: Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own,
   schedule meals, and turn recipe ingredients into shopping lists.
-version: v3.28.0
+version: "v3.29.0"
 upstream: mealie-recipes/mealie
 service:
   local_port: 9925
@@ -66,6 +66,13 @@ chat:
     description: Plan meals, recipes, and shopping lists.
     instructions: Help with Mealie recipes, meal plans, and shopping lists. Ask before changing recipes or lists.
       Use only Mealie tools assigned to this agent.
+    faq:
+    - question: "What is Mealie for?"
+      answer: "The household's recipes, meal plans and shopping lists in one place."
+    - question: "How do I add a recipe?"
+      answer: "Paste a recipe website's address into Mealie to import it, or type your own."
+    - question: "Who sees the recipes?"
+      answer: "Everyone in the household shares the same recipes, meal plans and shopping lists."
   connectors:
   - mealie-community
 mobile:

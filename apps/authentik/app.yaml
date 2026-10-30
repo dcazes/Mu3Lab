@@ -33,5 +33,12 @@ chat:
       events; to change anyone, point them to the People page in the Mu3Lab dashboard. Use only Authentik tools
       assigned to this agent.
     audience: operators
+    faq:
+    - question: "How do I add or remove someone?"
+      answer: "In the Mu3Lab dashboard: Settings, then People. That creates their account and invite link, or removes their access everywhere."
+    - question: "How does someone change their password?"
+      answer: "They sign in to Authentik and use Settings, then Change password."
+    - question: "How long does a sign-in last?"
+      answer: "30 days on each device. Signing out, or being removed, ends it straight away."
   connectors:
   - authentik-reader

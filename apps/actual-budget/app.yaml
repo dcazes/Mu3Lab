@@ -8,7 +8,7 @@ category: finance
 tagline: Envelope budgeting and spending
 summary: A personal finance app built around envelope budgeting. Track accounts and transactions, plan spending,
   and review financial reports, with budget data synced through your own server.
-version: v26.9.0
+version: "v26.10.0"
 upstream: actualbudget/actual
 service:
   local_port: 5006
@@ -68,6 +68,15 @@ chat:
     description: Plan budgets and inspect transactions.
     instructions: Help with Actual Budget. Explain calculations and ask before changing transactions, categories,
       or budgets. Use only Actual Budget tools assigned to this agent.
+    faq:
+    - question: "What is Actual Budget for?"
+      answer: "Envelope budgeting: give every pound or dollar a job, track accounts and spending, and see reports. Budgets are kept on this server, not with a company."
+    - question: "Who can see my budget?"
+      answer: "A budget belongs to the person who made it. The owner can give someone else access to a budget in Actual's settings; otherwise nobody else sees it."
+    - question: "How do I get my transactions in?"
+      answer: "Import a bank export file (OFX, QFX, QIF or CSV) in Actual, or enter them by hand."
+    - question: "Why can't the assistant see my budget?"
+      answer: "Actual's chat connection needs its server password and budget ID typed in by an administrator, so only the owner's budget is connected."
   connectors:
   - actual-budget-community
 mobile:

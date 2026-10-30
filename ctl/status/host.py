@@ -44,6 +44,14 @@ def observe_system(registry=None, root: Path | None = None) -> dict:
     )
     # None without an NVIDIA GPU (nvidia-smi missing or not answering).
     gpu = resource_usage.gpu_memory(registry, root) if registry is not None and root else None
+    if by_owner:
+        # Each app's highest use, so a local model is suggested with room left for it (ctl/model_fit.py).
+        from ctl import model_fit
+
+        try:
+            model_fit.remember(by_owner, (gpu or {}).get("by_owner") or {})
+        except OSError:
+            pass
     tailscale = tailscale_status()
     tailscale["serve"] = tailnet_serve_status()
     return {

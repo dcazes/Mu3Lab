@@ -8,7 +8,7 @@ category: documents
 tagline: Household wiki and notes
 summary: A fast, collaborative wiki for household notes, plans, recipes, and manuals. Shared collections for
   everyone, private documents for each person, and real-time editing together.
-version: v1.10.1
+version: "v1.12.0"
 upstream: outline/outline
 service:
   local_port: 3005
@@ -94,5 +94,12 @@ chat:
     description: Find, read and write household wiki pages.
     instructions: Help with the household's Outline wiki. Search before answering, cite the document titles you used,
       and ask before creating, editing, moving or deleting documents. Use only Outline tools assigned to this agent.
+    faq:
+    - question: "What is Outline for?"
+      answer: "The household wiki: notes, plans, recipes, manuals and how-tos, written and edited together."
+    - question: "Who can see what I write?"
+      answer: "Documents in shared collections are seen by the household; your private documents and drafts are yours alone."
+    - question: "Can we edit at the same time?"
+      answer: "Yes: Outline edits in real time, so several people can work on one page."
   connectors:
   - outline-builtin

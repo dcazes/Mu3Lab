@@ -16,8 +16,7 @@ export function ChatAppCard({ readOnly }: { readOnly: boolean }) {
       <MessageSquare className="inline-icon" /> Chat app
     </>
   );
-  const description =
-    'The chat the household sees on the Chat page. Each one keeps its own conversations; the other stays installed until you remove it.';
+  const description = 'The chat app the household sees on the Chat page. Each one keeps its own conversations.';
   if (!data)
     return (
       <Card title={title} description={description}>
@@ -43,6 +42,22 @@ export function ChatAppCard({ readOnly }: { readOnly: boolean }) {
     }
   };
   const missing = apps.filter((app) => !app.installed);
+  const installed = apps.filter((app) => app.installed);
+  const others = !readOnly && missing.length > 0 && (
+    <LinkButton size="sm" variant="ghost" to={`/apps/${missing[0].id}`}>
+      Get {missing[0].name}
+    </LinkButton>
+  );
+  // With one chat app there is nothing to choose: say which it is, and how to get another.
+  if (installed.length === 1)
+    return (
+      <Card title={title} description={description} actions={others || undefined}>
+        <p>
+          Chat uses <b>{installed[0].name}</b>.
+          {others && ` Install ${missing.map((app) => app.name).join(' or ')} to switch.`}
+        </p>
+      </Card>
+    );
   return (
     <Card title={title} description={description}>
       <div className="segmented" role="radiogroup" aria-label="Chat app">
@@ -61,12 +76,9 @@ export function ChatAppCard({ readOnly }: { readOnly: boolean }) {
             </button>
           ))}
       </div>
-      {!readOnly && missing.length > 0 && (
+      {others && (
         <p className="muted">
-          {missing.map((app) => app.name).join(' and ')} can be installed from Discover to choose it here.{' '}
-          <LinkButton size="sm" variant="ghost" to={`/apps/${missing[0].id}`}>
-            View {missing[0].name}
-          </LinkButton>
+          {missing.map((app) => app.name).join(' and ')} can be installed from Discover to choose it here. {others}
         </p>
       )}
     </Card>

@@ -101,8 +101,15 @@ export function stubFetch(handler: Handler) {
   return fetchMock;
 }
 
-/** The AI model settings as the server reports them: outside providers allowed, nothing local chosen. */
+/** The AI model settings as the server reports them: outside providers only, nothing local chosen. */
 export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides: Partial<AiModels> = {}): AiModels {
+  // The server works privacy out from the order of sources.
+  const sources = settings.sources ?? ['outside'];
+  const privacy = !sources.includes('outside')
+    ? 'local_only'
+    : sources[0] === 'local'
+      ? 'local_first'
+      : 'outside_allowed';
   const model = (id: string, name: string, extra: Partial<LocalModel> = {}): LocalModel => ({
     id,
     name,
@@ -117,7 +124,8 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
   return {
     ok: true,
     settings: {
-      privacy: 'outside_allowed',
+      sources,
+      privacy,
       chat_model: '',
       embedding_model: 'bge-m3',
       runner: '',
@@ -126,9 +134,20 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
       ...settings,
     },
     // Voice matches chat until the owner saves a voice choice.
+    voice_engine: {
+      engine: 'pipeline',
+      model: 'MiniCPM-o 4.5 (4-bit)',
+      download_gb: 8.9,
+      downloaded: false,
+      stops: ['Ollama', 'Speaches'],
+      stopped: [],
+      unavailable_reason: '',
+      changed_at: '',
+      changed_by: '',
+    },
     voice: {
-      privacy: settings.privacy ?? 'outside_allowed',
-      model: settings.chat_model ?? '',
+      privacy,
+      model: sources.includes('local') ? (settings.chat_model ?? '') : '',
       matches_chat: true,
       changed_at: '',
       changed_by: '',

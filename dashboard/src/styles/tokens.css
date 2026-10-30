@@ -11,7 +11,8 @@
   --border-strong: #d7d8de;
   --text: #1b1c20;
   --text-2: #5d616a;
-  --text-3: #8c9099;
+  /* Tertiary text still meets 4.5:1 on the page and on cards. */
+  --text-3: #71757f;
   --accent: #5e6ad2;
   --accent-hover: #4e5ac4;
   --accent-soft: rgba(94, 106, 210, 0.1);
@@ -22,6 +23,11 @@
   --red: #d33f2c;
   --blue: #3a7bf0;
   --gray: #a0a4ac;
+  /* Status words on their soft tints: darker than the dot colours so small text meets 4.5:1. */
+  --green-text: #157a46;
+  --amber-text: #8f5a00;
+  --red-text: #b8321f;
+  --blue-text: #2563d9;
   --green-soft: rgba(28, 155, 89, 0.1);
   --amber-soft: rgba(192, 122, 12, 0.1);
   --red-soft: rgba(211, 63, 44, 0.09);
@@ -65,7 +71,7 @@
   --border-strong: rgba(255, 255, 255, 0.12);
   --text: #eeeff2;
   --text-2: #a0a4ad;
-  --text-3: #6d717a;
+  --text-3: #80848d;
   --accent: #6c77d8;
   --accent-hover: #7b86e2;
   --accent-soft: rgba(108, 119, 216, 0.16);
@@ -75,6 +81,10 @@
   --red: #f06452;
   --blue: #62a0fa;
   --gray: #6f737c;
+  --green-text: #45bd7f;
+  --amber-text: #e2a847;
+  --red-text: #f37a6a;
+  --blue-text: #62a0fa;
   --green-soft: rgba(69, 189, 127, 0.13);
   --amber-soft: rgba(226, 168, 71, 0.13);
   --red-soft: rgba(240, 100, 82, 0.13);

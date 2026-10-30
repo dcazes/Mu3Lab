@@ -2,6 +2,8 @@
 id: surfsense-official
 name: SurfSense MCP
 preferred: true
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: official
 repository: https://github.com/ModSetter/SurfSense
 revision: c139e191a831bab76b9afc4f9b2063f2175be109
@@ -22,6 +24,7 @@ provision:
   interpreter:
   - python
   - '-'
-provision_note: Creates a Mu3Lab MCP personal token for the single active SurfSense user and enables API access
-  on that user's workspaces.
+  owner_email: true
+provision_note: Creates a Mu3Lab MCP personal token for the owner's SurfSense account and enables API access on
+  their workspaces.
 reviewed: true

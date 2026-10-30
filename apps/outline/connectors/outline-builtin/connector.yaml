@@ -3,6 +3,8 @@
 id: outline-builtin
 name: Outline MCP
 preferred: true
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: official
 repository: https://github.com/outline/outline
 revision: v1.10.1
@@ -23,8 +25,9 @@ provision:
   interpreter:
   - node
   - '-'
+  owner_email: true
   revoke_script: revoke.js
-provision_note: Creates a dedicated Mu3Lab chat API key for Outline's administrator and keeps MCP switched on for the
-  workspace.
-review_note: Outline's own MCP server, built into the pinned release. Tools act as the administrator, so they can reach
-  every collection the administrator can.
+provision_note: Creates a dedicated Mu3Lab chat API key for each person's Outline account and keeps MCP switched on
+  for the workspace.
+review_note: Outline's own MCP server, built into the pinned release. Each person's tools act as them, so they reach
+  the shared collections and that person's own documents.

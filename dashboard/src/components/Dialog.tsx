@@ -9,6 +9,7 @@ export function Dialog({
   description,
   children,
   footer,
+  icon,
   size = 'md',
 }: {
   open: boolean;
@@ -17,8 +18,13 @@ export function Dialog({
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
-  /** `drawer` slides in from the right (a sheet from the bottom on phones). */
-  size?: 'md' | 'lg' | 'drawer';
+  /** Shown before the title, such as the app's icon. */
+  icon?: ReactNode;
+  /**
+   * `drawer` slides in from the right at full height; `sheet` is a floating panel only as tall as
+   * its content, at the right. Both rise from the bottom on phones.
+   */
+  size?: 'md' | 'lg' | 'drawer' | 'sheet';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -52,8 +58,9 @@ export function Dialog({
       }}
     >
       <div className="dialog-panel">
-        <header className="dialog-header">
-          <div>
+        <header className={`dialog-header${icon ? ' has-icon' : ''}`}>
+          {icon}
+          <div className="dialog-heading">
             <h2>{title}</h2>
             {description && <p>{description}</p>}
           </div>

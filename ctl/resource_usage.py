@@ -41,8 +41,8 @@ from ctl.runtime import RuntimePaths
 CORE = "core"
 REMOVED = "removed"
 UNUSED = "unused"
-# Platform pieces that are not catalog apps: the private-network relay.
-PLATFORM_PROJECTS = {"tailnet-relay"}
+# Platform pieces that are not catalog apps: the private-network relay and the calendar tools.
+PLATFORM_PROJECTS = {"tailnet-relay", "calendar-tools"}
 # Measured once a day, and again right after an install, update or removal.
 DISK_EVERY = 24 * 3600
 DISK_RECORD = ("status", "disk-usage")
@@ -347,7 +347,7 @@ def folder_owners(registry, root: Path, paths: RuntimePaths, *, split_core: bool
 
     With ``split_core``, core folders are "core/<part>" instead of "core".
     """
-    from ctl import backup_service
+    from ctl import backup_service, duplex_voice
     from ctl.lifecycle.uninstall import data_directories
 
     own = f"{CORE}/{OWN_PART}" if split_core else CORE
@@ -359,6 +359,12 @@ def folder_owners(registry, root: Path, paths: RuntimePaths, *, split_core: bool
             result[f"data/{folder.name}"] = name
         for media in service.manifest.media:
             result[f"media/{media.name}"] = name
+    try:
+        # The voice assistant's full-duplex model: its Compose file names the folder through .env,
+        # so no mount above claims it.
+        result[str(duplex_voice.models_dir(paths).parent.relative_to(paths.root))] = duplex_voice.voice_app().id
+    except ValueError:
+        pass
     try:
         # Kopia's repository is the backup app's data.
         result["backups"] = backup_service.service_id()

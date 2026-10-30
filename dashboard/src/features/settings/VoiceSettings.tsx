@@ -1,118 +1,86 @@
-import { KeyRound, Mic, Trash2 } from 'lucide-react';
-import { useState } from 'react';
-import { deleteApi, postApi, type VoiceKeyCreated, type VoiceKeyStatus } from '../../api';
-import { Button, LinkButton } from '../../components/Button';
-import { CopyField } from '../../components/CopyField';
-import { useConfirm } from '../../components/Dialog';
-import { Callout, Card, EmptyState, Facts, PageHeader } from '../../components/Layout';
-import { useAction } from '../../lib/useAction';
+import { Mic } from 'lucide-react';
+import type { AiModels, Service, VoicePage } from '../../api';
+import { ExternalButton, LinkButton } from '../../components/Button';
+import { Callout, PageHeader } from '../../components/Layout';
+import { Dot } from '../../components/Status';
+import { JOB_POLL_MS } from '../../lib/jobs';
+import { launchTarget, stateTone, statusText } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
-import { useIsAdmin } from '../../state/dashboard';
-import { VoiceModelCard } from './VoiceModelCard';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
+import { VoiceAppsCard } from './VoiceAppsCard';
+import { VoiceConversationCard } from './VoiceConversationCard';
+import { VoiceEngineCard } from './VoiceEngineCard';
+import { VoiceKeyCard } from './VoiceKeyCard';
+import { voiceSourceLabel, VoiceModelCard } from './VoiceModelCard';
+import { VoiceSoundCard } from './VoiceSoundCard';
+
+const VOICE_APP = 'livekit';
+
+/** One line saying how the voice assistant stands now: running, where answers come from, its voice. */
+function VoiceStatus({ app, ai, page }: { app?: Service; ai: AiModels | null; page: VoicePage | null }) {
+  if (!app || !ai || !page) return null;
+  const tone = stateTone(app.display_state);
+  const voice = page.voices.find((item) => item.id === (page.settings.voice || page.speech.default_voice));
+  const parts =
+    ai.voice_engine.engine === 'duplex'
+      ? [`Full duplex · ${ai.voice_engine.model}`]
+      : [
+          voiceSourceLabel(ai),
+          voice ? `Voice ${voice.name}` : '',
+          page.settings.search && page.search_installed ? 'Web search on' : '',
+        ];
+  return (
+    <p className="status-line">
+      <Dot tone={tone} />
+      <strong>{statusText(app)}</strong>
+      {parts.filter(Boolean).map((part) => (
+        <span key={part}>· {part}</span>
+      ))}
+    </p>
+  );
+}
 
 export function VoiceSettings() {
-  const status = useApi<VoiceKeyStatus>('/api/v1/voice-key');
-  const [created, setCreated] = useState<VoiceKeyCreated | null>(null);
-  const { pending, run } = useAction();
-  const confirm = useConfirm();
   const isAdmin = useIsAdmin();
-  const data = status.data;
-
-  const create = async () => {
-    if (
-      data?.exists &&
-      !(await confirm({
-        title: 'Replace your voice key?',
-        description: 'Devices using your current key stop working until you give them the new one.',
-        confirmLabel: 'Replace key',
-      }))
-    )
-      return;
-    const result = await run('create', () => postApi<VoiceKeyCreated>('/api/v1/voice-key'), 'Voice key created');
-    if (result) setCreated(result);
-    void status.reload();
-  };
-  const revoke = async () => {
-    if (
-      !(await confirm({
-        title: 'Turn off your voice key?',
-        description: 'Every device and program using it stops reaching Mu3Lab speech.',
-        confirmLabel: 'Turn off',
-        tone: 'danger',
-      }))
-    )
-      return;
-    await run('revoke', () => deleteApi('/api/v1/voice-key'), 'Voice key turned off');
-    setCreated(null);
-    void status.reload();
-  };
-
+  const { data: dashboard } = useDashboard();
+  // Followed while a settings change runs, so the cards unlock when it ends.
+  const ai = useApi<AiModels>('/api/v1/ai/models', {
+    interval: (current) => (current?.active_job_id ? JOB_POLL_MS : 0),
+  });
+  const page = useApi<VoicePage>('/api/v1/ai/voice/settings', {
+    interval: (current) => (current?.active_job_id ? JOB_POLL_MS : 0),
+  });
+  const app = dashboard.services.services.find((service) => service.id === VOICE_APP);
+  const talk = app ? launchTarget(app) : null;
   return (
     <>
       <PageHeader
-        title="Voice Assistant"
-        description="Choose where the voice assistant gets its answers, and use Mu3Lab's private speech on your own devices."
+        title="Voice assistant"
+        description="Talk to your apps and the web. Choose where its answers come from, how it sounds and listens, and what it can use."
+        actions={
+          talk && (
+            <ExternalButton variant="primary" icon={Mic} href={talk.url}>
+              Open Talk
+            </ExternalButton>
+          )
+        }
       />
-      <VoiceModelCard readOnly={!isAdmin} />
-      {data && !data.available ? (
-        <EmptyState
-          icon={Mic}
-          title="Speech isn’t installed"
-          action={<LinkButton to="/apps/speech">View Speech</LinkButton>}
+      <VoiceStatus app={app} ai={ai.data} page={page.data} />
+      {page.data && !page.data.installed && (
+        <Callout
+          tone="info"
+          title="LiveKit isn’t installed"
+          action={<LinkButton to={`/apps/${VOICE_APP}`}>View LiveKit</LinkButton>}
         >
-          Install Speech first; your voice key uses it.
-        </EmptyState>
-      ) : (
-        <Card
-          title="Your voice key"
-          description="Use Mu3Lab's private speech for dictation or read-aloud in other apps on your devices."
-          // Most people only talk to the assistant; the key is for other apps, so it stays folded.
-          collapsible
-          defaultOpen={false}
-        >
-          <p className="muted">
-            Your voice never leaves your server. A key works only for speech, only for you, and only while your device
-            is connected to the Mu3Lab tailnet. Mu3Lab shows it once; keep it in your vault. Any app that supports an
-            “OpenAI-compatible” speech service works: enter the address below, your key and the model name.
-          </p>
-          {created && (
-            <Callout tone="success" icon={KeyRound} title="Copy your key now">
-              It is shown only this once. Save it in Bitwarden, then paste it into your dictation app.
-              <CopyField value={created.key} label="Voice key" />
-            </Callout>
-          )}
-          {data && (
-            <Facts
-              items={[
-                {
-                  label: 'Address for apps',
-                  value: data.base_url ? <CopyField value={data.base_url} label="Address" /> : '—',
-                },
-                { label: 'Speech to text model', value: data.models[0] ?? '—' },
-                { label: 'Text to speech model', value: data.models[1] ?? '—' },
-                {
-                  label: 'Key',
-                  value: data.exists
-                    ? data.created_at
-                      ? `Active since ${new Date(data.created_at).toLocaleDateString()}`
-                      : 'Active'
-                    : 'None yet',
-                },
-              ]}
-            />
-          )}
-          <div className="button-row">
-            <Button variant="primary" icon={KeyRound} loading={pending === 'create'} onClick={create}>
-              {data?.exists ? 'Replace key' : 'Create key'}
-            </Button>
-            {data?.exists && (
-              <Button variant="danger" icon={Trash2} loading={pending === 'revoke'} onClick={revoke}>
-                Turn off key
-              </Button>
-            )}
-          </div>
-        </Card>
+          The voice assistant runs in LiveKit. You can choose its settings now; they apply once it is installed.
+        </Callout>
       )}
+      <VoiceModelCard api={ai} readOnly={!isAdmin} />
+      <VoiceSoundCard api={page} readOnly={!isAdmin} />
+      <VoiceConversationCard api={page} readOnly={!isAdmin} />
+      <VoiceAppsCard page={page} readOnly={!isAdmin} />
+      <VoiceEngineCard api={ai} readOnly={!isAdmin} />
+      <VoiceKeyCard />
     </>
   );
 }

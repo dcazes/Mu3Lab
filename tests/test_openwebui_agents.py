@@ -7,14 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-
 from ctl import chat_ops, openwebui_ops
 from ctl.control_state import ControlState
 
 
 class ClientTests(unittest.TestCase):
-
-
     def test_the_main_assistant_is_every_new_chats_model(self):
         compose = (Path(__file__).resolve().parents[1] / "apps/open-webui/docker-compose.yml").read_text()
         self.assertIn("DEFAULT_MODELS: mu3lab-assistant", compose)

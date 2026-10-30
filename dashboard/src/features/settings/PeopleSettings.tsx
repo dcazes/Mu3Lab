@@ -1,10 +1,10 @@
-import { UserPlus, Users } from 'lucide-react';
+import { EyeOff, UserPlus, Users } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { postJsonApi } from '../../api';
 import { Button } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog, useConfirm } from '../../components/Dialog';
-import { Callout, Card, EmptyState, PageHeader } from '../../components/Layout';
+import { Card, EmptyState, PageHeader } from '../../components/Layout';
 import { Menu } from '../../components/Menu';
 import { QrCode } from '../../components/QrCode';
 import { Badge } from '../../components/Status';
@@ -181,11 +181,8 @@ export function PeopleSettings() {
           </Button>
         }
       />
-      <Callout title="What people can see">
-        Apps keep each person's data separate where the app supports it (their own photos, files and documents). Things
-        shared inside an app, like a shared album or folder, are visible to whoever it is shared with.
-      </Callout>
-      <Card title="People" flush>
+      {/* The page is titled People, so the list is counted rather than titled again. */}
+      <Card title={list.length ? `${list.length} ${list.length === 1 ? 'person' : 'people'}` : undefined} flush>
         {people.error ? (
           <p className="error-text card-pad">Could not load people: {people.error}</p>
         ) : !people.data ? (
@@ -248,6 +245,14 @@ export function PeopleSettings() {
           </div>
         )}
       </Card>
+      {/* Good to know, not a warning: a quiet note under the list. */}
+      <p className="hint">
+        <EyeOff />
+        <span>
+          Each person's photos, files and documents stay private where the app supports it. Anything shared inside an
+          app, like an album or folder, is visible to whoever it is shared with.
+        </span>
+      </p>
       <AddPersonDialog open={adding} onClose={() => setAdding(false)} added={() => void people.reload()} />
       <Dialog open={Boolean(invite)} onClose={() => setInvite(null)} title={`Invite ${invite?.name || ''}`}>
         {invite && <InviteLink invite={invite.invite} name={invite.name} />}

@@ -1,6 +1,6 @@
 # RomM — see ctl/manifest/models.py for every field.
 id: romm
-capabilities: [games]
+capabilities: [games, media_folders]
 name: RomM
 tier: optional
 group: apps
@@ -8,7 +8,7 @@ category: media
 tagline: Retro games, playable in your browser
 summary: Organizes the game files you own into a library with box art and details, and plays many classic
   systems right in the browser with saves kept on your server.
-version: 5.3.1
+version: "5.4.1"
 upstream: rommapp/romm
 media:
 - name: roms
@@ -17,7 +17,8 @@ service:
   local_port: 8091
   health:
     path: /api/heartbeat
-  start_timeout_seconds: 300
+  # RomM 5.4 rewrites its games table on first start: 15-20 minutes on a big library.
+  start_timeout_seconds: 1800
 route:
   https_port: 8464
   caddy_port: 19481
@@ -88,8 +89,8 @@ mobile:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private RomM address and sign in with Authentik.
     - Use the browser menu to add RomM to the Home Screen.
-resource_guidance: Moderate; library scans use CPU for a while. Game files live under /srv/mu3lab/media, which
-  backups leave out; saves and states are backed up.
+resource_guidance: Moderate; library scans use CPU for a while. Game files live under /srv/mu3lab/media (the Roms folder
+  in Nextcloud); backups include them, and saves and states.
 setup_action: Install RomM to organize and play the retro games you own.
 chat:
   assistant:
@@ -98,5 +99,10 @@ chat:
     instructions: Help with the household's RomM game library. List the systems before searching one, and use the game
       names the tools return. The tools only read the library and cannot change it. Use only RomM tools assigned to
       this agent.
+    faq:
+    - question: "What is RomM for?"
+      answer: "The household's retro game library: browse games by system, see their details and covers, and play many of them in the browser."
+    - question: "Can the assistant add or remove games?"
+      answer: "No. Its tools only read the library."
   connectors:
   - romm-adapter

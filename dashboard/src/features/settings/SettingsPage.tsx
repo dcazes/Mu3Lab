@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { EmptyState } from '../../components/Layout';
 import { GetStartedSettings } from '../home/GetStarted';
 import { Link } from '../../lib/router';
@@ -35,16 +36,18 @@ export function SettingsPage({ section }: { section: string }) {
         <h1 className="settings-nav-title">Settings</h1>
         {sections
           .filter((item) => !item.within)
-          .map(({ id, label, icon: Icon }) => (
-            <Link
-              key={id}
-              to={`/settings/${id}`}
-              className={id === highlighted ? 'active' : ''}
-              aria-current={id === section ? 'page' : undefined}
-            >
-              <Icon />
-              {label}
-            </Link>
+          .map(({ id, label, icon: Icon, group }, index, shown) => (
+            <Fragment key={id}>
+              {group !== shown[index - 1]?.group && <h2 className="settings-nav-group">{group}</h2>}
+              <Link
+                to={`/settings/${id}`}
+                className={id === highlighted ? 'active' : ''}
+                aria-current={id === section ? 'page' : undefined}
+              >
+                <Icon />
+                {label}
+              </Link>
+            </Fragment>
           ))}
       </nav>
       <div className="settings-content page">{Page ? <Page /> : <EmptyState title="Settings page not found" />}</div>

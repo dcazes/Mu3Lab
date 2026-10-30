@@ -74,7 +74,10 @@ describe('AI provider checklist', () => {
   it('lists recommended providers first with one key link each', async () => {
     stubFetch(providersApi([], []));
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    expect(await screen.findByText('Connect one provider to finish setup')).toBeInTheDocument();
+    expect(await screen.findByText(/Connect one provider to finish setup/)).toBeInTheDocument();
+    // Recommended providers show at once; the rest wait behind one row.
+    expect(screen.getAllByRole('link', { name: /Get key/ })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /3 more providers/ }));
     const rows = screen.getAllByRole('link', { name: /Get key/ });
     expect(rows.map((link) => link.getAttribute('href'))).toEqual([
       'https://groq.example/keys',
@@ -92,8 +95,11 @@ describe('AI provider checklist', () => {
   it('accepts one provider but recommends a backup', async () => {
     stubFetch(providersApi([connection('groq', 'Groq')], ['groq']));
     renderWithDashboard(<AiSettings />, dashboardData([]));
-    expect(await screen.findByText('Chat works — add a backup provider')).toBeInTheDocument();
-    expect(screen.getByText(/1 of 2 connected/)).toBeInTheDocument();
+    // One line says chat works and why a second provider helps.
+    expect(
+      await screen.findByText(/Chat works\. A second recommended provider .* 1 of 2 connected/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /3 more providers/ }));
     // Groq now lives under Connected providers, so the checklist no longer offers it.
     const keyLinks = screen.getAllByRole('link', { name: /Get key/ }).map((link) => link.getAttribute('href'));
     expect(keyLinks).not.toContain('https://groq.example/keys');
@@ -104,7 +110,7 @@ describe('AI provider checklist', () => {
     stubFetch(providersApi([connection('groq', 'Groq'), connection('nvidia', 'NVIDIA')], ['groq', 'nvidia']));
     renderWithDashboard(<AiSettings />, dashboardData([]));
     expect(await screen.findByText('More free providers')).toBeInTheDocument();
-    expect(screen.queryByText('Chat works — add a backup provider')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Chat works/)).not.toBeInTheDocument();
   });
 });
 
@@ -186,6 +192,7 @@ describe('One key field for every provider', () => {
     });
     renderWithDashboard(<AiSettings />, dashboardData([]));
     // The pickup only takes a key for the provider just opened.
+    fireEvent.click(await screen.findByRole('button', { name: /more providers/ }));
     fireEvent.click(
       (await screen.findAllByRole('link', { name: /Get key/ })).find(
         (link) => link.getAttribute('href') === 'https://cerebras.example/keys',
@@ -220,7 +227,7 @@ describe('Get started', () => {
     renderWithDashboard(<HomePage />, dashboardData([]));
     const first = await screen.findByRole('button', { name: /1\. Add Bitwarden/ });
     expect(first.closest('.get-started-item')).toHaveClass('is-next');
-    expect(screen.getByRole('link', { name: /2\. Connect an AI provider/ })).toHaveAttribute('href', '/settings/ai');
+    expect(screen.getByRole('link', { name: /2\. Choose how your AI runs/ })).toHaveAttribute('href', '/settings/ai');
     expect(screen.getByRole('link', { name: /3\. Install your first personal app/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /4\. Use Mu3Lab on your phone or laptop/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /5\. Start chatting/ })).toHaveAttribute('href', '/chat');
@@ -285,6 +292,9 @@ describe('Get started', () => {
     signedIn = true;
     fireEvent.click(check);
     expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    // Home folds finished steps into one row that shows them again.
+    expect(screen.queryByText(/Sign in to Bitwarden/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /1 step done/ }));
     expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
   });
 
@@ -293,6 +303,9 @@ describe('Get started', () => {
     stubFetch(api(true, [], ['Google Chrome'], true));
     renderWithDashboard(<HomePage />, dashboardData([]));
     expect(await screen.findByText('1 of 5 complete')).toBeInTheDocument();
+    // Home folds finished steps into one row that shows them again.
+    expect(screen.queryByText(/Sign in to Bitwarden/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /1 step done/ }));
     expect(screen.getByText(/Sign in to Bitwarden/).closest('.get-started-item')).toHaveClass('is-done');
   });
 

@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 from ctl.authentik_blueprints import GatedApp, render_gate_blueprint
 from ctl.identity import mode_for
 from ctl.integrations.vaultwarden import bootstrap as vw

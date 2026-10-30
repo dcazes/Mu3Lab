@@ -1,0 +1,170 @@
+diff --git a/src/llama-moe-slot.cpp b/src/llama-moe-slot.cpp
+index 28c7666..8a79a16 100644
+--- a/src/llama-moe-slot.cpp
++++ b/src/llama-moe-slot.cpp
+@@ -1345,7 +1345,7 @@ struct llama_moe_slot_runtime::impl {
+ 
+     /// 把已打开的 experts fd 的 F_NOCACHE 拨到 `on`。只改缓存行为，不动数据。
+     void apply_experts_nocache(bool on) {
+-#ifndef _WIN32
++#if !defined(_WIN32) && defined(F_NOCACHE)  // Mu3Lab: F_NOCACHE is macOS-only
+         std::lock_guard<std::mutex> lock(fd_mutex);
+         for (const auto & kv : fds) {
+             if (fcntl(kv.second, F_NOCACHE, on ? 1 : 0) != 0) {
+@@ -1372,9 +1372,11 @@ struct llama_moe_slot_runtime::impl {
+         const int fd = _open(path.c_str(), _O_RDONLY | _O_BINARY);
+ #else
+         const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
++#ifdef F_NOCACHE  // Mu3Lab: macOS-only; Linux reads through the page cache
+         if (experts_nocache_desired() && fcntl(fd, F_NOCACHE, 1) != 0) {
+             moe_log("F_NOCACHE 设置失败: %s", std::strerror(errno));
+         }
++#endif
+ #endif
+         if (fd < 0) {
+             throw std::runtime_error(format("failed to open MoE experts file '%s': %s", path.c_str(), std::strerror(errno)));
+diff --git a/tools/omni/omni.cpp b/tools/omni/omni.cpp
+index d3d351b..8cb3d2b 100644
+--- a/tools/omni/omni.cpp
++++ b/tools/omni/omni.cpp
+@@ -3880,6 +3880,7 @@ std::atomic<bool> t2w_thread_running(true);
+ struct DuplexEncodeReq {
+     std::string aud_fname;
+     std::string img_fname;
++    std::string text;  // Mu3Lab: text fed after this second's audio (tool results)
+     int         index;
+     int         max_slice_nums;  // -1 = 使用全局
+ };
+@@ -3888,6 +3889,7 @@ struct DuplexPrefillPacket {
+     std::vector<std::vector<float>> vision_embed;  // [0]=overview, [1..]=slices
+     std::vector<float>              audio_embed;
+     int                             index = 0;
++    std::string                     text;  // Mu3Lab: see DuplexEncodeReq::text
+ };
+ 
+ struct DuplexDecodeReq {
+@@ -3946,7 +3948,8 @@ static void duplex_stop_threads(omni_context * ctx_omni);
+ static bool duplex_prefill(omni_context * ctx_omni,
+                            const std::string & aud_fname,
+                            const std::string & img_fname,
+-                           int index, int max_slice_nums);
++                           int index, int max_slice_nums,
++                           const std::string & text = "");
+ static bool duplex_decode(omni_context * ctx_omni,
+                           const std::string & debug_dir,
+                           int round_idx);
+@@ -4243,7 +4246,7 @@ struct omni_context * omni_init(struct common_params * params, int media_type, b
+ 
+     ctx_omni->n_past = 0;
+     
+-    if (media_type == 2) {
++    if (media_type == 2 && !ctx_omni->params->vpm_model.empty()) {  // Mu3Lab: no vision path, no encoder
+         LOG_INF("init vision....");
+         const char * vision_path = ctx_omni->params->vpm_model.c_str();
+         auto * ctx_vision = vision_init(vision_path, vision_context_params{true, GGML_LOG_LEVEL_INFO, nullptr});
+@@ -9389,6 +9392,7 @@ static void duplex_encoder_thread_func(omni_context * ctx_omni, common_params *
+ 
+         DuplexPrefillPacket * packet = new DuplexPrefillPacket();
+         packet->index = req->index;
++        packet->text  = req->text;
+ 
+         const bool has_img = !req->img_fname.empty() && ctx_omni->ctx_vision != nullptr;
+         const bool has_aud = !req->aud_fname.empty();
+@@ -9786,6 +9790,12 @@ static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * param
+             }
+         }
+ 
++        // Mu3Lab: text for this second (a tool's result), after what was heard.
++        if (!packet->text.empty()) {
++            eval_string(ctx_omni, params, packet->text.c_str(),
++                        params->n_batch, &ctx_omni->n_past, false);
++        }
++
+         if (ctx_omni->sliding_window_config.mode != "off") {
+             std::string input_type = has_vision ? "omni" : "audio";
+             sliding_window_register_unit_end(ctx_omni, input_type, {}, false);
+@@ -10187,7 +10197,8 @@ static void duplex_llm_thread_func(omni_context * ctx_omni, common_params * para
+ 
+             if (packet) {
+                 // Stage 3: 先试 fused（1 次 llama_decode），失败回退到老 5-7 段路径。
+-                if (!duplex_do_prefill_one_fused(ctx_omni, params, packet, hidden_size)) {
++                // Mu3Lab: a packet with text takes the step-by-step path, which feeds it.
++                if (!packet->text.empty() || !duplex_do_prefill_one_fused(ctx_omni, params, packet, hidden_size)) {
+                     duplex_do_prefill_one(ctx_omni, params, packet, hidden_size);
+                 }
+                 delete packet;
+@@ -10217,7 +10228,8 @@ static void duplex_llm_thread_func(omni_context * ctx_omni, common_params * para
+ static bool duplex_prefill(omni_context * ctx_omni,
+                            const std::string & aud_fname,
+                            const std::string & img_fname,
+-                           int index, int max_slice_nums) {
++                           int index, int max_slice_nums,
++                           const std::string & text) {
+     if (!ctx_omni || !ctx_omni->duplex) {
+         LOG_ERR("duplex_prefill: pipeline not initialized\n");
+         return false;
+@@ -10229,6 +10241,7 @@ static bool duplex_prefill(omni_context * ctx_omni,
+     req->img_fname      = img_fname;
+     req->index          = index;
+     req->max_slice_nums = max_slice_nums;
++    req->text           = text;
+ 
+     {
+         std::unique_lock<std::mutex> lk(dup->encoder_mtx);
+@@ -10298,7 +10311,7 @@ bool stream_prefill(struct omni_context * ctx_omni, std::string aud_fname, std::
+     //   仍沿用下方原逻辑；线程启动点会在原逻辑末尾调用 duplex_start_threads。
+     if (ctx_omni->duplex_mode && ctx_omni->async && index > 0
+         && ctx_omni->system_prompt_initialized && ctx_omni->duplex != nullptr) {
+-        return duplex_prefill(ctx_omni, aud_fname, img_fname, index, max_slice_nums);
++        return duplex_prefill(ctx_omni, aud_fname, img_fname, index, max_slice_nums, text);
+     }
+ 
+     // 只有在新一轮开始时 (index == 0) 才需要等待上一轮 TTS 完成
+diff --git a/tools/server/protocol.cpp b/tools/server/protocol.cpp
+index 50c43dd..b937ea3 100644
+--- a/tools/server/protocol.cpp
++++ b/tools/server/protocol.cpp
+@@ -370,6 +370,7 @@ ParsedInput parse_input_append(const json & msg) {
+     }
+ 
+     out.force_listen = json_bool(in, "force_listen", false);
++    out.text = json_str(in, "text");
+     if (in.contains("hints") && in.at("hints").is_object()) {
+         out.force_listen = json_bool(in.at("hints"), "force_listen", out.force_listen);
+     }
+diff --git a/tools/server/protocol.h b/tools/server/protocol.h
+index 1721777..31d45e0 100644
+--- a/tools/server/protocol.h
++++ b/tools/server/protocol.h
+@@ -105,6 +105,7 @@ struct ParsedInput {
+     std::vector<std::string> video_frames_b64;     // base64 JPEG frames
+     int max_slice_nums = -1;
+     bool force_listen = false;            // full_duplex: force this step to LISTEN
++    std::string text;                     // full_duplex: text fed after this chunk's audio (Mu3Lab)
+ 
+     // Turn-based fields
+     bool streaming = true;
+diff --git a/tools/server/ws_handler.cpp b/tools/server/ws_handler.cpp
+index 5cf6427..a2dbcff 100644
+--- a/tools/server/ws_handler.cpp
++++ b/tools/server/ws_handler.cpp
+@@ -143,9 +143,7 @@ static void ensure_omni_model_paths(common_params & params) {
+     if (root.empty()) {
+         return;
+     }
+-    if (params.vpm_model.empty()) {
+-        params.vpm_model = root + "/vision/MiniCPM-o-4_5-vision-F16.gguf";
+-    }
++    // Mu3Lab: voice calls never send images; leaving vision unset keeps its encoder off the card.
+     if (params.apm_model.empty()) {
+         params.apm_model = root + "/audio/MiniCPM-o-4_5-audio-F16.gguf";
+     }
+@@ -1104,7 +1102,7 @@ void handle_ws_backend(httplib::ws::WebSocket & ws,
+                 const auto t_prefill_start = std::chrono::steady_clock::now();
+                 std::lock_guard<std::mutex> lock(octx_mutex);
+                 if (!stream_prefill(octx, tmp_files.audio_path, tmp_files.image_path,
+-                                    input_index, parsed_input.max_slice_nums)) {
++                                    input_index, parsed_input.max_slice_nums, parsed_input.text)) {
+                     tmp_files.cleanup();
+                     fail_fast(session_id, "prefill_failed");
+                     return;

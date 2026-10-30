@@ -2,6 +2,8 @@
 id: nextcloud-context-agent
 name: Nextcloud Files MCP
 preferred: true
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: mu3lab-adapter
 repository: https://docs.nextcloud.com/server/stable/user_manual/en/files/access_webdav.html
 revision: nextcloud-33-webdav
@@ -25,7 +27,8 @@ provision:
   interpreter:
   - sh
   - -s
-provision_note: Creates a named Nextcloud app password for the single administrator account.
+  owner_username: true
+provision_note: Creates a named Nextcloud app password for the owner's account.
 review_note: Mu3Lab adapter uses WebDAV for scoped file listing, text reading, and text writing.
 secrets:
 - env: MCP_AUTH_TOKEN

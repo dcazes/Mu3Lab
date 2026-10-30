@@ -2,7 +2,7 @@ name: mu3lab-livekit
 
 services:
   server:
-    image: livekit/livekit-server:v1.13.10@sha256:89ca9ce0791e18d6e03bf6e2c49ceb27e1c754eae8bd50c989386c1a5963791a
+    image: livekit/livekit-server:v1.13.11@sha256:25cd902de7cacbd5f1f779f6a6ac1eae20ba8f56b0935934ce6b0ab80d1e3d20
     restart: unless-stopped
     command: ["--config", "/etc/livekit.yaml"]
     # livekit.yaml holds the keys and is private to Mu3Lab's user; run as that user to read it
@@ -42,19 +42,25 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
       MU3LAB_AGENT_NAME: mu3lab-agent
-      # The chat model and the voice go through LiteLLM with the agent's own key (see README.md).
+      # Chat and speech both go through LiteLLM with the agent's own key. To bypass LiteLLM,
+      # point these at http://ollama:11434/v1 and http://speaches:8000/v1 (see README.md).
       MU3LAB_LLM_BASE_URL: http://litellm:4000/v1
       MU3LAB_LLM_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
       MU3LAB_LLM_MODEL: mu3lab-voice
       MU3LAB_SPEECH_URL: http://litellm:4000/v1
+      MU3LAB_STT_MODEL: mu3lab-stt
       MU3LAB_TTS_MODEL: mu3lab-tts
       MU3LAB_TTS_VOICE: ${MU3LAB_TTS_VOICE:-af_heart}
-      # What people say streams straight to the Speech app's WhisperLiveKit, word by word.
-      MU3LAB_STT_STREAM_URL: ${MU3LAB_STT_STREAM_URL:?MU3LAB_STT_STREAM_URL is required}
-      MU3LAB_STT_KEY: ${MU3LAB_STT_KEY:?MU3LAB_STT_KEY is required}
+      # Each person's app assistants and their own keys, written by Mu3Lab (ctl/voice_tools.py).
+      MU3LAB_VOICE_TOOLS: /app/voice-tools/people.json
+      # The household's time zone, so "tomorrow at 10" means 10 here.
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./voice-tools:/app/voice-tools:ro
     depends_on:
       server: {condition: service_healthy}
-    networks: [mu3lab_backend]
+    # mu3lab_mcp: the apps' tools, through ContextForge.
+    networks: [mu3lab_backend, mu3lab_mcp]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     healthcheck:
@@ -77,9 +83,6 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
       AGENT_NAME: mu3lab-agent
-      # The page's token endpoint runs only when something authenticates visitors first.
-      # Authentik's gate on this route is that layer; this setting tells the page so.
-      IS_VERCEL_PREVIEW: "true"
     networks: [mu3lab_frontend]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -120,3 +123,4 @@ services:
 networks:
   mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}

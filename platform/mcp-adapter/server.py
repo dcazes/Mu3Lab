@@ -169,8 +169,55 @@ elif MODE == "romm":
         ),
         tool("list_collections", "List the RomM collections", schema({})),
     ]
+elif MODE == "calendar":
+    WHEN = {"type": "string", "description": "ISO 8601 date-time, or YYYY-MM-DD for an all-day event"}
+    TOOLS = [
+        tool(
+            "list_events",
+            "List the person's calendar events between two times (default: the next 30 days), soonest first",
+            schema(
+                {
+                    "start": WHEN,
+                    "end": WHEN,
+                    "query": {"type": "string", "description": "Only events whose title contains this text"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 50},
+                }
+            ),
+        ),
+        tool(
+            "create_event",
+            "Add an event to the person's calendar",
+            schema(
+                {"title": TEXT, "start": WHEN, "end": WHEN, "all_day": {"type": "boolean", "default": False}},
+                ["title", "start", "end"],
+            ),
+        ),
+        tool(
+            "update_event",
+            "Change one event: its title, times or all-day flag. Pass the revision list_events returned.",
+            schema(
+                {
+                    "event_id": TEXT,
+                    "title": TEXT,
+                    "start": WHEN,
+                    "end": WHEN,
+                    "all_day": {"type": "boolean", "default": False},
+                    "revision": {"type": "string", "default": ""},
+                },
+                ["event_id", "title", "start", "end"],
+            ),
+        ),
+        tool(
+            "delete_event",
+            "Delete one event. Pass the revision list_events returned.",
+            schema({"event_id": TEXT, "revision": {"type": "string", "default": ""}}, ["event_id"]),
+        ),
+    ]
 else:
     raise SystemExit("unsupported adapter mode")
+
+# The calendar adapter acts for whoever calls it: each call's own key, checked by Mu3Lab.
+CALLER = __import__("threading").local()
 
 
 BEARER = {
@@ -182,6 +229,8 @@ BEARER = {
 
 
 def _auth() -> str:
+    if MODE == "calendar":
+        return getattr(CALLER, "authorization", "")
     if MODE == "nextcloud":
         username = os.environ.get("NEXTCLOUD_USERNAME", "")
         password = os.environ.get("NEXTCLOUD_APP_PASSWORD", "")
@@ -239,6 +288,15 @@ def _request(
                 raise ValueError("app response exceeded the size limit")
             return data, response.status
     except HTTPError as exc:
+        if MODE == "calendar":
+            # Mu3Lab's own explanation (a conflicting change, a missing event) helps the person act.
+            try:
+                reason = json.loads(exc.read(4096) or b"{}")
+            except (ValueError, OSError):
+                reason = {}
+            message = reason.get("message") or reason.get("detail") if isinstance(reason, dict) else ""
+            if isinstance(message, str) and message:
+                raise ValueError(message[:300]) from None
         raise ValueError(f"app returned HTTP {exc.code}") from None
     except URLError:
         raise ValueError("app is unavailable") from None
@@ -517,6 +575,36 @@ def _romm(name: str, args: dict):
     raise ValueError("unknown tool")
 
 
+def _calendar_body(args: dict) -> bytes:
+    return json.dumps(
+        {
+            "title": _text(args, "title"),
+            "start": _text(args, "start"),
+            "end": _text(args, "end"),
+            "all_day": bool(args.get("all_day", False)),
+            "revision": str(args.get("revision") or ""),
+        }
+    ).encode()
+
+
+def _calendar(name: str, args: dict):
+    """The caller's own calendar, through Mu3Lab's control plane; nothing else is reachable."""
+    base = "/api/v1/chat-tools/calendar/events"
+    if name == "list_events":
+        query = {key: str(args[key]) for key in ("start", "end", "query") if args.get(key)}
+        query["limit"] = str(_limit(args, 50))
+        return _get(base, query)
+    if name == "create_event":
+        return json.loads(_request(base, "POST", _calendar_body(args))[0] or b"{}")
+    event = _id(args, "event_id")
+    if name == "update_event":
+        return json.loads(_request(f"{base}/{event}", "PUT", _calendar_body(args))[0] or b"{}")
+    if name == "delete_event":
+        payload = json.dumps({"revision": str(args.get("revision") or "")}).encode()
+        return json.loads(_request(f"{base}/{event}", "DELETE", payload)[0] or b"{}")
+    raise ValueError("unknown tool")
+
+
 def _kopia(name: str, args: dict):
     """Read-only: only the control API's two GET routes; it never starts, stops or changes a backup."""
     if name == "repository_status":
@@ -606,6 +694,7 @@ HANDLERS = {
     "romm": _romm,
     "authentik": _authentik,
     "kopia": _kopia,
+    "calendar": _calendar,
 }
 
 
@@ -620,10 +709,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/mcp":
             self.send_error(404)
             return
-        token = os.environ.get("MCP_AUTH_TOKEN", "")
-        if not token or not secrets.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
-            self.send_error(401)
-            return
+        authorization = self.headers.get("Authorization", "")
+        if MODE == "calendar":
+            # No key of its own: the caller's key goes on to Mu3Lab, which decides whose calendar it is.
+            if not authorization.startswith("Bearer mu3cal_"):
+                self.send_error(401)
+                return
+            CALLER.authorization = authorization
+        else:
+            token = os.environ.get("MCP_AUTH_TOKEN", "")
+            if not token or not secrets.compare_digest(authorization, "Bearer " + token):
+                self.send_error(401)
+                return
         try:
             size = int(self.headers.get("Content-Length", "0"))
             if size < 1 or size > MAX_INPUT:

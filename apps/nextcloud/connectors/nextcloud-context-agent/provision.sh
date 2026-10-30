@@ -1,13 +1,12 @@
-# Prints a fresh Nextcloud app password for the one administrator (sh, on stdin).
+# Prints a fresh Nextcloud app password for one person, by username (sh, on stdin; the username is $1).
 set -eu
 occ() { runuser -u www-data -- php occ "$@"; }
-admins=$(occ group:list --output=json | php -r '$g = json_decode(stream_get_contents(STDIN), true); echo implode("\n", $g["admin"] ?? []);')
-count=$(printf '%s\n' "$admins" | grep -c . || true)
-if [ "$count" -ne 1 ]; then
-  echo "MU3LAB_ERROR Nextcloud needs exactly one administrator for automatic chat setup"
+user=${1:-}
+case "$user" in "" | -* | *[!A-Za-z0-9._@-]*) echo "MU3LAB_ERROR the person's username is missing or unusable"; exit 3 ;; esac
+if ! occ user:info "$user" >/dev/null 2>&1; then
+  echo "MU3LAB_ERROR Open Nextcloud and sign in once; chat connects after your Nextcloud account exists"
   exit 3
 fi
-user=$admins
 for id in $(occ user:auth-tokens:list "$user" --output=json | php -r 'foreach (json_decode(stream_get_contents(STDIN), true) ?: [] as $t) { if (($t["name"] ?? "") === "Mu3Lab MCP") echo $t["id"], "\n"; }'); do
   occ user:auth-tokens:delete --no-interaction "$user" "$id" >/dev/null
 done

@@ -269,6 +269,13 @@ def _compose_project_command(projdir: Path, extra_files: list[Path] | None = Non
     return [*command, "--project-directory", str(projdir)]
 
 
+def _gpu_start_refused(projdir: Path) -> str:
+    """Why an app must not start now: the voice assistant's full-duplex model holds the graphics card."""
+    from ctl import duplex_voice
+
+    return duplex_voice.start_refused(projdir)
+
+
 def compose_up(
     projdir: Path,
     log: Callable[[str], None],
@@ -280,6 +287,7 @@ def compose_up(
     services: list[str] | tuple[str, ...] | None = None,
     on_output: Callable[[str], None] | None = None,
     build: bool = False,
+    remove_orphans: bool = False,
 ) -> tuple[int, str]:
     """`docker compose up -d` for a project dir, via docker_cmd (sg-aware).
 
@@ -287,6 +295,10 @@ def compose_up(
     string, no shell games beyond one quoted layer) stays exact. Extra files
     are reviewed service-owned overrides, never browser-provided paths.
     """
+    refused = _gpu_start_refused(projdir)
+    if refused:
+        log(refused)
+        return 1, refused
     argv = [*_compose_project_command(projdir, extra_files), "up", "-d"]
     if recreate:
         argv.append("--force-recreate")
@@ -294,6 +306,8 @@ def compose_up(
     # Docker's build cache keeps this quick when nothing changed. Release installs have no ``build:``.
     if build:
         argv.append("--build")
+    if remove_orphans:
+        argv.append("--remove-orphans")
     if wait_timeout is not None:
         argv.extend(["--wait", "--wait-timeout", str(wait_timeout)])
     # Service names are always source-owned curated Compose names.  Keeping
@@ -399,6 +413,10 @@ def compose_action(
     }
     if action not in verbs:
         return 2, "unsupported curated lifecycle action"
+    refused = _gpu_start_refused(projdir) if action != "stop" else ""
+    if refused:
+        log(refused)
+        return 1, refused
     files = [projdir / "docker-compose.yml"]
     digest_override = projdir / "docker-compose.digest.yml"
     if digest_override.is_file():
@@ -428,7 +446,27 @@ def compose_down(
     for compose_file in files:
         command.extend(["-f", str(compose_file)])
     command.extend(["--project-directory", str(projdir), "down", "--remove-orphans"])
-    return docker_cmd(command, log, timeout=timeout, env=env)
+    rc, output = docker_cmd(command, log, timeout=timeout, env=env)
+    if rc == 0 or not _COMPOSE_UNREADABLE.search(output):
+        return rc, output
+    # The file on disk can stop matching its settings (an app's wiring changed
+    # after install); Docker still knows the containers by their project label.
+    log("Compose file could not be read; removing the containers by project name.")
+    fallback = ["docker", "compose", "-p", _compose_project_name(projdir), "down", "--remove-orphans"]
+    return docker_cmd(fallback, log, timeout=timeout, env=env)
+
+
+_COMPOSE_UNREADABLE = _re.compile(r"error while interpolating|required variable|no such file|not found", _re.I)
+
+
+def _compose_project_name(projdir: Path) -> str:
+    """The project's `name:` line, or Compose's default (the folder's name)."""
+    try:
+        text = (projdir / "docker-compose.yml").read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    match = _re.search(r"^name:\s*['\"]?([a-z0-9][a-z0-9_-]*)", text, _re.M)
+    return match.group(1) if match else _re.sub(r"[^a-z0-9_-]", "", projdir.name.lower())
 
 
 def compose_logs(projdir: Path, log: Callable[[str], None], *, tail: int = 120, container: str = "") -> tuple[int, str]:

@@ -5,6 +5,40 @@
   gap: 32px;
 }
 
+.home-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px 24px;
+}
+
+/* The System chip sits beside the greeting (it describes the same moment); its charts open full width below. */
+.home-header .status-strip {
+  display: contents;
+}
+
+.home-header .status-chips {
+  grid-column: 2;
+  grid-row: 1;
+  justify-content: flex-end;
+}
+
+.home-header .status-panel-system {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .home-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-header .status-chips {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+}
+
 .home-header h1 {
   font-size: 26px;
   font-weight: 600;
@@ -52,9 +86,17 @@
   border-color: var(--border-strong);
 }
 
+/* A calm card with an amber mark, so a warning is easy to spot without tinting the whole page. */
 .attention-warning {
-  background: var(--amber-soft);
-  border-color: color-mix(in srgb, var(--amber) 25%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 35%, var(--border));
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+
+.attention-more {
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-weight: 400;
+  white-space: nowrap;
 }
 
 .attention-row {
@@ -80,8 +122,54 @@
 }
 
 .get-started-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
   color: var(--text-3);
   font-size: 13px;
+}
+
+.get-started-progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin: -2px 0 10px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--chart-track);
+  appearance: none;
+  overflow: hidden;
+}
+
+.get-started-progress::-webkit-progress-bar {
+  background: var(--chart-track);
+}
+
+.get-started-progress::-webkit-progress-value {
+  background: var(--green);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.get-started-progress::-moz-progress-bar {
+  background: var(--green);
+  border-radius: 2px;
+}
+
+.get-started-item.get-started-fold {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-style: dashed;
+  cursor: pointer;
+}
+
+.get-started-fold small {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.get-started-fold:hover small {
+  color: var(--text);
 }
 
 .get-started-list {
@@ -170,13 +258,23 @@
 }
 
 .get-started-hide {
-  margin-top: 8px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--text-3);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+.get-started-hide::before {
+  content: '·';
+  margin-right: 12px;
+  color: var(--text-3);
+}
+
+.get-started-hide:hover {
+  color: var(--text);
 }
 
 /* A hidden Get started list leaves this small way back. */
@@ -219,10 +317,46 @@
   gap: 8px;
 }
 
+/* Small groups sit side by side, so a category with one app doesn't take a whole row. */
+.launcher-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 18px 36px;
+}
+
+.launcher-group {
+  max-width: 100%;
+}
+
+.launcher-group.is-wide {
+  flex-basis: 100%;
+}
+
 .launcher {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  grid-template-columns: repeat(auto-fill, 118px);
   gap: 10px;
+}
+
+/* Only as wide as its tiles, so the next group can follow on the same row. */
+.launcher-groups .launcher {
+  grid-template-columns: repeat(var(--tiles, 1), 118px);
+}
+
+.launcher-groups .is-wide .launcher {
+  grid-template-columns: repeat(auto-fill, 118px);
+}
+
+@media (max-width: 900px) {
+  .launcher-groups .launcher,
+  .launcher-groups .is-wide .launcher {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  }
+
+  .launcher-group {
+    flex-basis: 100%;
+  }
 }
 
 .tile {
@@ -259,6 +393,7 @@
 
 .tile-state {
   display: inline-flex;
+  white-space: nowrap;
   align-items: center;
   gap: 5px;
   margin-top: -6px;
@@ -275,10 +410,6 @@
 .tile-muted .app-icon {
   filter: grayscale(0.7);
   opacity: 0.7;
-}
-
-.launcher-group + .launcher-group {
-  margin-top: 14px;
 }
 
 .launcher-group h3 {
@@ -387,6 +518,17 @@
   background: var(--surface-2);
 }
 
+.status-chip-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-chip {
+  max-width: 100%;
+}
+
 .status-chip-name {
   color: var(--text);
   font-weight: 500;
@@ -403,15 +545,47 @@
   transform: rotate(180deg);
 }
 
-/* Home's quick panel for one app. */
-.quick-panel-head {
+/* Home's quick panel for one app: status, then what you can do, then a few facts. */
+.quick-panel-status {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
-.quick-panel-details {
-  align-self: flex-start;
+.quick-panel-busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.quick-panel-busy svg {
+  width: 15px;
+  height: 15px;
+  color: var(--blue);
+}
+
+.quick-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Opening the app is the main thing a person came for, so it gets the whole first row. */
+.quick-panel-open {
+  flex: 1 1 100%;
+  justify-content: center;
+}
+
+.quick-panel-actions .btn:not(.quick-panel-open) {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.dialog-footer .quick-panel-details {
+  margin-right: auto;
 }
 
 /* ---------- Memory, disk and CPU per app ---------- */
@@ -719,4 +893,9 @@
 .get-started-item.is-waiting {
   cursor: default;
   color: var(--text-2);
+}
+
+/* The hollow "stopped" ring needs a solid centre where it overlaps an icon. */
+.mini-tile .dot-gray {
+  background: var(--surface);
 }

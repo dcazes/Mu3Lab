@@ -126,9 +126,9 @@ export function BackupScheduleSection({ disabled = false }: { disabled?: boolean
           </div>
         </fieldset>
       </form>
+      {/* The form above already shows the schedule; only the next run is new information. */}
       <Facts
         items={[
-          { label: 'Schedule', value: describe(data) },
           {
             label: 'Next backup',
             value: !disabled && data.next_run_at ? new Date(data.next_run_at).toLocaleString() : '—',

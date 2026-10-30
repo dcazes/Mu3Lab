@@ -57,12 +57,16 @@ def start(service: Service, root: Path, log: Log) -> tuple[bool, str]:
         env, extra = compose_settings.settings(service, folder)
     except RuntimeError as exc:
         return False, str(exc)
+    # An app whose first start is known to take longer (RomM) asks for more.
+    wait = max(START_TIMEOUT, service.manifest.service.start_timeout_seconds)
+    # Orphans: a service a new release dropped (Dawarich's Sidekiq worker) must
+    # not keep running beside it.
     rc, output = actions.compose_up(
-        folder, log, timeout=START_TIMEOUT + 300, wait_timeout=START_TIMEOUT, env=env, extra_files=extra
+        folder, log, timeout=wait + 300, wait_timeout=wait, env=env, extra_files=extra, remove_orphans=True
     )
     if rc:
         return False, output[-500:]
-    healthy, detail = wait_healthy(service, timeout=START_TIMEOUT)
+    healthy, detail = wait_healthy(service, timeout=wait)
     if not healthy:
         return False, detail
     if not sync_application(service.id, running=True, root=root, log=log):

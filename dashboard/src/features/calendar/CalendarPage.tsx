@@ -1,4 +1,4 @@
-import { RefreshCw, Settings } from 'lucide-react';
+import { Plus, RefreshCw, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { Button, ExternalButton } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
@@ -18,32 +18,40 @@ export function CalendarPage() {
       <CalendarView
         nextcloud={nextcloud}
         openSettings={() => setSettings(true)}
-        header={({ result, loading, reload }) => (
+        header={({ result, loading, ready, reload, newEvent, status }) => (
           <PageHeader
             title={result?.calendar?.name || 'Calendar'}
-            description={result?.state === 'local' ? 'Kept privately on Mu3Lab.' : 'Synced privately from Nextcloud.'}
+            description={status}
             actions={
               <>
+                {/* Quiet tools first; the one main action, adding an event, sits last and stands out. */}
                 <Button
                   variant="ghost"
                   icon={RefreshCw}
                   loading={loading}
                   onClick={() => void reload()}
                   aria-label="Refresh"
+                  title="Refresh"
                 />
-                {openUrl && <ExternalButton href={openUrl}>Open in Nextcloud</ExternalButton>}
                 <Button
                   variant="ghost"
                   icon={Settings}
                   onClick={() => setSettings(true)}
                   aria-label="Calendar settings"
+                  title="Calendar settings"
                 />
+                {openUrl && <ExternalButton href={openUrl}>Open in Nextcloud</ExternalButton>}
+                {ready && (
+                  <Button variant="primary" icon={Plus} onClick={newEvent}>
+                    New event
+                  </Button>
+                )}
               </>
             }
           />
         )}
       />
-      <Dialog open={settings} onClose={() => setSettings(false)} title="Calendar settings" size="drawer">
+      <Dialog open={settings} onClose={() => setSettings(false)} title="Calendar settings" size="sheet">
         <CalendarSettings />
       </Dialog>
     </div>

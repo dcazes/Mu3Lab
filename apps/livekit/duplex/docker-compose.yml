@@ -1,0 +1,59 @@
+# The voice assistant's full-duplex mode: MiniCPM-o 4.5 (4-bit). Its web search is the household's
+# SearXNG app, like the turn-based assistant's.
+#
+# Not an app of its own and never started with LiveKit: only the switch in Settings, Voice
+# Assistant starts it (ctl/duplex_voice.py), after stopping every other app that uses the
+# graphics card, and stops it again before they start. Docker keeps a stopped container stopped
+# across restarts, so the card never holds two models.
+name: mu3lab-livekit-duplex
+
+services:
+  # Listens and speaks at the same time. One call at a time; the model loads on the first call
+  # (Mu3Lab makes that call when the mode is switched on) and stays on the card.
+  omni:
+    build: .
+    image: mu3lab/minicpm-omni:local
+    restart: unless-stopped
+    command:
+      - --port
+      - "9060"
+      - -m
+      - /models/MiniCPM-o-4_5-Q4_K_M.gguf
+      - -ngl
+      - "99"
+      - --ctx-size
+      - "8192"
+      # Sampling from llama.cpp-omni's README and MiniCPM-o's demo (text repetition penalty 1.05,
+      # temperature 0.7); the rest of the demo's settings go with each call (duplex.py SESSION_CONFIG).
+      - --repeat-penalty
+      - "1.05"
+      - --temp
+      - "0.7"
+    volumes:
+      - ${MU3LAB_DUPLEX_MODELS:?MU3LAB_DUPLEX_MODELS is required}:/models:ro
+    tmpfs:
+      # Each call's audio passes through here.
+      - /tmp:size=512m,uid=1000,gid=1000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Only the voice agent talks to it.
+    networks:
+      mu3lab_backend:
+        aliases: [minicpm-omni]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9060/health"]
+      interval: 1m
+      timeout: 5s
+      start_period: 30s
+      start_interval: 5s
+      retries: 3
+
+networks:
+  mu3lab_backend: {external: true}

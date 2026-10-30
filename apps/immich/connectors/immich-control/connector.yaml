@@ -2,6 +2,8 @@
 id: immich-control
 name: Immich Control
 preferred: false
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: community
 repository: https://github.com/lidless-labs/immichctrl
 revision: 0.5.2
@@ -21,7 +23,8 @@ provision:
   interpreter:
   - sh
   - -s
-provision_note: Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator.
+  owner_email: true
+provision_note: Creates a dedicated Mu3Lab MCP API key for the owner's Immich account.
 review_note: 'Writes are enabled in the connector so Mu3Lab''s switches decide; destructive tools still need confirm:
   true.'
 reviewed: true

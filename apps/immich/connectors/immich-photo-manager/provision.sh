@@ -1,14 +1,11 @@
-# Prints a new Immich API key for the one active administrator (sh in the database container, on stdin).
+# Prints a new Immich API key for one person, by email (sh in the database container, on stdin; the email is $1).
 set -eu
 q() { psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"; }
-admins=$(q "select id from \"user\" where \"isAdmin\" is true and \"deletedAt\" is null and status='active' limit 2;")
-count=$(printf '%s\n' "$admins" | grep -c . || true)
-if [ "$count" -eq 0 ]; then
+[ -n "${1:-}" ] || { echo "MU3LAB_ERROR the person's email is missing"; exit 3; }
+admins=$(printf '%s\n' "select id from \"user\" where lower(email) = lower(:'email') and \"deletedAt\" is null and status='active';" \
+  | psql -v ON_ERROR_STOP=1 -v email="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At)
+if [ -z "$admins" ]; then
   echo "MU3LAB_ERROR Open Immich and sign in once; chat connects after your Immich account exists"
-  exit 3
-fi
-if [ "$count" -ne 1 ]; then
-  echo "MU3LAB_ERROR Immich needs exactly one active administrator for automatic chat setup"
   exit 3
 fi
 case "$admins" in *[!0-9a-f-]*) echo "MU3LAB_ERROR unexpected Immich user id"; exit 3 ;; esac

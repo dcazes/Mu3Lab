@@ -10,7 +10,7 @@ saying what to open:
    installed and answering and the model is downloaded there; with outside
    providers, at least one provider is connected and allowed.
 2. The AI gateway (LiteLLM) routes every listed model. Speech
-   (``mu3lab-stt``, ``mu3lab-tts``) is routed once Speech is installed and running.
+   (``mu3lab-stt``, ``mu3lab-tts``) is routed once Speaches is installed and running.
 
 Only the gateway itself being down fails the install. The check runs again
 when the owner presses Start.
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from ctl import local_models
+from ctl import duplex_voice, local_models
 from ctl.engine.hooks import HookContext
 from ctl.rules import Params, Rule, model_ready, register
 
@@ -40,6 +40,9 @@ class NeedsVoiceModel(Rule):
 
     def setup_check(self, ctx: HookContext) -> None:
         assert ctx.facts is not None
+        # The full-duplex model hears and speaks itself; none of these models is used meanwhile.
+        if duplex_voice.duplex_on(ctx.facts.paths):
+            return
         if local_models.VOICE_ALIAS in self.params.models:
             self._check_voice(ctx)
         self._check_routes(ctx)
@@ -78,6 +81,6 @@ class NeedsVoiceModel(Rule):
         speech = [name for name in missing if name != local_models.VOICE_ALIAS]
         if speech:
             advice.append(
-                f"Not routed: {', '.join(speech)}. Install Speech from Apps and start it, then start this app again."
+                f"Not routed: {', '.join(speech)}. Install Speaches from Apps and start it, then start this app again."
             )
         ctx.needs_setup("gateway_routes", "gateway_route_missing", " ".join(advice))

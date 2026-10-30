@@ -36,6 +36,7 @@ class McpServer:
     include: tuple[str, ...] = ()
     builtin: bool = False
     headers: tuple[tuple[str, str], ...] = ()
+    per_person: bool = False
 
     def compose_path(self, root: Path = ROOT) -> Path | None:
         if not self.compose_dir:
@@ -93,6 +94,7 @@ def load(registry: Registry) -> tuple[McpServer, ...]:
                     include=connector.include,
                     builtin=connector.builtin,
                     headers=tuple(connector.headers.items()),
+                    per_person=connector.per_person,
                 )
             )
     return tuple(result)

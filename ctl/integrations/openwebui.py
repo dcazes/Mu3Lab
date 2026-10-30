@@ -5,7 +5,7 @@ app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
 app's assistant, plus the main assistant every new chat starts with. All are
 shared by everyone, except an infrastructure app's read-only assistant, which only
-Open WebUI's administrators see. An app that is stopped keeps its assistant switched off
+Open WebUI's administrators see, and a private app's, which each person has their own of. An app that is stopped keeps its assistant switched off
 (out of the model menu, settings kept) rather than deleted; ``check`` then
 asks Open WebUI itself whether each one is set up and its tools answer. It also hides the AI gateway's own names from the model
 menu (``HIDDEN``). Connections and models Mu3Lab did not create are never
@@ -28,7 +28,11 @@ BASE_MODEL = "mu3lab-chat"
 # LiteLLM's names, which Open WebUI would list as chat models: the main assistant is built on
 # mu3lab-chat, and the rest serve Mu3Lab's own checks, document search, speech and the voice
 # assistant. Hidden from the model menu only; they keep working.
-HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-local", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts", "mu3lab-voice")
+# The second-ranked source, offered in the model menu beside the main assistant: outside providers
+# while local models come first, the local model while outside providers do (ctl.local_models).
+OUTSIDE = "mu3lab-outside"
+LOCAL = "mu3lab-local"
+HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts", "mu3lab-voice")
 
 
 class ChatError(RuntimeError):
@@ -108,16 +112,29 @@ class OpenWebUI:
         )
         return list((data or {}).get("specs") or [])
 
-    def ensure(self, assistants: list[dict[str, Any]]) -> list[str]:
+    def ensure(
+        self, assistants: list[dict[str, Any]], guide: str = "", *, outside_choice: bool = False, local_choice: str = ""
+    ) -> list[str]:
         """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
         admins = grants_for(self.admin_ids()) if any(operators_only(item) for item in assistants) else []
+        # A private app's assistant belongs to one person, granted to their Open WebUI account by ID.
+        accounts = (
+            {str(user.get("email") or "").lower(): str(user["id"]) for user in self.users() if user.get("id")}
+            if any(item.get("person") for item in assistants)
+            else {}
+        )
         for item in assistants:
             server_id = f"{PREFIX}{item['id']}"
             # Switched off while its app is stopped: kept, but out of the menu and unreachable.
             active = bool(item.get("active", True))
             restricted = operators_only(item)
+            if item.get("person"):
+                account = accounts.get(str(item["person"]).lower())
+                if not account:
+                    continue  # they have not opened Open WebUI yet; the next sync adds it
+                personal = grants_for([account])
             wanted_connections.append(
                 {
                     "url": item["url"],
@@ -126,10 +143,15 @@ class OpenWebUI:
                     # Each person's own Authentik sign-in, which ContextForge trusts.
                     "auth_type": "system_oauth",
                     "key": "",
-                    "config": {"enable": active, "access_grants": ADMINS_ONLY if restricted else EVERYONE},
+                    "config": {
+                        "enable": active,
+                        "access_grants": personal if item.get("person") else ADMINS_ONLY if restricted else EVERYONE,
+                    },
                     "info": {"id": server_id, "name": item["title"], "description": item["description"]},
                 }
             )
+            if item.get("tools_only"):
+                continue  # the main assistant carries these (main_model)
             wanted_models[server_id] = {
                 "id": server_id,
                 "base_model_id": BASE_MODEL,
@@ -140,7 +162,7 @@ class OpenWebUI:
                     "capabilities": {"function_calling": True},
                 },
                 "params": {"system": item["instructions"], "function_calling": "native"},
-                "access_grants": admins if restricted else EVERYONE,
+                "access_grants": personal if item.get("person") else admins if restricted else EVERYONE,
                 "is_active": active,
             }
 
@@ -151,17 +173,32 @@ class OpenWebUI:
         others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
-        # The main assistant is everyone's, so it names only the household's assistants.
-        listed = [item for item in assistants if item.get("active", True) and not operators_only(item)]
-        self.save_model(main_model(listed), exists=MAIN in existing)
+        # The main assistant is everyone's, so it names only the household's assistants, each app once.
+        listed = list(
+            {
+                item["title"]: item for item in assistants if item.get("active", True) and not operators_only(item)
+            }.values()
+        )
+        listed = [item for item in listed if not item.get("tools_only")]
+        paused = bool([item for item in assistants if not item.get("tools_only")]) and not listed
+        # Each person's own calendar connection; Open WebUI skips those a person is not granted.
+        tool_ids = [
+            f"server:mcp:{PREFIX}{item['id']}"
+            for item in assistants
+            if item.get("tools_only") and f"{PREFIX}{item['id']}" in {c["info"]["id"] for c in wanted_connections}
+        ]
+        self.save_model(main_model(listed, guide, paused=paused, tool_ids=tool_ids), exists=MAIN in existing)
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
+        # The second-ranked source is a choice in the model menu, named for what it does.
+        self.save_model(outside_model() if outside_choice else hidden_model(OUTSIDE), exists=OUTSIDE in existing)
+        self.save_model(local_model(local_choice) if local_choice else hidden_model(LOCAL), exists=LOCAL in existing)
         for model_id, model in wanted_models.items():
             self.save_model(model, exists=model_id in existing)
         for model_id in existing:
             if ours(model_id) and model_id not in wanted_models:
                 self.delete_model(model_id)
-        return [item["id"] for item in assistants]
+        return [item["id"] for item in assistants if f"{PREFIX}{item['id']}" in wanted_models]
 
     def check(self, assistants: list[dict[str, Any]], token: str) -> dict[str, dict[str, Any]]:
         """Read back what Open WebUI holds for each assistant and, for those switched on, have it list their tools.
@@ -177,7 +214,11 @@ class OpenWebUI:
             active = bool(item.get("active", True))
             connection, model = connections.get(server_id), models.get(server_id)
             result = {"status": "failed", "tools": 0}
-            if connection is None or model is None:
+            if item.get("tools_only"):
+                model = model or {"meta": {"toolIds": [f"server:mcp:{server_id}"]}, "is_active": active}
+            if (connection is None or model is None) and item.get("person"):
+                result |= {"status": "pending", "detail": "Added once you have opened Open WebUI."}
+            elif connection is None or model is None:
                 missing = "tool connection" if connection is None else "assistant"
                 result["detail"] = f"Open WebUI does not have this app's {missing}."
             elif connection.get("url") != item["url"] or (model.get("meta") or {}).get("toolIds") != [
@@ -222,6 +263,37 @@ def _public(grants: Any) -> bool:
     )
 
 
+def outside_model() -> dict[str, Any]:
+    """Outside providers as a chat choice beside the local model (local first)."""
+    return {
+        "id": OUTSIDE,
+        "base_model_id": None,
+        "name": "Outside providers",
+        "meta": {
+            "description": "For harder questions: sends your messages to the outside AI providers set up in Mu3Lab.",
+        },
+        "params": {},
+        "access_grants": EVERYONE,
+        "is_active": True,
+    }
+
+
+def local_model(name: str) -> dict[str, Any]:
+    """The local model as a private chat choice beside outside providers (outside first)."""
+    return {
+        "id": LOCAL,
+        "base_model_id": None,
+        "name": f"{name} (private, on this server)",
+        "meta": {
+            "description": "Answers on this server: nothing you send leaves it. Slower and less capable than outside "
+            "providers.",
+        },
+        "params": {},
+        "access_grants": EVERYONE,
+        "is_active": True,
+    }
+
+
 def hidden_model(model_id: str) -> dict[str, Any]:
     """Settings for one of the gateway's own models that keep it out of the model menu."""
     return {
@@ -235,8 +307,14 @@ def hidden_model(model_id: str) -> dict[str, Any]:
     }
 
 
-def main_model(assistants: list[dict[str, Any]]) -> dict[str, Any]:
-    """The main assistant, told which app assistants exist so it can send people to them."""
+def main_model(
+    assistants: list[dict[str, Any]], guide: str = "", *, paused: bool = False, tool_ids: list[str] | None = None
+) -> dict[str, Any]:
+    """The main assistant, told which app assistants exist and what every installed app is for.
+
+    ``guide`` (``agent_context.household_guide``) lets it answer questions about the apps themselves,
+    such as what one is for or how to get it on a phone, without sending people elsewhere.
+    """
     if assistants:
         listing = "\n".join(f"- {item['title']}: {item['description']}" for item in assistants)
         apps = (
@@ -245,26 +323,51 @@ def main_model(assistants: list[dict[str, Any]]) -> dict[str, Any]:
             "When a request needs one of these apps, name the assistant to use and tell the person to type @ "
             "followed by its name in the message box, or to choose it from the model menu at the top of the chat."
         )
+    elif paused:
+        apps = (
+            "The app assistants are switched off right now because their apps are stopped. When someone asks for "
+            "one, explain that an administrator can start the app from the Mu3Lab dashboard (Apps), and its "
+            "assistant comes back with it."
+        )
     else:
         apps = (
             "No app assistants are available yet. When someone asks about their apps, explain that an "
             "administrator can install apps from the Mu3Lab dashboard (Apps, then Discover); apps with chat "
             "support then get their own assistant here."
         )
+    household = (
+        "\n\nThe household's installed apps (all private to this server; reach them on devices connected to the "
+        f"household's Tailscale network, signing in with the Mu3Lab account):\n{guide}\n\n"
+        "Answer questions about what these apps are for, which to use, or how to open them or get them on a "
+        "phone yourself. Anything that needs the person's data in an app goes to that app's assistant. Do not "
+        "guess at who else can see something, such as administrators: what an administrator can see differs "
+        "by app, and each app's assistant knows."
+        if guide
+        else ""
+    )
+    calendar = (
+        "\n\nCalendar: you have tools for the person's own Mu3Lab calendar, the same one the Mu3Lab dashboard, "
+        "Nextcloud and their phone show. List events before changing one, use the IDs the tools return, give times "
+        "in the person's time zone, and ask before moving or deleting an event."
+        if tool_ids
+        else ""
+    )
     instructions = (
         "You are Mu3Lab, this household's general assistant. You can help with general questions, writing and "
-        "planning. You have no app tools: you cannot see or change anything inside the household's apps, so never "
-        f"claim to have done so.\n\n{apps}"
+        "planning. Apart from the calendar, you have no app tools: you cannot see or change anything inside the "
+        f"household's apps, so never claim to have done so.\n\n{apps}{household}{calendar}\n\n"
+        "People manage Mu3Lab itself (apps, people, AI settings, backups) in the Mu3Lab dashboard."
     )
     return {
         "id": MAIN,
         "base_model_id": BASE_MODEL,
         "name": "Mu3Lab",
         "meta": {
-            "description": "General help, and directions to the right app assistant.",
+            "description": "General help, your calendar, and directions to the right app assistant.",
             "capabilities": {"function_calling": True},
+            **({"toolIds": tool_ids} if tool_ids else {}),
         },
-        "params": {"system": instructions},
+        "params": {"system": instructions, **({"function_calling": "native"} if tool_ids else {})},
         "access_grants": EVERYONE,
         "is_active": True,
     }

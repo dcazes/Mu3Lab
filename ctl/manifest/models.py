@@ -314,8 +314,19 @@ class ConfigField(Model):
     type: Literal["string", "boolean", "integer", "enum", "secret"]
     label: str = ""
     default: str | bool | int | None = None
+    # The default when the app runs its GPU build (service.uses_gpu and a docker-compose.<mode>.yml).
+    gpu_default: str | bool | int | None = None
     required: bool = False
     options: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _defaults_are_options(self) -> ConfigField:
+        if self.type == "enum":
+            for value in (self.default, self.gpu_default):
+                # A default naming a fact ({{country_code}}) is checked when it is rendered.
+                if value is not None and "{{" not in str(value) and str(value) not in self.options:
+                    raise ValueError(f"{self.key}: default {value!r} is not one of its options")
+        return self
 
 
 # --- Rules (shared behaviors; see ctl/rules) ---------------------------------------------
@@ -333,13 +344,21 @@ class RuleRef(Model):
 # --- Chat -------------------------------------------------------------------------------
 
 
+class Faq(Model):
+    question: str
+    answer: str
+
+
 class Assistant(Model):
     title: str
     description: str
+    # The app's own rules; ctl/agent_context.py adds the rest of the assistant's context.
     instructions: str
     # Who may use it: the whole household, or administrators only (an infrastructure app's
     # read-only assistant, which shows the whole server's people, sign-ins or backups).
     audience: Literal["household", "operators"] = "household"
+    # Questions people ask about the app itself, answered without tools.
+    faq: tuple[Faq, ...] = ()
 
 
 class Chat(Model):
@@ -421,11 +440,21 @@ class Connector(Model):
     # Fixed headers sent with every call besides the credential, e.g. X-Forwarded-Proto for an app
     # that redirects plain HTTP because it expects to sit behind an HTTPS proxy.
     headers: dict[str, str] = Field(default_factory=dict)
+    # The app keeps each person's data private, so everyone gets their own key, connector copy and
+    # ContextForge server rather than one shared assistant (ctl/person_connectors.py). Its provision
+    # script takes the person's username or email.
+    per_person: bool = False
 
     @model_validator(mode="after")
     def _one_provisioner(self) -> Connector:
         if self.provision is not None and self.provision_hook:
             raise ValueError("a connector is provisioned by a script or by its app's hooks, not both")
+        if (
+            self.per_person
+            and self.provision is not None
+            and not (self.provision.owner_username or self.provision.owner_email)
+        ):
+            raise ValueError("a per-person connector's provision script must take the person's username or email")
         return self
 
     @property
@@ -511,7 +540,9 @@ class MediaFolder(Model):
     """A library under the media root (``/srv/mu3lab/media/<name>``) that people fill themselves.
 
     Compose files mount it as ``${MU3LAB_MEDIA_<NAME>}``. Uninstall never deletes
-    it, and backups leave it out: it is large and people already have the files.
+    it. Backups hold every library as one ``media`` source, apart from any app,
+    and Nextcloud shows each one as a shared folder. An app with media offers
+    ``media_folders``, so Nextcloud re-renders when such an app comes or goes.
     """
 
     name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$")
@@ -563,6 +594,10 @@ class AppManifest(Model):
     account: Account = Account()
     secrets: tuple[Secret, ...] = ()
     env: dict[str, str | dict[str, Any] | list[Any]] = Field(default_factory=dict)
+    # Values assigned instead of ``env``'s while the app runs that build (a docker-compose.<mode>.yml,
+    # ctl/compute.py), e.g. Immich converting videos on the NVIDIA card. Each name also has its CPU
+    # value in ``env``, so switching back to the CPU build puts it back.
+    build_env: dict[str, dict[str, str]] = Field(default_factory=dict)
     configuration: tuple[ConfigField, ...] = ()
     integrates_with: tuple[Integration, ...] = ()
     rules: tuple[RuleRef, ...] = ()
@@ -590,6 +625,12 @@ class AppManifest(Model):
 
     @model_validator(mode="after")
     def _consistent(self) -> AppManifest:
+        for mode, values in self.build_env.items():
+            if mode == "cpu" or not self.service.uses_gpu:
+                raise ValueError("build_env is for the GPU builds of an app that uses the GPU")
+            missing = sorted(set(values) - set(self.env))
+            if missing:
+                raise ValueError(f"build_env {mode}: give {', '.join(missing)} a CPU value in env too")
         if self.sign_in.method in {"gate", "trusted_header"} and (self.route is None or self.route.access == "open"):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":
@@ -606,8 +647,8 @@ class AppManifest(Model):
                 raise ValueError("extra route names must be unique")
             routes = (self.route, *self.extra_routes)
             for field in ("https_port", "caddy_port"):
-                values = [getattr(route, field) for route in routes]
-                if len(values) != len(set(values)):
+                ports = [getattr(route, field) for route in routes]
+                if len(ports) != len(set(ports)):
                     raise ValueError(f"each route needs its own {field}")
             upstreams = [self.service.local_port, *(route.local_port for route in self.extra_routes)]
             if len(upstreams) != len(set(upstreams)):

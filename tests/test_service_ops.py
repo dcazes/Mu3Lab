@@ -131,9 +131,10 @@ class ServiceOperationTests(unittest.TestCase):
             paths = RuntimePaths(Path(tmp))
             store = JobStore(paths.runtime / "control.sqlite")
             state = ControlState(paths.runtime / "state.sqlite")
-            state.set_installation("speech", "stopped")
+            state.set_installation("litellm", "stopped")
+            state.set_installation("speaches", "stopped")
             state.set_installation("livekit", "stopped")
-            for app in ("speech", "livekit"):
+            for app in ("litellm", "speaches", "livekit"):
                 (paths.projects / app).mkdir(parents=True)
                 (paths.projects / app / "docker-compose.yml").write_text("services: {}")
 
@@ -153,15 +154,17 @@ class ServiceOperationTests(unittest.TestCase):
                     execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
                 return store.get(created["id"]), [call.args[0].name for call in action.call_args_list]
 
-            job, started = start(lambda service: (service.id != "speech", "not ready"))
+            job, started = start(lambda service: (service.id != "speaches", "not ready"))
             self.assertEqual((job["state"], job["error_code"]), ("failed", "dependency_start_failed"))
-            self.assertIn("Speech", job["detail"])
-            self.assertEqual(started, ["speech"])
+            self.assertIn("Speaches", job["detail"])
+            self.assertEqual(started, ["litellm", "speaches"])
             self.assertEqual(state.installation("livekit")["state"], "stopped")
             job, started = start(lambda _service: (True, "HTTP 200"))
             self.assertEqual(job["state"], "succeeded")
-            self.assertEqual(started, ["speech", "livekit"])
-            self.assertEqual(state.installation("speech")["state"], "running")
+            # LiteLLM is a core app and already running now; Speaches failed before, so it starts again.
+            self.assertEqual(started, ["speaches", "livekit"])
+            self.assertEqual(state.installation("litellm")["state"], "running")
+            self.assertEqual(state.installation("speaches")["state"], "running")
 
     def test_worker_rejects_unregistered_action(self):
         with tempfile.TemporaryDirectory() as tmp:

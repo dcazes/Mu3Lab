@@ -1,5 +1,5 @@
-// Prints a new Outline API key for the workspace administrator, for ContextForge to call Outline's /mcp with.
-// Earlier Mu3Lab keys are deleted first, so only one is ever valid.
+// Prints a new Outline API key for one person, found by the email in argv, for ContextForge to call Outline's /mcp with.
+// Their earlier Mu3Lab key is deleted first, so only one is ever valid per person.
 "use strict";
 
 process.chdir("/opt/outline");
@@ -10,9 +10,13 @@ const { TeamPreference } = require("/opt/outline/build/shared/types");
 const NAME = "Mu3Lab chat";
 
 async function main() {
-  const owner = await User.findOne({ where: { role: "admin", suspendedAt: null }, order: [["createdAt", "ASC"]] });
+  const email = String(process.argv[2] || "").trim().toLowerCase();
+  if (!email) {
+    throw new Error("the person's email is missing");
+  }
+  const owner = await User.findOne({ where: { email, suspendedAt: null } });
   if (!owner) {
-    throw new Error("Outline has no administrator yet");
+    throw new Error("Open Outline and sign in once; chat connects after your Outline account exists");
   }
   const team = await Team.findByPk(owner.teamId);
   if (!team.getPreference(TeamPreference.MCP)) {

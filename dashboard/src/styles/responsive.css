@@ -14,7 +14,8 @@
     padding-bottom: 8px;
   }
 
-  .settings-nav-title {
+  .settings-nav-title,
+  .settings-nav-group {
     display: none;
   }
 
@@ -150,7 +151,8 @@
     flex-direction: column;
   }
 
-  .launcher {
+  .launcher,
+  .launcher-groups .launcher {
     grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
   }
 

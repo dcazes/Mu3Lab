@@ -61,6 +61,7 @@ class VoiceModelTests(unittest.TestCase):
         ctx = context("livekit")
         rule = NeedsVoiceModel(NeedsVoiceModelParams(models=self.MODELS))
         with (
+            patch("ctl.rules.needs_voice_model.duplex_voice.duplex_on", return_value=False),
             patch("ctl.rules.needs_voice_model.local_models.voice_settings", return_value={"privacy": privacy}),
             patch("ctl.rules.needs_voice_model.local_models.voice_model", return_value=MODEL),
             patch("ctl.rules.needs_voice_model.model_ready.provider_connected", return_value=provider),
@@ -82,7 +83,7 @@ class VoiceModelTests(unittest.TestCase):
     def test_missing_speech_route_needs_setup(self):
         with self.assertRaises(SetupNeeded) as caught:
             self.check(provider=True, routed=("mu3lab-voice",))
-        self.assertIn("Install Speech", caught.exception.message)
+        self.assertIn("Install Speaches", caught.exception.message)
 
     def test_the_rule_no_longer_blocks_before_start(self):
         rule = NeedsVoiceModel(NeedsVoiceModelParams(models=self.MODELS))

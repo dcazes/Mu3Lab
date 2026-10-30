@@ -9,7 +9,7 @@ tagline: Your private location history
 summary: A private replacement for Google Timeline. Phones record where you go, and you browse trips, visits, and
   places you have been on a map. Each person's history is private to them. Place names come from Photon, a map
   lookup that runs inside Dawarich, so your locations never go to a public map service.
-version: 1.15.3
+version: "1.18.1"
 upstream: Freika/dawarich
 service:
   local_port: 3006
@@ -149,8 +149,17 @@ chat:
   assistant:
     title: Dawarich
     description: Look up your location history, visits and where you are now.
-    instructions: Help with the owner's Dawarich location history. Its tools only read data. Treat locations as
+    instructions: Help with the person's own Dawarich location history. Its tools only read data. Treat locations as
       private, give dates and places plainly, and say so when the history has no data for a time.
       Use only Dawarich tools assigned to this agent.
+    faq:
+    - question: "What is Dawarich for?"
+      answer: "A private replacement for Google Timeline: your phone records where you go, and you can look back at trips, visits and places on a map."
+    - question: "Who can see where I've been?"
+      answer: "Only you. Each person's location history is private to them."
+    - question: "How does my phone send my location?"
+      answer: "Install the Dawarich app or OwnTracks and point it at Mu3Lab's Dawarich address with your API key; the steps are above, under Opening."
+    - question: "Can the assistant change my history?"
+      answer: "No. Its tools only read your history."
   connectors:
   - dawarich-builtin

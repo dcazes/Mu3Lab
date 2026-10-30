@@ -2,6 +2,8 @@
 id: immich-photo-manager
 name: Immich Photo Manager
 preferred: true
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: community
 repository: https://github.com/drolosoft/immich-photo-manager
 revision: 2.0.11
@@ -20,5 +22,6 @@ provision:
   interpreter:
   - sh
   - -s
-provision_note: Creates a dedicated Mu3Lab MCP API key for the single active Immich administrator.
+  owner_email: true
+provision_note: Creates a dedicated Mu3Lab MCP API key for the owner's Immich account.
 reviewed: true

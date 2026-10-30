@@ -1,10 +1,30 @@
 /* ---------- Calendar ---------- */
+/* The month and what's coming up side by side; stacked when there isn't room for both. */
+.calendar-frame {
+  container-type: inline-size;
+}
+
+.calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@container (min-width: 900px) {
+  .calendar-layout {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+
 .calendar-card {
-  padding: 16px 18px 18px;
+  min-width: 0;
+  padding: 14px 16px 16px;
   --fc-border-color: var(--border);
   --fc-page-bg-color: var(--surface);
   --fc-neutral-bg-color: var(--surface-2);
-  --fc-today-bg-color: var(--accent-soft);
+  /* Today is marked by its circled date, not a tinted cell. */
+  --fc-today-bg-color: transparent;
   --fc-event-bg-color: var(--accent);
   --fc-event-border-color: var(--accent);
   --fc-button-bg-color: var(--surface);
@@ -16,22 +36,22 @@
   --fc-button-active-border-color: var(--border-strong);
 }
 
-.calendar-card .fc .fc-toolbar-title {
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.calendar-toolbar h2 {
   font-size: 17px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.calendar-card .fc .fc-button {
-  height: 30px;
-  padding: 0 10px;
-  font-size: 13px;
-  font-weight: 500;
-  box-shadow: var(--shadow-sm);
-  text-transform: capitalize;
-}
-
-.calendar-card .fc .fc-button:focus {
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.calendar-toolbar .button-row {
+  gap: 2px;
 }
 
 .calendar-card .fc-theme-standard .fc-scrollgrid {
@@ -53,8 +73,27 @@
 }
 
 .calendar-card .fc .fc-day-today .fc-daygrid-day-number {
-  color: var(--accent-text);
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  margin: 3px 4px 0 0;
+  padding: 0 6px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* Weekends a shade quieter, so the working week reads first. */
+.calendar-card .fc .fc-daygrid-day.fc-day-sat,
+.calendar-card .fc .fc-daygrid-day.fc-day-sun {
+  background: var(--surface-2);
+}
+
+.calendar-card .fc .fc-daygrid-day:hover {
+  background: var(--surface-hover);
 }
 
 .calendar-card .fc .fc-daygrid-day-frame {
@@ -78,10 +117,121 @@
 
 .calendar-card .fc-event-time {
   color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-card .fc .fc-event-title {
+  font-weight: 500;
 }
 
 .calendar-card > .callout {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+}
+
+/* ---------- Coming up ---------- */
+.coming-up {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.coming-up > h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.coming-up-day h3 {
+  margin: 0 0 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.coming-up-day ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coming-up-day button {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: content-box;
+}
+
+.coming-up-day button:hover {
+  background: var(--surface-hover);
+}
+
+.coming-up-time {
+  flex-shrink: 0;
+  width: 64px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.coming-up-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Phones: a compact month (titles as short bars) with the list below carrying the detail. */
+@media (max-width: 640px) {
+  .calendar-card {
+    padding: 10px 8px 8px;
+  }
+
+  .calendar-toolbar {
+    padding: 0 4px;
+  }
+
+  .calendar-card .fc .fc-daygrid-day-frame {
+    min-height: 52px;
+  }
+
+  .calendar-card .fc .fc-daygrid-day-number {
+    padding: 4px;
+    font-size: 11.5px;
+  }
+
+  /* Too narrow for titles: each event is a dot (an all-day one a thin bar), and Coming up,
+     shown first, names them. */
+  .calendar-layout > .coming-up {
+    order: -1;
+  }
+
+  .calendar-card .fc .fc-daygrid-event-harness {
+    display: inline-block;
+  }
+
+  .calendar-card .fc .fc-daygrid-dot-event {
+    padding: 2px;
+  }
+
+  .calendar-card .fc-event-time,
+  .calendar-card .fc-daygrid-dot-event .fc-event-title {
+    display: none;
+  }
+
+  .calendar-card .fc .fc-daygrid-block-event .fc-event-main {
+    height: 4px;
+    overflow: hidden;
+    font-size: 0;
+  }
 }
 
 .calendar-settings {

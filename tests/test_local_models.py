@@ -19,8 +19,8 @@ from ctl.runtime import RuntimePaths
 from ctl.store import records
 from tests import test_maintenance
 
-OUTSIDE = {"privacy": "outside_allowed", "chat_model": "", "embedding_model": "bge-m3", "runner": ""}
-LOCAL = {"privacy": "local_only", "chat_model": "qwen3.5-4b", "embedding_model": "bge-m3", "runner": ""}
+OUTSIDE = {"sources": ["outside"], "chat_model": "", "embedding_model": "bge-m3", "runner": ""}
+LOCAL = {"sources": ["local"], "chat_model": "qwen3.5-4b", "embedding_model": "bge-m3", "runner": ""}
 
 
 class FakeEngine:
@@ -74,7 +74,9 @@ class SettingsTests(_Runtime):
         self.assertEqual(local_models.validate(LOCAL), LOCAL)
         self.assertEqual(local_models.validate({**LOCAL, "runner": "ollama"})["runner"], "ollama")
         for bad in (
-            {**OUTSIDE, "privacy": "anything"},
+            {**OUTSIDE, "sources": ["anything"]},
+            {**OUTSIDE, "sources": []},  # chat needs somewhere to run
+            {**OUTSIDE, "sources": ["outside", "outside"]},
             {**OUTSIDE, "chat_model": "llama3:70b"},
             {**OUTSIDE, "embedding_model": "mxbai-embed-large"},
             {**OUTSIDE, "runner": "litellm"},  # not a model runner
@@ -86,7 +88,7 @@ class SettingsTests(_Runtime):
     def test_a_new_install_allows_outside_providers_and_searches_with_bge_m3(self):
         chosen = local_models.settings(self.paths)
         self.assertEqual(
-            (chosen["privacy"], chosen["chat_model"], chosen["embedding_model"], chosen["runner"]),
+            (chosen["sources"], chosen["chat_model"], chosen["embedding_model"], chosen["runner"]),
             tuple(OUTSIDE.values()),
         )
         self.assertFalse(local_models.local_only(self.paths))
@@ -109,6 +111,28 @@ class SettingsTests(_Runtime):
         )
         self.assertEqual(local_models.settings(self.paths)["privacy"], "local_only")
 
+    def test_a_record_saved_before_the_order_existed_keeps_its_meaning(self):
+        for privacy, chat, sources in (
+            ("local_only", "qwen3.5-4b", ["local"]),
+            ("local_first", "qwen3.5-4b", ["local", "outside"]),
+            ("outside_allowed", "qwen3.5-4b", ["outside", "local"]),
+            ("outside_allowed", "", ["outside"]),
+        ):
+            with self.subTest(privacy=privacy, chat=chat):
+                records.put(
+                    *local_models.SETTINGS,
+                    {"privacy": privacy, "chat_model": chat, "embedding_model": "bge-m3", "runner": ""},
+                    self.paths,
+                )
+                chosen = local_models.settings(self.paths)
+                self.assertEqual((chosen["sources"], chosen["privacy"]), (sources, privacy))
+
+    def test_turning_local_models_off_keeps_the_chosen_model_for_later(self):
+        self.store({**LOCAL, "sources": ["outside"]})
+        self.assertEqual(local_models.settings(self.paths)["chat_model"], "qwen3.5-4b")
+        self.assertIsNone(local_models.chat_model(self.paths))
+        self.assertEqual(local_models.voice_settings(self.paths)["model"], "")
+
 
 class RoutingTests(_Runtime):
     def routes(self, runner: str = "ollama") -> dict[str, dict]:
@@ -129,7 +153,7 @@ class RoutingTests(_Runtime):
         self.assertNotIn("api_key", self.routes()["mu3lab-embed"])
 
     def test_a_chosen_local_model_is_a_private_choice_beside_outside_chat(self):
-        self.store({**LOCAL, "privacy": "outside_allowed"})
+        self.store({**LOCAL, "sources": ["outside", "local"]})
         routes = self.routes()
         self.assertEqual(routes["mu3lab-chat"]["api_base"], "os.environ/GATEWAY")
         self.assertEqual(routes[local_models.LOCAL_ALIAS]["model"], "ollama_chat/qwen3.5:4b-q4_K_M")
@@ -137,6 +161,21 @@ class RoutingTests(_Runtime):
             local_models.chat_list(self.paths),
             "-all,+mu3lab-chat=Mu3Lab chat (outside providers),+mu3lab-local=Qwen 3.5 4B (private, on this server)",
         )
+
+    def test_local_first_offers_outside_providers_as_the_second_choice(self):
+        self.store({**LOCAL, "sources": ["local", "outside"]})
+        routes = self.routes()
+        self.assertEqual(routes["mu3lab-chat"]["api_base"], "os.environ/RUNNER")
+        self.assertEqual(routes[local_models.OUTSIDE_ALIAS]["api_base"], "os.environ/GATEWAY")
+        self.assertEqual(
+            local_models.chat_list(self.paths),
+            "-all,+mu3lab-chat=Qwen 3.5 4B (private, on this server),+mu3lab-outside=Outside providers",
+        )
+
+    def test_a_model_kept_while_local_models_are_off_is_not_offered(self):
+        self.store({**LOCAL, "sources": ["outside"]})
+        self.assertNotIn(local_models.LOCAL_ALIAS, self.routes())
+        self.assertEqual(local_models.chat_list(self.paths), "-all,+mu3lab-chat=Mu3Lab chat (outside providers)")
 
     def test_local_only_leaves_no_route_to_any_outside_provider(self):
         self.store(LOCAL)
@@ -264,21 +303,26 @@ class JobTests(_Runtime):
 
     def run_job(self, chosen: dict[str, str]) -> dict:
         job = self.db.create(
-            kind="wiring", service_id=local_models.SERVICE_ID, action="apply", actor="owner", params=chosen
+            kind="wiring",
+            service_id=local_models.SERVICE_ID,
+            action="apply",
+            actor="owner",
+            params=local_models.as_params(chosen),
         )
         claimed = self.db.claim("worker")
         assert claimed and claimed["id"] == job["id"]
         local_models.execute_claimed(self.db, claimed, "worker", Path("/repo"))
         return self.db.get(job["id"])
 
-    def test_a_working_model_is_switched_to_and_unused_models_are_deleted(self):
+    def test_a_working_model_is_switched_to_and_the_old_ones_are_kept(self):
         job = self.run_job(LOCAL)
         self.assertEqual(job["state"], "succeeded", job["detail"])
         self.assertIn("only on this server, in Ollama", job["detail"])
         self.assertIn("qwen3.5-4b", self.engine.present)
         self.assertEqual(local_models.settings(self.paths)["privacy"], "local_only")
         self.assertEqual(local_models.settings(self.paths)["runner"], "ollama")
-        self.assertEqual(sorted(self.engine.deleted), ["nomic-embed-text", "qwen3-8b"])
+        # Kept, so switching back is instant; Settings removes one on request.
+        self.assertEqual(self.engine.deleted, [])
 
     def test_switching_runners_downloads_into_the_new_one_and_leaves_the_old_one_alone(self):
         other = self.engines["other"]
@@ -338,7 +382,7 @@ class JobTests(_Runtime):
 
         self.stack.enter_context(patch("ctl.local_models._apply", side_effect=apply))
         self.stack.enter_context(patch("ctl.local_models._probe_litellm", side_effect=RuntimeError("HTTP 500")))
-        job = self.run_job({**OUTSIDE, "chat_model": "qwen3.5-4b"})
+        job = self.run_job({**OUTSIDE, "sources": ["outside", "local"], "chat_model": "qwen3.5-4b"})
         self.assertEqual((job["state"], job["error_code"]), ("failed", "rollback_failed"))
         self.assertEqual(calls, ["outside_allowed", "local_only"])
         # The routing may still send requests outside, so nothing may say local only.

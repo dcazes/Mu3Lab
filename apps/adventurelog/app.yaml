@@ -68,6 +68,13 @@ chat:
     description: Plan and review travel records.
     instructions: Help plan and review AdventureLog trips. Do not claim to have accessed live data unless a reviewed
       AdventureLog tool is assigned. Ask before changing data.
+    faq:
+    - question: "What is AdventureLog for?"
+      answer: "Planning and remembering trips: places you've been or want to go, with dates, notes, photos and maps, grouped into collections."
+    - question: "Who can see my trips?"
+      answer: "Your trips and collections are yours. You can share a collection with someone else in AdventureLog."
+    - question: "Can I use it on my phone?"
+      answer: "Yes: open its address in your phone's browser and add it to the home screen."
   connectors:
   - adventurelog
 mobile:

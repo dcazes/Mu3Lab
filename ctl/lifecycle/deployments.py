@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,9 @@ def capture(
     staging.mkdir(mode=0o700, parents=True)
     staging.chmod(0o700)
     files: dict[str, str] = {}
+    # The copies stay private; a restore gives each file its permissions back, so a file another
+    # container's user reads (the voice agent's people.json) stays readable.
+    modes: dict[str, int] = {}
     for source in _project_files(project) if project.is_dir() else []:
         relative = source.relative_to(project)
         destination = staging / FILES / relative
@@ -93,6 +97,7 @@ def capture(
             (staging / folder).mkdir(mode=0o700, exist_ok=True)
         write_atomic(destination, source.read_bytes())
         files[str(relative)] = _digest(destination)
+        modes[str(relative)] = stat.S_IMODE(source.stat().st_mode)
     settings = AppSettings(service.id, paths)
     SecretStore(paths).put(
         f"deployment:{service.id}",
@@ -105,6 +110,7 @@ def capture(
         "release_id": release_id,
         "storage": sorted(storage),
         "files": files,
+        "modes": modes,
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     write_atomic(staging / MANIFEST, json.dumps(manifest, sort_keys=True).encode())
@@ -142,10 +148,13 @@ def restore(service: Service, bundle_id: str, paths: RuntimePaths | None = None)
     base = _root(service.id, paths) / bundle_id / FILES
     project = paths.projects / service.id
     project.mkdir(mode=0o750, parents=True, exist_ok=True)
+    # Bundles captured before permissions were recorded restore every file private.
+    modes = value.get("modes") or {}
     for relative in value["files"]:
         destination = project / relative
         destination.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         write_atomic(destination, (base / relative).read_bytes())
+        destination.chmod(int(modes.get(relative, 0o600)) & 0o777)
     kept = {project / relative for relative in value["files"]}
     for path in _project_files(project):
         if path not in kept:

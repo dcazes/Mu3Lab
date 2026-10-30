@@ -10,7 +10,7 @@ import { CopyField } from '../../components/CopyField';
 import { bytes, humanize, relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { Link } from '../../lib/router';
-import { isInstalled, isRunning, launchTarget } from '../../lib/services';
+import { isInstalled, isRunning, isWorking, launchTarget, statusText } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpPanel } from '../integrations/McpPanel';
@@ -33,6 +33,8 @@ function HeaderActions({ service }: { service: Service }) {
     actions.includes(action),
   );
   const menuActions = actions.filter((action) => action !== primaryAction || target);
+  // While a start, stop or install runs, its place says so and nothing else can be started.
+  const busy = isWorking(service);
   return (
     <>
       {service.id === 'freellmapi' && <LinkButton to="/settings/ai">Manage providers</LinkButton>}
@@ -42,7 +44,11 @@ function HeaderActions({ service }: { service: Service }) {
             {link.label}
           </ExternalButton>
         ))}
-      {target ? (
+      {busy && !target ? (
+        <Button variant="primary" loading disabled>
+          {statusText(service)}
+        </Button>
+      ) : target ? (
         <ExternalButton variant="primary" href={target.url}>
           {target.label}
         </ExternalButton>
@@ -66,7 +72,7 @@ function HeaderActions({ service }: { service: Service }) {
             label: ACTIONS[action].label,
             icon: ACTIONS[action].icon,
             danger: ACTIONS[action].danger,
-            disabled: Boolean(pending),
+            disabled: Boolean(pending) || busy,
             onSelect: () => (action === 'uninstall' ? setUninstalling(true) : void perform(action)),
           }))}
       />
@@ -202,7 +208,7 @@ function Overview({ service, address, devices }: { service: Service; address: st
         {note && <p className="muted">{note}</p>}
         <Facts
           items={[
-            { label: 'Status', value: <StatusBadge state={service.display_state} /> },
+            // The status badge sits under the app's name in the header, so it isn't repeated here.
             // With a devices section below, its server address card carries the address.
             ...(address && !devices
               ? [{ label: 'Web address', value: <CopyField value={address} label="Web address" /> }]
@@ -319,7 +325,7 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
             <span>
               {service.name}
               <small>
-                <StatusBadge state={service.display_state} />
+                <StatusBadge state={service.display_state} service={service} />
                 {mcp?.state === 'live' && (
                   <Badge tone="gray">
                     <Plug /> In chat

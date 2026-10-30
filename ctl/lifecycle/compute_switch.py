@@ -5,7 +5,8 @@ computer's compute mode (``ctl.compute``). Changing that mode later moves
 nothing by itself: the app's page offers "Switch to GPU version" (or CPU), and
 this job downloads the other build, records it and restarts the app. Both
 builds share the same data, so no backup is needed; if the other build does
-not start, the build from before is put back and started again.
+not start, the build from before is put back and started again. Settings that
+belong to one build (``build_env``) are rendered again for the build recorded.
 """
 
 from __future__ import annotations
@@ -28,6 +29,13 @@ class SwitchFailed(RuntimeError):
     def __init__(self, message: str, code: str = "compute_switch_failed") -> None:
         super().__init__(message)
         self.code = code
+
+
+def _render(service: Service, root: Path) -> None:
+    """Settings and templates only: a switch must not slip in newer deployment files (R12)."""
+    from ctl.engine.runtime import render_service
+
+    render_service(service, root, copy_files=False)
 
 
 def wanted(service: Service, root: Path) -> str:
@@ -73,6 +81,7 @@ def switch(
     except RuntimeError as exc:
         raise SwitchFailed(f"Nothing changed: {exc}", "image_pull_failed") from exc
     app_releases.write(service.id, target, paths)
+    _render(service, root)
     if not running:
         return f"{service.name} will run its {LABELS.get(variant, variant)} version when you start it."
     step("apply_update", f"Restarting {service.name} on its {LABELS.get(variant, variant)} version.")
@@ -80,6 +89,7 @@ def switch(
     if started:
         return f"{service.name} now runs its {LABELS.get(variant, variant)} version."
     app_releases.write(service.id, previous, paths)
+    _render(service, root)
     back, _detail = app_control.start(service, root, log)
     raise SwitchFailed(
         f"The {LABELS.get(variant, variant)} version did not start ({detail[-200:]}), so Mu3Lab put back the "

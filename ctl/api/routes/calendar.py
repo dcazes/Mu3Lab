@@ -229,17 +229,24 @@ def _with_local(
 
 @router.get("/events", response_model=models.CalendarEvents, response_model_exclude_none=True)
 def list_events(request: Request, reader: Reader) -> models.CalendarEvents:
-    owner_uid = str(reader["subject_id"])
+    return events_for(
+        str(reader["subject_id"]),
+        request.query_params.get("start", "").strip(),
+        request.query_params.get("end", "").strip(),
+        request.query_params.get("limit", "5"),
+    )
+
+
+def events_for(owner_uid: str, start_value: str, end_value: str, limit_value: str) -> models.CalendarEvents:
+    """One person's events, as the dashboard and chat's calendar tools both read them."""
     state = ControlState.runtime()
     if state is None:
         raise ApiError(503, _UNAVAILABLE, state="unavailable")
-    start_value = request.query_params.get("start", "").strip()
-    end_value = request.query_params.get("end", "").strip()
     if bool(start_value) != bool(end_value):
         raise ApiError(400, "Calendar start and end must be supplied together.", state="invalid_range")
     try:
         start, end = _parse_time(start_value), _parse_time(end_value)
-        limit = int(request.query_params.get("limit", "5"))
+        limit = int(limit_value)
     except ValueError as exc:
         raise ApiError(400, "Calendar range values must be valid ISO 8601 datetimes.", state="invalid_range") from exc
     ready = readiness(state)
@@ -283,11 +290,13 @@ def _is_local(event_id: str) -> bool:
 async def create_event(
     payload_model: models.CalendarEventRequest, request: Request, writer: Writer
 ) -> models.OkResponse:
-    owner_uid = str(writer["subject_id"])
-    payload = payload_model.model_dump()
+    return await run_in_threadpool(create_for, str(writer["subject_id"]), payload_model.model_dump())
+
+
+def create_for(owner_uid: str, payload: dict) -> models.OkResponse:
     store = calendar if _connected(owner_uid, ControlState.runtime()) else local_calendar
     try:
-        return models.OkResponse.model_validate(await run_in_threadpool(store.create_event, owner_uid, payload))
+        return models.OkResponse.model_validate(store.create_event(owner_uid, payload))
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 
@@ -296,12 +305,13 @@ async def create_event(
 async def update_event(
     payload_model: models.CalendarEventRequest, event_id: str, request: Request, writer: Writer
 ) -> models.OkResponse:
-    payload = payload_model.model_dump()
+    return await run_in_threadpool(update_for, str(writer["subject_id"]), event_id, payload_model.model_dump())
+
+
+def update_for(owner_uid: str, event_id: str, payload: dict) -> models.OkResponse:
     store = local_calendar if _is_local(event_id) else calendar
     try:
-        return models.OkResponse.model_validate(
-            await run_in_threadpool(store.update_event, str(writer["subject_id"]), event_id, payload)
-        )
+        return models.OkResponse.model_validate(store.update_event(owner_uid, event_id, payload))
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 
@@ -314,11 +324,13 @@ async def delete_event(
     payload_model: Annotated[models.CalendarDeleteRequest | None, Body()] = None,
 ) -> models.OkResponse:
     revision = payload_model.revision if payload_model else ""
+    return await run_in_threadpool(delete_for, str(writer["subject_id"]), event_id, revision)
+
+
+def delete_for(owner_uid: str, event_id: str, revision: str) -> models.OkResponse:
     store = local_calendar if _is_local(event_id) else calendar
     try:
-        return models.OkResponse.model_validate(
-            await run_in_threadpool(store.delete_event, str(writer["subject_id"]), event_id, revision)
-        )
+        return models.OkResponse.model_validate(store.delete_event(owner_uid, event_id, revision))
     except calendar.CalendarError as exc:
         raise _raise(exc, _conflict_status(exc)) from exc
 

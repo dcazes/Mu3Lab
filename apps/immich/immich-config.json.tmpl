@@ -10,10 +10,14 @@
     "autoLaunch": true,
     "buttonText": "Login with Authentik",
     "roleClaim": "mu3lab_role",
-    "mobileOverrideEnabled": false,
-    "mobileRedirectUri": ""
+    "mobileOverrideEnabled": true,
+    "mobileRedirectUri": "{{origin}}/api/oauth/mobile-redirect"
   },
   "passwordLogin": {
     "enabled": {{IMMICH_PASSWORD_LOGIN_ENABLED}}
+  },
+  "ffmpeg": {
+    "accel": "{{IMMICH_VIDEO_ACCEL}}",
+    "accelDecode": true
   }
 }

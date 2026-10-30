@@ -35,17 +35,20 @@ describe('Home', () => {
       allowed_actions: ['start'],
     });
     const ollama = service('ollama', 'Ollama', 'core', { category: 'ai' });
+    localStorage.removeItem('mu3lab.homeFolded');
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    // AI and infrastructure apps show too, each under its Discover section.
-    expect(screen.getByRole('button', { name: /AI & voice/ })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
-    // A folded section keeps its apps as icons.
-    fireEvent.click(screen.getByRole('button', { name: /AI & voice/ }));
-    expect(screen.getByRole('button', { name: /AI & voice/ })).toHaveAttribute('aria-expanded', 'false');
+    // AI and infrastructure apps share one last group, folded to icons until opened.
+    const plumbing = () => screen.getByRole('button', { name: /AI & system/ });
+    expect(plumbing()).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
-    fireEvent.click(screen.getByRole('button', { name: /AI & voice/ }));
+    expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
+    fireEvent.click(plumbing());
+    expect(plumbing()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Ollama: Running' })).not.toHaveAttribute('title');
+    fireEvent.click(plumbing());
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
+    // Everyday apps stay open under their own section.
+    expect(screen.getByRole('button', { name: /Productivity/ })).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.click(screen.getByRole('button', { name: 'Immich: Running' }));
     let panel = screen.getByRole('dialog', { name: 'Immich' });
@@ -137,7 +140,7 @@ describe('Home', () => {
   it('adds graphics memory to the chip, a donut and a column when the server has an NVIDIA GPU', () => {
     stubFetch(() => ({}));
     const GB = 1024 ** 3;
-    const data = dashboardData([service('ollama', 'Ollama', 'core'), service('speech', 'Speech', 'optional')]);
+    const data = dashboardData([service('ollama', 'Ollama', 'core'), service('speaches', 'Speech', 'optional')]);
     data.system = {
       ...data.system,
       cpu_percent: 5,
@@ -149,7 +152,7 @@ describe('Home', () => {
         name: 'RTX 3060',
         total: 12 * GB,
         used: 3 * GB,
-        by_owner: { ollama: 2 * GB, speech: 0.5 * GB },
+        by_owner: { ollama: 2 * GB, speaches: 0.5 * GB },
         by_core_part: {},
       },
     };
@@ -665,8 +668,10 @@ describe('Settings', () => {
     expect(without).not.toHaveTextContent('Actual Budget');
     expect(without).not.toHaveTextContent('RomM');
     const manual = screen.getByRole('region', { name: 'Manual integration' });
-    expect(automatic).toHaveTextContent('Firecrawl MCP');
-    expect(manual).toHaveTextContent('Actual Budget MCP');
+    expect(automatic).toHaveTextContent('Firecrawl');
+    // Rows carry the installed app's name, not the connector's.
+    expect(manual).toHaveTextContent('Actual Budget');
+    expect(manual).not.toHaveTextContent('Actual Budget MCP');
     expect(within(manual).getByRole('link', { name: 'Add credential' })).toHaveAttribute(
       'href',
       '/apps/actual-budget/chat',
@@ -760,8 +765,10 @@ describe('Calendar', () => {
         : undefined,
     );
     renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
-    expect(await screen.findByText('Planning')).toBeInTheDocument();
+    expect((await screen.findAllByText('Planning')).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Personal' })).toBeInTheDocument();
+    // What's next sits beside the month.
+    expect(screen.getByRole('complementary', { name: 'Coming up' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     expect(screen.getByRole('dialog', { name: 'New event' })).toBeInTheDocument();
   });
@@ -783,7 +790,8 @@ describe('Calendar', () => {
         : { ok: true, id: 'local-1' },
     );
     renderWithDashboard(<CalendarPage />, dashboardData([]));
-    expect(await screen.findByText(/Saved on Mu3Lab/)).toBeInTheDocument();
+    // Where events are kept is said once, in the page's description.
+    expect(await screen.findByText(/Kept privately on Mu3Lab/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Install Nextcloud' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /New event/ }));
     const dialog = screen.getByRole('dialog', { name: 'New event' });
@@ -844,7 +852,8 @@ describe('Calendar sync', () => {
       return undefined;
     });
     renderWithDashboard(<CalendarPage />, dashboardData([service('nextcloud', 'Nextcloud', 'optional')]));
-    fireEvent.click(await screen.findByText('⚠ Piano'));
+    // The month's event; "Coming up" lists it too when it is still ahead of today.
+    fireEvent.click((await screen.findAllByText('⚠ Piano'))[0]);
     const dialog = screen.getByRole('dialog', { name: 'Edit event' });
     expect(within(dialog).getByText('Two versions of this event')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Keep mine' }));

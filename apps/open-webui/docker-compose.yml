@@ -53,6 +53,9 @@ services:
       DEFAULT_MODELS: mu3lab-assistant
       DEFAULT_PINNED_MODELS: mu3lab-assistant
       MODEL_ORDER_LIST: '["mu3lab-assistant"]'
+      # One calendar per person, Mu3Lab's (ctl/calendar_tools.py): Open WebUI's own calendar and its
+      # built-in calendar tools would be a second one that nothing else sees.
+      ENABLE_CALENDAR: "false"
       ENABLE_VERSION_UPDATE_CHECK: "false"
       ENABLE_COMMUNITY_SHARING: "false"
     volumes:

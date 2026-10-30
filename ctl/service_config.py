@@ -14,6 +14,7 @@ from typing import Any
 
 from ctl import resource_locks
 from ctl.app_settings import AppSettings, managed_names
+from ctl.compute import gpu_build
 from ctl.control_state import ControlState, RevisionConflict
 from ctl.registry import Service
 from ctl.runtime import RuntimePaths
@@ -53,10 +54,24 @@ def revision(service: Service) -> int:
     return int(installation["config_revision"]) if installation else 0
 
 
+def _fields(service: Service) -> list[dict[str, Any]]:
+    """The fields with the default that fits the app's build: its GPU default when it runs (or would install) one."""
+    fields = [dict(field) for field in service.configuration]
+    if any(field.get("gpu_default") is not None for field in fields) and gpu_build(
+        service.compose_path(), RuntimePaths().projects / service.id, service.uses_gpu
+    ):
+        for field in fields:
+            if field.get("gpu_default") is not None:
+                field["default"] = field["gpu_default"]
+    for field in fields:
+        field.pop("gpu_default", None)
+    return fields
+
+
 def read(service: Service) -> list[dict[str, Any]]:
     values = _settings(service).config()
     result: list[dict[str, Any]] = []
-    for field in service.configuration:
+    for field in _fields(service):
         key = str(field["key"])
         secret = field["type"] == "secret"
         item = {name: value for name, value in field.items() if name != "env"}
@@ -92,7 +107,7 @@ def write(service: Service, submitted: dict[str, Any], *, expected_revision: int
     """Save the submitted fields; raise ``RevisionConflict`` if the form was stale."""
     if not isinstance(submitted, dict):
         raise ValueError("configuration values must be an object")
-    fields = {str(field["key"]): field for field in service.configuration}
+    fields = {str(field["key"]): field for field in _fields(service)}
     unknown = set(submitted) - set(fields)
     if unknown:
         raise ValueError(f"unknown configuration fields: {', '.join(sorted(unknown))}")

@@ -8,7 +8,7 @@ category: knowledge
 tagline: AI research with cited sources
 summary: An AI research workspace for searching documents and web sources, organizing knowledge, and asking questions
   with source citations. Mu3Lab connects this self-hosted web app to its AI gateway, which also serves the local
-  search model.
+  search model and the household chat model.
 version: v2.0.3
 upstream: MODSetter/SurfSense
 depends_on:
@@ -34,8 +34,8 @@ route:
     status: 403
 sign_in:
   method: gate
-  note: Authentik guards the private address. SurfSense has no single sign-on, so Mu3Lab creates its login at install
-    and saves it to your vault; Bitwarden fills it in.
+  note: Authentik guards the private address. SurfSense has no single sign-on, so Mu3Lab creates each person's login
+    and saves it to their own vault; Bitwarden fills it in.
 account:
   mode: api_bootstrap
   save_login_to_vault: true
@@ -62,7 +62,8 @@ env:
   # The local search model, through LiteLLM, whichever model runner serves it (Settings, AI).
   EMBEDDING_MODEL: litellm://openai/mu3lab-embed
   EMBEDDING_BASE_URL: http://litellm:4000/v1
-  # Its own AI gateway key, for the search model only (gateway_key rule).
+  # Its own AI gateway key, for the search model and the household chat model (gateway_key rule);
+  # global_llm_config.yaml gives SurfSense that chat model.
   OPENAI_API_KEY: 'sk-{{LITELLM_APP_KEY}}'
   SURFSENSE_PUBLIC_URL: '{{public_url}}'
 # Registers its key again when the gateway is reinstalled.
@@ -78,18 +79,29 @@ rules:
 - rule: gateway_key
   with:
     key_env: OPENAI_API_KEY
-    models: [mu3lab-embed]
+    models: [mu3lab-chat, mu3lab-embed]
     rpm_limit: 3000
 - rule: needs_embedding_model
   with:
     # SurfSense sizes its search index for one model when it is installed.
     index_tied: true
+- rule: per_person_logins
+  with:
+    audience: household
+    purpose: Create a SurfSense account and private workspace for each household member
 chat:
   assistant:
     title: SurfSense
     description: Search and organize research sources.
     instructions: Help search and organize SurfSense research. Use only SurfSense tools assigned to this agent.
       Ask before changing sources or workspaces.
+    faq:
+    - question: "What is SurfSense for?"
+      answer: "A private research space: collect web pages, files and notes as sources, then ask questions across them."
+    - question: "Who can see my research?"
+      answer: "Only you: each person has their own SurfSense account and workspace."
+    - question: "How do I sign in?"
+      answer: "Bitwarden fills in the SurfSense login Mu3Lab saved in your vault."
   connectors:
   - surfsense-official
 mobile:

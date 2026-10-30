@@ -5,8 +5,17 @@ import { Button } from '../../components/Button';
 import { Collapsible } from '../../components/Layout';
 import { StateBadge } from '../../components/Status';
 import { bytes, humanize } from '../../lib/format';
+import { stepLabel } from './steps';
 
 const ACTIVE = ['queued', 'running', 'resetting'];
+
+/** The card's headline once the batch is no longer running. */
+const BATCH_TITLE: Record<string, string> = {
+  completed_with_failures: 'Some apps didn’t install',
+  cancelled: 'Installation cancelled',
+  paused: 'Installation paused',
+  reset_failed: 'The failed installation couldn’t be reset',
+};
 
 function timeLeft(seconds: number) {
   if (seconds < 60) return 'less than a minute left';
@@ -100,7 +109,7 @@ function ItemDetail({
   if (['queued', 'running'].includes(item.state) && isCurrent && job?.state === 'running') {
     if (job.step_id === 'pull_images' && download && download.state !== 'done')
       return <DownloadStatus download={download} />;
-    return <p className="download-status">{humanize(job.step_id || 'starting')}</p>;
+    return <p className="download-status">{stepLabel(job.step_id || '')}</p>;
   }
   return null;
 }
@@ -140,10 +149,10 @@ export function InstallProgress({
     <section className="card install-progress" aria-live="polite" aria-label="Installation progress">
       <header className="install-header">
         <div>
-          <b>{ACTIVE.includes(batch.state) ? 'Installing apps' : humanize(batch.state)}</b>
+          <b>{ACTIVE.includes(batch.state) ? 'Installing apps' : BATCH_TITLE[batch.state] || humanize(batch.state)}</b>
           <p>
             {active && ['queued', 'running'].includes(active.state)
-              ? `Setting up ${name(active.service_id)} · ${humanize(job?.step_id || job?.state || active.state)}`
+              ? `Setting up ${name(active.service_id)} · ${job?.step_id ? stepLabel(job.step_id).toLowerCase() : 'waiting its turn'}`
               : running
                 ? 'Downloading. Each app is set up as soon as its download finishes.'
                 : ''}
@@ -193,7 +202,7 @@ export function InstallProgress({
                 <span className="install-item-name">
                   {canMove && <GripVertical className="install-grip" aria-hidden />}
                   {name(item.service_id)}
-                  {!item.explicitly_selected && <small> · required dependency</small>}
+                  {!item.explicitly_selected && <small> · needed by another app you chose</small>}
                 </span>
                 <span className="install-item-actions">
                   {canMove && (

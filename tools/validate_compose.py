@@ -39,6 +39,8 @@ def main() -> int:
             "MU3LAB_RELAY_CONFIG": "/dev/null",  # written by ctl.tailnet_relay when the relay starts
             # Asked of Tailscale at install; a checker without Tailscale gets a placeholder tailnet address.
             "MU3LAB_TAILNET_IP": "100.64.0.1",
+            # Asked of Docker for ContextForge; a checker without Mu3Lab's networks gets a placeholder.
+            "CONTEXTFORGE_CONNECTOR_NETWORKS": '["172.30.0.0/16"]',
             "MU3LAB_UID": str(os.getuid()),
             "MU3LAB_GID": str(os.getgid()),
         }

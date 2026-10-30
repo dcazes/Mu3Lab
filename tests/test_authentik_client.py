@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 from ctl.integrations.authentik import password_hash
 from ctl.secrets import clear_authentik_bootstrap, ensure_authentik_env, read_runtime_env
 
@@ -18,7 +17,6 @@ class AuthentikClientTests(unittest.TestCase):
         value = password_hash("test password", salt="known-salt", iterations=10)
         expected = base64.b64encode(hashlib.pbkdf2_hmac("sha256", b"test password", b"known-salt", 10)).decode()
         self.assertEqual(value, f"pbkdf2_sha256$10$known-salt${expected}")
-
 
     def test_the_recovery_flow_is_set_on_authentiks_own_default_brand(self):
         import yaml
@@ -30,7 +28,6 @@ class AuthentikClientTests(unittest.TestCase):
         )
         brand = next(entry for entry in document["entries"] if entry["model"] == "authentik_brands.brand")
         self.assertEqual(brand["identifiers"], {"domain": "authentik-default", "default": True})
-
 
     def test_first_start_env_is_preserved_and_cleanup_keeps_token(self):
         with tempfile.TemporaryDirectory() as tmp:

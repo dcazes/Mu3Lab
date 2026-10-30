@@ -5,5 +5,8 @@
   "dependencies": {
     "mealie-mcp": "0.2.105",
     "supergateway": "3.4.3"
+  },
+  "overrides": {
+    "zod": "4.6.7"
   }
 }

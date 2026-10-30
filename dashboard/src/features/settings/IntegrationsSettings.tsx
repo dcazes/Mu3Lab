@@ -1,4 +1,5 @@
-import { ChevronRight, MessageSquare, Plug, PlugZap } from 'lucide-react';
+import { ChevronDown, ChevronRight, MessageSquare, Plug, PlugZap } from 'lucide-react';
+import { useState } from 'react';
 import type { McpServer } from '../../api';
 import type { ChatAssistant } from '../../api/models';
 import { AppIcon } from '../../components/AppIcon';
@@ -41,10 +42,14 @@ function IntegrationRow({
       <Link to={`/apps/${server.service_id}/chat`} className="row-main">
         <AppIcon id={server.service_id} />
         <span className="row-text">
-          <b>{server.name}</b>
+          {/* The app's own name; the connector's name ("… MCP") is a technical detail on its page. */}
+          <b title={server.name}>{appName}</b>
           <small>{summary.detail}</small>
-          {/* Why the app's assistant is not in chat yet; a ready one needs no extra line. */}
-          {assistant && assistant.status !== 'ready' && <small>Assistant: {assistant.detail}</small>}
+          {/* Why the app's assistant is not in chat yet; a ready one needs no extra line, and a stopped
+              app's is explained once for the whole group. */}
+          {assistant && assistant.status !== 'ready' && server.state !== 'stopped' && (
+            <small>Assistant: {assistant.detail}</small>
+          )}
         </span>
       </Link>
       <Badge tone={summary.tone}>
@@ -78,12 +83,33 @@ function IntegrationRow({
         <Link
           to={`/apps/${server.service_id}/chat`}
           className="btn btn-ghost btn-sm btn-icon"
-          aria-label={`Manage ${server.name}`}
+          aria-label={`Manage ${appName}`}
         >
           <ChevronRight />
         </Link>
       </span>
     </div>
+  );
+}
+
+/** Stopped apps' integrations in one folded row: they all wait for the same thing. */
+function StoppedRows({ servers, row }: { servers: McpServer[]; row: (server: McpServer) => JSX.Element }) {
+  const [open, setOpen] = useState(false);
+  if (!servers.length) return null;
+  if (open) return <>{servers.map(row)}</>;
+  return (
+    <button type="button" className="row row-more" aria-expanded={false} onClick={() => setOpen(true)}>
+      <ChevronDown />
+      <span className="row-more-text">
+        {servers.length} {servers.length === 1 ? 'app is' : 'apps are'} stopped
+        <small>Their integrations and assistants come back when each app starts.</small>
+      </span>
+      <span className="row-more-icons" aria-hidden="true">
+        {servers.slice(0, 8).map((server) => (
+          <AppIcon key={server.id} id={server.service_id} size="sm" />
+        ))}
+      </span>
+    </button>
   );
 }
 
@@ -124,6 +150,10 @@ export function IntegrationsSettings() {
   const automatic = servers.filter(setsUpAutomatically);
   const manual = servers.filter((server) => !setsUpAutomatically(server));
   const live = servers.filter((server) => server.state === 'live').length;
+  // Connected first, then the ones to act on; stopped apps fold into one row at the end.
+  const rank = (server: McpServer) => (server.state === 'live' ? 0 : 1);
+  const awake = automatic.filter((server) => server.state !== 'stopped').sort((a, b) => rank(a) - rank(b));
+  const asleep = automatic.filter((server) => server.state === 'stopped');
   const reload = () => void registry.reload();
   const { data } = useDashboard();
   const isAdmin = useIsAdmin();
@@ -144,12 +174,24 @@ export function IntegrationsSettings() {
           <span>
             <b>{live}</b> connected
           </span>
-          <span>
-            <b>{automatic.length}</b> set up automatically
-          </span>
-          <span>
-            <b>{manual.length}</b> need a credential
-          </span>
+          {assistants.length > 0 && (
+            <span>
+              <b>
+                {ready} of {assistants.length}
+              </b>{' '}
+              assistants in chat
+            </span>
+          )}
+          {asleep.length > 0 && (
+            <span>
+              <b>{asleep.length}</b> waiting for their app
+            </span>
+          )}
+          {manual.length > 0 && (
+            <span>
+              <b>{manual.length}</b> need a credential
+            </span>
+          )}
         </div>
       )}
       {!registry.data ? (
@@ -169,11 +211,7 @@ export function IntegrationsSettings() {
         <>
           <Card
             title="Set up automatically"
-            description={`Mu3Lab can create the credentials for these integrations when you connect them.${
-              assistants.length
-                ? ` ${ready} of ${assistants.length} apps have an assistant in chat, the same for everyone.`
-                : ''
-            } ContextForge chooses each assistant's tools and logs every call.`}
+            description="Mu3Lab creates the credentials when you connect. Each app's assistant is the same for everyone; ContextForge chooses its tools and logs every call."
             actions={
               isAdmin && (
                 <LinkButton size="sm" to="/apps/contextforge">
@@ -184,7 +222,14 @@ export function IntegrationsSettings() {
             flush
           >
             <section className="rows" aria-label="Set up automatically">
-              {automatic.length ? automatic.map(row) : <p className="muted card-pad">None yet.</p>}
+              {automatic.length ? (
+                <>
+                  {awake.map(row)}
+                  <StoppedRows servers={asleep} row={row} />
+                </>
+              ) : (
+                <p className="muted card-pad">None yet.</p>
+              )}
             </section>
           </Card>
           {manual.length > 0 && (

@@ -2,6 +2,8 @@
 id: adventurelog
 name: AdventureLog MCP
 preferred: true
+# The app keeps each person's data private: everyone gets their own copy (ctl/person_connectors.py).
+per_person: true
 provenance: mu3lab-adapter
 repository: https://github.com/seanmorley15/AdventureLog
 revision: v0.13.0-api
@@ -19,9 +21,9 @@ provision:
   script: provision.py
   interpreter:
   - python
-  - manage.py
-  - shell
-provision_note: Creates a dedicated Mu3Lab MCP API key for the single active AdventureLog superuser.
+  - '-'
+  owner_email: true
+provision_note: Creates a dedicated Mu3Lab MCP API key for each person's AdventureLog account.
 review_note: Mu3Lab adapter exposes only collections and locations. Live API compatibility is checked when the app
   runs.
 secrets:

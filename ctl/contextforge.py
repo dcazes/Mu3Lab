@@ -35,6 +35,7 @@ PASSWORD_ENV = "CONTEXTFORGE_ADMIN_PASSWORD"
 INTERNAL = "http://contextforge:4444"
 # The trusted issuer for sign-ins Open WebUI passes on with tool calls.
 CHAT_PROVIDER = "mu3lab-chat"
+KEY_DAYS = 90
 KEY_PREFIX = "mu3lab-lobechat-"
 # ContextForge refuses (HTTP 422) any connector, virtual server or sign-in provider name with other characters.
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_.\- ]+")
@@ -150,17 +151,29 @@ class ContextForge:
         return _items(self.request("GET", "/v1/gateways", params={"limit": 0, "include_inactive": True}), "gateways")
 
     def ensure_gateway(
-        self, name: str, url: str, token: str, description: str, headers: dict[str, str] | None = None
+        self,
+        name: str,
+        url: str,
+        token: str,
+        description: str,
+        headers: dict[str, str] | None = None,
+        *,
+        team_id: str = "",
     ) -> dict[str, Any]:
-        """Register a connector, or point an existing registration at its current address, key and headers."""
+        """Register a connector, or point an existing registration at its current address, key and headers.
+
+        With ``team_id`` only that team (and ContextForge's administrators) can see it and its tools.
+        """
         name = safe_name(name)
         body: dict[str, Any] = {
             "name": name,
             "url": url,
             "description": description,
             "transport": "STREAMABLEHTTP",
-            "visibility": "public",
+            "visibility": "team" if team_id else "public",
         }
+        if team_id:
+            body["team_id"] = team_id
         if headers:
             sent = ([{"key": "Authorization", "value": f"Bearer {token}"}] if token else []) + [
                 {"key": key, "value": value} for key, value in headers.items()
@@ -175,6 +188,9 @@ class ContextForge:
         self.set_gateway_active(str(current["id"]), True)
         return updated or current
 
+    def delete_gateway(self, gateway_id: str) -> None:
+        self._delete(f"/v1/gateways/{gateway_id}")
+
     def set_gateway_active(self, gateway_id: str, active: bool) -> None:
         self.request("POST", f"/v1/gateways/{gateway_id}/state", params={"activate": str(active).lower()})
 
@@ -187,14 +203,60 @@ class ContextForge:
     def servers(self) -> list[dict[str, Any]]:
         return _items(self.request("GET", "/v1/servers", params={"limit": 0, "include_inactive": True}), "servers")
 
-    def ensure_server(self, name: str, description: str, tool_ids: list[str]) -> dict[str, Any]:
-        """Create a virtual server once; an existing one is left exactly as operators made it."""
+    def ensure_server(self, name: str, description: str, tool_ids: list[str], *, team_id: str = "") -> dict[str, Any]:
+        """Create a virtual server once; an existing one is left exactly as operators made it.
+
+        With ``team_id`` only that team (and ContextForge's administrators) can reach it.
+        """
         name = safe_name(name)
         current = next((item for item in self.servers() if item.get("name") == name), None)
         if current is not None:
             return current
-        server = {"name": name, "description": description, "associated_tools": tool_ids}
+        server: dict[str, Any] = {"name": name, "description": description, "associated_tools": tool_ids}
+        if team_id:
+            server["team_id"] = team_id
+            return self.request(
+                "POST", "/v1/servers", json={"server": server, "visibility": "team", "team_id": team_id}
+            )
         return self.request("POST", "/v1/servers", json={"server": server, "visibility": "public"})
+
+    def keep_server_to_team(self, server: dict[str, Any], team_id: str) -> None:
+        """Make a virtual server reachable only by one team (and ContextForge's administrators)."""
+        if _field(server, "team_id") == team_id and _field(server, "visibility") == "team":
+            return
+        self.request("PUT", f"/v1/servers/{server['id']}", json={"team_id": team_id, "visibility": "team"})
+
+    def delete_server(self, server_id: str) -> None:
+        self._delete(f"/v1/servers/{server_id}")
+
+    # --- Teams: one per person, for their own app tools -----------------------------
+
+    def ensure_team(self, name: str, email: str) -> str:
+        """A private team whose only household member is ``email``; returns its ID."""
+        name = safe_name(name)
+        # ContextForge lists at most 500 teams per page, far more than a household has.
+        data = self.request("GET", "/v1/teams/", params={"limit": 500})
+        team = next((item for item in _items(data, "teams") if item.get("name") == name), None)
+        if team is None:
+            team = self.request(
+                "POST", "/v1/teams/", json={"name": name, "description": "Created by Mu3Lab", "visibility": "private"}
+            )
+        team_id = str(team["id"])
+        members = _items(self.request("GET", f"/v1/teams/{team_id}/members"), "members")
+        if not any(str(member.get("user_email") or member.get("email")) == email for member in members):
+            self.request("POST", f"/v1/teams/{team_id}/members", json={"email": email, "role": "member"})
+        return team_id
+
+    def delete_team(self, team_id: str) -> None:
+        self._delete(f"/v1/teams/{team_id}")
+
+    def _delete(self, path: str) -> None:
+        """Delete something; one already gone is fine."""
+        try:
+            self.request("DELETE", path)
+        except ContextForgeError as exc:
+            if exc.status != 404:
+                raise
 
     def accept_chat_sign_ins(self, server: dict[str, Any], dns_name: str) -> None:
         """Let a virtual server take the Authentik sign-ins Open WebUI passes on.
@@ -259,14 +321,22 @@ class ContextForge:
             if str(item.get("name", "")).startswith(KEY_PREFIX)
         ]
 
-    def create_key(self, email: str, name: str, server_id: str) -> tuple[str, str]:
-        """A key that acts as ``email`` and reaches only one virtual server: its ID and its text."""
-        body = {
+    def create_key(self, email: str, name: str, server_id: str, team_id: str = "") -> tuple[str, str]:
+        """A key that acts as ``email`` and reaches only one virtual server: its ID and its text.
+
+        A server kept to a team needs the key made in that team; a key without one is public-only.
+        """
+        body: dict[str, Any] = {
             "name": name,
             "description": "Created by Mu3Lab for LobeChat",
             "user_email": email,
             "scope": {"server_id": server_id},
+            # ContextForge requires an expiry (REQUIRE_TOKEN_EXPIRATION); an expired key is no longer
+            # listed as active, so the next sync replaces it (contextforge_ops.person_key).
+            "expires_in_days": KEY_DAYS,
         }
+        if team_id:
+            body["team_id"] = team_id
         data = self.request("POST", "/v1/tokens", json=body) or {}
         token = data.get("access_token") if isinstance(data, dict) else None
         key = data.get("token") if isinstance(data, dict) else None

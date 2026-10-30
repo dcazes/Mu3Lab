@@ -27,6 +27,7 @@ from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env, runtime_env_text
 from ctl.store.secrets import SecretStore
 
+ROOT = Path(__file__).resolve().parent.parent
 SUPPORTED_ACTIONS = frozenset({"prepare", "enable", "install", "restart", "disable", "verify", "update", "switch"})
 
 
@@ -43,6 +44,11 @@ def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
     ok, detail = contextforge_ops.connect(server, _app_name(server.service_id), log)
     if not ok:
         return False, detail
+    if server.per_person:
+        from ctl import person_connectors
+
+        # Everyone else's own copy, before chat is told which assistants exist.
+        person_connectors.sync(server, ROOT, log)
     return sync_agents(log)
 
 
@@ -55,6 +61,10 @@ def unbind(server, log) -> tuple[bool, str]:
     ok, detail = contextforge_ops.disconnect(server, log)
     if not ok:
         return False, detail
+    if server.per_person:
+        from ctl import person_connectors
+
+        person_connectors.stop(server, log)
     return sync_agents(log)
 
 
@@ -77,6 +87,10 @@ def _stop_connector(server, state: ControlState, log) -> tuple[bool, str]:
         if rc:
             return False, redact(output)
     state.set_mcp_server(server.id, server.service_id, enabled=False, state="disabled")
+    if server.per_person:
+        from ctl import person_connectors
+
+        person_connectors.remove_all(server, log)
     return unbind(server, log)
 
 
@@ -454,6 +468,13 @@ def reconcile_lifecycle(root: Path, log) -> None:
             sync_application(server.service_id, running=True, root=root, log=log)
         elif not app_healthy and runtime["state"] not in {"stopped", "prepared", "authentication_required"}:
             sync_application(server.service_id, running=False, root=root, log=log)
+        elif app_healthy and server.per_person:
+            # People joining or leaving, someone opening the app for the first time, or a copy that stopped.
+            from ctl import person_connectors
+            from ctl.chat_ops import sync_agents
+
+            if person_connectors.sync(server, root, log):
+                sync_agents(log)
 
 
 def _update_claimed(store: JobStore, job_id: str, actor: str, server, root: Path, log) -> None:

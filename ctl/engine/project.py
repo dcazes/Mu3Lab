@@ -33,6 +33,7 @@ from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from ctl import hostinfo, resource_locks
 from ctl.app_settings import AppSettings, fixed_names
+from ctl.compute import build, gpu_build
 from ctl.engine import template
 from ctl.engine.launch import caddy_handler
 from ctl.manifest.catalog import App, Catalog
@@ -142,12 +143,13 @@ def _integrations(app: App, facts: Facts, env: dict[str, str]) -> None:
                 env.pop(name, None)  # the provider has not published that setting yet
 
 
-def _config_default(field: ConfigField) -> str | None:
-    if field.default is None:
+def _config_default(field: ConfigField, gpu: bool = False) -> str | None:
+    default = field.gpu_default if gpu and field.gpu_default is not None else field.default
+    if default is None:
         return None
-    if isinstance(field.default, bool):
-        return "true" if field.default else "false"
-    return str(field.default)
+    if isinstance(default, bool):
+        return "true" if default else "false"
+    return str(default)
 
 
 def _rendered_default(field: ConfigField, default: str, lookup: template.Lookup) -> str | None:
@@ -191,6 +193,13 @@ class Facts:
         return tailnet_ip()
 
     @cached_property
+    def media_folders(self) -> str:
+        """The libraries under the media root, comma-separated; "none" while there are none."""
+        media = self.paths.media
+        names = sorted(item.name for item in media.iterdir() if item.is_dir()) if media.is_dir() else []
+        return ",".join(names) or "none"
+
+    @cached_property
     def connector_networks(self) -> str:
         """Asked of Docker once per render, and only by an app whose settings name it (ContextForge)."""
         from ctl.service_state import connector_networks
@@ -222,6 +231,8 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
             "https_port": str(app.manifest.route.https_port) if app.manifest.route else None,
             "discovery_url": discovery_url(facts.dns_name, app.id) if facts.dns_name else None,
             "data_root": str(facts.paths.data),
+            "media_root": str(facts.paths.media),
+            "media_folders": facts.media_folders,
             "tz": env.get("TZ") or None,
             "country_code": hostinfo.country_code(env.get("TZ")) or None,
             "currency_code": hostinfo.currency_code(hostinfo.country_code(env.get("TZ"))),
@@ -267,12 +278,16 @@ def build_env(
             store.put(scope, "env:" + oidc.env.client_secret, env[oidc.env.client_secret])
         if oidc.env.discovery_url and facts.dns_name:
             env[oidc.env.discovery_url] = discovery_url(facts.dns_name, app.id)
+    # Asked only when a field has a GPU default: finding the build may ask the graphics driver.
+    gpu = any(field.gpu_default is not None for field in manifest.configuration) and gpu_build(
+        app.folder, facts.paths.projects / app.id, manifest.service.uses_gpu
+    )
     for field in manifest.configuration:
         chosen = (config or {}).get(field.key)
         if chosen:
             env[field.env] = chosen
             continue
-        default = _config_default(field)
+        default = _config_default(field, gpu)
         if default is not None and field.env not in env:
             default = _rendered_default(field, default, lookup_for(app, facts, env))
             if default is not None:
@@ -288,6 +303,10 @@ def build_env(
             # A fact such as the private address is not known yet (Tailscale not
             # joined); keep any earlier value and fill it in on the next render.
             continue
+    if manifest.build_env:
+        mode = build(app.folder, facts.paths.projects / app.id, manifest.service.uses_gpu)
+        for name, value in manifest.build_env.get(mode, {}).items():
+            env[name] = template.render(value, lookup)
     return env
 
 

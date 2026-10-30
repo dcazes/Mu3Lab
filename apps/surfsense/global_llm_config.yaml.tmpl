@@ -1,0 +1,16 @@
+# SurfSense's preset chat model: the household chat model, through Mu3Lab's AI gateway
+# (Settings, AI chooses where it runs). With this file present SurfSense skips its own
+# model setup, so nobody is asked for an Ollama or OpenAI address.
+global_llm_configs:
+  - id: -1
+    name: "Mu3Lab chat"
+    billing_tier: "free"
+    provider: "openai"
+    model_name: "mu3lab-chat"
+    api_key: "sk-{{LITELLM_APP_KEY}}"
+    api_base: "http://litellm:4000/v1"
+    supports_tools: true
+    supports_image_input: false
+    system_instructions: ""
+    use_default_system_instructions: true
+    citations_enabled: true

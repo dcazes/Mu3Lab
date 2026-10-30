@@ -1,7 +1,13 @@
 import { ArrowRight, CheckCircle2, Circle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { putJsonApi, type ChecklistResponse, type ProviderMetadataResponse, type VaultStatus } from '../../api';
+import {
+  putJsonApi,
+  type AiModels,
+  type ChecklistResponse,
+  type ProviderMetadataResponse,
+  type VaultStatus,
+} from '../../api';
 import { Button, ExternalButton } from '../../components/Button';
 import { CopyField } from '../../components/CopyField';
 import { Dialog } from '../../components/Dialog';
@@ -151,6 +157,8 @@ function useGetStarted() {
   const { data } = useDashboard();
   const operator = data.identity.writes_enabled;
   const providers = useApi<ProviderMetadataResponse>(operator ? '/api/v1/providers' : null);
+  // A downloaded local model answers chat on its own; outside providers are then optional.
+  const ai = useApi<AiModels>(operator ? '/api/v1/ai/models' : null);
   const vault = useApi<VaultStatus>(operator ? '/api/v1/vault/status' : null);
   const [manual, mark, setItem] = useGetStartedChecklist();
   const coreInstalling = useCoreSetupActive();
@@ -169,6 +177,8 @@ function useGetStarted() {
     }
   };
   const setup = providers.data?.setup;
+  const localModel = ai.data?.chat_models?.find((model) => model.id === ai.data?.settings?.chat_model);
+  const localReady = Boolean(localModel?.downloaded) && Boolean(ai.data?.settings?.sources?.includes('local'));
   if (!operator || !setup || !vault.data) return null;
   // Only apps the owner chose count; setup installs the core ones by itself.
   const hasApp = data.services.services.some(
@@ -190,7 +200,19 @@ function useGetStarted() {
     },
     // Connecting AI providers is administration; members skip it.
     ...(data.identity.is_admin
-      ? [{ key: 'provider', text: 'Connect an AI provider for chat', done: setup.complete, to: '/settings/ai' }]
+      ? [
+          {
+            key: 'provider',
+            text: 'Choose how your AI runs',
+            hint: localReady
+              ? ''
+              : ai.data?.suggested
+                ? 'This computer can run a local model privately; Settings, then AI, suggests one. Or connect an outside provider.'
+                : 'Connect an outside AI provider; this computer has no room for a local model beside your apps.',
+            done: setup.complete || localReady,
+            to: '/settings/ai',
+          },
+        ]
       : []),
     { key: 'app', text: 'Install your first personal app', done: hasApp, to: '/apps/discover' },
     { key: 'devices', text: 'Use Mu3Lab on your phone or laptop', done: Boolean(manual.devices), guide: 'devices' },
@@ -230,17 +252,38 @@ interface Step {
 function StepList({
   state,
   compact = false,
+  foldDone = false,
 }: {
   state: NonNullable<ReturnType<typeof useGetStarted>>;
   compact?: boolean;
+  /** Finished steps fold into one row that shows them again, so the next step leads. */
+  foldDone?: boolean;
 }) {
   const [guide, setGuide] = useState<Guide | null>(null);
-  const { steps, markDone, checking, checkExtension } = state;
+  const [showDone, setShowDone] = useState(false);
+  const { steps, finished, markDone, checking, checkExtension } = state;
   const next = steps.find((step) => !step.done && !step.waiting)?.key;
+  const folded = foldDone && !showDone && finished > 0;
   return (
     <>
       <ol className={`get-started-list${compact ? ' is-compact' : ''}`}>
+        {folded && (
+          <li>
+            <button
+              type="button"
+              className="get-started-item is-done get-started-fold"
+              onClick={() => setShowDone(true)}
+            >
+              <CheckCircle2 className="get-started-done" />
+              <span>
+                {finished} {finished === 1 ? 'step' : 'steps'} done
+              </span>
+              <small>Show</small>
+            </button>
+          </li>
+        )}
         {steps.map((step, index) => {
+          if (folded && step.done) return null;
           const content = (
             <>
               {step.done ? <CheckCircle2 className="get-started-done" /> : <Circle />}
@@ -313,12 +356,18 @@ export function GetStarted() {
         <h2 id="get-started-heading">Get started</h2>
         <span className="get-started-count">
           {state.finished} of {state.steps.length} complete
+          <button type="button" className="get-started-hide" onClick={() => state.setHidden(true)}>
+            Hide
+          </button>
         </span>
       </div>
-      <StepList state={state} />
-      <button type="button" className="get-started-hide" onClick={() => state.setHidden(true)}>
-        Hide this list
-      </button>
+      <progress
+        className="get-started-progress"
+        value={state.finished}
+        max={state.steps.length}
+        aria-label={`${state.finished} of ${state.steps.length} steps complete`}
+      />
+      <StepList state={state} foldDone />
     </section>
   );
 }
