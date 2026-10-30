@@ -219,7 +219,7 @@ class ReconcileTests(_Paths):
         self.stack.enter_context(patch.object(backup_service, "_container", side_effect=lambda _log: self.container))
         self.recreate = self.stack.enter_context(patch.object(backup_service, "_recreate"))
         self.exec = self.stack.enter_context(patch.object(backup_service, "_exec"))
-        self.stack.enter_context(patch.object(backup_service, "_control", return_value={}))
+        self.control = self.stack.enter_context(patch.object(backup_service, "_control", return_value={}))
         self.status = self.stack.enter_context(patch.object(backup_service, "source_status", return_value={}))
 
     def reconcile(self):
@@ -233,6 +233,52 @@ class ReconcileTests(_Paths):
         self.assertEqual(targets, ["--global", "/data/mu3lab", "/data/mealie"])
         self.assertEqual(records.get("backup-apps", "mealie", self.paths)["completed_at"], "2026-10-11T03:31:00Z")
         self.recreate.assert_not_called()
+
+    def refreshes(self):
+        return [call for call in self.control.call_args_list if call.args[:2] == ("POST", "refresh")]
+
+    def test_kopia_is_refreshed_only_after_a_change(self):
+        self.reconcile()
+        self.reconcile()
+        self.assertEqual(len(self.refreshes()), 1)
+
+    def test_a_restarted_server_keeps_its_policies(self):
+        self.reconcile()
+        self.exec.reset_mock()
+        self.container = {**self.container, "started_at": "t2"}
+        self.reconcile()
+        self.exec.assert_not_called()
+
+    def test_nothing_changes_while_an_app_waits_its_turn(self):
+        # A refresh would queue the waiting app a second time.
+        self.status.return_value = {"mealie": {"status": "PENDING"}}
+        self.reconcile()
+        self.exec.assert_not_called()
+        self.assertEqual(self.refreshes(), [])
+        self.status.return_value = {"mealie": {"status": "IDLE"}}
+        self.reconcile()
+        self.assertEqual(len(self.refreshes()), 1)
+
+    def test_an_app_never_backed_up_waits_for_the_schedule(self):
+        self.status.return_value = {"mealie": {"status": "IDLE"}}
+        self.reconcile()
+        self.assertIn("--run-missed=false", self.exec.call_args_list[-1].args[1])
+        self.status.return_value = {"mealie": {"status": "IDLE", "lastSnapshot": {"endTime": "2026-10-11T03:31:00Z"}}}
+        self.reconcile()
+        self.assertIn("--run-missed=inherit", self.exec.call_args_list[-1].args[1])
+
+    def test_a_schedule_changed_inside_kopia_is_put_back_once(self):
+        backed_up = {"status": "IDLE", "lastSnapshot": {"endTime": "2026-10-11T03:31:00Z"}}
+        self.status.return_value = {"mealie": {**backed_up, "schedule": {"cron": ["30 3 * * 0"], "runMissed": True}}}
+        self.reconcile()
+        self.exec.reset_mock()
+        self.status.return_value = {"mealie": {**backed_up, "schedule": {"intervalSeconds": 3600, "runMissed": True}}}
+        self.reconcile()
+        targets = [call.args[1][2] for call in self.exec.call_args_list]
+        self.assertEqual(targets, ["--global", "/data/mealie"])
+        self.exec.reset_mock()
+        self.reconcile()  # still different: something else in Kopia sets it, so it is not rewritten every minute
+        self.exec.assert_not_called()
 
     def test_a_changed_schedule_reaches_kopia(self):
         self.reconcile()

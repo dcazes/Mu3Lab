@@ -17,13 +17,16 @@ services:
       KOPIA_CHECK_FOR_UPDATES: "false"
       KOPIA_CACHE_DIRECTORY: /cache
     entrypoint: ["/bin/sh", "-c"]
+    # Mu3Lab refreshes the server after each change it makes (and only while no
+    # backup waits its turn: a refresh queues waiting apps a second time), so
+    # the server's own refresh is effectively off.
     command:
       - >-
         kopia repository connect filesystem --path=/repo
         --override-username=mu3lab --override-hostname=mu3lab --enable-actions
         --content-cache-size-mb=500 --metadata-cache-size-mb=500
         && exec kopia server start --insecure --enable-actions --address=127.0.0.1:51515
-        --refresh-interval=5m --disable-file-logging --disable-content-log
+        --refresh-interval=8760h --disable-file-logging --disable-content-log
     volumes:
       - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia:/repo
       - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/restores:/restores

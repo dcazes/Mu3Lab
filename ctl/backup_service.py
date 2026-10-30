@@ -147,6 +147,35 @@ def global_policy(chosen: dict[str, Any]) -> list[str]:
     return [*backups.POLICY, f"--snapshot-time-crontab={cron or 'inherit'}", "--run-missed=true"]
 
 
+def _catches_up(item: dict[str, Any] | None) -> bool:
+    """Kopia counts an app never backed up as having missed every run: it waits for the schedule instead."""
+    return bool((item or {}).get("lastSnapshot"))
+
+
+def source_policy(item: dict[str, Any] | None) -> list[str]:
+    """One app's own policy: the actions around its backup, the schedule from Settings, and catching up."""
+    return [
+        f"--before-snapshot-root-action={HOOK}",
+        f"--after-snapshot-root-action={HOOK}",
+        "--action-command-mode=essential",
+        f"--action-command-timeout={ACTION_TIMEOUT}",
+        "--snapshot-time-crontab=inherit",
+        "--snapshot-time=inherit",
+        "--snapshot-interval=0s",
+        f"--run-missed={'inherit' if _catches_up(item) else 'false'}",
+    ]
+
+
+def _schedule_matches(item: dict[str, Any], chosen: dict[str, Any]) -> bool:
+    """Kopia runs this app on the schedule chosen in Settings, and nothing else."""
+    schedule = item.get("schedule")
+    if schedule is None:
+        return True  # Kopia has not said yet
+    cron = crontab(chosen)
+    timing = {key: value for key, value in schedule.items() if value and key != "runMissed"}
+    return timing == ({"cron": [cron]} if cron else {}) and bool(schedule.get("runMissed")) == _catches_up(item)
+
+
 # ---------------------------------------------------------------- sources and mounts
 
 
@@ -498,42 +527,50 @@ def reconcile(store: JobStore, root: Path, log: Log, paths: RuntimePaths | None 
         write_sources(found, paths)
         _recreate(root, log, paths)
         container = _container(log)
-        state = {}
-    elif restarted_elsewhere:
-        state = {}  # started by someone else with these same folders: it sees them as they are now
+        busy = True  # the new server may be catching up on missed runs; its settings wait for the next pass
+    # Policies live in the repository, so they outlast a restarted server; what
+    # Kopia reports wins over what was recorded.
     chosen = settings(paths)
     policy = global_policy(chosen)
+    applied_global = state.get("global") or []
     applied = dict(state.get("policies") or {})
-    try:
-        if state.get("global") != policy:
-            _exec(container["id"], ["policy", "set", "--global", *policy], log)
-        for source in found:
-            if applied.get(source) != HOOK:
-                _exec(
-                    container["id"],
-                    [
-                        "policy",
-                        "set",
-                        f"/data/{source}",
-                        f"--before-snapshot-root-action={HOOK}",
-                        f"--after-snapshot-root-action={HOOK}",
-                        "--action-command-mode=essential",
-                        f"--action-command-timeout={ACTION_TIMEOUT}",
-                    ],
-                    log,
-                )
-                applied[source] = HOOK
-        _control("POST", "refresh", paths=paths)
-    except OSError as exc:
-        log(f"The backup service's settings are not up to date yet: {exc}")
-        policy = state.get("global") or []
+    repaired = set(state.get("repaired") or [])
+    differs = {
+        source
+        for source, item in (status or {}).items()
+        if applied_global == policy and source in found and not _schedule_matches(item, chosen)
+    }
+    for source in differs - repaired:
+        applied_global = []
+        applied.pop(source, None)
+    if differs & repaired:
+        log(f"Kopia still runs {', '.join(sorted(differs & repaired))} on a different schedule; check its policies.")
+    if status is not None and not busy:
+        # A refresh makes Kopia queue again any app still waiting for its turn, so
+        # it is backed up twice: change and refresh only while every app is idle.
+        changed = False
+        try:
+            if applied_global != policy:
+                _exec(container["id"], ["policy", "set", "--global", *policy], log)
+                applied_global, changed = policy, True
+            for source in found:
+                args = source_policy(status.get(source))
+                if applied.get(source) != args:
+                    _exec(container["id"], ["policy", "set", f"/data/{source}", *args], log)
+                    applied[source], changed = args, True
+            if changed:
+                _control("POST", "refresh", paths=paths)
+            repaired = differs  # still different next time: something else in Kopia sets it
+        except OSError as exc:
+            log(f"The backup service's settings are not up to date yet: {exc}")
     records.put(
         *STATE,
         {
             "started_at": container.get("started_at", ""),
             "inodes": inodes,
-            "global": policy,
+            "global": applied_global,
             "policies": applied,
+            "repaired": sorted(repaired),
             "checked_at": _now().isoformat(timespec="seconds"),
         },
         paths,
