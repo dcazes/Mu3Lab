@@ -50,11 +50,30 @@ The agent then works like chat's assistants:
   and each yes allows one change (`ConfirmedToolset`). Without a yes the tool tells the model to
   ask first.
 
-Mu3Lab writes each person's assistants, keys and read-only tool names to
-`voice-tools/people.json` (`ctl/voice_tools.py`), whenever chat's assistants are synced; the
-agent reads it at the start of each call. The folder above it is Mu3Lab's user's alone, and
-the agent mounts it read-only. Administrators switch an app off for voice in **Settings, Voice
-assistant**.
+The main assistant also has `search_web` while web search is on and the **SearXNG** app is
+installed: private search for current facts, with no account or key.
+
+Mu3Lab writes two files to `voice-tools/` whenever chat's assistants are synced (every install
+does) and whenever **Settings, Voice assistant** changes; the agent reads both at the start of
+each call, so nothing needs a restart:
+
+- `people.json` (`ctl/voice_tools.py`): each person's assistants, keys and read-only tool names.
+  Administrators switch an app off for voice under **Tools**, which also checks that each app's
+  tools answer.
+- `settings.json` (`ctl/voice_settings.py`): responsiveness, interruptions, the voice, the web
+  search address and whether full-duplex mode (Labs) is on.
+
+The folder above it is Mu3Lab's user's alone, and the agent mounts it read-only.
+
+## How long a reply takes
+
+The agent logs one line per reply from LiveKit's own measurements: the wait from the end of
+speech to the first sound, and its parts (transcript, end of turn, the model's first words, the
+first audio). Tool calls log how long they took.
+
+```bash
+docker logs mu3lab-livekit-agent-1 2>&1 | grep -E "Reply after|Tool .* took|Web search took"
+```
 
 ## Containers
 
@@ -87,7 +106,9 @@ Start and Stop are on the app's page.
 
 - **Answer model:** choose outside providers or a local model in **Settings, Voice Assistant**,
   independently of chat. The agent always asks for `mu3lab-voice`, so it follows that choice.
-- **Voice:** change the Speaches app's default voice. The agent picks it up when the app is re-wired.
+- **Voice:** choose it (and try it) in **Settings, Voice Assistant, Voice**; the next call uses it.
+- **Speech models:** the same card sets Speaches up again with other Whisper or Kokoro models,
+  which every app using speech then shares.
 
 ## Bypassing LiteLLM
 

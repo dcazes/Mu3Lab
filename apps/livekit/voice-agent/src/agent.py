@@ -12,11 +12,17 @@ app's tools, reached through ContextForge with the person's own key, and hands i
 are done. Mu3Lab writes each person's app assistants to MU3LAB_VOICE_TOOLS (ctl/voice_tools.py).
 A tool that changes something runs only right after the person says yes.
 
+The main assistant can also search the web privately, through the household's SearXNG app.
+
 Mu3Lab can switch the assistant to one full-duplex model instead (duplex.py): it listens and speaks
-at once, and its only tool is web search.
+at once, and cannot use the apps.
+
+The household's choices (Settings, Voice Assistant) reach the agent in MU3LAB_VOICE_TOOLS' sibling
+settings.json, read at each call's start, so a change needs no restart (ctl/voice_settings.py).
 
 Speed: the greeting waits until speech recognition, the voice and a local answer model are loaded
 (their services unload idle models), and the person hears what is happening while an app is checked.
+Each reply logs where its wait went (log_turns).
 """
 
 import asyncio
@@ -25,6 +31,7 @@ import json
 import logging
 import os
 import re
+import time
 import wave
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +41,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import aiohttp
 import duplex
 import httpx2
+import websearch
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
@@ -79,25 +87,35 @@ TTS_MODEL = _env("MU3LAB_TTS_MODEL", "mu3lab-tts")
 TTS_VOICE = _env("MU3LAB_TTS_VOICE", "af_heart")
 
 VOICE_TOOLS = Path(_env("MU3LAB_VOICE_TOOLS", "voice-tools/people.json"))
-# How the assistant talks, beside the app tools: separate steps, or one full-duplex model
-# (Settings, Voice Assistant; ctl/duplex_voice.py).
-VOICE_ENGINE = VOICE_TOOLS.with_name("engine.json")
+# The household's choices, beside the app tools (Settings, Voice Assistant; ctl/voice_settings.py).
+VOICE_SETTINGS = VOICE_TOOLS.with_name("settings.json")
+DEFAULT_SETTINGS: dict[str, Any] = {
+    # Separate steps ("pipeline") or one full-duplex model ("duplex").
+    "engine": "pipeline",
+    "responsiveness": "balanced",
+    "interruptions": True,
+    "voice": "",
+    # SearXNG's address when web search is on and the app is installed; empty means no search.
+    "search_url": "",
+}
 
 INSTRUCTIONS = (
     "You are Mu3Lab's voice assistant for a household. Speak in short, plain sentences "
     "that sound natural when read aloud. Do not use lists, markdown or emoji."
 )
-# The person has stopped talking after this much silence (LiveKit's default is 0.5 s). The turn
-# detector still waits longer, up to 3 s, when they sound unfinished. LiveKit refuses to start a
-# call with the turn detector below 0.25 s.
+# The person has stopped talking after this much silence (LiveKit's default is 0.5 s). LiveKit
+# refuses to start a call with the turn detector below 0.25 s.
 END_OF_SPEECH_SECONDS = 0.25
+# When the person sounds unfinished, the turn detector waits for more, at most this long
+# (LiveKit's default is 3 s). The household chooses it as Responsiveness.
+MAX_WAIT_SECONDS = {"fast": 1.0, "balanced": 2.0, "patient": 3.0}
 # Speaches unloads idle models after five minutes and Ollama after ten, and loading one takes
 # seconds; the greeting waits at most this long for them.
 WARM_SECONDS = 60
 # How long the agent waits for the answer's first words. Longer than the plugin's 5 s, so the
 # gateway can try its next route when one is late (8 s local, then 4 s for the outside list).
 ANSWER_WAIT_SECONDS = 30
-# What the person hears while an app's tool runs and nothing else is being said.
+# What the person hears while a tool runs and nothing else is being said.
 FILLERS = ("One moment.", "Still working on it.")
 FILLER_DELAY_SECONDS = 1.0
 FILLER_INTERVAL_SECONDS = 5.0
@@ -139,13 +157,18 @@ def load_people() -> dict[str, Any]:
         return {}
 
 
-def load_engine() -> dict[str, Any]:
-    """How this call talks; separate steps until Mu3Lab says otherwise."""
+def load_settings() -> dict[str, Any]:
+    """The household's choices for this call; the defaults until Mu3Lab has written them."""
     try:
-        data = json.loads(VOICE_ENGINE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"engine": "pipeline"}
-    return data if isinstance(data, dict) else {"engine": "pipeline"}
+        data = json.loads(VOICE_SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("No voice settings at %s (%s); using the defaults.", VOICE_SETTINGS, exc)
+        data = {}
+    settings = {**DEFAULT_SETTINGS, **(data if isinstance(data, dict) else {})}
+    if settings["responsiveness"] not in MAX_WAIT_SECONDS:
+        settings["responsiveness"] = DEFAULT_SETTINGS["responsiveness"]
+    settings["voice"] = str(settings["voice"] or TTS_VOICE)
+    return settings
 
 
 def _silence() -> bytes:
@@ -167,7 +190,7 @@ async def _post(url: str, key: str, **request: Any) -> None:
         await reply.read()
 
 
-async def warm_speech() -> None:
+async def warm_speech(voice: str) -> None:
     """Load speech recognition and the voice by using each once."""
     form = aiohttp.FormData()
     form.add_field("model", STT_MODEL)
@@ -178,7 +201,7 @@ async def warm_speech() -> None:
         _post(
             f"{SPEECH_BASE_URL}/audio/speech",
             SPEECH_API_KEY,
-            json={"model": TTS_MODEL, "voice": TTS_VOICE, "input": "Hi.", "response_format": "pcm"},
+            json={"model": TTS_MODEL, "voice": voice, "input": "Hi.", "response_format": "pcm"},
         ),
     )
 
@@ -230,6 +253,47 @@ def _filler(step: int) -> str | None:
     return FILLERS[step] if step < len(FILLERS) else None
 
 
+def _seconds(value: Any) -> str:
+    return f"{value:.2f} s" if isinstance(value, (int, float)) else "?"
+
+
+def log_turns(session: AgentSession) -> None:
+    """Log one line per reply saying where the wait went, from LiveKit's own per-turn measurements.
+
+    Read them with ``docker logs mu3lab-livekit-agent-1 2>&1 | grep "Reply after"``. The parts can
+    overlap: the answer is prepared before the turn is confirmed (preemptive generation).
+    """
+    heard: dict[str, Any] = {}
+
+    @session.on("conversation_item_added")
+    def added(event) -> None:
+        item = event.item
+        if getattr(item, "type", "") != "message":
+            return
+        metrics = dict(getattr(item, "metrics", None) or {})
+        if item.role == "user":
+            heard.clear()
+            heard.update(metrics)
+            return
+        if item.role != "assistant" or "e2e_latency" not in metrics:
+            return
+        spoke = None
+        if "started_speaking_at" in heard and "stopped_speaking_at" in heard:
+            spoke = heard["stopped_speaking_at"] - heard["started_speaking_at"]
+        agent = session.current_agent
+        logger.info(
+            "Reply after %s from the end of speech (%s): transcript %s, end of turn %s, first words %s, "
+            "first sound %s; the person spoke for %s",
+            _seconds(metrics["e2e_latency"]),
+            getattr(agent, "title", "main assistant"),
+            _seconds(heard.get("transcription_delay")),
+            _seconds(heard.get("end_of_turn_delay")),
+            _seconds(metrics.get("llm_node_ttft")),
+            _seconds(metrics.get("tts_node_ttfb")),
+            _seconds(spoke),
+        )
+
+
 def _handoff_context(agent: Agent) -> ChatContext:
     """The recent conversation, without tool calls or the other assistant's instructions."""
     return agent.chat_ctx.copy(exclude_function_call=True, exclude_instructions=True).truncate(max_items=HANDOFF_ITEMS)
@@ -267,19 +331,45 @@ class ConfirmedToolset(MCPToolset):
                 if said is None or said[0] in self._used or not YES.search(said[1]):
                     raise ToolError(ASK_FIRST)
                 self._used.add(said[0])
-            async with context.with_filler(
-                _filler, delay=FILLER_DELAY_SECONDS, interval=FILLER_INTERVAL_SECONDS, max_steps=len(FILLERS)
-            ):
-                return await tool(raw_arguments=raw_arguments)
+            started = time.monotonic()
+            try:
+                async with context.with_filler(
+                    _filler, delay=FILLER_DELAY_SECONDS, interval=FILLER_INTERVAL_SECONDS, max_steps=len(FILLERS)
+                ):
+                    return await tool(raw_arguments=raw_arguments)
+            finally:
+                logger.info("Tool %s took %s", tool.info.name, _seconds(time.monotonic() - started))
 
         return function_tool(call, raw_schema=tool.info.raw_schema)
+
+
+def search_tool(base_url: str):
+    """The main assistant's web search, through the household's SearXNG app."""
+
+    async def search_web(context: RunContext, query: str) -> str:
+        """Search the internet for current facts: news, weather, opening hours, prices, sports and recent events.
+
+        Args:
+            query: A few search words.
+        """
+        started = time.monotonic()
+        async with context.with_filler(
+            _filler, delay=FILLER_DELAY_SECONDS, interval=FILLER_INTERVAL_SECONDS, max_steps=len(FILLERS)
+        ):
+            found = await websearch.search(utils.http_context.http_session(), base_url, query)
+        logger.info("Web search took %s", _seconds(time.monotonic() - started))
+        return found
+
+    return function_tool(search_web)
 
 
 class Assistant(Agent):
     """The main assistant: answers general questions and hands the person to an app's assistant."""
 
-    def __init__(self, person: dict[str, Any] | None, guide: str, chat_ctx: ChatContext | None = None) -> None:
-        self.person, self.guide = person, guide
+    def __init__(
+        self, person: dict[str, Any] | None, guide: str, search_url: str, chat_ctx: ChatContext | None = None
+    ) -> None:
+        self.person, self.guide, self.search_url = person, guide, search_url
         agents = (person or {}).get("agents", [])
         if person is None:
             situation = (
@@ -299,18 +389,22 @@ class Assistant(Agent):
                 "cannot see or change anything in their apps; an administrator turns them on in Mu3Lab."
             )
         instructions = f"{INSTRUCTIONS}\n\n{now_line()}\n\n{situation}"
+        tools = [self._open(agent) for agent in agents]
+        if search_url:
+            instructions += (
+                "\n\nFor current facts you do not know for certain (news, weather, prices, opening hours, sports, "
+                "recent events), call search_web, then answer in one or two sentences from what it finds. Never "
+                "read out links."
+            )
+            tools.append(search_tool(search_url))
         if guide:
             instructions += f"\n\nThe household's apps, for general questions:\n{guide}"
-        super().__init__(
-            instructions=instructions,
-            tools=[self._open(agent) for agent in agents],
-            chat_ctx=chat_ctx,
-        )
+        super().__init__(instructions=instructions, tools=tools, chat_ctx=chat_ctx)
         self._handed_back = chat_ctx is not None
 
     def _open(self, spec: dict[str, Any]):
         async def open_app(context: RunContext):
-            return AppAssistant(spec, self.person, self.guide, _handoff_context(self))
+            return AppAssistant(spec, self.person, self.guide, self.search_url, _handoff_context(self))
 
         return function_tool(
             open_app,
@@ -327,8 +421,10 @@ class Assistant(Agent):
 class AppAssistant(Agent):
     """One app's assistant, with only that app's tools, acting as the person talking."""
 
-    def __init__(self, spec: dict[str, Any], person: dict[str, Any], guide: str, chat_ctx: ChatContext) -> None:
-        self.person, self.guide, self.title = person, guide, spec["title"]
+    def __init__(
+        self, spec: dict[str, Any], person: dict[str, Any], guide: str, search_url: str, chat_ctx: ChatContext
+    ) -> None:
+        self.person, self.guide, self.search_url, self.title = person, guide, search_url, spec["title"]
         server = mcp.MCPServerHTTP(
             url=spec["url"],
             headers={"Authorization": f"Bearer {spec['token']}"},
@@ -345,7 +441,7 @@ class AppAssistant(Agent):
     @function_tool
     async def back_to_main(self, context: RunContext):
         """Hand the person back to the main assistant: when they are done here or ask about another app."""
-        return Assistant(self.person, self.guide, _handoff_context(self))
+        return Assistant(self.person, self.guide, self.search_url, _handoff_context(self))
 
     async def on_enter(self) -> None:
         # Say what is happening at once; the answer is worked out while this plays. Kept out of the
@@ -367,7 +463,7 @@ def prewarm(proc: JobProcess) -> None:
 server.setup_fnc = prewarm
 
 
-async def duplex_entrypoint(ctx: JobContext, engine: dict[str, Any]) -> None:
+async def duplex_entrypoint(ctx: JobContext, settings: dict[str, Any]) -> None:
     """A full-duplex call: the model listens and speaks itself, with web search as its one tool."""
     await ctx.connect()
     participant = await ctx.wait_for_participant()
@@ -378,18 +474,18 @@ async def duplex_entrypoint(ctx: JobContext, engine: dict[str, Any]) -> None:
         "household's apps; if asked, say that the household can switch the voice assistant back to separate "
         "steps in Mu3Lab's Settings to use them."
     )
-    await duplex.run_call(ctx.room, participant, engine, instructions)
+    await duplex.run_call(ctx.room, participant, settings, instructions)
 
 
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
-    engine = load_engine()
-    if engine.get("engine") == "duplex":
-        await duplex_entrypoint(ctx, engine)
+    settings = load_settings()
+    if settings["engine"] == "duplex":
+        await duplex_entrypoint(ctx, settings)
         return
     # Speech models load while the person joins.
-    speech_ready = asyncio.create_task(warm_speech())
+    speech_ready = asyncio.create_task(warm_speech(settings["voice"]))
 
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
@@ -412,7 +508,7 @@ async def entrypoint(ctx: JobContext) -> None:
             base_url=SPEECH_BASE_URL,
             api_key=SPEECH_API_KEY,
             model=TTS_MODEL,
-            voice=TTS_VOICE,
+            voice=settings["voice"],
             # Raw 24 kHz audio, as the plugin plays it: no MP3 to encode in Speaches and decode here.
             response_format="pcm",
         ),
@@ -420,11 +516,16 @@ async def entrypoint(ctx: JobContext) -> None:
         # "v1" would call LiveKit's hosted gateway.
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
-            endpointing={"min_delay": END_OF_SPEECH_SECONDS},
+            endpointing={"min_delay": END_OF_SPEECH_SECONDS, "max_delay": MAX_WAIT_SECONDS[settings["responsiveness"]]},
+            # Talking over the assistant stops it, judged by voice activity alone ("adaptive" would
+            # ask LiveKit Cloud).
+            interruption={"enabled": bool(settings["interruptions"]), "mode": "vad"},
             # Prepare the answer and its first spoken sentence before the turn is confirmed.
             preemptive_generation={"enabled": True, "preemptive_tts": True},
         ),
     )
+
+    log_turns(session)
 
     await ctx.connect()
     # The person's identity is their email, set from their sign-in by the voice page.
@@ -433,7 +534,7 @@ async def entrypoint(ctx: JobContext) -> None:
     person = (people.get("people") or {}).get(participant.identity.lower())
     if person is None:
         logger.warning("No voice tools for this caller; answering without app tools.")
-    assistant = Assistant(person, str(people.get("guide") or ""))
+    assistant = Assistant(person, str(people.get("guide") or ""), str(settings["search_url"] or ""))
     answer_ready = asyncio.create_task(warm_answer_model(assistant.instructions))
     await session.start(agent=assistant, room=ctx.room)
     await wait_until_warm(speech_ready, answer_ready)

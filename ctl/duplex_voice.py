@@ -5,8 +5,8 @@ The household chooses how the voice assistant talks (Settings, Voice Assistant):
 - **Separate steps** (``pipeline``, the default): Whisper hears, a chat model answers, Kokoro
   speaks, each through LiteLLM. App assistants and the spoken-yes check work here.
 - **Full duplex** (``duplex``): MiniCPM-o 4.5, 4-bit (Q4_K_M), from llama.cpp-omni. It takes a
-  system prompt. Its web search (SearXNG) stays off until duplex itself is reliable: the switch
-  starts only the model.
+  system prompt. Its web search (the household's SearXNG app) stays off in the bridge until duplex
+  itself is reliable: the switch starts only the model.
 
 The graphics card must never hold two models, so the switch is strict:
 
@@ -20,16 +20,15 @@ The graphics card must never hold two models, so the switch is strict:
 Switching back stops the duplex model, checks the card is free, saves the setting, and starts
 again the apps this mode stopped (an app the owner had stopped stays stopped).
 
-The voice agent reads ``engine.json`` next to its app tools at the start of each call, so no
-restart is needed: the next call uses the new mode.
+The voice agent reads ``settings.json`` next to its app tools at the start of each call
+(``ctl/voice_settings.py``), so no restart is needed: the next call uses the new mode. The file
+names duplex only once the model has loaded (``agent_engine``).
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import secrets
 import shutil
 import time
 import urllib.request
@@ -38,6 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ctl import voice_settings
 from ctl.runtime import RuntimePaths
 from ctl.store import records
 
@@ -84,10 +84,8 @@ FILES: tuple[tuple[str, int, str], ...] = (
 RETIRED = ("vision",)
 DOWNLOAD_BYTES = sum(size for _, size, _ in FILES)
 DOWNLOAD_GB = round(DOWNLOAD_BYTES / 1e9, 1)
-# Where the agent reaches the model and the search, on Mu3Lab's backend network.
+# Where the agent reaches the model, on Mu3Lab's backend network.
 OMNI_URL = "ws://minicpm-omni:9060/backend"
-SEARCH_URL = "http://voice-search:8080"
-ENGINE_FILE = "engine.json"
 AGENT_CONTAINER = "mu3lab-livekit-agent-1"
 # Building the server compiles CUDA code for several card generations: allow an hour.
 BUILD_SECONDS = 3600
@@ -119,6 +117,13 @@ def engine(paths: RuntimePaths | None = None) -> str:
 
 def duplex_on(paths: RuntimePaths | None = None) -> bool:
     return engine(paths) == DUPLEX
+
+
+def agent_engine(paths: RuntimePaths | None = None) -> str:
+    """How the agent's calls talk: duplex only once the model is loaded, separate steps until then."""
+    current = record(paths)
+    agent = current.get("agent", current["engine"])
+    return agent if agent in ENGINES else PIPELINE
 
 
 def voice_app():
@@ -295,16 +300,9 @@ def download(log: Log, report: Callable[[int, int], None], paths: RuntimePaths |
 
 
 def _write_env(paths: RuntimePaths) -> None:
-    """The project's Compose values: the model folder and SearXNG's own secret, kept between switches."""
-    from ctl.secrets import read_runtime_env
-
+    """The project's Compose values: the model folder."""
     env_file = project(paths) / ".env"
-    current = read_runtime_env(env_file) if env_file.is_file() else {}
-    values = {
-        "MU3LAB_DUPLEX_MODELS": str(models_dir(paths)),
-        "SEARXNG_SECRET": current.get("SEARXNG_SECRET") or secrets.token_hex(32),
-    }
-    text = "".join(f"{key}={value}\n" for key, value in values.items())
+    text = f"MU3LAB_DUPLEX_MODELS={models_dir(paths)}\n"
     partial = env_file.with_name(".env.partial")
     descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
@@ -340,9 +338,9 @@ def build(log: Log) -> None:
 
 
 def stop_project(log: Log) -> None:
-    # SearXNG too: earlier switches started it.
+    # Removes the containers, and the SearXNG one earlier versions of this project started.
     if (project() / "docker-compose.yml").is_file():
-        _compose(log, "stop", "omni", "searxng", timeout=180)
+        _compose(log, "down", "--remove-orphans", timeout=180)
 
 
 def warm(log: Log) -> None:
@@ -357,19 +355,6 @@ def warm(log: Log) -> None:
     )
     if rc:
         raise SwitchFailed(f"The full-duplex model did not load: {output[-400:]}")
-
-
-def write_agent_mode(engine_name: str, paths: RuntimePaths | None = None) -> None:
-    """Tell the voice agent which mode its next call uses (read at each call's start)."""
-    from ctl import voice_tools
-
-    target = voice_tools.folder(paths)
-    target.mkdir(mode=0o755, exist_ok=True)
-    data = {"engine": engine_name, "omni_url": OMNI_URL, "search_url": SEARCH_URL}
-    partial = target / f".{ENGINE_FILE}.partial"
-    partial.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
-    os.chmod(partial, 0o644)
-    partial.replace(target / ENGINE_FILE)
 
 
 # --- What Settings shows -----------------------------------------------------------------
@@ -414,11 +399,13 @@ def view(root: Path, paths: RuntimePaths | None = None) -> dict[str, Any]:
 # --- The switch job ----------------------------------------------------------------------
 
 
-def _save(engine_name: str, actor: str, stopped: list, paths: RuntimePaths) -> None:
+def _save(engine_name: str, actor: str, stopped: list, paths: RuntimePaths, *, loaded: bool = True) -> None:
+    """Store the mode; until ``loaded``, the agent's calls keep separate steps."""
     records.put(
         *SETTINGS,
         {
             "engine": engine_name,
+            "agent": engine_name if loaded else PIPELINE,
             "stopped": [service.id for service in stopped],
             "stopped_names": [service.name for service in stopped],
             "changed_at": _now(),
@@ -487,24 +474,25 @@ def _switch_on(job_id: str, actor: str, root: Path, log: Log, report: Callable[[
     build(log)
     # 2. From here every start of a GPU app is refused.
     services = gpu_apps(root, paths)
-    _save(DUPLEX, actor, [], paths)
+    _save(DUPLEX, actor, [], paths, loaded=False)
     stopped: list = []
     try:
-        _stop_apps(services, stopped, job_id, root, log, lambda: _save(DUPLEX, actor, stopped, paths))
+        _stop_apps(services, stopped, job_id, root, log, lambda: _save(DUPLEX, actor, stopped, paths, loaded=False))
         # 3. The card must be empty before the model loads.
         wait_card_free(log)
         log("Starting the full-duplex model.")
         _compose(log, "up", "-d", "--wait", "--wait-timeout", "300", "omni", timeout=420)
         warm(log)
-        write_agent_mode(DUPLEX, paths)
+        _save(DUPLEX, actor, stopped, paths)
+        voice_settings.write(log, paths)
     except Exception as exc:
         log(f"Switching on failed; putting separate steps back: {exc}")
         try:
             stop_project(log)
         except SwitchFailed as undo:
             log(str(undo))
-        write_agent_mode(PIPELINE, paths)
         _save(PIPELINE, actor, [], paths)
+        voice_settings.write(log, paths)
         failed = _start_apps([service.id for service in stopped], job_id, root, log)
         if failed:
             raise SwitchFailed(
@@ -525,7 +513,7 @@ def _switch_off(job_id: str, actor: str, root: Path, log: Log) -> str:
     stop_project(log)
     wait_card_free(log)
     _save(PIPELINE, actor, [], paths)
-    write_agent_mode(PIPELINE, paths)
+    voice_settings.write(log, paths)
     failed = _start_apps([str(app_id) for app_id in current.get("stopped") or []], job_id, root, log)
     if failed:
         raise SwitchFailed(

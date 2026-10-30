@@ -911,6 +911,8 @@ class VoiceApp(ApiModel):
     description: str
     operators_only: bool
     on: bool
+    # Whether the app's connector is live now; a stopped app's tools wait until it starts.
+    ready: bool = True
 
 
 class VoiceApps(ApiModel):
@@ -922,6 +924,97 @@ class VoiceApps(ApiModel):
 
 class VoiceAppRequest(ApiModel):
     on: bool
+
+
+VoiceResponsiveness = Literal["fast", "balanced", "patient"]
+
+
+class VoiceSettings(ApiModel):
+    """The household's voice assistant choices (ctl/voice_settings.py)."""
+
+    # How long the assistant waits when someone sounds unfinished.
+    responsiveness: VoiceResponsiveness
+    # Whether talking over the assistant stops it.
+    interruptions: bool
+    # The assistant's voice; "" uses Speaches' default voice.
+    voice: str
+    # Web search for current facts; it works once SearXNG is installed.
+    search: bool
+    changed_at: str
+    changed_by: str
+
+
+class VoiceSettingsRequest(ApiModel):
+    responsiveness: VoiceResponsiveness | None = None
+    interruptions: bool | None = None
+    voice: str | None = Field(default=None, max_length=40)
+    search: bool | None = None
+
+
+class VoiceOption(ApiModel):
+    id: str
+    name: str
+    accent: str
+    gender: str
+
+
+class SpeechModelChoice(ApiModel):
+    value: str
+    options: list[str]
+
+
+class VoiceSpeech(ApiModel):
+    """Speaches' models, which every app using speech shares."""
+
+    app_id: str
+    installed: bool
+    # Speech recognition (Whisper) and the voice model (Kokoro).
+    stt: SpeechModelChoice
+    tts: SpeechModelChoice
+    default_voice: str
+
+
+class VoicePage(ApiModel):
+    ok: bool
+    # Whether LiveKit, the voice app, is installed.
+    installed: bool
+    settings: VoiceSettings
+    speech: VoiceSpeech
+    # The English voices Speaches can speak with now; empty while it is not answering.
+    voices: list[VoiceOption]
+    # Whether the household's SearXNG app is installed; web search needs it.
+    search_installed: bool
+    search_app_id: str
+    # A running change of the speech models (Speaches' setup), or "".
+    active_job_id: str
+
+
+class VoiceSpeechRequest(ApiModel):
+    stt_model: str = Field(min_length=1, max_length=200)
+    tts_model: str = Field(min_length=1, max_length=200)
+
+
+class VoiceSampleRequest(ApiModel):
+    voice: str = Field(min_length=1, max_length=40)
+
+
+class VoiceSample(ApiModel):
+    ok: bool
+    # One spoken sentence as base64 MP3.
+    audio: str
+
+
+class VoiceToolCheck(ApiModel):
+    id: str
+    ok: bool
+    tools: int
+    detail: str
+
+
+class VoiceToolChecks(ApiModel):
+    ok: bool
+    # Checked with the viewer's own keys, as a call of theirs would; empty when they have none.
+    apps: list[VoiceToolCheck]
 
 
 class RecoverySheet(ApiModel):

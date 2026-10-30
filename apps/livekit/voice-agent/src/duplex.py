@@ -1,13 +1,19 @@
 """Full-duplex calls: one model (MiniCPM-o 4.5) listens and speaks at the same time.
 
-Mu3Lab switches the voice assistant to this mode in Settings, Voice Assistant (ctl/duplex_voice.py)
-and writes ``engine.json`` beside the app tools; the agent reads it at each call's start.
+Mu3Lab switches the voice assistant to this mode in Settings, Voice Assistant, Labs
+(ctl/duplex_voice.py) and says so in ``settings.json`` beside the app tools; the agent reads it at
+each call's start.
 
 A call here does not use LiveKit's AgentSession, which takes turns. Instead a bridge joins the room,
 sends the person's microphone to llama.cpp-omni's WebSocket one second at a time (16 kHz), and
 plays the model's speech as it arrives (24 kHz). The model decides itself when to talk, listen or
 stop, so there is no voice detection or turn detector here; the browser's echo cancellation keeps
 it from hearing itself.
+
+The call follows MiniCPM-o's own demo (OpenBMB/MiniCPM-o-Demo, branch Comni, and llama.cpp-omni's
+README): one second of audio every second, silence when the person is quiet, never skipped, so the
+model's sense of time does not drift; and the demo's sampling (SESSION_CONFIG). The server answers
+each second in order, so the bridge only keeps the person's audio live: it never sends old audio.
 
 The model can have one tool, a private web search. Its system prompt tells it to say "Let me look
 that up: <words>." when it needs current facts; the bridge hears that in the model's text, searches
@@ -16,7 +22,8 @@ to the server, apps/livekit/duplex/duplex-text.patch).
 
 While duplex is being made reliable, the search and Mu3Lab's own prompt are off (SEARCH_TOOL,
 MU3LAB_PROMPT): the model gets the prompt it was trained with, and each second of the call is
-logged (what the model heard, and whether it listened or spoke).
+logged (what the model heard, and whether it listened or spoke). Search, when on, uses the
+household's SearXNG app (``search_url`` in the settings).
 
 Run as ``python src/duplex.py warm`` to load the model onto the graphics card ahead of the first call.
 """
@@ -35,6 +42,7 @@ import time
 from typing import Any
 
 import aiohttp
+import websearch
 from livekit import rtc
 
 logger = logging.getLogger("mu3lab-voice-agent")
@@ -43,15 +51,33 @@ IN_RATE = 16000  # the model hears 16 kHz
 OUT_RATE = 24000  # and speaks 24 kHz
 CHUNK = IN_RATE  # one second of audio per step, as the model was trained
 FRAME = OUT_RATE // 50  # 20 ms frames into LiveKit
-# The person's audio waits at most this long while the model catches up; older audio is dropped.
-MAX_BACKLOG = 3 * IN_RATE
-# Steps sent but not yet answered before the bridge waits; and how long it waits at most.
-MAX_IN_FLIGHT = 2
-STALL_SECONDS = 3.0
+# Audio that arrives faster than real time (a network burst) is kept up to this much; older audio
+# is dropped, so the model always hears the person as they are now.
+MAX_BACKLOG = 2 * CHUNK
+# A second of audio may arrive a little after its tick (network jitter): it is waited for this
+# long before the missing part is sent as silence, and this much extra is kept for the next step.
+LATE_SECONDS = 0.15
+SLACK = CHUNK // 4
+# The model's answers a step usually takes 50 to 150 ms; longer than this is logged, as it means
+# the graphics card cannot keep up.
+SLOW_STEP_SECONDS = 1.0
+# Speech is buffered this long before a reply starts playing, so the first chunks play without gaps
+# (the demo's playback_delay_ms).
+PREROLL_SECONDS = 0.2
 CONNECT_SECONDS = 300  # the first call loads the model
-SEARCH_SECONDS = 10
-RESULTS = 3
-RESULT_CHARS = 300
+# The demo's duplex sampling (MiniCPM-o-Demo core/schemas/duplex.py, DuplexConfig defaults), sent
+# with session.init. Without it the server ends turns sooner (length_penalty 1.0 instead of 1.1).
+# The demo's text repetition penalty (1.05) is a server flag (apps/livekit/duplex/docker-compose.yml).
+SESSION_CONFIG = {
+    "length_penalty": 1.1,
+    "max_new_speak_tokens_per_chunk": 20,
+    "force_listen_count": 3,
+    "listen_prob_scale": 1.0,
+    "temperature": 0.7,
+    "top_k": 20,
+    "top_p": 0.8,
+    "tts_temperature": 0.8,
+}
 SEARCH = re.compile(r"let me look (?:that|it|this) up\s*[:,-]?\s*(?:for\s+)?(.{3,160}?)\s*[.?!\n]", re.IGNORECASE)
 STATE = "lk.agent.state"  # what the voice page shows (listening, speaking), as LiveKit's agents set it
 # Off while testing: the web search, and Mu3Lab's instructions in place of the model's trained prompt.
@@ -99,27 +125,10 @@ def _to_int16(b64: str) -> bytes:
 
 
 async def search(http: aiohttp.ClientSession, base_url: str, query: str) -> str:
-    """The top results from SearXNG as plain text the model reads, or why there are none."""
-    try:
-        async with http.get(
-            f"{base_url}/search",
-            params={"q": query, "format": "json", "safesearch": "1"},
-            timeout=aiohttp.ClientTimeout(total=SEARCH_SECONDS),
-        ) as reply:
-            reply.raise_for_status()
-            data = await reply.json()
-    except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-        logger.warning("Web search failed: %s", exc)
-        return f'[Search results for "{query}"]\nThe search did not work just now. Say so briefly.\n[End of search results]\n'
-    lines = [str(answer) for answer in data.get("answers") or []][:1]
-    for result in (data.get("results") or [])[:RESULTS]:
-        title = str(result.get("title") or "").strip()
-        content = " ".join(str(result.get("content") or "").split())[:RESULT_CHARS]
-        lines.append(f"- {title}: {content}" if content else f"- {title}")
-    if not lines:
-        lines.append("Nothing was found.")
-    body = "\n".join(lines)
-    return f'\n[Search results for "{query}"]\n{body}\n[End of search results]\n'
+    """The top results from SearXNG as text marked for the model, or why there are none."""
+    return (
+        f'\n[Search results for "{query}"]\n{await websearch.search(http, base_url, query)}\n[End of search results]\n'
+    )
 
 
 class DuplexCall:
@@ -128,18 +137,18 @@ class DuplexCall:
     def __init__(self, room: rtc.Room, track: rtc.Track, settings: dict[str, Any], instructions: str) -> None:
         self.room, self.track = room, track
         self.omni_url = str(settings.get("omni_url") or "ws://minicpm-omni:9060/backend")
-        self.search_url = str(settings.get("search_url") or "http://voice-search:8080")
+        self.search_url = str(settings.get("search_url") or "")
         self.instructions = instructions
         self.heard = bytearray()  # the person's 16 kHz audio not yet sent
         self.pending_text = ""  # search results for the next step
-        self.in_flight = 0
         self.steps = 0
+        # When each step was sent, to log a slow one.
+        self.sent_at: dict[int, float] = {}
         # Per step sent, for the log: how much of the second was the person's audio, and how loud.
         self.heard_log: dict[int, str] = {}
         # Bytes of speech since the last logged step (speech lags its step, so it is not per step).
         self.spoken = 0
         self.done_ids: set[str] = set()
-        self.last_answer = time.monotonic()
         self.speech: asyncio.Queue[bytes] = asyncio.Queue()
         self.texts: dict[str, str] = {}
         self.searched: set[str] = set()
@@ -162,7 +171,7 @@ class DuplexCall:
                 )
                 return
             async with ws:
-                payload: dict[str, Any] = {"mode": "full_duplex", "use_tts": True}
+                payload: dict[str, Any] = {"mode": "full_duplex", "use_tts": True, "config": SESSION_CONFIG}
                 if MU3LAB_PROMPT:
                     payload["system_prompt"] = system_prompt(self.instructions)
                 await ws.send_json({"type": "session.init", "payload": payload})
@@ -217,51 +226,56 @@ class DuplexCall:
                 del self.heard[: len(self.heard) - MAX_BACKLOG * 2]
 
     async def _send(self, ws: aiohttp.ClientWebSocketResponse) -> None:
-        """Every second, send that second of the person (silence when quiet or muted)."""
+        """Every second, send the person's latest second (silence when quiet or muted).
+
+        Never skipped and never late: the server answers steps in order, and some steps (the one
+        after a reply ends) send no event at all, so waiting for answers would stall the call.
+        """
         tick = time.monotonic()
         while True:
             tick += 1.0
             await asyncio.sleep(max(0.0, tick - time.monotonic()))
-            stalled = time.monotonic() - self.last_answer > STALL_SECONDS
-            if self.in_flight >= MAX_IN_FLIGHT and not stalled:
-                continue  # the model is behind; the audio waits in ``heard``
-            if stalled:
-                self.in_flight = 0
+            late = time.monotonic() + LATE_SECONDS
+            while len(self.heard) < CHUNK * 2 and time.monotonic() < late:
+                await asyncio.sleep(0.01)
+            # More than a little extra means the model would hear the person late: drop the oldest.
+            extra = len(self.heard) - (CHUNK + SLACK) * 2
+            if extra > 0:
+                del self.heard[:extra]
             chunk = bytes(self.heard[: CHUNK * 2])
             del self.heard[: CHUNK * 2]
             self.steps += 1
             self.heard_log[self.steps] = _level(chunk)
+            self.sent_at[self.steps] = time.monotonic()
             chunk += bytes(CHUNK * 2 - len(chunk))
             step: dict[str, Any] = {"audio_base64": _to_float32(chunk)}
             if self.pending_text:
                 step["text"], self.pending_text = self.pending_text, ""
             await ws.send_json({"type": "input.append", "input": step})
-            self.in_flight += 1
 
     def _answered(self, response_id: str, listened: bool) -> None:
-        self.last_answer = time.monotonic()
         if response_id and response_id in self.done_ids:
             return
         if response_id:
             self.done_ids.add(response_id)
-        self.in_flight = max(0, self.in_flight - 1)
         self._log_step(response_id, listened)
 
     def _log_step(self, response_id: str, listened: bool) -> None:
-        """One line per second of the call: what the model heard, and whether it listened or spoke."""
+        """One line per second of the call: what the model heard, whether it listened or spoke, how long it took."""
         step = int(response_id.rpartition("_")[2]) if response_id.rpartition("_")[2].isdigit() else 0
         heard = self.heard_log.pop(step, "?")
+        sent = self.sent_at.pop(step, None)
+        took = time.monotonic() - sent if sent is not None else 0.0
         text = self.texts.get(response_id, "").strip()
         played, self.spoken = self.spoken / 2 / OUT_RATE, 0
         action = "listen" if listened and not text else f"speak {text!r}" + (" then listen" if listened else "")
-        logger.info(
-            "Duplex step %s: heard %s; %s; %.1fs of speech arrived; %s in flight",
-            step,
-            heard,
-            action,
-            played,
-            self.in_flight,
-        )
+        logger.info("Duplex step %s: heard %s; %s in %.2fs; %.1fs of speech arrived", step, heard, action, took, played)
+        if took > SLOW_STEP_SECONDS:
+            logger.warning("Duplex step %s took %.1fs: the model is falling behind the call.", step, took)
+        # Steps the server answered with no event (it does after a reply ends) are dropped here.
+        for old in [number for number in self.sent_at if number < step]:
+            self.sent_at.pop(old, None)
+            self.heard_log.pop(old, None)
 
     async def _receive(self, ws: aiohttp.ClientWebSocketResponse, http: aiohttp.ClientSession) -> None:
         async for message in ws:
@@ -291,6 +305,8 @@ class DuplexCall:
         self.close()
 
     async def _maybe_search(self, http: aiohttp.ClientSession, text: str) -> None:
+        if not self.search_url:
+            return
         found = SEARCH.search(text)
         if not found:
             return
@@ -322,6 +338,14 @@ class DuplexCall:
                 if not pending:
                     await self._set_state("listening")
                     continue
+            if self.state != "speaking":
+                # A reply starts: gather a little speech first, so it does not stutter.
+                deadline = time.monotonic() + PREROLL_SECONDS
+                while len(pending) < PREROLL_SECONDS * OUT_RATE * 2 and time.monotonic() < deadline:
+                    try:
+                        pending += await asyncio.wait_for(self.speech.get(), timeout=deadline - time.monotonic())
+                    except TimeoutError:
+                        break
             await self._set_state("speaking")
             while len(pending) >= FRAME * 2 or (pending and self.speech.empty()):
                 piece, pending = pending[: FRAME * 2], pending[FRAME * 2 :]
@@ -364,7 +388,9 @@ async def _microphone(room: rtc.Room, participant: rtc.RemoteParticipant) -> rtc
 async def warm(url: str) -> None:
     """Open and close one call so the server loads every part of the model onto the card."""
     async with aiohttp.ClientSession() as http, http.ws_connect(url, max_msg_size=0) as ws:
-        await ws.send_json({"type": "session.init", "payload": {"mode": "full_duplex", "use_tts": True}})
+        await ws.send_json(
+            {"type": "session.init", "payload": {"mode": "full_duplex", "use_tts": True, "config": SESSION_CONFIG}}
+        )
         async with asyncio.timeout(CONNECT_SECONDS):
             async for message in ws:
                 if message.type != aiohttp.WSMsgType.TEXT:

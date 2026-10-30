@@ -62,6 +62,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "dawarich",
                 "lobehub",
                 "speaches",
+                "searxng",
                 "firecrawl",
                 "kopia-ui",
                 "navidrome",

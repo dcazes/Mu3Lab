@@ -1,0 +1,31 @@
+name: mu3lab-searxng
+
+services:
+  # A private metasearch: the frontend network reaches the search engines, the backend network
+  # the assistants that ask it.
+  searxng:
+    image: searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f
+    restart: unless-stopped
+    ports: ["127.0.0.1:8095:8080"]
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET is required}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - ./limiter.toml:/etc/searxng/limiter.toml:ro
+    networks:
+      mu3lab_frontend: {}
+      mu3lab_backend:
+        aliases: [searxng]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}

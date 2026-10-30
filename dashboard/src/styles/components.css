@@ -1060,6 +1060,64 @@ a.row-main:hover b,
   white-space: nowrap;
 }
 
+/* A select with its button beside it (a voice and Try). */
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-field select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A group of fields with a caption and no box of its own. */
+.plain-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.plain-fieldset legend {
+  margin-bottom: 10px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* One line under a page title saying how something stands now. */
+.status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 16px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.status-line strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* A switch row whose label also carries a status. */
+.switch-field .switch-label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.switch-field .switch-label small {
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
 .choice-list {
   display: grid;
   gap: 8px;

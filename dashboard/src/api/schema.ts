@@ -123,6 +123,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/voice/apps/check': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Check Voice Apps
+     * @description Whether each app's tools answer for the person looking, with the keys a call of theirs would use.
+     */
+    get: operations['check_voice_apps_api_v1_ai_voice_apps_check_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ai/voice/apps/{app_id}': {
     parameters: {
       query?: never;
@@ -156,6 +176,72 @@ export interface paths {
      * @description Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps.
      */
     put: operations['change_voice_engine_api_v1_ai_voice_engine_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/sample': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Voice Sample
+     * @description One sentence read aloud in a voice, so people can hear it before choosing it.
+     */
+    post: operations['voice_sample_api_v1_ai_voice_sample_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Voice Page
+     * @description Everyone may see how the voice assistant is set up; only administrators change it.
+     */
+    get: operations['voice_page_api_v1_ai_voice_settings_get'];
+    /**
+     * Change Voice Settings
+     * @description Save responsiveness, interruptions, the voice or web search; the next call uses them, no restart.
+     */
+    put: operations['change_voice_settings_api_v1_ai_voice_settings_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/speech': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change Speech Models
+     * @description Choose Speaches' models, which every app using speech shares: set Speaches up again with them.
+     *
+     *     Setting up downloads and checks the new models, and points the AI gateway's speech names at them.
+     */
+    put: operations['change_speech_models_api_v1_ai_voice_speech_put'];
     post?: never;
     delete?: never;
     options?: never;
@@ -3807,6 +3893,13 @@ export interface components {
       services: components['schemas']['ServicesResponse'];
       system: components['schemas']['SystemResponse'];
     };
+    /** SpeechModelChoice */
+    SpeechModelChoice: {
+      /** Options */
+      options: string[];
+      /** Value */
+      value: string;
+    };
     /** SystemConfig */
     SystemConfig: {
       /** Available Modes */
@@ -4004,6 +4097,11 @@ export interface components {
       on: boolean;
       /** Operators Only */
       operators_only: boolean;
+      /**
+       * Ready
+       * @default true
+       */
+      ready?: boolean;
       /** Title */
       title: string;
     };
@@ -4050,6 +4148,117 @@ export interface components {
       exists: boolean;
       /** Models */
       models: string[];
+      /** Ok */
+      ok: boolean;
+    };
+    /** VoiceOption */
+    VoiceOption: {
+      /** Accent */
+      accent: string;
+      /** Gender */
+      gender: string;
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /** VoicePage */
+    VoicePage: {
+      /** Active Job Id */
+      active_job_id: string;
+      /** Installed */
+      installed: boolean;
+      /** Ok */
+      ok: boolean;
+      /** Search App Id */
+      search_app_id: string;
+      /** Search Installed */
+      search_installed: boolean;
+      settings: components['schemas']['VoiceSettings'];
+      speech: components['schemas']['VoiceSpeech'];
+      /** Voices */
+      voices: components['schemas']['VoiceOption'][];
+    };
+    /** VoiceSample */
+    VoiceSample: {
+      /** Audio */
+      audio: string;
+      /** Ok */
+      ok: boolean;
+    };
+    /** VoiceSampleRequest */
+    VoiceSampleRequest: {
+      /** Voice */
+      voice: string;
+    };
+    /**
+     * VoiceSettings
+     * @description The household's voice assistant choices (ctl/voice_settings.py).
+     */
+    VoiceSettings: {
+      /** Changed At */
+      changed_at: string;
+      /** Changed By */
+      changed_by: string;
+      /** Interruptions */
+      interruptions: boolean;
+      /**
+       * Responsiveness
+       * @enum {string}
+       */
+      responsiveness: 'fast' | 'balanced' | 'patient';
+      /** Search */
+      search: boolean;
+      /** Voice */
+      voice: string;
+    };
+    /** VoiceSettingsRequest */
+    VoiceSettingsRequest: {
+      /** Interruptions */
+      interruptions?: boolean | null;
+      /** Responsiveness */
+      responsiveness?: ('fast' | 'balanced' | 'patient') | null;
+      /** Search */
+      search?: boolean | null;
+      /** Voice */
+      voice?: string | null;
+    };
+    /**
+     * VoiceSpeech
+     * @description Speaches' models, which every app using speech shares.
+     */
+    VoiceSpeech: {
+      /** App Id */
+      app_id: string;
+      /** Default Voice */
+      default_voice: string;
+      /** Installed */
+      installed: boolean;
+      stt: components['schemas']['SpeechModelChoice'];
+      tts: components['schemas']['SpeechModelChoice'];
+    };
+    /** VoiceSpeechRequest */
+    VoiceSpeechRequest: {
+      /** Stt Model */
+      stt_model: string;
+      /** Tts Model */
+      tts_model: string;
+    };
+    /** VoiceToolCheck */
+    VoiceToolCheck: {
+      /** Detail */
+      detail: string;
+      /** Id */
+      id: string;
+      /** Ok */
+      ok: boolean;
+      /** Tools */
+      tools: number;
+    };
+    /** VoiceToolChecks */
+    VoiceToolChecks: {
+      /** Apps */
+      apps: components['schemas']['VoiceToolCheck'][];
       /** Ok */
       ok: boolean;
     };
@@ -4657,6 +4866,89 @@ export interface operations {
       };
     };
   };
+  check_voice_apps_api_v1_ai_voice_apps_check_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceToolChecks'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   change_voice_app_api_v1_ai_voice_apps__app_id__put: {
     parameters: {
       query?: never;
@@ -4756,6 +5048,350 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['AiVoiceEngineRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_sample_api_v1_ai_voice_sample_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceSampleRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceSample'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_page_api_v1_ai_voice_settings_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoicePage'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_voice_settings_api_v1_ai_voice_settings_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceSettingsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoicePage'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  change_speech_models_api_v1_ai_voice_speech_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VoiceSpeechRequest'];
       };
     };
     responses: {

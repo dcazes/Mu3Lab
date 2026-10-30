@@ -28,6 +28,7 @@ import {
   siMealie,
   siNextcloud,
   siOllama,
+  siSearxng,
   siOutline,
   type SimpleIcon,
   siPaperlessngx,
@@ -49,6 +50,7 @@ const brands: Record<string, SimpleIcon> = {
   tailscale: siTailscale,
   audiobookshelf: siAudiobookshelf,
   outline: siOutline,
+  searxng: siSearxng,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {

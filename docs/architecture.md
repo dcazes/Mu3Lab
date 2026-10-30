@@ -216,6 +216,8 @@ The chat setting is an ordered list of sources, `local` and `outside` (default `
 
 [`apps/speaches/`](../apps/speaches) provides optional Whisper transcription and Kokoro synthesis. Its hook prepares models; manifest integrations point LiteLLM and chat at `mu3lab-stt` and `mu3lab-tts`. Open WebUI uses browser voice settings when the speech capability is absent. Server speech processing can be local while the resulting chat text still goes to an outside model if the household allows it.
 
+[`apps/livekit/`](../apps/livekit) is the household voice assistant: a main agent hands people to app assistants through ContextForge with their own keys, and changes run only after a spoken yes. [`ctl/voice_settings.py`](../ctl/voice_settings.py) and [`ctl/voice_tools.py`](../ctl/voice_tools.py) write the agent's `settings.json` and `people.json`, read at each call, so Settings, Voice assistant needs no restart. Its web search goes through [`apps/searxng/`](../apps/searxng), the household's private metasearch. An experimental full-duplex mode ([`ctl/duplex_voice.py`](../ctl/duplex_voice.py)) replaces the separate steps with MiniCPM-o 4.5, stopping every other app that uses the graphics card while it is on.
+
 [`ctl/voice_keys.py`](../ctl/voice_keys.py) issues owner-scoped LiteLLM keys restricted to speech models and rate-limited. The value is shown once with no-store response headers; Mu3Lab retains no plaintext copy of that personal key, and LiteLLM stores its hash. Compatible external clients use the private gateway address and bearer key. This is an API integration facility, not automatic installation of another voice product.
 
 ## 12. Chat assistants and ContextForge

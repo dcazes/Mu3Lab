@@ -78,6 +78,8 @@ def available() -> list[dict[str, Any]]:
                 "description": str(item["description"]),
                 "operators_only": item.get("audience") == "operators",
                 "on": app_id not in off,
+                # Its connector is live; a stopped app's assistant waits, switched off, until it starts.
+                "ready": bool(item.get("active")),
             },
         )
     return sorted(found.values(), key=lambda item: item["title"].casefold())
@@ -155,17 +157,20 @@ def folder(paths: RuntimePaths | None = None) -> Path:
 
 
 def sync(log: Log) -> bool:
-    """Write everyone's voice assistants for the agent, which reads the file at each call's start.
+    """Write everyone's voice assistants, and the household's settings, for the agent, which reads
+    both files at each call's start.
 
-    Returns whether the file changed. Does nothing until the voice app is installed.
+    Returns whether the people file changed. Does nothing until the voice app is installed.
     """
-    from ctl import chat_ops
+    from ctl import chat_ops, voice_settings
     from ctl.contextforge import ContextForgeError
     from ctl.people import PeopleError
 
     target = folder()
     if not chat_ops.installed(app().id) or not target.parent.is_dir():
         return False
+    # The household's choices first: they need no people, and a new SearXNG install turns search on.
+    voice_settings.write(log, RuntimePaths())
     try:
         data = build(log)
     except (PeopleError, ContextForgeError, OSError, ValueError) as exc:
@@ -174,6 +179,9 @@ def sync(log: Log) -> bool:
     text = json.dumps(data, indent=1, sort_keys=True)
     path = target / FILE
     if path.is_file() and path.read_text(encoding="utf-8") == text:
+        # Unchanged, but the agent must still be able to read it (an older restore made it private).
+        os.chmod(target, 0o755)
+        os.chmod(path, 0o644)
         return False
     # The agent runs as its own user. The folder above is the owner's alone (0750), so only
     # the agent's read-only mount and the owner can reach the keys inside.

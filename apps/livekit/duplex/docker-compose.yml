@@ -1,4 +1,5 @@
-# The voice assistant's full-duplex mode: MiniCPM-o 4.5 (4-bit) and a private web search.
+# The voice assistant's full-duplex mode: MiniCPM-o 4.5 (4-bit). Its web search is the household's
+# SearXNG app, like the turn-based assistant's.
 #
 # Not an app of its own and never started with LiveKit: only the switch in Settings, Voice
 # Assistant starts it (ctl/duplex_voice.py), after stopping every other app that uses the
@@ -22,6 +23,12 @@ services:
       - "99"
       - --ctx-size
       - "8192"
+      # Sampling from llama.cpp-omni's README and MiniCPM-o's demo (text repetition penalty 1.05,
+      # temperature 0.7); the rest of the demo's settings go with each call (duplex.py SESSION_CONFIG).
+      - --repeat-penalty
+      - "1.05"
+      - --temp
+      - "0.7"
     volumes:
       - ${MU3LAB_DUPLEX_MODELS:?MU3LAB_DUPLEX_MODELS is required}:/models:ro
     tmpfs:
@@ -48,29 +55,5 @@ services:
       start_interval: 5s
       retries: 3
 
-  # The model's one tool: a private metasearch the agent asks, so searches leave from this server
-  # without an account or key. The frontend network reaches the internet; the backend reaches the agent.
-  searxng:
-    image: searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f
-    restart: unless-stopped
-    environment:
-      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET is required}
-      SEARXNG_BASE_URL: http://voice-search:8080/
-    volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
-    networks:
-      mu3lab_frontend: {}
-      mu3lab_backend:
-        aliases: [voice-search]
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
-      timeout: 5s
-      start_period: 120s
-      start_interval: 10s
-      interval: 5m
-      retries: 3
-
 networks:
-  mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}

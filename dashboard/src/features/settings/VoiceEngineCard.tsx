@@ -5,8 +5,7 @@ import { useConfirm } from '../../components/Dialog';
 import { Callout, Card } from '../../components/Layout';
 import { Badge } from '../../components/Status';
 import { useAction } from '../../lib/useAction';
-import { JOB_POLL_MS } from '../../lib/jobs';
-import { useApi } from '../../lib/useApi';
+import type { ApiState } from '../../lib/useApi';
 import { JobLog } from './AiModelsCard';
 
 type Engine = AiVoiceEngineRequest['engine'];
@@ -17,12 +16,9 @@ export function duplexStops(stops: string[]): string {
   return `These apps stop until you switch back: ${stops.join(', ')}.`;
 }
 
-/** How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card. */
-export function VoiceEngineCard({ readOnly = false }: { readOnly?: boolean }) {
-  // Followed while a settings change runs, so the card unlocks when it ends.
-  const { data, error, reload } = useApi<AiModels>('/api/v1/ai/models', {
-    interval: (current) => (current?.active_job_id ? JOB_POLL_MS : 0),
-  });
+/** Labs: one full-duplex model instead of separate steps; it holds the whole graphics card. */
+export function VoiceEngineCard({ api, readOnly = false }: { api: ApiState<AiModels>; readOnly?: boolean }) {
+  const { data, error, reload } = api;
   const confirm = useConfirm();
   const { pending, run } = useAction();
   const [draft, setDraft] = useState<Engine | null>(null);
@@ -36,12 +32,16 @@ export function VoiceEngineCard({ readOnly = false }: { readOnly?: boolean }) {
     },
     [reload],
   );
-  const title = 'How the voice assistant talks';
+  const title = (
+    <>
+      Labs: full-duplex mode <Badge tone="amber">Experimental</Badge>
+    </>
+  );
   const description =
-    'Separate steps work with your apps. A full-duplex model listens and speaks at the same time, like a phone call, but needs the whole graphics card.';
+    'One model listens and speaks at the same time, like a phone call, instead of separate steps. It cannot use your apps and needs the whole graphics card.';
   if (!data)
     return (
-      <Card title={title} description={description}>
+      <Card title={title} description={description} collapsible defaultOpen={false}>
         {error ? <p className="error-text">Could not load: {error}</p> : <p className="muted card-loading">Loading…</p>}
       </Card>
     );
@@ -80,7 +80,8 @@ export function VoiceEngineCard({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   return (
-    <Card title={title} description={description}>
+    // Folded away unless it is on: most households never need it.
+    <Card title={title} description={description} collapsible defaultOpen={saved.engine === 'duplex'}>
       {saved.engine === 'duplex' && (
         <Callout tone="success" title={`${saved.model} is on`}>
           It holds the graphics card.{' '}
@@ -99,9 +100,9 @@ export function VoiceEngineCard({ readOnly = false }: { readOnly?: boolean }) {
               onChange={() => setDraft('pipeline')}
             />
             <span>
-              <strong>Separate steps</strong>
+              <strong>Off: separate steps</strong>
               <small>
-                Whisper hears you, the model chosen below answers, and Kokoro speaks. App assistants and changes after a
+                Whisper hears you, the model chosen in Answers replies, and Kokoro speaks. Tools and changes after a
                 spoken yes work here.
               </small>
             </span>
@@ -115,12 +116,10 @@ export function VoiceEngineCard({ readOnly = false }: { readOnly?: boolean }) {
               onChange={() => setDraft('duplex')}
             />
             <span>
-              <strong>
-                Full duplex: {saved.model} <Badge tone="amber">Experimental</Badge>
-              </strong>
+              <strong>On: {saved.model}</strong>
               <small>
-                One model on this server listens and speaks at once, so you can interrupt it. It can search the web
-                privately, but cannot use your apps. Your voice never leaves this server.
+                One model on this server listens and speaks at once, so you can interrupt it naturally. It cannot use
+                your apps or search the web yet. Your voice never leaves this server.
               </small>
             </span>
           </label>

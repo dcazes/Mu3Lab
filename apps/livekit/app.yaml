@@ -11,8 +11,8 @@ category: ai
 tagline: Talk to your private AI assistant
 summary: A voice assistant you talk to in the browser. Your speech is turned into text by Whisper and read back by a
   natural voice, both on this server. The answer comes from the model chosen in Settings, Voice Assistant, which can be
-  a local model or your outside providers. Built on LiveKit, with its admin dashboard for checking that the assistant
-  is connected.
+  a local model or your outside providers. It can use your apps as you, and search the web privately with SearXNG.
+  Built on LiveKit, with its admin dashboard for checking that the assistant is connected.
 version: "v1.13.11"
 upstream: livekit/livekit
 depends_on:

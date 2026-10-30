@@ -5,11 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl import chat_ops, duplex_voice, local_models, model_runners, voice_tools
+from ctl import chat_ops, duplex_voice, local_models, model_runners, voice_settings, voice_tools
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
-from ctl.api.security import Member, OperatorMutation
+from ctl.api.security import Member, MemberMutation, OperatorMutation
 from ctl.jobs import JobConflict, JobStore
 from ctl.registry import ROOT, load
 from ctl.runtime import RuntimePaths
@@ -202,7 +202,7 @@ def change_voice_engine(payload_model: models.AiVoiceEngineRequest, request: Req
         reason = duplex_voice.unavailable_reason(ROOT)
         if reason:
             raise ApiError(422, reason)
-    chosen = {"engine": wanted}
+    chosen: dict[str, str] = {"engine": wanted}
     key = runtime.idempotency_key(request)
     subject = runtime.mutation_subject(operator)
     previous = store.by_idempotency_key(
@@ -257,3 +257,138 @@ async def change_voice_app(
     voice_tools.set_switch(app_id, payload.on)
     await run_in_threadpool(voice_tools.sync, lambda _line: None)
     return await run_in_threadpool(_voice_apps)
+
+
+# --- The voice assistant's own settings, voices and speech models ----------------------------
+
+
+def _voice_page() -> models.VoicePage:
+    speech = voice_settings.speech_models()
+    store = JobStore.runtime()
+    active = next(
+        (
+            job
+            for job in (store.jobs_for_service(speech["app_id"], limit=5) if store else [])
+            if job.get("state") in {"queued", "running"}
+        ),
+        None,
+    )
+    try:
+        search_app_id = voice_settings.search_app().id
+    except ValueError:
+        search_app_id = ""
+    return models.VoicePage.model_validate(
+        {
+            "ok": True,
+            "installed": chat_ops.installed(voice_tools.app().id),
+            "settings": voice_settings.get(),
+            "speech": speech,
+            "voices": voice_settings.voices() if speech["installed"] else [],
+            "search_installed": voice_settings.search_installed(),
+            "search_app_id": search_app_id,
+            "active_job_id": str(active["id"]) if active else "",
+        }
+    )
+
+
+@router.get("/voice/settings", response_model=models.VoicePage, response_model_exclude_none=True)
+async def voice_page(_member: Member) -> models.VoicePage:
+    """Everyone may see how the voice assistant is set up; only administrators change it."""
+    return await run_in_threadpool(_voice_page)
+
+
+@router.put("/voice/settings", response_model=models.VoicePage, response_model_exclude_none=True)
+async def change_voice_settings(payload: models.VoiceSettingsRequest, operator: OperatorMutation) -> models.VoicePage:
+    """Save responsiveness, interruptions, the voice or web search; the next call uses them, no restart."""
+    try:
+        await run_in_threadpool(
+            voice_settings.save, payload.model_dump(exclude_none=True), operator["username"], lambda _line: None
+        )
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(
+            actor=operator["username"],
+            event="ai.voice_settings_changed",
+            detail="Changed the voice assistant's settings.",
+        )
+    return await run_in_threadpool(_voice_page)
+
+
+@router.post("/voice/sample", response_model=models.VoiceSample, response_model_exclude_none=True)
+async def voice_sample(payload: models.VoiceSampleRequest, _member: MemberMutation) -> models.VoiceSample:
+    """One sentence read aloud in a voice, so people can hear it before choosing it."""
+    try:
+        audio = await run_in_threadpool(voice_settings.sample, payload.voice)
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    return models.VoiceSample.model_validate({"ok": True, "audio": audio})
+
+
+@router.get("/voice/apps/check", response_model=models.VoiceToolChecks, response_model_exclude_none=True)
+async def check_voice_apps(member: Member) -> models.VoiceToolChecks:
+    """Whether each app's tools answer for the person looking, with the keys a call of theirs would use."""
+    found = await run_in_threadpool(voice_settings.check_tools, member["email"])
+    return models.VoiceToolChecks.model_validate(
+        {"ok": True, "apps": [{"id": app_id, **result} for app_id, result in found.items()]}
+    )
+
+
+@router.put("/voice/speech", response_model=models.JobResponse, response_model_exclude_none=True)
+def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, operator: OperatorMutation):
+    """Choose Speaches' models, which every app using speech shares: set Speaches up again with them.
+
+    Setting up downloads and checks the new models, and points the AI gateway's speech names at them.
+    """
+    from ctl import service_config
+    from ctl.control_state import ControlState
+
+    _refuse_while_duplex()
+    speech = voice_settings.speech_models()
+    if not speech["installed"]:
+        raise ApiError(409, "Install Speaches first.")
+    chosen = {"stt_model": payload.stt_model, "tts_model": payload.tts_model}
+    if chosen["stt_model"] not in speech["stt"]["options"] or chosen["tts_model"] not in speech["tts"]["options"]:
+        raise ApiError(422, "Choose one of the listed speech models.")
+    if chosen == {"stt_model": speech["stt"]["value"], "tts_model": speech["tts"]["value"]}:
+        raise ApiError(422, "Speaches already uses these models.")
+    store = runtime.job_store()
+    service = runtime.service(speech["app_id"])
+    key = runtime.idempotency_key(request)
+    subject = runtime.mutation_subject(operator)
+    previous = store.by_idempotency_key(
+        key or "",
+        kind="lifecycle",
+        service_id=service.id,
+        action="retry_setup",
+        actor=operator["username"],
+        actor_subject=subject,
+        namespace="ai.voice_speech",
+        request=chosen,
+    )
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    try:
+        service_config.write(service, chosen)
+    except (service_config.ConfigurationBusy, ValueError) as exc:
+        raise ApiError(409, str(exc)) from exc
+    control = ControlState.runtime()
+    try:
+        job = store.create(
+            kind="lifecycle",
+            service_id=service.id,
+            action="retry_setup",
+            actor=operator["username"],
+            actor_subject=subject,
+            namespace="ai.voice_speech",
+            request=chosen,
+            commit_state=(lambda job_id: control.set_installation(service.id, "queued", job_id=job_id))
+            if control
+            else None,
+            detail=f"Operator changed the speech models; {service.name} is set up again with them.",
+            idempotency_key=key,
+        )
+    except (JobConflict, ValueError) as exc:
+        raise ApiError(409, f"{service.name} is busy with another task; try again in a moment.") from exc
+    return models.JobResponse.model_validate({"ok": True, "job": job})

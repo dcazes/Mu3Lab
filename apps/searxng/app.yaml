@@ -1,0 +1,33 @@
+# SearXNG — see ctl/manifest/models.py for every field.
+# The household's private web search. The voice assistant asks it when someone wants current facts;
+# searches leave this server without an account or key, and nobody's searches are kept.
+id: searxng
+capabilities: [web_search]
+name: SearXNG
+tier: optional
+group: ai
+category: ai
+tagline: Private web search for your assistants
+summary: Searches the web for Mu3Lab's assistants without an account or key, by asking several search engines at
+  once. The voice assistant uses it for news, weather, opening hours and other current facts. It keeps no history.
+version: "2026.3.13-3c1f68c59"
+upstream: searxng/searxng
+service:
+  local_port: 8095
+  health:
+    path: /healthz
+sign_in:
+  method: none
+  note: Internal search service; the voice assistant reaches it on Mu3Lab's private network.
+ui:
+  available: false
+  unavailable_reason: SearXNG has no page of its own here; the voice assistant searches with it.
+backup:
+  include: false
+  reason: It keeps no data of its own; its settings are generated again on install.
+secrets:
+- env: SEARXNG_SECRET
+  kind: hex
+  length: 32
+resource_guidance: Light, about 150 MB of memory and no graphics card.
+setup_action: Install SearXNG so the voice assistant can search the web privately.
