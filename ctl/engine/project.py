@@ -33,7 +33,7 @@ from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
 from ctl import hostinfo, resource_locks
 from ctl.app_settings import AppSettings, fixed_names
-from ctl.compute import gpu_build
+from ctl.compute import build, gpu_build
 from ctl.engine import template
 from ctl.engine.launch import caddy_handler
 from ctl.manifest.catalog import App, Catalog
@@ -294,6 +294,10 @@ def build_env(
             # A fact such as the private address is not known yet (Tailscale not
             # joined); keep any earlier value and fill it in on the next render.
             continue
+    if manifest.build_env:
+        mode = build(app.folder, facts.paths.projects / app.id, manifest.service.uses_gpu)
+        for name, value in manifest.build_env.get(mode, {}).items():
+            env[name] = template.render(value, lookup)
     return env
 
 

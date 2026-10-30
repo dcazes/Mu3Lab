@@ -26,7 +26,7 @@ def render_rules(
     )
 
 
-def render_service(service: Service, root: Path) -> Path:
+def render_service(service: Service, root: Path, *, copy_files: bool = True) -> Path:
     catalog = load().catalog
     app = catalog.get(service.id)
     paths = RuntimePaths()
@@ -35,4 +35,5 @@ def render_service(service: Service, root: Path) -> Path:
         Facts(tailnet_dns_name(), paths, catalog),
         rules_for(app.manifest),
         onboarding_state.read(service.id, paths).get("owner"),
+        copy_files=copy_files,
     )

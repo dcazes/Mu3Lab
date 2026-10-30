@@ -592,6 +592,10 @@ class AppManifest(Model):
     account: Account = Account()
     secrets: tuple[Secret, ...] = ()
     env: dict[str, str | dict[str, Any] | list[Any]] = Field(default_factory=dict)
+    # Values assigned instead of ``env``'s while the app runs that build (a docker-compose.<mode>.yml,
+    # ctl/compute.py), e.g. Immich converting videos on the NVIDIA card. Each name also has its CPU
+    # value in ``env``, so switching back to the CPU build puts it back.
+    build_env: dict[str, dict[str, str]] = Field(default_factory=dict)
     configuration: tuple[ConfigField, ...] = ()
     integrates_with: tuple[Integration, ...] = ()
     rules: tuple[RuleRef, ...] = ()
@@ -619,6 +623,12 @@ class AppManifest(Model):
 
     @model_validator(mode="after")
     def _consistent(self) -> AppManifest:
+        for mode, values in self.build_env.items():
+            if mode == "cpu" or not self.service.uses_gpu:
+                raise ValueError("build_env is for the GPU builds of an app that uses the GPU")
+            missing = sorted(set(values) - set(self.env))
+            if missing:
+                raise ValueError(f"build_env {mode}: give {', '.join(missing)} a CPU value in env too")
         if self.sign_in.method in {"gate", "trusted_header"} and (self.route is None or self.route.access == "open"):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":

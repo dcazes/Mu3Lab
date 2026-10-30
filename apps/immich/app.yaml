@@ -53,6 +53,12 @@ secrets:
 - env: IMMICH_PASSWORD_LOGIN_ENABLED
   kind: fixed
   value: 'true'
+env:
+  IMMICH_VIDEO_ACCEL: disabled
+build_env:
+  # The NVIDIA build converts videos with the card's NVENC encoder (docker-compose.nvidia.yml).
+  nvidia:
+    IMMICH_VIDEO_ACCEL: nvenc
 rules:
 - rule: password_login_off_after_setup
   with:
