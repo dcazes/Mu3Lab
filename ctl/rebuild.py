@@ -138,7 +138,7 @@ def _owned_path(paths: RuntimePaths, name: str) -> Path:
     }
     valid = (
         name == "projects"
-        or (len(parts) == 2 and parts[0] == "data" and bool(backups._NAME.fullmatch(parts[1])))
+        or (len(parts) == 2 and parts[0] in {"data", "media"} and bool(backups._NAME.fullmatch(parts[1])))
         or (len(parts) == 2 and parts[0] == "state" and parts[1] in allowed_state)
         or (len(parts) == 2 and parts[0] == "backups" and parts[1] in {"kopia", ".kopia-copy"})
     )
@@ -493,9 +493,12 @@ def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = 
     _seal(paths, [staging, paths.projects, *control_targets], log)
     restored = []
     for app_id, snapshot in sorted(snapshots.items()):
-        log(f"Restoring {app_id}'s data (backup {snapshot['id'][:8]} from {snapshot['time']}).")
+        media = app_id == backups.MEDIA_SOURCE
+        what = "the media folders" if media else f"{app_id}'s data"
+        log(f"Restoring {what} (backup {snapshot['id'][:8]} from {snapshot['time']}).")
         for folder in snapshot["folders"]:
-            target = paths.data / folder
+            # The libraries go back under the media root, where every app that reads them looks.
+            target = (paths.media if media else paths.data) / folder
             if target.exists() and any(target.iterdir()):
                 raise RebuildError(f"{target} already holds data; a rebuild never overwrites it.")
             _own(paths, target)

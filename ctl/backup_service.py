@@ -10,8 +10,10 @@ administrators also open to browse backups) owns:
 - reclaiming the space of deleted backups (its automatic maintenance).
 
 Each backup source is ``/data/<app>``, with the app's data folders mounted
-read-only inside it, plus ``/data/mu3lab`` for Mu3Lab's own state. Kopia
-backs up one source at a time and runs two actions around each:
+read-only inside it, plus ``/data/mu3lab`` for Mu3Lab's own state and
+``/data/media`` for the media libraries (audiobooks, games), which belong to
+no one app and are never rolled back with one. Kopia backs up one source at a
+time and runs two actions around each:
 
 - **before**: ``POST /api/v1/backup-hooks/before-snapshot-root``. Mu3Lab notes
   the app's release, holds the app (nothing else may change it) and has the
@@ -168,6 +170,14 @@ def sources(root: Path, paths: RuntimePaths | None = None) -> dict[str, list[tup
         ]
         if folders:
             found[service.id] = [(folder.name, folder) for folder in folders]
+    # Every library under the media root, including one an uninstalled app left behind (its files are kept).
+    media = (
+        sorted(folder for folder in paths.media.iterdir() if folder.is_dir() and not folder.is_symlink())
+        if paths.media.is_dir()
+        else []
+    )
+    if media:
+        found[backups.MEDIA_SOURCE] = [(folder.name, folder) for folder in media]
     return found
 
 
@@ -301,6 +311,9 @@ def before(source: str, store: JobStore, root: Path, paths: RuntimePaths | None 
     if source == backups.PLATFORM_SOURCE:
         platform_backup.export_control_plane(paths)
         return "Mu3Lab's own state is ready to be saved."
+    if source == backups.MEDIA_SOURCE:
+        # Plain files no database depends on: nothing to stop.
+        return "The media folders are ready to be saved."
     try:
         service = load().get(source)
     except RegistryError:
@@ -355,6 +368,9 @@ def after(source: str, store: JobStore, root: Path, paths: RuntimePaths | None =
         platform_backup.clear_export(paths)
         _result(source, True, "", paths)
         return "Mu3Lab's own state was saved."
+    if source == backups.MEDIA_SOURCE:
+        _result(source, True, "", paths)
+        return "The media folders were saved."
     hold = records.get(HOLDS, source, paths)
     if not hold:
         return "Nothing to start again."

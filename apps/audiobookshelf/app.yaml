@@ -1,6 +1,6 @@
 # Audiobookshelf — see ctl/manifest/models.py for every field.
 id: audiobookshelf
-capabilities: [audiobooks]
+capabilities: [audiobooks, media_folders]
 name: Audiobookshelf
 tier: optional
 group: apps
@@ -40,7 +40,7 @@ sign_in:
       user: user
 account:
   mode: api_bootstrap
-  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to /srv/mu3lab/media/audiobooks.
+  user_action: Open Audiobookshelf; Authentik signs you in as its owner. Add books to the Audiobooks folder in Nextcloud, or to /srv/mu3lab/media/audiobooks.
 mobile:
   primary: audiobookshelf-app
   clients:
@@ -79,7 +79,7 @@ mobile:
     - Connect your phone to the Mu3Lab tailnet.
     - Open the private Audiobookshelf address and sign in with Authentik.
     - Use the browser menu to add it to the Home Screen.
-resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups leave out.
+resource_guidance: Light to run; libraries need disk space under /srv/mu3lab/media, which backups include.
 setup_action: Install Audiobookshelf to listen to your audiobooks and podcasts anywhere.
 chat:
   assistant:
