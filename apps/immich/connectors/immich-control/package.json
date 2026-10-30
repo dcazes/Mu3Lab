@@ -5,5 +5,8 @@
   "dependencies": {
     "immich-mcp": "0.5.2",
     "supergateway": "3.4.3"
+  },
+  "overrides": {
+    "zod": "4.6.7"
   }
 }
