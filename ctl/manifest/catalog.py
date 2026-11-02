@@ -332,6 +332,8 @@ def load(apps_dir: Path = APPS_DIR) -> Catalog:
         if manifest.id != folder.name:
             raise CatalogError(f"{manifest_path}: id must match the folder name")
         _check_compose(folder / COMPOSE_FILE, f"mu3lab-{manifest.id}")
+        for option in sorted(folder.glob("docker-compose.option-*.yml")):
+            _check_images(option)
         apps.append(App(manifest=manifest, folder=folder, connectors=_load_connectors(manifest, folder)))
     if not apps:
         raise CatalogError(f"no apps found under {apps_dir}")

@@ -20,6 +20,26 @@ Log = Callable[[str], None]
 RELEASE_RECORD = "docker-compose.digest.yml"
 MARKER_OUTPUT = "MU3LAB_OUTPUT "
 MARKER_ERROR = "MU3LAB_ERROR "
+# An app's optional part (qBittorrent's VPN): docker-compose.option-<name>.yml, used while the
+# app's setting MU3LAB_OPTION_<NAME> is on.
+OPTION_PREFIX = "docker-compose.option-"
+
+
+def option_env(path: Path) -> str:
+    """The setting that switches on the optional part in ``path``."""
+    name = path.name.removeprefix(OPTION_PREFIX).removesuffix(".yml")
+    return "MU3LAB_OPTION_" + name.upper().replace("-", "_")
+
+
+def option_files(directory: Path) -> list[Path]:
+    """The optional parts switched on in this project's settings (its ``.env``)."""
+    from ctl.secrets import read_runtime_env
+
+    candidates = sorted(directory.glob(OPTION_PREFIX + "*.yml"))
+    if not candidates:
+        return []
+    env = read_runtime_env(directory / ".env")
+    return [path for path in candidates if env.get(option_env(path), "").lower() in {"true", "1", "yes", "on"}]
 
 
 @dataclass(frozen=True)
@@ -60,7 +80,9 @@ class Compose:
         gpu = self.directory / f"docker-compose.{self.gpu_mode}.yml"
         if self.gpu_mode != "cpu" and gpu.is_file():
             files.append(gpu)
-        files.extend(extra)
+        files.extend(option_files(self.directory))
+        # A caller's extras may already name an optional part; Compose gets each file once.
+        files.extend(path for path in extra if path not in files)
         return files
 
     def overrides(self, extra: Sequence[Path] = ()) -> list[Path]:

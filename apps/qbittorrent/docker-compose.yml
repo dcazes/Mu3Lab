@@ -1,0 +1,66 @@
+# qBittorrent lives inside the network of a small "gateway" container, which holds its
+# address. With no VPN the gateway only sleeps, and torrent traffic leaves through this
+# computer's own internet connection. Switching the VPN on (the app's settings) adds
+# docker-compose.option-vpn.yml, which turns the gateway into Gluetun: then every connection
+# qBittorrent makes can only leave through the VPN.
+name: mu3lab-qbittorrent
+
+services:
+  gateway:
+    # qBittorrent's own image, so the no-VPN gateway needs nothing else downloaded.
+    image: qbittorrentofficial/qbittorrent-nox:5.2.4-1@sha256:92bfd78d731e254ba64f62b77b0696add6447a33642ee5feda106a26b285aa7f
+    restart: unless-stopped
+    entrypoint: ["/sbin/tini", "--", "sleep", "infinity"]
+    user: "65534:65534"
+    # Inside, qBittorrent listens on its private address's port (8479): it refuses a Host header
+    # naming any other port, and Tailscale and Caddy pass that address on unchanged.
+    ports: ["127.0.0.1:8096:8479"]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 5m
+      start_period: 10s
+      start_interval: 2s
+
+  qbittorrent:
+    image: qbittorrentofficial/qbittorrent-nox:5.2.4-1@sha256:92bfd78d731e254ba64f62b77b0696add6447a33642ee5feda106a26b285aa7f
+    restart: unless-stopped
+    network_mode: service:gateway
+    depends_on:
+      gateway:
+        condition: service_healthy
+        # A new gateway is a new network; qBittorrent must follow it.
+        restart: true
+    # Mu3Lab's start sets the settings it owns (start.py), then runs the image's own start.
+    entrypoint: ["/sbin/tini", "-g", "--", "python3", "/mu3lab/start.py"]
+    environment:
+      TZ: ${TZ:-UTC}
+      QBT_LEGAL_NOTICE: confirm
+      QBT_WEBUI_PORT: "8479"
+      # The only names qBittorrent answers to, so a web page cannot trick a browser into reaching it.
+      MU3LAB_SERVER_DOMAINS: ${QBT_SERVER_DOMAINS:-localhost}
+      QBT_TORRENTING_PORT: "6881"
+      # www-data, as Nextcloud writes the media libraries, so downloads can be moved and renamed there.
+      PUID: "33"
+      PGID: "33"
+      UMASK: "002"
+      MU3LAB_VPN: ${MU3LAB_OPTION_VPN:-false}
+      MU3LAB_MUSIC_SHARED: ${MU3LAB_MUSIC_SHARED:-0}
+      # Changes when a library comes or goes, so qBittorrent restarts with its categories.
+      MU3LAB_MEDIA_FOLDERS: ${MU3LAB_MEDIA_FOLDERS:-}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/qbittorrent/config:/config
+      # Every library under the media root: categories save straight into Audiobooks, Podcasts and Roms.
+      - ${MU3LAB_MEDIA_ROOT:?MU3LAB_MEDIA_ROOT is required}:/media
+      - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/music
+      - ./start.py:/mu3lab/start.py:ro
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      # From inside the container, so it answers without a login.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8479/api/v2/app/version >/dev/null || exit 1"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 5m
+      retries: 3

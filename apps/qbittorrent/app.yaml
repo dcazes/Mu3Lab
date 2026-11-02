@@ -1,0 +1,142 @@
+# qBittorrent — see ctl/manifest/models.py for every field.
+# Administrators only. Finished downloads go straight into the household's libraries by
+# category (Music, Audiobooks, Podcasts, Roms) or into the Downloads library, so Navidrome,
+# Audiobookshelf, RomM and Nextcloud show them without anyone moving files.
+id: qbittorrent
+capabilities: [media_folders]
+name: qBittorrent
+tier: optional
+group: apps
+category: media
+tagline: Download torrents into your libraries
+summary: Download torrents and magnet links from the browser. Pick a category and the finished files land in
+  Music, Audiobooks, Podcasts or Roms; anything else goes to the Downloads folder in Nextcloud. Torrent traffic
+  can go through a VPN of your choice.
+version: v5.2.4
+upstream: qbittorrent/qBittorrent
+media:
+- name: downloads
+  purpose: Finished torrents with no category. Unfinished pieces wait in its hidden .incomplete folder.
+service:
+  local_port: 8096
+  health:
+    path: /api/v2/app/version
+    # qBittorrent answers only to the names it knows (start.py); a port other than its own is refused.
+    headers:
+      Host: localhost
+route:
+  https_port: 8479
+  caddy_port: 19496
+  access: gate
+  audience: operators
+sign_in:
+  method: gate
+  note: Authentik admits administrators only, and qBittorrent then opens without a login of its own. It skips its
+    login only for its own Docker network, which nothing else joins.
+resource_guidance: Light on memory; disk and network heavy while downloading. Finished files are in the media
+  libraries, which backups include, so allow backup space for what you keep.
+setup_action: Install qBittorrent to download torrents straight into your libraries.
+configuration:
+# Switching this on adds docker-compose.option-vpn.yml (Gluetun); the settings below are Gluetun's.
+- key: vpn
+  env: MU3LAB_OPTION_VPN
+  type: boolean
+  label: Send torrent traffic through a VPN (fill in the VPN settings below first)
+  default: false
+- key: vpn_provider
+  env: QBT_VPN_PROVIDER
+  type: string
+  label: VPN provider, as Gluetun names it (for example mullvad, protonvpn, airvpn, windscribe)
+  default: ''
+- key: vpn_type
+  env: QBT_VPN_TYPE
+  type: enum
+  label: VPN connection type
+  default: wireguard
+  options: [wireguard, openvpn]
+- key: vpn_wireguard_private_key
+  env: QBT_VPN_WIREGUARD_PRIVATE_KEY
+  type: secret
+  label: WireGuard private key (from your VPN provider's WireGuard configuration)
+- key: vpn_wireguard_addresses
+  env: QBT_VPN_WIREGUARD_ADDRESSES
+  type: string
+  label: WireGuard address (the Address line of that configuration, for example 10.64.222.21/32)
+  default: ''
+- key: vpn_openvpn_user
+  env: QBT_VPN_OPENVPN_USER
+  type: string
+  label: OpenVPN username (OpenVPN only)
+  default: ''
+- key: vpn_openvpn_password
+  env: QBT_VPN_OPENVPN_PASSWORD
+  type: secret
+  label: OpenVPN password (OpenVPN only)
+- key: vpn_countries
+  env: QBT_VPN_COUNTRIES
+  type: string
+  label: VPN server countries, comma-separated (optional, for example Netherlands,Switzerland)
+  default: ''
+- key: vpn_port_forwarding
+  env: QBT_VPN_PORT_FORWARDING
+  type: boolean
+  label: Ask the VPN to forward a port, for faster seeding (ProtonVPN and a few others only)
+  default: false
+env:
+  MU3LAB_MEDIA_ROOT: '{{media_root}}'
+  # The names qBittorrent answers to: this server's private name, and localhost for Mu3Lab itself.
+  QBT_SERVER_DOMAINS: '{{dns_name}};localhost'
+  # Changes when a library comes or goes, which restarts qBittorrent with that category.
+  MU3LAB_MEDIA_FOLDERS: '{{media_folders}}'
+integrates_with:
+# Navidrome's music library is the Music category's folder (start.py).
+- capability: music_library
+  env:
+    MU3LAB_MUSIC_FOLDER: '{{provider:MU3LAB_MUSIC_FOLDER}}'
+    MU3LAB_MUSIC_SHARED: '1'
+  absent_env:
+    # An empty stand-in inside qBittorrent's own folder, so the mount always has a source.
+    MU3LAB_MUSIC_FOLDER: '{{data_root}}/qbittorrent/no-music'
+    MU3LAB_MUSIC_SHARED: '0'
+# Audiobookshelf or RomM arriving re-renders qBittorrent, so its library gets a category.
+- capability: media_folders
+mobile:
+  primary: qbittorrent-web
+  clients:
+  - id: qbittorrent-web
+    name: qBittorrent web page
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://www.qbittorrent.org/
+    setup: web
+    summary: Add, pause and remove torrents from the phone's browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private qBittorrent address; Authentik signs you in as an administrator.
+    - Tap the plus button to paste a magnet link, and pick a category so the files land in the right library.
+chat:
+  assistant:
+    title: qBittorrent (admins)
+    description: See what's downloading, add magnet links, and pause, resume or remove torrents.
+    instructions: Help administrators with qBittorrent. List the torrents before changing one, and use the hashes the
+      tools return. When adding a torrent, ask which library it is for and use that category (music, audiobooks,
+      podcasts, roms), or none for the Downloads folder. Removing a torrent always keeps its files; to delete files,
+      point them to the qBittorrent page or Nextcloud. Use only qBittorrent tools assigned to this agent.
+    audience: operators
+    faq:
+    - question: "Where do finished downloads go?"
+      answer: "Into the library their category names: Music (Navidrome), Audiobooks and Podcasts (Audiobookshelf) or Roms (RomM). Torrents with no category go to the Downloads folder, which everyone sees in Nextcloud."
+    - question: "Is torrent traffic private?"
+      answer: "Not unless the VPN is on. Without it, torrents use this computer's own internet connection, which your internet provider and other peers can see. An administrator can switch on a VPN in qBittorrent's settings in the Mu3Lab dashboard."
+    - question: "Who can add torrents?"
+      answer: "Only Mu3Lab administrators. Everyone else gets the finished files in the household's apps."
+    - question: "Can the assistant delete downloaded files?"
+      answer: "No. Removing a torrent here keeps its files; delete files from the qBittorrent page or Nextcloud."
+  connectors:
+  - qbittorrent-adapter

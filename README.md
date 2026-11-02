@@ -51,6 +51,7 @@ Every request enters through Tailscale, then Caddy routes it to the right app be
 | Navidrome | Music streaming | |
 | Audiobookshelf | Audiobooks and podcasts | |
 | RomM | Game library with a browser player | |
+| qBittorrent | Torrent downloads straight into the media libraries, with an optional VPN | |
 | LobeChat | Alternative chat app | |
 | Firecrawl | Web page extraction for AI | ✓ |
 | Speech | Local speech recognition and spoken replies | |

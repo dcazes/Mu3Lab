@@ -213,6 +213,59 @@ elif MODE == "calendar":
             schema({"event_id": TEXT, "revision": {"type": "string", "default": ""}}, ["event_id"]),
         ),
     ]
+elif MODE == "qbittorrent":
+    HASHES = {
+        "type": "array",
+        "items": {"type": "string", "pattern": "^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$"},
+        "minItems": 1,
+        "maxItems": 50,
+        "description": "Torrent hashes, as list_torrents returns them",
+    }
+    CATEGORY = {"type": "string", "maxLength": 60, "description": "A category name; empty for none (Downloads)"}
+    FILTERS = ["all", "downloading", "seeding", "completed", "stopped", "running", "active", "stalled", "errored"]
+    TOOLS = [
+        tool(
+            "list_torrents",
+            "List torrents, newest first: name, hash, state, progress, size, speeds, time left and category",
+            schema(
+                {
+                    "filter": {"type": "string", "enum": FILTERS, "default": "all"},
+                    "category": CATEGORY,
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                }
+            ),
+        ),
+        tool("transfer_info", "Download and upload speeds now, totals this session, and connection status", schema({})),
+        tool("list_categories", "List the categories and the folder each saves into", schema({})),
+        tool(
+            "add_torrent",
+            "Add one torrent from a magnet link or a link to a .torrent file, optionally in a category",
+            schema(
+                {
+                    "link": {"type": "string", "minLength": 8, "maxLength": 4000},
+                    "category": CATEGORY,
+                    "start_paused": {"type": "boolean", "default": False},
+                },
+                ["link"],
+            ),
+        ),
+        tool(
+            "pause_torrents",
+            "Pause downloading and seeding of the given torrents",
+            schema({"hashes": HASHES}, ["hashes"]),
+        ),
+        tool("resume_torrents", "Resume the given torrents", schema({"hashes": HASHES}, ["hashes"])),
+        tool(
+            "set_category",
+            "Put the given torrents in a category (an empty category means none)",
+            schema({"hashes": HASHES, "category": CATEGORY}, ["hashes", "category"]),
+        ),
+        tool(
+            "remove_torrents",
+            "Remove the given torrents from qBittorrent; their downloaded files are always kept",
+            schema({"hashes": HASHES}, ["hashes"]),
+        ),
+    ]
 else:
     raise SystemExit("unsupported adapter mode")
 
@@ -245,6 +298,8 @@ def _auth() -> str:
         return "Bearer " + token
     if MODE == "navidrome":
         return ""  # the Subsonic API signs each request in its query (_subsonic)
+    if MODE == "qbittorrent":
+        return ""  # qBittorrent skips its login for this computer; Authentik guards it for people
     if MODE == "kopia":
         username = os.environ.get("KOPIA_USERNAME", "")
         password = os.environ.get("KOPIA_PASSWORD", "")
@@ -278,6 +333,9 @@ def _request(
         headers["Authorization"] = auth
     if MODE == "nextcloud":
         headers["OCS-APIRequest"] = "true"
+    if MODE == "qbittorrent":
+        # qBittorrent answers only to names it knows; with no port named, its own port is assumed.
+        headers["Host"] = "localhost"
     if payload is not None:
         headers["Content-Type"] = content_type
     req = Request(APP_URL + path, data=payload, headers=headers, method=method)
@@ -685,6 +743,103 @@ def _authentik(name: str, args: dict):
     raise ValueError("unknown tool")
 
 
+def _hashes(args: dict) -> str:
+    values = args.get("hashes")
+    if not isinstance(values, list) or not 1 <= len(values) <= 50:
+        raise ValueError("hashes must list 1 to 50 torrent hashes")
+    hexdigits = set("0123456789abcdef")
+    found = [value.lower() for value in values if isinstance(value, str)]
+    if len(found) != len(values) or any(len(value) not in (40, 64) or set(value) - hexdigits for value in found):
+        raise ValueError("each hash must be one list_torrents returned")
+    return "|".join(found)
+
+
+def _category(args: dict) -> str:
+    value = args.get("category", "")
+    if not isinstance(value, str) or len(value) > 60 or any(char in value for char in "\\/\r\n"):
+        raise ValueError("category must be a category name")
+    return value.strip()
+
+
+def _post_form(path: str, values: dict) -> str:
+    data, _ = _request(path, "POST", urlencode(values).encode(), "application/x-www-form-urlencoded")
+    return data.decode("utf-8", "replace").strip()
+
+
+def _torrent(item: dict) -> dict:
+    eta = item.get("eta")
+    return {
+        "hash": item.get("hash"),
+        "name": item.get("name"),
+        "state": item.get("state"),
+        "progress_percent": round(float(item.get("progress") or 0) * 100, 1),
+        "size_bytes": item.get("size"),
+        "download_bytes_per_second": item.get("dlspeed"),
+        "upload_bytes_per_second": item.get("upspeed"),
+        # qBittorrent says 8640000 (100 days) when it cannot tell.
+        "seconds_left": eta if isinstance(eta, int) and 0 <= eta < 8_640_000 else None,
+        "category": item.get("category") or None,
+        "ratio": round(float(item.get("ratio") or 0), 2),
+        "seeds": item.get("num_seeds"),
+        "peers": item.get("num_leechs"),
+        "added": item.get("added_on"),
+    }
+
+
+def _qbittorrent(name: str, args: dict):
+    if name == "list_torrents":
+        state = args.get("filter", "all")
+        if state not in FILTERS:
+            raise ValueError("unknown filter")
+        query = {"filter": state, "sort": "added_on", "reverse": "true", "limit": _limit(args, 20)}
+        if args.get("category"):
+            query["category"] = _category(args)
+        return [_torrent(item) for item in _dicts(_get("/api/v2/torrents/info", query))]
+    if name == "transfer_info":
+        info = _get("/api/v2/transfer/info")
+        return {
+            "download_bytes_per_second": info.get("dl_info_speed"),
+            "upload_bytes_per_second": info.get("up_info_speed"),
+            "downloaded_bytes_this_session": info.get("dl_info_data"),
+            "uploaded_bytes_this_session": info.get("up_info_data"),
+            "connection": info.get("connection_status"),
+        }
+    if name == "list_categories":
+        found = _get("/api/v2/torrents/categories")
+        items = found.values() if isinstance(found, dict) else []
+        return [{"name": item.get("name"), "folder": item.get("savePath")} for item in items if isinstance(item, dict)]
+    if name == "add_torrent":
+        link = _text(args, "link")
+        if not link.startswith(("magnet:?", "https://", "http://")) or any(char in link for char in "\r\n"):
+            raise ValueError("link must be one magnet link or one http(s) link to a .torrent file")
+        paused = args.get("start_paused", False)
+        if not isinstance(paused, bool):
+            raise ValueError("start_paused must be true or false")
+        # Automatic management: the torrent saves into its category's library.
+        values = {"urls": link, "autoTMM": "true", "stopped": "true" if paused else "false"}
+        if args.get("category"):
+            values["category"] = _category(args)
+        if _post_form("/api/v2/torrents/add", values).startswith("Fails"):
+            raise ValueError("qBittorrent did not accept that link")
+        return {"added": True, "category": values.get("category")}
+    hashes = _hashes(args)
+    if name == "pause_torrents":
+        _post_form("/api/v2/torrents/stop", {"hashes": hashes})
+        return {"paused": hashes.split("|")}
+    if name == "resume_torrents":
+        _post_form("/api/v2/torrents/start", {"hashes": hashes})
+        return {"resumed": hashes.split("|")}
+    if name == "set_category":
+        category = _category(args)
+        _post_form("/api/v2/torrents/setCategory", {"hashes": hashes, "category": category})
+        return {"category": category or None, "torrents": hashes.split("|")}
+    if name == "remove_torrents":
+        # Never deleteFiles=true: the files may already be in a library people use.
+        _post_form("/api/v2/torrents/delete", {"hashes": hashes, "deleteFiles": "false"})
+        return {"removed": hashes.split("|"), "files_kept": True}
+    raise ValueError("unknown tool")
+
+
 HANDLERS = {
     "nextcloud": _nextcloud,
     "adventurelog": _adventurelog,
@@ -695,6 +850,7 @@ HANDLERS = {
     "authentik": _authentik,
     "kopia": _kopia,
     "calendar": _calendar,
+    "qbittorrent": _qbittorrent,
 }
 
 

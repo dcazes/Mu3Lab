@@ -86,7 +86,7 @@ the parent chat's own model and tools, so they cannot reach another assistant's 
 |---|---|---|
 | Upstream package in a pinned container | `mealie-community`, `babybuddy-official` | Our Compose project, built from a pinned release or commit |
 | Built into the app (`builtin: true`) | `outline-builtin`, `dawarich-builtin` | Nothing extra: the app joins `mu3lab_mcp_upstream` and ContextForge calls its own MCP endpoint |
-| Mu3Lab adapter | `adventurelog`, `beaver-adapter`, `audiobookshelf-adapter`, `navidrome-adapter`, `romm-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
+| Mu3Lab adapter | `adventurelog`, `beaver-adapter`, `audiobookshelf-adapter`, `navidrome-adapter`, `romm-adapter`, `qbittorrent-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
 
 A connector can also declare fixed `headers` that ContextForge sends with its credential (Dawarich
 needs `X-Forwarded-Proto: https`). A credential script can ask for the owner's username

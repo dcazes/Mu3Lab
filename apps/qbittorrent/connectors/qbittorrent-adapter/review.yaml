@@ -1,0 +1,28 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: qbittorrent-adapter
+revision: v5.2.4-webapi
+reviewed_at: '2026-11-01'
+guidance: |
+  List the torrents before changing one, and pass the hashes the tools return. When adding a torrent, ask
+  which library it is for and use that category (music, audiobooks, podcasts, roms), or none for the
+  Downloads folder. Removing a torrent keeps its files.
+
+categories:
+  - id: torrents
+    title: Torrents
+    summary: See what's downloading or seeding, transfer speeds, and the categories.
+  - id: manage
+    title: Manage torrents
+    summary: Add a magnet or link, pause, resume, set a category, and remove a torrent (its files are kept).
+
+tools:
+  list_torrents: {category: torrents, access: read, core: true}
+  transfer_info: {category: torrents, access: read, core: true}
+  list_categories: {category: torrents, access: read}
+  add_torrent: {category: manage, access: write, core: true}
+  pause_torrents: {category: manage, access: write}
+  resume_torrents: {category: manage, access: write}
+  set_category: {category: manage, access: write}
+  remove_torrents: {category: manage, access: write}
