@@ -188,6 +188,27 @@ class FileChangeTests(_Machine):
         self.assertEqual(sorted(p.name for p in (self.project / "agent").iterdir()), ["main.py"])
         self.assertFalse(self.status()["update_available"])
 
+    def test_a_file_the_app_drops_is_a_change_and_the_next_copy_removes_it(self):
+        override = self.root / "apps" / "mealie" / "docker-compose.nvidia.yml"
+        override.write_text("services: {}\n", encoding="utf-8")
+        self.copy_folder()
+        self.install()
+        self.assertFalse(self.status()["update_available"])
+        override.unlink()
+        self.agent.unlink()
+        self.agent.parent.rmdir()
+        self.assertEqual(
+            app_releases.changed_files(self.service, self.root), ["agent/main.py", "docker-compose.nvidia.yml"]
+        )
+        self.assertTrue(self.status()["files_only"])
+        # Files Mu3Lab writes into the project while the app runs are not the app's to drop.
+        (self.project / "config.yaml").write_text("written at run time\n", encoding="utf-8")
+        self.copy_folder()
+        self.assertFalse((self.project / "docker-compose.nvidia.yml").exists())
+        self.assertFalse((self.project / "agent").exists())
+        self.assertTrue((self.project / "config.yaml").exists())
+        self.assertFalse(self.status()["update_available"])
+
     def test_a_new_release_with_changed_files_is_an_ordinary_update(self):
         self.copy_folder()
         self.install()

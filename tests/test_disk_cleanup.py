@@ -59,13 +59,13 @@ class CleanupTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.registry = load()
 
-    def test_old_versions_and_removed_apps_are_reclaimable_but_current_previous_and_helpers_stay(self):
+    def test_earlier_versions_and_removed_apps_are_reclaimable_but_current_and_helpers_stay(self):
         found = disk_cleanup.reclaimable(self.registry, ROOT, self.paths)
         self.assertIn("sha256:old", found)
         self.assertIn("sha256:unsloth", found)
         self.assertNotIn("sha256:current", found)
-        # The release before the current one stays so an update can be undone offline.
-        self.assertNotIn("sha256:previous", found)
+        # Going back downloads the earlier release again, so it is not kept.
+        self.assertIn("sha256:previous", found)
         self.assertNotIn(disk_cleanup.identity(KOPIA_IMAGE), found)
 
     def test_only_unused_reclaimable_images_are_removed_and_never_the_owners_own(self):
@@ -111,6 +111,35 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual([path.name for path in delete.call_args.args[0]], ["unsloth-models"])
         self.assertEqual(done["folders"], ["unsloth-models", "projects/unsloth"])
         self.assertFalse((self.paths.projects / "unsloth").exists())
+
+    def test_a_connector_of_an_app_that_is_not_installed_loses_its_containers(self):
+        (self.paths.projects / "mcp-firecrawl-official").mkdir()
+        (self.paths.projects / "mcp-immich-photo-manager").mkdir()
+        (self.paths.projects / "immich" / "docker-compose.yml").write_text("services: {}\n")
+        leftover = str((self.paths.projects / "mcp-firecrawl-official").resolve())
+        connected = str((self.paths.projects / "mcp-immich-photo-manager").resolve())
+
+        def run(argv, **_kwargs):
+            if argv[:2] == ["docker", "ps"]:
+                return result(f"c1\t{leftover}\nc2\t{connected}\n")
+            return result()
+
+        self.assertEqual(disk_cleanup._removed_containers(self.registry, self.paths, run), ["c1"])
+        # Its folder keeps the credentials a reinstall that kept the app's data uses again.
+        self.assertNotIn(Path(leftover), disk_cleanup.removed_projects(self.registry, self.paths))
+
+    def test_a_connector_folder_goes_once_its_apps_data_is_gone(self):
+        for name in ("mcp-firecrawl-official", "mcp-paperless-community"):
+            (self.paths.projects / name).mkdir()
+            (self.paths.projects / name / ".env").write_text("TOKEN=issued-by-the-app\n")
+        # Paperless-ngx was uninstalled keeping its data, so a reinstall still needs that login.
+        (self.paths.data / "paperless").mkdir()
+        done = disk_cleanup.free_up(
+            self.registry, ROOT, lambda _line: None, paths=self.paths, run=lambda *_a, **_k: result()
+        )
+        self.assertEqual(done["folders"], ["projects/mcp-firecrawl-official"])
+        self.assertFalse((self.paths.projects / "mcp-firecrawl-official").exists())
+        self.assertTrue((self.paths.projects / "mcp-paperless-community" / ".env").is_file())
 
     def test_build_cache_is_cleared_whole_and_reports_what_it_freed(self):
         calls = []

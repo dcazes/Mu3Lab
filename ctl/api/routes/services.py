@@ -43,8 +43,10 @@ MANUAL_INITIALIZATION_MODES = frozenset(
     {"oidc_first_login", "browser_registration", "local_account_manual", "manual_owner", "trusted_header"}
 )
 
-# An app must be installed (running or stopped) to be backed up, restored or updated.
-MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped"})
+# An app must be installed (running or stopped) to be backed up, restored or updated. One stuck
+# "starting" (running, never healthy) qualifies too: a restore or update is often its way out, as
+# when an older release put back after a failed update is checked at the new release's health path.
+MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped", "starting"})
 # While an app's earlier restore or update was interrupted, only these may run.
 RECOVERY_ACTIONS = frozenset({"recover", "keep_update"})
 SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")

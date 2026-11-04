@@ -524,6 +524,17 @@ class MaintenanceApiTests(unittest.TestCase):
                 if service_id == "vaultwarden":
                     self.assertIn("together with Mu3Lab", body["blocked_reason"])
 
+    def test_an_app_that_never_becomes_healthy_can_still_be_updated(self):
+        for state, enabled in (("starting", True), ("installing", False)):
+            with (
+                self.subTest(state=state),
+                patch("ctl.api.routes.services._effective_state", return_value=state),
+                patch("ctl.api.routes.services.app_releases.status", return_value=self.status(True)),
+                patch("ctl.api.routes.services.backup_readiness", return_value={"available": True}),
+            ):
+                body = self.client.get("/api/v1/services/mealie/updates", headers=self.headers).json()
+                self.assertEqual(body["update_enabled"], enabled, body)
+
     def test_checking_for_updates_needs_no_network(self):
         with patch("urllib.request.urlopen", side_effect=AssertionError("no network")):
             response = self.client.get("/api/v1/services/mealie/updates", headers=self.headers)

@@ -217,12 +217,12 @@ def installed_version(service: Service, root: Path, paths: RuntimePaths | None =
 
 
 def changed_files(service: Service, root: Path, paths: RuntimePaths | None = None) -> list[str]:
-    """Mu3Lab's files for the app that its installed project lacks or holds in another version."""
-    from ctl.engine.project import shipped_files
+    """Mu3Lab's files for the app that its installed project lacks, holds in another version, or no longer needs."""
+    from ctl.engine.project import retired_files, shipped_files
 
     source = service.compose_path(root)
     project = _project(service.id, paths)
-    changed = []
+    changed = retired_files(source, project) if project.is_dir() else []
     for relative in shipped_files(source):
         new, old = source / relative, project / relative
         try:

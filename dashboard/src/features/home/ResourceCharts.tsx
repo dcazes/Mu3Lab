@@ -244,7 +244,7 @@ function FreeUpSpace({ freeable, folders }: { freeable: number; folders: string[
       !(await confirm({
         title: `Free up about ${bytes(freeable)}?`,
         description:
-          'Mu3Lab removes old versions of your apps that nothing uses, the programs of apps it no longer offers, and files left over from building apps. The version before each app’s current one stays, so updates can still be undone. Running apps aren’t affected.',
+          'Mu3Lab removes old versions of your apps that nothing uses, the programs of apps it no longer offers, and files left over from building apps. Only the version each app runs now stays; an older one downloads again if it’s ever needed. Running apps aren’t affected.',
         confirmLabel: 'Free up space',
       }))
     )

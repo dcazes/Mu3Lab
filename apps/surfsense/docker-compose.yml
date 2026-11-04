@@ -20,7 +20,9 @@ services:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/data:/data
     depends_on:
       data-init: {condition: service_completed_successfully}
-    networks: [mu3lab_backend]
+    # mu3lab_frontend publishes its port and lets it reach the web (research, crawling);
+    # mu3lab_backend reaches the AI gateway.
+    networks: [mu3lab_frontend, mu3lab_backend]
     # Its supervisor gives each sidecar 5 s after SIGTERM; Docker's 10 s is too tight.
     stop_grace_period: 30s
     security_opt: [no-new-privileges:true]
@@ -50,4 +52,5 @@ services:
     cap_add: [CHOWN]
 
 networks:
+  mu3lab_frontend: {external: true}
   mu3lab_backend: {external: true}

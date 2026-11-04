@@ -122,6 +122,8 @@ def _check_images(compose: Path) -> None:
 _PUBLISH = re.compile(r"(?:(?P<address>.+):)?(?P<port>\d+):\d+(?:/(?P<protocol>tcp|udp))?")
 # This server's tailnet address. The ``:?`` form makes Compose refuse to start without it:
 # an empty address would publish the port on every network the computer is on.
+# Networks created with --internal (ctl.install): no internet, and no published ports.
+INTERNAL_NETWORKS = frozenset({"mu3lab_backend"})
 _TAILNET_ADDRESS = re.compile(r"\$\{MU3LAB_TAILNET_IP:\?[^}:]*\}")
 
 
@@ -132,7 +134,11 @@ def published(compose: Path) -> list[tuple[int, str, str]]:
     any other address is refused.
     """
     ports = []
-    for definition in _services(compose).values():
+    for name, definition in _services(compose).items():
+        networks = set(definition.get("networks") or [])
+        if definition.get("ports") and networks and networks <= INTERNAL_NETWORKS:
+            # Docker publishes no port of a container that is only on internal networks.
+            raise CatalogError(f"{compose}: {name} publishes a port, so it needs mu3lab_frontend too")
         for entry in definition.get("ports") or []:
             match = _PUBLISH.fullmatch(str(entry))
             if not match:

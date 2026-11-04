@@ -23,15 +23,16 @@ import json
 import os
 import secrets
 import shutil
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
-from ctl import hostinfo, resource_locks
+from ctl import hostinfo, process, resource_locks
 from ctl.app_settings import AppSettings, fixed_names
 from ctl.compute import build, gpu_build
 from ctl.engine import template
@@ -48,6 +49,9 @@ NOT_COPIED = frozenset({"app.yaml", "hooks.py", "connectors", "scripts", "__pyca
 # A developer's environments and caches, at any depth (a voice agent's tests leave a .venv).
 DEV_FOLDERS = ("__pycache__", ".venv", "node_modules")
 TEMPLATE_SUFFIX = ".tmpl"
+# In each runtime project: the files the last copy took from the app's folder, so a file the
+# app later drops (an old setup's Compose override) is removed instead of staying in use.
+SHIPPED_RECORD = ".mu3lab-shipped"
 OIDC_SECRET_LENGTH = 40
 # Rendering waits this long for a job that holds the app.
 RENDER_LOCK_SECONDS = 600
@@ -339,8 +343,61 @@ def shipped_files(source: Path) -> list[Path]:
     return files
 
 
+def _outputs(source: Path) -> set[str]:
+    """Everything the app's folder puts in its project: copied files and rendered templates."""
+    rendered = {path.name.removesuffix(TEMPLATE_SUFFIX) for path in source.glob(f"*{TEMPLATE_SUFFIX}")}
+    return {str(path) for path in shipped_files(source)} | rendered
+
+
+@cache
+def _dropped_in_history(source: Path) -> frozenset[str]:
+    """Files the checkout's history says the app's folder once had and deleted.
+
+    Only for projects copied before ``SHIPPED_RECORD`` existed; without git it finds nothing.
+    Kept for the process's life: the dashboard asks on every refresh, and a project gets its
+    record on its next copy.
+    """
+    try:
+        proc = process.completed(
+            ["git", "log", "--diff-filter=D", "--name-only", "--format=", "--relative", "--", "."],
+            cwd=source,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    if proc.returncode:
+        return frozenset()
+    found = set()
+    for line in proc.stdout.splitlines():
+        relative = Path(line.strip())
+        if not line.strip() or any(part in DEV_FOLDERS for part in relative.parts):
+            continue
+        top = relative.parts[0]
+        if top in NOT_COPIED or top.startswith(".env"):
+            continue
+        found.add(str(relative).removesuffix(TEMPLATE_SUFFIX) if len(relative.parts) == 1 else str(relative))
+    return frozenset(found)
+
+
+def retired_files(source: Path, target: Path) -> list[str]:
+    """Files an earlier copy put in the project that the app's folder no longer has."""
+    record = target / SHIPPED_RECORD
+    try:
+        before: set[str] | frozenset[str] = set(record.read_text(encoding="utf-8").splitlines())
+    except FileNotFoundError:
+        before = _dropped_in_history(source)
+    return sorted(name for name in before - _outputs(source) if name and (target / name).is_file())
+
+
 def _copy_folder(source: Path, target: Path) -> None:
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
+    for name in retired_files(source, target):
+        (target / name).unlink()
+        # A folder the app no longer ships at all goes with its last file.
+        for folder in (target / name).parents:
+            if folder == target or any(folder.iterdir()):
+                break
+            folder.rmdir()
     for item in source.iterdir():
         if not _copied(item):
             continue
@@ -349,6 +406,7 @@ def _copy_folder(source: Path, target: Path) -> None:
             shutil.copytree(item, destination, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*DEV_FOLDERS))
         else:
             shutil.copy2(item, destination)
+    write_atomic(target / SHIPPED_RECORD, "".join(f"{name}\n" for name in sorted(_outputs(source))).encode("utf-8"))
 
 
 def _write_private(path: Path, text: str) -> None:

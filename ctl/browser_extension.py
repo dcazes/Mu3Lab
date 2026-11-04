@@ -137,8 +137,13 @@ def signed_in(vault_database: Path) -> bool:
     if not vault_database.is_file():
         return False
     marks = ",".join("?" * len(EXTENSION_DEVICE_TYPES))
+    # Vaultwarden keeps its database in WAL mode. Once it stops, its -wal and -shm files are
+    # gone and a read-only connection cannot recreate them in the root-owned folder, so the
+    # read would fail. Nothing writes the file then, so it is read as unchanging.
+    stopped = not vault_database.with_name(f"{vault_database.name}-wal").exists()
+    uri = f"file:{vault_database}?mode=ro{'&immutable=1' if stopped else ''}"
     try:
-        connection = sqlite3.connect(f"file:{vault_database}?mode=ro", uri=True, timeout=2)
+        connection = sqlite3.connect(uri, uri=True, timeout=2)
         try:
             row = connection.execute(
                 f"SELECT 1 FROM devices WHERE atype IN ({marks}) LIMIT 1", EXTENSION_DEVICE_TYPES
