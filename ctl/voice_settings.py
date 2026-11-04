@@ -10,8 +10,7 @@ An administrator chooses, in Settings, Voice Assistant:
 
 The agent cannot reach the control plane, so Mu3Lab writes ``settings.json`` beside the app tools
 (``ctl/voice_tools.py``) whenever these change and whenever chat's assistants sync (every install
-does). The agent reads it at each call's start, so a change needs no restart. The file also says
-how the assistant talks, which only the full-duplex switch changes (``ctl/duplex_voice.py``).
+does). The agent reads it at each call's start, so a change needs no restart.
 
 The same page lists the voices Speaches has, plays a sample of one, and checks each app the
 assistant can use, as the administrator looking.
@@ -115,13 +114,9 @@ def search_installed() -> bool:
 
 def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
     """What the agent reads at each call's start (apps/livekit/voice-agent/src/agent.py)."""
-    from ctl import duplex_voice
-
     paths = paths or RuntimePaths()
     chosen = get(paths)
     return {
-        "engine": duplex_voice.agent_engine(paths),
-        "omni_url": duplex_voice.OMNI_URL,
         "responsiveness": chosen["responsiveness"],
         "interruptions": chosen["interruptions"],
         "voice": chosen["voice"],

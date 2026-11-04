@@ -19,7 +19,7 @@ from unittest.mock import ANY, patch
 import yaml
 from fastapi.testclient import TestClient
 
-from ctl import job_guard
+from ctl import database_dumps, job_guard
 from ctl.api import create_app
 from ctl.backups import BackupError
 from ctl.jobs import JobStore, job_params
@@ -61,6 +61,7 @@ class _Workflow(unittest.TestCase):
         self.store = JobStore(self.paths.runtime / "jobs.sqlite3")
         self.events: list[str] = []
         self.starts: list[tuple[bool, str]] = []
+        self.builds: list[bool] = []
         self.listing: list[dict] = []
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
@@ -85,6 +86,11 @@ class _Workflow(unittest.TestCase):
         self.snapshot = self.stack.enter_context(
             patch("ctl.backups.snapshot", return_value={"snapshot_id": PRE_UPDATE, "files": 1})
         )
+        # Copying and loading databases runs containers; here it only notes what it would do.
+        self.loads: list[str] = []
+        self.dump = self.stack.enter_context(patch("ctl.database_dumps.write", side_effect=self.write_dumps))
+        self.stack.enter_context(patch("ctl.database_dumps.prepare", side_effect=lambda *_a, **_k: list(self.loads)))
+        self.load = self.stack.enter_context(patch("ctl.database_dumps.load", side_effect=self.load_dumps))
 
     # --- fakes
 
@@ -94,9 +100,18 @@ class _Workflow(unittest.TestCase):
     def stop(self, *_args):
         self.events.append("stop")
 
-    def start(self, *_args):
+    def start(self, *_args, build: bool = False):
         self.events.append(f"start {app_releases.installed_version(self.service, self.root)}")
+        self.builds.append(build)
         return self.starts.pop(0) if self.starts else (True, "")
+
+    def write_dumps(self, *_args, **_kwargs):
+        self.events.append("dump")
+        return "Copied."
+
+    def load_dumps(self, _service, _root, services, *_args, **_kwargs):
+        if services:
+            self.events.append(f"load {'+'.join(services)}")
 
     def restore_folder(self, snapshot_id, _folder, target, *_args, **_kwargs):
         (target / "data.txt").write_text(f"from {snapshot_id[:1]}", encoding="utf-8")
@@ -146,6 +161,22 @@ class RestoreTests(_Workflow):
         self.assertEqual(in_progress.get("mealie", self.paths), {})
         self.assertTrue(records.get("backup-apps", "mealie", self.paths).get("restore_tested_at"))
         self.download.assert_not_called()
+
+    def test_a_backup_with_a_database_dump_loads_it_before_the_app_starts(self):
+        self.backup()
+        self.loads = ["database"]
+        job = self.job("restore", snapshot_id=BACKUP)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.events, ["stop", "load database", "start v3.22.0"])
+
+    def test_a_dump_that_does_not_load_puts_the_data_back(self):
+        self.backup()
+        self.loads = ["database"]
+        self.load.side_effect = database_dumps.DumpFailed("Mealie's database could not be loaded.")
+        job = self.job("restore", snapshot_id=BACKUP)
+        self.assertEqual(job["error_code"], "restore_rolled_back")
+        self.assertEqual(self.data(), "live")
+        self.assertEqual(self.leftovers(), [])
 
     def test_restored_data_that_does_not_start_is_put_back(self):
         self.backup()
@@ -251,11 +282,22 @@ class UpdateTests(_Workflow):
         job = self.job("update", target_version=NEW.version)
         self.assertEqual(job["state"], "succeeded", job["detail"])
         self.assertEqual(self.installed(), NEW)
-        self.assertEqual(self.events, ["stop", "start v3.23.0"])
+        self.assertEqual(self.events, ["stop", "dump", "start v3.23.0"])
+        # Images Mu3Lab builds from source are rebuilt from the new files.
+        self.assertEqual(self.builds, [True])
         self.assertEqual(self.snapshot.call_args.kwargs["version"], OLD.version)
         self.assertIn("from v3.22.0 to v3.23.0", job["detail"])
         self.assertIn("Backup cccccccc", job["detail"])
         self.assertEqual(in_progress.get("mealie", self.paths), {})
+
+    def test_mu3lab_changes_to_the_apps_files_update_it_the_same_way(self):
+        app_releases.write("mealie", NEW)  # the approved release, with files from an older Mu3Lab
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.events, ["stop", "dump", "start v3.23.0"])
+        self.assertEqual(self.builds, [True])
+        self.assertIn("Updated Mealie with Mu3Lab's latest changes to it", job["detail"])
+        self.assertIn("Backup cccccccc", job["detail"])
 
     def test_a_release_that_does_not_start_is_put_back_with_its_files_and_data(self):
         self.listing = [
@@ -268,7 +310,9 @@ class UpdateTests(_Workflow):
         self.assertEqual(self.installed(), OLD)
         self.assertEqual((self.project / "docker-compose.yml").read_text(), "services: {old: {}}\n")
         self.assertEqual(self.data(), "from c")  # the data from just before the update
-        self.assertEqual(self.events, ["stop", "start v3.23.0", "stop", "start v3.22.0"])
+        self.assertEqual(self.events, ["stop", "dump", "start v3.23.0", "stop", "start v3.22.0"])
+        # Putting the old files back rebuilds from them too.
+        self.assertEqual(self.builds, [True, True])
         self.assertEqual(self.leftovers(), [])
 
     def test_no_backup_means_no_update(self):
@@ -276,8 +320,25 @@ class UpdateTests(_Workflow):
         job = self.job("update", target_version=NEW.version)
         self.assertEqual(job["error_code"], "backup_failed")
         self.assertEqual(self.installed(), OLD)
-        self.assertEqual(self.events, ["stop", "start v3.22.0"])
+        self.assertEqual(self.events, ["stop", "dump", "start v3.22.0"])
         self.assertEqual((self.project / "docker-compose.yml").read_text(), "services: {old: {}}\n")
+
+    def test_an_app_without_data_on_this_server_updates_without_a_backup(self):
+        shutil.rmtree(self.live)  # LiveKit and Kopia keep no data folders
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.installed(), NEW)
+        self.snapshot.assert_not_called()
+        self.assertNotIn("Backup", job["detail"])
+
+    def test_an_app_without_data_that_does_not_start_gets_its_files_back(self):
+        shutil.rmtree(self.live)
+        self.starts = [(False, "crashed"), (True, "")]
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["error_code"], "update_rolled_back")
+        self.assertEqual(self.installed(), OLD)
+        self.assertEqual((self.project / "docker-compose.yml").read_text(), "services: {old: {}}\n")
+        self.unpack.assert_not_called()
 
     def test_an_invalid_new_definition_stops_before_the_app_does(self):
         self.validate.side_effect = RuntimeError("unknown service key")
@@ -345,14 +406,27 @@ class UpdateTests(_Workflow):
 
 
 class BackupHoldJobTests(_Workflow):
-    def test_the_backup_service_stops_and_starts_any_app_with_the_installers_settings(self):
-        for service_id in ("mealie", "authentik"):
-            service = load().get(service_id)
-            for action in ("backup_stop", "backup_start"):
-                job = self.store.create(kind="lifecycle", service_id=service_id, action=action, actor="backup-service")
-                maintenance.execute(self.store, None, self.store.get(job["id"]), service, self.root)
-                self.assertEqual(self.store.get(job["id"])["state"], "succeeded")
-        self.assertEqual(len(self.events), 4)
+    def test_the_backup_service_copies_databases_and_starts_what_an_older_backup_stopped(self):
+        with patch.object(maintenance.database_dumps, "write", return_value="Copied.") as write:
+            for service_id in ("mealie", "authentik"):
+                service = load().get(service_id)
+                for action in ("backup_prepare", "backup_start"):
+                    job = self.store.create(
+                        kind="lifecycle", service_id=service_id, action=action, actor="backup-service"
+                    )
+                    maintenance.execute(self.store, None, self.store.get(job["id"]), service, self.root)
+                    self.assertEqual(self.store.get(job["id"])["state"], "succeeded")
+        self.assertEqual(write.call_count, 2)
+        self.assertEqual(len(self.events), 2)  # the two starts; a copy never stops an app
+
+    def test_a_database_that_cannot_be_copied_fails_its_job(self):
+        failed = maintenance.database_dumps.DumpFailed("Mealie's database could not be copied.")
+        with patch.object(maintenance.database_dumps, "write", side_effect=failed):
+            job = self.store.create(
+                kind="lifecycle", service_id="mealie", action="backup_prepare", actor="backup-service"
+            )
+            maintenance.execute(self.store, None, self.store.get(job["id"]), load().get("mealie"), self.root)
+        self.assertEqual(self.store.get(job["id"])["error_code"], "dump_failed")
 
 
 class UncancellableTests(unittest.TestCase):

@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ctl import duplex_voice, voice_settings
+from ctl import voice_settings
 from ctl.runtime import RuntimePaths
 from ctl.store import records
 
@@ -53,7 +53,7 @@ class VoiceSettingsTests(unittest.TestCase):
         written = self.agent_file()
         self.assertEqual(written["responsiveness"], "fast")
         self.assertEqual(written["voice"], "bm_george")
-        self.assertEqual(written["engine"], "pipeline")
+        self.assertNotIn("engine", written)
         # The agent runs as its own user.
         self.assertEqual((self.folder / voice_settings.FILE).stat().st_mode & 0o777, 0o644)
         self.assertFalse((self.folder / voice_settings.OLD_FILE).exists())
@@ -66,15 +66,6 @@ class VoiceSettingsTests(unittest.TestCase):
             self.assertEqual(self.agent_file()["search_url"], voice_settings.SEARCH_URL)
             voice_settings.save({"search": False}, "owner", lambda _line: None, self.paths)
             self.assertEqual(self.agent_file()["search_url"], "")
-
-    def test_calls_switch_to_duplex_only_once_the_model_is_loaded(self):
-        duplex_voice._save(duplex_voice.DUPLEX, "owner", [], self.paths, loaded=False)
-        voice_settings.write(lambda _line: None, self.paths)
-        self.assertTrue(duplex_voice.duplex_on(self.paths))
-        self.assertEqual(self.agent_file()["engine"], "pipeline")
-        duplex_voice._save(duplex_voice.DUPLEX, "owner", [], self.paths)
-        voice_settings.write(lambda _line: None, self.paths)
-        self.assertEqual(self.agent_file()["engine"], "duplex")
 
     def test_nothing_is_written_before_the_voice_app_is_installed(self):
         (self.paths.projects / "livekit").rmdir()

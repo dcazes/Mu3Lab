@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ctl import (
     access,
+    backup_location,
     backup_service,
     disk_cleanup,
     job_guard,
@@ -90,6 +91,8 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         self_update.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == disk_cleanup.SERVICE_ID:
         disk_cleanup.execute_claimed(store, job, worker_id, ROOT)
+    elif job.get("service_id") == backup_location.SERVICE_ID:
+        backup_location.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == local_models.SERVICE_ID:
         local_models.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
@@ -161,6 +164,7 @@ def run() -> int:
     # rarely while nobody does, so an idle Mu3Lab barely touches Authentik, Vaultwarden or Docker.
     last_run: dict[str, float] = {}
     vault_sync_soon = 0.0
+    build_cache_due = False
 
     def due(task: str, fast: float, slow: float) -> bool:
         now = time.monotonic()
@@ -290,6 +294,7 @@ def run() -> int:
                 sync_agents(log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab chat assistant synchronization deferred: {exc}")
+        batches = None
         try:
             from ctl.install_batches import InstallBatchStore
 
@@ -298,12 +303,21 @@ def run() -> int:
                 batches.reconcile(store)
         except Exception as exc:
             log.warning(f"Mu3Lab batch reconciliation deferred safely: {exc}")
+        if build_cache_due and not disk_cleanup.busy(store, batches):
+            build_cache_due = False
+            try:
+                if disk_cleanup.clear_build_cache(log.info):
+                    resource_usage.disk_stale.set()
+            except Exception as exc:
+                log.warning(f"Mu3Lab build cache clean-up deferred: {exc}")
         job = store.claim(worker_id)
         if job is None:
             time.sleep(POLL_SECONDS)
             continue
         try:
             run_job(store, job, worker_id)
+            # Once nothing else runs, clear what its builds left (see ctl/disk_cleanup.py).
+            build_cache_due = build_cache_due or disk_cleanup.builds(job)
             if resource_usage.touches_disk(job):
                 resource_usage.disk_stale.set()
             # A finished install may have created logins; save them within a minute.

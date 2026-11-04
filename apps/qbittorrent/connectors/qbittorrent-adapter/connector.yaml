@@ -10,8 +10,8 @@ provenance: mu3lab-adapter
 repository: https://github.com/qbittorrent/qBittorrent
 revision: v5.2.4-webapi
 transport: streamable-http
-endpoint: http://host.docker.internal:8831/mcp
-local_health: http://127.0.0.1:8831/health
+endpoint: http://host.docker.internal:8832/mcp
+local_health: http://127.0.0.1:8832/health
 provision_note: Needs no key of its own. qBittorrent skips its login for this computer, and Authentik guards the
   private address for people.
 review_note: Mu3Lab adapter with eight tools. Three read (torrents, transfer speeds, categories) and five manage

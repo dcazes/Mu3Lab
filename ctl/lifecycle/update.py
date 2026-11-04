@@ -13,6 +13,11 @@ Nothing continues by itself after a crash or a power cut. The note stays, so
 the app shows "Needs attention: an update was interrupted" until the owner
 chooses "Undo update" (``undo``, the default) or, once the new release was
 in place, "Keep new version" (``keep``).
+
+Mu3Lab's own changes to an app's files, with the same images (``files_only``),
+take the same steps. A start after the files changed (the new ones, or the old
+ones put back) rebuilds the images Mu3Lab builds from source, so the files in
+place are the ones that run.
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, backups, job_guard
+from ctl import actions, backups, database_dumps, job_guard
 from ctl.engine.runtime import render_service
 from ctl.jobs import redact
 from ctl.lifecycle import app_control, app_releases, deployments, in_progress, restore
@@ -80,7 +85,10 @@ def update(
     if not state["update_available"]:
         raise UpdateFailed(f"{service.name} is already up to date.", "already_current")
     current = previous.version if previous else "the installed release"
-    step("download_images", f"Downloading {service.name} {target.version}. The app keeps running meanwhile.")
+    if state["files_only"]:
+        step("download_images", f"Checking {service.name}'s images. The app keeps running meanwhile.")
+    else:
+        step("download_images", f"Downloading {service.name} {target.version}. The app keeps running meanwhile.")
     try:
         app_releases.download(target.images, log)
     except RuntimeError as exc:
@@ -113,27 +121,37 @@ def update(
             in_progress.clear(service.id, paths)
             raise UpdateFailed(f"Nothing changed: {exc}", "definition_invalid") from exc
         step("backup", f"Stopping {service.name} and saving a backup of {current}.")
+        saved: dict[str, Any] | None = None
         try:
             app_control.stop(service, root, log)
-            saved = backups.snapshot(
-                service.id,
-                backed_up(service, data_directories(service, root)),
-                "pre-update",
-                log,
-                version=previous.version if previous else "",
-                release_id=app_releases.remember(service.id, previous, paths) if previous else "",
-                paths=paths,
-            )
-        except (app_control.StopFailed, backups.BackupError, OSError) as exc:
+            folders = backed_up(service, data_directories(service, root))
+            # An app with no data folders on this server (LiveKit, Kopia) has nothing a backup could hold;
+            # the deployment copy above is all an undo needs.
+            if backups.sources(folders, paths):
+                # Its databases are dumped as for any backup, so this one restores the same way.
+                database_dumps.write(service, root, log, paths)
+                saved = backups.snapshot(
+                    service.id,
+                    folders,
+                    "pre-update",
+                    log,
+                    version=previous.version if previous else "",
+                    release_id=app_releases.remember(service.id, previous, paths) if previous else "",
+                    paths=paths,
+                )
+            else:
+                log(f"{service.name} keeps no data on this server, so there is nothing to back up first.")
+        except (app_control.StopFailed, backups.BackupError, database_dumps.DumpFailed, OSError) as exc:
             deployments.restore(service, bundle, paths)
             in_progress.clear(service.id, paths)
             if running:
                 app_control.start(service, root, log)
             raise UpdateFailed(f"Nothing was updated: {exc}", "backup_failed") from exc
-        note = in_progress.update(service.id, paths, snapshot_id=saved["snapshot_id"], applied=True)
+        note = in_progress.update(service.id, paths, snapshot_id=saved["snapshot_id"] if saved else "", applied=True)
+        kept = f" Backup {saved['snapshot_id'][:8]} holds the data from before." if saved else ""
         step("apply_update", f"Starting {service.name} {target.version}. Upgrading its data can take a few minutes.")
         app_releases.write(service.id, target, paths)
-        started, detail = app_control.start(service, root, log)
+        started, detail = app_control.start(service, root, log, build=True)
         if started:
             if not running:
                 app_control.stop(service, root, log)
@@ -143,11 +161,13 @@ def update(
             except OSError as exc:
                 log(f"Old deployment copies were not removed this time: {exc}")
             moved = (
-                f"Updated {service.name}'s supporting services"
+                f"Updated {service.name} with Mu3Lab's latest changes to it"
+                if state["files_only"]
+                else f"Updated {service.name}'s supporting services"
                 if state["supporting_only"]
                 else f"Updated {service.name} from {current} to {target.version}"
             )
-            return f"{moved}. Backup {saved['snapshot_id'][:8]} holds the data from before."
+            return f"{moved}.{kept}"
         step("put_back", f"{target.version} did not start; putting back {current} and its data.")
         cause = redact(detail)[-300:]
         try:
@@ -155,7 +175,7 @@ def update(
         except restore.PutBackFailed as failed:
             raise UpdateFailed(
                 f"{service.name} {target.version} did not start ({cause}), and putting back {current} did not "
-                f"finish: {failed}. Backup {saved['snapshot_id'][:8]} holds the data from before.",
+                f"finish: {failed}.{kept}",
                 "update_put_back_failed",
             ) from None
     raise UpdateFailed(
@@ -176,6 +196,9 @@ def _replace_data(service: Service, root: Path, snapshot_id: str, log: Log, path
         staging = restore.place(name, "restoring", paths)
         staging.mkdir(mode=0o700)
         backups.restore_folder(snapshot_id, name, staging, log, paths)
+    dumps = database_dumps.prepare(
+        service, root, {name: restore.place(name, "restoring", paths) for name in names}, log, paths
+    )
     for name in names:
         live, aside = paths.data / name, restore.place(name, "discard", paths)
         restore._wipe([aside], log, paths)
@@ -183,6 +206,7 @@ def _replace_data(service: Service, root: Path, snapshot_id: str, log: Log, path
             live.rename(aside)
         restore.place(name, "restoring", paths).rename(live)
     restore._wipe([restore.place(name, "discard", paths) for name in names], log, paths)
+    database_dumps.load(service, root, dumps, log, paths)
 
 
 def undo(service: Service, root: Path, log: Log, note: dict[str, Any], paths: RuntimePaths | None = None) -> str:
@@ -201,13 +225,14 @@ def undo(service: Service, root: Path, log: Log, note: dict[str, Any], paths: Ru
         app_control.StopFailed,
         deployments.BundleError,
         backups.BackupError,
+        database_dumps.DumpFailed,
         restore.RestoreFailed,
         OSError,
     ) as exc:
         raise restore.PutBackFailed(str(exc)) from exc
     in_progress.clear(service.id, paths)
     if note.get("was_running", True):
-        started, detail = app_control.start(service, root, log)
+        started, detail = app_control.start(service, root, log, build=True)
         if not started:
             return f"The previous release and its data are back, but {service.name} did not start: {detail[-300:]}"
     return f"{service.name} is back to how it was before the update."
@@ -219,7 +244,7 @@ def keep(service: Service, root: Path, log: Log, note: dict[str, Any], paths: Ru
     if not note.get("applied") or not note.get("target"):
         raise restore.PutBackFailed("The update had not reached the new release yet; undo it instead.")
     app_releases.write(service.id, Release.from_dict(note["target"]), paths)
-    started, detail = app_control.start(service, root, log)
+    started, detail = app_control.start(service, root, log, build=True)
     if not started:
         raise restore.PutBackFailed(f"The new release did not start: {redact(detail)[-300:]}. Undo the update instead.")
     if not note.get("was_running", True):

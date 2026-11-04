@@ -48,8 +48,11 @@ def stop(service: Service, root: Path, log: Log) -> None:
         raise StopFailed(f"{service.name} could not be stopped: {output[-300:]}")
 
 
-def start(service: Service, root: Path, log: Log) -> tuple[bool, str]:
-    """Start the app and wait for its health check; returns (healthy, why not)."""
+def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tuple[bool, str]:
+    """Start the app and wait for its health check; returns (healthy, why not).
+
+    ``build`` rebuilds the images Mu3Lab builds from source, for an update that brought new files.
+    """
     from ctl.mcp_ops import sync_application
 
     folder = project(service, root)
@@ -62,7 +65,14 @@ def start(service: Service, root: Path, log: Log) -> tuple[bool, str]:
     # Orphans: a service a new release dropped (Dawarich's Sidekiq worker) must
     # not keep running beside it.
     rc, output = actions.compose_up(
-        folder, log, timeout=wait + 300, wait_timeout=wait, env=env, extra_files=extra, remove_orphans=True
+        folder,
+        log,
+        timeout=wait + 300,
+        wait_timeout=wait,
+        env=env,
+        extra_files=extra,
+        remove_orphans=True,
+        build=build,
     )
     if rc:
         return False, output[-500:]

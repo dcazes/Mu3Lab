@@ -9,8 +9,8 @@ undoes the provider's own install or removal.
 
 Each consumer is re-wired under its own app lock, so it never changes while
 another job works on it. A consumer whose restore or update was interrupted is
-left alone until a person settles it, and one stopped for its backup is left
-until the backup is done.
+left alone until a person settles it, and one being backed up is left until
+the backup is done.
 """
 
 from __future__ import annotations

@@ -93,9 +93,7 @@ export function VoiceModelCard({ api, readOnly = false }: { api: ApiState<AiMode
   const draft = edits ?? { choice: savedChoice, model: saved.model };
   const localOn = draft.choice === 'local_only' || draft.choice === 'local_first';
   const edited = draft.choice !== savedChoice || (localOn && draft.model !== saved.model);
-  // The full-duplex model answers by itself; this setting waits until separate steps are back.
-  const duplexOn = data.voice_engine.engine === 'duplex';
-  const busy = running || Boolean(data.active_job_id) || duplexOn;
+  const busy = running || Boolean(data.active_job_id);
   const missingLocal = localOn && !draft.model;
   const chosen = data.chat_models.find((model) => model.id === draft.model);
 
@@ -131,11 +129,6 @@ export function VoiceModelCard({ api, readOnly = false }: { api: ApiState<AiMode
   return (
     <Card title={title} description={description}>
       <p className="model-where">{whereVoiceRuns(data)}</p>
-      {duplexOn && (
-        <Callout tone="info" title="Not used while the full-duplex model is on">
-          This applies again when Labs, full-duplex mode is switched off.
-        </Callout>
-      )}
       {!data.runner_reachable && localOn && (
         <Callout tone="warning" title="The model runner is not answering">
           Download states may be out of date until it is running again.

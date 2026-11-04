@@ -45,6 +45,8 @@ from ctl.store.secrets import SecretStore
 
 # Files that describe the app to Mu3Lab rather than run it.
 NOT_COPIED = frozenset({"app.yaml", "hooks.py", "connectors", "scripts", "__pycache__"})
+# A developer's environments and caches, at any depth (a voice agent's tests leave a .venv).
+DEV_FOLDERS = ("__pycache__", ".venv", "node_modules")
 TEMPLATE_SUFFIX = ".tmpl"
 OIDC_SECRET_LENGTH = 40
 # Rendering waits this long for a job that holds the app.
@@ -310,16 +312,41 @@ def build_env(
     return env
 
 
+def _copied(item: Path) -> bool:
+    """Whether a top-level item of the app's folder goes into its runtime project as it is."""
+    if item.name in NOT_COPIED or item.name.startswith(".env") or item.is_symlink():
+        return False
+    return item.suffix != TEMPLATE_SUFFIX
+
+
+def shipped_files(source: Path) -> list[Path]:
+    """Every file ``_copy_folder`` copies from the app's folder, relative to it.
+
+    Updates compare these with the installed project, so a change Mu3Lab makes to an app's
+    own files (LiveKit's voice agent, say) is offered as an update like a new release.
+    """
+    files: list[Path] = []
+    for item in sorted(source.iterdir()):
+        if not _copied(item):
+            continue
+        if item.is_dir():
+            for path in sorted(item.rglob("*")):
+                relative = path.relative_to(source)
+                if path.is_file() and not any(part in DEV_FOLDERS for part in relative.parts):
+                    files.append(relative)
+        elif item.is_file():
+            files.append(Path(item.name))
+    return files
+
+
 def _copy_folder(source: Path, target: Path) -> None:
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
     for item in source.iterdir():
-        if item.name in NOT_COPIED or item.name.startswith(".env") or item.is_symlink():
-            continue
-        if item.suffix == TEMPLATE_SUFFIX:
+        if not _copied(item):
             continue
         destination = target / item.name
         if item.is_dir():
-            shutil.copytree(item, destination, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(item, destination, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*DEV_FOLDERS))
         else:
             shutil.copy2(item, destination)
 

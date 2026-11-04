@@ -103,7 +103,7 @@ RomM's token can only read the library.
 ## Private apps: one set of tools per person
 
 Some apps keep each person's data private: Paperless-ngx, Immich, Nextcloud, Outline, AdventureLog,
-Actual Budget, SurfSense, Dawarich and Beaver Habits. One connector holding the owner's key would show
+Actual Budget, Dawarich and Beaver Habits. One connector holding the owner's key would show
 the owner's data to anyone who asked chat. Their connectors say `per_person: true`, and
 `ctl/person_connectors.py` gives everyone their own:
 

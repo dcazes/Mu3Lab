@@ -111,6 +111,8 @@ class ServiceUpdate(ApiModel):
     approved_version: str
     update_available: bool
     supporting_only: bool
+    # Same release and images; Mu3Lab changed the app's own files since they were installed.
+    files_only: bool = False
 
 
 class ServiceAccount(ApiModel):
@@ -195,7 +197,7 @@ class Service(ApiModel):
     containers: list[ServiceContainersItem] | None = None
     checks: ServiceChecks | None = None
     recovery: ServiceRecovery | None = None
-    # Kopia's backup service has stopped the app for its backup right now.
+    # Kopia's backup service is backing the app up right now (it keeps running).
     backing_up: bool = False
     blocking_check: Literal["process", "route", "sign_in"] | None = None
 
@@ -324,6 +326,20 @@ class DiskUsage(ApiModel):
     removed_folders: list[str] = Field(default_factory=list)
     # "core" part by part: platform app ids, "tailnet-relay" and "mu3lab" (Mu3Lab's own services).
     core_parts: dict[str, DiskShare] = Field(default_factory=dict)
+    # What owners keep on other drives (SystemResponse.drives), by mount point; "owners" is the main drive only.
+    drives: dict[str, dict[str, DiskShare]] = Field(default_factory=dict)
+
+
+class Drive(ApiModel):
+    """A drive besides the main one that holds Mu3Lab's data, measured live."""
+
+    mount: str
+    name: str
+    # What Mu3Lab keeps there: "backups".
+    role: str
+    total: float
+    used: float
+    percent: float
 
 
 class CleanupRequest(ApiModel):
@@ -360,7 +376,9 @@ class SystemResponse(ApiModel):
     tailscale: TailscaleStatus | None = None
     runtime_root: str
     memory: Metric
+    # The drive Mu3Lab's own folder is on.
     disk: Metric
+    drives: list[Drive] = Field(default_factory=list)
     backup: BackupReadiness
 
 
@@ -758,6 +776,38 @@ class BackupSchedule(ApiModel):
     problems: list[str]
 
 
+class BackupDrive(ApiModel):
+    """A place the backups can live: the main drive's own folder, or a folder on another mounted drive."""
+
+    id: str
+    name: str
+    # The drive's model, when the system knows it.
+    detail: str
+    mount: str
+    path: str
+    size_bytes: int
+    free_bytes: int
+    current: bool
+    # On the same physical drive as the apps' data: one drive failure loses both.
+    same_drive_as_data: bool
+    # Mounted only while someone is signed in to the desktop; night-time backups would miss it.
+    desktop_only: bool
+    # Why it can't be chosen; empty when it can.
+    problem: str
+
+
+class BackupLocation(ApiModel):
+    """Where the backups are, the drives they could move to, and the latest move."""
+
+    ok: bool
+    path: str
+    # Empty unless the chosen drive is missing (nothing is backed up until it is back).
+    problem: str
+    used_bytes: int
+    drives: list[BackupDrive]
+    move: Job | None = None
+
+
 class BackupStarted(ApiModel):
     """Kopia's backup service was asked to back up now; progress shows on the app."""
 
@@ -819,31 +869,6 @@ class AiVoiceSettings(ApiModel):
     changed_by: str
 
 
-AiVoiceEngine = Literal["pipeline", "duplex"]
-
-
-class AiVoiceEngineSettings(ApiModel):
-    """How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card."""
-
-    engine: AiVoiceEngine
-    # The full-duplex model, its download size and whether its files are here and checked.
-    model: str
-    download_gb: float
-    downloaded: bool
-    # Apps that use the graphics card and stop while the full-duplex model is on (names).
-    stops: list[str]
-    # The apps this mode stopped, which start again when it is switched off.
-    stopped: list[str]
-    # Why it cannot be switched on here, or "".
-    unavailable_reason: str
-    changed_at: str
-    changed_by: str
-
-
-class AiVoiceEngineRequest(ApiModel):
-    engine: AiVoiceEngine
-
-
 class ModelRunnerOption(ApiModel):
     id: str
     name: str
@@ -858,7 +883,6 @@ class AiModels(ApiModel):
     ok: bool
     settings: AiModelSettings
     voice: AiVoiceSettings
-    voice_engine: AiVoiceEngineSettings
     # The reviewed chat model that fits best, or "" to suggest outside providers; and why.
     suggested: str = ""
     suggestion_reason: str = ""
@@ -1096,6 +1120,7 @@ class UpdateResponse(ApiModel):
     release_url: str
     update_available: bool
     supporting_only: bool
+    files_only: bool = False
     update_enabled: bool
     blocked_reason: str
     added_services: list[str] = Field(default_factory=list)
@@ -1324,6 +1349,11 @@ class BackupScheduleRequest(RequestModel):
     time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
+class BackupLocationRequest(RequestModel):
+    # A drive's id from GET /system/backups/location: "default" or its mount point.
+    target: str = Field(min_length=1, max_length=4096)
+
+
 class BackupHookRequest(RequestModel):
     source: str = Field(max_length=80)
 
@@ -1349,6 +1379,9 @@ class ServiceActionRequest(RequestModel):
     ]
     confirm: str = ""
     snapshot_id: str = ""
+    # Start and restart: which of the stopped apps this one needs start with it. Left out, all of them;
+    # the dashboard asks first and the person may leave some stopped.
+    dependencies: list[str] | None = Field(default=None, max_length=50)
 
 
 class ConfigurationRequest(RequestModel):

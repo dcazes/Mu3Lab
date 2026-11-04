@@ -14,9 +14,6 @@ A tool that changes something runs only right after the person says yes.
 
 The main assistant can also search the web privately, through the household's SearXNG app.
 
-Mu3Lab can switch the assistant to one full-duplex model instead (duplex.py): it listens and speaks
-at once, and cannot use the apps.
-
 The household's choices (Settings, Voice Assistant) reach the agent in MU3LAB_VOICE_TOOLS' sibling
 settings.json, read at each call's start, so a change needs no restart (ctl/voice_settings.py).
 
@@ -39,7 +36,6 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
-import duplex
 import httpx2
 import websearch
 from dotenv import load_dotenv
@@ -90,8 +86,6 @@ VOICE_TOOLS = Path(_env("MU3LAB_VOICE_TOOLS", "voice-tools/people.json"))
 # The household's choices, beside the app tools (Settings, Voice Assistant; ctl/voice_settings.py).
 VOICE_SETTINGS = VOICE_TOOLS.with_name("settings.json")
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # Separate steps ("pipeline") or one full-duplex model ("duplex").
-    "engine": "pipeline",
     "responsiveness": "balanced",
     "interruptions": True,
     "voice": "",
@@ -463,27 +457,10 @@ def prewarm(proc: JobProcess) -> None:
 server.setup_fnc = prewarm
 
 
-async def duplex_entrypoint(ctx: JobContext, settings: dict[str, Any]) -> None:
-    """A full-duplex call: the model listens and speaks itself, with web search as its one tool."""
-    await ctx.connect()
-    participant = await ctx.wait_for_participant()
-    person = (load_people().get("people") or {}).get(participant.identity.lower())
-    who = f"You are talking with {person['name']}. " if person else ""
-    instructions = (
-        f"{INSTRUCTIONS}\n\n{now_line()}\n\n{who}In this mode you cannot see or change anything in the "
-        "household's apps; if asked, say that the household can switch the voice assistant back to separate "
-        "steps in Mu3Lab's Settings to use them."
-    )
-    await duplex.run_call(ctx.room, participant, settings, instructions)
-
-
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
     settings = load_settings()
-    if settings["engine"] == "duplex":
-        await duplex_entrypoint(ctx, settings)
-        return
     # Speech models load while the person joins.
     speech_ready = asyncio.create_task(warm_speech(settings["voice"]))
 

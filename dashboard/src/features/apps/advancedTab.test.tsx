@@ -95,6 +95,20 @@ describe('AdvancedTab updates', () => {
     await vi.waitFor(() => expect(posts).toEqual([{ action: 'update' }]));
   });
 
+  it('names an update of Mu3Lab’s changes to the app without a new version', async () => {
+    const posts = setup(release({ approved_version: 'v3.22.0', files_only: true }));
+    expect(
+      await screen.findByText(
+        'A tested update is ready: Mu3Lab’s changes to how Mealie is set up (Mealie stays v3.22.0).',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Release notes' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Update Mealie with Mu3Lab’s changes?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'update' }]));
+  });
+
   it('says when the app is on the latest tested version', async () => {
     setup(release({ update_available: false, update_enabled: false, approved_version: 'v3.22.0' }));
     expect(await screen.findByText('You’re on the latest tested version (v3.22.0).')).toBeInTheDocument();

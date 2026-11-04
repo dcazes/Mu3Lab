@@ -531,6 +531,10 @@ class BackupSpec(Model):
     reason: str = ""
     # Data folders (by name) left out because they are downloaded again (a map index); still removed on uninstall.
     skip: tuple[str, ...] = ()
+    # Folders inside the app's data (under the data root, like ``romm/redis``) the app builds
+    # again by itself. Live databases (their dumps are saved) and Redis, Valkey and RabbitMQ folders
+    # are left out without being listed (``ctl.database_dumps``).
+    ignore: tuple[Annotated[str, Field(pattern=r"^[a-z0-9-]+(/[A-Za-z0-9._-]+)+$")], ...] = ()
 
 
 # --- Media libraries -------------------------------------------------------------------

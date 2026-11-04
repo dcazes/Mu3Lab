@@ -538,7 +538,12 @@ def status(
     return {
         **service.public(),
         "compute": compute_switch.info(service, root),
-        "update": {"repository": str(service.update.get("repository", "")), "supporting_only": False, **release},
+        "update": {
+            "repository": str(service.update.get("repository", "")),
+            "supporting_only": False,
+            "files_only": False,
+            **release,
+        },
         "state": lifecycle_state,
         "detail": detail,
         "lifecycle_state": lifecycle_state,

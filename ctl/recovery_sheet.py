@@ -31,7 +31,9 @@ def password_check(password: str) -> str:
 
 
 def repository(paths: RuntimePaths) -> str:
-    return str(paths.backups / "kopia")
+    from ctl import backup_location
+
+    return str(backup_location.folder(paths) / "kopia")
 
 
 def vault_notes(host: str, paths: RuntimePaths) -> str:

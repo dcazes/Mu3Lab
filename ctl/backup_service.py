@@ -17,20 +17,19 @@ time and runs two actions around each:
 
 - **before**: ``POST /api/v1/backup-hooks/before-snapshot-root``. Mu3Lab notes
   the app's release, holds the app (nothing else may change it) and has the
-  worker stop it; for ``mu3lab`` it writes the consistent copy of its own
-  state. If this fails, Kopia skips that backup (the actions are
-  ``essential``), so a running database is never copied.
-- **after**: ``POST /api/v1/backup-hooks/after-snapshot-root``. The worker
-  starts the app again with the installer's settings
-  (``ctl.lifecycle.app_control``).
+  worker write a consistent copy of each of its databases while it keeps
+  running (``ctl.database_dumps``); for ``mu3lab`` it writes the consistent
+  copy of its own state. If this fails, Kopia skips that backup (the actions
+  are ``essential``), so a database is never saved half-changed.
+- **after**: ``POST /api/v1/backup-hooks/after-snapshot-root``. The hold ends.
 
 The worker keeps the server in step (``reconcile``, about once a minute): it
-mounts each installed app's folders, sets the actions on each source, writes
-the schedule and retention into the global policy, records each source's
-newest backup, and starts any app a backup left stopped because Kopia never
-ran the after-action. A bind mount follows the folder, not its name, so the
-server is recreated, while idle, after a restore swaps an app's folders; until
-then, the before-action refuses that app.
+mounts each installed app's folders, sets the actions and what to leave out
+(live database folders and caches) on each source, writes the schedule and
+retention into the global policy, records each source's newest backup, and
+ends any hold Kopia never ran the after-action for. A bind mount follows the
+folder, not its name, so the server is recreated, while idle, after a restore
+swaps an app's folders; until then, the before-action refuses that app.
 """
 
 from __future__ import annotations
@@ -50,10 +49,9 @@ from typing import Any
 
 import yaml
 
-from ctl import actions, backups, platform_backup
-from ctl.control_state import ControlState
+from ctl import actions, backups, database_dumps, platform_backup
 from ctl.jobs import JobConflict, JobStore
-from ctl.lifecycle import app_control, app_releases, in_progress
+from ctl.lifecycle import app_releases, in_progress
 from ctl.lifecycle.uninstall import backed_up, data_directories
 from ctl.registry import RegistryError, load
 from ctl.runtime import RuntimePaths
@@ -166,6 +164,16 @@ def source_policy(item: dict[str, Any] | None) -> list[str]:
         "--snapshot-interval=0s",
         f"--run-missed={'inherit' if _catches_up(item) else 'false'}",
     ]
+
+
+def ignore_rules(source: str, root: Path, registry=None) -> list[str]:
+    """What Kopia leaves out of one app's backup: its live databases, whose dumps are saved, and caches."""
+    if source in {backups.PLATFORM_SOURCE, backups.MEDIA_SOURCE}:
+        return []
+    try:
+        return database_dumps.kopia_rules((registry or load()).get(source), root)
+    except RegistryError:
+        return []
 
 
 def _schedule_matches(item: dict[str, Any], chosen: dict[str, Any]) -> bool:
@@ -366,24 +374,19 @@ def before(source: str, store: JobStore, root: Path, paths: RuntimePaths | None 
             [name for name, _path in found],
             paths,
         )
-        running = app_control.was_running(ControlState.runtime(paths), service)
+        # The app keeps running; the hold only keeps other tasks off it until its backup ends.
         since = _now().isoformat(timespec="seconds")
-        records.put(HOLDS, source, {"since": since, "was_running": running}, paths)
-        if running:
-            try:
-                job = _queue(store, source, "backup_stop", f"Stopping {service.name} for its backup.", since)
-            except JobConflict:
-                records.delete(HOLDS, source, paths)
-                raise HookRefused(
-                    f"Another task is running on {service.name}; its backup waits for the next run."
-                ) from None
-            if job.get("state") != "succeeded":
-                try:
-                    _queue(store, source, "backup_start", f"Starting {service.name} again.", since)
-                    records.delete(HOLDS, source, paths)
-                except JobConflict:
-                    pass  # the stop is still waiting for the worker; the stuck-app check starts it after
-                raise HookRefused(f"{service.name} could not be stopped for its backup: {job.get('detail', '')}")
+        records.put(HOLDS, source, {"since": since}, paths)
+        try:
+            job = _queue(store, source, "backup_prepare", f"Copying {service.name}'s databases for its backup.", since)
+        except JobConflict:
+            records.delete(HOLDS, source, paths)
+            raise HookRefused(
+                f"Another task is running on {service.name}; its backup waits for the next run."
+            ) from None
+        if job.get("state") != "succeeded":
+            records.delete(HOLDS, source, paths)
+            raise HookRefused(f"{service.name}'s databases could not be copied for its backup: {job.get('detail', '')}")
         return f"{service.name} is ready to be saved."
     except HookRefused as refused:
         _result(source, False, str(refused), paths)
@@ -404,6 +407,7 @@ def after(source: str, store: JobStore, root: Path, paths: RuntimePaths | None =
     if not hold:
         return "Nothing to start again."
     detail = ""
+    # Only a hold from before database dumps stopped its app ("was_running").
     if hold.get("was_running"):
         try:
             job = _queue(store, source, "backup_start", "Starting the app again after its backup.", str(hold["since"]))
@@ -419,7 +423,7 @@ def after(source: str, store: JobStore, root: Path, paths: RuntimePaths | None =
 
 
 def holding(source: str, paths: RuntimePaths | None = None) -> bool:
-    """The app is stopped for its backup right now; nothing else may change it."""
+    """The app is being backed up right now; nothing else may change it."""
     return bool(records.get(HOLDS, source, paths or RuntimePaths()))
 
 
@@ -475,8 +479,14 @@ def _recreate(root: Path, log: Log, paths: RuntimePaths) -> None:
         raise OSError(f"the backup service did not start: {output[-300:]}")
 
 
-def _restart_stuck(store: JobStore, status: dict[str, dict] | None, log: Log, paths: RuntimePaths) -> None:
-    """Start any app a backup stopped whose after-action never came (the backup failed or Kopia restarted)."""
+def _release_stuck(
+    store: JobStore, status: dict[str, dict] | None, log: Log, paths: RuntimePaths, *, server_up: bool
+) -> None:
+    """End the hold of any app whose after-action never came (the backup failed or Kopia restarted).
+
+    With the backup server stopped no backup can be running, so its holds end at
+    once; while it is up but cannot be asked, they wait in case it is still busy.
+    """
     for source in records.names(HOLDS, paths):
         hold = records.get(HOLDS, source, paths)
         try:
@@ -484,10 +494,11 @@ def _restart_stuck(store: JobStore, status: dict[str, dict] | None, log: Log, pa
         except (TypeError, ValueError):
             since = _now() - UNREACHABLE
         uploading = status is not None and (status.get(source) or {}).get("status") == "UPLOADING"
-        limit = STUCK if status is not None else UNREACHABLE
+        limit = timedelta(0) if not server_up else STUCK if status is not None else UNREACHABLE
         if uploading or _now() - since < limit:
             continue
-        log(f"A backup of {source} ended without starting it again; starting it now.")
+        log(f"A backup of {source} ended without its after-action; ending its hold now.")
+        # Only a hold from before database dumps stopped its app.
         if hold.get("was_running"):
             try:
                 store.create(
@@ -526,8 +537,8 @@ def reconcile(store: JobStore, root: Path, log: Log, paths: RuntimePaths | None 
     except OSError:
         status = None
     _note_reachable(status is not None, paths)
-    _restart_stuck(store, status, log, paths)
     container = _container(log)
+    _release_stuck(store, status, log, paths, server_up=bool(container))
     if not container:
         return  # stopped by an administrator, or not started yet: nothing to change
     busy = bool(records.names(HOLDS, paths)) or any(
@@ -569,11 +580,17 @@ def reconcile(store: JobStore, root: Path, log: Log, paths: RuntimePaths | None 
             if applied_global != policy:
                 _exec(container["id"], ["policy", "set", "--global", *policy], log)
                 applied_global, changed = policy, True
+            registry = load()
             for source in found:
                 args = source_policy(status.get(source))
-                if applied.get(source) != args:
-                    _exec(container["id"], ["policy", "set", f"/data/{source}", *args], log)
-                    applied[source], changed = args, True
+                rules = ignore_rules(source, root, registry)
+                wanted = [*args, *(f"--add-ignore={rule}" for rule in rules)]
+                if applied.get(source) != wanted:
+                    # Kopia applies a clear after an add in the same call, so they are two calls.
+                    _exec(container["id"], ["policy", "set", f"/data/{source}", *args, "--clear-ignore"], log)
+                    if rules:
+                        _exec(container["id"], ["policy", "set", f"/data/{source}", *wanted[len(args) :]], log)
+                    applied[source], changed = wanted, True
             if changed:
                 _control("POST", "refresh", paths=paths)
             repaired = differs  # still different next time: something else in Kopia sets it
@@ -672,6 +689,11 @@ def attention(paths: RuntimePaths | None = None, *, now: datetime | None = None)
                 "message": "Backups are off. Install Kopia backups from Apps to back up on a schedule.",
             }
         ]
+    from ctl import backup_location
+
+    missing = backup_location.problem(paths)
+    if missing:
+        return [{"key": "backup-drive-missing", "message": missing}]
     chosen = settings(paths)
     scheduled = chosen["frequency"] != "off"
     limit = INTERVALS[chosen["frequency"]] + GRACE if scheduled else UNSCHEDULED_LIMIT

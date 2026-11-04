@@ -161,10 +161,4 @@ describe('Voice assistant settings', () => {
     expect(await screen.findByRole('radio', { name: /Same as chat/ })).toBeChecked();
     expect(screen.getByText(/^The same as chat\./)).toBeInTheDocument();
   });
-
-  it('keeps full-duplex mode folded away under Labs', async () => {
-    renderPage();
-    const labs = await screen.findByRole('button', { name: /Labs: full-duplex mode/ });
-    expect(labs).toHaveAttribute('aria-expanded', 'false');
-  });
 });

@@ -17,7 +17,7 @@ from ctl.engine.install import run_install
 from ctl.engine.jobs import _event, _fail, _job_log
 from ctl.engine.project import Facts
 from ctl.engine.rewire import rewire_consumers
-from ctl.jobs import JobStore, redact
+from ctl.jobs import JobStore, job_params, redact
 from ctl.lifecycle import app_control, compute_switch, maintenance
 from ctl.lifecycle.health import wait_healthy
 from ctl.lifecycle.maintenance import BACKUP_ACTIONS, MAINTENANCE_ACTIONS
@@ -45,7 +45,7 @@ SUPPORTED_ACTIONS = frozenset(
         "update",
         "recover",
         "keep_update",
-        "backup_stop",
+        "backup_prepare",
         "backup_start",
         "switch_compute",
     }
@@ -240,9 +240,12 @@ def _start_needed_apps(
 
     Core apps count too: an administrator can stop LiteLLM, and an app installed then could not
     register its gateway key. An app that is not installed is the install batch's job. A failure
-    ends the job with the needed app named and leaves this app's own state as it was.
+    ends the job with the needed app named and leaves this app's own state as it was. A start
+    queued with ``dependencies`` starts only those; the person chose to leave the rest stopped.
     """
     job_id = str(job["id"])
+    params = job_params(job)
+    chosen = set(filter(None, params["dependencies"].split(","))) if "dependencies" in params else None
     seen: set[str] = set()
 
     def needed(current: Service) -> list[Service]:
@@ -263,6 +266,9 @@ def _start_needed_apps(
 
     log = _job_log(store, job_id)
     for dependency in needed(service):
+        if chosen is not None and dependency.id not in chosen:
+            log(f"Leaving {dependency.name} stopped, as asked; {service.name} may not work fully without it.")
+            continue
         _event(store, job_id, "start_dependencies", f"Starting {dependency.name}, which {service.name} needs.")
         project = project_path(dependency, root)
         rc, output = Compose(project, gpu_mode=app_mode(project, dependency.uses_gpu)).action("start", log)

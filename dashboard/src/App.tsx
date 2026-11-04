@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
 import { ConfirmProvider } from './components/Dialog';
+import { LifecycleProvider } from './features/apps/lifecycle';
 import { EmptyState } from './components/Layout';
 import { LinkButton } from './components/Button';
 import { AppDetailPage } from './features/apps/AppDetailPage';
@@ -108,7 +109,9 @@ export default function App() {
   return (
     <DashboardProvider value={dashboard}>
       <ConfirmProvider>
-        <Shell />
+        <LifecycleProvider>
+          <Shell />
+        </LifecycleProvider>
       </ConfirmProvider>
     </DashboardProvider>
   );

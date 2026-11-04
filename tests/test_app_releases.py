@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import yaml
 
+from ctl.engine.project import _copy_folder
 from ctl.lifecycle import app_releases
 from ctl.lifecycle.app_releases import Release
 from ctl.lifecycle.uninstall import _remove_project
@@ -118,6 +119,7 @@ class ApprovalTests(_Machine):
                 "approved_version": "v3.23.0",
                 "update_available": True,
                 "supporting_only": False,
+                "files_only": False,
                 "added_services": [],
                 "removed_services": [],
             },
@@ -142,6 +144,65 @@ class ApprovalTests(_Machine):
         self.copy_definition()
         app_releases.align(self.service, self.root)
         self.assertEqual(app_releases.installed(self.service, self.root), Release("v3.22.0", {"mealie": OLD}))
+
+
+class FileChangeTests(_Machine):
+    """Mu3Lab changes an app's own files (a voice agent it builds) without a new release of the app."""
+
+    def setUp(self):
+        super().setUp()
+        self.agent = self.root / "apps" / "mealie" / "agent" / "main.py"
+        self.agent.parent.mkdir(parents=True)
+        self.agent.write_text("print(1)\n", encoding="utf-8")
+
+    def copy_folder(self) -> None:
+        """What installing or updating does with the app's folder."""
+        _copy_folder(self.root / "apps" / "mealie", self.project)
+
+    def test_a_changed_file_is_offered_as_an_update_of_the_same_release(self):
+        self.copy_folder()
+        self.install()
+        self.assertFalse(self.status()["update_available"])
+        self.agent.write_text("print(22)\n", encoding="utf-8")
+        state = self.status()
+        self.assertTrue(state["update_available"])
+        self.assertTrue(state["files_only"])
+        self.assertFalse(state["supporting_only"])
+        self.copy_folder()
+        self.assertFalse(self.status()["update_available"])
+
+    def test_a_new_file_is_a_change_and_a_file_rewritten_unchanged_is_not(self):
+        self.copy_folder()
+        self.install()
+        self.agent.write_text("print(1)\n", encoding="utf-8")  # a checkout that touched it
+        self.assertFalse(self.status()["update_available"])
+        (self.agent.parent / "search.py").write_text("", encoding="utf-8")
+        self.assertEqual(app_releases.changed_files(self.service, self.root), ["agent/search.py"])
+
+    def test_a_developers_environment_is_neither_copied_nor_compared(self):
+        for name in (".venv/lib/site.py", "__pycache__/main.pyc", "node_modules/x/index.js"):
+            (self.agent.parent / name).parent.mkdir(parents=True)
+            (self.agent.parent / name).write_text("x", encoding="utf-8")
+        self.copy_folder()
+        self.install()
+        self.assertEqual(sorted(p.name for p in (self.project / "agent").iterdir()), ["main.py"])
+        self.assertFalse(self.status()["update_available"])
+
+    def test_a_new_release_with_changed_files_is_an_ordinary_update(self):
+        self.copy_folder()
+        self.install()
+        self.agent.write_text("print(22)\n", encoding="utf-8")
+        self.approve("v3.23.0", {"mealie": NEW})
+        state = self.status()
+        self.assertTrue(state["update_available"])
+        self.assertFalse(state["files_only"])
+
+    def test_an_app_already_past_the_approved_release_is_not_offered_older_files(self):
+        self.copy_folder()
+        self.install()
+        app_releases.write("mealie", Release("v3.24.0", {"mealie": OLD}))
+        self.agent.write_text("print(22)\n", encoding="utf-8")
+        self.assertFalse(self.status()["update_available"])
 
 
 class LegacyRecordTests(_Machine):

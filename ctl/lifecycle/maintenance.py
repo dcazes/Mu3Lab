@@ -6,9 +6,11 @@
   it was ("Put my original data back", "Undo update").
 - ``keep_update``: after an interrupted update whose new release was already
   in place, keep it if it starts healthy.
-- ``backup_stop`` and ``backup_start``: Kopia's backup service asks for an
-  app to be stopped just before its backup and started again just after
-  (``ctl.backup_service``); they run here so only the worker runs Docker.
+- ``backup_prepare``: Kopia's backup service asks for a consistent copy of an
+  app's databases just before its backup, while the app keeps running
+  (``ctl.backup_service``, ``ctl.database_dumps``); it runs here so only the
+  worker runs Docker. ``backup_start`` starts an app a backup stopped before
+  Mu3Lab made those copies.
 
 A job is never continued after its worker died: a restore or update job
 claimed a second time fails as interrupted, and its note
@@ -19,14 +21,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ctl import backup_service, job_guard
+from ctl import backup_service, database_dumps, job_guard
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, job_params, redact
 from ctl.lifecycle import app_control, in_progress, restore, update
 from ctl.registry import Service
 
 MAINTENANCE_ACTIONS = frozenset({"restore", "update", "recover", "keep_update"})
-BACKUP_ACTIONS = frozenset({"backup_stop", "backup_start"})
+BACKUP_ACTIONS = frozenset({"backup_prepare", "backup_start"})
 
 
 class _Failed(Exception):
@@ -36,12 +38,11 @@ class _Failed(Exception):
 
 
 def _backup_hold(service: Service, root: Path, action: str, log) -> str:
-    if action == "backup_stop":
+    if action == "backup_prepare":
         try:
-            app_control.stop(service, root, log)
-        except app_control.StopFailed as exc:
-            raise _Failed("stop_failed", str(exc)) from exc
-        return f"{service.name} is stopped for its backup."
+            return database_dumps.write(service, root, log)
+        except database_dumps.DumpFailed as exc:
+            raise _Failed("dump_failed", str(exc)) from exc
     started, detail = app_control.start(service, root, log)
     if not started:
         raise _Failed("health_check_failed", f"{service.name} did not start again after its backup: {detail[-300:]}")

@@ -24,8 +24,9 @@ models are updated. Models no longer used stay downloaded, so switching back is
 instant; the owner removes one in Settings to free its disk space (``remove``).
 A runner that is no longer chosen keeps its models, so switching back is quick.
 
-Apps whose search index is sized for one embedding model (SurfSense) cannot
-follow a change of embedding model, so it is refused while one is installed.
+Apps whose search index is sized for one embedding model (rule
+``needs_embedding_model`` with ``index_tied``) cannot follow a change of
+embedding model, so it is refused while one is installed.
 Every other app needs its documents indexed again; the dashboard says so.
 """
 
@@ -510,8 +511,7 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
     except model_runners.ENGINE_ERRORS:
         present, reachable = set(), False
 
-    from ctl import duplex_voice, model_fit
-    from ctl.registry import ROOT
+    from ctl import model_fit
 
     try:
         fit = model_fit.report(paths)
@@ -534,7 +534,6 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "suggestion_reason": fit["reason"],
         "settings": settings(paths),
         "voice": voice_settings(paths),
-        "voice_engine": duplex_voice.view(ROOT, paths),
         "chat_models": [view(model) for model in CHAT],
         "embedding_models": [view(model) for model in EMBEDDING],
         "runner": current.id,
@@ -764,11 +763,6 @@ def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
 def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
     if job.get("action") == VOICE_ACTION:
         _execute_voice(store, job, worker_id, root)
-        return
-    from ctl import duplex_voice
-
-    if job.get("action") == duplex_voice.ACTION:
-        duplex_voice.execute(store, job, worker_id, root)
         return
     from ctl import resource_locks
     from ctl.engine.hooks import StepFailed

@@ -8,16 +8,19 @@ import {
   Monitor,
   Moon,
   Rocket,
+  RotateCw,
   ScrollText,
   Settings,
   Sparkles,
   Sun,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
-import type { Mu3LabUpdate } from '../api';
+import { type Mu3LabUpdate, type OkResponse, postJsonApi } from '../api';
+import { useConfirm } from '../components/Dialog';
 import { RELEASES_URL } from '../features/settings/WhatsNew';
 import { navigate } from '../lib/router';
 import type { ThemePreference } from '../lib/theme';
+import { useAction } from '../lib/useAction';
 import { useApi } from '../lib/useApi';
 import { useDashboard, useIsAdmin } from '../state/dashboard';
 
@@ -57,6 +60,24 @@ export function UserMenu({
   // Only administrators can update, so only they are told an update is waiting.
   const update = useApi<Mu3LabUpdate>(admin ? '/api/v1/system/update' : null).data;
   const user = data.identity.display_name || data.identity.username || 'Account';
+  const confirm = useConfirm();
+  const { run } = useAction();
+  const restart = async () => {
+    if (
+      !(await confirm({
+        title: 'Restart Mu3Lab?',
+        description:
+          'The dashboard and its background worker restart, which clears anything stuck in them. Your apps keep running. The dashboard is back in a few seconds.',
+        confirmLabel: 'Restart Mu3Lab',
+      }))
+    )
+      return;
+    await run(
+      'restart',
+      () => postJsonApi<OkResponse>('/api/v1/system/restart', {}),
+      (result) => result.message ?? '',
+    );
+  };
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
@@ -86,6 +107,7 @@ export function UserMenu({
               badge: Boolean(update?.available),
             },
             { label: 'What’s new', icon: Sparkles, run: go('/settings/whats-new') },
+            { label: 'Restart Mu3Lab', icon: RotateCw, run: () => void restart() },
           ]
         : []),
     ],

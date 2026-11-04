@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { useId, useState } from 'react';
-import type { JobResponse, Service, SystemResponse } from '../../api';
+import type { Drive, JobResponse, Service, SystemResponse } from '../../api';
 import { postJsonApi } from '../../api/client';
 import { Button } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
@@ -17,7 +17,12 @@ export interface Share {
   /** CSS colour, usually a token. */
   color: string;
   ram: number;
+  /** On every drive together; the list shows this. */
   disk: number;
+  /** On the main drive only (the Disk donut); the same as ``disk`` when nothing is elsewhere. */
+  diskMain?: number;
+  /** On each other drive, by mount point. */
+  diskOn?: Record<string, number>;
   /** Graphics memory; 0 without an NVIDIA GPU. */
   gpu?: number;
   data?: number;
@@ -54,21 +59,39 @@ export function buildShares(system: SystemResponse, services: Service[]) {
   );
   const name = (id: string) => services.find((service) => service.id === id)?.name || id;
   const ramTotal = system.memory.total || 1;
-  const diskTotal = system.disk.total || 1;
-  const sized = (memory: number, share?: { data: number; program: number }, graphics = 0) => ({
-    ram: memory,
-    gpu: graphics,
-    data: share?.data || 0,
-    program: share?.program || 0,
-    disk: (share?.data || 0) + (share?.program || 0),
-  });
+  const drives = system.drives || [];
+  const diskTotal = system.disk.total + drives.reduce((sum, drive) => sum + drive.total, 0) || 1;
+  const elsewhere = system.disk_usage?.drives || {};
+  // What an owner keeps on each other drive: only data (programs live with Docker, on the main drive).
+  const onDrives = (id: string) =>
+    Object.fromEntries(
+      drives
+        .map((drive) => {
+          const share = elsewhere[drive.mount]?.[id];
+          return [drive.mount, (share?.data || 0) + (share?.program || 0)] as const;
+        })
+        .filter(([, size]) => size > 0),
+    );
+  const sized = (memory: number, share?: { data: number; program: number }, graphics = 0, on = {}) => {
+    const away = Object.values(on as Record<string, number>).reduce((sum, size) => sum + size, 0);
+    const main = (share?.data || 0) + (share?.program || 0);
+    return {
+      ram: memory,
+      gpu: graphics,
+      data: (share?.data || 0) + away,
+      program: share?.program || 0,
+      disk: main + away,
+      diskMain: main,
+      diskOn: on as Record<string, number>,
+    };
+  };
   const apps: Share[] = ids
     .map((id) => ({
       key: id,
       label: name(id),
       to: `/apps/${id}`,
       color: '',
-      ...sized(ram[id] || 0, disk[id], gpu[id] || 0),
+      ...sized(ram[id] || 0, disk[id], gpu[id] || 0, onDrives(id)),
     }))
     .filter((app) => app.ram || app.disk || app.gpu)
     .sort((a, b) => b.ram / ramTotal + b.disk / diskTotal - (a.ram / ramTotal + a.disk / diskTotal))
@@ -91,7 +114,7 @@ export function buildShares(system: SystemResponse, services: Service[]) {
     key: 'core',
     label: 'Mu3Lab core',
     color: 'var(--chart-core)',
-    ...sized(ram.core || 0, disk.core, gpu.core || 0),
+    ...sized(ram.core || 0, disk.core, gpu.core || 0, onDrives('core')),
     parts,
   };
   const freeable = (disk.removed?.data || 0) + (disk.removed?.program || 0) + (disk.unused?.program || 0);
@@ -103,21 +126,31 @@ export function buildShares(system: SystemResponse, services: Service[]) {
       color: 'var(--chart-core)',
       ram: 0,
       disk: freeable,
+      diskMain: freeable,
       hatched: true,
     });
   const counted = (pick: (share: Share) => number) =>
     [...apps, core, ...last].reduce((sum, share) => sum + pick(share), 0);
-  // Includes a leftover still running from an app Mu3Lab no longer offers.
+  // Includes a leftover still running from an app Mu3Lab no longer offers, and your own files on each drive.
+  const outsideMain = system.disk_usage ? Math.max(0, system.disk.used - counted((share) => share.diskMain || 0)) : 0;
+  const outsideOn = Object.fromEntries(
+    drives.map((drive) => [
+      drive.mount,
+      system.disk_usage ? Math.max(0, drive.used - counted((share) => share.diskOn?.[drive.mount] || 0)) : 0,
+    ]),
+  );
   last.push({
     key: 'outside',
     label: 'Other (not Mu3Lab)',
     color: 'var(--chart-outside)',
     ram: Math.max(0, system.memory.used - counted((share) => share.ram)),
-    disk: system.disk_usage ? Math.max(0, system.disk.used - counted((share) => share.disk)) : 0,
+    disk: outsideMain + Object.values(outsideOn).reduce((sum, size) => sum + size, 0),
+    diskMain: outsideMain,
+    diskOn: outsideOn,
     // The desktop and other programs on the GPU.
     gpu: system.gpu ? Math.max(0, system.gpu.used - counted((share) => share.gpu || 0)) : 0,
   });
-  return { apps: [...apps, core], last, freeable };
+  return { apps: [...apps, core], last, freeable, drives };
 }
 
 function Donut({
@@ -211,7 +244,7 @@ function FreeUpSpace({ freeable, folders }: { freeable: number; folders: string[
       !(await confirm({
         title: `Free up about ${bytes(freeable)}?`,
         description:
-          'Mu3Lab removes old versions of your apps that nothing uses, and the programs of apps it no longer offers. The version before each app’s current one stays, so updates can still be undone.',
+          'Mu3Lab removes old versions of your apps that nothing uses, the programs of apps it no longer offers, and files left over from building apps. The version before each app’s current one stays, so updates can still be undone. Running apps aren’t affected.',
         confirmLabel: 'Free up space',
       }))
     )
@@ -249,6 +282,7 @@ function LegendRow({
   open,
   toggle,
   gpu = false,
+  drives = [],
 }: {
   share: Share;
   hovered: string;
@@ -259,6 +293,8 @@ function LegendRow({
   toggle?: () => void;
   /** The server has a GPU, so the list has a graphics memory column. */
   gpu?: boolean;
+  /** Other drives Mu3Lab uses: an app's share on one is noted under its size. */
+  drives?: Drive[];
 }) {
   const split = share.program !== undefined && share.disk > 0;
   return (
@@ -289,6 +325,7 @@ function LegendRow({
       <td>{shown(share.ram)}</td>
       <td title={split ? `Data ${bytes(share.data || 0)} · program ${bytes(share.program || 0)}` : undefined}>
         {shown(share.disk)}
+        <DriveNotes drives={drives} sizes={share.diskOn} />
         {detailed && split && (
           <small className="legend-split">
             {bytes(share.data || 0)} data · {bytes(share.program || 0)} program
@@ -298,6 +335,17 @@ function LegendRow({
       {gpu && <td>{shown(share.gpu || 0)}</td>}
     </tr>
   );
+}
+
+/** "77.2 GB on Storage" under a size, for each other drive that holds some of it. */
+function DriveNotes({ drives, sizes }: { drives: Drive[]; sizes?: Record<string, number> }) {
+  return drives
+    .filter((drive) => (sizes?.[drive.mount] || 0) > 0)
+    .map((drive) => (
+      <small key={drive.mount} className="legend-drive">
+        {bytes(sizes?.[drive.mount] || 0)} on {drive.name}
+      </small>
+    ));
 }
 
 /**
@@ -312,7 +360,7 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
   const [coreOpen, setCoreOpen] = useState(false);
   const { system } = data;
   const hasGpu = Boolean(system.gpu);
-  const { apps, last, freeable } = buildShares(system, data.services.services);
+  const { apps, last, freeable, drives } = buildShares(system, data.services.services);
   const value = (share: Share) => share[sort.key] || 0;
   const order = (a: Share, b: Share) => (sort.descending ? value(b) - value(a) : value(a) - value(b));
   const listed = [...apps].sort(order);
@@ -349,14 +397,27 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
             setHovered={setHovered}
           />
           <Donut
-            label="Disk"
+            label={drives.length ? 'Main drive' : 'Disk'}
             total={system.disk.total}
             used={system.disk.used}
             shares={system.disk_usage ? shares : []}
-            pick={(share) => share.disk}
+            pick={(share) => share.diskMain ?? share.disk}
             hovered={hovered}
             setHovered={setHovered}
           />
+          {/* Each other drive on its own: its free space can't be used by what is on the main one. */}
+          {drives.map((drive) => (
+            <Donut
+              key={drive.mount}
+              label={drive.role === 'backups' ? `${drive.name} (backups)` : drive.name}
+              total={drive.total}
+              used={drive.used}
+              shares={system.disk_usage ? shares : []}
+              pick={(share) => share.diskOn?.[drive.mount] || 0}
+              hovered={hovered}
+              setHovered={setHovered}
+            />
+          ))}
           <Donut
             label="CPU"
             total={100}
@@ -403,6 +464,7 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
                       setHovered={setHovered}
                       detailed={detailed}
                       gpu={hasGpu}
+                      drives={drives}
                       open={coreOpen}
                       toggle={() => setCoreOpen(!coreOpen)}
                     />,
@@ -417,6 +479,7 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
                               setHovered={setHovered}
                               detailed={detailed}
                               gpu={hasGpu}
+                              drives={drives}
                               sub
                             />
                           ))
@@ -430,6 +493,7 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
                     setHovered={setHovered}
                     detailed={detailed}
                     gpu={hasGpu}
+                    drives={drives}
                   />
                 ),
               )}
@@ -441,6 +505,7 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
                   setHovered={setHovered}
                   detailed={detailed}
                   gpu={hasGpu}
+                  drives={drives}
                 />
               ))}
               <tr className="legend-free">
@@ -449,7 +514,13 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
                   Free
                 </th>
                 <td>{bytes(Math.max(0, system.memory.total - system.memory.used))}</td>
-                <td>{bytes(Math.max(0, system.disk.total - system.disk.used))}</td>
+                <td>
+                  {bytes(Math.max(0, system.disk.total - system.disk.used))}
+                  <DriveNotes
+                    drives={drives}
+                    sizes={Object.fromEntries(drives.map((drive) => [drive.mount, drive.total - drive.used]))}
+                  />
+                </td>
                 {system.gpu && <td>{bytes(Math.max(0, system.gpu.total - system.gpu.used))}</td>}
               </tr>
             </tbody>
@@ -457,7 +528,8 @@ export function ResourceCharts({ detailed = false }: { detailed?: boolean }) {
           {isAdmin && freeable >= MIN_FREEABLE && (
             <div className="resources-free">
               <span>
-                <b>{bytes(freeable)}</b> can be freed: old app versions and apps Mu3Lab no longer offers.
+                <b>{bytes(freeable)}</b> can be freed: old app versions, leftover build files and apps Mu3Lab no longer
+                offers.
               </span>
               {busy ? (
                 <span className="resources-free-wait">Available once the running task finishes.</span>

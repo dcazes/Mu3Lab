@@ -1,6 +1,6 @@
 # Backups and recovery
 
-Mu3Lab backs up its own state and each app's data with [Kopia](https://kopia.io), into an encrypted repository on this server. Kopia's own server (the **Kopia backups** app) does the whole job: it runs the schedule, keeps old backups by its retention rules and reclaims space. Mu3Lab only stops each app just before its backup and starts it again just after, so databases are copied consistently.
+Mu3Lab backs up its own state and each app's data with [Kopia](https://kopia.io), into an encrypted repository on this server. Kopia's own server (the **Kopia backups** app) does the whole job: it runs the schedule, keeps old backups by its retention rules and reclaims space. Apps keep running while they are backed up. Just before each app's backup, Mu3Lab writes a consistent copy of its databases into its data folder, the way database engines expect to be backed up, and Kopia saves that copy instead of the live database files.
 
 You restore an app from its **Backups** card in the dashboard. This page is for the cases the dashboard cannot handle, such as restoring by hand. It also explains the recovery sheet, the one thing you must keep somewhere other than this server.
 
@@ -8,7 +8,13 @@ You restore an app from its **Backups** card in the dashboard. This page is for 
 
 **Security & backups → Backup schedule** sets how often Kopia backs up everything: off, every 6 hours, every 12 hours, daily, or weekly (the default, Sunday at 03:30), in this server's local time. Mu3Lab writes the choice into Kopia's policy within a minute.
 
-A run backs up one source at a time: Mu3Lab's own settings and secrets, each core app (sign-in, the password vault, chat) and each installed app. Each app is stopped only for its own backup, usually a few seconds to a minute. An app that is busy with another task, or whose last restore or update was interrupted, is skipped that time and listed under the schedule. Mu3Lab also backs up an app itself just before every update.
+A run backs up one source at a time: Mu3Lab's own settings and secrets, each core app (sign-in, the password vault, chat) and each installed app. While an app is being backed up it shows **Backing up…** and keeps working; only starting, stopping, updating or restoring it waits until the backup is done. An app that is busy with another task, whose databases could not be copied, or whose last restore or update was interrupted, is skipped that time and listed under the schedule. Mu3Lab also backs up an app itself just before every update.
+
+What a backup holds, and what it leaves out:
+
+- **Saved:** everything people made: photos, files, documents, passwords, chats and settings, plus Mu3Lab's own settings and secrets.
+- **Databases** are saved as a copy taken just before the backup: Postgres and MariaDB with their own dump tools, SQLite with SQLite's own backup. The live database files are left out, or (for SQLite) saved alongside, so a backup never holds a database caught half-written.
+- **Left out:** what can be downloaded or rebuilt again: app programs, AI and speech models, map data, and caches and queues (Redis, Valkey, RabbitMQ).
 
 If the server was off at the scheduled time, Kopia runs the missed backup once it is back on. **Back up now** on an app's Backups card, or under *Mu3Lab itself*, asks Kopia for the same backup straight away.
 
@@ -22,9 +28,10 @@ On the app's **Backups** card, choose **Restore…** and type the app's name.
 
 1. Kopia unpacks the backup beside the current data while the app keeps running.
 2. The app stops, its current data folder is set aside, and the restored one takes its place. A backup from an older version also brings that version back.
-3. The app starts and must pass its health check. Then the data set aside is deleted.
+3. Each database starts empty and is loaded from the copy saved in the backup, before the app itself starts.
+4. The app starts and must pass its health check. Then the data set aside is deleted.
 
-If anything in steps 2–3 fails, Mu3Lab puts the data from before back, starts the app, and the card says **The restore did not work, so the data was put back as it was**, with **Retry**.
+If anything in steps 2–4 fails, Mu3Lab puts the data from before back, starts the app, and the card says **The restore did not work, so the data was put back as it was**, with **Retry**.
 
 If the computer loses power or crashes in the middle, nothing continues by itself. The app shows **Needs attention: a restore was interrupted**, and nothing else runs on it until you press **Put my original data back**. After that you can restore again. An interrupted update offers **Undo update** or, if the new version was already in place, **Keep new version**.
 
@@ -112,3 +119,21 @@ snapshot restore <snapshot-id>/<folder> /data/.<folder>.manual-restore
 ```
 
 Kopia gives the restored folder its original owner and permissions. Rename the live folder aside, rename the restored one into place, start the app, and delete the old folder only once the app works.
+
+A backup made while the app kept running holds its databases as copies, in the restored folder's `.mu3lab-backup` folder; the live database folder itself is not in it. Before starting the whole app:
+
+1. Each file under `.mu3lab-backup/sqlite/` replaces the file at the same path in the folder (delete that file's `-wal` and `-shm` files too).
+2. Each `.mu3lab-backup/<service>.sql` is one database. Empty that database's folder, start only that service, and load the dump into it once it is ready (from a root shell, in `/srv/mu3lab/projects/<app>`):
+
+```bash
+docker compose up -d <service>
+# Postgres (lines saying something "already exists" are expected):
+sed "s/SELECT pg_catalog.set_config('search_path', '', false);/SELECT pg_catalog.set_config('search_path', 'public, pg_catalog', true);/" \
+  /srv/mu3lab/data/<folder>/.mu3lab-backup/<service>.sql \
+  | docker compose exec -T <service> sh -c 'psql -U "${POSTGRES_USER:-postgres}" -d postgres'
+# MariaDB:
+docker compose exec -T <service> sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"' \
+  < /srv/mu3lab/data/<folder>/.mu3lab-backup/<service>.sql
+```
+
+3. Then start the app as usual.

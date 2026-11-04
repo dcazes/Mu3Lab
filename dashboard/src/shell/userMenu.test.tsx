@@ -20,7 +20,17 @@ describe('UserMenu', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent),
-    ).toEqual(['Settings', 'Get started', 'Apps', 'Update', 'What’s new', 'Changelog', 'GitHub', 'Log out']);
+    ).toEqual([
+      'Settings',
+      'Get started',
+      'Apps',
+      'Update',
+      'What’s new',
+      'Restart Mu3Lab',
+      'Changelog',
+      'GitHub',
+      'Log out',
+    ]);
     await waitFor(() => expect(within(menu).getByRole('menuitem', { name: 'Update available' })).toBeInTheDocument());
     fireEvent.click(within(menu).getByRole('radio', { name: 'Dark' }));
     expect(setTheme).toHaveBeenCalledWith('dark');
@@ -41,5 +51,6 @@ describe('UserMenu', () => {
       .map((item) => item.textContent);
     expect(items).not.toContain('Update');
     expect(items).not.toContain('What’s new');
+    expect(items).not.toContain('Restart Mu3Lab');
   });
 });

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, backup_service, disk_cleanup, platform_backup, recovery_sheet, self_update
+from ctl import __version__, backup_location, backup_service, disk_cleanup, platform_backup, recovery_sheet, self_update
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -178,6 +179,17 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
     return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
+@router.post("/system/restart", response_model=models.OkResponse, response_model_exclude_none=True)
+def restart_mu3lab(background: BackgroundTasks, operator: OperatorMutation) -> models.OkResponse:
+    """Restart the dashboard and worker once this answer is sent; the apps keep running."""
+    store = runtime.job_store()
+    if [job for job in store.active_jobs() if job["kind"] != "verification"]:
+        raise ApiError(409, "Wait for the running tasks to finish first; restarting Mu3Lab stops them.")
+    store.record_audit(actor=operator["username"], event="system.restarted", detail="Owner restarted Mu3Lab.")
+    background.add_task(self_update.restart, lambda _line: None)
+    return models.OkResponse(ok=True, message="Mu3Lab is restarting; the dashboard is back in a few seconds.")
+
+
 @router.post("/system/cleanup", response_model=models.JobResponse, response_model_exclude_none=True)
 def free_up_space(payload: models.CleanupRequest, request: Request, operator: OperatorMutation) -> models.JobResponse:
     """Remove removed apps' leftovers and old app versions; their data only when asked."""
@@ -248,6 +260,73 @@ def update_backup_schedule(
         detail=f"Scheduled backups: {chosen['frequency']}, weekday {chosen['weekday']}, {chosen['time']}.",
     )
     return models.BackupSchedule.model_validate({"ok": True, **backup_service.status()})
+
+
+@router.get("/system/backups/location", response_model=models.BackupLocation, response_model_exclude_none=True)
+def backup_location_status(_operator: Operator) -> models.BackupLocation:
+    """Where the backups are, the drives they could move to, and the latest move."""
+    paths = RuntimePaths()
+    try:
+        drives = backup_location.choices(paths)
+        used = backup_location.used_bytes(paths)
+    except backup_location.MoveError as exc:
+        raise ApiError(503, str(exc)) from exc
+    store = runtime.job_store()
+    moves = store.jobs_for_service(backup_location.SERVICE_ID, limit=1)
+    return models.BackupLocation.model_validate(
+        {
+            "ok": True,
+            "path": str(backup_location.folder(paths)),
+            "problem": backup_location.problem(paths),
+            "used_bytes": used,
+            "drives": drives,
+            "move": moves[0] if moves else None,
+        }
+    )
+
+
+@router.post("/system/backups/location", response_model=models.JobResponse, response_model_exclude_none=True)
+def move_backups(
+    payload: models.BackupLocationRequest, request: Request, operator: OperatorMutation
+) -> models.JobResponse:
+    """Move the backups to another drive (or back to the main one); a job that pauses backups while it copies."""
+    store = runtime.job_store()
+    key = runtime.idempotency_key(request)
+    params = {"target": payload.target}
+    identity: dict[str, Any] = {
+        "kind": "lifecycle",
+        "service_id": backup_location.SERVICE_ID,
+        "action": backup_location.ACTION,
+        "actor": operator["username"],
+        "actor_subject": runtime.mutation_subject(operator),
+        "namespace": "system.backup-location",
+        "request": params,
+    }
+    previous = store.by_idempotency_key(key or "", **identity)
+    if previous:
+        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
+    if store.active_jobs():
+        raise ApiError(409, "Wait for the running tasks to finish first.")
+    drive = next((item for item in backup_location.choices() if item["id"] == payload.target), None)
+    if drive is None:
+        raise ApiError(404, "That drive is no longer connected.")
+    if drive["current"]:
+        raise ApiError(409, f"The backups are already on {drive['name']}.")
+    if drive["problem"]:
+        raise ApiError(422, drive["problem"])
+    job = store.create(
+        **identity,
+        params=params,
+        detail=f"Move the backups to {drive['name']} ({drive['path']}).",
+        idempotency_key=key,
+    )
+    store.record_audit(
+        actor=str(operator["username"]),
+        event="backup.location_move_requested",
+        detail=f"Move the backups to {drive['path']}.",
+        job_id=str(job["id"]),
+    )
+    return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}

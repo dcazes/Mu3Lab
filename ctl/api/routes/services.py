@@ -179,6 +179,8 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):
             raise ApiError(409, "action is not valid for the current service state")
+        if action in {"start", "restart"} and body.get("dependencies") is not None:
+            params = {"dependencies": ",".join(sorted(set(body["dependencies"])))}
     try:
         job = store.create(
             kind="lifecycle",
@@ -381,6 +383,7 @@ def _release(service: Service) -> dict[str, object]:
             "approved_version": approved,
             "update_available": False,
             "supporting_only": False,
+            "files_only": False,
         }
     else:
         release = app_releases.status(service, ROOT)

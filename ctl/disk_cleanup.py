@@ -9,6 +9,15 @@ Only what Mu3Lab's own records say it put there is ever removed:
   catalog declares that nothing here runs (another compute variant, an app
   that was never finished). Each app's current release and the one before it
   stay, so an update can still be undone without downloading again.
+- **Build cache:** what Docker keeps from building images (the chat connectors, the
+  voice assistant). Docker's own clean-up keeps up to a tenth of the disk, so Mu3Lab
+  clears all of it here and after each job that may have built something. Running apps
+  never need it; the next build of an image only takes longer. Mu3Lab's server is
+  dedicated to it, so this includes builds made by hand.
+
+- **Retired features:** files Mu3Lab downloaded for a feature it no longer has (the
+  voice assistant's full-duplex model). They are downloads, never anyone's data, so they
+  go without asking.
 
 Images Mu3Lab never recorded (anything the owner pulled or runs themselves)
 and the helper images Mu3Lab runs one-off commands in are never touched.
@@ -30,6 +39,11 @@ from ctl.actions import docker_argv
 from ctl.runtime import RuntimePaths
 
 SERVICE_ID = "system:cleanup"
+# Folders under the runtime root of features Mu3Lab no longer has, removed by "Free up space".
+# data/livekit held only the full-duplex voice model (removed 2026-11-03), and projects/livekit/duplex its server.
+RETIRED = ("data/livekit", "projects/livekit/duplex")
+# Its server's image, built here; listed so the old-versions sweep removes it.
+RETIRED_IMAGES = frozenset({"mu3lab/minicpm-omni:local"})
 Log = Callable[[str], None]
 
 
@@ -103,7 +117,7 @@ def reclaimable(registry, root: Path, paths: RuntimePaths) -> set[str]:
     and the helper images, always stay.
     """
     ran, keep = _releases(registry, root, paths)
-    known = _declared(root) | ran
+    known = _declared(root) | ran | RETIRED_IMAGES
     for folder in removed_projects(registry, paths):
         known |= _images_in(folder)
     return known - keep - _helpers()
@@ -119,6 +133,7 @@ def _docker(argv: list[str], run, timeout: int = 300) -> tuple[int, str]:
 
 def _removed_containers(registry, paths: RuntimePaths, run) -> list[str]:
     folders = {str(folder.resolve()) for folder in removed_projects(registry, paths)}
+    folders |= {str((paths.root / name).resolve()) for name in RETIRED if name.startswith("projects/")}
     rc, output = _docker(
         [
             "docker",
@@ -164,6 +179,30 @@ def _unused_images(candidates: set[str], run) -> list[str]:
     return found
 
 
+def clear_build_cache(log: Log, run=process.completed) -> str:
+    """Remove all build cache no build is using now; returns what Docker reports it freed."""
+    rc, output = _docker(["docker", "builder", "prune", "--all", "--force"], run, 600)
+    if rc:
+        log(f"Kept the build cache: {output.strip()[-200:]}")
+        return ""
+    # Docker's last line reads "Total:  24.41GB" (or "Total reclaimed space: …" on older versions).
+    total = next(
+        (line.split(":", 1)[1].strip() for line in reversed(output.splitlines()) if line.startswith("Total")), ""
+    )
+    if not total or total.startswith("0B"):
+        return ""
+    log(f"Cleared {total} of build cache.")
+    return total
+
+
+def builds(job: dict) -> bool:
+    """A job that may have built an image: anything changing apps, connectors or Mu3Lab itself."""
+    from ctl import resource_usage, self_update
+
+    service_id = str(job.get("service_id") or "")
+    return resource_usage.touches_disk(job) or service_id.startswith("mcp:") or service_id == self_update.SERVICE_ID
+
+
 def removed_data(registry, root: Path, paths: RuntimePaths) -> list[Path]:
     """Data folders no catalog app mounts: what removed apps left behind."""
     from ctl.resource_usage import folder_owners
@@ -200,7 +239,17 @@ def free_up(
         removed_images += rc == 0
         if rc:
             log(f"Kept image {image[:19]}: {output.strip()[-200:]}")
-    folders: list[str] = []
+    build_cache = clear_build_cache(log, run)
+    folders = [name for name in RETIRED if (paths.root / name).is_dir()]
+    if folders:
+        log(f"Removing {', '.join(folders)}, which belong to a feature Mu3Lab no longer has.")
+        # Data folders may hold files of container users; Mu3Lab's own project files it removes itself.
+        ok, detail = delete_folders([paths.root / name for name in folders if name.startswith("data/")], root, log)
+        if not ok:
+            raise RuntimeError(detail)
+        for name in folders:
+            if not name.startswith("data/"):
+                shutil.rmtree(paths.root / name)
     if delete_data:
         data = removed_data(registry, root, paths)
         if data:
@@ -211,7 +260,7 @@ def free_up(
         for project in removed_projects(registry, paths):
             shutil.rmtree(project)
             folders.append(f"projects/{project.name}")
-    return {"containers": len(containers), "images": removed_images, "folders": folders}
+    return {"containers": len(containers), "images": removed_images, "folders": folders, "build_cache": build_cache}
 
 
 def busy(store, batches=None) -> bool:
@@ -240,6 +289,8 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         return
     resource_usage.disk_stale.set()
     parts = [f"{done['images']} old program version(s)"]
+    if done["build_cache"]:
+        parts.append(f"{done['build_cache']} of build cache")
     if done["containers"]:
         parts.append(f"{done['containers']} container(s) of removed apps")
     if done["folders"]:

@@ -7,6 +7,7 @@ import { relativeTime } from '../../lib/format';
 import { BACKUP_APP_ID, backupsOn, launchTarget } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
 import { useApi } from '../../lib/useApi';
+import { BackupLocationSection } from './BackupLocation';
 import { BackupScheduleSection } from './BackupSchedule';
 import { RecoverySheetSection } from './RecoverySheet';
 
@@ -68,6 +69,7 @@ function BackupsCard() {
         </Callout>
       )}
       {admin && <BackupScheduleSection />}
+      {admin && <BackupLocationSection />}
       <Facts
         items={[
           ...(admin ? [{ label: 'Mu3Lab core', value: core.data ? protection(core.data.platform) : '—' }] : []),
@@ -82,8 +84,9 @@ function BackupsCard() {
             Open backups
           </ExternalButton>
           <span className="muted">
-            Look inside any backup and restore single files into /srv/mu3lab/backups/restores. To roll back a whole app,
-            use that app’s Backups card.
+            Look inside any backup and restore single files into{' '}
+            {(backup.repository_path ?? '/srv/mu3lab/backups/kopia').replace(/\/kopia$/, '/restores')}. To roll back a
+            whole app, use that app’s Backups card.
           </span>
         </div>
       )}

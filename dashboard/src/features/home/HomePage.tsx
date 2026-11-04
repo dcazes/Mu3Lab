@@ -1,7 +1,8 @@
-import { ArrowRight, ChevronDown, X } from 'lucide-react';
-import { type CSSProperties, useState } from 'react';
+import { ArrowRight, Check, ChevronDown, Play, RefreshCw, Square, X } from 'lucide-react';
+import { type CSSProperties, useEffect, useState } from 'react';
 import type { Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
+import { Button } from '../../components/Button';
 import { Dot } from '../../components/Status';
 import { Link } from '../../lib/router';
 import {
@@ -9,11 +10,13 @@ import {
   isEverydayApp,
   isInstalled,
   isRunning,
+  isWorking,
   launchTarget,
   stateTone,
   statusText,
 } from '../../lib/services';
-import { useDashboard } from '../../state/dashboard';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
+import { can, type Lifecycle, useLifecycle } from '../apps/lifecycle';
 import { AppQuickPanel } from './AppQuickPanel';
 import { CoreSetupProgress } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
@@ -55,43 +58,152 @@ function useFolded() {
   return [isFolded, toggle] as const;
 }
 
+const BULK: Lifecycle[] = ['start', 'stop', 'restart'];
+const BULK_LOOK = {
+  start: { label: 'Start', icon: Play },
+  stop: { label: 'Stop', icon: Square },
+  restart: { label: 'Restart', icon: RefreshCw },
+} as const;
+
+/** An app select mode can pick: one it can start, stop or restart now. */
+const pickable = (service: Service) =>
+  !isWorking(service) && !service.backing_up && BULK.some((action) => can(service, action));
+
+interface TileProps {
+  service: Service;
+  onOpen: () => void;
+  /** In select mode a tap picks the app instead of opening its panel. */
+  selecting: boolean;
+  selected: boolean;
+}
+
+function tileClass(base: string, { service, selecting, selected }: TileProps) {
+  const muted = selecting ? !pickable(service) : !launchTarget(service);
+  return `${base}${muted ? ' tile-muted' : ''}${selecting ? ' is-selecting' : ''}${selected ? ' is-selected' : ''}`;
+}
+
 /** A folded tile is the icon alone; its name is the tooltip. */
-function MiniTile({ service, onOpen }: { service: Service; onOpen: () => void }) {
+function MiniTile(props: TileProps) {
+  const { service, onOpen, selecting, selected } = props;
   return (
     <button
       type="button"
-      className={`mini-tile${launchTarget(service) ? '' : ' tile-muted'}`}
+      className={tileClass('mini-tile', props)}
       aria-label={`${service.name}: ${statusText(service)}`}
       title={service.name}
-      aria-haspopup="dialog"
+      aria-haspopup={selecting ? undefined : 'dialog'}
+      aria-pressed={selecting ? selected : undefined}
+      disabled={selecting && !pickable(service)}
       onClick={onOpen}
     >
       <AppIcon id={service.id} />
-      {!isRunning(service) && <Dot tone={stateTone(service.display_state)} />}
+      {(selecting || !isRunning(service)) && <Dot tone={stateTone(service.display_state)} />}
+      {selected && <Check className="tile-check" aria-hidden="true" />}
     </button>
   );
 }
 
 /** A tile opens the app's quick panel; the panel's Open button opens the app itself. */
-function LauncherTile({ service, onOpen }: { service: Service; onOpen: () => void }) {
+function LauncherTile(props: TileProps) {
+  const { service, onOpen, selecting, selected } = props;
   const tone = stateTone(service.display_state);
   return (
     <button
       type="button"
-      className={`tile${launchTarget(service) ? '' : ' tile-muted'}`}
+      className={tileClass('tile', props)}
       aria-label={`${service.name}: ${statusText(service)}`}
-      aria-haspopup="dialog"
+      aria-haspopup={selecting ? undefined : 'dialog'}
+      aria-pressed={selecting ? selected : undefined}
+      disabled={selecting && !pickable(service)}
       onClick={onOpen}
     >
       <AppIcon id={service.id} size="lg" />
       <span className="tile-name">{service.name}</span>
-      {!isRunning(service) && (
+      {/* Choosing what to start or stop needs every app's state, running ones too. */}
+      {(selecting || !isRunning(service)) && (
         <span className="tile-state">
           <Dot tone={tone} />
           {statusText(service)}
         </span>
       )}
+      {selected && <Check className="tile-check" aria-hidden="true" />}
     </button>
+  );
+}
+
+/** Home's select mode: pick apps, then start, stop or restart them together. */
+function useSelection(services: Service[]) {
+  const [selecting, setSelecting] = useState(false);
+  const [stored, setStored] = useState<string[]>([]);
+  // An app that started working on something meanwhile drops out.
+  const picked = services.filter((service) => stored.includes(service.id) && pickable(service));
+  const toggle = (id: string) =>
+    setStored((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));
+  const setMany = (ids: string[], on: boolean) =>
+    setStored((current) => (on ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id))));
+  const finish = () => {
+    setSelecting(false);
+    setStored([]);
+  };
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && finish();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selecting]);
+  return { selecting, start: () => setSelecting(true), finish, picked, toggle, setMany };
+}
+
+function SelectionBar({ picked, onDone }: { picked: Service[]; onDone: () => void }) {
+  const lifecycle = useLifecycle();
+  const [pending, setPending] = useState<Lifecycle | ''>('');
+  const act = async (action: Lifecycle) => {
+    setPending(action);
+    try {
+      if (
+        await lifecycle(
+          action,
+          picked.filter((service) => can(service, action)),
+        )
+      )
+        onDone();
+    } finally {
+      setPending('');
+    }
+  };
+  return (
+    <div className="action-bar selection-bar" role="region" aria-label="Selected apps">
+      <span>
+        {picked.length ? (
+          <>
+            <b>{picked.length}</b> selected · {picked.map((service) => service.name).join(', ')}
+          </>
+        ) : (
+          'Tap apps to select them'
+        )}
+      </span>
+      {BULK.map((action) => {
+        const count = picked.filter((service) => can(service, action)).length;
+        const { label, icon } = BULK_LOOK[action];
+        return (
+          <Button
+            key={action}
+            icon={icon}
+            variant={action === 'start' ? 'primary' : 'secondary'}
+            disabled={!count || Boolean(pending)}
+            loading={pending === action}
+            title={count && count < picked.length ? `${count} of the selected apps can ${action} now` : undefined}
+            onClick={() => void act(action)}
+          >
+            {label}
+            {count > 0 && count < picked.length ? ` ${count}` : ''}
+          </Button>
+        );
+      })}
+      <Button variant="ghost" onClick={onDone}>
+        Done
+      </Button>
+    </div>
   );
 }
 
@@ -140,6 +252,9 @@ export function HomePage() {
   const [isFolded, toggleFolded] = useFolded();
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   const [panel, setPanel] = useState('');
+  const isAdmin = useIsAdmin();
+  const selection = useSelection(installed);
+  const open = (id: string) => (selection.selecting ? selection.toggle(id) : setPanel(id));
   // Look the app up each render so the panel follows its live state.
   const selected = services.find((service) => service.id === panel);
   return (
@@ -160,45 +275,75 @@ export function HomePage() {
       <section aria-labelledby="apps-heading">
         <div className="section-title">
           <h2 id="apps-heading">Your apps</h2>
-          <Link to="/apps">Manage</Link>
+          <span className="section-title-actions">
+            {isAdmin && installed.some(pickable) && (
+              <button
+                type="button"
+                className="link-button"
+                aria-pressed={selection.selecting}
+                onClick={selection.selecting ? selection.finish : selection.start}
+              >
+                {selection.selecting ? 'Done' : 'Select'}
+              </button>
+            )}
+            <Link to="/apps">Manage</Link>
+          </span>
         </div>
-        <div className="launcher-groups">
+        <div className={`launcher-groups${selection.selecting ? ' is-selecting' : ''}`}>
           {sections.map(({ id, label, apps }) => {
-            const open = !isFolded(id);
+            const unfolded = !isFolded(id);
+            const choices = apps.filter(pickable).map((service) => service.id);
+            const allPicked = choices.length > 0 && choices.every((app) => selection.picked.some((s) => s.id === app));
             // A group wider than about half the page keeps a row of its own.
             const wide = id === BEHIND_THE_SCENES || apps.length > 4;
             return (
               <section
                 key={id}
-                className={`launcher-group${open ? '' : ' is-folded'}${wide ? ' is-wide' : ''}`}
+                className={`launcher-group${unfolded ? '' : ' is-folded'}${wide ? ' is-wide' : ''}`}
                 style={{ '--tiles': apps.length } as CSSProperties}
               >
                 <h3>
                   <button
                     type="button"
                     className="launcher-toggle"
-                    aria-expanded={open}
+                    aria-expanded={unfolded}
                     onClick={() => toggleFolded(id)}
                   >
                     <ChevronDown />
                     {label}
                     <span className="launcher-count">{apps.length}</span>
                   </button>
-                </h3>
-                <div className={open ? 'launcher' : 'launcher-mini'}>
-                  {apps.map((service) =>
-                    open ? (
-                      <LauncherTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
-                    ) : (
-                      <MiniTile key={service.id} service={service} onOpen={() => setPanel(service.id)} />
-                    ),
+                  {selection.selecting && choices.length > 0 && (
+                    <button
+                      type="button"
+                      className="link-button launcher-pick"
+                      onClick={() => selection.setMany(choices, !allPicked)}
+                    >
+                      {allPicked ? 'Deselect all' : 'Select all'}
+                    </button>
                   )}
+                </h3>
+                <div className={unfolded ? 'launcher' : 'launcher-mini'}>
+                  {apps.map((service) => {
+                    const props = {
+                      service,
+                      onOpen: () => open(service.id),
+                      selecting: selection.selecting,
+                      selected: selection.picked.some((item) => item.id === service.id),
+                    };
+                    return unfolded ? (
+                      <LauncherTile key={service.id} {...props} />
+                    ) : (
+                      <MiniTile key={service.id} {...props} />
+                    );
+                  })}
                 </div>
               </section>
             );
           })}
         </div>
       </section>
+      {selection.selecting && <SelectionBar picked={selection.picked} onDone={selection.finish} />}
       {selected && <AppQuickPanel service={selected} onClose={() => setPanel('')} />}
     </div>
   );

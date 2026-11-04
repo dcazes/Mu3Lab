@@ -18,6 +18,11 @@ variant's override and the app's configuration and integration schema). Two
 deployments of the same version with a different database image are two
 releases. History keeps every release by id and never overwrites one, and
 backups are tagged with the id so a restore brings back exactly that release.
+
+Mu3Lab also changes an app's own files without a new release of the app (the
+voice agent LiveKit builds, a setting in its Compose file). The installed
+project keeps the files it was installed with, so those changes are offered as
+an update too (``files_only``) and arrive through the same backed-up update.
 """
 
 from __future__ import annotations
@@ -211,6 +216,28 @@ def installed_version(service: Service, root: Path, paths: RuntimePaths | None =
     return release.version if release else ""
 
 
+def changed_files(service: Service, root: Path, paths: RuntimePaths | None = None) -> list[str]:
+    """Mu3Lab's files for the app that its installed project lacks or holds in another version."""
+    from ctl.engine.project import shipped_files
+
+    source = service.compose_path(root)
+    project = _project(service.id, paths)
+    changed = []
+    for relative in shipped_files(source):
+        new, old = source / relative, project / relative
+        try:
+            mine, theirs = new.stat(), old.stat()
+        except OSError:
+            changed.append(str(relative))
+            continue
+        # Installing copies each file with its size and modification time, so a match is that copy.
+        if (mine.st_size, mine.st_mtime_ns) == (theirs.st_size, theirs.st_mtime_ns):
+            continue
+        if mine.st_size != theirs.st_size or new.read_bytes() != old.read_bytes():
+            changed.append(str(relative))
+    return changed
+
+
 def status(service: Service, root: Path, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """What the dashboard shows: installed, approved, and whether to offer the move."""
     current = installed(service, root, paths)
@@ -221,6 +248,7 @@ def status(service: Service, root: Path, paths: RuntimePaths | None = None) -> d
             "approved_version": target.version,
             "update_available": False,
             "supporting_only": False,
+            "files_only": False,
             "added_services": [],
             "removed_services": [],
         }
@@ -228,14 +256,18 @@ def status(service: Service, root: Path, paths: RuntimePaths | None = None) -> d
     # The union of both service sets: a service the new release drops is a change too.
     removed = sorted(set(current.images) - set(target.images))
     added = sorted(set(target.images) - set(current.images))
+    images = changed or bool(removed)
+    # Same images, but Mu3Lab changed the app's own files since they were installed.
+    files = not images and bool(changed_files(service, root, paths))
     # Never offer a step back: an app already past the approved release stays put.
-    available = (changed or bool(removed)) and not is_newer(current.version, target.version)
+    available = (images or files) and not is_newer(current.version, target.version)
     return {
         "installed_version": current.version,
         "approved_version": target.version,
         "update_available": available,
         # Same release, newer database or helper images: worth saying so.
-        "supporting_only": available and current.version == target.version,
+        "supporting_only": available and images and current.version == target.version,
+        "files_only": available and files,
         "added_services": added if available else [],
         "removed_services": removed if available else [],
     }

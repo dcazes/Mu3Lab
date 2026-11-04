@@ -112,6 +112,22 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(done["folders"], ["unsloth-models", "projects/unsloth"])
         self.assertFalse((self.paths.projects / "unsloth").exists())
 
+    def test_build_cache_is_cleared_whole_and_reports_what_it_freed(self):
+        calls = []
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            return result("ID\tRECLAIMABLE\tSIZE\nabc\ttrue\t1.2GB\nTotal:\t24.41GB\n")
+
+        self.assertEqual(disk_cleanup.clear_build_cache(lambda _line: None, run), "24.41GB")
+        self.assertEqual(calls, [["docker", "builder", "prune", "--all", "--force"]])
+        self.assertEqual(
+            disk_cleanup.clear_build_cache(lambda _line: None, lambda *_a, **_k: result("Total:\t0B\n")), ""
+        )
+        self.assertTrue(disk_cleanup.builds({"action": "update"}))
+        self.assertTrue(disk_cleanup.builds({"action": "enable", "service_id": "mcp:immich-control"}))
+        self.assertFalse(disk_cleanup.builds({"action": "start", "service_id": "immich"}))
+
     def test_nothing_is_removed_while_work_is_running_or_downloading(self):
         idle = SimpleNamespace(active_jobs=list)
         self.assertFalse(disk_cleanup.busy(idle, SimpleNamespace(download_queue=list)))

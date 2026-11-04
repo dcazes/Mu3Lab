@@ -237,7 +237,7 @@ export function BackupsCard({ service }: { service: Service }) {
       )}
       <Interrupted service={service} busy={busy} />
       <FailedRestore service={service} busy={busy} />
-      {service.backing_up && <p className="muted card-pad">Backing up now; {service.name} starts again on its own.</p>}
+      {service.backing_up && <p className="muted card-pad">Backing up now; {service.name} keeps running meanwhile.</p>}
       {listing?.protection && backups && backups.length > 0 && (
         <p className={`card-pad ${listing.protection.state === 'checked' ? 'muted' : 'warning-text'}`}>
           {listing.protection.detail}

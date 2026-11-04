@@ -46,7 +46,9 @@ class BackupServiceTests(unittest.TestCase):
 
     def test_no_app_data_is_mounted_here_and_no_secret_is_on_a_command_line(self):
         # App folders come from docker-compose.sources.yml, read-only, written by ctl.backup_service.
-        self.assertFalse(any(volume.startswith("/srv/mu3lab/data") for volume in self.service["volumes"]))
+        # The backup folder uses Compose's long syntax (a dict), the rest the short one.
+        sources = [volume["source"] if isinstance(volume, dict) else volume for volume in self.service["volumes"]]
+        self.assertFalse(any(source.startswith("/srv/mu3lab/data") for source in sources))
         self.assertTrue(self.service["read_only"])
         self.assertEqual(self.service["image"], backups.KOPIA_IMAGE)
         self.assertNotIn("password", self.command.lower())

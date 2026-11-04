@@ -163,26 +163,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/ai/voice/engine': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Change Voice Engine
-     * @description Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps.
-     */
-    put: operations['change_voice_engine_api_v1_ai_voice_engine_put'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/ai/voice/sample': {
     parameters: {
       query?: never;
@@ -1475,6 +1455,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/system/backups/location': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Backup Location Status
+     * @description Where the backups are, the drives they could move to, and the latest move.
+     */
+    get: operations['backup_location_status_api_v1_system_backups_location_get'];
+    put?: never;
+    /**
+     * Move Backups
+     * @description Move the backups to another drive (or back to the main one); a job that pauses backups while it copies.
+     */
+    post: operations['move_backups_api_v1_system_backups_location_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/system/backups/platform': {
     parameters: {
       query?: never;
@@ -1592,6 +1596,26 @@ export interface paths {
     /** Update System Config */
     put: operations['update_system_config_api_v1_system_config_put'];
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/system/restart': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restart Mu3Lab
+     * @description Restart the dashboard and worker once this answer is sent; the apps keep running.
+     */
+    post: operations['restart_mu3lab_api_v1_system_restart_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1755,7 +1779,6 @@ export interface components {
        */
       suggestion_reason?: string;
       voice: components['schemas']['AiVoiceSettings'];
-      voice_engine: components['schemas']['AiVoiceEngineSettings'];
     };
     /** AiModelsRequest */
     AiModelsRequest: {
@@ -1800,41 +1823,6 @@ export interface components {
       tokens_per_second: number;
       /** Where */
       where: string;
-    };
-    /** AiVoiceEngineRequest */
-    AiVoiceEngineRequest: {
-      /**
-       * Engine
-       * @enum {string}
-       */
-      engine: 'pipeline' | 'duplex';
-    };
-    /**
-     * AiVoiceEngineSettings
-     * @description How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card.
-     */
-    AiVoiceEngineSettings: {
-      /** Changed At */
-      changed_at: string;
-      /** Changed By */
-      changed_by: string;
-      /** Download Gb */
-      download_gb: number;
-      /** Downloaded */
-      downloaded: boolean;
-      /**
-       * Engine
-       * @enum {string}
-       */
-      engine: 'pipeline' | 'duplex';
-      /** Model */
-      model: string;
-      /** Stopped */
-      stopped: string[];
-      /** Stops */
-      stops: string[];
-      /** Unavailable Reason */
-      unavailable_reason: string;
     };
     /** AiVoiceRequest */
     AiVoiceRequest: {
@@ -1972,6 +1960,56 @@ export interface components {
       key: string;
       /** Message */
       message: string;
+    };
+    /**
+     * BackupDrive
+     * @description A place the backups can live: the main drive's own folder, or a folder on another mounted drive.
+     */
+    BackupDrive: {
+      /** Current */
+      current: boolean;
+      /** Desktop Only */
+      desktop_only: boolean;
+      /** Detail */
+      detail: string;
+      /** Free Bytes */
+      free_bytes: number;
+      /** Id */
+      id: string;
+      /** Mount */
+      mount: string;
+      /** Name */
+      name: string;
+      /** Path */
+      path: string;
+      /** Problem */
+      problem: string;
+      /** Same Drive As Data */
+      same_drive_as_data: boolean;
+      /** Size Bytes */
+      size_bytes: number;
+    };
+    /**
+     * BackupLocation
+     * @description Where the backups are, the drives they could move to, and the latest move.
+     */
+    BackupLocation: {
+      /** Drives */
+      drives: components['schemas']['BackupDrive'][];
+      move?: components['schemas']['Job'] | null;
+      /** Ok */
+      ok: boolean;
+      /** Path */
+      path: string;
+      /** Problem */
+      problem: string;
+      /** Used Bytes */
+      used_bytes: number;
+    };
+    /** BackupLocationRequest */
+    BackupLocationRequest: {
+      /** Target */
+      target: string;
     };
     /**
      * BackupProtection
@@ -2571,6 +2609,12 @@ export interface components {
       core_parts?: {
         [key: string]: components['schemas']['DiskShare'];
       };
+      /** Drives */
+      drives?: {
+        [key: string]: {
+          [key: string]: components['schemas']['DiskShare'];
+        };
+      };
       /** Measured At */
       measured_at: string;
       /** Owners */
@@ -2594,6 +2638,24 @@ export interface components {
        * @default true
        */
       ok?: boolean;
+    };
+    /**
+     * Drive
+     * @description A drive besides the main one that holds Mu3Lab's data, measured live.
+     */
+    Drive: {
+      /** Mount */
+      mount: string;
+      /** Name */
+      name: string;
+      /** Percent */
+      percent: number;
+      /** Role */
+      role: string;
+      /** Total */
+      total: number;
+      /** Used */
+      used: number;
     };
     /**
      * GpuMemory
@@ -3633,6 +3695,8 @@ export interface components {
        * @default
        */
       confirm?: string;
+      /** Dependencies */
+      dependencies?: string[] | null;
       /**
        * Snapshot Id
        * @default
@@ -3836,6 +3900,11 @@ export interface components {
     ServiceUpdate: {
       /** Approved Version */
       approved_version: string;
+      /**
+       * Files Only
+       * @default false
+       */
+      files_only?: boolean;
       /** Installed Version */
       installed_version: string;
       /** Repository */
@@ -3928,6 +3997,8 @@ export interface components {
       disk_usage?: components['schemas']['DiskUsage'] | null;
       /** Docker Ready */
       docker_ready: boolean;
+      /** Drives */
+      drives?: components['schemas']['Drive'][];
       gpu?: components['schemas']['GpuMemory'] | null;
       memory: components['schemas']['Metric'];
       /** Memory By Core Part */
@@ -3984,6 +4055,11 @@ export interface components {
       approved_version: string;
       /** Blocked Reason */
       blocked_reason: string;
+      /**
+       * Files Only
+       * @default false
+       */
+      files_only?: boolean;
       /** Installed Version */
       installed_version: string;
       /** Ok */
@@ -4971,93 +5047,6 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['VoiceApps'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  change_voice_engine_api_v1_ai_voice_engine_put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AiVoiceEngineRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */
@@ -12286,6 +12275,176 @@ export interface operations {
       };
     };
   };
+  backup_location_status_api_v1_system_backups_location_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BackupLocation'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  move_backups_api_v1_system_backups_location_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BackupLocationRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   platform_backup_status_api_v1_system_backups_platform_get: {
     parameters: {
       query?: never;
@@ -12978,6 +13137,89 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['SystemConfig'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  restart_mu3lab_api_v1_system_restart_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
         };
       };
       /** @description Bad Request */

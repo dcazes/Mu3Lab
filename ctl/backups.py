@@ -270,7 +270,9 @@ def repository_password(paths: RuntimePaths) -> str:
 
 
 def _repository(paths: RuntimePaths) -> Path:
-    return paths.backups / "kopia"
+    from ctl import backup_location
+
+    return backup_location.folder(paths) / "kopia"
 
 
 def _config(paths: RuntimePaths) -> Path:
@@ -327,6 +329,11 @@ def _run_kopia(
     timeout: int,
     password: str = "",
 ) -> tuple[int, str]:
+    from ctl import backup_location
+
+    missing = backup_location.problem(paths)
+    if missing:
+        return 1, missing  # never start a new, empty repository where the drive should be
     name = f"mu3lab-kopia-{secrets.token_hex(6)}"
     for folder in (_repository(paths), _config(paths)):
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
