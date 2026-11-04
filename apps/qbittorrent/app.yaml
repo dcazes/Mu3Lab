@@ -12,7 +12,7 @@ tagline: Download torrents into your libraries
 summary: Download torrents and magnet links from the browser. Pick a category and the finished files land in
   Music, Audiobooks, Podcasts or Roms; anything else goes to the Downloads folder in Nextcloud. Torrent traffic
   can go through a VPN of your choice.
-version: v5.2.4
+version: "v5.3.0"
 upstream: qbittorrent/qBittorrent
 media:
 - name: downloads

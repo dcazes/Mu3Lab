@@ -8,7 +8,7 @@ category: knowledge
 tagline: Turns web pages into AI-ready text
 summary: Converts web pages into Markdown and structured data for AI tools. Mu3Lab runs the self-hosted scraping
   and crawling API inside the server and connects it to chat for web research.
-version: v2.11.450
+version: "v2.11.678"
 upstream: firecrawl/firecrawl
 service:
   local_port: 3002

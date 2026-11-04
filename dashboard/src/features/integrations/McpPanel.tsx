@@ -104,11 +104,7 @@ export function McpPanel({
   const [values, setValues] = useState<Record<string, string>>({});
   const step = nextMcpStep(server);
   const manual = !setsUpAutomatically(server);
-  const help =
-    server.auth.auto_provision_note ||
-    (server.service_id === 'surfsense'
-      ? 'In SurfSense, create a personal token under API Playground → API Keys, enable its workspace, then paste the ss_pat_… token here.'
-      : '');
+  const help = server.auth.auto_provision_note || '';
 
   const act = async (action: 'prepare' | 'install') => {
     await run(action, () => queueMcp(server, action), 'Connection job started.');

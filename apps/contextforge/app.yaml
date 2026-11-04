@@ -11,7 +11,7 @@ category: ai
 tagline: Every app's AI tools in one place
 summary: Connects chat to your apps' tools. Each app gets its own set of tools for its assistant; operators choose
   which tools are on, who can use them, and see every call in ContextForge's screens.
-version: v1.0.11
+version: "v1.1.0"
 upstream: IBM/mcp-context-forge
 service:
   local_port: 4444

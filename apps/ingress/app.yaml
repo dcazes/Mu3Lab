@@ -8,7 +8,7 @@ category: system
 tagline: Private HTTPS web server
 summary: Routes requests to Mu3Lab apps over HTTPS. Caddy provides the internal web server and reverse proxy used
   to publish private app addresses.
-version: v2.11.4
+version: "v2.11.7"
 upstream: caddyserver/caddy
 service:
   local_port: 19460

@@ -306,18 +306,6 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
     ]
     if not tools:
         raise ValueError("MCP server returned no tools")
-    if getattr(server, "id", "") == "surfsense-official":
-        check, _ = _rpc_request(
-            url,
-            "tools/call",
-            3,
-            token=token,
-            session_id=session_id,
-            params={"name": "surfsense_list_workspaces", "arguments": {"response_format": "json"}},
-        )
-        result = check.get("result", {})
-        if not isinstance(result, dict) or result.get("isError"):
-            raise ValueError("SurfSense rejected the token or workspace API check")
     if getattr(server, "id", "") in {"nextcloud-context-agent", by_capability("travel").id}:
         name = "list_files" if server.id == "nextcloud-context-agent" else "list_collections"
         check, _ = _rpc_request(

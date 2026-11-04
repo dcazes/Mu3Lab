@@ -100,7 +100,13 @@ class OpenWebUI:
         return list(data or []) if isinstance(data, list) else list((data or {}).get("data") or [])
 
     def save_model(self, model: dict[str, Any], *, exists: bool) -> None:
-        self.request("POST", "/api/v1/models/model/update" if exists else "/api/v1/models/create", json=model)
+        if not exists:
+            self.request("POST", "/api/v1/models/create", json=model)
+            return
+        self.request("POST", "/api/v1/models/model/update", json=model)
+        # Since Open WebUI 0.12 an update keeps the old sharing; who may use a model changes only here.
+        access = {"id": model["id"], "name": model.get("name"), "access_grants": model.get("access_grants") or []}
+        self.request("POST", "/api/v1/models/model/access/update", json=access)
 
     def delete_model(self, model_id: str) -> None:
         self.request("POST", "/api/v1/models/model/delete", json={"id": model_id})

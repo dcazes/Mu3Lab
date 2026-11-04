@@ -1,9 +1,9 @@
 """Bootstrap the gateway using its supported declarative config and HTTP API.
 
-FreeLLMAPI v0.13.3 creates config.admin before opening its HTTP listener and
+FreeLLMAPI (checked through v0.16.18) creates config.admin before opening its HTTP listener and
 only when there are no users. This avoids /auth/setup's loopback/setup-code
 restriction on Docker-published ports; no container shell fallback is needed.
-Source: https://github.com/TashfeenAhmed/FreeLLMAPI/blob/v0.13.3/server/src/services/declarative-config.ts
+Source: https://github.com/TashfeenAhmed/FreeLLMAPI/blob/v0.16.18/server/src/services/declarative-config.ts
 """
 
 from ctl.engine.hooks import AppHooks, HookContext

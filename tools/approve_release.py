@@ -116,7 +116,7 @@ def approve(app: str, version: str, overrides: dict[str, str]) -> None:
             'images make up the release. Name them: IMAGES="service=registry/name:tag".'
         )
     print(f"Approving {service.name} {version} (was {current.version}):")
-    # Several containers often share one image (SurfSense's backend and workers).
+    # Several containers often share one image (Nextcloud's app and its cron job).
     resolved = {reference: resolve_digest(reference) for reference in dict.fromkeys(moved.values())}
     pinned = {name: resolved[reference] for name, reference in moved.items()}
     rewrite(service, version, pinned)
