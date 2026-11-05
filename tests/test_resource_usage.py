@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ctl import resource_usage
 from ctl.registry import load
@@ -170,6 +170,28 @@ class DiskTests(unittest.TestCase):
         # Nothing runs this image.
         self.assertEqual(usage["unused"], {"data": 0, "program": 200_000_000})
         self.assertNotIn("", usage)
+
+    def test_untagged_container_owns_only_the_latest_image(self):
+        for repository in ("mu3lab-livekit-agent", "localhost:5000/mu3lab/livekit-agent"):
+            with self.subTest(repository=repository):
+                detail = {
+                    "Containers": [
+                        {
+                            "Image": repository,
+                            "Labels": "com.docker.compose.project.working_dir=/srv/mu3lab/projects/livekit",
+                        }
+                    ],
+                    "Images": [
+                        {"Repository": repository, "Tag": "latest", "UniqueSize": "100MB"},
+                        {"Repository": repository, "Tag": "old", "UniqueSize": "50MB"},
+                    ],
+                }
+
+                summary = {"Type": "Images", "Size": "150MB"}
+                run = Mock(side_effect=[result(json.dumps(summary)), result(json.dumps(detail))])
+
+                usage = resource_usage.docker_usage(resource_usage.owners(load(), ROOT, PATHS), run=run)
+                self.assertEqual(usage["livekit"]["program"], 100_000_000)
 
     def test_folders_go_to_their_app_and_unknown_data_to_removed(self):
         du = "1\tdata/immich\n2\tdata/unsloth-studio\n3\tmedia/roms\n4\tstate\n5\tdata/authentik\n"

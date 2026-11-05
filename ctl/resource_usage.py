@@ -280,9 +280,11 @@ def _label(pattern: re.Pattern, labels: Any) -> str:
 
 
 def _name(reference: str) -> str:
-    """``docker.io/library/redis:7`` and ``redis:7`` are the same image."""
+    """Normalize Docker Hub shorthand and the implicit latest tag for name comparisons."""
     for prefix in ("docker.io/", "library/"):
         reference = reference.removeprefix(prefix)
+    if reference and ":" not in reference.rsplit("/", 1)[-1]:
+        return f"{reference}:latest"
     return reference
 
 
