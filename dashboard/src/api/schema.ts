@@ -229,6 +229,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/voice/speech/remove': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove Speech Model
+     * @description Delete one downloaded speech model Speaches is not set up to use, to free its disk space.
+     */
+    post: operations['remove_speech_model_api_v1_ai_voice_speech_remove_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/app-sizes': {
     parameters: {
       query?: never;
@@ -2946,6 +2966,8 @@ export interface components {
       name: string;
       /** Note */
       note: string;
+      /** Precision */
+      precision: string;
       /** Tag */
       tag: string;
     };
@@ -3965,9 +3987,33 @@ export interface components {
     /** SpeechModelChoice */
     SpeechModelChoice: {
       /** Options */
-      options: string[];
+      options: components['schemas']['SpeechModelOption'][];
       /** Value */
       value: string;
+    };
+    /** SpeechModelOption */
+    SpeechModelOption: {
+      /** Download Gb */
+      download_gb: number;
+      /** Downloaded */
+      downloaded: boolean;
+      /** Id */
+      id: string;
+      /** In Use */
+      in_use: boolean;
+      /** Memory Gb */
+      memory_gb: number;
+      /** Name */
+      name: string;
+      /** Note */
+      note: string;
+      /** Precision */
+      precision: string;
+    };
+    /** SpeechModelRemoveRequest */
+    SpeechModelRemoveRequest: {
+      /** Model */
+      model: string;
     };
     /** SystemConfig */
     SystemConfig: {
@@ -5391,6 +5437,93 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['JobResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  remove_speech_model_api_v1_ai_voice_speech_remove_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SpeechModelRemoveRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
         };
       };
       /** @description Bad Request */

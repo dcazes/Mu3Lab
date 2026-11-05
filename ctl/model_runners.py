@@ -74,6 +74,7 @@ class Engine(Protocol):
     def chat_route(self, model: Model) -> str: ...
     def embedding_route(self, model: Model) -> str: ...
     def downloaded(self) -> set[str]: ...
+    def on_disk(self) -> set[str]: ...
     def has(self, model: Model, present: set[str]) -> bool: ...
     def pull(self, model: Model, log: Log, progress: Progress | None = None) -> None: ...
     def delete(self, model: Model) -> None: ...
@@ -88,6 +89,7 @@ class OllamaEngine:
     def __init__(self, app: App, paths: RuntimePaths) -> None:
         self.app = app
         self.base = f"http://127.0.0.1:{app.manifest.service.local_port}"
+        self.paths = paths
 
     def _call(self, path: str, payload: dict | None = None, *, method: str = "POST", timeout: float = 300) -> Any:
         request = urllib.request.Request(
@@ -119,6 +121,15 @@ class OllamaEngine:
     def downloaded(self) -> set[str]:
         tags = self._call("/api/tags", method="GET", timeout=15)
         return {self.name(str(item.get("name", ""))) for item in tags.get("models", []) if isinstance(item, dict)}
+
+    def on_disk(self) -> set[str]:
+        """What ``downloaded`` lists, read from Ollama's model folder while Ollama is stopped."""
+        # Ollama's own folder, mounted from the data root (apps/ollama/docker-compose.yml).
+        library = self.paths.data / self.app.id / "models" / "manifests" / "registry.ollama.ai" / "library"
+        try:
+            return {f"{tag.parent.name}:{tag.name}" for tag in library.glob("*/*") if tag.is_file()}
+        except OSError:
+            return set()
 
     def has(self, model: Model, present: set[str]) -> bool:
         return self.name(model.tag) in present

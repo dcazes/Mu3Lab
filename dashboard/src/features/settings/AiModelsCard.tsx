@@ -14,14 +14,11 @@ import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Collapsible } from '../../components/Layout';
 import { Badge } from '../../components/Status';
 import { DownloadStatus } from '../apps/InstallProgress';
+import { ModelChoices, useRemoveModel } from './ModelChoices';
 import { humanize } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { type ApiState, useApi } from '../../lib/useApi';
 import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
-
-export function option(model: LocalModel): string {
-  return `${model.name} · ${model.download_gb} GB download, about ${model.memory_gb} GB memory`;
-}
 
 type Source = AiModelsRequest['sources'][number];
 
@@ -145,6 +142,10 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
     },
     [reload],
   );
+  const { remove, removing } = useRemoveModel(
+    (model) => postJsonApi(`/api/v1/ai/models/${model.id}/remove`, {}),
+    () => void reload(),
+  );
   const title = 'Where AI runs';
   const description =
     'Choose where chat runs and which models run on this server. Only models reviewed for Mu3Lab are offered, each marked by how well it fits beside your other apps.';
@@ -197,27 +198,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
     );
     if (result) setTried((current) => ({ ...current, [target]: result }));
   };
-  const remove = async (model: LocalModel) => {
-    if (
-      !(await confirm({
-        title: `Remove ${model.name}?`,
-        description: `This frees ${model.download_gb} GB of disk space. Choosing it again downloads it again.`,
-        confirmLabel: 'Remove',
-        tone: 'danger',
-      }))
-    )
-      return;
-    if (
-      await run(
-        `remove-${model.id}`,
-        () => postJsonApi(`/api/v1/ai/models/${model.id}/remove`, {}),
-        `${model.name} removed`,
-      )
-    )
-      void reload();
-  };
   const chosenChat = data.chat_models.find((model) => model.id === draft.chat_model);
-  const chosenEmbedding = data.embedding_models.find((model) => model.id === draft.embedding_model);
   const runnerName = (id: string) => data.runners.find((runner) => runner.id === id)?.name || 'the model runner';
 
   const save = async (event: FormEvent) => {
@@ -285,7 +266,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
       )}
       {!data.runner_reachable && (
         <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
-          Download states may be out of date until {runnerName(data.runner)} is running again.
+          Models can be tried or removed once {runnerName(data.runner)} is running again.
         </Callout>
       )}
       <form className="form" onSubmit={(event) => void save(event)}>
@@ -362,64 +343,48 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
             <small className="muted">Runs the models below.</small>
           </label>
         )}
-        <fieldset className="model-list" disabled={readOnly || busy}>
-          <legend>Local chat model</legend>
-          {!localOn && <small className="muted">Used when local models are on.</small>}
-          {data.chat_models.map((model) => {
+        <ModelChoices
+          name="chat-model"
+          legend="Local chat model"
+          hint={!localOn && <small className="muted">Used when local models are on.</small>}
+          footer={
+            <small className="muted">
+              Downloaded models stay on this server, so switching back is instant. Try it sends one test question.
+            </small>
+          }
+          // The fit verdict joins the reviewer's note.
+          models={data.chat_models.map((model) => ({ ...model, note: `${model.note} ${fitText(model)}`.trim() }))}
+          value={draft.chat_model ?? ''}
+          onChange={(id) => setEdits({ ...draft, chat_model: id })}
+          disabled={busy}
+          readOnly={readOnly}
+          remove={(model) => void remove(model)}
+          removing={removing}
+          badges={(model) => {
             const fit = FIT[model.fit || ''];
             return (
-              <div key={model.id} className="model-entry">
-                <label className="model-row">
-                  <input
-                    type="radio"
-                    name="chat-model"
-                    checked={draft.chat_model === model.id}
-                    onChange={() => setEdits({ ...draft, chat_model: model.id })}
-                  />
-                  <span className="model-row-text">
-                    <strong>
-                      {model.name}
-                      {model.id === data.suggested && <Badge tone="blue">Suggested</Badge>}
-                      {fit && <Badge tone={fit.tone}>{fit.label}</Badge>}
-                      {model.downloaded && <Badge>Downloaded</Badge>}
-                    </strong>
-                    <small>
-                      {model.note} {fitText(model)} {model.download_gb} GB download, about {model.memory_gb} GB memory.
-                    </small>
-                  </span>
-                  {model.downloaded && !readOnly && (
-                    <span className="model-row-actions">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        loading={pending === `try-${model.id}`}
-                        aria-label={`Try ${model.name}`}
-                        onClick={() => void tryIt(model.id)}
-                      >
-                        Try it
-                      </Button>
-                      {!model.in_use && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          loading={pending === `remove-${model.id}`}
-                          aria-label={`Remove ${model.name}`}
-                          onClick={() => void remove(model)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </span>
-                  )}
-                </label>
-                {tried[model.id] && <TryResult result={tried[model.id]} />}
-              </div>
+              <>
+                {model.id === data.suggested && <Badge tone="blue">Suggested</Badge>}
+                {fit && <Badge tone={fit.tone}>{fit.label}</Badge>}
+              </>
             );
-          })}
-          <small className="muted">
-            Downloaded models stay on this server, so switching back is instant. Try it sends one test question.
-          </small>
-        </fieldset>
+          }}
+          actions={(model) =>
+            model.downloaded &&
+            !readOnly && (
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={pending === `try-${model.id}`}
+                aria-label={`Try ${model.name}`}
+                onClick={() => void tryIt(model.id)}
+              >
+                Try it
+              </Button>
+            )
+          }
+          below={(model) => tried[model.id] && <TryResult result={tried[model.id]} />}
+        />
         {saved.sources.includes('outside') && !readOnly && (
           <div className="model-entry">
             <Button size="sm" variant="ghost" loading={pending === 'try-outside'} onClick={() => void tryIt('outside')}>
@@ -428,22 +393,18 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
             {tried.outside && <TryResult result={tried.outside} />}
           </div>
         )}
-        <label className="field">
-          <span>Search model</span>
-          <select
-            aria-label="Search model"
-            disabled={readOnly || busy || locked}
-            value={draft.embedding_model}
-            onChange={(event) => setEdits({ ...draft, embedding_model: event.target.value })}
-          >
-            {data.embedding_models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {option(model)}
-              </option>
-            ))}
-          </select>
-          {chosenEmbedding && <small className="muted">{chosenEmbedding.note}</small>}
-        </label>
+        <ModelChoices
+          name="search-model"
+          legend="Search model"
+          models={data.embedding_models}
+          value={draft.embedding_model}
+          onChange={(id) => setEdits({ ...draft, embedding_model: id })}
+          disabled={busy}
+          locked={locked}
+          readOnly={readOnly}
+          remove={(model) => void remove(model)}
+          removing={removing}
+        />
         {locked && (
           <p className="muted">
             {data.embedding_locked_by.join(', ')} keeps a search index built for one search model, so the search model

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -16,6 +18,7 @@ from ctl.runtime import RuntimePaths
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"], route_class=ContractRoute)
 NAMESPACE = "ai.models"
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def _view(store: JobStore | None) -> dict:
@@ -289,7 +292,8 @@ def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, o
     if not speech["installed"]:
         raise ApiError(409, "Install Speaches first.")
     chosen = {"stt_model": payload.stt_model, "tts_model": payload.tts_model}
-    if chosen["stt_model"] not in speech["stt"]["options"] or chosen["tts_model"] not in speech["tts"]["options"]:
+    listed = {part: {option["id"] for option in speech[part]["options"]} for part in ("stt", "tts")}
+    if chosen["stt_model"] not in listed["stt"] or chosen["tts_model"] not in listed["tts"]:
         raise ApiError(422, "Choose one of the listed speech models.")
     if chosen == {"stt_model": speech["stt"]["value"], "tts_model": speech["tts"]["value"]}:
         raise ApiError(422, "Speaches already uses these models.")
@@ -332,3 +336,20 @@ def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, o
     except (JobConflict, ValueError) as exc:
         raise ApiError(409, f"{service.name} is busy with another task; try again in a moment.") from exc
     return models.JobResponse.model_validate({"ok": True, "job": job})
+
+
+@router.post("/voice/speech/remove", response_model=models.OkResponse, response_model_exclude_none=True)
+async def remove_speech_model(
+    payload: models.SpeechModelRemoveRequest, operator: OperatorMutation
+) -> models.OkResponse:
+    """Delete one downloaded speech model Speaches is not set up to use, to free its disk space."""
+    if (await run_in_threadpool(_voice_page)).active_job_id:
+        raise ApiError(409, "Wait for the speech model change to finish.")
+    try:
+        detail = await run_in_threadpool(voice_settings.remove_speech_model, payload.model, ROOT, lambda _line: None)
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=operator["username"], event="ai.speech_model_removed", detail=detail)
+    return models.OkResponse.model_validate({"ok": True, "message": detail})

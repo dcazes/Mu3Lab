@@ -35,6 +35,9 @@ class FakeEngine:
     def downloaded(self) -> set[str]:
         return set(self.present)
 
+    def on_disk(self) -> set[str]:
+        return set(self.present)
+
     def has(self, model, present) -> bool:
         return model.id in present
 
@@ -397,6 +400,21 @@ class JobTests(_Runtime):
         self.assertEqual(local_models.settings(self.paths)["embedding_model"], "bge-m3")
 
 
+class OllamaFolderTests(_Runtime):
+    def test_downloads_are_read_from_ollamas_folder_while_it_is_stopped(self):
+        app = SimpleNamespace(id="ollama", manifest=SimpleNamespace(service=SimpleNamespace(local_port=1)))
+        engine = model_runners.OllamaEngine(app, self.paths)  # type: ignore[arg-type]
+        self.assertEqual(engine.on_disk(), set())
+        library = self.paths.data / "ollama/models/manifests/registry.ollama.ai/library"
+        for name in ("qwen3/8b-q4_K_M", "bge-m3/567m"):
+            (library / name).parent.mkdir(parents=True, exist_ok=True)
+            (library / name).write_text("{}")
+        present = engine.on_disk()
+        self.assertTrue(engine.has(local_models.CHAT_BY_ID["qwen3-8b"], present))
+        self.assertTrue(engine.has(local_models.EMBEDDING_BY_ID["bge-m3"], present))
+        self.assertFalse(engine.has(local_models.CHAT_BY_ID["qwen3.5-4b"], present))
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
@@ -424,7 +442,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["settings"]["privacy"], "outside_allowed")
         self.assertEqual([model["id"] for model in body["chat_models"]], [model.id for model in local_models.CHAT])
         self.assertFalse(body["runner_reachable"])
+        # A stopped runner's downloads are still shown, from its folder; each says how it is stored.
+        self.assertEqual(
+            {model["id"] for model in body["embedding_models"] if model["downloaded"]}, {"bge-m3", "nomic-embed-text"}
+        )
+        self.assertEqual({model["precision"] for model in body["chat_models"]}, {"Q4"})
         self.assertEqual({runner["id"] for runner in body["runners"]}, {"ollama", "other"})
+
+    def test_a_stopped_runner_is_asked_to_start_before_removing(self):
+        with patch("ctl.local_models.in_use", return_value=set()):
+            response = self.client.post("/api/v1/ai/models/nomic-embed-text/remove", headers=self.headers, json={})
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("first: it removes its own models", response.text)
 
     def test_a_change_is_queued_as_a_job(self):
         response = self.client.put("/api/v1/ai/models", headers=self.headers, json=LOCAL)

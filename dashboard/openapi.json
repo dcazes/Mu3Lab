@@ -3385,6 +3385,10 @@
             "title": "Note",
             "type": "string"
           },
+          "precision": {
+            "title": "Precision",
+            "type": "string"
+          },
           "tag": {
             "title": "Tag",
             "type": "string"
@@ -3398,6 +3402,7 @@
           "memory_gb",
           "note",
           "dimensions",
+          "precision",
           "downloaded"
         ],
         "title": "LocalModel",
@@ -6649,7 +6654,7 @@
         "properties": {
           "options": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/SpeechModelOption"
             },
             "title": "Options",
             "type": "array"
@@ -6664,6 +6669,69 @@
           "options"
         ],
         "title": "SpeechModelChoice",
+        "type": "object"
+      },
+      "SpeechModelOption": {
+        "properties": {
+          "download_gb": {
+            "title": "Download Gb",
+            "type": "number"
+          },
+          "downloaded": {
+            "title": "Downloaded",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "in_use": {
+            "title": "In Use",
+            "type": "boolean"
+          },
+          "memory_gb": {
+            "title": "Memory Gb",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "note",
+          "download_gb",
+          "memory_gb",
+          "precision",
+          "downloaded",
+          "in_use"
+        ],
+        "title": "SpeechModelOption",
+        "type": "object"
+      },
+      "SpeechModelRemoveRequest": {
+        "properties": {
+          "model": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "SpeechModelRemoveRequest",
         "type": "object"
       },
       "SystemConfig": {
@@ -9083,6 +9151,108 @@
           }
         },
         "summary": "Change Speech Models",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/voice/speech/remove": {
+      "post": {
+        "description": "Delete one downloaded speech model Speaches is not set up to use, to free its disk space.",
+        "operationId": "remove_speech_model_api_v1_ai_voice_speech_remove_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechModelRemoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Remove Speech Model",
         "tags": [
           "ai"
         ]

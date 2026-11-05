@@ -74,3 +74,70 @@ class VoiceSettingsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpeechModelTests(unittest.TestCase):
+    """Speaches' models: which are downloaded, and removing one it does not use."""
+
+    STT = ("deepdml/faster-whisper-large-v3-turbo-ct2", "Systran/faster-whisper-small")
+    TTS = ("speaches-ai/Kokoro-82M-v1.0-ONNX-int8", "speaches-ai/Kokoro-82M-v1.0-ONNX")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.paths = RuntimePaths(Path(tmp.name))
+        fields = [
+            {"key": "stt_model", "value": self.STT[0], "options": list(self.STT)},
+            {"key": "tts_model", "value": self.TTS[0], "options": list(self.TTS)},
+        ]
+        for patcher in (
+            patch("ctl.voice_settings._speech_app", return_value=SimpleNamespace(id="speaches")),
+            patch("ctl.registry.load"),
+            patch("ctl.service_config.read", return_value=fields),
+            patch("ctl.chat_ops.installed", return_value=True),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def download(self, model_id: str) -> Path:
+        folder = voice_settings._speech_folder(model_id, self.paths)
+        (folder / "snapshots" / "abc123").mkdir(parents=True)
+        return folder
+
+    def test_every_offered_speech_model_has_its_size_and_memory(self):
+        import yaml
+
+        manifest = yaml.safe_load((Path(__file__).resolve().parents[1] / "apps/speaches/app.yaml").read_text())
+        fields = [field for field in manifest["configuration"] if field["key"] in {"stt_model", "tts_model"}]
+        offered = {option for field in fields for option in field["options"]}
+        self.assertTrue(offered)
+        self.assertEqual(offered - set(voice_settings.SPEECH), set())
+
+    def test_lists_which_are_downloaded_and_in_use(self):
+        self.download(self.STT[0])
+        self.download(self.TTS[1])
+        # A download Speaches never finished has no snapshot yet.
+        voice_settings._speech_folder(self.STT[1], self.paths).mkdir(parents=True)
+        options = voice_settings.speech_models(self.paths)["stt"]["options"]
+        self.assertEqual([(item["downloaded"], item["in_use"]) for item in options], [(True, True), (False, False)])
+        tts = voice_settings.speech_models(self.paths)["tts"]["options"][1]
+        self.assertEqual(
+            (tts["name"], tts["precision"], tts["downloaded"], tts["in_use"]), ("Kokoro full", "32-bit", True, False)
+        )
+
+    def test_removes_only_a_downloaded_model_speaches_does_not_use(self):
+        unused = self.download(self.TTS[1])
+        self.download(self.TTS[0])
+        with patch("ctl.lifecycle.uninstall.delete_data", return_value=(True, "")) as delete:
+            with self.assertRaisesRegex(ValueError, "in use"):
+                voice_settings.remove_speech_model(self.TTS[0], Path("."), print, self.paths)
+            with self.assertRaisesRegex(ValueError, "listed"):
+                voice_settings.remove_speech_model("someone/else", Path("."), print, self.paths)
+            self.assertIn(
+                "not downloaded", voice_settings.remove_speech_model(self.STT[1], Path("."), print, self.paths)
+            )
+            delete.assert_not_called()
+            self.assertIn(
+                "Removed Kokoro full", voice_settings.remove_speech_model(self.TTS[1], Path("."), print, self.paths)
+            )
+        self.assertEqual(delete.call_args.args[0], [unused, unused.parent / ".locks" / unused.name])

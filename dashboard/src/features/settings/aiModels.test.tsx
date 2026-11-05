@@ -25,6 +25,10 @@ function setup(current: AiModels = aiModels()) {
       }
       return current;
     }
+    if (path.endsWith('/remove')) {
+      puts.push(path);
+      return { ok: true, message: 'Removed.' };
+    }
     if (path === '/api/v1/ai/models/try')
       return {
         ok: true,
@@ -149,7 +153,7 @@ describe('Where AI runs', () => {
 
   it('lets outside providers run alone, with no local model', async () => {
     setup();
-    await screen.findByLabelText('Search model');
+    await screen.findByRole('group', { name: 'Search model' });
     // Chat needs somewhere to run, so the only source turned on cannot be turned off.
     expect(screen.getByRole('checkbox', { name: /Outside providers/ })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /Outside providers/ })).toBeDisabled();
@@ -190,14 +194,32 @@ describe('Where AI runs', () => {
 
   it('warns that documents are indexed again when the search model changes', async () => {
     setup();
-    fireEvent.change(await screen.findByLabelText('Search model'), { target: { value: 'nomic-embed-text' } });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Nomic Embed Text' }));
     expect(screen.getByText('Documents need indexing again')).toBeInTheDocument();
   });
 
   it('locks the search model while an app keeps an index for it', async () => {
     setup(aiModels({}, { embedding_locked_by: ['SurfSense'] }));
-    expect(((await screen.findByLabelText('Search model')) as HTMLSelectElement).disabled).toBe(true);
+    expect(await screen.findByRole('radio', { name: 'Nomic Embed Text' })).toBeDisabled();
     expect(screen.getByText(/SurfSense keeps a search index/)).toBeInTheDocument();
+  });
+
+  it('shows each model’s Q4 memory and download, and removes only unused downloads', async () => {
+    const current = aiModels();
+    current.embedding_models = current.embedding_models.map((model) => ({
+      ...model,
+      downloaded: true,
+      in_use: model.id === 'bge-m3',
+    }));
+    const puts = setup(current);
+    const chat = (await screen.findByRole('radio', { name: 'Qwen3 8B' })).closest('.model-entry') as HTMLElement;
+    expect(chat).toHaveTextContent('Q4: 3.3 GB download, about 5 GB memory.');
+    expect(chat).toHaveTextContent('Downloaded');
+    expect(screen.queryByRole('button', { name: 'Remove Qwen 3.5 4B' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove BGE-M3' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Nomic Embed Text' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    await vi.waitFor(() => expect(puts).toContain('/api/v1/ai/models/nomic-embed-text/remove'));
   });
 
   it('shows why a change failed', async () => {

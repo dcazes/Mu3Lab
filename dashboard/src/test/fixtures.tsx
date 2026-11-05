@@ -121,6 +121,7 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
     memory_gb: 5,
     note: `${name} note.`,
     dimensions: 0,
+    precision: 'Q4',
     downloaded: false,
     ...extra,
   });

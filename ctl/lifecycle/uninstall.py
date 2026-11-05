@@ -90,14 +90,15 @@ def _cleanup_image(root: Path) -> str:
 def delete_data(directories: list[Path], root: Path, log: Log) -> tuple[bool, str]:
     """Delete data folders whose files belong to container users (postgres, www-data).
 
-    The dashboard runs unprivileged, so the removal runs in a short-lived
-    container that sees only the data root, with networking off.
+    Each may be an app's whole folder or one inside it (a downloaded speech model). The dashboard
+    runs unprivileged, so the removal runs in a short-lived container that sees only the data
+    root, with networking off.
     """
-    data = RuntimePaths().data
-    present = [path for path in directories if path.exists()]
+    data = RuntimePaths().data.resolve()
+    present = [path.resolve() for path in directories if path.exists()]
     if not present:
         return True, "No application data was found."
-    if any(path.parent != data for path in present):
+    if any(data not in path.parents for path in present):
         return False, "Refusing to delete a folder outside the Mu3Lab data root."
     command = [
         "docker",
@@ -114,7 +115,7 @@ def delete_data(directories: list[Path], root: Path, log: Log) -> tuple[bool, st
         _cleanup_image(root),
         "-rf",
         "--",
-        *(f"/mu3lab-data/{path.name}" for path in present),
+        *(f"/mu3lab-data/{path.relative_to(data)}" for path in present),
     ]
     rc, output = actions.docker_cmd(command, log, timeout=1800)
     remaining = [path.name for path in present if path.exists()]

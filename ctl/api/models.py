@@ -834,6 +834,8 @@ class LocalModel(ApiModel):
     memory_gb: float
     note: str
     dimensions: int
+    # How its weights are stored (Q4 for every chat model), which the memory estimate assumes.
+    precision: str
     # Downloaded in the model runner that serves requests now.
     downloaded: bool
     # Used by a setting now (chat, voice or search), so it cannot be removed.
@@ -982,9 +984,22 @@ class VoiceOption(ApiModel):
     gender: str
 
 
+class SpeechModelOption(ApiModel):
+    id: str
+    name: str
+    note: str
+    download_gb: float
+    # An estimate of the memory it takes while loaded, at the precision its weights are stored.
+    memory_gb: float
+    precision: str
+    # In Speaches' model folder now, and whether Speaches is set up to use it.
+    downloaded: bool
+    in_use: bool
+
+
 class SpeechModelChoice(ApiModel):
     value: str
-    options: list[str]
+    options: list[SpeechModelOption]
 
 
 class VoiceSpeech(ApiModel):
@@ -1016,6 +1031,10 @@ class VoicePage(ApiModel):
 class VoiceSpeechRequest(ApiModel):
     stt_model: str = Field(min_length=1, max_length=200)
     tts_model: str = Field(min_length=1, max_length=200)
+
+
+class SpeechModelRemoveRequest(ApiModel):
+    model: str = Field(min_length=1, max_length=200)
 
 
 class VoiceSampleRequest(ApiModel):

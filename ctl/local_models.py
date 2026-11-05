@@ -85,6 +85,9 @@ class Model:
     memory_gb: float
     note: str
     dimensions: int = 0  # embedding models only
+    # How its weights are stored, which the memory estimate assumes: every chat tag is Q4_K_M;
+    # Ollama publishes the search models only at 16 bits (they are small enough not to matter).
+    precision: str = "Q4"
 
 
 # Reviewed by the owner on 2026-10-10. Sizes are Ollama's published download sizes. Memory raised
@@ -159,6 +162,7 @@ EMBEDDING: tuple[Model, ...] = (
         2,
         "Many languages; long documents.",
         dimensions=1024,
+        precision="16-bit",
     ),
     Model(
         "nomic-embed-text",
@@ -168,6 +172,7 @@ EMBEDDING: tuple[Model, ...] = (
         1,
         "The earlier default; English-first and very light.",
         dimensions=768,
+        precision="16-bit",
     ),
 )
 DEFAULT_EMBEDDING = "bge-m3"
@@ -509,7 +514,8 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
         present = engine.downloaded()
         reachable = True
     except model_runners.ENGINE_ERRORS:
-        present, reachable = set(), False
+        # A stopped runner still shows what it has downloaded.
+        present, reachable = engine.on_disk(), False
 
     from ctl import model_fit
 
@@ -611,8 +617,13 @@ def remove(model_id: str, paths: RuntimePaths | None = None) -> str:
         raise ValueError("Choose a model from the list.")
     if model in in_use(paths):
         raise ValueError(f"{model.name} is in use. Choose another model first.")
-    engine = model_runners.engine(runner(paths), paths)
-    if not engine.has(model, engine.downloaded()):
+    current = runner(paths)
+    engine = model_runners.engine(current, paths)
+    try:
+        present = engine.downloaded()
+    except model_runners.ENGINE_ERRORS:
+        raise ValueError(f"Start {current.manifest.name} first: it removes its own models.") from None
+    if not engine.has(model, present):
         return f"{model.name} is not downloaded."
     engine.delete(model)
     return f"Removed {model.name}; {model.download_gb} GB of disk space is free again."

@@ -1,12 +1,12 @@
 import { type FormEvent, useCallback, useState } from 'react';
-import { type AiModels, type AiVoiceRequest, type JobResponse, putJsonApi } from '../../api';
+import { type AiModels, type AiVoiceRequest, type JobResponse, postJsonApi, putJsonApi } from '../../api';
 import { Button } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
 import { Callout, Card } from '../../components/Layout';
-import { Badge } from '../../components/Status';
 import { useAction } from '../../lib/useAction';
 import type { ApiState } from '../../lib/useApi';
-import { JobLog, option, whereChatRuns } from './AiModelsCard';
+import { JobLog, whereChatRuns } from './AiModelsCard';
+import { ModelChoices, useRemoveModel } from './ModelChoices';
 
 /** Where the voice assistant's answers come from, in words for the person choosing. */
 export function whereVoiceRuns(data: Pick<AiModels, 'voice' | 'chat_models' | 'settings'>): string {
@@ -75,6 +75,10 @@ export function VoiceModelCard({ api, readOnly = false }: { api: ApiState<AiMode
     },
     [reload],
   );
+  const { remove, removing } = useRemoveModel(
+    (model) => postJsonApi(`/api/v1/ai/models/${model.id}/remove`, {}),
+    () => void reload(),
+  );
   const title = 'Answers';
   const description =
     'Where the voice assistant’s replies come from. Your speech is always turned into text, and replies read aloud, on this server.';
@@ -131,7 +135,7 @@ export function VoiceModelCard({ api, readOnly = false }: { api: ApiState<AiMode
       <p className="model-where">{whereVoiceRuns(data)}</p>
       {!data.runner_reachable && localOn && (
         <Callout tone="warning" title="The model runner is not answering">
-          Download states may be out of date until it is running again.
+          Models can be removed once it is running again.
         </Callout>
       )}
       <form className="form" onSubmit={(event) => void save(event)}>
@@ -153,27 +157,17 @@ export function VoiceModelCard({ api, readOnly = false }: { api: ApiState<AiMode
           ))}
         </fieldset>
         {localOn && (
-          <label className="field">
-            <span>Answer model</span>
-            <select
-              aria-label="Answer model"
-              disabled={readOnly || busy}
-              value={draft.model}
-              onChange={(event) => setEdits({ ...draft, model: event.target.value })}
-            >
-              <option value="">Choose a model</option>
-              {data.chat_models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {option(model)}
-                </option>
-              ))}
-            </select>
-            {chosen && (
-              <small className="muted">
-                {chosen.note} {chosen.downloaded ? <Badge tone="green">Downloaded</Badge> : null}
-              </small>
-            )}
-          </label>
+          <ModelChoices
+            name="voice-model"
+            legend="Answer model"
+            models={data.chat_models}
+            value={draft.model}
+            onChange={(id) => setEdits({ ...draft, model: id })}
+            disabled={busy}
+            readOnly={readOnly}
+            remove={(model) => void remove(model)}
+            removing={removing}
+          />
         )}
         {missingLocal && <p className="error-text">Choose an answer model to run on this server.</p>}
         {!readOnly && (
