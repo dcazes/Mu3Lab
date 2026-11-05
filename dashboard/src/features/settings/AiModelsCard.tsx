@@ -68,6 +68,9 @@ function TryResult({ result }: { result: AiTryResult }) {
         {result.name} on {result.where}: {result.seconds} s
         {result.loading_seconds ? ` (${result.loading_seconds} s to load it)` : ''}
         {result.tokens_per_second ? `, about ${result.tokens_per_second} tokens a second` : ''}.
+        {result.runner_started
+          ? ' The model runner was stopped, so it was started for this answer and stopped again.'
+          : ''}
       </small>
     </div>
   );
@@ -209,9 +212,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
         ? `Chat will answer on this server with ${chosenChat.name}. Outside providers stay a choice in chat.`
         : '',
       !outsideOn && saved.sources.includes('outside')
-        ? data.voice.matches_chat || data.voice.privacy === 'local_only'
-          ? 'Chat will use only the local model. Outside provider keys stay saved but are not used.'
-          : 'Chat will use only the local model. The voice assistant keeps its own setting and still uses outside providers.'
+        ? 'Chat and the voice assistant will use only the local model. Outside provider keys stay saved but are not used.'
         : '',
       embeddingChanged
         ? 'Document search in every app has to index its documents again with the new search model. Until it does, search may find nothing.'
@@ -222,11 +223,9 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
       chosenChat && !chosenChat.downloaded && !runnerChanged
         ? `${chosenChat.name} is downloaded first (${chosenChat.download_gb} GB).`
         : '',
-      // Voice reads chat's setting until it has its own, so say which way it goes.
+      // Voice always answers with chat's setting and model, so one model is loaded for both.
       draft.sources.join() !== saved.sources.join() || draft.chat_model !== saved.chat_model
-        ? data.voice.matches_chat
-          ? 'The voice assistant follows this setting too.'
-          : 'The voice assistant keeps its own setting (Settings, Voice Assistant).'
+        ? 'The voice assistant follows this setting too.'
         : '',
     ].filter(Boolean);
     if (
@@ -264,10 +263,17 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
           {data.suggestion_reason}
         </Callout>
       )}
-      {!data.runner_reachable && (
-        <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
-          Models can be tried or removed once {runnerName(data.runner)} is running again.
+      {data.runner_stopped ? (
+        <Callout tone="info" title={`${runnerName(data.runner)} is stopped`}>
+          Trying, removing or switching a model starts {runnerName(data.runner)} for that and stops it again, so the
+          first answer takes longer. Local chat and document search answer only while it runs: start it from Home.
         </Callout>
+      ) : (
+        !data.runner_reachable && (
+          <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
+            Trying, removing or switching a model starts it again first.
+          </Callout>
+        )
       )}
       <form className="form" onSubmit={(event) => void save(event)}>
         <fieldset className="choice-list" disabled={readOnly || busy}>
@@ -311,15 +317,17 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
           })}
           <small className="muted">
             {draft.sources.length > 1
-              ? 'The first answers in every app. The second is a choice in the chat model menu; it never answers on its own when the first fails.'
+              ? draft.sources[0] === 'local'
+                ? 'The first answers in every app. The second is a choice in the chat model menu; it never answers chat on its own when the first fails. The voice assistant does use it when the local model is slow or stopped, so a call never goes silent.'
+                : 'The first answers in every app. The second is a choice in the chat model menu; it never answers on its own when the first fails.'
               : draft.sources[0] === 'local'
-                ? 'If the local model stops working, chat stops too: it never falls back to an outside provider. The voice assistant has its own setting.'
+                ? 'If the local model stops working, chat and the voice assistant stop too: they never fall back to an outside provider.'
                 : 'Turn on local models too to offer a private choice in chat.'}
           </small>
           {localOn && draft.sources[0] === 'outside' && (
             <Callout tone="info" title="Local models are second">
-              Chat{data.voice.matches_chat ? ' and the voice assistant' : ''} still answer through outside providers by
-              default. Move local models up to answer on this server first.
+              Chat and the voice assistant still answer through outside providers by default. Move local models up to
+              answer on this server first.
             </Callout>
           )}
         </fieldset>
@@ -346,6 +354,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
         <ModelChoices
           name="chat-model"
           legend="Local chat model"
+          grouped
           hint={!localOn && <small className="muted">Used when local models are on.</small>}
           footer={
             <small className="muted">

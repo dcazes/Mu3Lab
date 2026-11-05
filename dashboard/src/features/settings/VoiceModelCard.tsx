@@ -1,185 +1,59 @@
-import { type FormEvent, useCallback, useState } from 'react';
-import { type AiModels, type AiVoiceRequest, type JobResponse, postJsonApi, putJsonApi } from '../../api';
-import { Button } from '../../components/Button';
-import { useConfirm } from '../../components/Dialog';
+import type { AiModels } from '../../api';
+import { LinkButton } from '../../components/Button';
 import { Callout, Card } from '../../components/Layout';
-import { useAction } from '../../lib/useAction';
 import type { ApiState } from '../../lib/useApi';
-import { JobLog, whereChatRuns } from './AiModelsCard';
-import { ModelChoices, useRemoveModel } from './ModelChoices';
 
-/** Where the voice assistant's answers come from, in words for the person choosing. */
-export function whereVoiceRuns(data: Pick<AiModels, 'voice' | 'chat_models' | 'settings'>): string {
-  if (data.voice.matches_chat) return `The same as chat. ${whereChatRuns(data)}`;
-  const local = data.chat_models.find((model) => model.id === data.voice.model);
-  const name = local ? local.name : 'a local model';
-  return data.voice.privacy === 'local_only'
-    ? `Answers come from ${name}, only on this server.`
-    : data.voice.privacy === 'local_first'
-      ? `Answers come from ${name} on this server, or your outside providers when it is slow or stopped.`
-      : 'Answers come from your outside providers.';
+/**
+ * Where the voice assistant's answers come from, in words for the person. Voice always follows chat's
+ * setting and model (Settings, AI), so the model runner never holds two chat models at once.
+ */
+export function whereVoiceRuns(data: Pick<AiModels, 'settings' | 'chat_models'>): string {
+  const local = data.chat_models.find((model) => model.id === data.settings.chat_model);
+  const name = local ? local.name : 'the local chat model';
+  const [first, second] = data.settings.sources;
+  if (first === 'local' && !second) return `Answers come from ${name}, only on this server.`;
+  if (first === 'local')
+    return `Answers come from ${name} on this server. If it is slow or stopped, your outside providers answer instead, so the text of what you say can leave this server.`;
+  return 'Answers come from your outside providers. The text of what you say leaves this server.';
 }
 
 /** The answer source in two or three words, for the page's status line. */
-export function voiceSourceLabel(data: Pick<AiModels, 'voice' | 'chat_models'>): string {
-  const local = data.chat_models.find((model) => model.id === data.voice.model);
-  const where =
-    data.voice.privacy === 'local_only'
-      ? 'Local only'
-      : data.voice.privacy === 'local_first'
-        ? 'Local first'
-        : 'Outside providers';
-  const what = data.voice.privacy === 'outside_allowed' || !local ? where : `${where} · ${local.name}`;
-  return data.voice.matches_chat ? `Same as chat (${what})` : what;
+export function voiceSourceLabel(data: Pick<AiModels, 'settings' | 'chat_models'>): string {
+  const local = data.chat_models.find((model) => model.id === data.settings.chat_model);
+  const [first, second] = data.settings.sources;
+  if (first !== 'local') return 'Outside providers';
+  const where = second ? 'Local first' : 'Local only';
+  return local ? `${where} · ${local.name}` : where;
 }
 
-type Choice = 'chat' | AiVoiceRequest['privacy'];
-
-const CHOICES: { id: Choice; title: string; body: string }[] = [
-  {
-    id: 'chat',
-    title: 'Same as chat',
-    body: 'Follows Settings, AI, and changes with it.',
-  },
-  {
-    id: 'local_only',
-    title: 'Local only',
-    body: 'A model on this server answers. If it stops working, the voice assistant stops too: nothing you say leaves this server.',
-  },
-  {
-    id: 'local_first',
-    title: 'Local first',
-    body: 'A model on this server answers; your outside providers take over when it is slow or stopped, so the text of what you say can leave this server.',
-  },
-  {
-    id: 'outside_allowed',
-    title: 'Outside providers',
-    body: 'The providers connected in Settings, AI answer. The text of what you say leaves this server.',
-  },
-];
-
-/** The voice assistant's answer model: the same as chat, or its own choice (Settings, AI holds chat's). */
-export function VoiceModelCard({ api, readOnly = false }: { api: ApiState<AiModels>; readOnly?: boolean }) {
-  const { data, error, reload } = api;
-  const confirm = useConfirm();
-  const { pending, run } = useAction();
-  const [edits, setEdits] = useState<{ choice: Choice; model: string } | null>(null);
-  const [jobId, setJobId] = useState('');
-  const [running, setRunning] = useState(false);
-  const finished = useCallback(
-    (lost: boolean) => {
-      setRunning(false);
-      // Unread progress: the server's active job (polled by the page) keeps the card locked while it runs.
-      if (lost) setJobId('');
-      void reload();
-    },
-    [reload],
-  );
-  const { remove, removing } = useRemoveModel(
-    (model) => postJsonApi(`/api/v1/ai/models/${model.id}/remove`, {}),
-    () => void reload(),
-  );
+/** The voice assistant's answers: the same as chat's, changed in Settings, AI. */
+export function VoiceModelCard({ api }: { api: ApiState<AiModels> }) {
+  const { data, error } = api;
   const title = 'Answers';
   const description =
-    'Where the voice assistant’s replies come from. Your speech is always turned into text, and replies read aloud, on this server.';
+    'The voice assistant answers with the same model as chat. Your speech is always turned into text, and replies read aloud, on this server.';
   if (!data)
     return (
       <Card title={title} description={description}>
-        {error ? (
-          <p className="error-text">Could not load: {error}</p>
-        ) : (
-          <p className="muted card-loading card-loading-tall">Loading…</p>
-        )}
+        {error ? <p className="error-text">Could not load: {error}</p> : <p className="muted card-loading">Loading…</p>}
       </Card>
     );
-  const saved = data.voice;
-  const savedChoice: Choice = saved.matches_chat ? 'chat' : saved.privacy;
-  const draft = edits ?? { choice: savedChoice, model: saved.model };
-  const localOn = draft.choice === 'local_only' || draft.choice === 'local_first';
-  const edited = draft.choice !== savedChoice || (localOn && draft.model !== saved.model);
-  const busy = running || Boolean(data.active_job_id);
-  const missingLocal = localOn && !draft.model;
-  const chosen = data.chat_models.find((model) => model.id === draft.model);
-
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    const body: AiVoiceRequest =
-      draft.choice === 'chat'
-        ? { privacy: saved.privacy, model: '', matches_chat: true }
-        : { privacy: draft.choice, model: localOn ? draft.model : '' };
-    if (
-      chosen &&
-      localOn &&
-      !chosen.downloaded &&
-      !(await confirm({
-        title: 'Change the answer model?',
-        description: `${chosen.name} is downloaded first (${chosen.download_gb} GB). Until it works, the voice assistant keeps its current model.`,
-        confirmLabel: 'Change',
-      }))
-    )
-      return;
-    const result = await run(
-      'voice',
-      () => putJsonApi<JobResponse>('/api/v1/ai/voice', body),
-      'Mu3Lab is checking the voice model. Nothing changes until it works.',
-    );
-    if (result) {
-      setEdits(null);
-      setJobId(result.job.id);
-      setRunning(true);
-    }
-  };
-
+  const local = data.settings.sources[0] === 'local';
   return (
-    <Card title={title} description={description}>
+    <Card
+      title={title}
+      description={description}
+      actions={<LinkButton to="/settings/ai">Open Settings, AI</LinkButton>}
+    >
       <p className="model-where">{whereVoiceRuns(data)}</p>
-      {!data.runner_reachable && localOn && (
-        <Callout tone="warning" title="The model runner is not answering">
-          Models can be removed once it is running again.
+      {local && (data.runner_stopped || !data.runner_reachable) && (
+        <Callout
+          tone="info"
+          title={data.runner_stopped ? 'The model runner is stopped' : 'The model runner is not answering'}
+        >
+          The local model answers the voice assistant only while it runs: start it from Home.
         </Callout>
       )}
-      <form className="form" onSubmit={(event) => void save(event)}>
-        <fieldset className="choice-list" disabled={readOnly || busy}>
-          <legend>Where the voice assistant may send what you say</legend>
-          {CHOICES.map((choice) => (
-            <label className="choice" key={choice.id}>
-              <input
-                type="radio"
-                name="voice-answers"
-                checked={draft.choice === choice.id}
-                onChange={() => setEdits({ ...draft, choice: choice.id })}
-              />
-              <span>
-                <strong>{choice.title}</strong>
-                <small>{choice.body}</small>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        {localOn && (
-          <ModelChoices
-            name="voice-model"
-            legend="Answer model"
-            models={data.chat_models}
-            value={draft.model}
-            onChange={(id) => setEdits({ ...draft, model: id })}
-            disabled={busy}
-            readOnly={readOnly}
-            remove={(model) => void remove(model)}
-            removing={removing}
-          />
-        )}
-        {missingLocal && <p className="error-text">Choose an answer model to run on this server.</p>}
-        {!readOnly && (
-          <div className="button-row">
-            <Button type="submit" size="sm" loading={pending === 'voice'} disabled={!edited || missingLocal || busy}>
-              Save and apply
-            </Button>
-            {edited && !busy && <small className="muted">Not saved yet: nothing changes until you save.</small>}
-          </div>
-        )}
-      </form>
-      {(jobId || data.active_job_id) && <JobLog id={jobId || data.active_job_id} finished={finished} />}
     </Card>
   );
 }

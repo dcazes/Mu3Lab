@@ -131,6 +131,7 @@ def _load_all() -> None:
         gateway_key,
         hide_model_providers,
         initial_owner_guard,
+        keeps_models_current,
         needs_chat_model,
         needs_embedding_model,
         needs_voice_model,

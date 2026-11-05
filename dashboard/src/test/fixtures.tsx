@@ -137,15 +137,10 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
       changed_by: '',
       ...settings,
     },
-    // Voice matches chat until the owner saves a voice choice.
-    voice: {
-      privacy,
-      model: sources.includes('local') ? (settings.chat_model ?? '') : '',
-      matches_chat: true,
-      changed_at: '',
-      changed_by: '',
-    },
-    chat_models: [model('qwen3.5-4b', 'Qwen 3.5 4B'), model('qwen3-8b', 'Qwen3 8B', { downloaded: true })],
+    chat_models: [
+      model('qwen3.5-4b', 'Qwen 3.5 4B', { params_b: 4, size_group: 'xsmall' }),
+      model('qwen3.5-9b', 'Qwen 3.5 9B', { downloaded: true, params_b: 9, size_group: 'small' }),
+    ],
     embedding_models: [
       model('bge-m3', 'BGE-M3', { dimensions: 1024, downloaded: true }),
       model('nomic-embed-text', 'Nomic Embed Text', { dimensions: 768 }),
@@ -153,6 +148,7 @@ export function aiModels(settings: Partial<AiModels['settings']> = {}, overrides
     runner: 'ollama',
     runners: [{ id: 'ollama', name: 'Ollama', installed: true, has_ui: false }],
     runner_reachable: true,
+    runner_stopped: false,
     embedding_locked_by: [],
     active_job_id: '',
     ...overrides,

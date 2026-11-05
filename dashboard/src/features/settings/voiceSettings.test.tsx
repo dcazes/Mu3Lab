@@ -183,9 +183,10 @@ describe('Voice assistant settings', () => {
     );
   });
 
-  it('offers the same answers as chat as one of the choices', async () => {
+  it("answers with chat's setting, with no model choice of its own", async () => {
     renderPage();
-    expect(await screen.findByRole('radio', { name: /Same as chat/ })).toBeChecked();
-    expect(screen.getByText(/^The same as chat\./)).toBeInTheDocument();
+    expect(await screen.findByText(/^Answers come from your outside providers\./)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Settings, AI' })).toHaveAttribute('href', '/settings/ai');
+    expect(screen.queryByRole('radio', { name: /Same as chat/ })).not.toBeInTheDocument();
   });
 });

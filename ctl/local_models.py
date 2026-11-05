@@ -13,9 +13,9 @@ The owner chooses from a reviewed list, never from everything a runner offers:
   then point every chat name at the local model and hold no chat route to the
   provider gateway at all. With no local chat model, chat fails rather than
   going outside;
-* the voice assistant's own switch and model (``mu3lab-voice``), independent of
-  chat. Until the owner saves a voice choice it matches chat's. The gateway's
-  provider keys are switched off only when neither chat nor voice may go outside.
+* the voice assistant (``mu3lab-voice``) always follows chat: the same sources
+  and the same local model, so only one chat model is ever loaded. The gateway's
+  provider keys are switched off only when chat is local only.
 
 Changing these settings is a durable job: the new models are downloaded and
 checked first, so a failed download changes nothing. Then the routing is
@@ -34,14 +34,19 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from contextlib import ExitStack
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from ctl import model_runners
 from ctl.runtime import RuntimePaths
 from ctl.store import records
+
+# The checkout the apps' Compose projects come from, for waking a stopped runner.
+ROOT = Path(__file__).resolve().parents[1]
+STOPPED_NOTE = "local models answer only while it runs. Start it from Home."
 
 if TYPE_CHECKING:
     from ctl.manifest.catalog import App, Catalog
@@ -61,9 +66,10 @@ SERVICE_ID = "ai:models"
 LOCAL_ALIAS = "mu3lab-local"
 # Outside providers' chat name when chat runs locally first.
 OUTSIDE_ALIAS = "mu3lab-outside"
-# The voice assistant's chat name, routed by its own setting (outside or a local model).
+# The voice assistant's chat name, routed by chat's setting with voice's own speed limits.
 VOICE_ALIAS = "mu3lab-voice"
-VOICE_SETTINGS = ("ai", "voice")
+# Where voice kept its own setting before it followed chat; deleted when chat's setting is saved.
+OLD_VOICE_SETTINGS = ("ai", "voice")
 # FreeLLMAPI's list of outside models that answer with thinking off, quickly enough to talk to
 # (apps/freellmapi/hooks.py keeps it); requests pick it as "auto:mu3lab-voice".
 VOICE_OUTSIDE_LIST = "mu3lab-voice"
@@ -85,16 +91,21 @@ class Model:
     memory_gb: float
     note: str
     dimensions: int = 0  # embedding models only
-    # How its weights are stored, which the memory estimate assumes: every chat tag is Q4_K_M;
-    # Ollama publishes the search models only at 16 bits (they are small enough not to matter).
+    # How its weights are stored, which the memory estimate assumes: Q4 is Q4_K_M; Gemma's QAT files
+    # are Google's own 4-bit training; Ollama publishes the search models only at 16 bits.
     precision: str = "Q4"
+    # Billions of parameters in the whole file (a Gemma "E4B" counts all 8), which sorts it into a size group.
+    params_b: float = 0.0
+    # Tags this model was listed under before; the runner's next start replaces those files.
+    former_tags: tuple[str, ...] = ()
 
 
-# Reviewed by the owner on 2026-10-10. Sizes are Ollama's published download sizes. Memory raised
-# on 2026-10-25 for the 51,200-token context, from each file's layer layout: Phi-4-mini and
-# Qwen3 keep a cache in every layer (about 3.5 GiB at that length); Qwen 3.5 in one layer of four
-# and Gemma 4 mostly over a short window, so theirs stay well inside the earlier estimates
-# (Qwen 3.5 4B measured 4.1 GiB on an RTX 3060).
+# Reviewed by the owner on 2026-10-10, and again on 2026-11-05 (Bonsai 2 27B added; Gemma 4 on
+# Google's own 4-bit QAT files; Qwen3 8B and Phi-4-mini retired). Sizes are Ollama's published
+# download sizes. Memory is for the 51,200-token context, from each file's layer layout: Qwen 3.5
+# (Bonsai 2 is one, packed to ternary weights) keeps a cache in one layer of four and Gemma 4 mostly
+# over a short window, so the cache stays small (Qwen 3.5 4B measured 4.1 GiB on an RTX 3060).
+# Bonsai 2 27B's 11 GiB is that estimate, not yet measured.
 CHAT: tuple[Model, ...] = (
     Model(
         "qwen3.5-2b",
@@ -103,14 +114,7 @@ CHAT: tuple[Model, ...] = (
         1.9,
         3,
         "Fastest. Good for short answers and summaries.",
-    ),
-    Model(
-        "phi4-mini",
-        "Phi-4-mini 3.8B",
-        "phi4-mini:3.8b-q4_K_M",
-        2.5,
-        6,
-        "Small and quick; English-first.",
+        params_b=2,
     ),
     Model(
         "qwen3.5-4b",
@@ -119,22 +123,18 @@ CHAT: tuple[Model, ...] = (
         3.3,
         5,
         "A good balance on most home servers.",
-    ),
-    Model(
-        "qwen3-8b",
-        "Qwen3 8B",
-        "qwen3:8b-q4_K_M",
-        5.2,
-        9,
-        "Stronger reasoning; slower without a GPU.",
+        params_b=4,
     ),
     Model(
         "gemma4-e4b",
         "Gemma 4 E4B",
-        "gemma4:e4b-it-q4_K_M",
-        6.6,
-        8,
+        "gemma4:e4b-it-qat",
+        6.1,
+        7.5,
         "Also understands images and audio.",
+        precision="Q4 (QAT)",
+        params_b=8,
+        former_tags=("gemma4:e4b-it-q4_K_M",),
     ),
     Model(
         "qwen3.5-9b",
@@ -143,16 +143,45 @@ CHAT: tuple[Model, ...] = (
         6.6,
         8,
         "Strongest Qwen here; best with a GPU.",
+        params_b=9,
     ),
     Model(
         "gemma4-12b",
         "Gemma 4 12B",
-        "gemma4:12b-it-q4_K_M",
-        8.0,
-        10,
-        "The largest choice; needs a GPU to be quick.",
+        "gemma4:12b-it-qat",
+        7.2,
+        9,
+        "Strong all-rounder that also reads images; needs a GPU to be quick.",
+        precision="Q4 (QAT)",
+        params_b=12,
+        former_tags=("gemma4:12b-it-q4_K_M",),
+    ),
+    Model(
+        "bonsai2-27b",
+        "Bonsai 2 27B",
+        "bonsai-2:27b",
+        8.3,
+        11,
+        "The smartest choice: a 27B model packed small. Needs a GPU with 12 GB.",
+        precision="Ternary",
+        params_b=27,
     ),
 )
+
+
+class Retired(NamedTuple):
+    """A chat model taken off the list: the file it was, and the listed model that replaces it."""
+
+    tag: str
+    successor: str
+
+
+# A setting that names a retired model reads as its successor; the runner's next start downloads
+# the successor and deletes the retired file (``bring_up_to_date``).
+RETIRED: dict[str, Retired] = {
+    "qwen3-8b": Retired("qwen3:8b-q4_K_M", "qwen3.5-9b"),
+    "phi4-mini": Retired("phi4-mini:3.8b-q4_K_M", "qwen3.5-4b"),
+}
 EMBEDDING: tuple[Model, ...] = (
     Model(
         "bge-m3",
@@ -161,6 +190,7 @@ EMBEDDING: tuple[Model, ...] = (
         1.2,
         2,
         "Many languages; long documents.",
+        params_b=0.57,
         dimensions=1024,
         precision="16-bit",
     ),
@@ -171,6 +201,7 @@ EMBEDDING: tuple[Model, ...] = (
         0.3,
         1,
         "The earlier default; English-first and very light.",
+        params_b=0.14,
         dimensions=768,
         precision="16-bit",
     ),
@@ -180,6 +211,17 @@ DEFAULT_EMBEDDING = "bge-m3"
 LEGACY_EMBEDDING = "nomic-embed-text"
 
 CHAT_BY_ID = {model.id: model for model in CHAT}
+
+# The dashboard lists chat models in these groups, by billions of parameters: under 5, 5 to 10,
+# 10 to 18, and 18 or more. Each is the lower bound of its group.
+SIZE_GROUPS: tuple[tuple[str, float], ...] = (("xsmall", 0), ("small", 5), ("medium", 10), ("large", 18))
+
+
+def size_group(model: Model) -> str:
+    """The group a model is listed in: the last whose lower bound its parameter count reaches."""
+    return [name for name, floor in SIZE_GROUPS if model.params_b >= floor][-1]
+
+
 EMBEDDING_BY_ID = {model.id: model for model in EMBEDDING}
 
 
@@ -254,6 +296,8 @@ def settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
     """The stored settings, with ``privacy`` worked out from the order of sources."""
     paths = paths or RuntimePaths()
     stored = records.get(*SETTINGS, paths)
+    if stored.get("chat_model") in RETIRED:
+        stored = {**stored, "chat_model": RETIRED[stored["chat_model"]].successor}
     defaults = {
         "sources": ["outside"],
         "chat_model": "",
@@ -286,7 +330,9 @@ def settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
 
 
 def save(chosen: dict[str, Any], actor: str, paths: RuntimePaths | None = None) -> None:
-    records.put(*SETTINGS, {**validate(chosen), "changed_at": _now(), "changed_by": actor}, paths or RuntimePaths())
+    paths = paths or RuntimePaths()
+    records.put(*SETTINGS, {**validate(chosen), "changed_at": _now(), "changed_by": actor}, paths)
+    records.delete(*OLD_VOICE_SETTINGS, paths)
 
 
 def local_only(paths: RuntimePaths | None = None) -> bool:
@@ -308,81 +354,32 @@ def runner(paths: RuntimePaths | None = None, catalog: Catalog | None = None) ->
     return model_runners.effective(settings(paths)["runner"], catalog)
 
 
-# --- The voice assistant's own setting ---------------------------------------
+# --- The voice assistant ------------------------------------------------------
 #
-# Voice has its own switch and model, independent of chat, so the two can run in
-# different places. Until the owner saves a voice choice, voice matches chat: it
-# reads chat's switch and local model each time, so a chat change moves it too.
+# Voice always follows chat: the same sources and the same local model, so the
+# runner never holds two chat models at once. Only its routes differ (``_voice_routes``).
 
 
-def voice_validate(new: dict[str, Any]) -> dict[str, str]:
-    """The voice setting as stored; raises ValueError with a sentence for the person."""
-    privacy = str(new.get("privacy", ""))
-    if privacy not in PRIVACY:
-        raise ValueError("Choose whether the voice assistant may use outside AI providers.")
-    model = str(new.get("model") or "")
-    if model and model not in CHAT_BY_ID:
-        raise ValueError("Choose a local chat model from the list.")
-    if privacy in {"local_only", "local_first"} and not model:
-        raise ValueError(
-            "The voice assistant needs a local model to run on this server. Choose one, or allow outside providers."
-        )
-    return {"privacy": privacy, "model": model}
-
-
-def voice_from_chat(paths: RuntimePaths | None = None) -> dict[str, str]:
-    """The voice setting that chat's setting gives, while voice matches chat."""
+def voice_settings(paths: RuntimePaths | None = None) -> dict[str, str]:
+    """Where the voice assistant's answers come from: chat's privacy word and its local model."""
     chat = settings(paths)
     return {"privacy": chat["privacy"], "model": chat["chat_model"] if "local" in chat["sources"] else ""}
 
 
-def voice_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
-    """Where the voice assistant's chat runs; ``matches_chat`` until the owner saves a voice choice."""
-    paths = paths or RuntimePaths()
-    stored = records.get(*VOICE_SETTINGS, paths)
-    if not stored:
-        return {**voice_from_chat(paths), "matches_chat": True, "changed_at": "", "changed_by": ""}
-    try:
-        clean = voice_validate(stored)
-    except ValueError:
-        # An invalid record cannot authorize outside inference.
-        model = str(stored.get("model") or "")
-        clean = {"privacy": "local_only", "model": model if model in CHAT_BY_ID else ""}
-    return {
-        **clean,
-        "matches_chat": False,
-        "changed_at": str(stored.get("changed_at") or ""),
-        "changed_by": str(stored.get("changed_by") or ""),
-    }
-
-
-def save_voice(chosen: dict[str, str] | None, actor: str, paths: RuntimePaths | None = None) -> None:
-    """Store a voice choice; None goes back to matching chat."""
-    paths = paths or RuntimePaths()
-    if chosen is None:
-        records.delete(*VOICE_SETTINGS, paths)
-        return
-    records.put(*VOICE_SETTINGS, {**voice_validate(chosen), "changed_at": _now(), "changed_by": actor}, paths)
-
-
 def voice_model(paths: RuntimePaths | None = None) -> Model | None:
-    """The local model voice runs on, or None while voice uses outside providers."""
-    voice = voice_settings(paths)
-    return CHAT_BY_ID.get(voice["model"]) if voice["privacy"] in {"local_only", "local_first"} else None
+    """The local model voice runs on (chat's), or None while voice uses outside providers."""
+    return chat_model(paths) if settings(paths)["privacy"] in {"local_only", "local_first"} else None
 
 
 def outside_used(paths: RuntimePaths | None = None) -> bool:
-    """Whether chat or the voice assistant may use outside providers, so their keys must stay on."""
-    return not local_only(paths) or voice_settings(paths)["privacy"] != "local_only"
+    """Whether chat (and so voice) may use outside providers, so their keys must stay on."""
+    return not local_only(paths)
 
 
 def in_use(paths: RuntimePaths | None = None) -> set[Model]:
     """Every model a setting uses now; nothing here is deleted to free space."""
-    used = {embedding_model(paths)}
-    for model in (chat_model(paths), voice_model(paths)):
-        if model is not None:
-            used.add(model)
-    return used
+    chat = chat_model(paths)
+    return {embedding_model(paths)} | ({chat} if chat else set())
 
 
 def chat_list(paths: RuntimePaths | None = None) -> str:
@@ -463,7 +460,7 @@ def _voice_routes(
     """
     voice = voice_settings(paths)
     routes: list[tuple[dict, str, int]] = []
-    local = CHAT_BY_ID.get(voice["model"]) if voice["privacy"] in {"local_only", "local_first"} else None
+    local = voice_model(paths)
     if local:
         routes.append((on_runner(VOICE_ALIAS, engine.chat_route(local)), "none", VOICE_LOCAL_DEADLINE))
     if voice["privacy"] != "local_only":
@@ -527,10 +524,12 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
 
     def view(model: Model) -> dict[str, Any]:
         verdict = fit["fits"].get(model.id) or {}
+        listed = {key: value for key, value in asdict(model).items() if key != "former_tags"}
         return {
-            **asdict(model),
+            **listed,
             "downloaded": engine.has(model, present),
             "in_use": model.id in used,
+            "size_group": size_group(model),
             "fit": verdict.get("fit", ""),
             "fit_where": verdict.get("where", ""),
         }
@@ -539,7 +538,6 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "suggested": fit["suggested"],
         "suggestion_reason": fit["reason"],
         "settings": settings(paths),
-        "voice": voice_settings(paths),
         "chat_models": [view(model) for model in CHAT],
         "embedding_models": [view(model) for model in EMBEDDING],
         "runner": current.id,
@@ -553,6 +551,8 @@ def status(paths: RuntimePaths | None = None) -> dict[str, Any]:
             for app in model_runners.runners()
         ],
         "runner_reachable": reachable,
+        # Stopped from Home: trying, removing or switching a model starts it for that and stops it again.
+        "runner_stopped": model_runners.stopped(current.id),
     }
 
 
@@ -571,9 +571,11 @@ def try_model(target: str, prompt: str = "", paths: RuntimePaths | None = None) 
         if model is None:
             raise ValueError("Choose a local chat model from the list.")
         engine = model_runners.engine(runner(paths), paths)
-        if not engine.has(model, engine.downloaded()):
+        if not engine.has(model, engine.on_disk() if model_runners.stopped(engine.app.id) else engine.downloaded()):
             raise ValueError(f"Download {model.name} first.")
-        return {"where": "this server", "name": model.name, **engine.try_chat(model, prompt)}
+        with model_runners.awake(engine, ROOT, lambda _line: None) as started:
+            answer = engine.try_chat(model, prompt)
+        return {"where": "this server", "name": model.name, **answer, "runner_started": started}
     chosen = settings(paths)
     if "outside" not in chosen["sources"]:
         raise ValueError("Outside providers are switched off: AI runs only on this server.")
@@ -590,13 +592,13 @@ def try_model(target: str, prompt: str = "", paths: RuntimePaths | None = None) 
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         method="POST",
     )
-    started = time.monotonic()
+    began = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             answer = _json.load(response)
     except OSError as exc:
         raise ValueError(f"Your outside providers did not answer: {exc}") from None
-    seconds = time.monotonic() - started
+    seconds = time.monotonic() - began
     choices = answer.get("choices") or [{}]
     tokens = int((answer.get("usage") or {}).get("completion_tokens") or 0)
     return {
@@ -619,14 +621,50 @@ def remove(model_id: str, paths: RuntimePaths | None = None) -> str:
         raise ValueError(f"{model.name} is in use. Choose another model first.")
     current = runner(paths)
     engine = model_runners.engine(current, paths)
-    try:
-        present = engine.downloaded()
-    except model_runners.ENGINE_ERRORS:
-        raise ValueError(f"Start {current.manifest.name} first: it removes its own models.") from None
-    if not engine.has(model, present):
+    if not engine.has(model, engine.on_disk()):
         return f"{model.name} is not downloaded."
-    engine.delete(model)
+    # The runner removes its own models, so a stopped one is started for it and stopped again.
+    with model_runners.awake(engine, ROOT, lambda _line: None):
+        if not engine.has(model, engine.downloaded()):
+            return f"{model.name} is not downloaded."
+        engine.delete(model)
     return f"Removed {model.name}; {model.download_gb} GB of disk space is free again."
+
+
+def bring_up_to_date(engine, log: Callable[[str], None]) -> None:
+    """Move the runner onto the reviewed list after the list changed; called each time it starts.
+
+    The chosen chat model downloads under its current tag when the runner holds only an earlier
+    file of it (a former tag, or the retired model it replaces). Then the earlier files are deleted:
+    nothing routes to them, and the dashboard lists only current models, so it cannot remove them.
+    A download that fails keeps every file; the chat apps then say to save the choice again.
+    """
+    present = engine.downloaded()
+    chosen = chat_model(engine.paths)
+    earlier = {
+        model.id: [*model.former_tags, *(old.tag for old in RETIRED.values() if old.successor == model.id)]
+        for model in CHAT
+    }
+    replacing = (
+        chosen is not None
+        and not engine.has(chosen, present)
+        and any(engine.has(replace(chosen, tag=tag), present) for tag in earlier[chosen.id])
+    )
+    if chosen and replacing:
+        log(f"Downloading {chosen.name} ({chosen.download_gb} GB) to replace the earlier model file it follows.")
+        try:
+            engine.pull(chosen, log)
+            engine.check_chat(chosen)
+        except model_runners.ENGINE_ERRORS as exc:
+            log(f"{chosen.name} could not be downloaded ({exc}); its earlier file is kept.")
+            return
+        present = engine.downloaded()
+    # No earlier file is in use now: the chosen model has its current file, or never had one.
+    for model in CHAT:
+        for tag in earlier[model.id]:
+            if engine.has(replace(model, tag=tag), present):
+                engine.delete(replace(model, tag=tag))
+                log(f"Deleted {tag}, an earlier file that nothing uses now.")
 
 
 # --- The settings job -------------------------------------------------------
@@ -653,9 +691,6 @@ def _apply(paths: RuntimePaths, root: Path, log) -> None:
     ok, detail, _ = _reconcile(root, log)
     if not ok:
         raise RuntimeError(detail)
-
-
-VOICE_ACTION = "voice"
 
 
 def _pull_reporter(service_id: str, job_id: str) -> tuple[Callable[[int, int], None], Callable[[], None]]:
@@ -691,90 +726,7 @@ def _pull(engine, model: Model, log, job_id: str) -> None:
     finish()
 
 
-def _execute_voice(store, job: dict, worker_id: str, root: Path) -> None:
-    """Change the voice assistant's setting: download and check first, then route, then free the old model."""
-    from ctl.jobs import job_params, redact
-    from ctl.registry import load
-
-    job_id = str(job["id"])
-    actor = str(job.get("actor") or worker_id)
-    paths = RuntimePaths()
-
-    def log(line: str) -> None:
-        store.append_event(job_id, "log", line)
-
-    def fail(detail: str, code: str, step: str) -> None:
-        store.transition(job_id, "failed", actor=actor, detail=redact(detail), error_code=code, step_id=step)
-
-    params = job_params(job)
-    # Following chat again stores no voice record; the routes then read chat's setting.
-    follow = params.get("matches_chat") == "yes"
-    try:
-        chosen = voice_validate(voice_from_chat(paths) if follow else params)
-    except ValueError as exc:
-        fail(str(exc), "invalid_settings", "validate")
-        return
-    before_record = records.get(*VOICE_SETTINGS, paths)
-    model = CHAT_BY_ID.get(chosen["model"]) if chosen["privacy"] in {"local_only", "local_first"} else None
-    target = runner(paths, load().catalog)
-    engine = model_runners.engine(target, paths)
-    # 1. A local model is downloaded and checked first: until this succeeds nothing has changed.
-    if model is not None:
-        if not model_runners.installed(target.id):
-            fail("Install the model runner from Apps first.", "runner_missing", "validate")
-            return
-        try:
-            if not engine.has(model, engine.downloaded()):
-                log(f"Downloading {model.name} into {target.manifest.name} ({model.download_gb} GB).")
-                _pull(engine, model, log, job_id)
-            log(f"Checking {model.name} in {target.manifest.name}.")
-            engine.check_chat(model)
-        except model_runners.ENGINE_ERRORS as exc:
-            fail(
-                f"Nothing was changed: {model.name} could not be downloaded or did not answer ({exc}).",
-                "model_failed",
-                "download",
-            )
-            return
-    # 2. Route voice by the new setting, and check that it answers through LiteLLM.
-    save_voice(None if follow else chosen, actor, paths)
-    try:
-        _apply(paths, root, log)
-        _probe_litellm(log, VOICE_ALIAS)
-    except (OSError, ValueError, RuntimeError) as exc:
-        if before_record:
-            records.put(*VOICE_SETTINGS, before_record, paths)
-        else:
-            records.delete(*VOICE_SETTINGS, paths)
-        try:
-            _apply(paths, root, log)
-        except (OSError, ValueError, RuntimeError) as undo:
-            fail(
-                f"{exc} Putting the earlier voice setting back also failed ({redact(str(undo))}). "
-                "Choose the voice setting again to retry.",
-                "rollback_failed",
-                "route",
-            )
-            return
-        fail(f"The earlier voice setting was kept: {exc}", "routing_failed", "route")
-        return
-    # Models no longer used are kept, so switching back is instant; Settings removes one (``remove``).
-    if model is None:
-        detail = "The voice assistant now uses your outside providers."
-    elif chosen["privacy"] == "local_first":
-        detail = f"The voice assistant now uses {model.name} on this server first, then your outside providers."
-    else:
-        detail = f"The voice assistant now uses {model.name}, only on this server."
-    if follow:
-        detail += " It follows chat's setting again."
-    store.record_audit(actor=actor, event="ai.voice_changed", detail=detail, job_id=job_id)
-    store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")
-
-
 def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
-    if job.get("action") == VOICE_ACTION:
-        _execute_voice(store, job, worker_id, root)
-        return
     from ctl import resource_locks
     from ctl.engine.hooks import StepFailed
     from ctl.engine.project import Facts
@@ -834,53 +786,61 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         return
     chosen["runner"] = target.id
     engine = model_runners.engine(target, paths)
-    # 1. Download and check the models first: until this succeeds nothing has changed.
+    # A runner stopped from Home is started for the change and stopped again after it.
+    wake = ExitStack()
     try:
-        present = engine.downloaded()
-        for model, check in ((chat, engine.check_chat), (embed, engine.check_embedding)):
-            if model is None:
-                continue
-            if not engine.has(model, present):
-                log(f"Downloading {model.name} into {target.manifest.name} ({model.download_gb} GB).")
-                _pull(engine, model, log, job_id)
-            log(f"Checking {model.name} in {target.manifest.name}.")
-            check(model)
+        started = wake.enter_context(model_runners.awake(engine, root, log))
     except model_runners.ENGINE_ERRORS as exc:
-        fail(
-            f"Nothing was changed: the model could not be downloaded or did not answer ({exc}).",
-            "model_failed",
-            "download",
-        )
+        fail(f"Nothing was changed: {exc}", "runner_unavailable", "download")
         return
-    # 2. Route requests by the new settings, and check chat's own path.
-    save(chosen, actor, paths)
-    try:
-        _apply(paths, root, log)
-        if chat:
-            _probe_litellm(log)
-    except (OSError, ValueError, RuntimeError) as exc:
-        roll_back(str(exc), "routing_failed", "route")
-        return
-    # 3. Apps whose settings follow the models: the chat app's list and the search apps.
-    facts = Facts(tailnet_dns_name(), paths, catalog)
+    with wake:
+        # 1. Download and check the models first: until this succeeds nothing has changed.
+        try:
+            present = engine.downloaded()
+            for model, check in ((chat, engine.check_chat), (embed, engine.check_embedding)):
+                if model is None:
+                    continue
+                if not engine.has(model, present):
+                    log(f"Downloading {model.name} into {target.manifest.name} ({model.download_gb} GB).")
+                    _pull(engine, model, log, job_id)
+                log(f"Checking {model.name} in {target.manifest.name}.")
+                check(model)
+        except model_runners.ENGINE_ERRORS as exc:
+            fail(
+                f"Nothing was changed: the model could not be downloaded or did not answer ({exc}).",
+                "model_failed",
+                "download",
+            )
+            return
+        # 2. Route requests by the new settings, and check chat's own path.
+        save(chosen, actor, paths)
+        try:
+            _apply(paths, root, log)
+            if chat:
+                _probe_litellm(log)
+        except (OSError, ValueError, RuntimeError) as exc:
+            roll_back(str(exc), "routing_failed", "route")
+            return
+        # 3. Apps whose settings follow the models: the chat app's list and the search apps.
+        facts = Facts(tailnet_dns_name(), paths, catalog)
 
-    def follow() -> list[str]:
-        """Rewire every follower; return the names of those still on the old settings."""
-        incomplete = []
-        for app in _followers(catalog, paths):
-            try:
-                with resource_locks.hold(f"app:{app.id}", timeout=LOCK_WAIT_SECONDS, paths=paths):
-                    if rewire_one(app, facts, log):
-                        log(f"{app.manifest.name} now uses the new settings.")
-            except resource_locks.Busy:
-                incomplete.append(app.manifest.name)
-                log(f"{app.manifest.name} is busy; it picks up the new settings the next time it starts.")
-            except (StepFailed, OSError, ValueError, RuntimeError) as exc:
-                incomplete.append(app.manifest.name)
-                log(f"{app.manifest.name} could not be updated: {redact(str(exc))}")
-        return incomplete
+        def follow() -> list[str]:
+            """Rewire every follower; return the names of those still on the old settings."""
+            incomplete = []
+            for app in _followers(catalog, paths):
+                try:
+                    with resource_locks.hold(f"app:{app.id}", timeout=LOCK_WAIT_SECONDS, paths=paths):
+                        if rewire_one(app, facts, log):
+                            log(f"{app.manifest.name} now uses the new settings.")
+                except resource_locks.Busy:
+                    incomplete.append(app.manifest.name)
+                    log(f"{app.manifest.name} is busy; it picks up the new settings the next time it starts.")
+                except (StepFailed, OSError, ValueError, RuntimeError) as exc:
+                    incomplete.append(app.manifest.name)
+                    log(f"{app.manifest.name} could not be updated: {redact(str(exc))}")
+            return incomplete
 
-    incomplete = follow()
+        incomplete = follow()
     if incomplete:
         # An app still on the old settings may still need an old model, so nothing is deleted.
         fail(
@@ -901,5 +861,7 @@ def execute_claimed(store, job: dict, worker_id: str, root: Path) -> None:
         f"AI now runs {where}, in {target.manifest.name}. "
         f"Chat model: {chat.name if chat else 'none'}. Search: {embed.name}."
     )
+    if started:
+        detail += f" {target.manifest.name} was stopped, so it ran for this change and is stopped again: {STOPPED_NOTE}"
     store.record_audit(actor=actor, event="ai.models_changed", detail=detail, job_id=job_id)
     store.transition(job_id, "succeeded", actor=actor, detail=detail, step_id="complete")

@@ -74,7 +74,7 @@ class VoiceModelTests(unittest.TestCase):
         with self.assertRaises(SetupNeeded) as caught:
             self.check()
         self.assertEqual(caught.exception.code, "no_outside_provider")
-        self.assertIn("choose a local model in Settings, Voice Assistant", caught.exception.message)
+        self.assertIn("turn on local models in Settings, AI", caught.exception.message)
 
     def test_a_local_voice_model_needs_no_provider(self):
         self.check(privacy="local_only").assert_called_once()

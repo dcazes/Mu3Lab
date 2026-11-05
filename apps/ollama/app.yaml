@@ -30,6 +30,7 @@ backup:
   reason: Its data is downloaded AI models, which Mu3Lab downloads again when needed.
 setup_action: Install and verify the model runner using the host-wide compute setting.
 rules:
+- rule: keeps_models_current
 - rule: needs_embedding_model
   with:
     at: after_healthy

@@ -52,7 +52,7 @@ export function VoiceSettings() {
     <>
       <PageHeader
         title="Voice assistant"
-        description="Talk to your apps and the web. Choose where its answers come from, how it sounds and listens, and what it can use."
+        description="Talk to your apps and the web. Choose how it sounds and listens, and what it can use. It answers with the same model as chat."
         actions={
           talk && (
             <ExternalButton variant="primary" icon={Mic} href={talk.url}>
@@ -71,7 +71,7 @@ export function VoiceSettings() {
           The voice assistant runs in LiveKit. You can choose its settings now; they apply once it is installed.
         </Callout>
       )}
-      <VoiceModelCard api={ai} readOnly={!isAdmin} />
+      <VoiceModelCard api={ai} />
       <VoiceSoundCard api={page} readOnly={!isAdmin} />
       <VoiceConversationCard api={page} readOnly={!isAdmin} />
       <VoiceAppsCard page={page} readOnly={!isAdmin} />

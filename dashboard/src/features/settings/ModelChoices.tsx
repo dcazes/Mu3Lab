@@ -14,7 +14,17 @@ export type ModelChoice = {
   memory_gb: number;
   downloaded: boolean;
   in_use?: boolean;
+  // Chat models only: the size group it is listed under (``groups``).
+  size_group?: string;
 };
+
+/** The chat models' size groups, by billions of parameters (ctl/local_models.py ``SIZE_GROUPS``). */
+export const SIZE_GROUPS: { id: string; title: string; hint: string }[] = [
+  { id: 'xsmall', title: 'Extra small', hint: 'Under 5B parameters: quick on any computer.' },
+  { id: 'small', title: 'Small', hint: '5B to 10B: smarter; best with a graphics card.' },
+  { id: 'medium', title: 'Medium', hint: '10B to 18B: needs a graphics card to be quick.' },
+  { id: 'large', title: 'Large', hint: '18B and over: the smartest; needs a large graphics card.' },
+];
 
 /** Its size and the memory it needs while loaded, at the precision it is stored in. */
 export function sizes(model: ModelChoice): string {
@@ -61,6 +71,7 @@ export function ModelChoices<M extends ModelChoice>({
   badges,
   actions,
   below,
+  grouped = false,
 }: {
   name: string;
   legend: string;
@@ -78,56 +89,72 @@ export function ModelChoices<M extends ModelChoice>({
   badges?: (model: M) => ReactNode;
   actions?: (model: M) => ReactNode;
   below?: (model: M) => ReactNode;
+  // List the models under their size groups (``SIZE_GROUPS``), leaving out empty groups.
+  grouped?: boolean;
 }) {
+  const row = (model: M) => {
+    const removable = Boolean(remove) && model.downloaded && !model.in_use && !readOnly;
+    const extra = actions?.(model);
+    return (
+      <div key={model.id} className="model-entry">
+        <label className="model-row">
+          <input
+            type="radio"
+            name={name}
+            aria-label={model.name}
+            disabled={locked}
+            checked={value === model.id}
+            onChange={() => onChange(model.id)}
+          />
+          <span className="model-row-text">
+            <strong>
+              {model.name}
+              {badges?.(model)}
+              {model.downloaded && <Badge>Downloaded</Badge>}
+            </strong>
+            <small>
+              {model.note} {sizes(model)}
+            </small>
+          </span>
+          {(extra || removable) && (
+            <span className="model-row-actions">
+              {extra}
+              {removable && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={removing === model.id}
+                  aria-label={`Remove ${model.name}`}
+                  onClick={() => remove?.(model)}
+                >
+                  Remove
+                </Button>
+              )}
+            </span>
+          )}
+        </label>
+        {below?.(model)}
+      </div>
+    );
+  };
   return (
     <fieldset className="model-list" disabled={readOnly || disabled}>
       <legend>{legend}</legend>
       {hint}
-      {models.map((model) => {
-        const removable = Boolean(remove) && model.downloaded && !model.in_use && !readOnly;
-        const extra = actions?.(model);
-        return (
-          <div key={model.id} className="model-entry">
-            <label className="model-row">
-              <input
-                type="radio"
-                name={name}
-                aria-label={model.name}
-                disabled={locked}
-                checked={value === model.id}
-                onChange={() => onChange(model.id)}
-              />
-              <span className="model-row-text">
-                <strong>
-                  {model.name}
-                  {badges?.(model)}
-                  {model.downloaded && <Badge>Downloaded</Badge>}
-                </strong>
-                <small>
-                  {model.note} {sizes(model)}
-                </small>
-              </span>
-              {(extra || removable) && (
-                <span className="model-row-actions">
-                  {extra}
-                  {removable && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      loading={removing === model.id}
-                      aria-label={`Remove ${model.name}`}
-                      onClick={() => remove?.(model)}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </span>
-              )}
-            </label>
-            {below?.(model)}
-          </div>
-        );
-      })}
+      {grouped
+        ? SIZE_GROUPS.map((group) => {
+            const members = models.filter((model) => (model.size_group || 'xsmall') === group.id);
+            if (!members.length) return null;
+            return (
+              <div key={group.id} className="model-group" role="group" aria-label={group.title}>
+                <h3 className="model-group-title">
+                  {group.title} <small className="muted">{group.hint}</small>
+                </h3>
+                {members.map(row)}
+              </div>
+            );
+          })
+        : models.map(row)}
       {footer}
     </fieldset>
   );

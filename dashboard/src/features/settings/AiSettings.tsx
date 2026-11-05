@@ -523,9 +523,7 @@ export function AiSettings() {
       >
         {localOnly && (
           <p className="muted card-pad">
-            {models.data?.voice.privacy === 'outside_allowed'
-              ? 'Chat is local only. The voice assistant still uses outside providers, so these stay in use for voice.'
-              : 'Chat and the voice assistant are local only: saved keys are kept but not used or checked.'}
+            Chat and the voice assistant are local only: saved keys are kept but not used or checked.
           </p>
         )}
         {providers.error ? (

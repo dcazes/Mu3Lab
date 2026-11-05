@@ -200,6 +200,26 @@
   display: grid;
   gap: 6px;
 }
+/* Chat models in size groups, so the list reads as four short lists. */
+.model-group {
+  display: grid;
+  gap: 6px;
+}
+.model-group + .model-group {
+  margin-top: 10px;
+}
+.model-group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.model-group-title small {
+  font-weight: 400;
+}
 .model-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

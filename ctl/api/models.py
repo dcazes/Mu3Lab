@@ -838,8 +838,12 @@ class LocalModel(ApiModel):
     precision: str
     # Downloaded in the model runner that serves requests now.
     downloaded: bool
-    # Used by a setting now (chat, voice or search), so it cannot be removed.
+    # Used by a setting now (chat, which voice follows, or search), so it cannot be removed.
     in_use: bool = False
+    # Billions of parameters, and the group the dashboard lists it in: xsmall (under 5), small (5 to 10),
+    # medium (10 to 18) or large (18 and over).
+    params_b: float = 0.0
+    size_group: Literal["xsmall", "small", "medium", "large"] = "xsmall"
     # How it fits this computer beside the other apps (ctl/model_fit.py): good, slow or too_big; gpu or cpu.
     fit: str = ""
     fit_where: str = ""
@@ -859,18 +863,6 @@ class AiModelSettings(ApiModel):
     changed_by: str
 
 
-class AiVoiceSettings(ApiModel):
-    """Where the voice assistant's answers come from, independent of chat."""
-
-    privacy: AiPrivacy
-    # The local model voice runs on (a chat model id); used with local first and local only.
-    model: str
-    # True until the owner saves a voice choice: voice then reads chat's settings.
-    matches_chat: bool
-    changed_at: str
-    changed_by: str
-
-
 class ModelRunnerOption(ApiModel):
     id: str
     name: str
@@ -884,7 +876,6 @@ class AiModels(ApiModel):
 
     ok: bool
     settings: AiModelSettings
-    voice: AiVoiceSettings
     # The reviewed chat model that fits best, or "" to suggest outside providers; and why.
     suggested: str = ""
     suggestion_reason: str = ""
@@ -894,6 +885,8 @@ class AiModels(ApiModel):
     runner: str
     runners: list[ModelRunnerOption]
     runner_reachable: bool
+    # Stopped from Home: trying, removing or switching a model starts it for that and stops it again.
+    runner_stopped: bool
     # Installed apps whose search index blocks changing the embedding model.
     embedding_locked_by: list[str]
     active_job_id: str
@@ -920,13 +913,8 @@ class AiTryResult(ApiModel):
     seconds: float
     loading_seconds: float
     tokens_per_second: float
-
-
-class AiVoiceRequest(ApiModel):
-    privacy: AiPrivacy
-    model: str = Field(default="", max_length=64)
-    # True goes back to following chat's setting; privacy and model are then ignored.
-    matches_chat: bool = False
+    # The model runner was stopped from Home, so it was started for this answer and stopped again.
+    runner_started: bool = False
 
 
 class VoiceApp(ApiModel):

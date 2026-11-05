@@ -83,26 +83,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/ai/voice': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Change Voice
-     * @description Queue the voice assistant's change: a local model downloads and is checked before voice switches over.
-     */
-    put: operations['change_voice_api_v1_ai_voice_put'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/ai/voice/apps': {
     parameters: {
       query?: never;
@@ -1785,6 +1765,8 @@ export interface components {
       runner: string;
       /** Runner Reachable */
       runner_reachable: boolean;
+      /** Runner Stopped */
+      runner_stopped: boolean;
       /** Runners */
       runners: components['schemas']['ModelRunnerOption'][];
       settings: components['schemas']['AiModelSettings'];
@@ -1798,7 +1780,6 @@ export interface components {
        * @default
        */
       suggestion_reason?: string;
-      voice: components['schemas']['AiVoiceSettings'];
     };
     /** AiModelsRequest */
     AiModelsRequest: {
@@ -1837,49 +1818,17 @@ export interface components {
       name: string;
       /** Ok */
       ok: boolean;
+      /**
+       * Runner Started
+       * @default false
+       */
+      runner_started?: boolean;
       /** Seconds */
       seconds: number;
       /** Tokens Per Second */
       tokens_per_second: number;
       /** Where */
       where: string;
-    };
-    /** AiVoiceRequest */
-    AiVoiceRequest: {
-      /**
-       * Matches Chat
-       * @default false
-       */
-      matches_chat?: boolean;
-      /**
-       * Model
-       * @default
-       */
-      model?: string;
-      /**
-       * Privacy
-       * @enum {string}
-       */
-      privacy: 'outside_allowed' | 'local_first' | 'local_only';
-    };
-    /**
-     * AiVoiceSettings
-     * @description Where the voice assistant's answers come from, independent of chat.
-     */
-    AiVoiceSettings: {
-      /** Changed At */
-      changed_at: string;
-      /** Changed By */
-      changed_by: string;
-      /** Matches Chat */
-      matches_chat: boolean;
-      /** Model */
-      model: string;
-      /**
-       * Privacy
-       * @enum {string}
-       */
-      privacy: 'outside_allowed' | 'local_first' | 'local_only';
     };
     /** ApiErrorResponse */
     ApiErrorResponse: {
@@ -2966,8 +2915,19 @@ export interface components {
       name: string;
       /** Note */
       note: string;
+      /**
+       * Params B
+       * @default 0
+       */
+      params_b?: number;
       /** Precision */
       precision: string;
+      /**
+       * Size Group
+       * @default xsmall
+       * @enum {string}
+       */
+      size_group?: 'xsmall' | 'small' | 'medium' | 'large';
       /** Tag */
       tag: string;
     };
@@ -4751,93 +4711,6 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['OkResponse'];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['ApiErrorResponse'];
-        };
-      };
-    };
-  };
-  change_voice_api_v1_ai_voice_put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AiVoiceRequest'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['JobResponse'];
         };
       };
       /** @description Bad Request */

@@ -124,61 +124,6 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
     return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
-@router.put("/voice", response_model=models.JobResponse, response_model_exclude_none=True)
-def change_voice(payload_model: models.AiVoiceRequest, request: Request, operator: OperatorMutation):
-    """Queue the voice assistant's change: a local model downloads and is checked before voice switches over."""
-    store = runtime.job_store()
-    paths = RuntimePaths()
-    current = local_models.voice_settings(paths)
-    follow = payload_model.matches_chat
-    if follow and current["matches_chat"]:
-        raise ApiError(422, "The voice assistant already follows chat's setting.")
-    try:
-        chosen = local_models.voice_validate(
-            local_models.voice_from_chat(paths) if follow else payload_model.model_dump(exclude={"matches_chat"})
-        )
-    except ValueError as exc:
-        raise ApiError(422, str(exc)) from exc
-    if chosen["privacy"] == "outside_allowed":
-        chosen["model"] = ""  # only a local choice names a model
-    if not follow and not current["matches_chat"] and all(chosen[key] == current[key] for key in chosen):
-        raise ApiError(422, "These are already the current settings.")
-    if chosen["privacy"] != "outside_allowed" and not model_runners.installed(local_models.runner(paths).id):
-        raise ApiError(422, "Install the model runner from Apps first.")
-    if follow:
-        chosen["matches_chat"] = "yes"
-    key = runtime.idempotency_key(request)
-    subject = runtime.mutation_subject(operator)
-    previous = store.by_idempotency_key(
-        key or "",
-        kind="wiring",
-        service_id=local_models.SERVICE_ID,
-        action=local_models.VOICE_ACTION,
-        actor=operator["username"],
-        actor_subject=subject,
-        namespace=NAMESPACE,
-        request=chosen,
-    )
-    if previous:
-        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
-    try:
-        job = store.create(
-            kind="wiring",
-            service_id=local_models.SERVICE_ID,
-            action=local_models.VOICE_ACTION,
-            actor=operator["username"],
-            actor_subject=subject,
-            namespace=NAMESPACE,
-            request=chosen,
-            params=chosen,
-            detail="Operator changed the voice assistant's model.",
-            idempotency_key=key,
-        )
-    except JobConflict as conflict:
-        raise ApiError(409, "The AI model settings are already being changed.") from conflict
-    return models.JobResponse.model_validate({"ok": True, "job": job})
-
-
 def _voice_apps() -> models.VoiceApps:
     return models.VoiceApps.model_validate(
         {"ok": True, "installed": chat_ops.installed(voice_tools.app().id), "apps": voice_tools.available()}

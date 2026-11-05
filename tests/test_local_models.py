@@ -28,7 +28,7 @@ class FakeEngine:
 
     def __init__(self, name: str = "Ollama") -> None:
         self.app = SimpleNamespace(id=name.split()[0].lower(), manifest=SimpleNamespace(name=name))
-        self.present = {"bge-m3", "nomic-embed-text", "qwen3-8b"}
+        self.present = {"bge-m3", "nomic-embed-text", "qwen3.5-9b"}
         self.deleted: list[str] = []
         self.checked: list[str] = []
 
@@ -107,6 +107,22 @@ class SettingsTests(_Runtime):
         for model in (*local_models.CHAT, *local_models.EMBEDDING):
             with self.subTest(model=model.id):
                 self.assertRegex(model.tag, r"^[\w.-]+:[\w.-]+$")
+
+    def test_chat_models_sort_into_size_groups_by_parameters(self):
+        groups = {model.id: local_models.size_group(model) for model in local_models.CHAT}
+        self.assertEqual(groups["qwen3.5-2b"], "xsmall")
+        self.assertEqual(groups["qwen3.5-9b"], "small")
+        self.assertEqual(groups["gemma4-12b"], "medium")
+        self.assertEqual(groups["bonsai2-27b"], "large")
+        self.assertTrue(all(model.params_b > 0 for model in local_models.CHAT))
+        self.assertEqual(local_models.size_group(local_models.Model("x", "X", "x:1", 1, 1, "", params_b=27)), "large")
+
+    def test_a_retired_model_reads_as_the_listed_model_that_replaces_it(self):
+        records.put(*local_models.SETTINGS, {**LOCAL, "chat_model": "qwen3-8b"}, self.paths)
+        self.assertEqual(local_models.settings(self.paths)["chat_model"], "qwen3.5-9b")
+        self.assertEqual(local_models.settings(self.paths)["sources"], ["local"])
+        for old in local_models.RETIRED.values():
+            self.assertIn(old.successor, local_models.CHAT_BY_ID)
 
     def test_a_damaged_record_denies_outside_inference(self):
         records.put(
@@ -200,6 +216,31 @@ class RoutingTests(_Runtime):
             self.assertTrue(core_wiring._provider_keys(self.paths)[0]["enabled"])
             self.store(LOCAL)
             self.assertFalse(core_wiring._provider_keys(self.paths)[0]["enabled"])
+
+    def test_voice_runs_on_chats_local_model_so_only_one_is_loaded(self):
+        self.store({**LOCAL, "sources": ["local", "outside"]})
+        voice = [
+            item["litellm_params"] for item in self.routes_list() if item["model_name"] == local_models.VOICE_ALIAS
+        ]
+        self.assertEqual(voice[0]["model"], self.routes()["mu3lab-chat"]["model"])
+        self.assertEqual([params["api_base"] for params in voice[1:]], ["os.environ/GATEWAY"] * 2)
+        self.assertEqual({model.id for model in local_models.in_use(self.paths)}, {"qwen3.5-4b", "bge-m3"})
+
+    def test_voice_uses_outside_providers_while_chat_does(self):
+        self.store({**LOCAL, "sources": ["outside", "local"]})
+        self.assertIsNone(local_models.voice_model(self.paths))
+        voice = [item for item in self.routes_list() if item["model_name"] == local_models.VOICE_ALIAS]
+        self.assertTrue(all(item["litellm_params"]["api_base"] == "os.environ/GATEWAY" for item in voice))
+
+    def test_saving_chat_clears_the_voice_setting_kept_before_voice_followed_chat(self):
+        records.put(*local_models.OLD_VOICE_SETTINGS, {"privacy": "outside_allowed", "model": ""}, self.paths)
+        local_models.save(LOCAL, "owner", self.paths)
+        self.assertEqual(records.get(*local_models.OLD_VOICE_SETTINGS, self.paths), {})
+
+    def routes_list(self) -> list[dict]:
+        app = model_runners.find("ollama")
+        with patch("ctl.local_models.runner", return_value=app):
+            return local_models.litellm_models("GATEWAY", "GATEWAY_KEY", "RUNNER", "RUNNER_KEY", self.paths)
 
 
 def _runner(app_id: str, name: str, tier: str = "optional") -> SimpleNamespace:
@@ -400,17 +441,72 @@ class JobTests(_Runtime):
         self.assertEqual(local_models.settings(self.paths)["embedding_model"], "bge-m3")
 
 
+class TagEngine(FakeEngine):
+    """A runner that keeps its downloads by tag, as Ollama does."""
+
+    def __init__(self, tags: set[str]) -> None:
+        super().__init__()
+        self.present = set(tags)
+        self.fail_pull = False
+
+    def has(self, model, present) -> bool:
+        return model.tag in present
+
+    def pull(self, model, _log, _progress=None) -> None:
+        if self.fail_pull:
+            raise OSError("offline")
+        self.present.add(model.tag)
+
+    def delete(self, model) -> None:
+        self.present.discard(model.tag)
+        self.deleted.append(model.tag)
+
+
+class UpToDateTests(_Runtime):
+    """The runner's start moves it onto the reviewed list after a release changed the list."""
+
+    def bring(self, engine: TagEngine) -> None:
+        engine.paths = self.paths
+        local_models.bring_up_to_date(engine, lambda _line: None)
+
+    def test_the_chosen_model_moves_to_its_new_file_and_the_old_one_is_deleted(self):
+        records.put(*local_models.SETTINGS, {**LOCAL, "chat_model": "gemma4-12b"}, self.paths)
+        engine = TagEngine({"gemma4:12b-it-q4_K_M", "bge-m3:567m"})
+        self.bring(engine)
+        self.assertEqual(engine.present, {"gemma4:12b-it-qat", "bge-m3:567m"})
+        self.assertEqual(engine.checked, ["gemma4-12b"])
+
+    def test_a_retired_choice_downloads_its_successor_and_deletes_the_retired_file(self):
+        records.put(*local_models.SETTINGS, {**LOCAL, "chat_model": "phi4-mini"}, self.paths)
+        engine = TagEngine({"phi4-mini:3.8b-q4_K_M", "qwen3:8b-q4_K_M"})
+        self.bring(engine)
+        self.assertEqual(engine.present, {"qwen3.5:4b-q4_K_M"})
+
+    def test_a_failed_download_keeps_every_file(self):
+        records.put(*local_models.SETTINGS, {**LOCAL, "chat_model": "gemma4-e4b"}, self.paths)
+        engine = TagEngine({"gemma4:e4b-it-q4_K_M"})
+        engine.fail_pull = True
+        self.bring(engine)
+        self.assertEqual((engine.present, engine.deleted), ({"gemma4:e4b-it-q4_K_M"}, []))
+
+    def test_nothing_is_downloaded_for_a_model_that_was_never_here(self):
+        records.put(*local_models.SETTINGS, {**LOCAL, "chat_model": "bonsai2-27b"}, self.paths)
+        engine = TagEngine({"qwen3.5:4b-q4_K_M"})
+        self.bring(engine)
+        self.assertEqual((engine.present, engine.deleted), ({"qwen3.5:4b-q4_K_M"}, []))
+
+
 class OllamaFolderTests(_Runtime):
     def test_downloads_are_read_from_ollamas_folder_while_it_is_stopped(self):
         app = SimpleNamespace(id="ollama", manifest=SimpleNamespace(service=SimpleNamespace(local_port=1)))
         engine = model_runners.OllamaEngine(app, self.paths)  # type: ignore[arg-type]
         self.assertEqual(engine.on_disk(), set())
         library = self.paths.data / "ollama/models/manifests/registry.ollama.ai/library"
-        for name in ("qwen3/8b-q4_K_M", "bge-m3/567m"):
+        for name in ("qwen3.5/9b-q4_K_M", "bge-m3/567m"):
             (library / name).parent.mkdir(parents=True, exist_ok=True)
             (library / name).write_text("{}")
         present = engine.on_disk()
-        self.assertTrue(engine.has(local_models.CHAT_BY_ID["qwen3-8b"], present))
+        self.assertTrue(engine.has(local_models.CHAT_BY_ID["qwen3.5-9b"], present))
         self.assertTrue(engine.has(local_models.EMBEDDING_BY_ID["bge-m3"], present))
         self.assertFalse(engine.has(local_models.CHAT_BY_ID["qwen3.5-4b"], present))
 
@@ -423,6 +519,7 @@ class ApiTests(unittest.TestCase):
         self.stack.enter_context(patch("ctl.api.security.csrf_token", return_value="bound"))
         unreachable = FakeEngine()
         unreachable.downloaded = lambda: (_ for _ in ()).throw(OSError("no runner"))  # type: ignore[method-assign]
+        self.engine = unreachable
         self.stack.enter_context(patch("ctl.model_runners.engine", return_value=unreachable))
         self.stack.enter_context(
             patch(
@@ -446,14 +543,42 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(
             {model["id"] for model in body["embedding_models"] if model["downloaded"]}, {"bge-m3", "nomic-embed-text"}
         )
-        self.assertEqual({model["precision"] for model in body["chat_models"]}, {"Q4"})
+        precision = {model["id"]: model["precision"] for model in body["chat_models"]}
+        self.assertEqual((precision["qwen3.5-4b"], precision["gemma4-12b"]), ("Q4", "Q4 (QAT)"))
+        self.assertNotIn("former_tags", body["chat_models"][0])
         self.assertEqual({runner["id"] for runner in body["runners"]}, {"ollama", "other"})
 
-    def test_a_stopped_runner_is_asked_to_start_before_removing(self):
-        with patch("ctl.local_models.in_use", return_value=set()):
+    def test_a_stopped_runner_is_started_to_remove_and_stopped_again(self):
+        engine = self.engine
+
+        def start(_service, _root, _log):
+            engine.downloaded = lambda: set(engine.present)  # type: ignore[method-assign]
+            return True, ""
+
+        with (
+            patch("ctl.local_models.in_use", return_value=set()),
+            patch("ctl.model_runners.stopped", return_value=True),
+            patch("ctl.registry.load"),
+            patch("ctl.lifecycle.app_control.start", side_effect=start) as started,
+            patch("ctl.lifecycle.app_control.stop") as stopped,
+        ):
+            response = self.client.post("/api/v1/ai/models/nomic-embed-text/remove", headers=self.headers, json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(engine.deleted, ["nomic-embed-text"])
+        self.assertEqual((started.call_count, stopped.call_count), (1, 1))
+
+    def test_a_runner_that_does_not_start_is_reported(self):
+        with (
+            patch("ctl.local_models.in_use", return_value=set()),
+            patch("ctl.model_runners.stopped", return_value=True),
+            patch("ctl.registry.load"),
+            patch("ctl.lifecycle.app_control.start", return_value=(False, "no health")),
+            patch("ctl.lifecycle.app_control.stop") as stopped,
+        ):
             response = self.client.post("/api/v1/ai/models/nomic-embed-text/remove", headers=self.headers, json={})
         self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("first: it removes its own models", response.text)
+        self.assertIn("Ollama is stopped and did not start: no health", response.text)
+        self.assertEqual(stopped.call_count, 1)
 
     def test_a_change_is_queued_as_a_job(self):
         response = self.client.put("/api/v1/ai/models", headers=self.headers, json=LOCAL)
