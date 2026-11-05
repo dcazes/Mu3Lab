@@ -12,6 +12,8 @@ version: "v0.16.18"
 upstream: TashfeenAhmed/FreeLLMAPI
 service:
   local_port: 3001
+  stop_warning: While FreeLLMAPI is stopped, answers from outside AI providers pause; the model on this server still
+    answers.
   start_timeout_seconds: 600
   health:
     path: /api/ping

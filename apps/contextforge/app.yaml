@@ -15,6 +15,7 @@ version: "v1.1.0"
 upstream: IBM/mcp-context-forge
 service:
   local_port: 4444
+  stop_warning: While ContextForge is stopped, no assistant in chat or voice can reach any app's tools.
   health:
     path: /health
   start_timeout_seconds: 600

@@ -15,6 +15,8 @@ depends_on:
 - freellmapi
 service:
   local_port: 4000
+  stop_warning: While LiteLLM is stopped, chat, voice and document search can't answer, because every AI request
+    goes through it.
   start_timeout_seconds: 600
   health:
     path: /health/liveliness

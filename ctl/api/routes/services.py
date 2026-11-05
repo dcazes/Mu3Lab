@@ -213,8 +213,10 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
 
 def _maintenance_params(service: Service, action: str, body: dict, state: str) -> dict[str, str]:
     """Check a restore or update request before it is queued."""
-    if service.stage != "optional":
-        raise ApiError(409, "Only apps installed from the catalog can be restored or updated here.")
+    if action == "restore" and service.stage != "optional":
+        raise ApiError(409, "Only apps installed from the catalog can be restored here.")
+    if not app_releases.updatable(service):
+        raise ApiError(409, f"{service.name} is updated by ./install.sh, not from here.")
     if state not in MAINTENANCE_STATES:
         raise ApiError(409, "Finish setting up the app first.")
     if action == "restore":
@@ -378,7 +380,7 @@ def _write_service_configuration(
 
 def _release(service: Service) -> dict[str, object]:
     """The release Mu3Lab approves for this app, and whether this machine can move to it."""
-    if service.stage != "optional":
+    if not app_releases.updatable(service):
         approved = str(service.update.get("approved_version", ""))
         release: dict[str, object] = {
             "installed_version": approved,
@@ -390,8 +392,8 @@ def _release(service: Service) -> dict[str, object]:
     else:
         release = app_releases.status(service, ROOT)
     reason = ""
-    if service.stage != "optional":
-        reason = f"{service.name} is part of Mu3Lab itself and is updated together with Mu3Lab."
+    if not app_releases.updatable(service):
+        reason = f"{service.name} is part of Mu3Lab's foundation and is updated by ./install.sh."
     elif _effective_state(service, runtime.control_state()) not in MAINTENANCE_STATES:
         reason = f"Install {service.name} before updating it."
     elif not backup_readiness().get("available"):

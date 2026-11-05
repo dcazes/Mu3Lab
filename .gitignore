@@ -18,6 +18,7 @@ core/*/.env
 # Node modules + built dashboard bundle (recreated by npm ci/build)
 node_modules/
 dashboard/dist/
+dashboard/*.tsbuildinfo
 
 # Service data dirs (bind-mounted container data, e.g. core/vaultwarden/data/)
 core/*/data/

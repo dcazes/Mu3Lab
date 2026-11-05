@@ -98,7 +98,7 @@ function RestoreDialog({
 }
 
 /** A restore or update that was interrupted: nothing else runs until the owner chooses. */
-function Interrupted({ service, busy }: { service: Service; busy: boolean }) {
+export function Interrupted({ service, busy }: { service: Service; busy: boolean }) {
   const { refresh } = useDashboard();
   const { pending, run } = useAction();
   const recovery = service.recovery;

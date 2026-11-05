@@ -81,7 +81,24 @@ def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tup
         return False, detail
     if not sync_application(service.id, running=True, root=root, log=log):
         log("One enabled chat connector needs attention after the app started.")
+    if "chat" in service.manifest.capabilities:
+        _sync_chat(log)
     return True, ""
+
+
+def _sync_chat(log: Log) -> None:
+    """A chat app starts without Mu3Lab's tool connections (Open WebUI keeps none); give them back now.
+
+    A convenience: the worker tries again within minutes, so a failure never fails the start.
+    """
+    from ctl.chat_ops import sync_agents
+
+    try:
+        ok, detail = sync_agents(log)
+    except Exception as exc:  # any failure here must leave the healthy start standing
+        ok, detail = False, str(exc)
+    if not ok:
+        log(f"Chat assistants were not updated after the start: {detail}")
 
 
 def was_running(state: ControlState | None, service: Service) -> bool:

@@ -24,7 +24,7 @@ from pathlib import Path
 from ctl import backup_service, database_dumps, job_guard
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, job_params, redact
-from ctl.lifecycle import app_control, in_progress, restore, update
+from ctl.lifecycle import app_control, app_releases, in_progress, restore, update
 from ctl.registry import Service
 
 MAINTENANCE_ACTIONS = frozenset({"restore", "update", "recover", "keep_update"})
@@ -94,8 +94,11 @@ def execute(store: JobStore, state: ControlState | None, job: dict, service: Ser
             )
         elif backup_service.holding(service.id):
             raise _Failed("backup_running", f"Nothing changed: {service.name} is being backed up; try again shortly.")
-        elif service.stage != "optional" or not (app_control.project(service, root) / "docker-compose.yml").is_file():
-            raise _Failed("unsupported_action", f"{service.name} is not an installed catalog app.")
+        elif not (app_control.project(service, root) / "docker-compose.yml").is_file():
+            raise _Failed("unsupported_action", f"{service.name} is not installed.")
+        elif not app_releases.updatable(service) or (action == "restore" and service.stage != "optional"):
+            # Core apps update (and undo an update) here; restoring one from a backup is the rebuild's job.
+            raise _Failed("unsupported_action", f"Mu3Lab does not {action.replace('_', ' ')} {service.name} here.")
         elif action in {"recover", "keep_update"}:
             active = {str(item["id"]) for item in store.active_jobs() if str(item["id"]) != job_id}
             with job_guard.uncancellable():

@@ -529,8 +529,8 @@ def status(
     approved = str(service.update.get("approved_version", ""))
     release = (
         app_releases.status(service, root)
-        if service.stage == "optional"
-        # Core services are pinned and move only together with Mu3Lab itself.
+        if app_releases.updatable(service)
+        # Foundation apps are pinned and move only when ./install.sh runs.
         else {"installed_version": approved, "approved_version": approved, "update_available": False}
     )
     from ctl.lifecycle import compute_switch

@@ -17,7 +17,7 @@ import { useApi } from '../../lib/useApi';
 import { useAction } from '../../lib/useAction';
 import { useDashboard } from '../../state/dashboard';
 import { McpConnectionCard } from '../integrations/McpPanel';
-import { BackupsCard } from './BackupsCard';
+import { BackupsCard, Interrupted } from './BackupsCard';
 
 function Logs({ service }: { service: Service }) {
   const [lines, setLines] = useState<string[] | null>(null);
@@ -104,9 +104,15 @@ export function useApplyUpdate(service: Service) {
           : update.supporting_only
             ? `Update ${service.name}’s supporting services?`
             : `Update ${service.name} to ${update.approved_version}?`,
-        description: update.files_only
-          ? `This version of Mu3Lab changed how ${service.name} is set up; ${service.name} itself stays ${update.approved_version}. Mu3Lab stops ${service.name}, saves a backup of its data, then starts it with the changes. If it doesn't start properly, Mu3Lab puts back the backup and the setup from before automatically. ${service.name} is unavailable for a few minutes.`
-          : `Mu3Lab downloads the new version, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
+        description: [
+          update.files_only
+            ? `This version of Mu3Lab changed how ${service.name} is set up; ${service.name} itself stays ${update.approved_version}. Mu3Lab stops ${service.name}, saves a backup of its data, then starts it with the changes. If it doesn't start properly, Mu3Lab puts back the backup and the setup from before automatically. ${service.name} is unavailable for a few minutes.`
+            : `Mu3Lab downloads the new version, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
+          // Core apps reach further than themselves while they are stopped (LiteLLM answers every chat).
+          service.stop_warning,
+        ]
+          .filter(Boolean)
+          .join(' '),
         confirmLabel: 'Update',
       }))
     )
@@ -145,14 +151,18 @@ function Updates({ service }: { service: Service }) {
       : update?.approved_version;
   // Only a new release of the app has a version to name and release notes to read.
   const sameVersion = Boolean(update?.supporting_only || update?.files_only);
+  // Foundation apps (sign-in, passwords, web addresses) move only when ./install.sh runs.
+  const foundation = service.stage === 'foundation';
   return (
     <Card
       title="Updates"
-      description={
-        service.stage === 'optional' ? undefined : `Version ${installed || 'unknown'}. Updated together with Mu3Lab.`
-      }
+      description={foundation ? `Version ${installed || 'unknown'}. Updated by ./install.sh.` : undefined}
     >
-      {update && service.stage === 'optional' && installed && (
+      {/* Core apps have no Backups card, so an interrupted update offers its choices here. */}
+      {service.stage === 'core' && service.recovery?.kind === 'update' && (
+        <Interrupted service={service} busy={apply.pending} />
+      )}
+      {update && !foundation && installed && !service.recovery && (
         <div className="stack">
           <p>
             {update.update_available

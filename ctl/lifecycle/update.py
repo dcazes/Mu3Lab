@@ -124,7 +124,8 @@ def update(
         saved: dict[str, Any] | None = None
         try:
             app_control.stop(service, root, log)
-            folders = backed_up(service, data_directories(service, root))
+            # Data that is only downloaded again (Ollama's models) is never backed up, here either.
+            folders = backed_up(service, data_directories(service, root)) if service.manifest.backup.include else []
             # An app with no data folders on this server (LiveKit, Kopia) has nothing a backup could hold;
             # the deployment copy above is all an undo needs.
             if backups.sources(folders, paths):
@@ -139,6 +140,9 @@ def update(
                     release_id=app_releases.remember(service.id, previous, paths) if previous else "",
                     paths=paths,
                 )
+            elif not service.manifest.backup.include:
+                why = service.manifest.backup.reason or "It can be downloaded again."
+                log(f"No backup of {service.name} is saved first. {why}")
             else:
                 log(f"{service.name} keeps no data on this server, so there is nothing to back up first.")
         except (app_control.StopFailed, backups.BackupError, database_dumps.DumpFailed, OSError) as exc:

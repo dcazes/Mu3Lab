@@ -77,6 +77,44 @@ describe('AdvancedTab updates', () => {
     await vi.waitFor(() => expect(posts).toEqual([{ action: 'update' }]));
   });
 
+  it('updates a core app the same way and says what pauses meanwhile', async () => {
+    const litellm = service('litellm', 'LiteLLM', 'core', {
+      group: 'ai',
+      update: { ...mealie.update!, repository: 'BerriAI/litellm' },
+      stop_warning: 'While LiteLLM is stopped, chat can’t answer.',
+    });
+    const posts = setup(release(), litellm);
+    fireEvent.click(await screen.findByRole('button', { name: 'Update to v3.23.0' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Update LiteLLM to v3.23.0?' });
+    expect(within(dialog).getByText(/While LiteLLM is stopped, chat can’t answer\./)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'update' }]));
+    // Core apps are backed up with Mu3Lab itself; their Backups card is not offered here.
+    expect(screen.queryByRole('heading', { name: 'Backups' })).not.toBeInTheDocument();
+  });
+
+  it('after an interrupted core app update offers undoing it', async () => {
+    const openWebUi = service('open-webui', 'Open WebUI', 'core', {
+      group: 'ai',
+      update: { ...mealie.update!, repository: 'open-webui/open-webui' },
+      recovery: { kind: 'update' as const, detail: 'An update was interrupted.', since: '', can_keep: false },
+    });
+    const posts = setup(release(), openWebUi);
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo update' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'recover' }]));
+    expect(screen.queryByRole('button', { name: /Update to/ })).not.toBeInTheDocument();
+  });
+
+  it('leaves foundation apps to the installer', async () => {
+    const vaultwarden = service('vaultwarden', 'Vaultwarden', 'foundation', {
+      group: 'infrastructure',
+      update: { ...mealie.update!, installed_version: '1.37.5', approved_version: '1.37.5', update_available: false },
+    });
+    setup(release({ update_available: false, update_enabled: false }), vaultwarden);
+    expect(await screen.findByText('Version 1.37.5. Updated by ./install.sh.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Update/ })).not.toBeInTheDocument();
+  });
+
   it('explains why an update cannot run instead of offering it', async () => {
     setup(release({ update_enabled: false, blocked_reason: 'Updates need Docker to save a backup first.' }));
     expect(await screen.findByText('Updates need Docker to save a backup first.')).toBeInTheDocument();

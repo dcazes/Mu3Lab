@@ -14,6 +14,7 @@ model_runner:
   engine: ollama_api
 service:
   local_port: 11434
+  stop_warning: While Ollama is stopped, the AI models on this server can't answer, and document search pauses.
   health:
     path: /
   uses_gpu: true

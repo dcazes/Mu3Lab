@@ -25,6 +25,7 @@ from ctl.backups import BackupError
 from ctl.jobs import JobStore, job_params
 from ctl.lifecycle import app_releases, in_progress, maintenance, restore, update
 from ctl.lifecycle.app_releases import Release
+from ctl.manifest.models import BackupSpec
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
 from ctl.store import records
@@ -290,6 +291,40 @@ class UpdateTests(_Workflow):
         self.assertIn("Backup cccccccc", job["detail"])
         self.assertEqual(in_progress.get("mealie", self.paths), {})
 
+    def test_a_core_app_updates_the_same_way_but_is_not_restored_here(self):
+        self.service = dataclasses.replace(self.service, stage="core")
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.installed(), NEW)
+        self.assertIn("Backup cccccccc", job["detail"])
+        self.backup(NEW.version)
+        refused = self.job("restore", snapshot_id=BACKUP)
+        self.assertEqual(refused["error_code"], "unsupported_action")
+        self.assertEqual(self.data(), "live")
+
+    def test_a_foundation_app_is_left_to_the_installer(self):
+        self.service = dataclasses.replace(self.service, stage="foundation")
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["error_code"], "unsupported_action")
+        self.assertEqual(self.installed(), OLD)
+        self.assertEqual(self.events, [])
+
+    def test_data_that_is_downloaded_again_is_not_backed_up_first(self):
+        manifest = self.service.manifest.model_copy(
+            update={"backup": BackupSpec(include=False, reason="Its data is downloaded AI models.")}
+        )
+        self.service = dataclasses.replace(self.service, manifest=manifest)
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.installed(), NEW)
+        self.snapshot.assert_not_called()
+        self.assertNotIn("Backup", job["detail"])
+        self.assertTrue(any("No backup of Mealie is saved first" in event["detail"] for event in self.log_events()))
+
+    def log_events(self) -> list[dict]:
+        with self.store._connect() as conn:
+            return [dict(row) for row in conn.execute("SELECT event, detail FROM job_events WHERE event = 'log'")]
+
     def test_mu3lab_changes_to_the_apps_files_update_it_the_same_way(self):
         app_releases.write("mealie", NEW)  # the approved release, with files from an older Mu3Lab
         job = self.job("update", target_version=NEW.version)
@@ -510,7 +545,12 @@ class MaintenanceApiTests(unittest.TestCase):
         self.assertEqual(store.return_value.create.call_args.kwargs["params"], {"target_version": "v3.23.0"})
 
     def test_updates_are_offered_only_when_they_can_run(self):
-        cases = [("mealie", True, True), ("mealie", False, False), ("vaultwarden", True, False)]
+        cases = [
+            ("mealie", True, True),
+            ("mealie", False, False),
+            ("open-webui", True, True),
+            ("vaultwarden", True, False),
+        ]
         for service_id, available, enabled in cases:
             with (
                 self.subTest(service_id=service_id, available=available),
@@ -522,7 +562,16 @@ class MaintenanceApiTests(unittest.TestCase):
                 body = response.json()
                 self.assertEqual(body["update_enabled"], enabled, body)
                 if service_id == "vaultwarden":
-                    self.assertIn("together with Mu3Lab", body["blocked_reason"])
+                    self.assertIn("updated by ./install.sh", body["blocked_reason"])
+
+    def test_a_core_app_is_updated_here_but_not_restored(self):
+        response = self.client.post(
+            "/api/v1/services/open-webui/actions",
+            headers=self.headers,
+            json={"action": "restore", "snapshot_id": "a" * 64, "confirm": "Open WebUI"},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Only apps installed from the catalog can be restored", response.text)
 
     def test_an_app_that_never_becomes_healthy_can_still_be_updated(self):
         for state, enabled in (("starting", True), ("installing", False)):

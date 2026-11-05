@@ -1,4 +1,6 @@
-"""Which release of a catalog app is approved, and which one each machine runs.
+"""Which release of an app is approved, and which one each machine runs.
+
+Catalog apps and Mu3Lab's core apps (``DASHBOARD_UPDATES``) both work this way.
 
 The approved release is checked in: ``update.approved_version`` in
 ``version`` in ``apps/<id>/app.yaml`` names it, and the digest-pinned images in
@@ -46,6 +48,14 @@ from ctl.store import records
 
 RECORD = "docker-compose.digest.yml"
 _EXTENSION = "x-mu3lab-release"
+# Tiers the dashboard updates: catalog apps and Mu3Lab's core apps, which keep a
+# release record like catalog apps do. Foundation apps are set up by ./install.sh.
+DASHBOARD_UPDATES = frozenset({"core", "optional"})
+
+
+def updatable(service: Service) -> bool:
+    """Whether the dashboard offers this app's backed-up update."""
+    return service.stage in DASHBOARD_UPDATES
 
 
 class AmbiguousRelease(LookupError):
