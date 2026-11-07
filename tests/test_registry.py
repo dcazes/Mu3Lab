@@ -86,11 +86,11 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(_compose_state(Path("/srv/mu3lab/projects/surfsense/docker-compose.yml"), fake_run), "running")
 
-    def test_checked_in_registry_marks_surfsense_installable_and_local_account(self):
+    def test_checked_in_registry_marks_surfsense_installable_behind_authentik(self):
         registry = load()
         self.assertEqual(registry.get("surfsense").stage, "optional")
         self.assertEqual(registry.get("surfsense").auth, "proxy")
-        self.assertIn("no single sign-on", registry.get("surfsense").identity_note)
+        self.assertIn("only sign-in", registry.get("surfsense").identity_note)
         compose = registry.get("surfsense").compose_path(Path(__file__).resolve().parents[1]) / "docker-compose.yml"
         compose_text = compose.read_text(encoding="utf-8")
         self.assertNotIn("docker.sock", compose_text)
@@ -324,7 +324,6 @@ class RegistryTests(unittest.TestCase):
             "adventurelog": "adventurelog_internal",
             "paperless-ngx": "paperless_internal",
             "nextcloud": "nextcloud_internal",
-            "surfsense": "surfsense_internal",
             "immich": "immich_internal",
         }
         for service_id, private_network in private_networks.items():

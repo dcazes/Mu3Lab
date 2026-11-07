@@ -66,15 +66,21 @@ class RegistryV3Tests(unittest.TestCase):
                 "firecrawl",
                 "kopia-ui",
                 "navidrome",
+                "qbittorrent",
+                "jellyfin",
             },
         )
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
-                # Apps people open get a private address; internal services (speech, maps) have none.
-                routed = service.manifest.ui.available
+                # Apps people open get a private address; internal services (speech, maps) have none,
+                # and an app kept on the home network (Jellyfin) opens at its home address instead.
+                at_home = service.manifest.service.home_port is not None
+                routed = service.manifest.ui.available and not at_home
                 self.assertEqual(service.private_https_port is not None, routed)
                 self.assertEqual(service.proxy_port is not None, routed)
+                if at_home:
+                    self.assertTrue(service.manifest.ui.available)
 
     def test_install_is_the_only_initial_optional_action(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "not_installed"), ["install"])
@@ -130,7 +136,7 @@ class RegistryV3Tests(unittest.TestCase):
         self.assertIn("header_up Host {http.request.hostport}", route)
         self.assertIn("header_up X-Forwarded-Host {http.request.hostport}", route)
 
-    def test_surfsense_route_is_authentik_gated_before_local_login(self):
+    def test_surfsense_route_is_authentik_gated(self):
         block = render("{\n  admin off\n}\n", [load().get("surfsense")])
         self.assertIn(":19464 {", block)
         self.assertIn("forward_auth 127.0.0.1:9001", block)
@@ -167,10 +173,15 @@ class RegistryV3Tests(unittest.TestCase):
 
 
 class InstallationWorkflowTests(unittest.TestCase):
-    def test_surfsense_install_allows_bounded_migration_and_zero_cache_startup(self):
+    def test_surfsense_turns_its_password_off_only_behind_authentik(self):
+        service = load().get("surfsense")
         compose = (ROOT / "apps/surfsense/docker-compose.yml").read_text(encoding="utf-8")
+        self.assertEqual(service.manifest.route.access, "gate")
+        self.assertIn("SURFSENSE_AUTH: none", compose)
+        # Without its password, the allowed names are what stop a rebinding page; the port stays on loopback.
+        self.assertIn("SURFSENSE_ALLOWED_HOSTS: ${SURFSENSE_ALLOWED_HOSTS:?", compose)
+        self.assertIn('ports: ["127.0.0.1:3929:80"]', compose)
         self.assertIn("condition: service_completed_successfully", compose)
-        self.assertIn('SANDBOX_ENABLED: "FALSE"', compose)
         self.assertNotIn("docker.sock", compose)
 
 

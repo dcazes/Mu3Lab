@@ -60,6 +60,7 @@ def observe_system(registry=None, root: Path | None = None) -> dict:
         "uptime_seconds": max(0, int(time.time() - psutil.boot_time())),
         "memory": {"total": memory.total, "used": memory.used, "percent": memory.percent},
         "disk": {"total": disk.total, "used": disk.used, "percent": disk.percent},
+        "drives": resource_usage.other_drives(),
         "docker_ready": docker,
         "container_memory": by_name,
         "memory_by_owner": by_owner,

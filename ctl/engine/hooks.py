@@ -146,6 +146,16 @@ class AppHooks:
         """
         raise RuntimeError(f"{app.manifest.name} cannot create this chat credential.")
 
+    def person_connector_credentials(
+        self, app: App, connector_id: str, person: dict[str, str], paths: RuntimePaths
+    ) -> dict[str, str]:
+        """One person's own credential for a ``per_person`` connector with ``provision_hook``.
+
+        ``person`` has ``username``, ``email`` and ``name``. Returns ``{credential key: value}``;
+        raise ``RuntimeError`` with a safe sentence while the person has no account in the app yet.
+        """
+        raise RuntimeError(f"{app.manifest.name} cannot create a personal chat credential.")
+
 
 def load_app_hooks(app: App) -> AppHooks:
     """Import ``apps/<id>/hooks.py`` by path; an app without one gets the empty defaults."""

@@ -1,0 +1,17 @@
+name: mu3lab-mcp-qbittorrent-adapter
+services:
+  qbittorrent-mcp:
+    build: .
+    restart: 'no'
+    # qBittorrent listens on 127.0.0.1:8097 only (apps/qbittorrent/docker-compose.yml).
+    network_mode: host
+    environment:
+      MCP_APP: qbittorrent
+      APP_URL: http://127.0.0.1:8097
+      MCP_LISTEN: 127.0.0.1:8832,@docker0:8832
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-qbittorrent-adapter:development

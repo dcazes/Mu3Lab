@@ -90,14 +90,15 @@ def _cleanup_image(root: Path) -> str:
 def delete_data(directories: list[Path], root: Path, log: Log) -> tuple[bool, str]:
     """Delete data folders whose files belong to container users (postgres, www-data).
 
-    The dashboard runs unprivileged, so the removal runs in a short-lived
-    container that sees only the data root, with networking off.
+    Each may be an app's whole folder or one inside it (a downloaded speech model). The dashboard
+    runs unprivileged, so the removal runs in a short-lived container that sees only the data
+    root, with networking off.
     """
-    data = RuntimePaths().data
-    present = [path for path in directories if path.exists()]
+    data = RuntimePaths().data.resolve()
+    present = [path.resolve() for path in directories if path.exists()]
     if not present:
         return True, "No application data was found."
-    if any(path.parent != data for path in present):
+    if any(data not in path.parents for path in present):
         return False, "Refusing to delete a folder outside the Mu3Lab data root."
     command = [
         "docker",
@@ -114,7 +115,7 @@ def delete_data(directories: list[Path], root: Path, log: Log) -> tuple[bool, st
         _cleanup_image(root),
         "-rf",
         "--",
-        *(f"/mu3lab-data/{path.name}" for path in present),
+        *(f"/mu3lab-data/{path.relative_to(data)}" for path in present),
     ]
     rc, output = actions.docker_cmd(command, log, timeout=1800)
     remaining = [path.name for path in present if path.exists()]
@@ -124,7 +125,10 @@ def delete_data(directories: list[Path], root: Path, log: Log) -> tuple[bool, st
 
 
 def _release_chat_connectors(service_id: str, root: Path, log: Log, *, forget: bool) -> bool:
-    """Stop the app's MCP connectors; when its data goes, their credentials go too."""
+    """Stop and remove the app's MCP connectors' containers; when its data goes, their folders and credentials go too.
+
+    Their images, then unused, go with the clean-up that follows an app's removal.
+    """
     from ctl.control_state import ControlState
     from ctl.mcp_catalog import load as load_catalog
     from ctl.mcp_ops import sync_application
@@ -132,14 +136,18 @@ def _release_chat_connectors(service_id: str, root: Path, log: Log, *, forget: b
     from ctl.registry import load as load_registry
 
     stopped = sync_application(service_id, running=False, root=root, log=log)
+    servers = [server for server in load_catalog(load_registry()) if server.service_id == service_id]
+    for server in servers:
+        project = credential_path(server.id).parent
+        if not server.builtin and (project / "docker-compose.yml").is_file():
+            rc, _output = actions.compose_down(project, log)
+            stopped = stopped and rc == 0
     state = ControlState.runtime()
     if not forget or state is None:
         return stopped
-    for server in load_catalog(load_registry()):
-        if server.service_id != service_id:
-            continue
+    for server in servers:
         # These were issued by the app being deleted; a reinstall issues new ones.
-        credential_path(server.id).unlink(missing_ok=True)
+        shutil.rmtree(credential_path(server.id).parent, ignore_errors=True)
         if state.mcp_server(server.id):
             state.set_mcp_server(server.id, service_id, enabled=False, state="disabled")
     return stopped

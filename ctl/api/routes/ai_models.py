@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl import chat_ops, duplex_voice, local_models, model_runners, voice_settings, voice_tools
+from ctl import chat_ops, local_models, model_runners, voice_settings, voice_tools
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import Member, MemberMutation, OperatorMutation
 from ctl.jobs import JobConflict, JobStore
-from ctl.registry import ROOT, load
+from ctl.registry import load
 from ctl.runtime import RuntimePaths
 
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"], route_class=ContractRoute)
 NAMESPACE = "ai.models"
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def _view(store: JobStore | None) -> dict:
@@ -36,17 +39,6 @@ def _view(store: JobStore | None) -> dict:
     }
 
 
-DUPLEX_HOLDS_CARD = (
-    "The voice assistant's full-duplex model holds the graphics card, so local models are stopped. "
-    "Switch the voice assistant back to separate steps in Settings, Voice Assistant first."
-)
-
-
-def _refuse_while_duplex() -> None:
-    if duplex_voice.duplex_on():
-        raise ApiError(409, DUPLEX_HOLDS_CARD)
-
-
 @router.get("/models", response_model=models.AiModels, response_model_exclude_none=True)
 def ai_models(_member: Member) -> models.AiModels:
     """Everyone may see where AI requests go; only administrators change it."""
@@ -56,7 +48,6 @@ def ai_models(_member: Member) -> models.AiModels:
 @router.post("/models/try", response_model=models.AiTryResult, response_model_exclude_none=True)
 async def try_model(payload: models.AiTryRequest, operator: OperatorMutation) -> models.AiTryResult:
     """One test answer from a downloaded model or the outside providers, before switching to it."""
-    _refuse_while_duplex()
     try:
         result = await run_in_threadpool(local_models.try_model, payload.target, payload.prompt)
     except (ValueError, *model_runners.ENGINE_ERRORS) as exc:
@@ -67,7 +58,6 @@ async def try_model(payload: models.AiTryRequest, operator: OperatorMutation) ->
 @router.post("/models/{model_id}/remove", response_model=models.OkResponse, response_model_exclude_none=True)
 async def remove_model(model_id: str, operator: OperatorMutation) -> models.OkResponse:
     """Delete one downloaded model no setting uses, to free its disk space."""
-    _refuse_while_duplex()
     if _view(JobStore.runtime())["active_job_id"]:
         raise ApiError(409, "Wait for the AI settings change to finish.")
     try:
@@ -80,7 +70,6 @@ async def remove_model(model_id: str, operator: OperatorMutation) -> models.OkRe
 @router.put("/models", response_model=models.JobResponse, response_model_exclude_none=True)
 def change_ai_models(payload_model: models.AiModelsRequest, request: Request, operator: OperatorMutation):
     """Queue the change: models download and are checked before anything is switched over."""
-    _refuse_while_duplex()
     store = runtime.job_store()
     paths = RuntimePaths()
     try:
@@ -128,106 +117,6 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
             request=chosen,
             params=local_models.as_params(chosen),
             detail="Operator changed the AI model settings.",
-            idempotency_key=key,
-        )
-    except JobConflict as conflict:
-        raise ApiError(409, "The AI model settings are already being changed.") from conflict
-    return models.JobResponse.model_validate({"ok": True, "job": job})
-
-
-@router.put("/voice", response_model=models.JobResponse, response_model_exclude_none=True)
-def change_voice(payload_model: models.AiVoiceRequest, request: Request, operator: OperatorMutation):
-    """Queue the voice assistant's change: a local model downloads and is checked before voice switches over."""
-    _refuse_while_duplex()
-    store = runtime.job_store()
-    paths = RuntimePaths()
-    current = local_models.voice_settings(paths)
-    follow = payload_model.matches_chat
-    if follow and current["matches_chat"]:
-        raise ApiError(422, "The voice assistant already follows chat's setting.")
-    try:
-        chosen = local_models.voice_validate(
-            local_models.voice_from_chat(paths) if follow else payload_model.model_dump(exclude={"matches_chat"})
-        )
-    except ValueError as exc:
-        raise ApiError(422, str(exc)) from exc
-    if chosen["privacy"] == "outside_allowed":
-        chosen["model"] = ""  # only a local choice names a model
-    if not follow and not current["matches_chat"] and all(chosen[key] == current[key] for key in chosen):
-        raise ApiError(422, "These are already the current settings.")
-    if chosen["privacy"] != "outside_allowed" and not model_runners.installed(local_models.runner(paths).id):
-        raise ApiError(422, "Install the model runner from Apps first.")
-    if follow:
-        chosen["matches_chat"] = "yes"
-    key = runtime.idempotency_key(request)
-    subject = runtime.mutation_subject(operator)
-    previous = store.by_idempotency_key(
-        key or "",
-        kind="wiring",
-        service_id=local_models.SERVICE_ID,
-        action=local_models.VOICE_ACTION,
-        actor=operator["username"],
-        actor_subject=subject,
-        namespace=NAMESPACE,
-        request=chosen,
-    )
-    if previous:
-        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
-    try:
-        job = store.create(
-            kind="wiring",
-            service_id=local_models.SERVICE_ID,
-            action=local_models.VOICE_ACTION,
-            actor=operator["username"],
-            actor_subject=subject,
-            namespace=NAMESPACE,
-            request=chosen,
-            params=chosen,
-            detail="Operator changed the voice assistant's model.",
-            idempotency_key=key,
-        )
-    except JobConflict as conflict:
-        raise ApiError(409, "The AI model settings are already being changed.") from conflict
-    return models.JobResponse.model_validate({"ok": True, "job": job})
-
-
-@router.put("/voice/engine", response_model=models.JobResponse, response_model_exclude_none=True)
-def change_voice_engine(payload_model: models.AiVoiceEngineRequest, request: Request, operator: OperatorMutation):
-    """Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps."""
-    store = runtime.job_store()
-    wanted = payload_model.engine
-    if wanted == duplex_voice.engine():
-        raise ApiError(422, "The voice assistant already talks this way.")
-    if wanted == duplex_voice.DUPLEX:
-        reason = duplex_voice.unavailable_reason(ROOT)
-        if reason:
-            raise ApiError(422, reason)
-    chosen: dict[str, str] = {"engine": wanted}
-    key = runtime.idempotency_key(request)
-    subject = runtime.mutation_subject(operator)
-    previous = store.by_idempotency_key(
-        key or "",
-        kind="wiring",
-        service_id=local_models.SERVICE_ID,
-        action=duplex_voice.ACTION,
-        actor=operator["username"],
-        actor_subject=subject,
-        namespace=NAMESPACE,
-        request=chosen,
-    )
-    if previous:
-        return models.JobResponse.model_validate({"ok": True, "duplicate": True, "job": previous})
-    try:
-        job = store.create(
-            kind="wiring",
-            service_id=local_models.SERVICE_ID,
-            action=duplex_voice.ACTION,
-            actor=operator["username"],
-            actor_subject=subject,
-            namespace=NAMESPACE,
-            request=chosen,
-            params=chosen,
-            detail="Operator changed how the voice assistant talks.",
             idempotency_key=key,
         )
     except JobConflict as conflict:
@@ -344,12 +233,12 @@ def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, o
     from ctl import service_config
     from ctl.control_state import ControlState
 
-    _refuse_while_duplex()
     speech = voice_settings.speech_models()
     if not speech["installed"]:
         raise ApiError(409, "Install Speaches first.")
     chosen = {"stt_model": payload.stt_model, "tts_model": payload.tts_model}
-    if chosen["stt_model"] not in speech["stt"]["options"] or chosen["tts_model"] not in speech["tts"]["options"]:
+    listed = {part: {option["id"] for option in speech[part]["options"]} for part in ("stt", "tts")}
+    if chosen["stt_model"] not in listed["stt"] or chosen["tts_model"] not in listed["tts"]:
         raise ApiError(422, "Choose one of the listed speech models.")
     if chosen == {"stt_model": speech["stt"]["value"], "tts_model": speech["tts"]["value"]}:
         raise ApiError(422, "Speaches already uses these models.")
@@ -392,3 +281,20 @@ def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, o
     except (JobConflict, ValueError) as exc:
         raise ApiError(409, f"{service.name} is busy with another task; try again in a moment.") from exc
     return models.JobResponse.model_validate({"ok": True, "job": job})
+
+
+@router.post("/voice/speech/remove", response_model=models.OkResponse, response_model_exclude_none=True)
+async def remove_speech_model(
+    payload: models.SpeechModelRemoveRequest, operator: OperatorMutation
+) -> models.OkResponse:
+    """Delete one downloaded speech model Speaches is not set up to use, to free its disk space."""
+    if (await run_in_threadpool(_voice_page)).active_job_id:
+        raise ApiError(409, "Wait for the speech model change to finish.")
+    try:
+        detail = await run_in_threadpool(voice_settings.remove_speech_model, payload.model, ROOT, lambda _line: None)
+    except ValueError as exc:
+        raise ApiError(422, str(exc)) from exc
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=operator["username"], event="ai.speech_model_removed", detail=detail)
+    return models.OkResponse.model_validate({"ok": True, "message": detail})

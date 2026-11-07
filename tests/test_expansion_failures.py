@@ -90,8 +90,8 @@ class SpeechImagesTests(unittest.TestCase):
         self.assertEqual(app_releases.pin(self.service, ROOT, lambda _: None, self.paths, gpu_mode="nvidia"), pinned)
 
     def test_download_uses_retained_release_record(self):
-        old = {name: image.replace("0.8.3-cpu", "0.8.2-cpu") for name, image in self.cpu.items()}
-        app_releases.write("speaches", app_releases.Release("v0.8.2", old), self.paths)
+        old = {name: image.replace("0.9.0-rc.3-cpu", "0.8.3-cpu") for name, image in self.cpu.items()}
+        app_releases.write("speaches", app_releases.Release("v0.8.3", old), self.paths)
         with patch("ctl.actions.docker_cmd", return_value=(0, json.dumps({"services": {}}))) as command:
             actions.compose_image_list(self.project, lambda _: None)
         self.assertIn(str(self.project / "docker-compose.digest.yml"), command.call_args.args[0])

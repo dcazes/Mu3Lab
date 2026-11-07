@@ -90,7 +90,7 @@ fi
 
 # --- Background services ------------------------------------------------------
 step "Stopping the Mu3Lab dashboard"
-for unit in mu3lab-ctl.service mu3lab-worker.service; do
+for unit in mu3lab-ctl.service mu3lab-worker.service mu3lab-wake.service; do
   if [[ -f "$HOME/.config/systemd/user/$unit" ]]; then
     run systemctl --user disable --now "$unit"
     run rm -f "$HOME/.config/systemd/user/$unit"
@@ -166,8 +166,11 @@ if [[ ${#policies[@]} -gt 0 ]]; then
 fi
 
 # --- Data ---------------------------------------------------------------------------
+# Backups moved to another drive (Settings > Security & backups) are kept: they are how Mu3Lab is rebuilt.
+moved_backups=$(sudo -n sed -n 's/^ *"path": "\(.*\)",*$/\1/p' /srv/mu3lab/state/backup-location.json 2>/dev/null || true)
 step "Deleting Mu3Lab's data (/srv/mu3lab)"
 [[ -e /srv/mu3lab ]] && run sudo -n rm -rf /srv/mu3lab
+[[ -n $moved_backups ]] && echo "  Your backups on the other drive were kept: $moved_backups"
 
 step "Cleaning this folder (generated files only; your checkout is kept)"
 for path in .venv .tools .env .state dashboard/node_modules dashboard/dist .mypy_cache .ruff_cache; do

@@ -5,9 +5,9 @@ checked in the order the owner would do them, and the first one that is
 missing leaves the app installed but stopped ("Needs setup") with a sentence
 saying what to open:
 
-1. When the app uses the voice name (``mu3lab-voice``), the voice setting
-   (Settings, Voice Assistant) is ready: with a local model, its model runner is
-   installed and answering and the model is downloaded there; with outside
+1. When the app uses the voice name (``mu3lab-voice``), chat's setting, which
+   voice follows (Settings, AI), is ready: with a local model, its model runner
+   is installed and answering and the model is downloaded there; with outside
    providers, at least one provider is connected and allowed.
 2. The AI gateway (LiteLLM) routes every listed model. Speech
    (``mu3lab-stt``, ``mu3lab-tts``) is routed once Speaches is installed and running.
@@ -20,11 +20,12 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from ctl import duplex_voice, local_models
+from ctl import local_models
 from ctl.engine.hooks import HookContext
 from ctl.rules import Params, Rule, model_ready, register
 
-VOICE_PLACE = "Settings, Voice Assistant"
+# Voice follows chat, so its model is chosen where chat's is.
+VOICE_PLACE = "Settings, AI"
 
 
 class NeedsVoiceModelParams(Params):
@@ -40,9 +41,6 @@ class NeedsVoiceModel(Rule):
 
     def setup_check(self, ctx: HookContext) -> None:
         assert ctx.facts is not None
-        # The full-duplex model hears and speaks itself; none of these models is used meanwhile.
-        if duplex_voice.duplex_on(ctx.facts.paths):
-            return
         if local_models.VOICE_ALIAS in self.params.models:
             self._check_voice(ctx)
         self._check_routes(ctx)
@@ -55,8 +53,8 @@ class NeedsVoiceModel(Rule):
                 ctx.needs_setup(
                     "voice_check",
                     "no_outside_provider",
-                    "The voice assistant is set to use outside providers, but none is connected. Connect one in "
-                    f"{model_ready.PROVIDERS_PLACE}, or choose a local model in {VOICE_PLACE}. "
+                    "The voice assistant follows chat, which uses outside providers, but none is connected. Connect one "
+                    f"in {model_ready.PROVIDERS_PLACE}, or turn on local models in {VOICE_PLACE}. "
                     "Then start this app again.",
                 )
             return
@@ -65,7 +63,7 @@ class NeedsVoiceModel(Rule):
             ctx.needs_setup(
                 "voice_check",
                 "voice_model_not_chosen",
-                f"No local model is chosen for the voice assistant. Open {VOICE_PLACE}, choose one and save. "
+                f"No local chat model is chosen, and the voice assistant uses chat's. Open {VOICE_PLACE}, choose one and save. "
                 "Then start this app again.",
             )
         model_ready.local_model(ctx, chosen, VOICE_PLACE)
@@ -77,7 +75,7 @@ class NeedsVoiceModel(Rule):
             return
         advice = []
         if local_models.VOICE_ALIAS in missing:
-            advice.append(f"The voice model is not routed yet. Save the choice again in {VOICE_PLACE}.")
+            advice.append(f"The voice model is not routed yet. Save chat's setting again in {VOICE_PLACE}.")
         speech = [name for name in missing if name != local_models.VOICE_ALIAS]
         if speech:
             advice.append(

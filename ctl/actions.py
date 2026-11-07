@@ -101,6 +101,51 @@ def docker_cmd_stdin(argv: list[str], data: str, log: Callable[[str], None], tim
     return result.returncode, result.output
 
 
+def docker_pipe(
+    producer: list[str],
+    consumer: list[str],
+    log: Callable[[str], None],
+    *,
+    timeout: int = 3600,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    """Stream one Docker command's output into another's input, without logging what passes.
+
+    For a database dump: from the database's container into a file only root may
+    write, and back. Returns the first failure, else the consumer's own output.
+    """
+    job_guard.checkpoint()
+    first, second = _docker_invocation(producer), _docker_invocation(consumer)
+    if first is None or second is None:
+        return 1, "docker unavailable: no live group and no DB membership"
+    log(f"$ docker {' '.join(producer[1:])} | docker {' '.join(consumer[1:])}")
+    command_env = {**_os.environ, **_docker_config_env(), **(env or {})}
+    import tempfile
+
+    with tempfile.TemporaryFile() as errors:
+        source = _subprocess.Popen(first, stdout=_subprocess.PIPE, stderr=errors, env=command_env)
+        try:
+            sink = _subprocess.run(second, stdin=source.stdout, capture_output=True, env=command_env, timeout=timeout)
+        except (OSError, _subprocess.TimeoutExpired) as exc:
+            source.kill()
+            source.wait()
+            return 1, f"stopped: {exc}"
+        finally:
+            if source.stdout:
+                source.stdout.close()
+        try:
+            source.wait(timeout=60)
+        except _subprocess.TimeoutExpired:
+            source.kill()
+            source.wait()
+        errors.seek(0)
+        failed = errors.read().decode(errors="replace")
+    output = (sink.stdout + sink.stderr).decode(errors="replace")
+    if source.returncode:
+        return source.returncode, failed[-2000:] or "the first command failed"
+    return sink.returncode, output
+
+
 def _docker_invocation(argv: list[str]) -> list[str] | None:
     """Return the direct/``sg`` Docker command without running it.
 
@@ -269,11 +314,9 @@ def _compose_project_command(projdir: Path, extra_files: list[Path] | None = Non
     return [*command, "--project-directory", str(projdir)]
 
 
-def _gpu_start_refused(projdir: Path) -> str:
-    """Why an app must not start now: the voice assistant's full-duplex model holds the graphics card."""
-    from ctl import duplex_voice
-
-    return duplex_voice.start_refused(projdir)
+def compose_argv(projdir: Path, extra_files: list[Path] | None, *args: str) -> list[str]:
+    """``docker compose`` for a reviewed project with all its files, then ``args`` (source-owned, never input)."""
+    return [*_compose_project_command(projdir, extra_files), *args]
 
 
 def compose_up(
@@ -295,10 +338,6 @@ def compose_up(
     string, no shell games beyond one quoted layer) stays exact. Extra files
     are reviewed service-owned overrides, never browser-provided paths.
     """
-    refused = _gpu_start_refused(projdir)
-    if refused:
-        log(refused)
-        return 1, refused
     argv = [*_compose_project_command(projdir, extra_files), "up", "-d"]
     if recreate:
         argv.append("--force-recreate")
@@ -413,10 +452,6 @@ def compose_action(
     }
     if action not in verbs:
         return 2, "unsupported curated lifecycle action"
-    refused = _gpu_start_refused(projdir) if action != "stop" else ""
-    if refused:
-        log(refused)
-        return 1, refused
     files = [projdir / "docker-compose.yml"]
     digest_override = projdir / "docker-compose.digest.yml"
     if digest_override.is_file():

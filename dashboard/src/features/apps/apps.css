@@ -455,3 +455,68 @@
 .group[id^='category-'] {
   scroll-margin-top: 16px;
 }
+
+/* ---------- Starting and stopping with the apps involved (lifecycle.tsx) ---------- */
+.plan-group h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.plan-group p {
+  margin: 2px 0 10px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.plan-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plan-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    box-shadow 0.12s;
+}
+
+.plan-app:hover {
+  border-color: var(--border-strong);
+}
+
+.plan-app .plan-check {
+  width: 14px;
+  height: 14px;
+  margin-right: -4px;
+  stroke-width: 3;
+  visibility: hidden;
+}
+
+.plan-app.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  color: var(--text);
+}
+
+.plan-app.is-selected .plan-check {
+  visibility: visible;
+  color: var(--accent-text);
+}
+
+.plan-app:not(.is-selected) .app-icon {
+  filter: grayscale(0.8);
+  opacity: 0.6;
+}

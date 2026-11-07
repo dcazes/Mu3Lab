@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiModels } from '../../api';
 import { aiModels, dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
@@ -24,6 +24,10 @@ function setup(current: AiModels = aiModels()) {
         return { ok: true, job: { id: 'job1', state: 'queued' } };
       }
       return current;
+    }
+    if (path.endsWith('/remove')) {
+      puts.push(path);
+      return { ok: true, message: 'Removed.' };
     }
     if (path === '/api/v1/ai/models/try')
       return {
@@ -132,24 +136,24 @@ describe('Where AI runs', () => {
   });
 
   it('ranks local models and outside providers, and keeps one on', async () => {
-    const puts = setup(aiModels({ sources: ['outside', 'local'], chat_model: 'qwen3-8b' }));
+    const puts = setup(aiModels({ sources: ['outside', 'local'], chat_model: 'qwen3.5-9b' }));
     const local = await screen.findByRole('checkbox', { name: /Local models/ });
     expect(local.closest('.source-row')).toHaveTextContent('Second, a choice in chat');
     fireEvent.click(screen.getByRole('button', { name: 'Put local models first' }));
     expect(local.closest('.source-row')).toHaveTextContent('First');
     fireEvent.click(screen.getByRole('button', { name: 'Save and apply' }));
-    expect(await screen.findByText(/Chat will answer on this server with Qwen3 8B/)).toBeInTheDocument();
+    expect(await screen.findByText(/Chat will answer on this server with Qwen 3.5 9B/)).toBeInTheDocument();
     await confirmDialog();
     await vi.waitFor(() =>
       expect(puts).toEqual([
-        { sources: ['local', 'outside'], chat_model: 'qwen3-8b', embedding_model: 'bge-m3', runner: 'ollama' },
+        { sources: ['local', 'outside'], chat_model: 'qwen3.5-9b', embedding_model: 'bge-m3', runner: 'ollama' },
       ]),
     );
   });
 
   it('lets outside providers run alone, with no local model', async () => {
     setup();
-    await screen.findByLabelText('Search model');
+    await screen.findByRole('group', { name: 'Search model' });
     // Chat needs somewhere to run, so the only source turned on cannot be turned off.
     expect(screen.getByRole('checkbox', { name: /Outside providers/ })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /Outside providers/ })).toBeDisabled();
@@ -157,6 +161,16 @@ describe('Where AI runs', () => {
     expect(screen.queryByLabelText('Model runner')).not.toBeInTheDocument();
     expect(screen.queryByText('Last changed')).not.toBeInTheDocument();
     expect(screen.queryByText('Changed by')).not.toBeInTheDocument();
+  });
+
+  it('lists chat models under their size groups, leaving out empty ones', async () => {
+    setup(aiModels({ sources: ['local'], chat_model: 'qwen3.5-4b' }));
+    const small = await screen.findByRole('group', { name: 'Small' });
+    expect(within(small).getByRole('radio', { name: 'Qwen 3.5 9B' })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('group', { name: 'Extra small' })).getByRole('radio', { name: 'Qwen 3.5 4B' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Large' })).not.toBeInTheDocument();
   });
 
   it('offers no runner choice while Ollama is the only model runner', async () => {
@@ -190,14 +204,32 @@ describe('Where AI runs', () => {
 
   it('warns that documents are indexed again when the search model changes', async () => {
     setup();
-    fireEvent.change(await screen.findByLabelText('Search model'), { target: { value: 'nomic-embed-text' } });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Nomic Embed Text' }));
     expect(screen.getByText('Documents need indexing again')).toBeInTheDocument();
   });
 
   it('locks the search model while an app keeps an index for it', async () => {
     setup(aiModels({}, { embedding_locked_by: ['SurfSense'] }));
-    expect(((await screen.findByLabelText('Search model')) as HTMLSelectElement).disabled).toBe(true);
+    expect(await screen.findByRole('radio', { name: 'Nomic Embed Text' })).toBeDisabled();
     expect(screen.getByText(/SurfSense keeps a search index/)).toBeInTheDocument();
+  });
+
+  it('shows each model’s Q4 memory and download, and removes only unused downloads', async () => {
+    const current = aiModels();
+    current.embedding_models = current.embedding_models.map((model) => ({
+      ...model,
+      downloaded: true,
+      in_use: model.id === 'bge-m3',
+    }));
+    const puts = setup(current);
+    const chat = (await screen.findByRole('radio', { name: 'Qwen 3.5 9B' })).closest('.model-entry') as HTMLElement;
+    expect(chat).toHaveTextContent('Q4: 3.3 GB download, about 5 GB memory.');
+    expect(chat).toHaveTextContent('Downloaded');
+    expect(screen.queryByRole('button', { name: 'Remove Qwen 3.5 4B' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove BGE-M3' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Nomic Embed Text' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    await vi.waitFor(() => expect(puts).toContain('/api/v1/ai/models/nomic-embed-text/remove'));
   });
 
   it('shows why a change failed', async () => {

@@ -43,8 +43,10 @@ MANUAL_INITIALIZATION_MODES = frozenset(
     {"oidc_first_login", "browser_registration", "local_account_manual", "manual_owner", "trusted_header"}
 )
 
-# An app must be installed (running or stopped) to be backed up, restored or updated.
-MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped"})
+# An app must be installed (running or stopped) to be backed up, restored or updated. One stuck
+# "starting" (running, never healthy) qualifies too: a restore or update is often its way out, as
+# when an older release put back after a failed update is checked at the new release's health path.
+MAINTENANCE_STATES = frozenset({"ready", "needs_setup", "needs_attention", "stopped", "starting"})
 # While an app's earlier restore or update was interrupted, only these may run.
 RECOVERY_ACTIONS = frozenset({"recover", "keep_update"})
 SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,64}$")
@@ -179,6 +181,8 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
         required = "uninstall" if action in UNINSTALL_ACTIONS else action
         if required not in allowed_actions(service, _effective_state(service, control)):
             raise ApiError(409, "action is not valid for the current service state")
+        if action in {"start", "restart"} and body.get("dependencies") is not None:
+            params = {"dependencies": ",".join(sorted(set(body["dependencies"])))}
     try:
         job = store.create(
             kind="lifecycle",
@@ -209,8 +213,10 @@ def _queue_service_action(service_id: str, body: dict, request: Request, operato
 
 def _maintenance_params(service: Service, action: str, body: dict, state: str) -> dict[str, str]:
     """Check a restore or update request before it is queued."""
-    if service.stage != "optional":
-        raise ApiError(409, "Only apps installed from the catalog can be restored or updated here.")
+    if action == "restore" and service.stage != "optional":
+        raise ApiError(409, "Only apps installed from the catalog can be restored here.")
+    if not app_releases.updatable(service):
+        raise ApiError(409, f"{service.name} is updated by ./install.sh, not from here.")
     if state not in MAINTENANCE_STATES:
         raise ApiError(409, "Finish setting up the app first.")
     if action == "restore":
@@ -374,19 +380,20 @@ def _write_service_configuration(
 
 def _release(service: Service) -> dict[str, object]:
     """The release Mu3Lab approves for this app, and whether this machine can move to it."""
-    if service.stage != "optional":
+    if not app_releases.updatable(service):
         approved = str(service.update.get("approved_version", ""))
         release: dict[str, object] = {
             "installed_version": approved,
             "approved_version": approved,
             "update_available": False,
             "supporting_only": False,
+            "files_only": False,
         }
     else:
         release = app_releases.status(service, ROOT)
     reason = ""
-    if service.stage != "optional":
-        reason = f"{service.name} is part of Mu3Lab itself and is updated together with Mu3Lab."
+    if not app_releases.updatable(service):
+        reason = f"{service.name} is part of Mu3Lab's foundation and is updated by ./install.sh."
     elif _effective_state(service, runtime.control_state()) not in MAINTENANCE_STATES:
         reason = f"Install {service.name} before updating it."
     elif not backup_readiness().get("available"):

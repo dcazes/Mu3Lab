@@ -96,6 +96,10 @@
             "title": "Runner Reachable",
             "type": "boolean"
           },
+          "runner_stopped": {
+            "title": "Runner Stopped",
+            "type": "boolean"
+          },
           "runners": {
             "items": {
               "$ref": "#/components/schemas/ModelRunnerOption"
@@ -115,24 +119,17 @@
             "default": "",
             "title": "Suggestion Reason",
             "type": "string"
-          },
-          "voice": {
-            "$ref": "#/components/schemas/AiVoiceSettings"
-          },
-          "voice_engine": {
-            "$ref": "#/components/schemas/AiVoiceEngineSettings"
           }
         },
         "required": [
           "ok",
           "settings",
-          "voice",
-          "voice_engine",
           "chat_models",
           "embedding_models",
           "runner",
           "runners",
           "runner_reachable",
+          "runner_stopped",
           "embedding_locked_by",
           "active_job_id"
         ],
@@ -218,6 +215,11 @@
             "title": "Ok",
             "type": "boolean"
           },
+          "runner_started": {
+            "default": false,
+            "title": "Runner Started",
+            "type": "boolean"
+          },
           "seconds": {
             "title": "Seconds",
             "type": "number"
@@ -241,155 +243,6 @@
           "tokens_per_second"
         ],
         "title": "AiTryResult",
-        "type": "object"
-      },
-      "AiVoiceEngineRequest": {
-        "properties": {
-          "engine": {
-            "enum": [
-              "pipeline",
-              "duplex"
-            ],
-            "title": "Engine",
-            "type": "string"
-          }
-        },
-        "required": [
-          "engine"
-        ],
-        "title": "AiVoiceEngineRequest",
-        "type": "object"
-      },
-      "AiVoiceEngineSettings": {
-        "description": "How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card.",
-        "properties": {
-          "changed_at": {
-            "title": "Changed At",
-            "type": "string"
-          },
-          "changed_by": {
-            "title": "Changed By",
-            "type": "string"
-          },
-          "download_gb": {
-            "title": "Download Gb",
-            "type": "number"
-          },
-          "downloaded": {
-            "title": "Downloaded",
-            "type": "boolean"
-          },
-          "engine": {
-            "enum": [
-              "pipeline",
-              "duplex"
-            ],
-            "title": "Engine",
-            "type": "string"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "stopped": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Stopped",
-            "type": "array"
-          },
-          "stops": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Stops",
-            "type": "array"
-          },
-          "unavailable_reason": {
-            "title": "Unavailable Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "engine",
-          "model",
-          "download_gb",
-          "downloaded",
-          "stops",
-          "stopped",
-          "unavailable_reason",
-          "changed_at",
-          "changed_by"
-        ],
-        "title": "AiVoiceEngineSettings",
-        "type": "object"
-      },
-      "AiVoiceRequest": {
-        "properties": {
-          "matches_chat": {
-            "default": false,
-            "title": "Matches Chat",
-            "type": "boolean"
-          },
-          "model": {
-            "default": "",
-            "maxLength": 64,
-            "title": "Model",
-            "type": "string"
-          },
-          "privacy": {
-            "enum": [
-              "outside_allowed",
-              "local_first",
-              "local_only"
-            ],
-            "title": "Privacy",
-            "type": "string"
-          }
-        },
-        "required": [
-          "privacy"
-        ],
-        "title": "AiVoiceRequest",
-        "type": "object"
-      },
-      "AiVoiceSettings": {
-        "description": "Where the voice assistant's answers come from, independent of chat.",
-        "properties": {
-          "changed_at": {
-            "title": "Changed At",
-            "type": "string"
-          },
-          "changed_by": {
-            "title": "Changed By",
-            "type": "string"
-          },
-          "matches_chat": {
-            "title": "Matches Chat",
-            "type": "boolean"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "privacy": {
-            "enum": [
-              "outside_allowed",
-              "local_first",
-              "local_only"
-            ],
-            "title": "Privacy",
-            "type": "string"
-          }
-        },
-        "required": [
-          "privacy",
-          "model",
-          "matches_chat",
-          "changed_at",
-          "changed_by"
-        ],
-        "title": "AiVoiceSettings",
         "type": "object"
       },
       "ApiErrorResponse": {
@@ -636,6 +489,133 @@
           "message"
         ],
         "title": "BackupAttention",
+        "type": "object"
+      },
+      "BackupDrive": {
+        "description": "A place the backups can live: the main drive's own folder, or a folder on another mounted drive.",
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "desktop_only": {
+            "title": "Desktop Only",
+            "type": "boolean"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "free_bytes": {
+            "title": "Free Bytes",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mount": {
+            "title": "Mount",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "problem": {
+            "title": "Problem",
+            "type": "string"
+          },
+          "same_drive_as_data": {
+            "title": "Same Drive As Data",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "detail",
+          "mount",
+          "path",
+          "size_bytes",
+          "free_bytes",
+          "current",
+          "same_drive_as_data",
+          "desktop_only",
+          "problem"
+        ],
+        "title": "BackupDrive",
+        "type": "object"
+      },
+      "BackupLocation": {
+        "description": "Where the backups are, the drives they could move to, and the latest move.",
+        "properties": {
+          "drives": {
+            "items": {
+              "$ref": "#/components/schemas/BackupDrive"
+            },
+            "title": "Drives",
+            "type": "array"
+          },
+          "move": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Job"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "problem": {
+            "title": "Problem",
+            "type": "string"
+          },
+          "used_bytes": {
+            "title": "Used Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "path",
+          "problem",
+          "used_bytes",
+          "drives"
+        ],
+        "title": "BackupLocation",
+        "type": "object"
+      },
+      "BackupLocationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "BackupLocationRequest",
         "type": "object"
       },
       "BackupProtection": {
@@ -2347,6 +2327,16 @@
             "title": "Core Parts",
             "type": "object"
           },
+          "drives": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/DiskShare"
+              },
+              "type": "object"
+            },
+            "title": "Drives",
+            "type": "object"
+          },
           "measured_at": {
             "title": "Measured At",
             "type": "string"
@@ -2408,6 +2398,45 @@
           "dismissed"
         ],
         "title": "DismissedResponse",
+        "type": "object"
+      },
+      "Drive": {
+        "description": "A drive besides the main one that holds Mu3Lab's data, measured live.",
+        "properties": {
+          "mount": {
+            "title": "Mount",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "percent": {
+            "title": "Percent",
+            "type": "number"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          },
+          "used": {
+            "title": "Used",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mount",
+          "name",
+          "role",
+          "total",
+          "used",
+          "percent"
+        ],
+        "title": "Drive",
         "type": "object"
       },
       "GpuMemory": {
@@ -3294,6 +3323,26 @@
             "title": "Note",
             "type": "string"
           },
+          "params_b": {
+            "default": 0.0,
+            "title": "Params B",
+            "type": "number"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "string"
+          },
+          "size_group": {
+            "default": "xsmall",
+            "enum": [
+              "xsmall",
+              "small",
+              "medium",
+              "large"
+            ],
+            "title": "Size Group",
+            "type": "string"
+          },
           "tag": {
             "title": "Tag",
             "type": "string"
@@ -3307,6 +3356,7 @@
           "memory_gb",
           "note",
           "dimensions",
+          "precision",
           "downloaded"
         ],
         "title": "LocalModel",
@@ -4105,6 +4155,11 @@
             "title": "Commit",
             "type": "string"
           },
+          "dashboard_outdated": {
+            "default": false,
+            "title": "Dashboard Outdated",
+            "type": "boolean"
+          },
           "date": {
             "title": "Date",
             "type": "string"
@@ -4494,6 +4549,95 @@
           "core_apps"
         ],
         "title": "PlatformBackupStatus",
+        "type": "object"
+      },
+      "PowerStatus": {
+        "description": "Whether Mu3Lab as a whole is on, and the progress of turning it off.",
+        "properties": {
+          "blockers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockers"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "state": {
+            "enum": [
+              "on",
+              "turning_off",
+              "off",
+              "turning_on"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "PowerStatus",
         "type": "object"
       },
       "ProviderCatalogItem": {
@@ -5423,6 +5567,11 @@
             "title": "Health State",
             "type": "string"
           },
+          "home_network": {
+            "default": false,
+            "title": "Home Network",
+            "type": "boolean"
+          },
           "https_port": {
             "title": "Https Port",
             "type": "number"
@@ -5712,6 +5861,21 @@
             "default": "",
             "title": "Confirm",
             "type": "string"
+          },
+          "dependencies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependencies"
           },
           "snapshot_id": {
             "default": "",
@@ -6393,6 +6557,11 @@
             "title": "Approved Version",
             "type": "string"
           },
+          "files_only": {
+            "default": false,
+            "title": "Files Only",
+            "type": "boolean"
+          },
           "installed_version": {
             "title": "Installed Version",
             "type": "string"
@@ -6538,7 +6707,7 @@
         "properties": {
           "options": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/SpeechModelOption"
             },
             "title": "Options",
             "type": "array"
@@ -6553,6 +6722,69 @@
           "options"
         ],
         "title": "SpeechModelChoice",
+        "type": "object"
+      },
+      "SpeechModelOption": {
+        "properties": {
+          "download_gb": {
+            "title": "Download Gb",
+            "type": "number"
+          },
+          "downloaded": {
+            "title": "Downloaded",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "in_use": {
+            "title": "In Use",
+            "type": "boolean"
+          },
+          "memory_gb": {
+            "title": "Memory Gb",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "note",
+          "download_gb",
+          "memory_gb",
+          "precision",
+          "downloaded",
+          "in_use"
+        ],
+        "title": "SpeechModelOption",
+        "type": "object"
+      },
+      "SpeechModelRemoveRequest": {
+        "properties": {
+          "model": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "SpeechModelRemoveRequest",
         "type": "object"
       },
       "SystemConfig": {
@@ -6665,6 +6897,13 @@
           "docker_ready": {
             "title": "Docker Ready",
             "type": "boolean"
+          },
+          "drives": {
+            "items": {
+              "$ref": "#/components/schemas/Drive"
+            },
+            "title": "Drives",
+            "type": "array"
           },
           "gpu": {
             "anyOf": [
@@ -6866,6 +7105,11 @@
           "blocked_reason": {
             "title": "Blocked Reason",
             "type": "string"
+          },
+          "files_only": {
+            "default": false,
+            "title": "Files Only",
+            "type": "boolean"
           },
           "installed_version": {
             "title": "Installed Version",
@@ -8170,108 +8414,6 @@
         ]
       }
     },
-    "/api/v1/ai/voice": {
-      "put": {
-        "description": "Queue the voice assistant's change: a local model downloads and is checked before voice switches over.",
-        "operationId": "change_voice_api_v1_ai_voice_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AiVoiceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Change Voice",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
     "/api/v1/ai/voice/apps": {
       "get": {
         "description": "The app assistants the voice assistant can hand people to.",
@@ -8564,108 +8706,6 @@
           }
         },
         "summary": "Change Voice App",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/api/v1/ai/voice/engine": {
-      "put": {
-        "description": "Queue the switch between separate steps and the full-duplex model; the job stops and starts GPU apps.",
-        "operationId": "change_voice_engine_api_v1_ai_voice_engine_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AiVoiceEngineRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Change Voice Engine",
         "tags": [
           "ai"
         ]
@@ -9062,6 +9102,108 @@
           }
         },
         "summary": "Change Speech Models",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/voice/speech/remove": {
+      "post": {
+        "description": "Delete one downloaded speech model Speaches is not set up to use, to free its disk space.",
+        "operationId": "remove_speech_model_api_v1_ai_voice_speech_remove_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechModelRemoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Remove Speech Model",
         "tags": [
           "ai"
         ]
@@ -13840,6 +13982,190 @@
         ]
       }
     },
+    "/api/v1/power": {
+      "get": {
+        "description": "Whether Mu3Lab is on; while it turns off, how far it has got.\n\nThe wake page answers this same address once Mu3Lab is off, so the dashboard's page can\nfollow the whole turn-off and then show the wake page.",
+        "operationId": "power_status_api_v1_power_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Power Status",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/power/off": {
+      "post": {
+        "description": "Turn the whole of Mu3Lab off: every app, sign-in, Caddy and this dashboard.\n\nOnly the wake page stays on, at the dashboard's address, with a button to turn it on.\nIt runs as its own systemd unit, because it stops the dashboard answering this request.",
+        "operationId": "power_off_api_v1_power_off_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Power Off",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/v1/providers": {
       "get": {
         "description": "List safe connection state; encrypted keys never cross this boundary.",
@@ -17098,6 +17424,198 @@
         ]
       }
     },
+    "/api/v1/system/backups/location": {
+      "get": {
+        "description": "Where the backups are, the drives they could move to, and the latest move.",
+        "operationId": "backup_location_status_api_v1_system_backups_location_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupLocation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Backup Location Status",
+        "tags": [
+          "system"
+        ]
+      },
+      "post": {
+        "description": "Move the backups to another drive (or back to the main one); a job that pauses backups while it copies.",
+        "operationId": "move_backups_api_v1_system_backups_location_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupLocationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Move Backups",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/v1/system/backups/platform": {
       "get": {
         "description": "Mu3Lab's own backup and each core app's, from their own evidence.",
@@ -17942,6 +18460,98 @@
           }
         },
         "summary": "Update System Config",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/restart": {
+      "post": {
+        "description": "Restart the dashboard and worker once this answer is sent; the apps keep running.\n\nWhen the dashboard's code changed since its page was built, the page is rebuilt first.",
+        "operationId": "restart_mu3lab_api_v1_system_restart_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Restart Mu3Lab",
         "tags": [
           "system"
         ]

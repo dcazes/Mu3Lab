@@ -1,4 +1,4 @@
-"""Chat connectors for Audiobookshelf, Navidrome and RomM: Mu3Lab's adapter and how each gets its credential."""
+"""Chat connectors for Audiobookshelf, Navidrome, RomM and qBittorrent: Mu3Lab's adapter and how each gets its credential."""
 
 from __future__ import annotations
 
@@ -18,7 +18,12 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 
 ROOT = Path(__file__).resolve().parents[1]
-MODES = {"audiobookshelf-adapter": "audiobookshelf", "navidrome-adapter": "navidrome", "romm-adapter": "romm"}
+MODES = {
+    "audiobookshelf-adapter": "audiobookshelf",
+    "navidrome-adapter": "navidrome",
+    "romm-adapter": "romm",
+    "qbittorrent-adapter": "qbittorrent",
+}
 
 
 def adapter(mode: str):

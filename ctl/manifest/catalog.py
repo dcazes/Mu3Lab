@@ -122,17 +122,25 @@ def _check_images(compose: Path) -> None:
 _PUBLISH = re.compile(r"(?:(?P<address>.+):)?(?P<port>\d+):\d+(?:/(?P<protocol>tcp|udp))?")
 # This server's tailnet address. The ``:?`` form makes Compose refuse to start without it:
 # an empty address would publish the port on every network the computer is on.
+# Networks created with --internal (ctl.install): no internet, and no published ports.
+INTERNAL_NETWORKS = frozenset({"mu3lab_backend"})
 _TAILNET_ADDRESS = re.compile(r"\$\{MU3LAB_TAILNET_IP:\?[^}:]*\}")
+# This server's home-network address, for an app kept off the tailnet (same ``:?`` rule).
+_HOME_ADDRESS = re.compile(r"\$\{MU3LAB_HOME_IP:\?[^}:]*\}")
 
 
 def published(compose: Path) -> list[tuple[int, str, str]]:
     """``(port, protocol, listen)`` for every host port a compose file publishes.
 
-    ``listen`` is ``loopback`` (``127.0.0.1``) or ``tailnet`` (``${MU3LAB_TAILNET_IP:?...}``);
-    any other address is refused.
+    ``listen`` is ``loopback`` (``127.0.0.1``), ``tailnet`` (``${MU3LAB_TAILNET_IP:?...}``) or
+    ``home`` (``${MU3LAB_HOME_IP:?...}``); any other address is refused.
     """
     ports = []
-    for definition in _services(compose).values():
+    for name, definition in _services(compose).items():
+        networks = set(definition.get("networks") or [])
+        if definition.get("ports") and networks and networks <= INTERNAL_NETWORKS:
+            # Docker publishes no port of a container that is only on internal networks.
+            raise CatalogError(f"{compose}: {name} publishes a port, so it needs mu3lab_frontend too")
         for entry in definition.get("ports") or []:
             match = _PUBLISH.fullmatch(str(entry))
             if not match:
@@ -142,10 +150,12 @@ def published(compose: Path) -> list[tuple[int, str, str]]:
                 listen = "loopback"
             elif _TAILNET_ADDRESS.fullmatch(address):
                 listen = "tailnet"
+            elif _HOME_ADDRESS.fullmatch(address):
+                listen = "home"
             else:
                 raise CatalogError(
                     f"{compose}: {entry!r} must listen on 127.0.0.1 only "
-                    "(or on ${MU3LAB_TAILNET_IP:?...} for a tailnet extra port)"
+                    "(or on ${MU3LAB_TAILNET_IP:?...} / ${MU3LAB_HOME_IP:?...} for a tailnet or home extra port)"
                 )
             ports.append((int(match["port"]), match["protocol"] or "tcp", listen))
     return ports
@@ -332,6 +342,8 @@ def load(apps_dir: Path = APPS_DIR) -> Catalog:
         if manifest.id != folder.name:
             raise CatalogError(f"{manifest_path}: id must match the folder name")
         _check_compose(folder / COMPOSE_FILE, f"mu3lab-{manifest.id}")
+        for option in sorted(folder.glob("docker-compose.option-*.yml")):
+            _check_images(option)
         apps.append(App(manifest=manifest, folder=folder, connectors=_load_connectors(manifest, folder)))
     if not apps:
         raise CatalogError(f"no apps found under {apps_dir}")

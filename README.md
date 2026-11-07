@@ -51,6 +51,7 @@ Every request enters through Tailscale, then Caddy routes it to the right app be
 | Navidrome | Music streaming | |
 | Audiobookshelf | Audiobooks and podcasts | |
 | RomM | Game library with a browser player | |
+| qBittorrent | Torrent downloads straight into the media libraries, with an optional VPN | |
 | LobeChat | Alternative chat app | |
 | Firecrawl | Web page extraction for AI | ✓ |
 | Speech | Local speech recognition and spoken replies | |
@@ -102,6 +103,10 @@ Keep the `Mu3Lab` folder where it is, because the background services run from i
 - **Docker and browsers.** Setup may install or upgrade Docker and restart it, which affects other containers on this computer. It also adds the Bitwarden extension to Chrome, Chromium and Brave through a browser policy, so those browsers may show *Managed by your organization*.
 - **Backups stay local.** Scheduled backups need the Kopia backups app and are stored on this computer. Copying them elsewhere is up to you. Media libraries under `/srv/mu3lab/media` are not backed up.
 - **Trusted household only.** The dashboard and worker share Docker access, which is equivalent to root on this computer. Mu3Lab is not designed to isolate untrusted users or apps.
+
+## Turning Mu3Lab off
+
+An administrator can turn the whole of Mu3Lab off from the menu under their name: **Turn off Mu3Lab**. Every app, sign-in and the dashboard stop. Only a small wake page stays on at the dashboard's address, using about 20 MB of memory, and its button turns Mu3Lab back on. Off stays off after the computer restarts. On a terminal, `./stop.sh` turns Mu3Lab off and `./start.sh` turns it back on. A scheduled backup that falls due while Mu3Lab is off runs once it is back on.
 
 ## Updates and removal
 

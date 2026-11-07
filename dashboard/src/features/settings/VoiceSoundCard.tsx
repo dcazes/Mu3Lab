@@ -14,16 +14,7 @@ import { Callout, Card } from '../../components/Layout';
 import { useAction } from '../../lib/useAction';
 import type { ApiState } from '../../lib/useApi';
 import { JobLog } from './AiModelsCard';
-
-/** Speaches' model names, in words; an unknown one shows as it is. */
-const MODEL_LABELS: Record<string, string> = {
-  'deepdml/faster-whisper-large-v3-turbo-ct2': 'Whisper large v3 turbo: most accurate, fast on an NVIDIA card',
-  'Systran/faster-whisper-small': 'Whisper small: quicker without a graphics card',
-  'speaches-ai/Kokoro-82M-v1.0-ONNX': 'Kokoro full: for an NVIDIA card',
-  'speaches-ai/Kokoro-82M-v1.0-ONNX-int8': 'Kokoro small: for the processor',
-};
-
-export const modelLabel = (id: string) => MODEL_LABELS[id] ?? id;
+import { ModelChoices, useRemoveModel } from './ModelChoices';
 
 /** How the assistant sounds and hears: its own voice, and Speaches' models, which other apps share. */
 export function VoiceSoundCard({ api, readOnly = false }: { api: ApiState<VoicePage>; readOnly?: boolean }) {
@@ -40,6 +31,10 @@ export function VoiceSoundCard({ api, readOnly = false }: { api: ApiState<VoiceP
       void reload();
     },
     [reload],
+  );
+  const { remove, removing } = useRemoveModel(
+    (model) => postJsonApi('/api/v1/ai/voice/speech/remove', { model: model.id }),
+    () => void reload(),
   );
   const title = 'Voice';
   const description = 'How the voice assistant sounds, and the speech models that turn speech into text and back.';
@@ -143,34 +138,24 @@ export function VoiceSoundCard({ api, readOnly = false }: { api: ApiState<VoiceP
       <form className="form" onSubmit={(event) => void saveModels(event)}>
         <fieldset className="plain-fieldset" disabled={readOnly || busy}>
           <legend>Speech models, shared with every app that uses speech</legend>
-          <label className="field">
-            <span>Hearing model (speech to text)</span>
-            <select
-              aria-label="Hearing model"
-              value={draft.stt_model}
-              onChange={(event) => setModels({ ...draft, stt_model: event.target.value })}
-            >
-              {speech.stt.options.map((id) => (
-                <option key={id} value={id}>
-                  {modelLabel(id)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Speaking model (text to speech)</span>
-            <select
-              aria-label="Speaking model"
-              value={draft.tts_model}
-              onChange={(event) => setModels({ ...draft, tts_model: event.target.value })}
-            >
-              {speech.tts.options.map((id) => (
-                <option key={id} value={id}>
-                  {modelLabel(id)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ModelChoices
+            name="hearing-model"
+            legend="Hearing model (speech to text)"
+            models={speech.stt.options}
+            value={draft.stt_model}
+            onChange={(id) => setModels({ ...draft, stt_model: id })}
+            remove={(model) => void remove(model)}
+            removing={removing}
+          />
+          <ModelChoices
+            name="speaking-model"
+            legend="Speaking model (text to speech)"
+            models={speech.tts.options}
+            value={draft.tts_model}
+            onChange={(id) => setModels({ ...draft, tts_model: id })}
+            remove={(model) => void remove(model)}
+            removing={removing}
+          />
         </fieldset>
         {!readOnly && (
           <div className="button-row">

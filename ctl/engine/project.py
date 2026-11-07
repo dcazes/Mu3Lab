@@ -23,15 +23,16 @@ import json
 import os
 import secrets
 import shutil
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
 
-from ctl import hostinfo, resource_locks
+from ctl import hostinfo, process, resource_locks
 from ctl.app_settings import AppSettings, fixed_names
 from ctl.compute import build, gpu_build
 from ctl.engine import template
@@ -45,7 +46,12 @@ from ctl.store.secrets import SecretStore
 
 # Files that describe the app to Mu3Lab rather than run it.
 NOT_COPIED = frozenset({"app.yaml", "hooks.py", "connectors", "scripts", "__pycache__"})
+# A developer's environments and caches, at any depth (a voice agent's tests leave a .venv).
+DEV_FOLDERS = ("__pycache__", ".venv", "node_modules")
 TEMPLATE_SUFFIX = ".tmpl"
+# In each runtime project: the files the last copy took from the app's folder, so a file the
+# app later drops (an old setup's Compose override) is removed instead of staying in use.
+SHIPPED_RECORD = ".mu3lab-shipped"
 OIDC_SECRET_LENGTH = 40
 # Rendering waits this long for a job that holds the app.
 RENDER_LOCK_SECONDS = 600
@@ -193,6 +199,13 @@ class Facts:
         return tailnet_ip()
 
     @cached_property
+    def home_address(self):
+        """This server's home-network address, asked once per render and only by an app on the home network."""
+        from ctl.service_state import home_address
+
+        return home_address()
+
+    @cached_property
     def media_folders(self) -> str:
         """The libraries under the media root, comma-separated; "none" while there are none."""
         media = self.paths.media
@@ -213,6 +226,9 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
     def lookup(name: str) -> str | None:
         if name == "tailnet_ip":
             return facts.tailnet_ip or None
+        if name in {"home_ip", "home_network"}:
+            home = facts.home_address
+            return (home.ip if name == "home_ip" else home.network) if home else None
         if name == "connector_networks":
             return facts.connector_networks or None
         if name.startswith("route_url:"):
@@ -310,18 +326,97 @@ def build_env(
     return env
 
 
+def _copied(item: Path) -> bool:
+    """Whether a top-level item of the app's folder goes into its runtime project as it is."""
+    if item.name in NOT_COPIED or item.name.startswith(".env") or item.is_symlink():
+        return False
+    return item.suffix != TEMPLATE_SUFFIX
+
+
+def shipped_files(source: Path) -> list[Path]:
+    """Every file ``_copy_folder`` copies from the app's folder, relative to it.
+
+    Updates compare these with the installed project, so a change Mu3Lab makes to an app's
+    own files (LiveKit's voice agent, say) is offered as an update like a new release.
+    """
+    files: list[Path] = []
+    for item in sorted(source.iterdir()):
+        if not _copied(item):
+            continue
+        if item.is_dir():
+            for path in sorted(item.rglob("*")):
+                relative = path.relative_to(source)
+                if path.is_file() and not any(part in DEV_FOLDERS for part in relative.parts):
+                    files.append(relative)
+        elif item.is_file():
+            files.append(Path(item.name))
+    return files
+
+
+def _outputs(source: Path) -> set[str]:
+    """Everything the app's folder puts in its project: copied files and rendered templates."""
+    rendered = {path.name.removesuffix(TEMPLATE_SUFFIX) for path in source.glob(f"*{TEMPLATE_SUFFIX}")}
+    return {str(path) for path in shipped_files(source)} | rendered
+
+
+@cache
+def _dropped_in_history(source: Path) -> frozenset[str]:
+    """Files the checkout's history says the app's folder once had and deleted.
+
+    Only for projects copied before ``SHIPPED_RECORD`` existed; without git it finds nothing.
+    Kept for the process's life: the dashboard asks on every refresh, and a project gets its
+    record on its next copy.
+    """
+    try:
+        proc = process.completed(
+            ["git", "log", "--diff-filter=D", "--name-only", "--format=", "--relative", "--", "."],
+            cwd=source,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    if proc.returncode:
+        return frozenset()
+    found = set()
+    for line in proc.stdout.splitlines():
+        relative = Path(line.strip())
+        if not line.strip() or any(part in DEV_FOLDERS for part in relative.parts):
+            continue
+        top = relative.parts[0]
+        if top in NOT_COPIED or top.startswith(".env"):
+            continue
+        found.add(str(relative).removesuffix(TEMPLATE_SUFFIX) if len(relative.parts) == 1 else str(relative))
+    return frozenset(found)
+
+
+def retired_files(source: Path, target: Path) -> list[str]:
+    """Files an earlier copy put in the project that the app's folder no longer has."""
+    record = target / SHIPPED_RECORD
+    try:
+        before: set[str] | frozenset[str] = set(record.read_text(encoding="utf-8").splitlines())
+    except FileNotFoundError:
+        before = _dropped_in_history(source)
+    return sorted(name for name in before - _outputs(source) if name and (target / name).is_file())
+
+
 def _copy_folder(source: Path, target: Path) -> None:
     target.mkdir(mode=0o750, parents=True, exist_ok=True)
+    for name in retired_files(source, target):
+        (target / name).unlink()
+        # A folder the app no longer ships at all goes with its last file.
+        for folder in (target / name).parents:
+            if folder == target or any(folder.iterdir()):
+                break
+            folder.rmdir()
     for item in source.iterdir():
-        if item.name in NOT_COPIED or item.name.startswith(".env") or item.is_symlink():
-            continue
-        if item.suffix == TEMPLATE_SUFFIX:
+        if not _copied(item):
             continue
         destination = target / item.name
         if item.is_dir():
-            shutil.copytree(item, destination, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(item, destination, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*DEV_FOLDERS))
         else:
             shutil.copy2(item, destination)
+    write_atomic(target / SHIPPED_RECORD, "".join(f"{name}\n" for name in sorted(_outputs(source))).encode("utf-8"))
 
 
 def _write_private(path: Path, text: str) -> None:

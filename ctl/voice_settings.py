@@ -10,8 +10,7 @@ An administrator chooses, in Settings, Voice Assistant:
 
 The agent cannot reach the control plane, so Mu3Lab writes ``settings.json`` beside the app tools
 (``ctl/voice_tools.py``) whenever these change and whenever chat's assistants sync (every install
-does). The agent reads it at each call's start, so a change needs no restart. The file also says
-how the assistant talks, which only the full-duplex switch changes (``ctl/duplex_voice.py``).
+does). The agent reads it at each call's start, so a change needs no restart.
 
 The same page lists the voices Speaches has, plays a sample of one, and checks each app the
 assistant can use, as the administrator looking.
@@ -24,7 +23,9 @@ import json
 import os
 import re
 from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ctl.runtime import RuntimePaths
@@ -115,13 +116,9 @@ def search_installed() -> bool:
 
 def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
     """What the agent reads at each call's start (apps/livekit/voice-agent/src/agent.py)."""
-    from ctl import duplex_voice
-
     paths = paths or RuntimePaths()
     chosen = get(paths)
     return {
-        "engine": duplex_voice.agent_engine(paths),
-        "omni_url": duplex_voice.OMNI_URL,
         "responsiveness": chosen["responsiveness"],
         "interruptions": chosen["interruptions"],
         "voice": chosen["voice"],
@@ -167,8 +164,41 @@ def _speech_url(path: str) -> str:
     return f"http://127.0.0.1:{_speech_app().manifest.service.local_port}{path}"
 
 
-def speech_models() -> dict[str, Any]:
-    """Speaches' speech recognition and voice models: the choices and the ones in use."""
+@dataclass(frozen=True)
+class SpeechModel:
+    name: str
+    note: str
+    download_gb: float
+    # An estimate of the memory (GiB) it takes while loaded, run the way its note suggests.
+    memory_gb: float
+    # How its weights are stored: Speaches' models come at 32, 16 or 8 bits, not Q4.
+    precision: str
+
+
+# The choices in apps/speaches/app.yaml. Sizes are the downloaded folders, measured 2026-11-04.
+SPEECH: dict[str, SpeechModel] = {
+    "deepdml/faster-whisper-large-v3-turbo-ct2": SpeechModel(
+        "Whisper large v3 turbo", "Most accurate; fast on an NVIDIA card.", 1.6, 2, "16-bit"
+    ),
+    "Systran/faster-whisper-small": SpeechModel("Whisper small", "Quicker without a graphics card.", 0.5, 1, "16-bit"),
+    "speaches-ai/Kokoro-82M-v1.0-ONNX": SpeechModel("Kokoro full", "For an NVIDIA card.", 0.3, 0.5, "32-bit"),
+    "speaches-ai/Kokoro-82M-v1.0-ONNX-int8": SpeechModel("Kokoro small", "For the processor.", 0.1, 0.3, "8-bit"),
+}
+
+
+def _speech_folder(model_id: str, paths: RuntimePaths | None = None) -> Path:
+    """Where Speaches keeps a downloaded model: Hugging Face's cache, mounted from the app's data
+    folder (its docker-compose.yml)."""
+    return (paths or RuntimePaths()).data / _speech_app().id / "models" / ("models--" + model_id.replace("/", "--"))
+
+
+def _speech_downloaded(model_id: str, paths: RuntimePaths | None = None) -> bool:
+    snapshots = _speech_folder(model_id, paths) / "snapshots"
+    return snapshots.is_dir() and any(snapshots.iterdir())
+
+
+def speech_models(paths: RuntimePaths | None = None) -> dict[str, Any]:
+    """Speaches' speech recognition and voice models: the choices, which are downloaded and the ones in use."""
     from ctl import chat_ops, service_config
     from ctl.registry import load
 
@@ -178,9 +208,18 @@ def speech_models() -> dict[str, Any]:
 
     def field(key: str) -> dict[str, Any]:
         item = fields.get(key) or {}
+        value = str(item.get("value") or item.get("default") or "")
         return {
-            "value": str(item.get("value") or item.get("default") or ""),
-            "options": [str(option) for option in item.get("options") or []],
+            "value": value,
+            "options": [
+                {
+                    "id": option,
+                    **asdict(SPEECH.get(option) or SpeechModel(option, "", 0, 0, "")),
+                    "downloaded": _speech_downloaded(option, paths),
+                    "in_use": option == value,
+                }
+                for option in map(str, item.get("options") or [])
+            ],
         }
 
     return {
@@ -190,6 +229,27 @@ def speech_models() -> dict[str, Any]:
         "tts": field("tts_model"),
         "default_voice": str((fields.get("tts_voice") or {}).get("value") or ""),
     }
+
+
+def remove_speech_model(model_id: str, root: Path, log: Log, paths: RuntimePaths | None = None) -> str:
+    """Delete one downloaded speech model Speaches does not use now; returns a sentence for the person."""
+    from ctl.lifecycle.uninstall import delete_data
+
+    speech = speech_models(paths)
+    known = {option["id"]: option for part in ("stt", "tts") for option in speech[part]["options"]}
+    model = known.get(model_id)
+    if model is None:
+        raise ValueError("Choose one of the listed speech models.")
+    if model["in_use"]:
+        raise ValueError(f"{model['name']} is in use. Choose another speech model first.")
+    if not model["downloaded"]:
+        return f"{model['name']} is not downloaded."
+    folder = _speech_folder(model_id, paths)
+    # Speaches' download lock for the model goes with it.
+    ok, detail = delete_data([folder, folder.parent / ".locks" / folder.name], root, log)
+    if not ok:
+        raise ValueError(detail)
+    return f"Removed {model['name']}; {model['download_gb']} GB of disk space is free again."
 
 
 def _label(name: str) -> str:

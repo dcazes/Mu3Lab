@@ -60,6 +60,8 @@ def gpu_build(folder: Path, project: Path, uses_gpu: bool) -> bool:
 
 def compose_overrides(service_id: str, project: Path) -> list[Path]:
     """Return only checked-in/runtime-materialized overrides, never browser paths."""
+    from ctl.engine.compose import option_files
+
     mode = recorded_mode(project) or resolved_mode()
     candidate = project / f"docker-compose.{mode}.yml"
-    return [candidate] if mode != "cpu" and candidate.is_file() else []
+    return [*([candidate] if mode != "cpu" and candidate.is_file() else []), *option_files(project)]

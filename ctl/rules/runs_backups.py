@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ctl import backups
+from ctl import backup_location, backups
 from ctl.engine.hooks import HookContext
 from ctl.rules import Params, Rule, register
 from ctl.runtime import RuntimePaths
@@ -40,17 +40,20 @@ class RunsBackups(Rule):
         # The install's own runtime, never /srv/mu3lab by default: the Compose check renders into a temporary one.
         paths = paths or RuntimePaths()
         env[self.params.password_env] = backups.repository_password(paths)
-        env[self.params.backups_env] = str(paths.backups)
+        env[self.params.backups_env] = str(backup_location.folder(paths))
         env[self.params.state_env] = str(paths.state)
 
     def before_start(self, ctx: HookContext) -> None:
         from ctl import platform_backup
 
         paths = ctx.facts.paths if ctx.facts else RuntimePaths()
+        missing = backup_location.problem(paths)
+        if missing:
+            ctx.fail("before_start", "backup_drive_missing", missing)
         try:
             backups.ensure_repository(ctx.log, paths)
         except backups.BackupError as exc:
             ctx.fail("before_start", "backup_repository_unavailable", str(exc))
-        (paths.backups / "restores").mkdir(mode=0o750, exist_ok=True)
+        (backup_location.folder(paths) / "restores").mkdir(mode=0o750, exist_ok=True)
         (paths.state / "kopia-server").mkdir(mode=0o700, exist_ok=True)
         platform_backup.export_folder(paths)

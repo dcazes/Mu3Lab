@@ -71,7 +71,7 @@ function InstalledRow({ service, summary }: { service: Service; summary: string 
   const update = useApplyUpdate(service);
   const mode = service.identity?.mode;
   const sso = mode === 'native_oidc' || mode === 'trusted_header';
-  const updatable = isAdmin && service.stage === 'optional' && service.update?.update_available;
+  const updatable = isAdmin && service.stage !== 'foundation' && service.update?.update_available;
   return (
     <div className="row installed-row">
       <Link to={`/apps/${service.id}`} className="row-main">

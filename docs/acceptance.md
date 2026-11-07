@@ -66,7 +66,7 @@ on the working household server for this exercise.
    data returns, no duplicate owner is created, and routes/connectors recover.
    Repeat a deliberately interrupted operation and inspect its clear error,
    retry action and redacted job log. Confirm no other installation is touched.
-7. **Vault and provider.** Verify SurfSense and FreeLLMAPI login entries in
+7. **Vault and provider.** Verify the FreeLLMAPI login entry in
    Vaultwarden. Sign the Bitwarden extension into this test vault and exercise
    autofill. Add a test provider key and verify a real chat response through
    the approved route. No key or master password may appear in browser error

@@ -360,6 +360,7 @@
 }
 
 .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -383,6 +384,24 @@
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
+}
+
+.tile .app-icon {
+  transition: transform 0.14s;
+}
+
+.tile:hover .app-icon {
+  transform: scale(1.04);
+}
+
+.tile:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.tile:focus-visible,
+.mini-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .tile-name {
@@ -898,4 +917,100 @@
 /* The hollow "stopped" ring needs a solid centre where it overlaps an icon. */
 .mini-tile .dot-gray {
   background: var(--surface);
+}
+
+/* "77.2 GB on Storage": which other drive holds an app's data. Unlike the data and program split, it
+   stays on narrow screens. */
+.legend-drive {
+  display: block;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---------- Select mode: pick apps to start, stop or restart together ---------- */
+.section-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.launcher-group .launcher-pick {
+  margin-left: 10px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.launcher-group .launcher-pick:hover {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+/* A picked app is highlighted, as in Apps, Discover; no checkboxes. */
+.tile.is-selecting:hover {
+  transform: none;
+}
+
+.tile.is-selected,
+.mini-tile.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tile.is-selected .tile-name {
+  color: var(--accent-text);
+}
+
+.tile:disabled,
+.mini-tile:disabled {
+  cursor: default;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.tile-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  stroke-width: 3;
+  animation: pop 0.14s ease-out;
+}
+
+.mini-tile .tile-check {
+  top: auto;
+  right: -5px;
+  bottom: -5px;
+  width: 15px;
+  height: 15px;
+  padding: 2px;
+}
+
+.selection-bar {
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .action-bar.selection-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .action-bar.selection-bar > span {
+    flex: 0 0 100%;
+    padding: 0 4px;
+  }
+
+  .action-bar.selection-bar .btn {
+    flex: 1 1 0;
+    padding-inline: 6px;
+  }
 }

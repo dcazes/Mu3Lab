@@ -90,10 +90,44 @@ def needs_connect(app: App) -> bool:
     return app.manifest.chat.workspace == "lobe"
 
 
-def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False) -> list[dict[str, Any]]:
+GATEWAY = "tool_gateway"
+
+
+def gateway_name() -> str:
+    from ctl.platform_apps import by_capability
+
+    return by_capability(GATEWAY).manifest.name
+
+
+def gateway_up() -> bool:
+    """Whether ContextForge, which connects chat to every app's tools, answers now."""
+    from ctl.platform_apps import by_capability
+    from ctl.registry import load as load_registry
+    from ctl.service_state import _healthy
+
+    try:
+        return _healthy(load_registry().get(by_capability(GATEWAY).id))[0]
+    except (KeyError, ValueError, OSError):
+        return False
+
+
+def _status(installation: str, connector: str, gateway: bool) -> str:
+    """Whether an assistant's tools are in reach: ready, stopped, gateway_down or connector_down."""
+    if installation == "stopped" or connector == "stopped":
+        return "stopped"
+    if not gateway:
+        return "gateway_down"
+    return "ready" if connector == "live" else "connector_down"
+
+
+def desired_assistants(
+    uid: str = "", email: str = "", *, operator: bool = False, gateway: bool | None = None
+) -> list[dict[str, Any]]:
     """Everyone's assistants: one per installed app whose connector is switched on and has a ContextForge virtual server.
 
-    Each is ``active`` only while its connector is live; one whose app is stopped stays, switched off.
+    Each carries its ``status`` (``_status``) and is ``active`` only while that is ready: its app
+    runs, its connector is live and ContextForge (``gateway``, checked when not given) answers.
+    One that is not stays, and its instructions say first why and how to fix it.
     Each names its ``audience``: the household, or administrators only.
 
     With ``uid`` and ``email`` (LobeChat), each carries that person's own ContextForge key, and
@@ -111,20 +145,22 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
     state = ControlState.runtime()
     if state is None:
         return []
-    # Per app: its switched-on connector, a live one first, and whether that one is live.
+    # Per app: its switched-on connector, a live one first, and that one's state.
     live: dict[str, str] = {}
-    active: dict[str, bool] = {}
+    connector_state: dict[str, str] = {}
     connectors = {connector.id: connector for connector in load_connectors(load_registry())}
     for connector in connectors.values():
         runtime = state.mcp_server(connector.id)
         if not runtime or not runtime["enabled"] or not contextforge_ops.virtual_server(connector.id):
             continue
-        if not active.get(connector.service_id):
+        if connector_state.get(connector.service_id) != "live":
             live[connector.service_id] = connector.id
-            active[connector.service_id] = runtime["state"] == "live"
+            connector_state[connector.service_id] = str(runtime["state"])
     from ctl import agent_context
     from ctl.mcp_review import load as load_review
 
+    gateway = gateway_up() if gateway is None else gateway
+    gateway_title = gateway_name()
     dns_name = tailnet_dns_name() or ""
     # Every assistant names the others, so it can send people to the right one.
     titles = {
@@ -149,19 +185,30 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
             review = load_review(connector.id, connector.review) if connector.review else None
         except (OSError, ValueError):
             review = None
+        status = _status(str(installation["state"]), connector_state[app.id], gateway)
         instructions = agent_context.app_instructions(
             app,
             per_person=connector.per_person,
             review=review,
             dns_name=dns_name,
             others=[title for other, title in titles.items() if other != app.id],
+            status=status,
+            gateway=gateway_title,
+            connector_state=connector_state[app.id],
+            # One person's assistants (LobeChat) know who they serve; Open WebUI fills in each person's role,
+            # and the date and time from their browser.
+            operator=operator if uid else None,
+            now="" if uid else agent_context.NOW,
         )
         item = {
             "id": app.id,
             "title": assistant.title,
+            "app_name": app.manifest.name,
             "description": assistant.description,
             "instructions": instructions,
-            "active": active[app.id],
+            "status": status,
+            "connector_state": connector_state[app.id],
+            "active": status == "ready",
             "audience": assistant.audience,
         }
         if uid and assistant.audience == "operators" and not operator:
@@ -186,7 +233,9 @@ def desired_assistants(uid: str = "", email: str = "", *, operator: bool = False
     from ctl import calendar_tools
 
     for item in calendar_tools.assistants(uid):
-        if uid and email:
+        # Calendar tools reach the calendar through ContextForge too.
+        item |= {"status": "ready" if gateway else "gateway_down", "active": gateway, "app_name": "your calendar"}
+        if uid and email and item["active"]:
             item["token"] = contextforge_ops.person_key(
                 uid, email, "calendar", str(item["server_id"]), team_id=str(item["team_id"])
             )

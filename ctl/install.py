@@ -434,6 +434,9 @@ def _user_service_active(unit: str) -> bool:
 
 
 SERVICE_UNITS = ("mu3lab-ctl.service", "mu3lab-worker.service")
+# The wake page is rendered with them but runs only while Mu3Lab is turned off (ctl/power.py).
+WAKE_UNIT = "mu3lab-wake.service"
+RENDERED_UNITS = (*SERVICE_UNITS, WAKE_UNIT)
 
 
 def _unit_dir() -> Path:
@@ -442,7 +445,8 @@ def _unit_dir() -> Path:
 
 def _rendered_unit(root: Path, unit_name: str) -> str:
     template = root / "deploy" / unit_name
-    return template.read_text(encoding="utf-8").replace("@MU3LAB_ROOT@", str(root))
+    rendered = template.read_text(encoding="utf-8").replace("@MU3LAB_ROOT@", str(root))
+    return rendered.replace("@MU3LAB_STATE@", str(RuntimePaths().state))
 
 
 def _services_stamp() -> Path:
@@ -463,11 +467,11 @@ def _service_check(root: Path) -> dict:
     """Dashboard and worker installed, current, and healthy?
     States: no_unit | outdated | inactive | unhealthy | ready."""
     unit_dir = _unit_dir()
-    if any(not (unit_dir / unit).is_file() for unit in SERVICE_UNITS):
+    if any(not (unit_dir / unit).is_file() for unit in RENDERED_UNITS):
         return _row("service", "missing", "The dashboard and background worker are not installed yet.", "no_unit")
     try:
         units_current = all(
-            (unit_dir / unit).read_text(encoding="utf-8") == _rendered_unit(root, unit) for unit in SERVICE_UNITS
+            (unit_dir / unit).read_text(encoding="utf-8") == _rendered_unit(root, unit) for unit in RENDERED_UNITS
         )
     except OSError:
         units_current = False
@@ -524,10 +528,10 @@ def _linger_enabled(user: str) -> bool:
 
 
 def write_service_units(root: Path, log: Callable[[str], None]) -> str:
-    """Render the dashboard and worker units for this checkout. Returns an error, or ""."""
+    """Render the dashboard, worker and wake-page units for this checkout. Returns an error, or ""."""
     unit_dir = _unit_dir()
     unit_dir.mkdir(parents=True, exist_ok=True)
-    for unit_name in SERVICE_UNITS:
+    for unit_name in RENDERED_UNITS:
         if not (root / "deploy" / unit_name).is_file():
             return f"deploy/{unit_name} missing from checkout"
         rendered = _rendered_unit(root, unit_name)

@@ -285,7 +285,7 @@ describe('App page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mealie actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Stop' }));
     const dialog = await screen.findByRole('dialog', { name: 'Stop Mealie?' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Stop' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Stop Mealie' }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/v1/services/mealie/actions',

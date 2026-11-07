@@ -117,7 +117,7 @@ class DispatchTests(unittest.TestCase):
             home = Path(tmp)
             unit_dir = home / ".config" / "systemd" / "user"
             unit_dir.mkdir(parents=True)
-            for unit in ("mu3lab-ctl.service", "mu3lab-worker.service"):
+            for unit in install.RENDERED_UNITS:
                 (unit_dir / unit).touch()
             with (
                 patch("ctl.install.Path.home", return_value=home),
@@ -136,7 +136,7 @@ class DispatchTests(unittest.TestCase):
             home = Path(tmp)
             unit_dir = home / ".config" / "systemd" / "user"
             unit_dir.mkdir(parents=True)
-            for unit in ("mu3lab-ctl.service", "mu3lab-worker.service"):
+            for unit in install.RENDERED_UNITS:
                 (unit_dir / unit).touch()
             with (
                 patch("ctl.install.Path.home", return_value=home),

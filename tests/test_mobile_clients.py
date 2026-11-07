@@ -39,6 +39,8 @@ class MobileClientTests(unittest.TestCase):
                 "dawarich",
                 "open-webui",
                 "navidrome",
+                "qbittorrent",
+                "jellyfin",
             },
         )
         self.assertEqual(mobile["lobehub"]["primary"], "lobechat-pwa")

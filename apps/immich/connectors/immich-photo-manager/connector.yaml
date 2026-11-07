@@ -6,7 +6,7 @@ preferred: true
 per_person: true
 provenance: community
 repository: https://github.com/drolosoft/immich-photo-manager
-revision: 2.0.11
+revision: 2.0.14
 transport: streamable-http
 endpoint: http://immich-photo-manager:8626/mcp
 local_health: http://127.0.0.1:8815/health

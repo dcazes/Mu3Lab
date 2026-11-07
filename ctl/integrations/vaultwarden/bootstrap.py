@@ -156,7 +156,21 @@ def register(base_url: str, email: str, password: str, name: str, *, client: htt
     owned = client is None
     http = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=30.0)
     try:
-        response = http.post("/identity/accounts/register", json=body)
+        # Vaultwarden 1.37.4 removed the one-step register endpoint. Without mail it hands the
+        # sign-up token straight back; the name travels in the token, not the finishing request.
+        started = http.post(
+            "/identity/accounts/register/send-verification-email",
+            json={"email": email, "name": name or email},
+            headers={"Accept": "application/json"},
+        )
+        if started.status_code == 400 and "already" in started.text.lower():
+            raise VaultError("A Vaultwarden account with this email already exists.", "exists")
+        if started.status_code >= 400:
+            raise VaultError(f"Vaultwarden refused the new account (HTTP {started.status_code}).", "rejected")
+        token = started.json() if "json" in started.headers.get("content-type", "") else started.text.strip()
+        if not token:
+            raise VaultError("Vaultwarden sent a verification email instead of creating the account.", "rejected")
+        response = http.post("/identity/accounts/register/finish", json={**body, "emailVerificationToken": token})
         if response.status_code == 400 and "already" in response.text.lower():
             raise VaultError("A Vaultwarden account with this email already exists.", "exists")
         if response.status_code >= 400:

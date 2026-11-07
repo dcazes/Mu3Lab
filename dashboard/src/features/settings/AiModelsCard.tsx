@@ -14,14 +14,11 @@ import { useConfirm } from '../../components/Dialog';
 import { Callout, Card, Collapsible } from '../../components/Layout';
 import { Badge } from '../../components/Status';
 import { DownloadStatus } from '../apps/InstallProgress';
+import { ModelChoices, useRemoveModel } from './ModelChoices';
 import { humanize } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
 import { type ApiState, useApi } from '../../lib/useApi';
 import { JOB_POLL_MS, jobActive } from '../../lib/jobs';
-
-export function option(model: LocalModel): string {
-  return `${model.name} · ${model.download_gb} GB download, about ${model.memory_gb} GB memory`;
-}
 
 type Source = AiModelsRequest['sources'][number];
 
@@ -71,6 +68,9 @@ function TryResult({ result }: { result: AiTryResult }) {
         {result.name} on {result.where}: {result.seconds} s
         {result.loading_seconds ? ` (${result.loading_seconds} s to load it)` : ''}
         {result.tokens_per_second ? `, about ${result.tokens_per_second} tokens a second` : ''}.
+        {result.runner_started
+          ? ' The model runner was stopped, so it was started for this answer and stopped again.'
+          : ''}
       </small>
     </div>
   );
@@ -145,6 +145,10 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
     },
     [reload],
   );
+  const { remove, removing } = useRemoveModel(
+    (model) => postJsonApi(`/api/v1/ai/models/${model.id}/remove`, {}),
+    () => void reload(),
+  );
   const title = 'Where AI runs';
   const description =
     'Choose where chat runs and which models run on this server. Only models reviewed for Mu3Lab are offered, each marked by how well it fits beside your other apps.';
@@ -197,27 +201,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
     );
     if (result) setTried((current) => ({ ...current, [target]: result }));
   };
-  const remove = async (model: LocalModel) => {
-    if (
-      !(await confirm({
-        title: `Remove ${model.name}?`,
-        description: `This frees ${model.download_gb} GB of disk space. Choosing it again downloads it again.`,
-        confirmLabel: 'Remove',
-        tone: 'danger',
-      }))
-    )
-      return;
-    if (
-      await run(
-        `remove-${model.id}`,
-        () => postJsonApi(`/api/v1/ai/models/${model.id}/remove`, {}),
-        `${model.name} removed`,
-      )
-    )
-      void reload();
-  };
   const chosenChat = data.chat_models.find((model) => model.id === draft.chat_model);
-  const chosenEmbedding = data.embedding_models.find((model) => model.id === draft.embedding_model);
   const runnerName = (id: string) => data.runners.find((runner) => runner.id === id)?.name || 'the model runner';
 
   const save = async (event: FormEvent) => {
@@ -228,9 +212,7 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
         ? `Chat will answer on this server with ${chosenChat.name}. Outside providers stay a choice in chat.`
         : '',
       !outsideOn && saved.sources.includes('outside')
-        ? data.voice.matches_chat || data.voice.privacy === 'local_only'
-          ? 'Chat will use only the local model. Outside provider keys stay saved but are not used.'
-          : 'Chat will use only the local model. The voice assistant keeps its own setting and still uses outside providers.'
+        ? 'Chat and the voice assistant will use only the local model. Outside provider keys stay saved but are not used.'
         : '',
       embeddingChanged
         ? 'Document search in every app has to index its documents again with the new search model. Until it does, search may find nothing.'
@@ -241,11 +223,9 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
       chosenChat && !chosenChat.downloaded && !runnerChanged
         ? `${chosenChat.name} is downloaded first (${chosenChat.download_gb} GB).`
         : '',
-      // Voice reads chat's setting until it has its own, so say which way it goes.
+      // Voice always answers with chat's setting and model, so one model is loaded for both.
       draft.sources.join() !== saved.sources.join() || draft.chat_model !== saved.chat_model
-        ? data.voice.matches_chat
-          ? 'The voice assistant follows this setting too.'
-          : 'The voice assistant keeps its own setting (Settings, Voice Assistant).'
+        ? 'The voice assistant follows this setting too.'
         : '',
     ].filter(Boolean);
     if (
@@ -283,10 +263,17 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
           {data.suggestion_reason}
         </Callout>
       )}
-      {!data.runner_reachable && (
-        <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
-          Download states may be out of date until {runnerName(data.runner)} is running again.
+      {data.runner_stopped ? (
+        <Callout tone="info" title={`${runnerName(data.runner)} is stopped`}>
+          Trying, removing or switching a model starts {runnerName(data.runner)} for that and stops it again, so the
+          first answer takes longer. Local chat and document search answer only while it runs: start it from Home.
         </Callout>
+      ) : (
+        !data.runner_reachable && (
+          <Callout tone="warning" title={`${runnerName(data.runner)} is not answering`}>
+            Trying, removing or switching a model starts it again first.
+          </Callout>
+        )
       )}
       <form className="form" onSubmit={(event) => void save(event)}>
         <fieldset className="choice-list" disabled={readOnly || busy}>
@@ -330,15 +317,17 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
           })}
           <small className="muted">
             {draft.sources.length > 1
-              ? 'The first answers in every app. The second is a choice in the chat model menu; it never answers on its own when the first fails.'
+              ? draft.sources[0] === 'local'
+                ? 'The first answers in every app. The second is a choice in the chat model menu; it never answers chat on its own when the first fails. The voice assistant does use it when the local model is slow or stopped, so a call never goes silent.'
+                : 'The first answers in every app. The second is a choice in the chat model menu; it never answers on its own when the first fails.'
               : draft.sources[0] === 'local'
-                ? 'If the local model stops working, chat stops too: it never falls back to an outside provider. The voice assistant has its own setting.'
+                ? 'If the local model stops working, chat and the voice assistant stop too: they never fall back to an outside provider.'
                 : 'Turn on local models too to offer a private choice in chat.'}
           </small>
           {localOn && draft.sources[0] === 'outside' && (
             <Callout tone="info" title="Local models are second">
-              Chat{data.voice.matches_chat ? ' and the voice assistant' : ''} still answer through outside providers by
-              default. Move local models up to answer on this server first.
+              Chat and the voice assistant still answer through outside providers by default. Move local models up to
+              answer on this server first.
             </Callout>
           )}
         </fieldset>
@@ -362,64 +351,49 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
             <small className="muted">Runs the models below.</small>
           </label>
         )}
-        <fieldset className="model-list" disabled={readOnly || busy}>
-          <legend>Local chat model</legend>
-          {!localOn && <small className="muted">Used when local models are on.</small>}
-          {data.chat_models.map((model) => {
+        <ModelChoices
+          name="chat-model"
+          legend="Local chat model"
+          grouped
+          hint={!localOn && <small className="muted">Used when local models are on.</small>}
+          footer={
+            <small className="muted">
+              Downloaded models stay on this server, so switching back is instant. Try it sends one test question.
+            </small>
+          }
+          // The fit verdict joins the reviewer's note.
+          models={data.chat_models.map((model) => ({ ...model, note: `${model.note} ${fitText(model)}`.trim() }))}
+          value={draft.chat_model ?? ''}
+          onChange={(id) => setEdits({ ...draft, chat_model: id })}
+          disabled={busy}
+          readOnly={readOnly}
+          remove={(model) => void remove(model)}
+          removing={removing}
+          badges={(model) => {
             const fit = FIT[model.fit || ''];
             return (
-              <div key={model.id} className="model-entry">
-                <label className="model-row">
-                  <input
-                    type="radio"
-                    name="chat-model"
-                    checked={draft.chat_model === model.id}
-                    onChange={() => setEdits({ ...draft, chat_model: model.id })}
-                  />
-                  <span className="model-row-text">
-                    <strong>
-                      {model.name}
-                      {model.id === data.suggested && <Badge tone="blue">Suggested</Badge>}
-                      {fit && <Badge tone={fit.tone}>{fit.label}</Badge>}
-                      {model.downloaded && <Badge>Downloaded</Badge>}
-                    </strong>
-                    <small>
-                      {model.note} {fitText(model)} {model.download_gb} GB download, about {model.memory_gb} GB memory.
-                    </small>
-                  </span>
-                  {model.downloaded && !readOnly && (
-                    <span className="model-row-actions">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        loading={pending === `try-${model.id}`}
-                        aria-label={`Try ${model.name}`}
-                        onClick={() => void tryIt(model.id)}
-                      >
-                        Try it
-                      </Button>
-                      {!model.in_use && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          loading={pending === `remove-${model.id}`}
-                          aria-label={`Remove ${model.name}`}
-                          onClick={() => void remove(model)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </span>
-                  )}
-                </label>
-                {tried[model.id] && <TryResult result={tried[model.id]} />}
-              </div>
+              <>
+                {model.id === data.suggested && <Badge tone="blue">Suggested</Badge>}
+                {fit && <Badge tone={fit.tone}>{fit.label}</Badge>}
+              </>
             );
-          })}
-          <small className="muted">
-            Downloaded models stay on this server, so switching back is instant. Try it sends one test question.
-          </small>
-        </fieldset>
+          }}
+          actions={(model) =>
+            model.downloaded &&
+            !readOnly && (
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={pending === `try-${model.id}`}
+                aria-label={`Try ${model.name}`}
+                onClick={() => void tryIt(model.id)}
+              >
+                Try it
+              </Button>
+            )
+          }
+          below={(model) => tried[model.id] && <TryResult result={tried[model.id]} />}
+        />
         {saved.sources.includes('outside') && !readOnly && (
           <div className="model-entry">
             <Button size="sm" variant="ghost" loading={pending === 'try-outside'} onClick={() => void tryIt('outside')}>
@@ -428,22 +402,18 @@ export function AiModelsCard({ models, readOnly = false }: { models: ApiState<Ai
             {tried.outside && <TryResult result={tried.outside} />}
           </div>
         )}
-        <label className="field">
-          <span>Search model</span>
-          <select
-            aria-label="Search model"
-            disabled={readOnly || busy || locked}
-            value={draft.embedding_model}
-            onChange={(event) => setEdits({ ...draft, embedding_model: event.target.value })}
-          >
-            {data.embedding_models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {option(model)}
-              </option>
-            ))}
-          </select>
-          {chosenEmbedding && <small className="muted">{chosenEmbedding.note}</small>}
-        </label>
+        <ModelChoices
+          name="search-model"
+          legend="Search model"
+          models={data.embedding_models}
+          value={draft.embedding_model}
+          onChange={(id) => setEdits({ ...draft, embedding_model: id })}
+          disabled={busy}
+          locked={locked}
+          readOnly={readOnly}
+          remove={(model) => void remove(model)}
+          removing={removing}
+        />
         {locked && (
           <p className="muted">
             {data.embedding_locked_by.join(', ')} keeps a search index built for one search model, so the search model

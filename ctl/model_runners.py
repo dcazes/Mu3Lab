@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ctl.control_state import ControlState
@@ -49,6 +51,13 @@ def installed(app_id: str, state: ControlState | None = None) -> bool:
     return bool(record and record["state"] != "not_installed")
 
 
+def stopped(app_id: str, state: ControlState | None = None) -> bool:
+    """Whether the household stopped the runner (Home, Stop): it stays stopped between model tasks."""
+    state = state or ControlState.runtime()
+    record = state.installation(app_id) if state else None
+    return bool(record and record["state"] == "stopped")
+
+
 def find(app_id: str, catalog: Catalog | None = None) -> App | None:
     return next((app for app in runners(catalog) if app.id == app_id), None)
 
@@ -63,6 +72,69 @@ def effective(chosen: str, catalog: Catalog | None = None) -> App:
     return default_app(catalog)
 
 
+# --- Waking a stopped runner ------------------------------------------------------
+
+# How long a task waits for a Start or Stop of the runner from Home to finish first.
+WAKE_LOCK_SECONDS = 60
+
+
+def reachable(engine: Engine) -> bool:
+    try:
+        engine.downloaded()
+    except ENGINE_ERRORS:
+        return False
+    return True
+
+
+@contextmanager
+def awake(engine: Engine, root: Path, log: Log, *, lock_seconds: float = WAKE_LOCK_SECONDS) -> Iterator[bool]:
+    """Keep the runner answering for the block; yields whether Mu3Lab started it for the block.
+
+    A runner the household stopped is started for the task and stopped again after it, so
+    trying or switching a model never leaves it running. One that should be running but is
+    not answering is started and left running. The app's own lock (the one Home's Start and
+    Stop hold) is kept for the whole block, so a second task cannot stop it mid-answer.
+    """
+    from ctl import resource_locks
+    from ctl.lifecycle import app_control
+    from ctl.registry import load
+
+    app = engine.app
+    name = app.manifest.name
+    household_stopped = stopped(app.id)
+    if not household_stopped and reachable(engine):
+        yield False
+        return
+    lock = ExitStack()
+    try:
+        lock.enter_context(resource_locks.hold(f"app:{app.id}", timeout=lock_seconds))
+    except resource_locks.Busy:
+        raise RunnerError(f"{name} is being started or stopped; try again in a moment.") from None
+    with lock:
+        started = False
+        service = load().get(app.id)
+        if not reachable(engine):
+            log(f"{name} is stopped; starting it for this." if household_stopped else f"Starting {name}.")
+            healthy, why = app_control.start(service, root, log)
+            if not healthy:
+                if household_stopped:
+                    try:
+                        app_control.stop(service, root, log)
+                    except app_control.StopFailed as exc:
+                        log(str(exc))
+                raise RunnerError(f"{name} is stopped and did not start: {why}")
+            started = True
+        try:
+            yield started
+        finally:
+            if started and stopped(app.id):
+                log(f"Stopping {name} again, as it was before.")
+                try:
+                    app_control.stop(service, root, log)
+                except app_control.StopFailed as exc:
+                    log(f"{exc} Stop it from Home.")
+
+
 # --- Engines ----------------------------------------------------------------------
 
 
@@ -74,6 +146,7 @@ class Engine(Protocol):
     def chat_route(self, model: Model) -> str: ...
     def embedding_route(self, model: Model) -> str: ...
     def downloaded(self) -> set[str]: ...
+    def on_disk(self) -> set[str]: ...
     def has(self, model: Model, present: set[str]) -> bool: ...
     def pull(self, model: Model, log: Log, progress: Progress | None = None) -> None: ...
     def delete(self, model: Model) -> None: ...
@@ -88,6 +161,7 @@ class OllamaEngine:
     def __init__(self, app: App, paths: RuntimePaths) -> None:
         self.app = app
         self.base = f"http://127.0.0.1:{app.manifest.service.local_port}"
+        self.paths = paths
 
     def _call(self, path: str, payload: dict | None = None, *, method: str = "POST", timeout: float = 300) -> Any:
         request = urllib.request.Request(
@@ -119,6 +193,15 @@ class OllamaEngine:
     def downloaded(self) -> set[str]:
         tags = self._call("/api/tags", method="GET", timeout=15)
         return {self.name(str(item.get("name", ""))) for item in tags.get("models", []) if isinstance(item, dict)}
+
+    def on_disk(self) -> set[str]:
+        """What ``downloaded`` lists, read from Ollama's model folder while Ollama is stopped."""
+        # Ollama's own folder, mounted from the data root (apps/ollama/docker-compose.yml).
+        library = self.paths.data / self.app.id / "models" / "manifests" / "registry.ollama.ai" / "library"
+        try:
+            return {f"{tag.parent.name}:{tag.name}" for tag in library.glob("*/*") if tag.is_file()}
+        except OSError:
+            return set()
 
     def has(self, model: Model, present: set[str]) -> bool:
         return self.name(model.tag) in present
@@ -185,6 +268,8 @@ class OllamaEngine:
                 "model": model.tag,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
+                # A thinking model would spend the whole allowance thinking and show no answer.
+                "think": False,
                 "options": {"num_predict": 400},
             },
             timeout=600,

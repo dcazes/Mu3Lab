@@ -29,6 +29,7 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked
 from ctl.secrets import read_runtime_env
+from ctl.service_state import home_address, home_url
 from ctl.store import onboarding as onboarding_state
 from ctl.store import person_logins, records
 from ctl.store.secrets import SecretStore
@@ -107,14 +108,16 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
         if not any(ref.rule == "per_person_logins" for ref in service.manifest.rules):
             continue
         login = person_logins.get(service.id, str(person.get("username") or ""), paths)
-        if login and host:
+        # An app on the home network is filled at its home address (http://<address>:<port>).
+        url = home_url(service, home_address()) if service.manifest.service.home_port else ""
+        if login and (url or (host and service.private_https_port)):
             items.append(
                 Item(
                     f"login:{service.id}",
                     service.name,
                     str(login["login"]),
                     str(login["password"]),
-                    _origin(host, service.private_https_port),
+                    url or _origin(host, service.private_https_port),
                     "Created by Mu3Lab for you. Bitwarden fills this in when the app asks for its login.",
                 )
             )

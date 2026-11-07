@@ -7,19 +7,24 @@ import {
   type LucideIcon,
   Monitor,
   Moon,
+  Power,
   Rocket,
+  RotateCw,
   ScrollText,
   Settings,
   Sparkles,
   Sun,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
-import type { Mu3LabUpdate } from '../api';
+import { api, type Mu3LabUpdate, type OkResponse, postJsonApi } from '../api';
+import { useConfirm } from '../components/Dialog';
 import { RELEASES_URL } from '../features/settings/WhatsNew';
 import { navigate } from '../lib/router';
 import type { ThemePreference } from '../lib/theme';
+import { useAction } from '../lib/useAction';
 import { useApi } from '../lib/useApi';
 import { useDashboard, useIsAdmin } from '../state/dashboard';
+import { showTurningOff } from './PowerOverlay';
 
 const REPOSITORY_URL = 'https://github.com/dcazes/Mu3Lab';
 // Authentik's outpost ends the dashboard session and sends the person to its sign-out page.
@@ -57,6 +62,44 @@ export function UserMenu({
   // Only administrators can update, so only they are told an update is waiting.
   const update = useApi<Mu3LabUpdate>(admin ? '/api/v1/system/update' : null).data;
   const user = data.identity.display_name || data.identity.username || 'Account';
+  const confirm = useConfirm();
+  const { run } = useAction();
+  const restart = async () => {
+    // Asked again now: the dashboard's code may have changed since this page loaded.
+    const rebuild = await api<Mu3LabUpdate>('/api/v1/system/update').then(
+      (current) => Boolean(current.dashboard_outdated),
+      () => Boolean(update?.dashboard_outdated),
+    );
+    if (
+      !(await confirm({
+        title: 'Restart Mu3Lab?',
+        description: rebuild
+          ? 'The dashboard’s code has changed since its page was built, so the page is rebuilt first. Then the dashboard and its background worker restart. Your apps keep running. The dashboard is back in about a minute.'
+          : 'The dashboard and its background worker restart, which clears anything stuck in them. Your apps keep running. The dashboard is back in a few seconds.',
+        confirmLabel: rebuild ? 'Rebuild and restart' : 'Restart Mu3Lab',
+      }))
+    )
+      return;
+    await run(
+      'restart',
+      () => postJsonApi<OkResponse>('/api/v1/system/restart', {}),
+      (result) => result.message ?? '',
+    );
+  };
+  const turnOff = async () => {
+    if (
+      !(await confirm({
+        title: 'Turn off Mu3Lab?',
+        description:
+          'Every app, the chat assistants, sign-in and this dashboard stop, for everyone in the household. Only a small page stays on at this address, with a button to turn Mu3Lab back on. Turning off takes about a minute and turning on a few minutes. A backup that falls due while it is off runs once it is back on.',
+        confirmLabel: 'Turn off',
+        tone: 'danger',
+      }))
+    )
+      return;
+    const result = await run('power-off', () => postJsonApi<OkResponse>('/api/v1/power/off', {}));
+    if (result?.ok) showTurningOff();
+  };
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
@@ -86,6 +129,8 @@ export function UserMenu({
               badge: Boolean(update?.available),
             },
             { label: 'What’s new', icon: Sparkles, run: go('/settings/whats-new') },
+            { label: 'Restart Mu3Lab', icon: RotateCw, run: () => void restart() },
+            { label: 'Turn off Mu3Lab', icon: Power, run: () => void turnOff() },
           ]
         : []),
     ],

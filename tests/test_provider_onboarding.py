@@ -82,6 +82,26 @@ class BrowserPolicyTests(unittest.TestCase):
             connection.close()
             self.assertTrue(browser_extension.signed_in(database))
 
+    def test_a_sign_in_is_still_seen_while_vaultwarden_is_stopped(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "vaultwarden"
+            folder.mkdir()
+            database = folder / "db.sqlite3"
+            connection = sqlite3.connect(database)
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("CREATE TABLE devices (uuid TEXT, atype INTEGER)")
+            connection.execute("INSERT INTO devices VALUES ('chrome', 2)")
+            connection.commit()
+            connection.close()  # a clean stop removes the -wal and -shm files
+            # Vaultwarden's folder belongs to root, so the dashboard cannot create them again.
+            folder.chmod(0o555)
+            try:
+                self.assertTrue(browser_extension.signed_in(database))
+            finally:
+                folder.chmod(0o755)
+
     def test_existing_extension_rules_from_someone_else_are_left_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

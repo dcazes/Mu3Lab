@@ -294,7 +294,7 @@ def docker_usage(
     A layer several images share is counted once overall: Docker's total for
     images, less every image's own unique bytes, is split by each owner's share.
     An image no container uses is ``unused`` when Mu3Lab may remove it, and
-    otherwise not Mu3Lab's to count. Owners "" (not Mu3Lab's) are left out.
+    otherwise not Mu3Lab's to count. The build cache is ``unused`` too. Owners "" (not Mu3Lab's) are left out.
     """
     summary = _docker_json(["docker", "system", "df", "--format", "{{json .}}"], run, 60)
     verbose = _docker_json(["docker", "system", "df", "-v", "--format", "{{json .}}"], run, 120)
@@ -326,6 +326,8 @@ def docker_usage(
             program[name] += unique / len(runners)
             shared_by[name] += shared / len(runners)
     images_total = next((_size(row.get("Size")) for row in summary if row.get("Type") == "Images"), 0)
+    # Build cache is never needed to run an app, and "Free up space" clears all of it (ctl/disk_cleanup.py).
+    program[UNUSED] += next((_size(row.get("Size")) for row in summary if row.get("Type") == "Build Cache"), 0)
     shared_actual = max(0, images_total - unique_total)
     weight = sum(shared_by.values())
     for name, amount in shared_by.items():
@@ -347,7 +349,8 @@ def folder_owners(registry, root: Path, paths: RuntimePaths, *, split_core: bool
 
     With ``split_core``, core folders are "core/<part>" instead of "core".
     """
-    from ctl import backup_service, duplex_voice
+    from ctl import backup_service
+    from ctl.disk_cleanup import RETIRED
     from ctl.lifecycle.uninstall import data_directories
 
     own = f"{CORE}/{OWN_PART}" if split_core else CORE
@@ -359,12 +362,8 @@ def folder_owners(registry, root: Path, paths: RuntimePaths, *, split_core: bool
             result[f"data/{folder.name}"] = name
         for media in service.manifest.media:
             result[f"media/{media.name}"] = name
-    try:
-        # The voice assistant's full-duplex model: its Compose file names the folder through .env,
-        # so no mount above claims it.
-        result[str(duplex_voice.models_dir(paths).parent.relative_to(paths.root))] = duplex_voice.voice_app().id
-    except ValueError:
-        pass
+    # Downloads of features Mu3Lab no longer has: "Free up space" removes them without asking.
+    result.update({folder: REMOVED for folder in RETIRED if folder.startswith("data/")})
     try:
         # Kopia's repository is the backup app's data.
         result["backups"] = backup_service.service_id()
@@ -420,7 +419,48 @@ def measure_disk(registry, root: Path, paths: RuntimePaths, run=process.complete
         "owners": used(usage),
         "core_parts": used(parts),
         "removed_folders": [folder.name for folder in removed_data(registry, root, paths)],
+        "drives": _drive_usage(paths),
     }
+
+
+def other_drives(paths: RuntimePaths | None = None) -> list[dict[str, Any]]:
+    """Drives besides the main one that hold Mu3Lab's data, with their live size; today only a backup drive."""
+    import shutil
+
+    from ctl import backup_location
+
+    found = []
+    backup = backup_location.drive(paths)
+    if backup:
+        try:
+            usage = shutil.disk_usage(backup["mount"])
+        except OSError:
+            return []
+        found.append(
+            {
+                **backup,
+                "role": "backups",
+                "total": usage.total,
+                "used": usage.used,
+                "percent": round(usage.used / usage.total * 100, 1) if usage.total else 0.0,
+            }
+        )
+    return found
+
+
+def _drive_usage(paths: RuntimePaths) -> dict[str, dict[str, dict[str, int]]]:
+    """What each owner keeps on another drive, by mount point: the backups, measured as root."""
+    from ctl import backup_location, backup_service
+
+    backup = backup_location.drive(paths)
+    if not backup:
+        return {}
+    try:
+        owner = backup_service.service_id()
+    except ValueError:
+        owner = f"{CORE}/{OWN_PART}"
+    size = backup_location.used_bytes(paths, fresh=True)
+    return {backup["mount"]: {_fold(owner): {"data": size, "program": 0}}} if size else {}
 
 
 def stored_disk(paths: RuntimePaths | None = None) -> dict[str, Any] | None:

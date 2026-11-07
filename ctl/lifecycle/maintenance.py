@@ -6,9 +6,11 @@
   it was ("Put my original data back", "Undo update").
 - ``keep_update``: after an interrupted update whose new release was already
   in place, keep it if it starts healthy.
-- ``backup_stop`` and ``backup_start``: Kopia's backup service asks for an
-  app to be stopped just before its backup and started again just after
-  (``ctl.backup_service``); they run here so only the worker runs Docker.
+- ``backup_prepare``: Kopia's backup service asks for a consistent copy of an
+  app's databases just before its backup, while the app keeps running
+  (``ctl.backup_service``, ``ctl.database_dumps``); it runs here so only the
+  worker runs Docker. ``backup_start`` starts an app a backup stopped before
+  Mu3Lab made those copies.
 
 A job is never continued after its worker died: a restore or update job
 claimed a second time fails as interrupted, and its note
@@ -19,14 +21,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ctl import backup_service, job_guard
+from ctl import backup_service, database_dumps, job_guard
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, job_params, redact
-from ctl.lifecycle import app_control, in_progress, restore, update
+from ctl.lifecycle import app_control, app_releases, in_progress, restore, update
 from ctl.registry import Service
 
 MAINTENANCE_ACTIONS = frozenset({"restore", "update", "recover", "keep_update"})
-BACKUP_ACTIONS = frozenset({"backup_stop", "backup_start"})
+BACKUP_ACTIONS = frozenset({"backup_prepare", "backup_start"})
 
 
 class _Failed(Exception):
@@ -36,12 +38,11 @@ class _Failed(Exception):
 
 
 def _backup_hold(service: Service, root: Path, action: str, log) -> str:
-    if action == "backup_stop":
+    if action == "backup_prepare":
         try:
-            app_control.stop(service, root, log)
-        except app_control.StopFailed as exc:
-            raise _Failed("stop_failed", str(exc)) from exc
-        return f"{service.name} is stopped for its backup."
+            return database_dumps.write(service, root, log)
+        except database_dumps.DumpFailed as exc:
+            raise _Failed("dump_failed", str(exc)) from exc
     started, detail = app_control.start(service, root, log)
     if not started:
         raise _Failed("health_check_failed", f"{service.name} did not start again after its backup: {detail[-300:]}")
@@ -93,8 +94,11 @@ def execute(store: JobStore, state: ControlState | None, job: dict, service: Ser
             )
         elif backup_service.holding(service.id):
             raise _Failed("backup_running", f"Nothing changed: {service.name} is being backed up; try again shortly.")
-        elif service.stage != "optional" or not (app_control.project(service, root) / "docker-compose.yml").is_file():
-            raise _Failed("unsupported_action", f"{service.name} is not an installed catalog app.")
+        elif not (app_control.project(service, root) / "docker-compose.yml").is_file():
+            raise _Failed("unsupported_action", f"{service.name} is not installed.")
+        elif not app_releases.updatable(service) or (action == "restore" and service.stage != "optional"):
+            # Core apps update (and undo an update) here; restoring one from a backup is the rebuild's job.
+            raise _Failed("unsupported_action", f"Mu3Lab does not {action.replace('_', ' ')} {service.name} here.")
         elif action in {"recover", "keep_update"}:
             active = {str(item["id"]) for item in store.active_jobs() if str(item["id"]) != job_id}
             with job_guard.uncancellable():

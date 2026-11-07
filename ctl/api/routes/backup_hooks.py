@@ -1,4 +1,4 @@
-"""Kopia's before- and after-actions: stop an app just before its backup, start it just after.
+"""Kopia's before- and after-actions: copy an app's databases just before its backup, end its hold just after.
 
 Only the backup service calls these, from ``apps/kopia-ui/backup-hook.sh``,
 with the hook token from its own settings file. The token can do nothing else:

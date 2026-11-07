@@ -8,12 +8,13 @@ category: ai
 tagline: Runs AI models on your server
 summary: Runs AI models and generates text embeddings on your server. Mu3Lab uses Ollama as an internal API for
   document search and the optional private chat model chosen in Settings; it has no browser interface.
-version: v0.35.0
+version: "v0.40.14"
 upstream: ollama/ollama
 model_runner:
   engine: ollama_api
 service:
   local_port: 11434
+  stop_warning: While Ollama is stopped, the AI models on this server can't answer, and document search pauses.
   health:
     path: /
   uses_gpu: true
@@ -30,6 +31,7 @@ backup:
   reason: Its data is downloaded AI models, which Mu3Lab downloads again when needed.
 setup_action: Install and verify the model runner using the host-wide compute setting.
 rules:
+- rule: keeps_models_current
 - rule: needs_embedding_model
   with:
     at: after_healthy

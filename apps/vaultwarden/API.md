@@ -1,7 +1,7 @@
-Vaultwarden 1.37.3 uses Bitwarden CLI 2026.5.0, pinned with the SHA-256 digests
+Vaultwarden 1.37.5 uses Bitwarden CLI 2026.5.0, pinned with the SHA-256 digests
 published on the official GitHub release. Both Linux architectures have
 standalone binaries. CLI 2026.9.0 was tested but rejected this server during
-its new user-key-ID migration; this pair is explicitly integration-tested.
+its new user-key-ID migration (against 1.37.3); this pair is explicitly integration-tested.
 
 The CLI owns login, synchronization, folders, items, collection access and
 member confirmation. Each job gets a 0700 temporary cache which is deleted
@@ -11,7 +11,9 @@ A temporary loopback HTTPS bridge supplies a certificate trusted only by
 that CLI process. It does not change system trust or the live ingress.
 
 Account registration and organization creation retain the small bootstrap
-crypto implementation because the official CLI cannot perform them. The
+crypto implementation because the official CLI cannot perform them (sign-up
+uses the two-step `register/send-verification-email` + `register/finish` flow
+since 1.37.4 removed the one-step endpoint). The
 admin API sends account invitations with a generated admin password backed
 by an Argon2 PHC hash in the project's private environment. The owner approved
 using `/api/organizations/{id}/users/invite` for organization invitations:
@@ -25,5 +27,5 @@ containers and volume. No production project or data is used. Run it with
 `.venv/bin/python -m tools.test_vaultwarden`.
 
 Sources: https://github.com/bitwarden/clients/releases/tag/cli-v2026.5.0,
-https://github.com/dani-garcia/vaultwarden/blob/1.37.3/src/api/admin.rs,
-https://github.com/dani-garcia/vaultwarden/blob/1.37.3/src/api/core/organizations.rs.
+https://github.com/dani-garcia/vaultwarden/blob/1.37.5/src/api/admin.rs,
+https://github.com/dani-garcia/vaultwarden/blob/1.37.5/src/api/core/organizations.rs.
