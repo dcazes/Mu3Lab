@@ -187,9 +187,9 @@ SPEECH: dict[str, SpeechModel] = {
 
 
 def _speech_folder(model_id: str, paths: RuntimePaths | None = None) -> Path:
-    """Where Speaches keeps a downloaded model: Hugging Face's cache, mounted from the data root
-    (apps/speaches/docker-compose.yml)."""
-    return (paths or RuntimePaths()).data / "speaches" / "models" / ("models--" + model_id.replace("/", "--"))
+    """Where Speaches keeps a downloaded model: Hugging Face's cache, mounted from the app's data
+    folder (its docker-compose.yml)."""
+    return (paths or RuntimePaths()).data / _speech_app().id / "models" / ("models--" + model_id.replace("/", "--"))
 
 
 def _speech_downloaded(model_id: str, paths: RuntimePaths | None = None) -> bool:

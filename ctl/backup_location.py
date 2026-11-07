@@ -365,11 +365,13 @@ def move(target_id: str, root: Path, log: Log, paths: RuntimePaths | None = None
                 log,
                 timeout=COPY_TIMEOUT,
             )
-            log("Comparing every copied file with the original.")
+            log("Comparing every copied file with the original, byte for byte. This reads both copies.")
             _root_shell(
                 "set -e; "
-                # Every file's name and size; with no repository yet, both sides are the empty copy.
-                "list() { cd \"$1\" && find . -type f -printf '%P %s\\n' | sort | sha256sum; }; "
+                # Every file's name and contents, read back from both drives: the old copy is deleted
+                # once this passes, so a bad write to the new drive must show here. With no repository
+                # yet, both sides are the empty copy.
+                'list() { cd "$1" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum; }; '
                 "src=/from/kopia; [ -d $src ] || src=/to/.kopia-copy; "
                 "a=$(list $src); b=$(list /to/.kopia-copy); "
                 '[ "$a" = "$b" ] || { echo \'the copy does not match the original\' >&2; exit 4; }; '

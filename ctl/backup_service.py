@@ -65,9 +65,11 @@ ADDRESS = "http://127.0.0.1:51515"
 CONTROL_USER = "mu3lab-control"
 HOOK = "/hooks/backup-hook.sh"
 SOURCES_FILE = "docker-compose.sources.yml"
-ACTION_TIMEOUT = "30m"
-# How long the before- and after-actions wait for the worker; inside Kopia's action timeout.
-HOOK_WAIT_SECONDS = 25 * 60
+# A large app's database copies (database_dumps.DUMP_SECONDS each), plus any task the worker is
+# finishing first, must fit. Nested so each side gives up after the one inside it:
+# the worker's wait here < the hook script's curl (apps/kopia-ui/backup-hook.sh) < Kopia.
+ACTION_TIMEOUT = "3h"
+HOOK_WAIT_SECONDS = 3 * 3600 - 10 * 60
 ACTOR = "backup-service"
 STATE = ("backup", "service")
 REACHABLE = ("backup", "service-reachable")  # since when the server has not answered

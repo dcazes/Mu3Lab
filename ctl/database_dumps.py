@@ -10,14 +10,20 @@ under ``.mu3lab-backup/``, the way database engines expect to be backed up:
   container. Kopia leaves the live database folder out (``kopia_rules``).
 - **SQLite**, found as any file that starts with SQLite's header: SQLite's online
   backup, from a networkless helper container. The live file is saved too; a
-  restore puts the copy in its place.
+  restore puts the copy in its place. Photos, films, music and documents
+  (``PLAIN_SUFFIXES``) are never opened to look, so a large library adds little time.
 - **Caches** the app builds again (Redis, Valkey and RabbitMQ folders, and what the
   manifest's ``backup.ignore`` lists): left out.
 
-A restore unpacks a backup beside the live data, as before. ``prepare`` then puts
-each SQLite copy in place and empties each dumped database's folder; after the
-swap, ``load`` starts only the database containers, loads each dump, and only
-then does the app itself start. A backup from before this, with the live
+Each folder also records which database each of its dumps belongs to
+(``.mu3lab-backup/databases.json``), as the release that made the backup named
+them. A restore unpacks a backup beside the live data, as before. ``prepare``
+then puts each SQLite copy in place and empties each dumped database's folder,
+going by that record; after the swap, ``load`` starts only the database
+containers, loads each dump, and only then does the app itself start. A dump
+the release in place has no database for fails the restore, which puts the
+original data back, rather than leave a database empty. A backup from before
+the record follows today's release; one from before dumps, with the live
 database folder inside and no dumps, restores as it always did.
 
 The database containers of a stopped app are started on their own for a dump or
@@ -43,12 +49,36 @@ from ctl.registry import Service
 from ctl.runtime import RuntimePaths
 
 FOLDER = ".mu3lab-backup"
+RECORD = "databases.json"
 # The pinned Python the chat connectors are built on; it has SQLite's online backup.
 HELPER_IMAGE = "python:3.12-alpine3.22@sha256:a190708a2dec1bd18b1decb539f8e8f5407abaa9bf39cacda583f7f8c11db322"
 ENGINES = {"/var/lib/postgresql": "postgres", "/var/lib/mysql": "mariadb"}
 CACHE_IMAGE = re.compile(r"(^|/)(redis|valkey|rabbitmq)(:|@|$)")
 READY_SECONDS = 180
-DUMP_SECONDS = 6 * 3600
+# Each dump before a backup must end inside the backup hook's wait (backup_service.HOOK_WAIT_SECONDS).
+DUMP_SECONDS = 2 * 3600
+# Loading a dump back during a restore or an undo is not waited on by Kopia.
+LOAD_SECONDS = 6 * 3600
+# Files the SQLite search never opens: what photo, film, music and document libraries and web
+# apps' own code are made of. A database file is never named like these.
+PLAIN_SUFFIXES = (
+    # photos
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".avif", ".tif", ".tiff", ".bmp", ".svg", ".ico",
+    ".dng", ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf", ".psd", ".xmp",
+    # films and subtitles
+    ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".mpg", ".mpeg", ".mts", ".m2ts", ".3gp", ".ts",
+    ".vob", ".srt", ".vtt", ".ass",
+    # music
+    ".mp3", ".flac", ".m4a", ".m4b", ".aac", ".ogg", ".oga", ".opus", ".wav", ".wma", ".aiff", ".alac",
+    # documents and books
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".epub", ".mobi", ".azw3",
+    ".cbz", ".cbr", ".txt", ".md", ".csv",
+    # archives
+    ".zip", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".7z", ".rar", ".tar", ".iso",
+    # web apps' own code
+    ".js", ".mjs", ".css", ".map", ".html", ".htm", ".php", ".json", ".xml", ".yml", ".yaml", ".woff", ".woff2",
+    ".ttf", ".otf", ".eot",
+)  # fmt: skip
 
 _MOUNT = re.compile(r"^\$\{MU3LAB_DATA_ROOT(?::-[^}]*)?\}/([a-z0-9-]+(?:/[^:/]+)*):(/[^:]*)")
 _ROOT_PASSWORD = '"${MARIADB_ROOT_PASSWORD:-$MYSQL_ROOT_PASSWORD}"'
@@ -103,59 +133,113 @@ with open(sys.argv[1], "rb") as dump:
     for line in dump:
         sys.stdout.buffer.write(new + line[len(old):] if postgres and line.startswith(old) else line)
 """
+# Also records the folder's databases (its third argument) and removes dumps of databases the
+# app no longer has, so a restore never loads a stale dump.
 _SQLITE = """
-import json, os, shutil, sqlite3, stat, sys
-root, skip = sys.argv[1], set(json.loads(sys.argv[2]))
-copies, fresh = os.path.join(root, ".mu3lab-backup", "sqlite"), os.path.join(root, ".mu3lab-backup", "sqlite.new")
+import json, os, shutil, sqlite3, sys
+root, skip, plain = sys.argv[1], set(json.loads(sys.argv[2])), tuple(json.loads(sys.argv[4]))
+databases = json.loads(sys.argv[3])
+saved = os.path.join(root, ".mu3lab-backup")
+record = os.path.join(saved, "databases.json")
+if databases:
+    os.makedirs(saved, mode=0o700, exist_ok=True)
+    with open(record + ".partial", "w") as out:
+        os.fchmod(out.fileno(), 0o600)
+        json.dump({"databases": databases}, out)
+    os.replace(record + ".partial", record)
+elif os.path.exists(record):
+    os.unlink(record)
+dumps = {item["service"] + ".sql" for item in databases}
+for name in os.listdir(saved) if os.path.isdir(saved) else []:
+    if name.endswith(".sql") and name not in dumps:
+        os.unlink(os.path.join(saved, name))
+copies, fresh = os.path.join(saved, "sqlite"), os.path.join(saved, "sqlite.new")
 shutil.rmtree(fresh, ignore_errors=True)
 copied, failed = [], []
-for top, folders, files in os.walk(root):
-    here = os.path.relpath(top, root)
-    folders[:] = [name for name in folders if os.path.normpath(os.path.join(here, name)) not in skip]
-    for name in files:
-        path, relative = os.path.join(top, name), os.path.normpath(os.path.join(here, name))
+
+
+def candidates(top, here):
+    # Names only (no file is opened) until a name could be a database.
+    try:
+        entries = list(os.scandir(top))
+    except OSError:
+        return
+    for entry in entries:
+        relative = os.path.normpath(os.path.join(here, entry.name))
         try:
-            info = os.lstat(path)
-            if not stat.S_ISREG(info.st_mode) or info.st_size < 512:
-                continue
-            with open(path, "rb") as handle:
-                if handle.read(16) != b"SQLite format 3\\x00":
-                    continue
+            if entry.is_dir(follow_symlinks=False):
+                if relative not in skip:
+                    yield from candidates(entry.path, relative)
+            elif entry.is_file(follow_symlinks=False) and not entry.name.lower().endswith(plain):
+                yield entry.path, relative
         except OSError:
             continue
+
+
+for path, relative in candidates(root, "."):
+    try:
+        info = os.lstat(path)
+        if info.st_size < 512:
+            continue
+        with open(path, "rb") as handle:
+            if handle.read(16) != b"SQLite format 3\\x00":
+                continue
+    except OSError:
+        continue
+    target = os.path.join(fresh, relative)
+    try:
+        os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
+        # Written straight to its file, opened here as root; no journal, as nothing else uses it.
+        copy = sqlite3.connect(target)
         try:
+            copy.execute("PRAGMA journal_mode=OFF")
             # Read as the file's owner, so any journal SQLite opens beside it stays the app's.
             switch = os.geteuid() == 0
             if switch:
                 os.setegid(info.st_gid)
                 os.seteuid(info.st_uid)
             try:
-                source, memory = sqlite3.connect(path, timeout=20), sqlite3.connect(":memory:")
-                source.backup(memory)
-                source.close()
+                source = sqlite3.connect(path, timeout=20)
+                try:
+                    source.backup(copy)
+                finally:
+                    source.close()
             finally:
                 if switch:
                     os.seteuid(0)
                     os.setegid(0)
-            target = os.path.join(fresh, relative)
-            os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
-            with open(target, "wb") as out:
-                out.write(memory.serialize())
-            memory.close()
-            copied.append(relative)
-        except (OSError, sqlite3.Error) as exc:
-            failed.append(f"{relative}: {exc}")
+        finally:
+            copy.close()
+        copied.append(relative)
+    except (OSError, sqlite3.Error) as exc:
+        failed.append(f"{relative}: {exc}")
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
 shutil.rmtree(copies, ignore_errors=True)
 if os.path.isdir(fresh):
     os.rename(fresh, copies)
 print(json.dumps({"copied": copied, "failed": failed}))
 """
+# Its second argument is today's release's databases in this folder ({service: folder inside}),
+# used only for a backup made before the record.
 _PREPARE = """
-import json, os, shutil, sys
-root, databases = sys.argv[1], json.loads(sys.argv[2])
+import json, os, re, shutil, sys
+root, current = sys.argv[1], json.loads(sys.argv[2])
 saved = os.path.join(root, ".mu3lab-backup")
+try:
+    with open(os.path.join(saved, "databases.json")) as handle:
+        databases = {str(item["service"]): str(item["inside"]) for item in json.load(handle)["databases"]}
+except FileNotFoundError:
+    databases = current
 load, placed = [], []
-for inside, service in databases.items():
+for service, inside in sorted(databases.items()):
+    inside = os.path.normpath(inside)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", service) or os.path.isabs(inside) or (
+        inside == "." or inside.split(os.sep)[0] == ".."
+    ):
+        sys.exit(f"the backup names a database Mu3Lab cannot place: {service} in {inside}")
     if os.path.isfile(os.path.join(saved, service + ".sql")):
         # The dump wins over any copy of the live folder: the database starts empty and is loaded.
         target = os.path.join(root, inside)
@@ -330,7 +414,11 @@ class _Containers:
         rc, output = actions.docker_cmd(
             self.compose("ps", "--status", "running", "--services"), _quiet, timeout=60, env=self.env
         )
-        running = set(output.split()) if rc == 0 else set()
+        if rc:
+            # Not knowing what runs, a database the app is using could be taken for one started here
+            # and be stopped after.
+            raise DumpFailed(f"Docker did not say which of {self.service.name}'s services run: {redact(output)[-300:]}")
+        running = set(output.split())
         wanted = sorted({database.service for database in self.chosen} - running)
         if wanted:
             self.log(f"Starting {self.service.name}'s database on its own.")
@@ -360,19 +448,43 @@ class _Containers:
             actions.docker_cmd(self.compose("stop", *self.started), self.log, timeout=300, env=self.env)
 
 
-def _sqlite(service: Service, root: Path, log: Log, paths: RuntimePaths) -> tuple[int, list[str]]:
-    """Copy every SQLite database in the app's folders with SQLite's online backup; (copies, failures)."""
+def _sqlite(
+    service: Service, root: Path, chosen: list[Database], log: Log, paths: RuntimePaths
+) -> tuple[int, list[str]]:
+    """Copy every SQLite database in the app's folders with SQLite's online backup; (copies, failures).
+
+    Each folder's run also records which database each of its dumps belongs to; a folder with
+    dumps whose record could not be written raises DumpFailed, as a restore needs it.
+    """
     left_out = ignored(service, root, paths)
     copied, failed = 0, []
     for name in _folders(service, root, paths):
         if name in left_out or not (paths.data / name).is_dir():
             continue
         skip = [FOLDER, *(path.split("/", 1)[1] for path in left_out if path.startswith(f"{name}/"))]
+        record = [
+            {"service": database.service, "engine": database.engine, "inside": database.inside}
+            for database in chosen
+            if database.folder == name
+        ]
         rc, output = actions.docker_cmd(
-            _helper(paths.data / name, _SQLITE, "/folder", json.dumps(skip)), log, timeout=DUMP_SECONDS
+            _helper(
+                paths.data / name,
+                _SQLITE,
+                "/folder",
+                json.dumps(skip),
+                json.dumps(record),
+                json.dumps(PLAIN_SUFFIXES),
+            ),
+            log,
+            timeout=DUMP_SECONDS,
         )
         result = _result(output)
         if rc or not result:
+            if record:
+                raise DumpFailed(
+                    f"{service.name}'s database copies in {name} could not be recorded: {redact(output)[-300:]}"
+                )
             failed.append(f"{name}: {redact(output)[-200:]}")
             continue
         copied += len(result.get("copied") or [])
@@ -399,7 +511,7 @@ def write(service: Service, root: Path, log: Log, paths: RuntimePaths | None = N
                     raise DumpFailed(
                         f"{service.name}'s database ({database.service}) could not be copied: {redact(output)[-300:]}"
                     )
-    copied, failed = _sqlite(service, root, log, paths)
+    copied, failed = _sqlite(service, root, chosen, log, paths)
     for failure in failed:
         # The live file is saved as well, so the backup still holds it; only its copy is missing.
         log(f"A SQLite database could not be copied, so its file is saved as it was: {failure}")
@@ -415,14 +527,16 @@ def prepare(
     """Ready unpacked folders (``{folder: staging}``) for the swap; returns the database services to load.
 
     Each SQLite copy takes its live file's place, and each database with a dump
-    gets an empty folder. A backup with no copies is left as it was.
+    gets an empty folder: the folders the backup's own record names, or for a
+    backup made before the record, the ones today's release uses. A backup with
+    no copies is left as it was.
     """
     paths = paths or RuntimePaths()
     chosen = databases(service, root, paths)
     load: list[str] = []
     for name, staging in staged.items():
-        inside = {database.inside: database.service for database in chosen if database.folder == name}
-        rc, output = actions.docker_cmd(_helper(staging, _PREPARE, "/folder", json.dumps(inside)), log, timeout=3600)
+        today = {database.service: database.inside for database in chosen if database.folder == name}
+        rc, output = actions.docker_cmd(_helper(staging, _PREPARE, "/folder", json.dumps(today)), log, timeout=3600)
         result = _result(output)
         if rc or not result:
             raise DumpFailed(f"The backup of {name} could not be readied: {redact(output)[-300:]}")
@@ -441,16 +555,26 @@ def load(
     *,
     keep_running: bool = False,
 ) -> None:
-    """Load the saved dumps into the (empty) databases ``services``, before the rest of the app starts."""
+    """Load the saved dumps into the (empty) databases ``services``, before the rest of the app starts.
+
+    A dump of a database the release in place does not have raises DumpFailed, so the caller
+    puts the original data back rather than start the app on an empty database.
+    """
     paths = paths or RuntimePaths()
     chosen = [database for database in databases(service, root, paths) if database.service in services]
+    unknown = sorted(set(services) - {database.service for database in chosen})
+    if unknown:
+        raise DumpFailed(
+            f"The backup holds {service.name} databases ({', '.join(unknown)}) that the release in place "
+            "does not have, so they cannot be loaded."
+        )
     if not chosen:
         return
     with _Containers(service, root, chosen, log, keep=keep_running) as containers:
         for database in chosen:
             producer = _helper(paths.data / database.folder, _READ, f"/folder/{database.dump}", database.engine)
             consumer = containers.compose("exec", "-T", database.service, "sh", "-c", LOAD[database.engine])
-            rc, output = actions.docker_pipe(producer, consumer, log, timeout=DUMP_SECONDS, env=containers.env)
+            rc, output = actions.docker_pipe(producer, consumer, log, timeout=LOAD_SECONDS, env=containers.env)
             # A fresh database already has the app's role and database; those lines may fail.
             errors = [line for line in output.splitlines() if "ERROR" in line and "already exists" not in line]
             if rc or errors:

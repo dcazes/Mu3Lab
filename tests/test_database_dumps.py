@@ -101,11 +101,44 @@ class ScriptTests(unittest.TestCase):
         live.commit()  # still open, its newest rows only in the write-ahead log
         sqlite3.connect(self.folder / "cache" / "cache.db").execute("CREATE TABLE c (x)")
         (self.folder / "app" / "photo.jpg").write_bytes(os.urandom(4096))
-        result = run_script(database_dumps._SQLITE, str(self.folder), json.dumps(["cache", ".mu3lab-backup"]))
+        result = self.sqlite(["cache", ".mu3lab-backup"], [])
         self.assertEqual(json.loads(result.stdout), {"copied": ["app/app.db"], "failed": []}, result.stderr)
         live.close()
         copy = sqlite3.connect(self.folder / ".mu3lab-backup" / "sqlite" / "app" / "app.db")
         self.assertEqual(copy.execute("SELECT text FROM notes").fetchall(), [("kept",)])
+        self.assertEqual(copy.execute("PRAGMA integrity_check").fetchone(), ("ok",))
+
+    def sqlite(self, skip: list[str], record: list[dict]) -> subprocess.CompletedProcess:
+        return run_script(
+            database_dumps._SQLITE,
+            str(self.folder),
+            json.dumps(skip),
+            json.dumps(record),
+            json.dumps(database_dumps.PLAIN_SUFFIXES),
+        )
+
+    def test_photos_films_and_documents_are_never_opened_to_look_for_databases(self):
+        library = self.folder / "library" / "2026"
+        library.mkdir(parents=True)
+        # Even one that is a database inside: a library's files are never read for the search.
+        sqlite3.connect(library / "IMG_0001.JPG").execute("CREATE TABLE t (x)").connection.commit()
+        sqlite3.connect(library / "notes.sqlite3").execute("CREATE TABLE t (x)").connection.commit()
+        result = self.sqlite([".mu3lab-backup"], [])
+        self.assertEqual(json.loads(result.stdout)["copied"], ["library/2026/notes.sqlite3"], result.stderr)
+
+    def test_each_folder_records_its_dumps_and_drops_dumps_of_databases_it_no_longer_has(self):
+        saved = self.folder / ".mu3lab-backup"
+        saved.mkdir()
+        (saved / "database.sql").write_text("-- current\n")
+        (saved / "old-db.sql").write_text("-- a release ago\n")
+        record = [{"service": "database", "engine": "postgres", "inside": "postgres"}]
+        self.assertEqual(self.sqlite([".mu3lab-backup"], record).returncode, 0)
+        self.assertEqual(json.loads((saved / "databases.json").read_text()), {"databases": record})
+        self.assertEqual(sorted(path.name for path in saved.glob("*.sql")), ["database.sql"])
+        self.assertEqual((saved / "databases.json").stat().st_mode & 0o777, 0o600)
+        # A release without databases here leaves no record and no dump to load.
+        self.assertEqual(self.sqlite([".mu3lab-backup"], []).returncode, 0)
+        self.assertEqual(list(saved.iterdir()), [])
 
     def test_a_restore_puts_copies_in_place_and_empties_each_dumped_database(self):
         saved = self.folder / ".mu3lab-backup"
@@ -116,13 +149,35 @@ class ScriptTests(unittest.TestCase):
         (self.folder / "app.db").write_bytes(b"torn")
         (self.folder / "app.db-wal").write_bytes(b"stale")
         (saved / "sqlite" / "app.db").write_bytes(b"consistent")
+        # A backup from before the record: today's release says where each database lives.
         result = run_script(
-            database_dumps._PREPARE, str(self.folder), json.dumps({"postgres": "database", "x": "other"})
+            database_dumps._PREPARE, str(self.folder), json.dumps({"database": "postgres", "other": "x"})
         )
         self.assertEqual(json.loads(result.stdout), {"load": ["database"], "placed": ["app.db"]}, result.stderr)
         self.assertEqual(list((self.folder / "postgres").iterdir()), [])
         self.assertEqual((self.folder / "app.db").read_bytes(), b"consistent")
         self.assertFalse((self.folder / "app.db-wal").exists())
+
+    def test_a_restore_follows_the_backups_own_record_over_todays_release(self):
+        saved = self.folder / ".mu3lab-backup"
+        saved.mkdir()
+        (saved / "db.sql").write_text("-- dump\n")
+        (saved / "databases.json").write_text(
+            json.dumps({"databases": [{"service": "db", "engine": "postgres", "inside": "pgdata"}]})
+        )
+        (self.folder / "pgdata").mkdir()
+        (self.folder / "pgdata" / "PG_VERSION").write_text("16")
+        # Today's release renamed the service and moved its folder; the backup's names decide.
+        result = run_script(database_dumps._PREPARE, str(self.folder), json.dumps({"database": "postgres"}))
+        self.assertEqual(json.loads(result.stdout)["load"], ["db"], result.stderr)
+        self.assertEqual(list((self.folder / "pgdata").iterdir()), [])
+        # A record that points outside the folder is refused before anything is emptied.
+        (saved / "databases.json").write_text(
+            json.dumps({"databases": [{"service": "db", "engine": "postgres", "inside": "../elsewhere"}]})
+        )
+        refused = run_script(database_dumps._PREPARE, str(self.folder), "{}")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn(b"cannot place", refused.stderr)
 
 
 class OrchestrationTests(unittest.TestCase):
@@ -138,6 +193,8 @@ class OrchestrationTests(unittest.TestCase):
         self.pipes: list[tuple[list[str], list[str]]] = []
         self.pipe_result = (0, "")
         self.running = ""
+        self.ps_result = 0
+        self.sqlite_result = (0, json.dumps({"copied": ["library/x.db"], "failed": []}))
         stack = ExitStack()
         self.addCleanup(stack.close)
         stack.enter_context(patch.object(database_dumps.app_control, "project", return_value=self.paths.projects))
@@ -149,9 +206,9 @@ class OrchestrationTests(unittest.TestCase):
     def docker(self, argv, _log, **_kwargs):
         self.commands.append(argv)
         if "ps" in argv:
-            return 0, self.running
+            return (0, self.running) if self.ps_result == 0 else (self.ps_result, "context deadline exceeded")
         if database_dumps._SQLITE in argv:
-            return 0, json.dumps({"copied": ["library/x.db"], "failed": []})
+            return self.sqlite_result
         return 0, ""
 
     def pipe(self, producer, consumer, _log, **_kwargs):
@@ -173,6 +230,29 @@ class OrchestrationTests(unittest.TestCase):
         database_dumps.write(self.immich, ROOT, lambda _l: None, self.paths)
         self.assertEqual(self.up.call_args.kwargs["services"], ["database"])
         self.assertEqual([argv[-2:] for argv in self.commands if "stop" in argv], [["stop", "database"]])
+
+    def test_not_knowing_what_runs_fails_the_backup_rather_than_stop_a_database_in_use(self):
+        self.ps_result = 1
+        with self.assertRaisesRegex(database_dumps.DumpFailed, "which of Immich's services run"):
+            database_dumps.write(self.immich, ROOT, lambda _l: None, self.paths)
+        self.up.assert_not_called()
+        self.assertFalse([argv for argv in self.commands if "stop" in argv])
+        self.assertFalse(self.pipes)
+
+    def test_each_folder_with_dumps_records_them_and_a_failed_record_fails_the_backup(self):
+        self.running = "database\n"
+        database_dumps.write(self.immich, ROOT, lambda _l: None, self.paths)
+        sqlite = next(argv for argv in self.commands if database_dumps._SQLITE in argv)
+        record = json.loads(sqlite[sqlite.index(database_dumps._SQLITE) + 3])
+        self.assertEqual(record, [{"service": "database", "engine": "postgres", "inside": "postgres"}])
+        self.sqlite_result = (1, "docker: no space left on device")
+        with self.assertRaisesRegex(database_dumps.DumpFailed, "could not be recorded"):
+            database_dumps.write(self.immich, ROOT, lambda _l: None, self.paths)
+
+    def test_a_dump_the_release_in_place_has_no_database_for_fails_the_restore(self):
+        with self.assertRaisesRegex(database_dumps.DumpFailed, r"\(db\) that the release in place does not have"):
+            database_dumps.load(self.immich, ROOT, ["database", "db"], lambda _l: None, self.paths)
+        self.assertFalse(self.pipes)
 
     def test_a_dump_that_fails_fails_the_backup(self):
         self.pipe_result = (1, "pg_dumpall: error: connection failed")
