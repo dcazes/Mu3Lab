@@ -11,6 +11,7 @@ import { HomePage } from './features/home/HomePage';
 import { usePath } from './lib/router';
 import { useTheme } from './lib/theme';
 import { CommandPalette } from './shell/CommandPalette';
+import { PowerOverlay, useTurningOff } from './shell/PowerOverlay';
 import { MobileBar, Sidebar, useSidebarCollapsed } from './shell/Sidebar';
 import { LoadingScreen, OfflineScreen, ServerErrorScreen, SignedOutScreen } from './shell/StatusScreens';
 import { DashboardProvider, useDashboard, useDashboardLoader } from './state/dashboard';
@@ -67,6 +68,8 @@ function Shell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const path = usePath();
   const [collapsed, toggleSidebar] = useSidebarCollapsed(path);
+  const turningOff = useTurningOff();
+  if (turningOff) return <PowerOverlay />;
   if (connection === 'connecting') return <LoadingScreen />;
   if (connection === 'offline') return <OfflineScreen retry={() => void refresh()} />;
   if (connection === 'server_error') return <ServerErrorScreen status={errorStatus} retry={() => void refresh()} />;

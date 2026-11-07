@@ -188,14 +188,25 @@ def _switch_compute(
 
 
 def _ready_to_start(
-    store: JobStore, job: dict, service: Service, registry: Registry, actor: str, log: Callable[[str], None]
+    store: JobStore,
+    state: ControlState | None,
+    job: dict,
+    service: Service,
+    registry: Registry,
+    actor: str,
+    log: Callable[[str], None],
 ) -> bool:
     """Check again what the app waits on (``ctl.setup_checks``); when something is missing it stays stopped.
 
-    The job ends with the sentence saying what to open; the app keeps its stopped
-    state rather than turning into a failed install.
+    The job ends with the sentence saying what to open; the app goes back to stopped
+    (the start had queued it) rather than turning into a failed install.
     """
     job_id = str(job["id"])
+
+    def stays_stopped() -> None:
+        if state:
+            state.set_installation(service.id, "stopped", job_id=job_id)
+
     if service.stage != "optional":
         return True
     paths = RuntimePaths()
@@ -216,12 +227,14 @@ def _ready_to_start(
         store.transition(
             job_id, "failed", actor=actor, detail=failure.message, error_code=failure.code, step_id=failure.stage
         )
+        stays_stopped()
         return False
     if missing:
         setup_checks.remember(app.id, missing, paths)
         store.transition(
             job_id, "failed", actor=actor, detail=missing.message, error_code=missing.code, step_id=missing.stage
         )
+        stays_stopped()
         return False
     setup_checks.forget(app.id, paths)
     return True
@@ -283,6 +296,9 @@ def _start_needed_apps(
                 error_code="dependency_start_failed",
                 step_id="start_dependencies",
             )
+            if state and job.get("action") == "start":
+                # The start had queued it; it is still stopped, not starting.
+                state.set_installation(service.id, "stopped", job_id=job_id)
             return False
         if not sync_application(dependency.id, running=True, root=root, log=log):
             log(f"One enabled MCP of {dependency.name} needs attention after its start.")
@@ -409,9 +425,10 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             "An enabled MCP could not stop safely.",
         )
         return
-    if action == "start" and not _ready_to_start(store, job, service, registry, actor, log):
-        return
+    # The apps this one needs start first: the check below asks some of them (LiveKit's asks LiteLLM).
     if action in {"start", "restart"} and not _start_needed_apps(store, state, job, service, registry, actor, root):
+        return
+    if action == "start" and not _ready_to_start(store, state, job, service, registry, actor, log):
         return
     compose = Compose(project, gpu_mode=app_mode(project, service.uses_gpu))
     rc, output = compose.action(action, log)
@@ -446,10 +463,9 @@ def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> N
             return
         if not sync_application(service.id, running=True, root=root, log=log):
             log("One enabled MCP needs attention after application start.")
-        if "chat" in service.manifest.capabilities:
-            # Open WebUI starts without Mu3Lab's tool connections; give them back now, not in five minutes.
-            sync_agents(log)
     if state:
         state.set_installation(service.id, target_state, job_id=job_id, route_state="ready")
+    # A chat app's tool connections, or every assistant once ContextForge started or stopped.
+    app_control.refresh_chat(service, root, log, running=target_state == "running")
     store.append_event(job_id, "step.completed", f"compose:{action}")
     store.transition(job_id, "succeeded", actor=actor, detail=f"{service.name} {action} completed.", step_id="complete")

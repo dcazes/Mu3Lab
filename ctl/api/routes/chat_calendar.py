@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl import access, calendar_tools
+from ctl import access, calendar_tools, hostinfo
 from ctl.api import models
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -41,10 +42,46 @@ def _caller(request: Request) -> str:
 Caller = Annotated[str, Depends(_caller)]
 
 
+def _local(value: str) -> str:
+    """A time a model sent without a zone ("2026-11-06T10:00:00") means the household's clock, not UTC.
+
+    Times with an offset, and all-day dates, pass through unchanged.
+    """
+    value = value.strip()
+    if "T" not in value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value  # the calendar answers a bad time itself
+    if parsed.tzinfo:
+        return value
+    return parsed.replace(tzinfo=ZoneInfo(hostinfo.timezone())).isoformat()
+
+
+def _event(payload: models.CalendarEventRequest) -> dict:
+    return payload.model_dump() | {"start": _local(payload.start), "end": _local(payload.end)}
+
+
+def _shown_locally(event: models.CalendarEvent, zone: ZoneInfo) -> models.CalendarEvent:
+    """An event's times on the household's clock, so a model reads 10:00-05:00 and never converts from UTC."""
+    if event.all_day:
+        return event
+    try:
+        start, end = (datetime.fromisoformat(value.replace("Z", "+00:00")) for value in (event.start, event.end))
+    except ValueError:
+        return event
+    if not (start.tzinfo and end.tzinfo):
+        return event
+    return event.model_copy(
+        update={"start": start.astimezone(zone).isoformat(), "end": end.astimezone(zone).isoformat()}
+    )
+
+
 @router.get("/events", response_model=models.CalendarEvents, response_model_exclude_none=True)
 def list_events(request: Request, uid: Caller) -> models.CalendarEvents:
-    start = request.query_params.get("start", "").strip()
-    end = request.query_params.get("end", "").strip()
+    start = _local(request.query_params.get("start", ""))
+    end = _local(request.query_params.get("end", ""))
     if not start and not end:
         now = datetime.now(UTC)
         start, end = now.isoformat(), (now + timedelta(days=DEFAULT_DAYS)).isoformat()
@@ -63,17 +100,19 @@ def list_events(request: Request, uid: Caller) -> models.CalendarEvents:
     query = request.query_params.get("query", "").strip().casefold()
     if query:
         result.events = [event for event in result.events if query in event.title.casefold()]
+    zone = ZoneInfo(hostinfo.timezone())
+    result.events = [_shown_locally(event, zone) for event in result.events]
     return result
 
 
 @router.post("/events", response_model=models.OkResponse, response_model_exclude_none=True)
 async def create_event(payload: models.CalendarEventRequest, uid: Caller) -> models.OkResponse:
-    return await run_in_threadpool(calendar.create_for, uid, payload.model_dump())
+    return await run_in_threadpool(calendar.create_for, uid, _event(payload))
 
 
 @router.put("/events/{event_id}", response_model=models.OkResponse, response_model_exclude_none=True)
 async def update_event(payload: models.CalendarEventRequest, event_id: str, uid: Caller) -> models.OkResponse:
-    return await run_in_threadpool(calendar.update_for, uid, event_id, payload.model_dump())
+    return await run_in_threadpool(calendar.update_for, uid, event_id, _event(payload))
 
 
 @router.delete("/events/{event_id}", response_model=models.OkResponse, response_model_exclude_none=True)

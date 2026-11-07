@@ -616,10 +616,12 @@ def _event_fields(payload: dict) -> tuple[str, date | datetime, date | datetime]
         )
     except ValueError as exc:
         raise CalendarError("invalid_event", "Event times must use ISO 8601 format.") from exc
-    if isinstance(start, datetime) and start.tzinfo is None:
-        start = start.replace(tzinfo=UTC)
-    if isinstance(finish, datetime) and finish.tzinfo is None:
-        finish = finish.replace(tzinfo=UTC)
+    # Stored in UTC: an offset such as -05:00 would be written as TZID="UTC-05:00", a zone no calendar
+    # defines, which Nextcloud then reads as UTC (a 10:00 event showed at 5:00).
+    if isinstance(start, datetime):
+        start = start.replace(tzinfo=UTC) if start.tzinfo is None else start.astimezone(UTC)
+    if isinstance(finish, datetime):
+        finish = finish.replace(tzinfo=UTC) if finish.tzinfo is None else finish.astimezone(UTC)
     if finish <= start:
         raise CalendarError("invalid_event", "The event end must be after its start.")
     return title[:256], start, finish

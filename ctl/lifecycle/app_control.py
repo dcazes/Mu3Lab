@@ -46,6 +46,7 @@ def stop(service: Service, root: Path, log: Log) -> None:
     rc, output = actions.compose_action(folder, "stop", log, env=env, extra_files=extra)
     if rc:
         raise StopFailed(f"{service.name} could not be stopped: {output[-300:]}")
+    refresh_chat(service, root, log, running=False)
 
 
 def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tuple[bool, str]:
@@ -81,24 +82,33 @@ def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tup
         return False, detail
     if not sync_application(service.id, running=True, root=root, log=log):
         log("One enabled chat connector needs attention after the app started.")
-    if "chat" in service.manifest.capabilities:
-        _sync_chat(log)
+    refresh_chat(service, root, log, running=True)
     return True, ""
 
 
-def _sync_chat(log: Log) -> None:
-    """A chat app starts without Mu3Lab's tool connections (Open WebUI keeps none); give them back now.
+def refresh_chat(service: Service, root: Path, log: Log, *, running: bool) -> None:
+    """Bring chat in step after an app chat depends on started or stopped.
 
-    A convenience: the worker tries again within minutes, so a failure never fails the start.
+    A chat app starts without Mu3Lab's tool connections (Open WebUI keeps none): give them back
+    now. ContextForge connects chat to every app: while it is stopped every assistant says so, and
+    once it is back the connectors that could not reach it meanwhile are linked again. A
+    convenience: the worker tries again within the hour, so a failure never fails the job.
     """
+    capabilities = set(service.manifest.capabilities)
+    if "tool_gateway" not in capabilities and not ("chat" in capabilities and running):
+        return
     from ctl.chat_ops import sync_agents
 
     try:
+        if running and "tool_gateway" in capabilities:
+            from ctl.mcp_ops import reconcile_lifecycle
+
+            reconcile_lifecycle(root, log)
         ok, detail = sync_agents(log)
-    except Exception as exc:  # any failure here must leave the healthy start standing
+    except Exception as exc:  # any failure here must leave the app's own start or stop standing
         ok, detail = False, str(exc)
     if not ok:
-        log(f"Chat assistants were not updated after the start: {detail}")
+        log(f"Chat assistants were not updated: {detail}")
 
 
 def was_running(state: ControlState | None, service: Service) -> bool:

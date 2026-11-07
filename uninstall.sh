@@ -90,7 +90,7 @@ fi
 
 # --- Background services ------------------------------------------------------
 step "Stopping the Mu3Lab dashboard"
-for unit in mu3lab-ctl.service mu3lab-worker.service; do
+for unit in mu3lab-ctl.service mu3lab-worker.service mu3lab-wake.service; do
   if [[ -f "$HOME/.config/systemd/user/$unit" ]]; then
     run systemctl --user disable --now "$unit"
     run rm -f "$HOME/.config/systemd/user/$unit"

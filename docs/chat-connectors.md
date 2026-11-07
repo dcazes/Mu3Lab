@@ -86,7 +86,7 @@ the parent chat's own model and tools, so they cannot reach another assistant's 
 |---|---|---|
 | Upstream package in a pinned container | `mealie-community`, `babybuddy-official` | Our Compose project, built from a pinned release or commit |
 | Built into the app (`builtin: true`) | `outline-builtin`, `dawarich-builtin` | Nothing extra: the app joins `mu3lab_mcp_upstream` and ContextForge calls its own MCP endpoint |
-| Mu3Lab adapter | `adventurelog`, `beaver-adapter`, `audiobookshelf-adapter`, `navidrome-adapter`, `romm-adapter`, `qbittorrent-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
+| Mu3Lab adapter | `adventurelog`, `beaver-adapter`, `audiobookshelf-adapter`, `navidrome-adapter`, `romm-adapter`, `qbittorrent-adapter`, `jellyfin-adapter` | `platform/mcp-adapter/server.py`, a few fixed tools over the app's REST API |
 
 A connector can also declare fixed `headers` that ContextForge sends with its credential (Dawarich
 needs `X-Forwarded-Proto: https`). A credential script can ask for the owner's username
@@ -103,12 +103,15 @@ RomM's token can only read the library.
 ## Private apps: one set of tools per person
 
 Some apps keep each person's data private: Paperless-ngx, Immich, Nextcloud, Outline, AdventureLog,
-Actual Budget, Dawarich and Beaver Habits. One connector holding the owner's key would show
+Actual Budget, Dawarich, Beaver Habits and Jellyfin (watch history). One connector holding the owner's key would show
 the owner's data to anyone who asked chat. Their connectors say `per_person: true`, and
 `ctl/person_connectors.py` gives everyone their own:
 
 - **A key minted for them in the app.** The provision script takes their username or email
   (`owner_username` / `owner_email`), never "the only administrator".
+  Or, with `provision_hook: true`, the app's `hooks.py` makes it in
+  `person_connector_credentials`: Jellyfin signs in as the person with the login Mu3Lab made for them
+  (a "Mu3Lab chat" device, removed when they leave), so their library access and parental limits apply.
 - **Their own copy of the connector**, named `mcp-<connector>--p<hash>`. The copy gets its own Compose
   project and service names and no host port. A built-in MCP server needs no copy.
 - **Their own gateway and virtual server in ContextForge**, kept to a team with only them in it

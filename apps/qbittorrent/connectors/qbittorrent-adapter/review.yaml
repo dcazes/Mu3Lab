@@ -6,7 +6,7 @@ revision: v5.2.4-webapi
 reviewed_at: '2026-11-01'
 guidance: |
   List the torrents before changing one, and pass the hashes the tools return. When adding a torrent, ask
-  which library it is for and use that category (music, audiobooks, podcasts, roms), or none for the
+  which library it is for and use that category (music, audiobooks, podcasts, roms, movies, shows), or none for the
   Downloads folder. Removing a torrent keeps its files.
 
 categories:

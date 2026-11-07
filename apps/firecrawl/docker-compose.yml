@@ -2,7 +2,7 @@ name: mu3lab-firecrawl
 
 services:
   api:
-    image: ghcr.io/firecrawl/firecrawl:2.11.678-production@sha256:75ea8ebf5e2d828592289bb3b8d84e932cced9f28a9614701f00c54f39946018
+    image: ghcr.io/firecrawl/firecrawl:2.11.684-production@sha256:9197579f5d43770eae05c0f873bf7187ee9244b4dde124923e80c8ed4b07f1aa
     restart: unless-stopped
     command: node dist/src/harness.js --start-docker
     ports: ["127.0.0.1:3002:3002"]

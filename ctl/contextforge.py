@@ -20,7 +20,10 @@ never reach logs.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -39,6 +42,12 @@ KEY_DAYS = 90
 KEY_PREFIX = "mu3lab-lobechat-"
 # ContextForge refuses (HTTP 422) any connector, virtual server or sign-in provider name with other characters.
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_.\- ]+")
+
+
+# Mu3Lab's administrator sign-in, reused for a while by every client in this process.
+SIGN_IN_REUSE_SECONDS = 300
+_SIGN_INS: dict[tuple[str, str, str], tuple[str, float]] = {}
+_SIGN_IN_LOCK = threading.Lock()
 
 
 class ContextForgeError(RuntimeError):
@@ -114,11 +123,21 @@ class ContextForge:
     def __exit__(self, *_args: object) -> None:
         self.client.close()
 
-    def _sign_in(self) -> None:
-        data = self._send("POST", "/v1/auth/email/login", json={"email": self.email, "password": self.password})
-        token = (data or {}).get("access_token") if isinstance(data, dict) else None
-        if not token:
-            raise ContextForgeError("ContextForge did not sign Mu3Lab in.")
+    def _sign_in(self, *, fresh: bool = False) -> None:
+        """Sign in, or reuse this process's recent sign-in (``SIGN_IN_REUSE_SECONDS``).
+
+        ContextForge locks out an account that signs in more than ten times a minute, and one chat
+        sync makes many requests; starting several apps at once made several syncs in a row.
+        """
+        key = (str(self.client.base_url), self.email, hashlib.sha256(self.password.encode()).hexdigest())
+        with _SIGN_IN_LOCK:
+            token, until = _SIGN_INS.get(key, ("", 0.0))
+            if fresh or not token or until <= time.monotonic():
+                data = self._send("POST", "/v1/auth/email/login", json={"email": self.email, "password": self.password})
+                token = str((data or {}).get("access_token") or "") if isinstance(data, dict) else ""
+                if not token:
+                    raise ContextForgeError("ContextForge did not sign Mu3Lab in.")
+                _SIGN_INS[key] = (token, time.monotonic() + SIGN_IN_REUSE_SECONDS)
         self.client.headers["Authorization"] = f"Bearer {token}"
         self.signed_in = True
 
@@ -137,7 +156,14 @@ class ContextForge:
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
         if not self.signed_in:
             self._sign_in()
-        return self._send(method, path, **kwargs)
+        try:
+            return self._send(method, path, **kwargs)
+        except ContextForgeError as exc:
+            if exc.status != 401:
+                raise
+            # A reused sign-in expired (or ContextForge restarted with a new key): sign in once more.
+            self._sign_in(fresh=True)
+            return self._send(method, path, **kwargs)
 
     def access_token(self) -> str:
         """Mu3Lab's own short-lived sign-in, which Open WebUI's connection test passes to the virtual servers."""

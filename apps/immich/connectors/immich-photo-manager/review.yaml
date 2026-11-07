@@ -2,7 +2,7 @@ schema_version: 1
 data_scope: operator_only
 delegation: none
 server: immich-photo-manager
-revision: "2.0.11"
+revision: "2.0.14"
 reviewed_at: "2026-09-30"
 guidance: |
   Asset ids come from search results; pass them to other tools rather than guessing.

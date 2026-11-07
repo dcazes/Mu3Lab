@@ -924,6 +924,52 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/power': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Power Status
+     * @description Whether Mu3Lab is on; while it turns off, how far it has got.
+     *
+     *     The wake page answers this same address once Mu3Lab is off, so the dashboard's page can
+     *     follow the whole turn-off and then show the wake page.
+     */
+    get: operations['power_status_api_v1_power_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/power/off': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Power Off
+     * @description Turn the whole of Mu3Lab off: every app, sign-in, Caddy and this dashboard.
+     *
+     *     Only the wake page stays on, at the dashboard's address, with a button to turn it on.
+     *     It runs as its own systemd unit, because it stops the dashboard answering this request.
+     */
+    post: operations['power_off_api_v1_power_off_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/providers': {
     parameters: {
       query?: never;
@@ -1614,6 +1660,8 @@ export interface paths {
     /**
      * Restart Mu3Lab
      * @description Restart the dashboard and worker once this answer is sent; the apps keep running.
+     *
+     *     When the dashboard's code changed since its page was built, the page is rebuilt first.
      */
     post: operations['restart_mu3lab_api_v1_system_restart_post'];
     delete?: never;
@@ -3184,6 +3232,11 @@ export interface components {
       checked_at: number;
       /** Commit */
       commit: string;
+      /**
+       * Dashboard Outdated
+       * @default false
+       */
+      dashboard_outdated?: boolean;
       /** Date */
       date: string;
       last_update?: components['schemas']['Mu3LabUpdateResult'] | null;
@@ -3326,6 +3379,29 @@ export interface components {
       ok: boolean;
       platform: components['schemas']['BackupProtection'];
       recovery_sheet?: components['schemas']['RecoverySheetStatus'] | null;
+    };
+    /**
+     * PowerStatus
+     * @description Whether Mu3Lab as a whole is on, and the progress of turning it off.
+     */
+    PowerStatus: {
+      /** Blockers */
+      blockers?: string[] | null;
+      /** Done */
+      done?: number | null;
+      /** Error */
+      error?: string | null;
+      /** Since */
+      since?: string | null;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'on' | 'turning_off' | 'off' | 'turning_on';
+      /** Step */
+      step?: string | null;
+      /** Total */
+      total?: number | null;
     };
     /** ProviderCatalogItem */
     ProviderCatalogItem: {
@@ -3585,6 +3661,11 @@ export interface components {
       group: 'apps' | 'ai' | 'infrastructure';
       /** Health State */
       health_state: string;
+      /**
+       * Home Network
+       * @default false
+       */
+      home_network?: boolean;
       /** Https Port */
       https_port: number;
       /** Id */
@@ -9485,6 +9566,172 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['PersonResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  power_status_api_v1_power_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PowerStatus'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  power_off_api_v1_power_off_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
         };
       };
       /** @description Bad Request */

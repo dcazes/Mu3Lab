@@ -57,13 +57,16 @@ class ExtraPort(Model):
     ``loopback`` ports are for this computer only (an extra route's upstream,
     MQTT, a health port). ``tailnet`` ports listen on this server's tailnet
     address only, for traffic HTTPS routes cannot carry, such as WebRTC media;
-    the compose file binds them to ``${MU3LAB_TAILNET_IP}``.
+    the compose file binds them to ``${MU3LAB_TAILNET_IP}``. ``home`` ports
+    listen on this server's home-network address only, for an app the owner
+    keeps off the tailnet (Jellyfin, for the household's TVs); the compose file
+    binds them to ``${MU3LAB_HOME_IP}``, and the app checks logins itself.
     """
 
     port: Port
     purpose: str
     protocol: Literal["tcp", "udp"] = "tcp"
-    listen: Literal["loopback", "tailnet"] = "loopback"
+    listen: Literal["loopback", "tailnet", "home"] = "loopback"
 
 
 class ServiceSpec(Model):
@@ -79,10 +82,23 @@ class ServiceSpec(Model):
 
     @model_validator(mode="after")
     def _distinct_ports(self) -> ServiceSpec:
-        ports = [(self.local_port, "tcp"), *((extra.port, extra.protocol) for extra in self.extra_ports)]
+        # A home-network port may reuse the loopback port number: they listen on different addresses.
+        ports = [
+            (self.local_port, "tcp", "loopback"),
+            *((extra.port, extra.protocol, extra.listen) for extra in self.extra_ports),
+        ]
         if len(ports) != len(set(ports)):
             raise ValueError("service ports must be distinct")
+        if len([extra for extra in self.extra_ports if extra.listen == "home" and extra.protocol == "tcp"]) > 1:
+            raise ValueError("an app has at most one home-network address (one tcp home port)")
         return self
+
+    @property
+    def home_port(self) -> int | None:
+        """The port people open on the home network (``http://<home address>:<port>``), if the app has one."""
+        return next(
+            (extra.port for extra in self.extra_ports if extra.listen == "home" and extra.protocol == "tcp"), None
+        )
 
 
 # --- Private address (Tailscale Serve → Caddy → app) ------------------------------------
@@ -635,6 +651,12 @@ class AppManifest(Model):
             missing = sorted(set(values) - set(self.env))
             if missing:
                 raise ValueError(f"build_env {mode}: give {', '.join(missing)} a CPU value in env too")
+        if any(extra.listen == "home" for extra in self.service.extra_ports):
+            # Nothing guards the home network but the app's own login.
+            if self.sign_in.method != "local":
+                raise ValueError("an app on the home network signs people in itself (sign_in.method local)")
+            if self.route is not None:
+                raise ValueError("an app on the home network has no tailnet route")
         if self.sign_in.method in {"gate", "trusted_header"} and (self.route is None or self.route.access == "open"):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":

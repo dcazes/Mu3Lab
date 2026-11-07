@@ -26,6 +26,7 @@ import {
   siCaddy,
   siImmich,
   siGrocy,
+  siJellyfin,
   siLivekit,
   siMealie,
   siNextcloud,
@@ -56,6 +57,7 @@ const brands: Record<string, SimpleIcon> = {
   searxng: siSearxng,
   qbittorrent: siQbittorrent,
   livekit: siLivekit,
+  jellyfin: siJellyfin,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
@@ -77,8 +79,13 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   contextforge: { icon: Plug, color: '#0f62fe' },
 };
 
-// Near-black brand colors would vanish in dark mode; those glyphs follow the text color.
-const readable = (hex: string) => (parseInt(hex, 16) < 0x333333 ? undefined : `#${hex}`);
+// A near-black brand color would vanish in dark mode and a near-white one (LiveKit's) in light mode;
+// those glyphs follow the text color.
+const readable = (hex: string) => {
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const lightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lightness < 51 || lightness > 225 ? undefined : `#${hex}`;
+};
 
 export function AppIcon({ id, size = 'md' }: { id: string; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   const brand = brands[id];

@@ -170,7 +170,11 @@ elif MODE == "romm":
         tool("list_collections", "List the RomM collections", schema({})),
     ]
 elif MODE == "calendar":
-    WHEN = {"type": "string", "description": "ISO 8601 date-time, or YYYY-MM-DD for an all-day event"}
+    WHEN = {
+        "type": "string",
+        "description": "The person's local date and time with no offset or Z (2026-11-06T10:00:00): Mu3Lab applies "
+        "the household's time zone, so never convert to UTC. YYYY-MM-DD for an all-day event.",
+    }
     TOOLS = [
         tool(
             "list_events",
@@ -266,6 +270,43 @@ elif MODE == "qbittorrent":
             schema({"hashes": HASHES}, ["hashes"]),
         ),
     ]
+elif MODE == "jellyfin":
+    LIMIT = {"type": "integer", "minimum": 1, "maximum": 50, "default": 20}
+    TOOLS = [
+        tool(
+            "list_libraries",
+            "List the Jellyfin libraries this person can see (films, shows, music) with their IDs",
+            schema({}),
+        ),
+        tool(
+            "search_media",
+            "Search the films, shows and episodes this person can see",
+            schema({"query": TEXT, "limit": LIMIT}, ["query"]),
+        ),
+        tool(
+            "recently_added",
+            "List what was added most recently, optionally in one library",
+            schema({"library_id": {"type": "string"}, "limit": LIMIT}),
+        ),
+        tool(
+            "list_library",
+            "List the films or shows in one library, newest added or by name",
+            schema(
+                {
+                    "library_id": TEXT,
+                    "order": {"type": "string", "enum": ["newest", "name"], "default": "newest"},
+                    "limit": LIMIT,
+                },
+                ["library_id"],
+            ),
+        ),
+        tool(
+            "continue_watching", "List the films and episodes this person is part-way through", schema({"limit": LIMIT})
+        ),
+        tool(
+            "next_up", "List the next episode to watch in each show this person is following", schema({"limit": LIMIT})
+        ),
+    ]
 else:
     raise SystemExit("unsupported adapter mode")
 
@@ -300,6 +341,12 @@ def _auth() -> str:
         return ""  # the Subsonic API signs each request in its query (_subsonic)
     if MODE == "qbittorrent":
         return ""  # qBittorrent skips its login for this computer; Authentik guards it for people
+    if MODE == "jellyfin":
+        # The person's own Jellyfin sign-in, so their library access and parental limits apply.
+        token = os.environ.get("JELLYFIN_TOKEN", "")
+        if not token:
+            raise ValueError("Jellyfin sign-in is not configured")
+        return f'MediaBrowser Client="Mu3Lab chat", Token="{token}"'
     if MODE == "kopia":
         username = os.environ.get("KOPIA_USERNAME", "")
         password = os.environ.get("KOPIA_PASSWORD", "")
@@ -840,6 +887,76 @@ def _qbittorrent(name: str, args: dict):
     raise ValueError("unknown tool")
 
 
+# Jellyfin's fields for a list of items, without images, people or file details.
+JELLYFIN_FIELDS = "Overview,ProductionYear,Genres,OfficialRating,CommunityRating,RunTimeTicks,DateCreated"
+
+
+def _media(item: dict) -> dict:
+    """One Jellyfin film, show or episode, with this person's progress."""
+    data = item.get("UserData") or {}
+    ticks = item.get("RunTimeTicks")
+    found = {
+        "id": item.get("Id"),
+        "type": item.get("Type"),
+        "name": item.get("Name"),
+        "year": item.get("ProductionYear"),
+        "show": item.get("SeriesName"),
+        "season": item.get("ParentIndexNumber") if item.get("Type") == "Episode" else None,
+        "episode": item.get("IndexNumber") if item.get("Type") == "Episode" else None,
+        "minutes": round(ticks / 600_000_000) if isinstance(ticks, int) else None,
+        "rating": item.get("OfficialRating"),
+        "score": item.get("CommunityRating"),
+        "genres": item.get("Genres"),
+        "overview": _short(item.get("Overview"), 300),
+        "added": item.get("DateCreated"),
+        "watched": data.get("Played"),
+        "percent_watched": round(data["PlayedPercentage"])
+        if isinstance(data.get("PlayedPercentage"), int | float)
+        else None,
+    }
+    return {key: value for key, value in found.items() if value not in (None, [], "")}
+
+
+def _jellyfin(name: str, args: dict):
+    common = {"fields": JELLYFIN_FIELDS, "enableImages": "false"}
+    if name == "list_libraries":
+        views = _dicts(_get("/UserViews").get("Items"))
+        return [{"id": view.get("Id"), "name": view.get("Name"), "kind": view.get("CollectionType")} for view in views]
+    if name == "search_media":
+        query = common | {
+            "searchTerm": _text(args, "query"),
+            "recursive": "true",
+            "includeItemTypes": "Movie,Series,Episode",
+            "limit": _limit(args, 20),
+        }
+        return [_media(item) for item in _dicts(_get("/Items", query).get("Items"))]
+    if name == "recently_added":
+        query = common | {"limit": _limit(args, 20), "groupItems": "true"}
+        if args.get("library_id"):
+            query["parentId"] = _text(args, "library_id")
+        return [_media(item) for item in _dicts(_get("/Items/Latest", query))]
+    if name == "list_library":
+        order = args.get("order", "newest")
+        if order not in {"newest", "name"}:
+            raise ValueError("order must be newest or name")
+        query = common | {
+            "parentId": _text(args, "library_id"),
+            "recursive": "true",
+            "includeItemTypes": "Movie,Series,MusicAlbum",
+            "sortBy": "DateCreated,SortName" if order == "newest" else "SortName",
+            "sortOrder": "Descending" if order == "newest" else "Ascending",
+            "limit": _limit(args, 20),
+        }
+        return [_media(item) for item in _dicts(_get("/Items", query).get("Items"))]
+    if name == "continue_watching":
+        query = common | {"limit": _limit(args, 20), "mediaTypes": "Video"}
+        return [_media(item) for item in _dicts(_get("/UserItems/Resume", query).get("Items"))]
+    if name == "next_up":
+        query = common | {"limit": _limit(args, 20)}
+        return [_media(item) for item in _dicts(_get("/Shows/NextUp", query).get("Items"))]
+    raise ValueError("unknown tool")
+
+
 HANDLERS = {
     "nextcloud": _nextcloud,
     "adventurelog": _adventurelog,
@@ -851,6 +968,7 @@ HANDLERS = {
     "kopia": _kopia,
     "calendar": _calendar,
     "qbittorrent": _qbittorrent,
+    "jellyfin": _jellyfin,
 }
 
 

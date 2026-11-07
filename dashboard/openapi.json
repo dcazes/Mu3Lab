@@ -4155,6 +4155,11 @@
             "title": "Commit",
             "type": "string"
           },
+          "dashboard_outdated": {
+            "default": false,
+            "title": "Dashboard Outdated",
+            "type": "boolean"
+          },
           "date": {
             "title": "Date",
             "type": "string"
@@ -4544,6 +4549,95 @@
           "core_apps"
         ],
         "title": "PlatformBackupStatus",
+        "type": "object"
+      },
+      "PowerStatus": {
+        "description": "Whether Mu3Lab as a whole is on, and the progress of turning it off.",
+        "properties": {
+          "blockers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockers"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "state": {
+            "enum": [
+              "on",
+              "turning_off",
+              "off",
+              "turning_on"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "PowerStatus",
         "type": "object"
       },
       "ProviderCatalogItem": {
@@ -5472,6 +5566,11 @@
           "health_state": {
             "title": "Health State",
             "type": "string"
+          },
+          "home_network": {
+            "default": false,
+            "title": "Home Network",
+            "type": "boolean"
           },
           "https_port": {
             "title": "Https Port",
@@ -13883,6 +13982,190 @@
         ]
       }
     },
+    "/api/v1/power": {
+      "get": {
+        "description": "Whether Mu3Lab is on; while it turns off, how far it has got.\n\nThe wake page answers this same address once Mu3Lab is off, so the dashboard's page can\nfollow the whole turn-off and then show the wake page.",
+        "operationId": "power_status_api_v1_power_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Power Status",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/power/off": {
+      "post": {
+        "description": "Turn the whole of Mu3Lab off: every app, sign-in, Caddy and this dashboard.\n\nOnly the wake page stays on, at the dashboard's address, with a button to turn it on.\nIt runs as its own systemd unit, because it stops the dashboard answering this request.",
+        "operationId": "power_off_api_v1_power_off_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Power Off",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/v1/providers": {
       "get": {
         "description": "List safe connection state; encrypted keys never cross this boundary.",
@@ -18184,7 +18467,7 @@
     },
     "/api/v1/system/restart": {
       "post": {
-        "description": "Restart the dashboard and worker once this answer is sent; the apps keep running.",
+        "description": "Restart the dashboard and worker once this answer is sent; the apps keep running.\n\nWhen the dashboard's code changed since its page was built, the page is rebuilt first.",
         "operationId": "restart_mu3lab_api_v1_system_restart_post",
         "responses": {
           "200": {

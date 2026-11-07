@@ -297,6 +297,12 @@ class UpdateTests(_Checkout):
         restart.assert_not_called()
 
 
+def _unlock() -> None:
+    """Release the restart lock a test left held (the real restart ends the process instead)."""
+    if self_update.restarting.locked():
+        self_update.restarting.release()
+
+
 class ApiTests(unittest.TestCase):
     headers: ClassVar[dict[str, str]] = {
         "x-mu3lab-proxy-token": "token",
@@ -348,6 +354,80 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("edited files", response.text)
         create.assert_not_called()
+
+    def restart(self, outdated: bool):
+        """Press Restart Mu3Lab; returns the answer and what ran after it was sent."""
+        with (
+            patch("ctl.api.runtime.job_store") as store,
+            patch.object(self_update, "dashboard_outdated", return_value=outdated),
+            patch.object(self_update, "restart") as restart,
+            patch.object(self_update, "rebuild_and_restart") as rebuild,
+        ):
+            store.return_value.active_jobs.return_value = []
+            response = self.client.post("/api/v1/system/restart", headers=self.headers, json={})
+        _unlock()
+        return response, restart, rebuild
+
+    def test_a_restart_with_no_dashboard_change_only_restarts(self):
+        response, restart, rebuild = self.restart(outdated=False)
+        self.assertEqual(response.status_code, 200, response.text)
+        restart.assert_called_once()
+        rebuild.assert_not_called()
+
+    def test_a_restart_after_the_dashboards_code_changed_rebuilds_its_page_first(self):
+        response, restart, rebuild = self.restart(outdated=True)
+        self.assertIn("Rebuilding the dashboard", response.json()["message"])
+        rebuild.assert_called_once()
+        restart.assert_not_called()
+
+
+class RebuildTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.dist = self.root / "dashboard/dist"
+        self.dist.mkdir(parents=True)
+        (self.dist / "index.html").write_text("earlier page")
+        self.assertTrue(self_update.restarting.acquire(blocking=False))
+        self.addCleanup(_unlock)
+
+    def rebuild(self, build):
+        failures: list[str] = []
+        with patch("ctl.dashboard_build.build", side_effect=build), patch.object(self_update, "restart") as restart:
+            self_update.rebuild_and_restart(self.root, lambda _line: None, failures.append)
+        self.assertFalse(self_update.restarting.locked())
+        restart.assert_called_once()
+        return failures
+
+    def test_a_build_restarts_on_the_new_page(self):
+        def build(root, _log):
+            (root / "dashboard/dist/index.html").write_text("new page")
+            return True, "Dashboard built."
+
+        self.assertEqual(self.rebuild(build), [])
+        self.assertEqual((self.dist / "index.html").read_text(), "new page")
+        self.assertFalse((self.root / "dashboard/.dist-before-restart").exists())
+
+    def test_a_failed_build_still_restarts_on_the_earlier_page_and_says_why(self):
+        def build(root, _log):
+            for item in (root / "dashboard/dist").iterdir():
+                item.unlink()
+            return False, "Dashboard build failed."
+
+        self.assertEqual(self.rebuild(build), ["Dashboard build failed."])
+        self.assertEqual((self.dist / "index.html").read_text(), "earlier page")
+
+    def test_the_page_is_outdated_until_it_is_built_from_the_current_code(self):
+        from ctl.bootstrap import stamps
+
+        (self.root / "dashboard/src").mkdir()
+        (self.root / "dashboard/src/main.tsx").write_text("one")
+        self.assertTrue(self_update.dashboard_outdated(self.root))
+        stamps.write(self.root / stamps.BUILD_STAMP, stamps.dashboard_digest(self.root))
+        self.assertFalse(self_update.dashboard_outdated(self.root))
+        (self.root / "dashboard/src/main.tsx").write_text("two")
+        self.assertTrue(self_update.dashboard_outdated(self.root))
 
 
 if __name__ == "__main__":

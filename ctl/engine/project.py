@@ -199,6 +199,13 @@ class Facts:
         return tailnet_ip()
 
     @cached_property
+    def home_address(self):
+        """This server's home-network address, asked once per render and only by an app on the home network."""
+        from ctl.service_state import home_address
+
+        return home_address()
+
+    @cached_property
     def media_folders(self) -> str:
         """The libraries under the media root, comma-separated; "none" while there are none."""
         media = self.paths.media
@@ -219,6 +226,9 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
     def lookup(name: str) -> str | None:
         if name == "tailnet_ip":
             return facts.tailnet_ip or None
+        if name in {"home_ip", "home_network"}:
+            home = facts.home_address
+            return (home.ip if name == "home_ip" else home.network) if home else None
         if name == "connector_networks":
             return facts.connector_networks or None
         if name.startswith("route_url:"):

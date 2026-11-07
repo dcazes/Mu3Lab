@@ -107,6 +107,7 @@ export type PersonInvite = components['schemas']['PersonInvite'];
 export type PersonRequest = components['schemas']['PersonRequest'];
 export type PersonResponse = components['schemas']['PersonResponse'];
 export type PlatformBackupStatus = components['schemas']['PlatformBackupStatus'];
+export type PowerStatus = components['schemas']['PowerStatus'];
 export type ProviderCatalogItem = components['schemas']['ProviderCatalogItem'];
 export type ProviderCatalogResponse = components['schemas']['ProviderCatalogResponse'];
 export type ProviderMetadata = components['schemas']['ProviderMetadata'];

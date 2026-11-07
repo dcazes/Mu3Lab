@@ -160,6 +160,8 @@ def update(
             if not running:
                 app_control.stop(service, root, log)
             in_progress.clear(service.id, paths)
+            _refresh_route(service, root, log)
+            _refresh_connectors(service, root, log, running=running)
             try:
                 deployments.prune(service.id, set(), paths)
             except OSError as exc:
@@ -254,4 +256,28 @@ def keep(service: Service, root: Path, log: Log, note: dict[str, Any], paths: Ru
     if not note.get("was_running", True):
         app_control.stop(service, root, log)
     in_progress.clear(service.id, paths)
+    _refresh_route(service, root, log)
+    _refresh_connectors(service, root, log, running=note.get("was_running", True))
     return f"{service.name} kept its new release; it started healthy."
+
+
+def _refresh_route(service: Service, root: Path, log: Log) -> None:
+    """Point the app's private address at its new release (a release may move its port: qBittorrent to 8097)."""
+    if service.private_https_port is None:
+        return
+    from ctl.registry import load as load_registry
+    from ctl.routes import apply as apply_route
+
+    routed, detail = apply_route(load_registry(), service, root, log)
+    if not routed:
+        log(f"{service.name}'s private address was not refreshed: {redact(detail)}")
+
+
+def _refresh_connectors(service: Service, root: Path, log: Log, *, running: bool) -> None:
+    """Give the app's chat connectors the new release's files (they say where the app listens)."""
+    from ctl.mcp_ops import refresh_files
+
+    try:
+        refresh_files(service.id, running=running, root=root, log=log)
+    except OSError as exc:
+        log(f"{service.name}'s chat connectors kept their previous files: {redact(str(exc))}")

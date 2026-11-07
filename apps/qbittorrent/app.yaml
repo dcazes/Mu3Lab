@@ -1,7 +1,7 @@
 # qBittorrent — see ctl/manifest/models.py for every field.
 # Administrators only. Finished downloads go straight into the household's libraries by
-# category (Music, Audiobooks, Podcasts, Roms) or into the Downloads library, so Navidrome,
-# Audiobookshelf, RomM and Nextcloud show them without anyone moving files.
+# category (Music, Audiobooks, Podcasts, Roms, Movies, Shows) or into the Downloads library, so Navidrome,
+# Audiobookshelf, RomM, Jellyfin and Nextcloud show them without anyone moving files.
 id: qbittorrent
 capabilities: [media_folders]
 name: qBittorrent
@@ -10,15 +10,15 @@ group: apps
 category: media
 tagline: Download torrents into your libraries
 summary: Download torrents and magnet links from the browser. Pick a category and the finished files land in
-  Music, Audiobooks, Podcasts or Roms; anything else goes to the Downloads folder in Nextcloud. Torrent traffic
-  can go through a VPN of your choice.
+  Music, Audiobooks, Podcasts, Roms, Movies or Shows; anything else goes to the Downloads folder in Nextcloud.
+  Torrent traffic can go through a VPN of your choice.
 version: "v5.3.0"
 upstream: qbittorrent/qBittorrent
 media:
 - name: downloads
   purpose: Finished torrents with no category. Unfinished pieces wait in its hidden .incomplete folder.
 service:
-  local_port: 8096
+  local_port: 8097
   health:
     path: /api/v2/app/version
     # qBittorrent answers only to the names it knows (start.py); a port other than its own is refused.
@@ -98,7 +98,7 @@ integrates_with:
     # An empty stand-in inside qBittorrent's own folder, so the mount always has a source.
     MU3LAB_MUSIC_FOLDER: '{{data_root}}/qbittorrent/no-music'
     MU3LAB_MUSIC_SHARED: '0'
-# Audiobookshelf or RomM arriving re-renders qBittorrent, so its library gets a category.
+# Audiobookshelf, RomM or Jellyfin arriving re-renders qBittorrent, so its libraries get categories.
 - capability: media_folders
 mobile:
   primary: qbittorrent-web
@@ -126,12 +126,12 @@ chat:
     description: See what's downloading, add magnet links, and pause, resume or remove torrents.
     instructions: Help administrators with qBittorrent. List the torrents before changing one, and use the hashes the
       tools return. When adding a torrent, ask which library it is for and use that category (music, audiobooks,
-      podcasts, roms), or none for the Downloads folder. Removing a torrent always keeps its files; to delete files,
-      point them to the qBittorrent page or Nextcloud. Use only qBittorrent tools assigned to this agent.
+      podcasts, roms, movies, shows), or none for the Downloads folder. Removing a torrent always keeps its
+      files; to delete files, point them to the qBittorrent page or Nextcloud. Use only qBittorrent tools assigned to this agent.
     audience: operators
     faq:
     - question: "Where do finished downloads go?"
-      answer: "Into the library their category names: Music (Navidrome), Audiobooks and Podcasts (Audiobookshelf) or Roms (RomM). Torrents with no category go to the Downloads folder, which everyone sees in Nextcloud."
+      answer: "Into the library their category names: Music (Navidrome), Audiobooks and Podcasts (Audiobookshelf), Roms (RomM), or Movies and Shows (Jellyfin). Torrents with no category go to the Downloads folder, which everyone sees in Nextcloud."
     - question: "Is torrent traffic private?"
       answer: "Not unless the VPN is on. Without it, torrents use this computer's own internet connection, which your internet provider and other peers can see. An administrator can switch on a VPN in qBittorrent's settings in the Mu3Lab dashboard."
     - question: "Who can add torrents?"

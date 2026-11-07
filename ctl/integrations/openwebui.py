@@ -5,22 +5,49 @@ app, pointing at that app's ContextForge virtual server and passing each
 person's own Authentik sign-in) and the workspace models that act as each
 app's assistant, plus the main assistant every new chat starts with. All are
 shared by everyone, except an infrastructure app's read-only assistant, which only
-Open WebUI's administrators see, and a private app's, which each person has their own of. An app that is stopped keeps its assistant switched off
-(out of the model menu, settings kept) rather than deleted; ``check`` then
+Open WebUI's administrators see, and a private app's, which each person has their own of.
+While an app's tools are out of reach (the app is stopped, or ContextForge is), its assistant
+stays in the model menu, named for why (``Nextcloud (stopped)``), with its tool connection
+switched off and instructions that say why first; old chats keep working with it. ``check`` then
 asks Open WebUI itself whether each one is set up and its tools answer. It also hides the AI gateway's own names from the model
 menu (``HIDDEN``). Connections and models Mu3Lab did not create are never
-touched: ours carry the ``mu3lab-app-`` id prefix, or are ``mu3lab-assistant``.
+touched: our assistants carry the ``mu3lab-app-`` id prefix (or are ``mu3lab-assistant``), our tool
+connections the short ``m3-`` one (``connection_id``).
 API error bodies never reach logs.
+
+Mu3Lab's status filter (``ctl/integrations/openwebui_filter.py``, ``ensure_status_filter``)
+checks every message: when an assistant's tools did not connect, the model is told and the
+person sees one line saying why.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
 
+from ctl import agent_context
+
 # Distinct from LiteLLM model names such as mu3lab-chat, which Open WebUI also lists.
 PREFIX = "mu3lab-app-"
+# Our tool connections. Open WebUI names each tool ``<connection>_<tool>`` and cuts a name past 64
+# characters to 55 plus a code the model must copy exactly, which models get wrong ("Tool not found").
+CONNECTION_PREFIX = "m3-"
+# What a person's tag keeps in a connection name: enough to tell a household's people apart.
+TAG_LENGTH = 6
+
+
+def connection_id(item_id: str) -> str:
+    """The short ID of an assistant's tool connection: ``m3-grocy``, ``m3-immich-b54595`` for one person's."""
+    app_id, _, tag = item_id.partition("--")
+    return f"{CONNECTION_PREFIX}{app_id}" + (f"-{tag[-TAG_LENGTH:]}" if tag else "")
+
+
+def tool_id(item_id: str) -> str:
+    return f"server:mcp:{connection_id(item_id)}"
+
+
 # The household's main assistant: no app tools, the selected model in every new chat
 # (DEFAULT_MODELS in apps/open-webui/docker-compose.yml), and it points people to the app assistants.
 MAIN = "mu3lab-assistant"
@@ -33,6 +60,21 @@ BASE_MODEL = "mu3lab-chat"
 OUTSIDE = "mu3lab-outside"
 LOCAL = "mu3lab-local"
 HIDDEN = ("mu3lab-chat", "mu3lab-fast", "mu3lab-embed", "mu3lab-stt", "mu3lab-tts", "mu3lab-voice")
+# How an assistant whose tools are out of reach is marked in the model menu.
+MARKS = {"stopped": "stopped", "gateway_down": "unavailable", "connector_down": "unavailable"}
+
+
+def menu_name(title: str, status: str) -> str:
+    """``Nextcloud (stopped)``; a title with a note of its own keeps one pair: ``qBittorrent (admins, stopped)``."""
+    mark = MARKS.get(status)
+    if not mark:
+        return title
+    return f"{title[:-1]}, {mark})" if title.endswith(")") else f"{title} ({mark})"
+
+
+# Mu3Lab's global filter: Open WebUI function IDs allow letters, digits and underscores only.
+FILTER_ID = "mu3lab_status"
+FILTER_SOURCE = Path(__file__).with_name("openwebui_filter.py")
 
 
 class ChatError(RuntimeError):
@@ -119,9 +161,18 @@ class OpenWebUI:
         return list((data or {}).get("specs") or [])
 
     def ensure(
-        self, assistants: list[dict[str, Any]], guide: str = "", *, outside_choice: bool = False, local_choice: str = ""
+        self,
+        assistants: list[dict[str, Any]],
+        guide: str = "",
+        *,
+        outside_choice: bool = False,
+        local_choice: str = "",
+        gateway_down: str = "",
     ) -> list[str]:
-        """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs."""
+        """Make Mu3Lab's connections and assistants exactly ``assistants``; returns their app IDs.
+
+        ``gateway_down`` names ContextForge while it is stopped, so the main assistant can say so.
+        """
         wanted_connections: list[dict[str, Any]] = []
         wanted_models: dict[str, dict[str, Any]] = {}
         admins = grants_for(self.admin_ids()) if any(operators_only(item) for item in assistants) else []
@@ -132,8 +183,9 @@ class OpenWebUI:
             else {}
         )
         for item in assistants:
-            server_id = f"{PREFIX}{item['id']}"
-            # Switched off while its app is stopped: kept, but out of the menu and unreachable.
+            server_id = connection_id(item["id"])
+            model_id = f"{PREFIX}{item['id']}"
+            # Out of reach: the tool connection is switched off; the assistant stays and says why.
             active = bool(item.get("active", True))
             restricted = operators_only(item)
             if item.get("person"):
@@ -158,42 +210,50 @@ class OpenWebUI:
             )
             if item.get("tools_only"):
                 continue  # the main assistant carries these (main_model)
-            wanted_models[server_id] = {
-                "id": server_id,
+            wanted_models[model_id] = {
+                "id": model_id,
                 "base_model_id": BASE_MODEL,
-                "name": item["title"],
+                "name": menu_name(item["title"], str(item.get("status") or "ready")),
                 "meta": {
                     "description": item["description"],
-                    "toolIds": [f"server:mcp:{server_id}"],
+                    "toolIds": [tool_id(item["id"])],
                     "capabilities": {"function_calling": True},
                 },
                 "params": {"system": item["instructions"], "function_calling": "native"},
                 "access_grants": personal if item.get("person") else admins if restricted else EVERYONE,
-                "is_active": active,
+                # Always in the menu: a hidden one is "Model not found" in its old chats.
+                "is_active": True,
             }
 
         def ours(identifier: str) -> bool:
             return identifier.startswith(PREFIX)
 
+        def our_connection(identifier: str) -> bool:
+            # Connections made before the short names carried the assistants' long prefix.
+            return identifier.startswith((CONNECTION_PREFIX, PREFIX))
+
         current = self.connections()
-        others = [item for item in current if not ours(str((item.get("info") or {}).get("id") or ""))]
+        others = [item for item in current if not our_connection(str((item.get("info") or {}).get("id") or ""))]
         self.set_connections([*others, *wanted_connections])
         existing = {str(model.get("id")) for model in self.models()}
-        # The main assistant is everyone's, so it names only the household's assistants, each app once.
-        listed = list(
-            {
-                item["title"]: item for item in assistants if item.get("active", True) and not operators_only(item)
-            }.values()
-        )
-        listed = [item for item in listed if not item.get("tools_only")]
-        paused = bool([item for item in assistants if not item.get("tools_only")]) and not listed
+        # The main assistant is everyone's, so it names only the household's assistants, each app once
+        # (a ready one first), each with whether it can reach its app now.
+        listed: dict[str, dict[str, Any]] = {}
+        for item in assistants:
+            if operators_only(item) or item.get("tools_only"):
+                continue
+            if item["title"] not in listed or item.get("active"):
+                listed[item["title"]] = item
         # Each person's own calendar connection; Open WebUI skips those a person is not granted.
         tool_ids = [
-            f"server:mcp:{PREFIX}{item['id']}"
+            tool_id(item["id"])
             for item in assistants
-            if item.get("tools_only") and f"{PREFIX}{item['id']}" in {c["info"]["id"] for c in wanted_connections}
+            if item.get("tools_only") and connection_id(item["id"]) in {c["info"]["id"] for c in wanted_connections}
         ]
-        self.save_model(main_model(listed, guide, paused=paused, tool_ids=tool_ids), exists=MAIN in existing)
+        self.save_model(
+            main_model(list(listed.values()), guide, tool_ids=tool_ids, gateway_down=gateway_down),
+            exists=MAIN in existing,
+        )
         for model_id in HIDDEN:
             self.save_model(hidden_model(model_id), exists=model_id in existing)
         # The second-ranked source is a choice in the model menu, named for what it does.
@@ -206,22 +266,25 @@ class OpenWebUI:
                 self.delete_model(model_id)
         return [item["id"] for item in assistants if f"{PREFIX}{item['id']}" in wanted_models]
 
-    def check(self, assistants: list[dict[str, Any]], token: str) -> dict[str, dict[str, Any]]:
+    def check(
+        self, assistants: list[dict[str, Any]], token: str, *, gateway: str = "ContextForge"
+    ) -> dict[str, dict[str, Any]]:
         """Read back what Open WebUI holds for each assistant and, for those switched on, have it list their tools.
 
-        ``token`` is how Open WebUI signs in to ContextForge for the test, in place of a person's sign-in.
+        ``token`` is how Open WebUI signs in to ContextForge (``gateway``) for the test, in place of a person's sign-in.
         Returns each app's ``status`` (ready, paused or failed), ``detail`` and ``tools`` (how many answered).
         """
         connections = {str((item.get("info") or {}).get("id") or ""): item for item in self.connections()}
         models = {str(model.get("id")): model for model in self.models()}
         results = {}
         for item in assistants:
-            server_id = f"{PREFIX}{item['id']}"
+            server_id = connection_id(item["id"])
             active = bool(item.get("active", True))
-            connection, model = connections.get(server_id), models.get(server_id)
+            connection, model = connections.get(server_id), models.get(f"{PREFIX}{item['id']}")
             result = {"status": "failed", "tools": 0}
             if item.get("tools_only"):
-                model = model or {"meta": {"toolIds": [f"server:mcp:{server_id}"]}, "is_active": active}
+                # Tools the main assistant carries: no menu entry of their own to check.
+                model = model or {"meta": {"toolIds": [f"server:mcp:{server_id}"]}, "is_active": True}
             if (connection is None or model is None) and item.get("person"):
                 result |= {"status": "pending", "detail": "Added once you have opened Open WebUI."}
             elif connection is None or model is None:
@@ -235,12 +298,18 @@ class OpenWebUI:
                 (connection.get("config") or {}).get("access_grants") or _public(model.get("access_grants"))
             ):
                 result["detail"] = "Open WebUI offers this administrators-only assistant to everyone."
-            elif (
-                bool((connection.get("config") or {}).get("enable")) != active or bool(model.get("is_active")) != active
-            ):
-                result["detail"] = f"Open WebUI still has this assistant switched {'off' if active else 'on'}."
+            elif bool((connection.get("config") or {}).get("enable")) != active:
+                result["detail"] = f"Open WebUI still has this assistant's tools switched {'off' if active else 'on'}."
+            elif not model.get("is_active"):
+                result["detail"] = "Open WebUI hides this assistant from the model menu."
             elif not active:
-                result |= {"status": "paused", "detail": "Switched off in Open WebUI while the app is stopped."}
+                cause, _fix = agent_context.out_of_reach(
+                    str(item.get("app_name") or item["title"]),
+                    str(item.get("status") or "stopped"),
+                    gateway=gateway,
+                    connector_state=str(item.get("connector_state") or ""),
+                )
+                result |= {"status": "paused", "detail": f"In chat, marked out of reach: {cause}."}
             else:
                 try:
                     tools = self.verify(connection, token)
@@ -259,6 +328,34 @@ class OpenWebUI:
                         )
             results[item["id"]] = result
         return results
+
+    def ensure_status_filter(self, apps: dict[str, dict[str, Any]]) -> None:
+        """Install Mu3Lab's status filter, switched on for every model, and tell it about each tool connection.
+
+        ``apps`` maps each connection's ID to ``agent_context.filter_entry``.
+        """
+        import json
+
+        content = FILTER_SOURCE.read_text()
+        form = {
+            "id": FILTER_ID,
+            "name": "Mu3Lab app status",
+            "content": content,
+            "meta": {"description": "Says when an app's tools did not connect for a message. Managed by Mu3Lab."},
+        }
+        installed = {str(item.get("id")) for item in self.request("GET", "/api/v1/functions/") or []}
+        if FILTER_ID not in installed:
+            self.request("POST", "/api/v1/functions/create", json=form)
+        current = self.request("GET", f"/api/v1/functions/id/{FILTER_ID}") or {}
+        if current.get("content") != content:
+            self.request("POST", f"/api/v1/functions/id/{FILTER_ID}/update", json=form)
+        if not current.get("is_active"):
+            self.request("POST", f"/api/v1/functions/id/{FILTER_ID}/toggle")
+        if not current.get("is_global"):
+            self.request("POST", f"/api/v1/functions/id/{FILTER_ID}/toggle/global")
+        self.request(
+            "POST", f"/api/v1/functions/id/{FILTER_ID}/valves/update", json={"priority": 0, "apps": json.dumps(apps)}
+        )
 
 
 def _public(grants: Any) -> bool:
@@ -313,27 +410,51 @@ def hidden_model(model_id: str) -> dict[str, Any]:
     }
 
 
+def _listing(item: dict[str, Any], gateway_down: str) -> str:
+    """One app assistant for the main assistant, with whether it can reach its app now."""
+    status = str(item.get("status") or "ready")
+    line = f"- {menu_name(item['title'], status)}: {item['description']}"
+    if status == "ready" or (status == "gateway_down" and gateway_down):
+        return line  # ContextForge being down is said once, below the list
+    cause, fix = agent_context.out_of_reach(
+        str(item.get("app_name") or item["title"]),
+        status,
+        gateway=gateway_down or "ContextForge",
+        connector_state=str(item.get("connector_state") or ""),
+    )
+    return f"{line} Out of reach right now: {cause}. {fix}"
+
+
 def main_model(
-    assistants: list[dict[str, Any]], guide: str = "", *, paused: bool = False, tool_ids: list[str] | None = None
+    assistants: list[dict[str, Any]],
+    guide: str = "",
+    *,
+    tool_ids: list[str] | None = None,
+    gateway_down: str = "",
 ) -> dict[str, Any]:
-    """The main assistant, told which app assistants exist and what every installed app is for.
+    """The main assistant, told which app assistants exist, whether each can reach its app now, and what every
+    installed app is for.
 
     ``guide`` (``agent_context.household_guide``) lets it answer questions about the apps themselves,
     such as what one is for or how to get it on a phone, without sending people elsewhere.
+    ``gateway_down`` names ContextForge while it is stopped: then no assistant reaches its app.
     """
     if assistants:
-        listing = "\n".join(f"- {item['title']}: {item['description']}" for item in assistants)
+        listing = "\n".join(_listing(item, gateway_down) for item in assistants)
+        offline = (
+            f"\n\nRight now {gateway_down}, the part of Mu3Lab that connects chat to the household's apps, is "
+            f"stopped, so none of these assistants can reach its app{', and your calendar tools are offline' if tool_ids else ''}. "
+            "Say so plainly whenever someone asks for anything inside an app. "
+            f"{agent_context.start_in_dashboard(gateway_down)} {agent_context.who_fixes(None)}"
+            if gateway_down
+            else ""
+        )
         apps = (
             "These app assistants can read and change data in their app:\n"
-            f"{listing}\n\n"
+            f"{listing}{offline}\n\n"
             "When a request needs one of these apps, name the assistant to use and tell the person to type @ "
-            "followed by its name in the message box, or to choose it from the model menu at the top of the chat."
-        )
-    elif paused:
-        apps = (
-            "The app assistants are switched off right now because their apps are stopped. When someone asks for "
-            "one, explain that an administrator can start the app from the Mu3Lab dashboard (Apps), and its "
-            "assistant comes back with it."
+            "followed by its name in the message box, or to choose it from the model menu at the top of the chat. "
+            "When its app is out of reach, say so first, with how to fix it."
         )
     else:
         apps = (
@@ -354,11 +475,13 @@ def main_model(
     calendar = (
         "\n\nCalendar: you have tools for the person's own Mu3Lab calendar, the same one the Mu3Lab dashboard, "
         "Nextcloud and their phone show. List events before changing one, use the IDs the tools return, give times "
-        "in the person's time zone, and ask before moving or deleting an event."
+        "in the person's time zone, and ask before moving or deleting an event. If you have no calendar tools in "
+        "this chat, they did not connect: say so plainly, and never answer from memory."
         if tool_ids
         else ""
     )
     instructions = (
+        f"{agent_context.NOW}\n\n"
         "You are Mu3Lab, this household's general assistant. You can help with general questions, writing and "
         "planning. Apart from the calendar, you have no app tools: you cannot see or change anything inside the "
         f"household's apps, so never claim to have done so.\n\n{apps}{household}{calendar}\n\n"

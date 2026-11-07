@@ -1,4 +1,4 @@
-"""Approve a tested upstream release of a catalog app, for every Mu3Lab install.
+"""Approve a tested upstream release of any app, for every Mu3Lab install.
 
     make check-updates                       # which apps have a newer upstream release
     make approve APP=mealie VERSION=v3.23.0  # pin it, digest and all
@@ -9,6 +9,8 @@ only, nothing is downloaded), pins each to its digest in
 ``apps/<app>/app.yaml``. Nothing is committed: test
 the update from your own dashboard (Apps -> the app -> Advanced -> Updates),
 then commit and push. Each install offers the release once it pulls Mu3Lab.
+Catalog and core apps update from the dashboard; foundation apps (sign-in,
+passwords, the web front door) move when ./install.sh runs.
 
 Only the app's own images move, matched by the approved version in their
 tag. Databases and helpers keep their pins; move one deliberately with
@@ -104,8 +106,6 @@ def approve(app: str, version: str, overrides: dict[str, str]) -> None:
     if not _RELEASE_TAG.fullmatch(version):
         raise SystemExit(f"{version!r} is not a release tag.")
     service = load().get(app)
-    if service.stage != "optional":
-        raise SystemExit(f"{service.name} is part of Mu3Lab itself; edit its pins by hand.")
     current = app_releases.approved(service, ROOT)
     if not overrides and not app_releases.is_newer(version, current.version):
         raise SystemExit(f"{service.name} {current.version} is already approved; {version} is not newer.")
@@ -122,9 +122,13 @@ def approve(app: str, version: str, overrides: dict[str, str]) -> None:
     rewrite(service, version, pinned)
     for name, image in pinned.items():
         print(f"  {name}: {image}")
+    where = (
+        "run ./install.sh (foundation apps move only with the installer)"
+        if not app_releases.updatable(service)
+        else f"open your dashboard, go to Apps > {service.name} > Advanced and run the update"
+    )
     print(
-        "\nNext: open your dashboard, go to Apps > "
-        f"{service.name} > Advanced and run the update. If it works, commit and push:\n"
+        f"\nNext: {where}. If it works, commit and push:\n"
         f'  git commit -am "Approve {service.name} {version}" && git push'
     )
 
@@ -134,7 +138,7 @@ def check() -> None:
 
     for service in load().services:
         repository = str(service.update.get("repository", ""))
-        if service.stage != "optional" or not repository:
+        if not repository:
             continue
         approved = str(service.update.get("approved_version", ""))
         try:

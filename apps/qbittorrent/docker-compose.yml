@@ -14,7 +14,7 @@ services:
     user: "65534:65534"
     # Inside, qBittorrent listens on its private address's port (8479): it refuses a Host header
     # naming any other port, and Tailscale and Caddy pass that address on unchanged.
-    ports: ["127.0.0.1:8096:8479"]
+    ports: ["127.0.0.1:8097:8479"]
     read_only: true
     security_opt: ["no-new-privileges:true"]
     healthcheck:

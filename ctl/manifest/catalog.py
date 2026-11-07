@@ -125,13 +125,15 @@ _PUBLISH = re.compile(r"(?:(?P<address>.+):)?(?P<port>\d+):\d+(?:/(?P<protocol>t
 # Networks created with --internal (ctl.install): no internet, and no published ports.
 INTERNAL_NETWORKS = frozenset({"mu3lab_backend"})
 _TAILNET_ADDRESS = re.compile(r"\$\{MU3LAB_TAILNET_IP:\?[^}:]*\}")
+# This server's home-network address, for an app kept off the tailnet (same ``:?`` rule).
+_HOME_ADDRESS = re.compile(r"\$\{MU3LAB_HOME_IP:\?[^}:]*\}")
 
 
 def published(compose: Path) -> list[tuple[int, str, str]]:
     """``(port, protocol, listen)`` for every host port a compose file publishes.
 
-    ``listen`` is ``loopback`` (``127.0.0.1``) or ``tailnet`` (``${MU3LAB_TAILNET_IP:?...}``);
-    any other address is refused.
+    ``listen`` is ``loopback`` (``127.0.0.1``), ``tailnet`` (``${MU3LAB_TAILNET_IP:?...}``) or
+    ``home`` (``${MU3LAB_HOME_IP:?...}``); any other address is refused.
     """
     ports = []
     for name, definition in _services(compose).items():
@@ -148,10 +150,12 @@ def published(compose: Path) -> list[tuple[int, str, str]]:
                 listen = "loopback"
             elif _TAILNET_ADDRESS.fullmatch(address):
                 listen = "tailnet"
+            elif _HOME_ADDRESS.fullmatch(address):
+                listen = "home"
             else:
                 raise CatalogError(
                     f"{compose}: {entry!r} must listen on 127.0.0.1 only "
-                    "(or on ${MU3LAB_TAILNET_IP:?...} for a tailnet extra port)"
+                    "(or on ${MU3LAB_TAILNET_IP:?...} / ${MU3LAB_HOME_IP:?...} for a tailnet or home extra port)"
                 )
             ports.append((int(match["port"]), match["protocol"] or "tcp", listen))
     return ports

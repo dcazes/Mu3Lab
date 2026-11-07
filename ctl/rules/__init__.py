@@ -130,6 +130,7 @@ def _load_all() -> None:
         first_admin_from_env,
         gateway_key,
         hide_model_providers,
+        home_network,
         initial_owner_guard,
         keeps_models_current,
         needs_chat_model,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,16 @@ from fastapi.responses import JSONResponse
 from pydantic import JsonValue
 from starlette.concurrency import run_in_threadpool
 
-from ctl import __version__, backup_location, backup_service, disk_cleanup, platform_backup, recovery_sheet, self_update
+from ctl import (
+    __version__,
+    backup_location,
+    backup_service,
+    disk_cleanup,
+    platform_backup,
+    power,
+    recovery_sheet,
+    self_update,
+)
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -181,13 +191,73 @@ def start_mu3lab_update(request: Request, operator: OperatorMutation) -> models.
 
 @router.post("/system/restart", response_model=models.OkResponse, response_model_exclude_none=True)
 def restart_mu3lab(background: BackgroundTasks, operator: OperatorMutation) -> models.OkResponse:
-    """Restart the dashboard and worker once this answer is sent; the apps keep running."""
+    """Restart the dashboard and worker once this answer is sent; the apps keep running.
+
+    When the dashboard's code changed since its page was built, the page is rebuilt first.
+    """
     store = runtime.job_store()
     if [job for job in store.active_jobs() if job["kind"] != "verification"]:
         raise ApiError(409, "Wait for the running tasks to finish first; restarting Mu3Lab stops them.")
-    store.record_audit(actor=operator["username"], event="system.restarted", detail="Owner restarted Mu3Lab.")
-    background.add_task(self_update.restart, lambda _line: None)
-    return models.OkResponse(ok=True, message="Mu3Lab is restarting; the dashboard is back in a few seconds.")
+    if not self_update.restarting.acquire(blocking=False):
+        raise ApiError(409, "Mu3Lab is already restarting.")
+    if not self_update.dashboard_outdated(ROOT):
+        self_update.restarting.release()
+        store.record_audit(actor=operator["username"], event="system.restarted", detail="Owner restarted Mu3Lab.")
+        background.add_task(self_update.restart, lambda _line: None)
+        return models.OkResponse(ok=True, message="Mu3Lab is restarting; the dashboard is back in a few seconds.")
+    store.record_audit(
+        actor=operator["username"],
+        event="system.restarted",
+        detail="Owner restarted Mu3Lab; the dashboard is rebuilt from its changed code first.",
+    )
+
+    def failed(detail: str) -> None:
+        store.record_audit(
+            actor=operator["username"],
+            event="system.dashboard_build_failed",
+            detail=f"The dashboard was not rebuilt, so the earlier page is kept. {detail}",
+        )
+
+    logger = logging.getLogger(__name__)
+    background.add_task(self_update.rebuild_and_restart, ROOT, logger.info, failed)
+    return models.OkResponse(
+        ok=True,
+        message="Rebuilding the dashboard with your code changes, then restarting. It's back in about a minute.",
+    )
+
+
+@router.get("/power", response_model=models.PowerStatus, response_model_exclude_none=True)
+def power_status(identity: Member) -> models.PowerStatus:
+    """Whether Mu3Lab is on; while it turns off, how far it has got.
+
+    The wake page answers this same address once Mu3Lab is off, so the dashboard's page can
+    follow the whole turn-off and then show the wake page.
+    """
+    status: dict[str, Any] = power.public(power.read())
+    if identity.get("is_admin"):
+        status["blockers"] = power.blockers()
+    return models.PowerStatus.model_validate(status)
+
+
+@router.post("/power/off", response_model=models.OkResponse, response_model_exclude_none=True)
+def power_off(operator: OperatorMutation) -> models.OkResponse:
+    """Turn the whole of Mu3Lab off: every app, sign-in, Caddy and this dashboard.
+
+    Only the wake page stays on, at the dashboard's address, with a button to turn it on.
+    It runs as its own systemd unit, because it stops the dashboard answering this request.
+    """
+    if problems := power.blockers():
+        raise ApiError(409, problems[0])
+    if power.read() is not None:
+        raise ApiError(409, "Mu3Lab is already turning off.")
+    try:
+        power.launch("off")
+    except power.PowerError as exc:
+        raise ApiError(409, str(exc)) from exc
+    runtime.job_store().record_audit(
+        actor=operator["username"], event="system.turned_off", detail="Turned off all of Mu3Lab."
+    )
+    return models.OkResponse(ok=True, message="Mu3Lab is turning off.")
 
 
 @router.post("/system/cleanup", response_model=models.JobResponse, response_model_exclude_none=True)

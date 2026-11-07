@@ -161,6 +161,8 @@ class Service(ApiModel):
     stage: Literal["foundation"] | Literal["core"] | Literal["optional"]
     group: Literal["apps"] | Literal["ai"] | Literal["infrastructure"]
     routable: bool
+    # Reached on the home network (http://<home address>:<port>), not the tailnet (Jellyfin).
+    home_network: bool = False
     extra_routes: list[ServiceExtraRoute] = Field(default_factory=list)
     required: bool
     identity_note: str
@@ -1091,6 +1093,8 @@ class Mu3LabUpdate(ApiModel):
     changes: list[str]
     blocked_reason: str
     checked_at: float
+    # The dashboard's code changed since its page was built: Restart Mu3Lab rebuilds it first.
+    dashboard_outdated: bool = False
     last_update: Mu3LabUpdateResult | None = None
 
 
@@ -1524,6 +1528,19 @@ class OkResponse(ApiModel):
     warning: str | None = None
     message: str | None = None
     id: str | None = None
+
+
+class PowerStatus(ApiModel):
+    """Whether Mu3Lab as a whole is on, and the progress of turning it off."""
+
+    state: Literal["on", "turning_off", "off", "turning_on"]
+    step: str | None = None
+    done: int | None = None
+    total: int | None = None
+    since: str | None = None
+    error: str | None = None
+    # Why it cannot turn off now (a task is running); only administrators are told.
+    blockers: list[str] | None = None
 
 
 class PersonAccess(ApiModel):

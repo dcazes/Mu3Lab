@@ -7,8 +7,8 @@ Runs as root inside the container at every start, before qBittorrent does:
   it) and for itself (Gluetun's port-forwarding command). Nobody types a qBittorrent password:
   the one set here is random and never kept.
 - Where files go. New torrents land in the Downloads library; a category saves straight into
-  the library it is named after (Music, Audiobooks, Podcasts, Roms), so those apps pick the
-  files up. Unfinished pieces wait in Downloads/.incomplete, which backups skip.
+  the library it is named after (Music, Audiobooks, Podcasts, Roms, Movies, Shows), so those
+  apps pick the files up. Unfinished pieces wait in Downloads/.incomplete, which backups skip.
 - The VPN. While it is on, qBittorrent may use only the VPN's network interface.
 """
 
@@ -36,6 +36,8 @@ LIBRARIES = {
     "audiobooks": Path("/media/audiobooks"),
     "podcasts": Path("/media/podcasts"),
     "roms": Path("/media/roms"),
+    "movies": Path("/media/movies"),
+    "shows": Path("/media/shows"),
 }
 VPN_INTERFACE = "tun0"
 OWNER = (int(os.environ.get("PUID", "33")), int(os.environ.get("PGID", "33")))

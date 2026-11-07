@@ -34,6 +34,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -93,6 +94,7 @@ def status(root: Path, *, refresh: bool = False) -> dict[str, Any]:
         "changes": [],
         "blocked_reason": "",
         "checked_at": 0,
+        "dashboard_outdated": dashboard_outdated(root),
     }
     last = last_update()
     if last:
@@ -578,6 +580,45 @@ def restart(log: Log) -> None:
     rc, out = _run(["systemctl", "--user", "--no-block", "restart", *UNITS], Path.cwd(), timeout=30)
     if rc:
         log(f"Restart failed ({out}); run ./start.sh to restart Mu3Lab.")
+
+
+# Held from the restart button's press until the restart, so a second press waits for the first.
+restarting = threading.Lock()
+
+
+def dashboard_outdated(root: Path) -> bool:
+    """True when the dashboard's code changed since its page was last built (only a copy someone edits)."""
+    from ctl.bootstrap import stamps
+
+    return stamps.read(root / stamps.BUILD_STAMP) != stamps.dashboard_digest(root)
+
+
+def rebuild_and_restart(root: Path, log: Log, failed: Callable[[str], None]) -> None:
+    """Build the dashboard from its changed code, then restart, so the page matches the code it talks to.
+
+    A failed build still restarts, on the page built before; ``failed`` hears why.
+    """
+    from ctl import dashboard_build
+
+    dist = root / "dashboard" / "dist"
+    kept = root / "dashboard" / ".dist-before-restart"
+    try:
+        shutil.rmtree(kept, ignore_errors=True)
+        if (dist / "index.html").is_file():
+            shutil.copytree(dist, kept)
+        try:
+            ok, detail = dashboard_build.build(root, log)
+        except OSError as exc:
+            ok, detail = False, f"Dashboard build could not run: {exc}"
+        if not ok:
+            failed(detail)
+            if kept.is_dir() and not (dist / "index.html").is_file():
+                shutil.rmtree(dist, ignore_errors=True)
+                shutil.copytree(kept, dist)
+        shutil.rmtree(kept, ignore_errors=True)
+        restart(log)
+    finally:
+        restarting.release()
 
 
 def execute_claimed(store: JobStore, job: dict, worker_id: str, root: Path) -> None:

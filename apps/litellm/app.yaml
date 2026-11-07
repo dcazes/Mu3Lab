@@ -8,7 +8,7 @@ category: ai
 tagline: One gateway for all AI models
 summary: Provides a unified API for local and external AI models. Mu3Lab uses LiteLLM to route chat and embedding
   requests through one gateway for connected apps.
-version: "v1.106.6"
+version: "v1.108.0"
 upstream: BerriAI/litellm
 depends_on:
 - ollama
