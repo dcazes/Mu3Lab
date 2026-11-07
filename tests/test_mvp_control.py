@@ -67,15 +67,20 @@ class RegistryV3Tests(unittest.TestCase):
                 "kopia-ui",
                 "navidrome",
                 "qbittorrent",
+                "jellyfin",
             },
         )
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
-                # Apps people open get a private address; internal services (speech, maps) have none.
-                routed = service.manifest.ui.available
+                # Apps people open get a private address; internal services (speech, maps) have none,
+                # and an app kept on the home network (Jellyfin) opens at its home address instead.
+                at_home = service.manifest.service.home_port is not None
+                routed = service.manifest.ui.available and not at_home
                 self.assertEqual(service.private_https_port is not None, routed)
                 self.assertEqual(service.proxy_port is not None, routed)
+                if at_home:
+                    self.assertTrue(service.manifest.ui.available)
 
     def test_install_is_the_only_initial_optional_action(self):
         self.assertEqual(allowed_actions(load().get("mealie"), "not_installed"), ["install"])
