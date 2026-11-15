@@ -176,3 +176,25 @@ class SortingTests(unittest.TestCase):
             self.sort.destination("the.real.housewives.of.beverly.hills.s11e24.720p", files),
             f"{shows}/The Real Housewives of Beverly Hills/Season 11",
         )
+
+    def test_a_folder_torrent_leaves_one_video_beside_the_others(self):
+        season = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(season))
+        release = season / "Show.S01E02.720p.WEB-GRP[TGx]"
+        (release / "Subs").mkdir(parents=True)
+        for name in ("show.s01e02.mkv", "show.s01e02.nfo", "[TGx]Downloaded from torrentgalaxy.to .txt", "sample.mkv"):
+            (release / name).write_text("x")
+        (release / "Subs" / "English.srt").write_text("x")
+        self.sort.tidy(release, season)
+        self.assertEqual(sorted(path.name for path in season.iterdir()), ["English.srt", "show.s01e02.mkv"])
+
+    def test_a_folder_holding_something_unexpected_is_kept(self):
+        season = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(season))
+        release = season / "Show.S01E02"
+        release.mkdir()
+        (release / "show.s01e02.mkv").write_text("x")
+        (release / "bonus.pdf").write_text("x")
+        self.sort.tidy(release, season)
+        self.assertEqual(sorted(path.name for path in season.iterdir()), ["Show.S01E02", "show.s01e02.mkv"])
+        self.assertEqual([path.name for path in release.iterdir()], ["bonus.pdf"])

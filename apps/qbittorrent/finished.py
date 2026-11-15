@@ -12,6 +12,10 @@ that up). For every finished torrent:
    - anything else stays in Downloads.
    qBittorrent moves the files itself (same drive, so it is instant).
 3. It removes the torrent from qBittorrent, keeping its files.
+4. A filed torrent that came as a folder (video plus release extras) is tidied: the video and
+   any subtitles move up beside the others, and extras such as .nfo, .txt adverts and sample
+   clips go. Jellyfin notices a file arriving more reliably than a folder, and Nextcloud shows
+   one file per episode.
 
 Movies and Shows are shared folders in Nextcloud, and Jellyfin sees new files as they arrive.
 It talks to qBittorrent on localhost, which needs no login (start.py).
@@ -36,6 +40,10 @@ LOG = Path("/config/mu3lab-finished.log")
 LOCK = Path("/config/mu3lab-finished.lock")
 MOVE_SECONDS = 1800
 VIDEO = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".webm", ".ts", ".m2ts", ".mpg", ".mpeg", ".flv"}
+SUBTITLES = {".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt"}
+# What release groups add beside the video; anything else stays, and so does its folder.
+EXTRAS = {".nfo", ".txt", ".jpg", ".jpeg", ".png", ".url", ".lnk", ".exe", ".sfv", ".md5", ".nzb", ".htm", ".html"}
+SAMPLE = re.compile(r"(^|[\s._\-])sample([\s._\-]|$)", re.IGNORECASE)
 # The show's name, then its season: "S02", "S02E05", "Season 2" or "2x05".
 SEASON = re.compile(
     r"^(?P<show>.*?)[\s._\-\[(]+"
@@ -95,6 +103,26 @@ def show_folder(show: str) -> str:
     return show.title() if show == show.lower() else show
 
 
+def tidy(root: Path, folder: Path) -> None:
+    """Move a filed folder torrent's video and subtitles up into ``folder``; drop the extras."""
+    if not root.is_dir() or root.parent != folder:
+        return  # a single file is already where it belongs
+    for item in sorted(path for path in root.rglob("*") if path.is_file()):
+        suffix = item.suffix.lower()
+        sample = SAMPLE.search(item.stem) is not None
+        if (suffix in VIDEO and not sample) or suffix in SUBTITLES:
+            target = folder / item.name
+            if not target.exists():
+                item.rename(target)
+        elif suffix in EXTRAS or (suffix in VIDEO and sample):
+            item.unlink()
+    for directory in sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: -len(path.parts)):
+        if not any(directory.iterdir()):
+            directory.rmdir()
+    if not any(root.iterdir()):
+        root.rmdir()
+
+
 def call(path: str, data: dict[str, str] | None = None):
     body = urllib.parse.urlencode(data).encode() if data is not None else None
     with urllib.request.urlopen(urllib.request.Request(f"{API}/{path}", data=body), timeout=30) as response:
@@ -137,6 +165,7 @@ def finish(torrent: dict, libraries: bool) -> None:
         return
     category = str(torrent.get("category") or "")
     saved = str(torrent.get("save_path") or "").rstrip("/")
+    content = ""
     # No category: file it by what it holds. The shows category: its category folder is the
     # top of Shows, so put the episode in its show's season folder, as Jellyfin expects.
     if libraries and ((not category and saved == DOWNLOADS) or (category == "shows" and saved == SHOWS)):
@@ -145,12 +174,19 @@ def finish(torrent: dict, libraries: bool) -> None:
             folder = None  # named without a season: left where it was saved
         if folder:
             call("torrents/setLocation", {"hashes": hash_, "location": folder})
-            if str(settled(hash_).get("save_path") or "").rstrip("/") != folder:
+            moved = settled(hash_)
+            if str(moved.get("save_path") or "").rstrip("/") != folder:
                 log(f"{name}: not yet moved to {folder}; it stays stopped and is finished off next time")
                 return
             log(f"{name} -> {folder}")
+            content = str(moved.get("content_path") or "")
     call("torrents/delete", {"hashes": hash_, "deleteFiles": "false"})
     log(f"{name}: finished; removed from qBittorrent, files kept")
+    if content:
+        try:
+            tidy(Path(content), Path(folder))
+        except OSError as error:
+            log(f"{name}: left as a folder ({error})")
 
 
 def main() -> int:
