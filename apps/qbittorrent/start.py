@@ -114,9 +114,9 @@ def settings(vpn: bool) -> None:
             "Session\\GlobalMaxRatio": "0",
             "Session\\GlobalMaxSeedingMinutes": "0",
             "Session\\ShareLimitAction": "Stop",
-            # Three download at once and the rest wait; one with no one sharing it (under 2 KB/s for a
-            # minute) stops holding a place, so a stalled torrent never blocks the queue behind it.
-            "Session\\IgnoreSlowTorrentsForQueueing": "true",
+            # No queue: every torrent downloads at once, so a slow or stalled one never makes the
+            # others wait (most household torrents are thinly shared).
+            "Session\\QueueingSystemEnabled": "false",
         },
         "Network": {"PortForwardingEnabled": "false"},
         # When a torrent finishes, finished.py files a video for Jellyfin and removes the torrent.
