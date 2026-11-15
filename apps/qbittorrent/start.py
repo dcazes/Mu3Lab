@@ -12,6 +12,8 @@ Runs as root inside the container at every start, before qBittorrent does:
   A finished video with no category is moved on into Movies or Shows for Jellyfin, and every
   finished torrent is stopped and removed from qBittorrent, files kept, so nothing seeds
   (finished.py).
+- The drop folder. A .torrent file put in Add torrents (Nextcloud, administrators only) is
+  started and the file removed; one qBittorrent cannot read is renamed *.qbt_rejected.
 - The VPN. While it is on, qBittorrent may use only the VPN's network interface.
 """
 
@@ -31,8 +33,10 @@ from pathlib import Path
 CONFIG = Path("/config/qBittorrent/config")
 SETTINGS = CONFIG / "qBittorrent.conf"
 CATEGORIES = CONFIG / "categories.json"
+WATCHED = CONFIG / "watched_folders.json"
 DOWNLOADS = Path("/media/downloads")
 INCOMPLETE = DOWNLOADS / ".incomplete"
+DROP = Path("/media/add-torrents")
 # Category -> the library folder it saves into. Music is Navidrome's, outside the media root.
 LIBRARIES = {
     "music": Path("/music"),
@@ -110,6 +114,9 @@ def settings(vpn: bool) -> None:
             "Session\\GlobalMaxRatio": "0",
             "Session\\GlobalMaxSeedingMinutes": "0",
             "Session\\ShareLimitAction": "Stop",
+            # Three download at once and the rest wait; one with no one sharing it (under 2 KB/s for a
+            # minute) stops holding a place, so a stalled torrent never blocks the queue behind it.
+            "Session\\IgnoreSlowTorrentsForQueueing": "true",
         },
         "Network": {"PortForwardingEnabled": "false"},
         # When a torrent finishes, finished.py files a video for Jellyfin and removes the torrent.
@@ -144,9 +151,21 @@ def categories(found: dict[str, Path]) -> None:
     CATEGORIES.write_text(json.dumps(current, indent=4) + "\n", encoding="utf-8")
 
 
+def watched() -> None:
+    """Watch the drop folder: its torrents start with no category, so finished.py files them."""
+    try:
+        current = json.loads(WATCHED.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    current[str(DROP)] = {"add_torrent_params": {"use_auto_tmm": True}, "recursive": False}
+    WATCHED.write_text(json.dumps(current, indent=4) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     found = libraries()
-    for path in (DOWNLOADS, INCOMPLETE, *found.values()):
+    for path in (DOWNLOADS, INCOMPLETE, DROP, *found.values()):
         writable(path)
     # Kopia skips what .kopiaignore names: half-downloaded pieces are not worth a backup.
     ignore = DOWNLOADS / ".kopiaignore"
@@ -154,6 +173,7 @@ def main() -> None:
         ignore.write_text(".incomplete/\n", encoding="utf-8")
     settings(os.environ.get("MU3LAB_VPN", "").lower() in {"true", "1", "yes", "on"})
     categories(found)
+    watched()
     os.execv("/entrypoint.sh", ["/entrypoint.sh", *sys.argv[1:]])
 
 

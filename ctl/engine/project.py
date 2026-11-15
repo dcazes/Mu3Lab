@@ -213,6 +213,19 @@ class Facts:
         return ",".join(names) or "none"
 
     @cached_property
+    def media_admin_folders(self) -> str:
+        """The libraries Nextcloud shows to administrators only, comma-separated; "none" for none."""
+        names = sorted(
+            {
+                folder.name
+                for app in self.catalog.apps
+                for folder in app.manifest.media
+                if folder.audience == "operators"
+            }
+        )
+        return ",".join(names) or "none"
+
+    @cached_property
     def connector_networks(self) -> str:
         """Asked of Docker once per render, and only by an app whose settings name it (ContextForge)."""
         from ctl.service_state import connector_networks
@@ -249,6 +262,7 @@ def lookup_for(app: App, facts: Facts, env: dict[str, str]) -> template.Lookup:
             "data_root": str(facts.paths.data),
             "media_root": str(facts.paths.media),
             "media_folders": facts.media_folders,
+            "media_admin_folders": facts.media_admin_folders,
             "tz": env.get("TZ") or None,
             "country_code": hostinfo.country_code(env.get("TZ")) or None,
             "currency_code": hostinfo.currency_code(hostinfo.country_code(env.get("TZ"))),

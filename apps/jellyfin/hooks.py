@@ -155,6 +155,7 @@ def _configure(port: int, token: str, env: dict[str, str]) -> None:
     wanted = [*LIBRARIES, *([MUSIC] if env.get("MU3LAB_MUSIC_SHARED") == "1" else [])]
     existing = _call(port, "/Library/VirtualFolders", token=token) or []
     have = {str(folder.get("Name") or "").casefold(): folder for folder in existing if isinstance(folder, dict)}
+    scan = False
     for name, kind, path in wanted:
         folder = have.get(name.casefold())
         if folder is None:
@@ -170,6 +171,10 @@ def _configure(port: int, token: str, env: dict[str, str]) -> None:
         if isinstance(options, dict) and folder.get("ItemId") and options.get("EnableRealtimeMonitor") is not True:
             update = {"Id": folder["ItemId"], "LibraryOptions": options | {"EnableRealtimeMonitor": True}}
             _call(port, "/Library/VirtualFolders/LibraryOptions", method="POST", data=update, token=token)
+            scan = True
+    if scan:
+        # Files added while nobody was watching are found by one scan.
+        _call(port, "/Library/Refresh", method="POST", token=token)
 
 
 def _policy(port: int, token: str, user: dict[str, Any], **changes: Any) -> None:

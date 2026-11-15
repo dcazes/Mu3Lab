@@ -64,6 +64,7 @@ services:
       MU3LAB_MUSIC_SHARED: ${MU3LAB_MUSIC_SHARED:-0}
       # The media libraries scripts/media.sh shares, by folder name (comma-separated).
       MU3LAB_MEDIA_FOLDERS: ${MU3LAB_MEDIA_FOLDERS:-}
+      MU3LAB_MEDIA_ADMIN_FOLDERS: ${MU3LAB_MEDIA_ADMIN_FOLDERS:-}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
       - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/mnt/mu3lab-music

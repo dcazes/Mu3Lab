@@ -162,6 +162,7 @@ def update(
             in_progress.clear(service.id, paths)
             _refresh_route(service, root, log)
             _refresh_connectors(service, root, log, running=running)
+            _rewire_consumers(service, root, log, paths)
             try:
                 deployments.prune(service.id, set(), paths)
             except OSError as exc:
@@ -189,6 +190,19 @@ def update(
         "settings from just before; nothing was lost.",
         "update_rolled_back",
     )
+
+
+def _rewire_consumers(service: Service, root: Path, log: Log, paths: RuntimePaths) -> None:
+    """Apps that work with this one pick up what the update changed, as after an install
+    (a new media library reaches Nextcloud). A problem here never undoes the update."""
+    from ctl.engine.rewire import rewire_consumers
+    from ctl.manifest.catalog import CatalogError, load
+
+    try:
+        catalog = load(root / "apps")
+        rewire_consumers(catalog.get(service.id), catalog, log, paths)
+    except (CatalogError, OSError) as exc:
+        log(f"Apps that work with {service.name} were not refreshed: {redact(str(exc))}")
 
 
 def _replace_data(service: Service, root: Path, snapshot_id: str, log: Log, paths: RuntimePaths) -> None:

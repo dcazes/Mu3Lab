@@ -2,6 +2,7 @@
 
 Names are either facts about this computer and app (``public_url``,
 ``dns_name``, ``https_port``, ``discovery_url``, ``data_root``, ``media_root``, ``media_folders``,
+``media_admin_folders``,
 ``tz``, ``country_code``, ``currency_code``, ``origin``, ``sign_in_launch``, ``tailnet_ip``, and
 ``home_ip`` / ``home_network`` for an app on the home network) or another environment
 value of the same app (``{{DB_PASSWORD}}``), or ``{{app:<id>:<ENV>}}`` for a value another app generated. An unknown name

@@ -13,6 +13,17 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "apps/qbittorrent"
 
 
+class DropFolderTests(unittest.TestCase):
+    def test_only_administrators_see_the_add_torrents_folder(self):
+        from ctl.engine.project import Facts
+        from ctl.manifest.catalog import load
+        from ctl.runtime import RuntimePaths
+
+        facts = Facts("box.test", RuntimePaths(Path(tempfile.mkdtemp())), load())
+        self.assertEqual(facts.media_admin_folders, "add-torrents")
+        self.assertIn('--add-group=admin', (ROOT / "apps/nextcloud/scripts/media.sh").read_text())
+
+
 class VpnOptionTests(unittest.TestCase):
     def project(self, env: str) -> Path:
         folder = Path(tempfile.mkdtemp())
@@ -130,3 +141,23 @@ class SortingTests(unittest.TestCase):
                 ("torrents/delete", {"hashes": "a" * 40, "deleteFiles": "false"}),
             ],
         )
+
+    def test_an_episode_saved_with_the_shows_category_goes_into_its_season_folder(self):
+        where = {"save_path": "/media/shows"}
+        calls = []
+
+        def call(path, data=None):
+            calls.append((path.split("?")[0], data))
+            if path.startswith("torrents/info"):
+                return [{"hash": "b" * 40, "name": "Show.S02E03", "state": "stoppedUP", "category": "shows", **where}]
+            if path.startswith("torrents/files"):
+                return [{"name": "Show.S02E03.mkv", "size": 900}]
+            if path == "torrents/setLocation":
+                where["save_path"] = data["location"]
+            return ""
+
+        self.sort.call = call
+        self.sort.log = lambda message: None
+        self.sort.finish({"hash": "b" * 40, "name": "Show.S02E03", "category": "shows", **where}, libraries=True)
+        self.assertIn(("torrents/setLocation", {"hashes": "b" * 40, "location": "/media/shows/Show/Season 02"}), calls)
+        self.assertEqual(calls[-1], ("torrents/delete", {"hashes": "b" * 40, "deleteFiles": "false"}))

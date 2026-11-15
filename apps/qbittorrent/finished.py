@@ -4,7 +4,8 @@ qBittorrent runs this inside its own container each time a torrent finishes (sta
 that up). For every finished torrent:
 
 1. It stops the torrent, so nothing is uploaded once the download is complete.
-2. A torrent with no category still in the Downloads library is filed by what it holds:
+2. A torrent with no category still in the Downloads library is filed by what it holds
+   (one given the shows category goes into its show's season folder the same way):
    - mostly video, with a season in its name ("Show.Name.S02E05", "Season 2") -> Shows, in
      "Show Name/Season 02", the layout Jellyfin expects for series;
    - any other video -> Movies;
@@ -121,8 +122,14 @@ def finish(torrent: dict, libraries: bool) -> None:
     if not torrent:
         log(f"{name}: still moving; it stays stopped and is finished off next time")
         return
-    if libraries and not torrent.get("category") and str(torrent.get("save_path") or "").rstrip("/") == DOWNLOADS:
+    category = str(torrent.get("category") or "")
+    saved = str(torrent.get("save_path") or "").rstrip("/")
+    # No category: file it by what it holds. The shows category: its category folder is the
+    # top of Shows, so put the episode in its show's season folder, as Jellyfin expects.
+    if libraries and ((not category and saved == DOWNLOADS) or (category == "shows" and saved == SHOWS)):
         folder = destination(name, call(f"torrents/files?{urllib.parse.urlencode({'hash': hash_})}"))
+        if category == "shows" and folder == MOVIES:
+            folder = None  # named without a season: left where it was saved
         if folder:
             call("torrents/setLocation", {"hashes": hash_, "location": folder})
             if str(settled(hash_).get("save_path") or "").rstrip("/") != folder:

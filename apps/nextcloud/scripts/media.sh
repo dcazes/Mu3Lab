@@ -1,4 +1,6 @@
 # Share every media library (audiobooks, games) as a folder everyone sees, and drop ones that are gone (sh in the app container).
+# A library in MU3LAB_MEDIA_ADMIN_FOLDERS (qBittorrent's add-torrents) is seen by Nextcloud's admin group only,
+# which holds exactly Mu3Lab's administrators (configure.sh).
 # The library stays the app's only copy: a file added in Nextcloud lands straight in Audiobookshelf's or RomM's folder.
 set -eu
 occ() { runuser -u www-data -- php occ "$@"; }
@@ -12,6 +14,7 @@ existing() {
     }'
 }
 wanted=$(printf '%s' "${MU3LAB_MEDIA_FOLDERS:-}" | tr ',' '\n' | grep -E '^[a-z][a-z0-9-]*$' || true)
+admins_only=$(printf '%s' "${MU3LAB_MEDIA_ADMIN_FOLDERS:-}" | tr ',' '\n' | grep -E '^[a-z][a-z0-9-]*$' || true)
 if [ -n "$wanted" ]; then
   occ app:enable files_external >/dev/null || { echo "MU3LAB_ERROR Nextcloud could not enable external storage"; exit 3; }
 fi
@@ -21,11 +24,19 @@ for name in $wanted; do
   [ -d "$dir" ] || continue
   # Nextcloud writes as www-data; the media apps run as root and still read and write.
   chown -R www-data:www-data "$dir"
-  if ! printf '%s\n' "$mounts" | grep -qx "[0-9]* $name"; then
-    # audiobooks -> /Audiobooks; with no applicable users or groups, the folder is everyone's.
-    title=$(printf '%s' "$name" | cut -c1 | tr a-z A-Z)$(printf '%s' "$name" | cut -c2-)
-    occ files_external:create "/$title" local null::null -c "datadir=$dir" >/dev/null \
+  # audiobooks -> /Audiobooks, add-torrents -> /Add torrents.
+  title=$(printf '%s' "$name" | cut -c1 | tr a-z A-Z)$(printf '%s' "$name" | cut -c2- | tr '-' ' ')
+  id=$(printf '%s\n' "$mounts" | awk -v n="$name" '$2 == n { print $1; exit }')
+  if [ -z "$id" ]; then
+    # With no applicable users or groups, the folder is everyone's.
+    # It answers "Storage created with id 9".
+    created=$(occ files_external:create "/$title" local null::null -c "datadir=$dir") \
       || { echo "MU3LAB_ERROR Nextcloud could not add the $title folder"; exit 3; }
+    id=$(printf '%s' "$created" | grep -o '[0-9][0-9]*' | tail -n 1)
+  fi
+  if printf '%s\n' "$admins_only" | grep -qx "$name"; then
+    occ files_external:applicable --add-group=admin "$id" >/dev/null \
+      || { echo "MU3LAB_ERROR Nextcloud could not keep the $title folder to administrators"; exit 3; }
   fi
 done
 # A library that is no longer there (someone removed it) leaves no empty folder behind.

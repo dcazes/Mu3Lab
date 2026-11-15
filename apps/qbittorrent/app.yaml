@@ -18,6 +18,10 @@ upstream: qbittorrent/qBittorrent
 media:
 - name: downloads
   purpose: Finished torrents with no category. Unfinished pieces wait in its hidden .incomplete folder.
+- name: add-torrents
+  purpose: Drop .torrent files here (Add torrents in Nextcloud, administrators only); qBittorrent starts each one
+    and removes the file. One it cannot read is renamed to end in .qbt_rejected.
+  audience: operators
 service:
   local_port: 8097
   health:
@@ -139,6 +143,8 @@ chat:
       answer: "No. When a download finishes, Mu3Lab stops the torrent and removes it from qBittorrent, keeping the files, so nothing more is uploaded. While it is still downloading, qBittorrent shares pieces as every torrent does."
     - question: "Is torrent traffic private?"
       answer: "Not unless the VPN is on. Without it, torrents use this computer's own internet connection, which your internet provider and other peers can see. An administrator can switch on a VPN in qBittorrent's settings in the Mu3Lab dashboard."
+    - question: "Can I add .torrent files?"
+      answer: "Yes. Drop them into the Add torrents folder in Nextcloud (administrators only) and qBittorrent starts each one and removes the file; episodes and films are filed for Jellyfin when they finish. The qBittorrent page also has an Add torrent file button."
     - question: "Who can add torrents?"
       answer: "Only Mu3Lab administrators. Everyone else gets the finished files in the household's apps."
     - question: "Can the assistant delete downloaded files?"

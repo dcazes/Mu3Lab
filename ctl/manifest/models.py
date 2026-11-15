@@ -567,6 +567,8 @@ class MediaFolder(Model):
 
     name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$")
     purpose: str
+    # Who sees it in Nextcloud: everyone, or Mu3Lab administrators only (Nextcloud's admin group).
+    audience: Literal["everyone", "operators"] = "everyone"
 
     @property
     def env(self) -> str:
