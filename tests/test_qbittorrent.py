@@ -21,7 +21,7 @@ class DropFolderTests(unittest.TestCase):
 
         facts = Facts("box.test", RuntimePaths(Path(tempfile.mkdtemp())), load())
         self.assertEqual(facts.media_admin_folders, "add-torrents")
-        self.assertIn('--add-group=admin', (ROOT / "apps/nextcloud/scripts/media.sh").read_text())
+        self.assertIn("--add-group=admin", (ROOT / "apps/nextcloud/scripts/media.sh").read_text())
 
 
 class VpnOptionTests(unittest.TestCase):
