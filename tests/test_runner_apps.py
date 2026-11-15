@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,11 +91,16 @@ class RerunWhenTests(unittest.TestCase):
         )
         env = {"MU3LAB_MUSIC_SHARED": "1"}
         ran: list[str] = []
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder)
+        (folder / "scripts").mkdir()
+        script = folder / "scripts/music.sh"
+        script.write_text("echo one\n")
         ctx = SimpleNamespace(
             env=lambda: dict(env),
             set_env=env.update,
             facts=None,
-            app=SimpleNamespace(id="nextcloud", manifest=SimpleNamespace(name="Nextcloud")),
+            app=SimpleNamespace(id="nextcloud", folder=folder, manifest=SimpleNamespace(name="Nextcloud")),
         )
         running = SimpleNamespace(installation=lambda _id: {"state": "running"})
         with (
@@ -109,7 +115,10 @@ class RerunWhenTests(unittest.TestCase):
             self.assertEqual(rule.periodic(ctx), "")
             env["MU3LAB_MUSIC_SHARED"] = "0"
             self.assertIn("again", rule.periodic(ctx))
-        self.assertEqual(ran, ["ran", "ran"])
+            script.write_text("echo two\n")  # a fixed script reaches a running install too
+            self.assertIn("again", rule.periodic(ctx))
+            self.assertEqual(rule.periodic(ctx), "")
+        self.assertEqual(ran, ["ran", "ran", "ran"])
 
 
 class EmbeddingRuleTests(_AppTest):

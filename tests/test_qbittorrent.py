@@ -161,3 +161,18 @@ class SortingTests(unittest.TestCase):
         self.sort.finish({"hash": "b" * 40, "name": "Show.S02E03", "category": "shows", **where}, libraries=True)
         self.assertIn(("torrents/setLocation", {"hashes": "b" * 40, "location": "/media/shows/Show/Season 02"}), calls)
         self.assertEqual(calls[-1], ("torrents/delete", {"hashes": "b" * 40, "deleteFiles": "false"}))
+
+    def test_one_show_keeps_one_folder_whatever_the_capitals(self):
+        shows = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(shows))
+        self.sort.SHOWS = str(shows)
+        files = [{"name": "x.mkv", "size": 9}]
+        self.assertEqual(
+            self.sort.destination("the.real.housewives.of.beverly.hills.s11e24.720p", files),
+            f"{shows}/The Real Housewives Of Beverly Hills/Season 11",
+        )
+        (shows / "The Real Housewives of Beverly Hills").mkdir()
+        self.assertEqual(
+            self.sort.destination("the.real.housewives.of.beverly.hills.s11e24.720p", files),
+            f"{shows}/The Real Housewives of Beverly Hills/Season 11",
+        )

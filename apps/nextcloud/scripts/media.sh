@@ -34,6 +34,10 @@ for name in $wanted; do
       || { echo "MU3LAB_ERROR Nextcloud could not add the $title folder"; exit 3; }
     id=$(printf '%s' "$created" | grep -o '[0-9][0-9]*' | tail -n 1)
   fi
+  # Look for changes on each visit. A folder added from the command line otherwise never does, and
+  # files the apps add themselves (qBittorrent's downloads, filed episodes) would never appear.
+  occ files_external:option "$id" filesystem_check_changes 1 >/dev/null \
+    || { echo "MU3LAB_ERROR Nextcloud could not keep the $title folder up to date"; exit 3; }
   if printf '%s\n' "$admins_only" | grep -qx "$name"; then
     occ files_external:applicable --add-group=admin "$id" >/dev/null \
       || { echo "MU3LAB_ERROR Nextcloud could not keep the $title folder to administrators"; exit 3; }

@@ -78,8 +78,21 @@ def destination(name: str, files: list[dict]) -> str | None:
     found = show_and_season(name) or (show_and_season(str(videos[0]["name"])) if videos else None)
     if found:
         show, season = found
-        return f"{SHOWS}/{show}/Season {season:02d}"
+        return f"{SHOWS}/{show_folder(show)}/Season {season:02d}"
     return MOVIES
+
+
+def show_folder(show: str) -> str:
+    """The show's folder: one already in Shows whatever its capitals, else the name as released
+    (capitalised when the release is all lower case), so one show never gets two folders."""
+    try:
+        existing = [item.name for item in Path(SHOWS).iterdir() if item.is_dir()]
+    except OSError:
+        existing = []
+    same = next((folder for folder in existing if folder.casefold() == show.casefold()), None)
+    if same:
+        return same
+    return show.title() if show == show.lower() else show
 
 
 def call(path: str, data: dict[str, str] | None = None):
