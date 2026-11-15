@@ -61,3 +61,72 @@ class ToolLimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _sorter():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("qbittorrent_finished", APP / "finished.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class SortingTests(unittest.TestCase):
+    """A finished video with no category moves on to where Jellyfin looks."""
+
+    def setUp(self):
+        self.sort = _sorter()
+
+    def test_an_episode_goes_to_its_show_and_season(self):
+        files = [{"name": "Love.Is.Blind.S11E12.480p.x264-mSD[EZTVx.to].mkv", "size": 666}]
+        self.assertEqual(
+            self.sort.destination("Love.Is.Blind.S11E12.480p.x264-mSD[EZTVx.to]", files),
+            "/media/shows/Love Is Blind/Season 11",
+        )
+
+    def test_season_names_and_years_follow_jellyfins_layout(self):
+        self.assertEqual(self.sort.show_and_season("Doctor.Who.2005.S01.1080p"), ("Doctor Who (2005)", 1))
+        self.assertEqual(self.sort.show_and_season("[Group] Frieren Season 2 (1080p)"), ("Frieren", 2))
+        self.assertEqual(self.sort.show_and_season("The Office US 3x05 HDTV"), ("The Office US", 3))
+
+    def test_a_film_goes_to_movies(self):
+        for name in ("Se7en.1995.1080p.BluRay", "Blade.Runner.2049.2017.2160p", "Film.1996.1920x1080"):
+            self.assertIsNone(self.sort.show_and_season(name), name)
+        files = [{"name": "Film/Film.mkv", "size": 900}, {"name": "Film/Film.nfo", "size": 5}]
+        self.assertEqual(self.sort.destination("Film.2020.1080p", files), "/media/movies")
+
+    def test_a_folder_named_without_a_season_uses_its_biggest_video(self):
+        files = [{"name": "Pack/Show.Name.S03E01.mkv", "size": 900}, {"name": "Pack/sample.mkv", "size": 9}]
+        self.assertEqual(self.sort.destination("Pack", files), "/media/shows/Show Name/Season 03")
+
+    def test_anything_but_video_stays_in_downloads(self):
+        self.assertIsNone(self.sort.destination("Album", [{"name": "Album/01.flac", "size": 900}]))
+        self.assertIsNone(self.sort.destination("Empty", []))
+
+    def test_a_finished_torrent_is_stopped_filed_and_removed_with_its_files_kept(self):
+        where = {"save_path": "/media/downloads"}
+        calls = []
+
+        def call(path, data=None):
+            calls.append((path.split("?")[0], data))
+            if path.startswith("torrents/info"):
+                return [{"hash": "a" * 40, "name": "Show.S01E01", "state": "stoppedUP", "category": "", **where}]
+            if path.startswith("torrents/files"):
+                return [{"name": "Show.S01E01.mkv", "size": 900}]
+            if path == "torrents/setLocation":
+                where["save_path"] = data["location"]
+            return ""
+
+        self.sort.call = call
+        self.sort.log = lambda message: None
+        self.sort.finish({"hash": "a" * 40, "name": "Show.S01E01", "category": "", **where}, libraries=True)
+        writes = [(path, data) for path, data in calls if data is not None]
+        self.assertEqual(
+            writes,
+            [
+                ("torrents/stop", {"hashes": "a" * 40}),
+                ("torrents/setLocation", {"hashes": "a" * 40, "location": "/media/shows/Show/Season 01"}),
+                ("torrents/delete", {"hashes": "a" * 40, "deleteFiles": "false"}),
+            ],
+        )

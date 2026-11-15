@@ -9,6 +9,9 @@ Runs as root inside the container at every start, before qBittorrent does:
 - Where files go. New torrents land in the Downloads library; a category saves straight into
   the library it is named after (Music, Audiobooks, Podcasts, Roms, Movies, Shows), so those
   apps pick the files up. Unfinished pieces wait in Downloads/.incomplete, which backups skip.
+  A finished video with no category is moved on into Movies or Shows for Jellyfin, and every
+  finished torrent is stopped and removed from qBittorrent, files kept, so nothing seeds
+  (finished.py).
 - The VPN. While it is on, qBittorrent may use only the VPN's network interface.
 """
 
@@ -102,8 +105,15 @@ def settings(vpn: bool) -> None:
             "Session\\DisableAutoTMMByDefault": "false",
             "Session\\Interface": VPN_INTERFACE if vpn else "",
             "Session\\InterfaceName": VPN_INTERFACE if vpn else "",
+            # No sharing once a download is complete: finished.py stops and removes the torrent,
+            # and these stop any torrent it has not reached yet.
+            "Session\\GlobalMaxRatio": "0",
+            "Session\\GlobalMaxSeedingMinutes": "0",
+            "Session\\ShareLimitAction": "Stop",
         },
         "Network": {"PortForwardingEnabled": "false"},
+        # When a torrent finishes, finished.py files a video for Jellyfin and removes the torrent.
+        "AutoRun": {"enabled": "true", "program": "python3 /mu3lab/finished.py"},
     }
     for section, values in owned.items():
         if not parser.has_section(section):

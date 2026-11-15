@@ -154,13 +154,22 @@ def _configure(port: int, token: str, env: dict[str, str]) -> None:
 
     wanted = [*LIBRARIES, *([MUSIC] if env.get("MU3LAB_MUSIC_SHARED") == "1" else [])]
     existing = _call(port, "/Library/VirtualFolders", token=token) or []
-    have = {str(folder.get("Name") or "").casefold() for folder in existing if isinstance(folder, dict)}
+    have = {str(folder.get("Name") or "").casefold(): folder for folder in existing if isinstance(folder, dict)}
     for name, kind, path in wanted:
-        if name.casefold() in have:
+        folder = have.get(name.casefold())
+        if folder is None:
+            query = urllib.parse.urlencode({"name": name, "collectionType": kind, "refreshLibrary": "true"})
+            options = {"PathInfos": [{"Path": path}], "SaveLocalMetadata": False, "EnableRealtimeMonitor": True}
+            _call(
+                port, f"/Library/VirtualFolders?{query}", method="POST", data={"LibraryOptions": options}, token=token
+            )
             continue
-        query = urllib.parse.urlencode({"name": name, "collectionType": kind, "refreshLibrary": "true"})
-        options = {"LibraryOptions": {"PathInfos": [{"Path": path}], "SaveLocalMetadata": False}}
-        _call(port, f"/Library/VirtualFolders?{query}", method="POST", data=options, token=token)
+        # Real-time monitoring: a film saved in Nextcloud or finished in qBittorrent shows up at
+        # once, not at the next scheduled scan. Libraries made before this was set get it too.
+        options = folder.get("LibraryOptions")
+        if isinstance(options, dict) and folder.get("ItemId") and options.get("EnableRealtimeMonitor") is not True:
+            update = {"Id": folder["ItemId"], "LibraryOptions": options | {"EnableRealtimeMonitor": True}}
+            _call(port, "/Library/VirtualFolders/LibraryOptions", method="POST", data=update, token=token)
 
 
 def _policy(port: int, token: str, user: dict[str, Any], **changes: Any) -> None:

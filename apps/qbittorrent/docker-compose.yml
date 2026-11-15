@@ -55,6 +55,8 @@ services:
       - ${MU3LAB_MEDIA_ROOT:?MU3LAB_MEDIA_ROOT is required}:/media
       - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/music
       - ./start.py:/mu3lab/start.py:ro
+      # Run when a torrent finishes: files a video for Jellyfin, then removes the torrent (no seeding).
+      - ./finished.py:/mu3lab/finished.py:ro
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       # From inside the container, so it answers without a login.
