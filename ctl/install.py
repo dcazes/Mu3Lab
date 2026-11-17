@@ -527,18 +527,25 @@ def _linger_enabled(user: str) -> bool:
     return rc == 0 and out.strip() == "Linger=yes"
 
 
-def write_service_units(root: Path, log: Callable[[str], None]) -> str:
-    """Render the dashboard, worker and wake-page units for this checkout. Returns an error, or ""."""
+def write_unit(root: Path, unit_name: str, log: Callable[[str], None]) -> str:
+    """Render one of this checkout's user units, if it changed. Returns an error, or ""."""
+    if not (root / "deploy" / unit_name).is_file():
+        return f"deploy/{unit_name} missing from checkout"
     unit_dir = _unit_dir()
     unit_dir.mkdir(parents=True, exist_ok=True)
+    rendered = _rendered_unit(root, unit_name)
+    unit_path = unit_dir / unit_name
+    if not unit_path.is_file() or unit_path.read_text(encoding="utf-8") != rendered:
+        unit_path.write_text(rendered, encoding="utf-8")
+        log(f"wrote {unit_path}")
+    return ""
+
+
+def write_service_units(root: Path, log: Callable[[str], None]) -> str:
+    """Render the dashboard, worker and wake-page units for this checkout. Returns an error, or ""."""
     for unit_name in RENDERED_UNITS:
-        if not (root / "deploy" / unit_name).is_file():
-            return f"deploy/{unit_name} missing from checkout"
-        rendered = _rendered_unit(root, unit_name)
-        unit_path = unit_dir / unit_name
-        if not unit_path.is_file() or unit_path.read_text(encoding="utf-8") != rendered:
-            unit_path.write_text(rendered, encoding="utf-8")
-            log(f"wrote {unit_path}")
+        if error := write_unit(root, unit_name, log):
+            return error
     return ""
 
 

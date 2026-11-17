@@ -209,9 +209,14 @@ class ContextForge:
             body |= {"auth_type": "bearer", "auth_token": token}
         current = next((item for item in self.gateways() if item.get("name") == name), None)
         if current is None:
-            return self.request("POST", "/v1/gateways", json=body)
+            return self.request("POST", "/v1/gateways", json=body)  # reads its tools on the way in
         updated = self.request("PUT", f"/v1/gateways/{current['id']}", json=body)
         self.set_gateway_active(str(current["id"]), True)
+        # An updated connector may bring new tools; ContextForge no longer looks for them on a timer.
+        try:
+            self.request("POST", f"/v1/gateways/{current['id']}/tools/refresh")
+        except ContextForgeError:
+            pass  # the tools it already knows still work; the next start or update asks again
         return updated or current
 
     def delete_gateway(self, gateway_id: str) -> None:

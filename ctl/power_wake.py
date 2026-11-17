@@ -145,7 +145,9 @@ def handler(wake: Wake) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def serve(wake: Wake, ports: list[int]) -> list[ThreadingHTTPServer]:
+def serve(wake: Wake, ports: list[int], poll_interval: float = 3600) -> list[ThreadingHTTPServer]:
+    """One listener per address. Each sleeps until a request arrives: the poll interval only sets
+    how quickly ``shutdown()`` returns, and systemd stops the page with a signal instead."""
     servers = []
     for port in ports:
         try:
@@ -156,7 +158,7 @@ def serve(wake: Wake, ports: list[int]) -> list[ThreadingHTTPServer]:
                 raise
             continue
         server.daemon_threads = True
-        threading.Thread(target=server.serve_forever, daemon=True, name=f"wake-{port}").start()
+        threading.Thread(target=server.serve_forever, args=(poll_interval,), daemon=True, name=f"wake-{port}").start()
         servers.append(server)
     return servers
 
@@ -248,6 +250,7 @@ button[hidden], .progress[hidden], .error[hidden] { display: none; }
 const $ = (id) => document.getElementById(id);
 let busy = false;
 let opening = 0;
+let pressed = 0;  // when Turn on was pressed, until turning on reports that it started
 function show(status) {
   const state = status.state;
   const turning = state === 'turning_on' || state === 'turning_off';
@@ -284,6 +287,9 @@ async function poll() {
     ? await response.json().then((body) => (body && body.wake ? body : null), () => null)
     : null;
   if (wake) {
+    // Turning on takes a moment to start and say so; until then the page keeps its progress.
+    if (pressed && wake.state === 'off' && Date.now() - pressed < START_GRACE) return;
+    if (wake.state !== 'off') pressed = 0;
     show(wake);
     return;
   }
@@ -291,17 +297,52 @@ async function poll() {
   if (busy && ![502, 503, 504].includes(response.status) && ++opening > 1) location.reload();
 }
 $('on').addEventListener('click', async () => {
+  pressed = Date.now();
   show({ state: 'turning_on', step: 'Starting' });
   try {
-    const response = await fetch('{power}/on', { method: 'POST', headers: { '{header}': 'on' } });
+    const response = await fetch('{power}/on', {
+      method: 'POST', headers: { '{header}': 'on' }, redirect: 'manual',
+    });
+    // Not this page answering: Mu3Lab was turned on elsewhere, so open the dashboard.
+    if (!(response.headers.get('content-type') || '').startsWith('application/json')) {
+      location.reload();
+      return;
+    }
     const body = await response.json();
-    if (!body.ok) show({ state: 'off', error: body.message });
+    if (!body.ok) {
+      pressed = 0;
+      show({ state: 'off', error: body.message });
+    }
   } catch {
+    pressed = 0;
     show({ state: 'off', error: 'Mu3Lab could not be reached. Try again in a moment.' });
   }
+  check();
 });
-poll();
-setInterval(poll, 2000);
+// Checks run only while turning on, to show its progress, and whenever someone comes back to
+// the page, in case Mu3Lab was turned on somewhere else meanwhile. An idle page sends nothing.
+const POLL_BUSY = 2000;
+const START_GRACE = 60000;
+let timer = 0;
+let checking = false;
+async function check() {
+  if (checking) return;  // the one already on its way sets up the next
+  checking = true;
+  clearTimeout(timer);
+  try {
+    await poll();
+  } finally {
+    checking = false;
+  }
+  if (busy) timer = setTimeout(check, POLL_BUSY);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') check();
+});
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) check();
+});
+check();
 </script>
 </body>
 </html>

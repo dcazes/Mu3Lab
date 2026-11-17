@@ -52,6 +52,9 @@ PROJECT_LABEL = "com.docker.compose.project"
 PREFIX = "mu3lab-"
 CORE_WAIT = 300  # seconds sign-in and the core apps get to pass their health checks when turning on
 STOP_TIMEOUT = 60  # seconds a container gets to shut down cleanly; Docker's own default is 10
+CONNECTOR_STOP_TIMEOUT = 10  # connectors and helpers hold no data, and some ignore the polite stop signal
+WAKE_STATUS = f"http://127.0.0.1:{DASHBOARD_CADDY_PORT}/api/v1/power"
+WAKE_WAIT = 20  # seconds the wake page gets to answer before Mu3Lab turns straight back on
 
 # Stop order, lowest first; turning on runs it backwards. The dashboard stops between the core
 # apps and sign-in, because its own page needs sign-in and Caddy to show the progress.
@@ -271,6 +274,24 @@ def launch(change: str, paths: RuntimePaths | None = None) -> None:
 # ---------------------------------------------------------------- turning off
 
 
+def _prepare_wake(log: Log) -> None:
+    """Install the wake page's unit for this checkout before anything stops. Without it nothing
+    could turn Mu3Lab back on from a browser."""
+    from ctl import install
+
+    if install.write_unit(ROOT, WAKE_UNIT, log) or not _systemctl("daemon-reload", log=log):
+        raise PowerError("The wake page could not be set up, so nothing was turned off. Run ./install.sh first.")
+
+
+def _wake_answers() -> bool:
+    """Whether the wake page, not Caddy, answers the dashboard's address."""
+    try:
+        with urllib.request.urlopen(WAKE_STATUS, timeout=3) as response:
+            return bool(json.loads(response.read()).get("wake"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def turn_off(log: Log, paths: RuntimePaths | None = None) -> None:
     """Stop every Mu3Lab container and the dashboard, then start the wake page."""
     with _locked(paths):
@@ -280,6 +301,7 @@ def turn_off(log: Log, paths: RuntimePaths | None = None) -> None:
         problems = blockers()
         if problems:
             raise PowerError(problems[0])
+        _prepare_wake(log)
         containers = running_containers()
         # A turn-off or turn-on that stopped part way already stopped some: keep them on the list.
         running = {item["name"] for item in containers}
@@ -311,8 +333,9 @@ def turn_off(log: Log, paths: RuntimePaths | None = None) -> None:
             record["step"] = f"Stopping {STEPS[rank]}"
             _write(record, paths)
             log(f"{record['step']}: {', '.join(names)}")
+            grace = CONNECTOR_STOP_TIMEOUT if rank == CONNECTORS else STOP_TIMEOUT
             rc, output = actions.docker_cmd(
-                ["docker", "stop", "--timeout", str(STOP_TIMEOUT), *names], log, timeout=STOP_TIMEOUT + 120
+                ["docker", "stop", "--timeout", str(grace), *names], log, timeout=grace + 120
             )
             if rc:
                 log(f"Some containers did not stop: {output[-300:]}")
@@ -321,9 +344,16 @@ def turn_off(log: Log, paths: RuntimePaths | None = None) -> None:
             _systemctl("disable", "--now", *DASHBOARD_UNITS, log=log)
         record.update(state="off", step="", off_at=_now())
         _write(record, paths)
-        if not (_systemctl("enable", WAKE_UNIT, log=log) and _systemctl("restart", WAKE_UNIT, log=log)):
-            log("The wake page did not start. Turn Mu3Lab on from a terminal: ./start.sh")
-        log("Mu3Lab is off.")
+        started = _systemctl("enable", WAKE_UNIT, log=log) and _systemctl("restart", WAKE_UNIT, log=log)
+        if started and _wait_until(_wake_answers, WAKE_WAIT):
+            log("Mu3Lab is off.")
+            return
+        # Off with no wake page would leave nothing to press: turn straight back on instead.
+        log("The wake page did not answer, so Mu3Lab is turning back on.")
+        _turn_on(log, paths)
+        raise PowerError(
+            f"The wake page did not start, so Mu3Lab turned back on. Its log: journalctl --user -u {WAKE_UNIT}"
+        )
 
 
 # ---------------------------------------------------------------- turning on
@@ -356,55 +386,59 @@ def _start(names: list[str], log: Log) -> None:
 
 def turn_on(log: Log, paths: RuntimePaths | None = None) -> None:
     """Start what turning off stopped, then hand the addresses back from the wake page to Caddy."""
+    with _locked(paths):
+        _turn_on(log, paths)
+
+
+def _turn_on(log: Log, paths: RuntimePaths | None = None) -> None:
     from ctl.lifecycle.health import wait_healthy
     from ctl.registry import load
 
-    with _locked(paths):
-        record = read(paths)
-        if record is None:
-            log("Mu3Lab is already on.")
-            return
-        containers: list[dict[str, Any]] = list(reversed(record.get("containers") or []))
-        record.update(state="turning_on", done=0, total=len(containers), error="")
-        services = {f"{PREFIX}{service.id}": service for service in load().services}
+    record = read(paths)
+    if record is None:
+        log("Mu3Lab is already on.")
+        return
+    containers: list[dict[str, Any]] = list(reversed(record.get("containers") or []))
+    record.update(state="turning_on", done=0, total=len(containers), error="")
+    services = {f"{PREFIX}{service.id}": service for service in load().services}
 
-        def step(text: str) -> None:
-            record["step"] = text
-            _write(record, paths)
-            log(text)
+    def step(text: str) -> None:
+        record["step"] = text
+        _write(record, paths)
+        log(text)
 
-        def start(items: list[dict[str, Any]]) -> None:
-            # Within a project a database starts before the app that needs it.
-            for level in sorted({item["level"] for item in items}, reverse=True):
-                _start([item["name"] for item in items if item["level"] == level], log)
-            record["done"] += len(items)
-            _write(record, paths)
+    def start(items: list[dict[str, Any]]) -> None:
+        # Within a project a database starts before the app that needs it.
+        for level in sorted({item["level"] for item in items}, reverse=True):
+            _start([item["name"] for item in items if item["level"] == level], log)
+        record["done"] += len(items)
+        _write(record, paths)
 
-        core = [item for item in containers if CORE <= item["rank"] < PROXY]
-        step("Starting sign-in and the core apps")
-        start(core)
-        for project in dict.fromkeys(item["project"] for item in core):
-            if (service := services.get(project)) is not None:
-                healthy, detail = wait_healthy(service, timeout=CORE_WAIT)
-                if not healthy:
-                    log(f"{service.name} is not answering yet ({detail}); carrying on.")
-        step("Starting your apps")
-        start([item for item in containers if item["rank"] == APPS])
-        start([item for item in containers if item["rank"] == CONNECTORS])
-        step("Starting the dashboard")
-        _systemctl("enable", *DASHBOARD_UNITS, log=log)
-        _systemctl("start", *DASHBOARD_UNITS, log=log)
-        if not _wait_until(lambda: _answers(DASHBOARD_HEALTH), 120):
-            log("The dashboard is not answering yet; carrying on.")
-        # The wake page gives Caddy's addresses back; the page in the browser expects a short gap.
-        step("Opening the dashboard")
-        time.sleep(3)
-        _systemctl("disable", "--now", WAKE_UNIT, log=log)
-        start([item for item in containers if item["rank"] == PROXY])
-        if not _wait_until(lambda: _answers(f"http://127.0.0.1:{DASHBOARD_CADDY_PORT}/__mu3lab_caddy_health"), 60):
-            log("Caddy is not answering yet.")
-        (_state_dir(paths) / RECORD).unlink(missing_ok=True)
-        log("Mu3Lab is on.")
+    core = [item for item in containers if CORE <= item["rank"] < PROXY]
+    step("Starting sign-in and the core apps")
+    start(core)
+    for project in dict.fromkeys(item["project"] for item in core):
+        if (service := services.get(project)) is not None:
+            healthy, detail = wait_healthy(service, timeout=CORE_WAIT)
+            if not healthy:
+                log(f"{service.name} is not answering yet ({detail}); carrying on.")
+    step("Starting your apps")
+    start([item for item in containers if item["rank"] == APPS])
+    start([item for item in containers if item["rank"] == CONNECTORS])
+    step("Starting the dashboard")
+    _systemctl("enable", *DASHBOARD_UNITS, log=log)
+    _systemctl("start", *DASHBOARD_UNITS, log=log)
+    if not _wait_until(lambda: _answers(DASHBOARD_HEALTH), 120):
+        log("The dashboard is not answering yet; carrying on.")
+    # The wake page gives Caddy's addresses back; the page in the browser expects a short gap.
+    step("Opening the dashboard")
+    time.sleep(3)
+    _systemctl("disable", "--now", WAKE_UNIT, log=log)
+    start([item for item in containers if item["rank"] == PROXY])
+    if not _wait_until(lambda: _answers(f"http://127.0.0.1:{DASHBOARD_CADDY_PORT}/__mu3lab_caddy_health"), 60):
+        log("Caddy is not answering yet.")
+    (_state_dir(paths) / RECORD).unlink(missing_ok=True)
+    log("Mu3Lab is on.")
 
 
 # ---------------------------------------------------------------- the command line

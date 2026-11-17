@@ -83,6 +83,7 @@ class TurningTests(unittest.TestCase):
         self.paths = RuntimePaths(Path(self.tmp.name))
         self.paths.state.mkdir()
         self.calls: list[tuple[str, ...]] = []
+        self.graces: dict[str, int] = {}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -94,7 +95,24 @@ class TurningTests(unittest.TestCase):
     def _docker(self, argv, log, timeout=0):
         names = [item for item in argv[2:] if not item.startswith("-") and not item.isdigit()]
         self.calls.append(("docker", argv[1], *names))
+        if argv[1] == "stop":
+            self.graces[names[0]] = int(argv[3])
         return 0, ""
+
+    def _off(self, containers, wake_answers=True, docker=None):
+        with (
+            patch.object(power, "running_containers", return_value=containers),
+            patch.object(power, "blockers", return_value=[]),
+            patch.object(power, "_prepare_wake"),
+            patch.object(power, "_wake_answers", return_value=wake_answers),
+            patch.object(power, "_caddy_ports", return_value=[19460, 19461]),
+            patch.object(power, "_systemctl", side_effect=self._systemctl),
+            patch.object(power.actions, "docker_cmd", side_effect=docker or self._docker),
+            patch("ctl.registry.load", return_value=SimpleNamespace(services=())),
+            patch.object(power, "_wait_until", side_effect=lambda check, _seconds: check()),
+            patch.object(power.time, "sleep"),
+        ):
+            power.turn_off(lambda _line: None, self.paths)
 
     def test_turning_off_saves_the_list_first_and_stops_the_dashboard_before_sign_in(self):
         containers = [
@@ -109,14 +127,7 @@ class TurningTests(unittest.TestCase):
             saved.append([item["name"] for item in power.read(self.paths)["containers"]])
             return self._docker(argv, log, timeout)
 
-        with (
-            patch.object(power, "running_containers", return_value=containers),
-            patch.object(power, "blockers", return_value=[]),
-            patch.object(power, "_caddy_ports", return_value=[19460, 19461]),
-            patch.object(power, "_systemctl", side_effect=self._systemctl),
-            patch.object(power.actions, "docker_cmd", side_effect=docker),
-        ):
-            power.turn_off(lambda _line: None, self.paths)
+        self._off(containers, docker=docker)
         self.assertEqual(saved[0], ["mcp", "app", "login", "caddy"])
         stops = [call for call in self.calls if call[0] == "docker"]
         self.assertEqual([call[2:] for call in stops], [("mcp",), ("app",), ("login",), ("caddy",)])
@@ -135,17 +146,35 @@ class TurningTests(unittest.TestCase):
         self.assertEqual(record["state"], "off")
         self.assertEqual(record["ports"], [19460, 19461])
 
+    def test_connectors_get_a_short_grace_and_apps_a_long_one(self):
+        self._off([_item("mcp", "mu3lab-mcp-x", power.CONNECTORS), _item("app", "mu3lab-x", power.APPS)])
+        self.assertEqual(self.graces, {"mcp": power.CONNECTOR_STOP_TIMEOUT, "app": power.STOP_TIMEOUT})
+
+    def test_nothing_stops_when_the_wake_page_cannot_be_set_up(self):
+        with (
+            patch.object(power, "blockers", return_value=[]),
+            patch.object(power, "_prepare_wake", side_effect=power.PowerError("no wake page")),
+            patch.object(power, "running_containers") as running,
+            self.assertRaisesRegex(power.PowerError, "no wake page"),
+        ):
+            power.turn_off(lambda _line: None, self.paths)
+        running.assert_not_called()
+        self.assertIsNone(power.read(self.paths))
+
+    def test_mu3lab_turns_straight_back_on_when_the_wake_page_does_not_answer(self):
+        containers = [_item("app", "mu3lab-x", power.APPS), _item("caddy", "mu3lab-proxy", power.PROXY)]
+        with self.assertRaisesRegex(power.PowerError, "turned back on"):
+            self._off(containers, wake_answers=False)
+        order = [" ".join(call) for call in self.calls]
+        back_on = order[order.index(f"systemctl restart {power.WAKE_UNIT}") + 1 :]
+        self.assertEqual(back_on[0], "docker start app")
+        self.assertEqual(back_on[-1], "docker start caddy")
+        self.assertIsNone(power.read(self.paths))
+
     def test_turning_off_again_keeps_what_an_interrupted_turn_off_already_stopped(self):
         earlier = {"state": "turning_off", "since": "then", "containers": [_item("stopped", "mu3lab-x", power.APPS)]}
         power._write(earlier, self.paths)
-        with (
-            patch.object(power, "running_containers", return_value=[_item("still", "mu3lab-y", power.APPS)]),
-            patch.object(power, "blockers", return_value=[]),
-            patch.object(power, "_caddy_ports", return_value=[19460]),
-            patch.object(power, "_systemctl", side_effect=self._systemctl),
-            patch.object(power.actions, "docker_cmd", side_effect=self._docker),
-        ):
-            power.turn_off(lambda _line: None, self.paths)
+        self._off([_item("still", "mu3lab-y", power.APPS)])
         record = power.read(self.paths)
         self.assertEqual(sorted(item["name"] for item in record["containers"]), ["still", "stopped"])
         self.assertEqual(record["since"], "then")
@@ -207,7 +236,7 @@ class WakePageTests(unittest.TestCase):
             json.dumps({"state": "off", "since": "2026-11-07T12:00:00+00:00", "containers": [_item("hidden", "p", 1)]})
         )
         self.wake = power_wake.Wake(Path("/opt/mu3lab"), self.state)
-        self.server = power_wake.serve(self.wake, [0])[0]
+        self.server = power_wake.serve(self.wake, [0], poll_interval=0.05)[0]
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
 
     def tearDown(self):

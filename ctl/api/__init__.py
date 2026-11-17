@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -47,6 +47,7 @@ from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
 from ctl.service_state import tailnet_dns_name
+from ctl.status import signals
 
 ROOT = Path(__file__).resolve().parents[2]
 DIST = ROOT / "dashboard" / "dist"
@@ -125,6 +126,19 @@ def create_app(dist: Path = DIST) -> FastAPI:
     ):
         app.include_router(module.router)
     app.include_router(snapshot.router)
+    app.middleware("http")(_nudge_after_changes)
     if dist.is_dir():
         _mount_dashboard(app, dist)
     return app
+
+
+_READS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+async def _nudge_after_changes(request: Request, call_next):
+    """A change made here (a download paused, an install reordered, a job cancelled) may be the
+    worker's to act on, and the worker sleeps until told: tell it once the change is saved."""
+    response = await call_next(request)
+    if request.method not in _READS and response.status_code < 400:
+        signals.nudge()
+    return response

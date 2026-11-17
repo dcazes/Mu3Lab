@@ -1075,8 +1075,15 @@ def _listeners() -> list[tuple[str, int]]:
 
 
 def _serve() -> None:
+    import signal
     import threading
 
+    def stop(_signum: int, _frame: object) -> None:
+        raise SystemExit(0)
+
+    # As a container's first process, Python ignores the stop signal unless it handles it, and
+    # Docker then waits its whole grace period before killing the connector.
+    signal.signal(signal.SIGTERM, stop)
     *others, last = [ThreadingHTTPServer(address, Handler) for address in _listeners()]
     for server in others:
         threading.Thread(target=server.serve_forever, daemon=True).start()

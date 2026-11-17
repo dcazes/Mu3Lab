@@ -326,8 +326,8 @@ def _retire_authentik_only(session, uid: str, existing: dict[str, Any], paths: R
             onboarding_state.discard_password(str(record["service_id"]), paths)
 
 
-def run(log) -> dict[str, Any] | None:
-    """Sync everyone, as the worker and the dashboard's "save now" do."""
+def run(log, *, upkeep: bool = False) -> dict[str, Any] | None:
+    """Sync everyone, as the worker (``upkeep``) and the dashboard's "save now" do."""
     from ctl import people
     from ctl.service_state import tailnet_dns_name
 
@@ -335,11 +335,20 @@ def run(log) -> dict[str, Any] | None:
     if not paths.runtime.is_dir():
         return None
     try:
-        everyone = people.list_people()
+        everyone = people.people_for_upkeep() if upkeep else people.list_people()
     except people.PeopleError as exc:
         log(f"Saving logins to Vaultwarden waits for Authentik: {exc}")
         return None
     return sync(everyone, tailnet_dns_name(), log, paths)
+
+
+def someone_waiting(paths: RuntimePaths | None = None) -> bool:
+    """Whether the last save left someone's logins waiting (no vault account yet, or some not saved),
+    or did not finish. Only then can a save change anything without a new login or household change."""
+    last = records.get("vault", "organization", paths or RuntimePaths())
+    if not last or not last.get("ok"):
+        return True
+    return any(person.get("state") in {"waiting_for_account", "partly_saved"} for person in last.get("people") or [])
 
 
 def session_password(login, org_key) -> str:

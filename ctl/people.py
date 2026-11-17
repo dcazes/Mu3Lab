@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -96,14 +98,33 @@ def list_people() -> list[dict[str, Any]]:
         raise PeopleError(str(exc)) from exc
 
 
+# Background upkeep (app accounts, vault logins) reuses one reading of the household for a while.
+UPKEEP_FRESH = 300  # while someone uses Mu3Lab: a person who just accepted an invitation is using it
+UPKEEP_FRESH_IDLE = 3600  # otherwise: catches changes made in Authentik's own screens
+_upkeep_lock = threading.Lock()
+_upkeep: dict[str, Any] = {"at": 0.0, "people": None}
+
+
+def people_for_upkeep() -> list[dict[str, Any]]:
+    """The household, for the worker's upkeep: read from Authentik again once a change made through
+    Mu3Lab is recorded, else every 5 minutes while someone uses Mu3Lab and hourly while nobody does."""
+    with _upkeep_lock:
+        now = time.time()
+        fetched, cached = _upkeep["at"], _upkeep["people"]
+        fresh = now - fetched < signals.every(UPKEEP_FRESH, UPKEEP_FRESH_IDLE)
+        if cached is not None and fresh and signals.household_changed_at() < fetched:
+            return list(cached)
+        people = list_people()
+        _upkeep.update(at=now, people=people)
+        return list(people)
+
+
 def add_person(name: str, email: str, role: str, authentik_origin: str) -> dict[str, Any]:
     name, email = name.strip()[:150], email.strip().lower()
     if not _EMAIL.fullmatch(email) or len(email) > 254:
         raise PeopleError("Enter a valid email address.")
     if role not in ROLES:
         raise PeopleError("Choose member or admin.")
-    # The worker matches app accounts and vault logins to the household sooner after this.
-    signals.household_changed()
     try:
         with locked(RuntimePaths().runtime / "people.lock"):
             client = Authentik.runtime()
@@ -121,6 +142,10 @@ def add_person(name: str, email: str, role: str, authentik_origin: str) -> dict[
             return {"person": _view(user), **_invite(client, user, authentik_origin)}
     except AuthentikError as exc:
         raise PeopleError(str(exc)) from exc
+    finally:
+        # Recorded once Authentik has the change: the worker then reads the household again and
+        # matches app accounts and vault logins to it (``people_for_upkeep``).
+        signals.household_changed()
 
 
 def change(username: str, action: str, authentik_origin: str, role: str = "", actor: str = "") -> dict[str, Any]:
@@ -135,7 +160,6 @@ def change(username: str, action: str, authentik_origin: str, role: str = "", ac
         raise PeopleError("Unsupported change.")
     if action == "role" and role not in ROLES:
         raise PeopleError("Choose member or admin.")
-    signals.household_changed()
     try:
         with locked(RuntimePaths().runtime / "people.lock"):
             client = Authentik.runtime()
@@ -190,6 +214,8 @@ def change(username: str, action: str, authentik_origin: str, role: str = "", ac
             return {"person": _view(user, access.holds().get(uid))}
     except AuthentikError as exc:
         raise PeopleError(str(exc)) from exc
+    finally:
+        signals.household_changed()  # once Authentik has the change, as in ``add_person``
 
 
 def operator_subjects() -> set[str]:

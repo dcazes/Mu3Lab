@@ -30,8 +30,8 @@ When a connector goes live, Mu3Lab (`ctl/contextforge_ops.py`):
    - for a connector without a review, every tool it offers.
 
 After that, the virtual server belongs to the operators: Mu3Lab never changes its tools. Tools a
-connector adds later appear in ContextForge (it re-reads connectors every few minutes) but stay out
-of the virtual server until an operator adds them.
+connector adds later appear in ContextForge (Mu3Lab asks it to re-read a connector's tools whenever
+it starts or updates that connector) but stay out of the virtual server until an operator adds them.
 
 When a connector stops, its gateway is switched off in ContextForge, so its tools leave chat until it
 is back. Switching an app to another connector gives chat that connector's own virtual server.

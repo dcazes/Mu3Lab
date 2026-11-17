@@ -153,7 +153,7 @@ The manual vault-seeding endpoint can ask for a master password and two-factor c
 
 [`ctl/jobs.py`](../ctl/jobs.py) owns persistent jobs, transitions, events, idempotency and audit. Public job records exclude secret payloads; sensitive workflow inputs live in encrypted scoped storage. Mutation namespaces and request identity are used to distinguish retries from different operations rather than treating any repeated key as equivalent.
 
-[`ctl/worker.py`](../ctl/worker.py) polls for work every two seconds. A claimed job has a 45-second lease renewed by a heartbeat thread every ten seconds. Dispatch is restricted to known core, service, MCP, provider, model, cleanup and platform-update handlers.
+[`ctl/worker.py`](../ctl/worker.py) sleeps until there is work. Queuing a job, and any successful change through the dashboard's API, sends a one-byte nudge to the worker's socket in the state folder ([`ctl/status/signals.py`](../ctl/status/signals.py)); the worker's loops also look again on their own every 30 to 60 seconds, so a missed nudge only delays work. A claimed job has a 45-second lease renewed by a heartbeat thread every ten seconds. Dispatch is restricted to known core, service, MCP, provider, model, cleanup and platform-update handlers.
 
 Two complementary mechanisms prevent concurrent destructive work:
 

@@ -45,7 +45,10 @@ from ctl.status import reconciler, sign_in, signals
 from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
-POLL_SECONDS = 2
+POLL_SECONDS = 2  # while an earlier worker's command or the runtime layout is still settling
+# With nothing to do the worker sleeps until the dashboard nudges it (``signals.nudge``), and at
+# most this long, so upkeep keeps its pace and a missed nudge only delays work.
+IDLE_SECONDS = 30.0
 log = logging.getLogger("mu3lab.worker")
 
 
@@ -164,6 +167,7 @@ def run() -> int:
     # rarely while nobody does, so an idle Mu3Lab barely touches Authentik, Vaultwarden or Docker.
     last_run: dict[str, float] = {}
     vault_sync_soon = 0.0
+    vault_household_seen = 0.0  # the household change the last vault save already covered
     build_cache_due = False
 
     def due(task: str, fast: float, slow: float) -> bool:
@@ -173,9 +177,12 @@ def run() -> int:
         last_run[task] = now
         return True
 
+    wakeup = signals.waiter()
+
     def stop(_signum, _frame) -> None:
         nonlocal stopping
         stopping = True
+        signals.nudge()  # ends the idle sleep; a socket message is safe to send from a signal handler
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -215,6 +222,7 @@ def run() -> int:
             # Reading status, downloading images and revoking access never change a running app,
             # so they start at once. App images download in the background, several at once,
             # while setup jobs run one at a time below.
+            signals.listen()
             download_manager.start(log.info, downloads_stopping)
             status_thread = reconciler.start(downloads_stopping)
             resource_usage.start(downloads_stopping, ROOT, log.info)
@@ -253,13 +261,21 @@ def run() -> int:
                 run_periodic(store, ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab sign-in verification deferred safely: {exc}")
-        if due("vault", 300, 3600) or (vault_sync_soon and time.monotonic() >= vault_sync_soon):
+        # Logins are saved after each job, when the household changes, and while someone's logins
+        # wait for their vault account; otherwise an hourly pass catches anything changed elsewhere.
+        from ctl import vault_sync
+
+        household_at = signals.household_changed_at()
+        if (
+            (vault_sync_soon and time.monotonic() >= vault_sync_soon)
+            or household_at > vault_household_seen
+            or due("vault", 300 if vault_sync.someone_waiting() else 3600, 3600)
+        ):
             vault_sync_soon = 0.0
+            vault_household_seen = household_at
             last_run["vault"] = time.monotonic()
             try:
-                from ctl import vault_sync
-
-                vault_sync.run(log.info)
+                vault_sync.run(log.info, upkeep=True)
             except Exception as exc:
                 log.warning(f"Mu3Lab vault saving deferred safely: {exc}")
         if due("backup", 60, 900):
@@ -312,7 +328,11 @@ def run() -> int:
                 log.warning(f"Mu3Lab build cache clean-up deferred: {exc}")
         job = store.claim(worker_id)
         if job is None:
-            time.sleep(POLL_SECONDS)
+            idle = IDLE_SECONDS
+            if vault_sync_soon:
+                idle = min(idle, max(0.0, vault_sync_soon - time.monotonic()))
+            wakeup.wait(idle)
+            wakeup.clear()
             continue
         try:
             run_job(store, job, worker_id)
@@ -333,7 +353,7 @@ def run() -> int:
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
                 log.warning(f"Mu3Lab post-job reconciliation deferred safely: {exc}")
     downloads_stopping.set()
-    signals.changed.set()
+    signals.wake()
     if status_thread is not None:
         status_thread.join(timeout=2)
     lock.release()

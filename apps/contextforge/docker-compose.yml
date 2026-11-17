@@ -58,8 +58,13 @@ services:
       # Open WebUI passes each person's own Authentik sign-in with their tool calls;
       # Mu3Lab registers that issuer as trusted for API use (ctl/contextforge.py).
       SSO_API_TOKEN_AUTH_ENABLED: "true"
-      # Pick up tools a connector adds; they stay off until an operator adds them to a virtual server.
-      AUTO_REFRESH_SERVERS: "true"
+      # ContextForge would ask every connector for its tools every 5 minutes and check it every
+      # minute. Mu3Lab asks for the tools whenever it starts or updates a connector (the only times
+      # they change; new ones stay off until an operator adds them to a virtual server), and checks
+      # connectors itself, reconnecting any that stop answering. ContextForge's own check is a
+      # slow backstop: three misses in a row mark a connector unreachable, the next answer clears it.
+      AUTO_REFRESH_SERVERS: "false"
+      HEALTH_CHECK_INTERVAL: "3600"
       # ContextForge pages MCP tool lists at 100 and needs Redis for a second page; one page holds them all.
       MCP_LIST_PAGE_SIZE: "1000"
       MCPGATEWAY_A2A_ENABLED: "false"
