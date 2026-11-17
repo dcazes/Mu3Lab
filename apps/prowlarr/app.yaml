@@ -1,0 +1,71 @@
+# Prowlarr — see ctl/manifest/models.py for every field.
+# Administrators only. Prowlarr keeps the list of torrent sites in one place and hands it to
+# Sonarr and Radarr, so a site is added once. FlareSolverr, a helper only Prowlarr can reach,
+# gets past the Cloudflare check many public sites use. Mu3Lab connects it all (hooks.py).
+id: prowlarr
+name: Prowlarr
+tier: optional
+group: apps
+category: media
+tagline: Torrent sites for Sonarr and Radarr
+summary: Add the torrent sites you trust once, here, and Sonarr and Radarr search them all. Prowlarr tests each
+  site, shows which ones answer, and passes Cloudflare-protected sites through FlareSolverr. Install it with
+  Sonarr and Radarr; nobody else in the household needs it.
+version: "v3.0.2.5780"
+upstream: Prowlarr/Prowlarr
+backup:
+  ignore:
+  - prowlarr/config/logs
+  - prowlarr/config/Backups
+service:
+  local_port: 9696
+  health:
+    path: /ping
+route:
+  https_port: 8482
+  caddy_port: 19499
+  access: gate
+  audience: operators
+sign_in:
+  method: gate
+  note: Authentik admits administrators only, and Prowlarr then opens without a login of its own (its "External"
+    sign-in, made for this).
+secrets:
+# Prowlarr's own key format: 32 hexadecimal characters.
+- env: PROWLARR_API_KEY
+  kind: hex
+  length: 16
+integrates_with:
+# Installing Sonarr or Radarr hands Prowlarr its key; Prowlarr then sends it every site (hooks.py).
+- capability: tv_automation
+  env:
+    MU3LAB_SONARR_API_KEY: '{{provider:SONARR_API_KEY}}'
+- capability: movie_automation
+  env:
+    MU3LAB_RADARR_API_KEY: '{{provider:RADARR_API_KEY}}'
+ui:
+  parts:
+    flaresolverr: FlareSolverr, which gets past Cloudflare's check for sites tagged flaresolverr
+resource_guidance: Light. FlareSolverr runs a hidden web browser for Cloudflare-protected sites and uses a few
+  hundred MB of memory while it does.
+setup_action: Install Prowlarr to give Sonarr and Radarr the torrent sites to search.
+mobile:
+  primary: prowlarr-web
+  clients:
+  - id: prowlarr-web
+    name: Prowlarr web page
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://prowlarr.com/
+    setup: web
+    summary: Add and test torrent sites from the phone's browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Prowlarr address; Authentik signs you in as an administrator.
+    - Choose Add Indexer, pick a site and save; Sonarr and Radarr get it within a minute.

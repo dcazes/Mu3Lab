@@ -8,7 +8,6 @@ import unittest
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -109,36 +108,36 @@ class HookTests(_Paths):
 
         def queue(_store, source, action, _detail, _since):
             self.queued.append(f"{action} {source}")
-            return {"state": self.outcome if action == "backup_stop" else "succeeded", "detail": "no"}
+            return {"state": self.outcome, "detail": "no"}
 
         self.stack.enter_context(patch.object(backup_service, "_queue", side_effect=queue))
         self.stack.enter_context(patch.object(backup_service.app_releases, "installed", return_value=None))
-        self.stack.enter_context(patch.object(backup_service.ControlState, "runtime", return_value=None))
 
-    def test_an_app_is_stopped_before_and_started_after_its_backup(self):
+    def test_an_app_keeps_running_while_its_databases_are_copied_and_backed_up(self):
         backup_service.before("mealie", self.store, ROOT, self.paths)
         self.assertTrue(backup_service.holding("mealie", self.paths))
         notes = records.get("backup-releases", "mealie", self.paths)["entries"]
         self.assertEqual(notes[0]["folders"], ["mealie"])
         backup_service.after("mealie", self.store, ROOT, self.paths)
-        self.assertEqual(self.queued, ["backup_stop mealie", "backup_start mealie"])
+        # Never a stop or a start: only the copy of its databases.
+        self.assertEqual(self.queued, ["backup_prepare mealie"])
         self.assertFalse(backup_service.holding("mealie", self.paths))
         self.assertEqual(backup_service.problems(self.paths), [])
 
-    def test_an_app_the_owner_stopped_is_backed_up_without_starting_it(self):
-        state = SimpleNamespace(installation=lambda _id: {"state": "stopped"})
-        with patch.object(backup_service.ControlState, "runtime", return_value=state):
-            backup_service.before("mealie", self.store, ROOT, self.paths)
-            backup_service.after("mealie", self.store, ROOT, self.paths)
-        self.assertEqual(self.queued, [])
-
-    def test_an_app_that_cannot_be_stopped_is_started_again_and_skipped(self):
+    def test_an_app_whose_databases_cannot_be_copied_is_skipped(self):
         self.outcome = "failed"
-        with self.assertRaises(backup_service.HookRefused):
+        with self.assertRaisesRegex(backup_service.HookRefused, "could not be copied"):
             backup_service.before("mealie", self.store, ROOT, self.paths)
-        self.assertEqual(self.queued, ["backup_stop mealie", "backup_start mealie"])
+        self.assertEqual(self.queued, ["backup_prepare mealie"])
         self.assertFalse(backup_service.holding("mealie", self.paths))
         self.assertTrue(backup_service.problems(self.paths)[0].startswith("mealie:"))
+
+    def test_an_app_stopped_by_a_backup_before_dumps_is_started_after(self):
+        since = datetime.now(UTC).isoformat(timespec="seconds")
+        records.put(backup_service.HOLDS, "mealie", {"since": since, "was_running": True}, self.paths)
+        backup_service.after("mealie", self.store, ROOT, self.paths)
+        self.assertEqual(self.queued, ["backup_start mealie"])
+        self.assertFalse(backup_service.holding("mealie", self.paths))
 
     def test_a_folder_swapped_by_a_restore_is_never_backed_up_through_a_stale_mount(self):
         self.mealie.rename(self.paths.data / ".mealie.original")
@@ -159,19 +158,6 @@ class HookTests(_Paths):
             backup_service.before("mealie", self.store, ROOT, self.paths)
         self.assertFalse(backup_service.holding("mealie", self.paths))
 
-    def test_a_stop_still_waiting_for_the_worker_leaves_the_start_to_the_stuck_app_check(self):
-        self.outcome = "failed"
-        real = backup_service._queue
-
-        def queue(store, source, action, detail, since):
-            if action == "backup_start":
-                raise JobConflict("resource_busy", "stop-job")
-            return real(store, source, action, detail, since)
-
-        with patch.object(backup_service, "_queue", side_effect=queue), self.assertRaises(backup_service.HookRefused):
-            backup_service.before("mealie", self.store, ROOT, self.paths)
-        self.assertTrue(backup_service.holding("mealie", self.paths))
-
     def test_unknown_sources_are_refused(self):
         for source in ("not-an-app", "kopia-ui"):
             with self.subTest(source=source), self.assertRaises(backup_service.HookRefused):
@@ -187,27 +173,41 @@ class HookTests(_Paths):
 
 
 class StuckTests(_Paths):
-    def hold(self, minutes_ago: float) -> None:
+    def hold(self, minutes_ago: float, **extra) -> None:
         since = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
-        records.put(backup_service.HOLDS, "mealie", {"since": since, "was_running": True}, self.paths)
+        records.put(backup_service.HOLDS, "mealie", {"since": since, **extra}, self.paths)
 
-    def test_an_app_whose_backup_ended_without_its_after_action_is_started_again(self):
+    def release(self, status, *, server_up: bool = True) -> None:
+        backup_service._release_stuck(self.store, status, lambda _l: None, self.paths, server_up=server_up)
+
+    def test_a_backup_that_ended_without_its_after_action_ends_its_hold(self):
         self.hold(10)
-        backup_service._restart_stuck(self.store, {"mealie": {"status": "IDLE"}}, lambda _l: None, self.paths)
-        jobs = self.store.active_jobs()
-        self.assertEqual([(job["service_id"], job["action"]) for job in jobs], [("mealie", "backup_start")])
+        self.release({"mealie": {"status": "IDLE"}})
+        self.assertEqual(self.store.active_jobs(), [])
         self.assertFalse(backup_service.holding("mealie", self.paths))
         self.assertIn("did not finish", backup_service.problems(self.paths)[0])
 
+    def test_an_app_an_older_backup_stopped_is_started_again(self):
+        self.hold(10, was_running=True)
+        self.release({"mealie": {"status": "IDLE"}})
+        jobs = self.store.active_jobs()
+        self.assertEqual([(job["service_id"], job["action"]) for job in jobs], [("mealie", "backup_start")])
+
     def test_a_backup_still_running_or_just_started_is_left_alone(self):
         self.hold(10)
-        backup_service._restart_stuck(self.store, {"mealie": {"status": "UPLOADING"}}, lambda _l: None, self.paths)
+        self.release({"mealie": {"status": "UPLOADING"}})
         self.hold(1)
-        backup_service._restart_stuck(self.store, {"mealie": {"status": "IDLE"}}, lambda _l: None, self.paths)
+        self.release({"mealie": {"status": "IDLE"}})
         self.hold(10)
-        backup_service._restart_stuck(self.store, None, lambda _l: None, self.paths)  # Kopia cannot be asked yet
-        self.assertEqual(self.store.active_jobs(), [])
+        self.release(None)  # Kopia is up but cannot be asked yet
         self.assertTrue(backup_service.holding("mealie", self.paths))
+
+    def test_with_the_backup_server_stopped_a_hold_ends_at_once(self):
+        # An update or an administrator stopped Kopia mid-backup: no backup can be running.
+        self.hold(0, was_running=True)
+        self.release(None, server_up=False)
+        self.assertFalse(backup_service.holding("mealie", self.paths))
+        self.assertEqual([job["action"] for job in self.store.active_jobs()], ["backup_start"])
 
 
 class ReconcileTests(_Paths):
@@ -233,6 +233,14 @@ class ReconcileTests(_Paths):
         self.assertEqual(targets, ["--global", "/data/mu3lab", "/data/mealie"])
         self.assertEqual(records.get("backup-apps", "mealie", self.paths)["completed_at"], "2026-10-11T03:31:00Z")
         self.recreate.assert_not_called()
+
+    def test_live_database_folders_are_left_out_in_a_call_after_the_clear(self):
+        # Kopia applies --clear-ignore after --add-ignore within one call.
+        with patch.object(backup_service.database_dumps, "kopia_rules", return_value=["/mealie/postgres/"]):
+            self.reconcile()
+        mealie = [call.args[1][3:] for call in self.exec.call_args_list if call.args[1][2] == "/data/mealie"]
+        self.assertIn("--clear-ignore", mealie[0])
+        self.assertEqual(mealie[1], ["--add-ignore=/mealie/postgres/"])
 
     def refreshes(self):
         return [call for call in self.control.call_args_list if call.args[:2] == ("POST", "refresh")]

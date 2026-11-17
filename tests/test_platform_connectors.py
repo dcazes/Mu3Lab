@@ -63,6 +63,7 @@ class AudienceTests(unittest.TestCase):
             patch("ctl.contextforge_ops.virtual_server", return_value="srv"),
             patch("ctl.contextforge_ops.person_key", return_value="key"),
             patch("ctl.contextforge.endpoint", return_value="http://contextforge/servers/srv/mcp"),
+            patch("ctl.chat_ops.gateway_up", return_value=True),
         ):
             member = {item["id"] for item in chat_ops.desired_assistants("u1", "m@example.com")}
             operator = {item["id"] for item in chat_ops.desired_assistants("u2", "o@example.com", operator=True)}

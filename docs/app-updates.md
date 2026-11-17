@@ -15,6 +15,7 @@ The update checks first, using the installer's own checks from the new version. 
 - **Updating.** When the approved release is newer, the app shows **Update ready**. The update downloads the new images while the app keeps running, stops it, saves a backup, then starts the new release. If it doesn't come up healthy, the backup and the previous release are put back automatically.
 - **Undoing.** Restoring the backup taken before an update also puts back the release it came from. `releases.json`, next to the digest file, records every release the server has run.
 - **Supporting services.** A newer database or helper image under the same app version is offered as an update too, labelled as such.
+- **Setup changes.** When a Mu3Lab update changes an installed app's own files (its Compose file, settings or helper code) but not its images, the app offers "Mu3Lab's changes to how <app> is set up" and keeps its version. It runs the same backup-first update; a `git pull` alone never applies them to a running app.
 
 ## Approving a release (maintainer)
 
@@ -36,7 +37,7 @@ The update checks first, using the installer's own checks from the new version. 
    make approve APP=firecrawl VERSION=v2.12.0 IMAGES="api=ghcr.io/firecrawl/firecrawl:2.12.1-production"
    ```
 
-   Some projects re-publish one tag for every build. SurfSense, for example, publishes every self-hosted server build as `0.0.40`. Naming such a tag again (`IMAGES="backend=ghcr.io/modsetter/surfsense-backend:0.0.40 …"`) pins whatever it points to today. A `latest` tag is recorded by its digest alone.
+   Some projects re-publish one tag for every build (SurfSense's old self-hosted server re-published `0.0.40` for weeks). Naming such a tag again in `IMAGES` pins whatever it points to today. A `latest` tag is recorded by its digest alone.
 
    If the new release changes its Compose setup (new environment variables, services or volumes), edit `apps/<app>/docker-compose.yml` as well.
 

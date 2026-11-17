@@ -163,6 +163,14 @@ function useGetStarted() {
   const [manual, mark, setItem] = useGetStartedChecklist();
   const coreInstalling = useCoreSetupActive();
   const [checking, setChecking] = useState(false);
+  // Once a signed-in extension is seen the step stays done, even while Vaultwarden is stopped.
+  const signedIn = Boolean(vault.data?.browser_extension?.signed_in);
+  const recorded = useRef(false);
+  useEffect(() => {
+    if (!signedIn || manual.extension || recorded.current) return;
+    recorded.current = true;
+    mark('extension');
+  }, [signedIn, manual.extension, mark]);
   const checkExtension = async () => {
     setChecking(true);
     try {
@@ -195,7 +203,7 @@ function useGetStarted() {
       hint: preinstalled
         ? 'Click the shield icon next to the address bar, then sign in with your Mu3Lab email and password.'
         : '',
-      done: Boolean(extension?.signed_in),
+      done: signedIn || Boolean(manual.extension),
       guide: 'extension',
     },
     // Connecting AI providers is administration; members skip it.

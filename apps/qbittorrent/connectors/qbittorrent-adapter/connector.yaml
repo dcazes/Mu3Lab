@@ -1,0 +1,25 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# qBittorrent has no maintained MCP server; Mu3Lab's small adapter calls its Web API (/api/v2).
+# qBittorrent answers only on this computer's loopback, where it skips its own login, so the
+# adapter runs on the host network and listens on loopback (for Mu3Lab's checks) and on
+# Docker's host address, which ContextForge reaches as host.docker.internal.
+id: qbittorrent-adapter
+name: qBittorrent MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://github.com/qbittorrent/qBittorrent
+revision: v5.2.4-webapi
+transport: streamable-http
+endpoint: http://host.docker.internal:8832/mcp
+local_health: http://127.0.0.1:8832/health
+provision_note: Needs no key of its own. qBittorrent skips its login for this computer, and Authentik guards the
+  private address for people.
+review_note: Mu3Lab adapter with eight tools. Three read (torrents, transfer speeds, categories) and five manage
+  torrents (add a magnet or link, pause, resume, set a category, remove). Remove always keeps the downloaded
+  files; no tool deletes files or changes qBittorrent's settings. Only administrators see its assistant.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

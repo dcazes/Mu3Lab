@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { VoiceApps, VoicePage } from '../../api';
+import type { SpeechModelOption, VoiceApps, VoicePage } from '../../api';
 import { aiModels, dashboardData, renderWithDashboard, stubFetch } from '../../test/fixtures';
 import { VoiceSettings } from './VoiceSettings';
 
@@ -8,6 +8,10 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+function speechModel(id: string, name: string, inUse: boolean, downloaded = inUse): SpeechModelOption {
+  return { id, name, note: '', precision: '16-bit', download_gb: 0.5, memory_gb: 1, downloaded, in_use: inUse };
+}
 
 function voicePage(overrides: Partial<VoicePage['settings']> = {}, searchInstalled = true): VoicePage {
   return {
@@ -27,11 +31,17 @@ function voicePage(overrides: Partial<VoicePage['settings']> = {}, searchInstall
       installed: true,
       stt: {
         value: 'deepdml/faster-whisper-large-v3-turbo-ct2',
-        options: ['deepdml/faster-whisper-large-v3-turbo-ct2', 'Systran/faster-whisper-small'],
+        options: [
+          speechModel('deepdml/faster-whisper-large-v3-turbo-ct2', 'Whisper large v3 turbo', true),
+          speechModel('Systran/faster-whisper-small', 'Whisper small', false),
+        ],
       },
       tts: {
         value: 'speaches-ai/Kokoro-82M-v1.0-ONNX',
-        options: ['speaches-ai/Kokoro-82M-v1.0-ONNX-int8', 'speaches-ai/Kokoro-82M-v1.0-ONNX'],
+        options: [
+          speechModel('speaches-ai/Kokoro-82M-v1.0-ONNX-int8', 'Kokoro small', false, true),
+          speechModel('speaches-ai/Kokoro-82M-v1.0-ONNX', 'Kokoro full', true),
+        ],
       },
       default_voice: 'af_heart',
     },
@@ -144,8 +154,7 @@ describe('Voice assistant settings', () => {
 
   it('changes the speech models only after confirming Speaches is set up again', async () => {
     const puts = renderPage();
-    const recognition = await screen.findByRole('combobox', { name: 'Hearing model' });
-    fireEvent.change(recognition, { target: { value: 'Systran/faster-whisper-small' } });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Whisper small' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save and set up Speaches' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Change models' }));
     await vi.waitFor(() =>
@@ -156,15 +165,28 @@ describe('Voice assistant settings', () => {
     );
   });
 
-  it('offers the same answers as chat as one of the choices', async () => {
-    renderPage();
-    expect(await screen.findByRole('radio', { name: /Same as chat/ })).toBeChecked();
-    expect(screen.getByText(/^The same as chat\./)).toBeInTheDocument();
+  it('shows which speech models are downloaded and removes an unused one', async () => {
+    const puts = renderPage();
+    const small = (await screen.findByRole('radio', { name: 'Kokoro small' })).closest('.model-entry') as HTMLElement;
+    expect(small).toHaveTextContent('Downloaded');
+    expect(small).toHaveTextContent('16-bit: 0.5 GB download, about 1 GB memory.');
+    // The model Speaches uses now cannot be removed.
+    expect(screen.queryByRole('button', { name: 'Remove Kokoro full' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove Whisper small' })).not.toBeInTheDocument();
+    fireEvent.click(within(small).getByRole('button', { name: 'Remove Kokoro small' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    await vi.waitFor(() =>
+      expect(puts).toContainEqual({
+        path: '/api/v1/ai/voice/speech/remove',
+        body: { model: 'speaches-ai/Kokoro-82M-v1.0-ONNX-int8' },
+      }),
+    );
   });
 
-  it('keeps full-duplex mode folded away under Labs', async () => {
+  it("answers with chat's setting, with no model choice of its own", async () => {
     renderPage();
-    const labs = await screen.findByRole('button', { name: /Labs: full-duplex mode/ });
-    expect(labs).toHaveAttribute('aria-expanded', 'false');
+    expect(await screen.findByText(/^Answers come from your outside providers\./)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Settings, AI' })).toHaveAttribute('href', '/settings/ai');
+    expect(screen.queryByRole('radio', { name: /Same as chat/ })).not.toBeInTheDocument();
   });
 });

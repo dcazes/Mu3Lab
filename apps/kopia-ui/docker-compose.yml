@@ -28,8 +28,17 @@ services:
         && exec kopia server start --insecure --enable-actions --address=127.0.0.1:51515
         --refresh-interval=8760h --disable-file-logging --disable-content-log
     volumes:
-      - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia:/repo
-      - ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/restores:/restores
+      # The backup folder may be on another drive (ctl/backup_location.py). Docker
+      # must never create it: with that drive missing it would start an empty
+      # repository on the main drive.
+      - type: bind
+        source: ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/kopia
+        target: /repo
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${MU3LAB_BACKUPS_ROOT:?MU3LAB_BACKUPS_ROOT is required}/restores
+        target: /restores
+        bind: {create_host_path: false}
       - ${MU3LAB_STATE_ROOT:?MU3LAB_STATE_ROOT is required}/kopia-server:/cache
       - ./backup-hook.sh:/hooks/backup-hook.sh:ro
       # Schedules run in this computer's time zone.

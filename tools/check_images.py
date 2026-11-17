@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -41,15 +42,34 @@ def pinned_images(root: Path = ROOT) -> dict[str, list[str]]:
     return found
 
 
+# A registry that is busy (rate limit, server error, timeout) is asked again after these waits;
+# a digest it does not have fails at once.
+RETRY_WAITS = (5, 15, 30)
+TEMPORARY = re.compile(
+    r"\b(429|500|502|503|504)\b|toomanyrequests|too many requests|service unavailable|bad gateway"
+    r"|gateway time-?out|i/o timeout|tls handshake timeout|connection reset",
+    re.IGNORECASE,
+)
+
+
+def _inspect(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run one registry query, asking again while the registry is only busy."""
+    for wait in (*RETRY_WAITS, None):
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
+        except subprocess.TimeoutExpired:
+            if wait is None:
+                raise
+        else:
+            if not result.returncode or wait is None or not TEMPORARY.search(result.stderr):
+                return result
+        time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def platforms(image: str) -> set[str]:
     """The platforms a pinned image provides, read from its registry manifest. Raises RuntimeError."""
-    raw = subprocess.run(
-        ["docker", "buildx", "imagetools", "inspect", "--raw", image],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+    raw = _inspect(["docker", "buildx", "imagetools", "inspect", "--raw", image])
     if raw.returncode:
         raise RuntimeError(raw.stderr.strip()[-300:] or "the registry did not answer")
     manifest = json.loads(raw.stdout)
@@ -60,13 +80,7 @@ def platforms(image: str) -> set[str]:
             if item.get("platform") and item["platform"].get("os") != "unknown"
         }
     # A single-platform image: its config says which.
-    config = subprocess.run(
-        ["docker", "buildx", "imagetools", "inspect", "--format", "{{json .Image}}", image],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+    config = _inspect(["docker", "buildx", "imagetools", "inspect", "--format", "{{json .Image}}", image])
     if config.returncode:
         raise RuntimeError(config.stderr.strip()[-300:])
     details = json.loads(config.stdout)

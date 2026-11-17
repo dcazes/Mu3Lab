@@ -114,6 +114,7 @@ class Service:
             "dependencies": list(self.dependencies),
             "stage": self.stage,
             "routable": self.private_https_port is not None,
+            "home_network": self.manifest.service.home_port is not None,
             # The app's other private addresses (``extra_routes``), shown as links beside Open.
             "extra_routes": [
                 {"name": target.name, "label": target.label, "private_https_port": target.private_https_port}

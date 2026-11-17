@@ -1,0 +1,71 @@
+# Radarr — see ctl/manifest/models.py for every field.
+# Administrators only. Radarr fetches films: it finds them on the sites Prowlarr knows, hands
+# them to qBittorrent in its own category, then moves each finished film into Movies with a
+# tidy name, where Jellyfin and Nextcloud see it. Mu3Lab sets it all up (hooks.py).
+id: radarr
+name: Radarr
+tier: optional
+group: apps
+category: media
+tagline: Finds and downloads the films you want
+summary: Add a film and Radarr downloads it once a good copy is out, in the household's chosen quality (1080p,
+  or 4K, 720p or DVD when that is all there is), then files it in Movies for Jellyfin. It finds films on the
+  sites you add to Prowlarr, downloads them with qBittorrent, and checks for new copies every two hours.
+  Seerr sends it the films people ask for.
+version: "v7.0.3.10918"
+upstream: Radarr/Radarr
+# Radarr offers its key to Prowlarr and Seerr, which connect to it when they are installed.
+capabilities: [movie_automation, media_folders]
+depends_on: [qbittorrent]
+media:
+- name: movies
+  purpose: Your films, one folder per film, for example "Film Name (2010)/Film Name (2010).mkv".
+backup:
+  # Radarr fetches posters again, and keeps its own logs and weekly copies of its database.
+  ignore:
+  - radarr/config/logs
+  - radarr/config/MediaCover
+  - radarr/config/Backups
+service:
+  local_port: 7878
+  health:
+    path: /ping
+route:
+  https_port: 8481
+  caddy_port: 19498
+  access: gate
+  audience: operators
+sign_in:
+  method: gate
+  note: Authentik admits administrators only, and Radarr then opens without a login of its own (its "External"
+    sign-in, made for this). Prowlarr and Seerr use its key.
+secrets:
+# Radarr's own key format: 32 hexadecimal characters.
+- env: RADARR_API_KEY
+  kind: hex
+  length: 16
+env:
+  MU3LAB_MEDIA_ROOT: '{{media_root}}'
+resource_guidance: Light on memory and processor. Films take disk space in Movies (about 6 GB each in 1080p, 15 to
+  40 GB in 4K), which backups include, so allow backup space for what you keep.
+setup_action: Install Radarr to have the films you want downloaded for Jellyfin.
+mobile:
+  primary: radarr-web
+  clients:
+  - id: radarr-web
+    name: Radarr web page
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://radarr.video/
+    setup: web
+    summary: Add films and see what's downloading, from the phone's browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Radarr address; Authentik signs you in as an administrator.
+    - Search for a film under Movies, Add New, and choose the Mu3Lab quality profile.

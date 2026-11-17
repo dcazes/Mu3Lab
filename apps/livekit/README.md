@@ -61,7 +61,7 @@ each call, so nothing needs a restart:
   Administrators switch an app off for voice under **Tools**, which also checks that each app's
   tools answer.
 - `settings.json` (`ctl/voice_settings.py`): responsiveness, interruptions, the voice, the web
-  search address and whether full-duplex mode (Labs) is on.
+  search address.
 
 The folder above it is Mu3Lab's user's alone, and the agent mounts it read-only.
 

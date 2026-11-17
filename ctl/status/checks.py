@@ -192,7 +192,7 @@ def sign_in_check(service: Service, saved: dict | None, now: float) -> Check:
     if now - verified > SIGN_IN_MAX_AGE_SECONDS:
         return Check(
             "stale",
-            "Sign-in has not been re-verified in the last 24 hours.",
+            "Sign-in was last verified more than a day ago; Mu3Lab checks it again once the app answers.",
             verified_at,
             verified_at,
         )

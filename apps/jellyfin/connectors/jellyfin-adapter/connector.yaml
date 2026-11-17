@@ -1,0 +1,32 @@
+# Reviewed chat connector — see Connector in ctl/manifest/models.py.
+# Jellyfin has no maintained MCP server; Mu3Lab's small adapter calls its REST API.
+# Each person gets their own copy, signed in to Jellyfin as them with the login Mu3Lab made for
+# them, so their library access, parental limits and watch history apply (per_person).
+id: jellyfin-adapter
+name: Jellyfin MCP
+preferred: true
+provenance: mu3lab-adapter
+repository: https://github.com/jellyfin/jellyfin
+revision: v12.4-api
+transport: streamable-http
+endpoint: http://jellyfin-mcp:8080/mcp
+local_health: http://127.0.0.1:8833/health
+credentials:
+- key: token
+  env: JELLYFIN_TOKEN
+  type: secret
+  label: Jellyfin sign-in token for this person
+  required: true
+provision_hook: true
+per_person: true
+provision_note: Mu3Lab signs in to Jellyfin as each person with the login it made for them; no administrator key
+  is shared.
+review_note: Mu3Lab adapter with six tools, all read-only. They list the libraries, search films and shows, show what
+  was added recently and list a library, and show the person's own Continue watching and Next up. Nothing plays,
+  changes or deletes anything, or touches users or settings.
+secrets:
+- env: MCP_AUTH_TOKEN
+  length: 40
+include:
+- platform/mcp-adapter/server.py
+reviewed: true

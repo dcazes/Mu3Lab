@@ -8,7 +8,7 @@ category: ai
 tagline: AI chat with your apps, voice and documents
 summary: Mu3Lab's chat. Chat with Mu3Lab's models, use an assistant for each of your apps, talk and listen with
   local voice when Speaches is installed, and ask questions about your own documents.
-version: v0.11.4
+version: "v0.13.0"
 upstream: open-webui/open-webui
 depends_on:
 - litellm

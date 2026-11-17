@@ -1,0 +1,36 @@
+name: mu3lab-jellyfin
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:12.4@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771
+    restart: unless-stopped
+    # At home only: on this server's home-network address, never the tailnet or every network
+    # (the owner's choice). The loopback port is for Mu3Lab's own checks.
+    ports:
+      - "127.0.0.1:8096:8096"
+      - "${MU3LAB_HOME_IP:?MU3LAB_HOME_IP is required}:8096:8096"
+    environment:
+      # The address Jellyfin gives TVs and phones (hooks.py also limits it to the home network).
+      JELLYFIN_PublishedServerUrl: http://${MU3LAB_HOME_IP:?MU3LAB_HOME_IP is required}:8096
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/jellyfin/config:/config
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/jellyfin/cache:/cache
+      # Read-only: Jellyfin never deletes or rewrites anyone's files; its artwork stays in /config.
+      - ${MU3LAB_MEDIA_MOVIES:?MU3LAB_MEDIA_MOVIES is required}:/media/movies:ro
+      - ${MU3LAB_MEDIA_SHOWS:?MU3LAB_MEDIA_SHOWS is required}:/media/shows:ro
+      # Navidrome's music, when Navidrome is installed (integrates_with: music_library).
+      - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/media/music:ro
+    networks: [jellyfin]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "--noproxy", "localhost", "-fsS", "http://localhost:8096/health"]
+      timeout: 10s
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
+
+networks:
+  # Its own network, with internet access for film and show details; the chat connector joins it.
+  jellyfin: {}

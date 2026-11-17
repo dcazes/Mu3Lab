@@ -75,6 +75,29 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn("typed", " ".join(captured["command"]))
 
 
+class DatabaseTests(unittest.TestCase):
+    def test_each_apps_databases_are_loaded_before_anything_starts_it(self):
+        paths = RuntimePaths(Path("/srv/test"))
+        with (
+            patch("ctl.database_dumps.prepare", return_value=["database"]) as prepare,
+            patch("ctl.database_dumps.load") as load,
+        ):
+            rebuild._load_databases("immich", ["immich"], paths, print)
+        self.assertEqual(prepare.call_args.args[2], {"immich": paths.data / "immich"})
+        self.assertEqual(load.call_args.args[2], ["database"])
+
+    def test_a_dump_that_does_not_load_stops_the_rebuild(self):
+        from ctl import database_dumps
+
+        failed = database_dumps.DumpFailed("Immich's database could not be loaded.")
+        with (
+            patch("ctl.database_dumps.prepare", return_value=["database"]),
+            patch("ctl.database_dumps.load", side_effect=failed),
+            self.assertRaisesRegex(rebuild.RebuildError, "install.sh --restore"),
+        ):
+            rebuild._load_databases("immich", ["immich"], RuntimePaths(Path("/srv/test")), print)
+
+
 class InstallerTests(unittest.TestCase):
     def test_the_step_runs_only_when_asked_and_before_new_secrets_are_made(self):
         order = [step["id"] for step in install.STEPS]

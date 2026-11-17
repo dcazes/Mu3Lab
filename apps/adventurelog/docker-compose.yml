@@ -2,7 +2,7 @@ name: mu3lab-adventurelog
 
 services:
   app:
-    image: ghcr.io/seanmorley15/adventurelog:v0.13.0@sha256:08bf228403dc99559a661e0d03a5ff08823da21a47fb7ab281dcef98794571ec
+    image: ghcr.io/seanmorley15/adventurelog:v0.13.1@sha256:67ff66e4a2b46b3ca4806a3ecb47cb71c42443ea2d88c18e1ea3dba3ae0d2cf5
     extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     environment:

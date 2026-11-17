@@ -15,7 +15,9 @@ secrets, a new database or new app data:
    projects. Mu3Lab's own encrypted store, and so every app's passwords and
    keys, come back with them.
 4. Restore each app's data folders from that app's newest backup, so sign-in,
-   the password vault, chat and every app start with their old data.
+   the password vault, chat and every app start with their old data. Each
+   app's databases are loaded from their dumps here, before anything starts
+   the app (``ctl.database_dumps``).
 5. Tidy the restored database for a new computer: jobs that were running on
    the old one, install batches and pending chat approvals are retired,
    and setup progress starts again.
@@ -402,6 +404,22 @@ def prepare_database(database: Path) -> dict[str, int]:
     return {"cancelled": len(active), "reset": reset}
 
 
+def _load_databases(app_id: str, folders: list[str], paths: RuntimePaths, log: Log) -> None:
+    """Put an app's database copies in place and load its dumps, before anything starts the app."""
+    from ctl import database_dumps
+    from ctl.registry import ROOT, RegistryError, load
+
+    try:
+        service = load().get(app_id)
+    except RegistryError:
+        return  # an app this Mu3Lab no longer offers: its folders come back as they were saved
+    try:
+        dumps = database_dumps.prepare(service, ROOT, {folder: paths.data / folder for folder in folders}, log, paths)
+        database_dumps.load(service, ROOT, dumps, log, paths)
+    except database_dumps.DumpFailed as exc:
+        raise RebuildError(f"{exc} Run ./install.sh --restore again to start the rebuild over.") from exc
+
+
 def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """Bring the old computer's Mu3Lab back onto this one. See the module docstring for the order."""
     paths = paths or RuntimePaths()
@@ -496,6 +514,7 @@ def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = 
         media = app_id == backups.MEDIA_SOURCE
         what = "the media folders" if media else f"{app_id}'s data"
         log(f"Restoring {what} (backup {snapshot['id'][:8]} from {snapshot['time']}).")
+        targets = []
         for folder in snapshot["folders"]:
             # The libraries go back under the media root, where every app that reads them looks.
             target = (paths.media if media else paths.data) / folder
@@ -503,7 +522,11 @@ def restore(source: Path, password: str, log: Log, paths: RuntimePaths | None = 
                 raise RebuildError(f"{target} already holds data; a rebuild never overwrites it.")
             _own(paths, target)
             _restore_folder(snapshot["id"], folder, target, password, paths, log)
-            _seal(paths, [target], log)
+            targets.append(target)
+        if not media:
+            _load_databases(app_id, snapshot["folders"], paths, log)
+        # Sealed once complete: an interrupted rebuild removes exactly what it restored.
+        _seal(paths, targets, log)
         restored.append(app_id)
     result = {
         "restored_at": _now(),

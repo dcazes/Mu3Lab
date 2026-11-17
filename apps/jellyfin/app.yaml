@@ -1,0 +1,172 @@
+# Jellyfin — see ctl/manifest/models.py for every field.
+# Films and TV for the household, at home only: Jellyfin listens on this server's home-network
+# address (http://<home address>:8096), never on the tailnet (the owner's choice, so TVs set up
+# simply and nothing is reachable outside the home). It checks each person's login itself.
+id: jellyfin
+capabilities: [videos, media_folders]
+name: Jellyfin
+tier: optional
+group: apps
+category: media
+tagline: Your own films and TV, like Netflix
+summary: Watch the household's films and shows on the TV, in the browser or on phones at home, with each
+  person's own watch history and Continue watching. Add films to the shared Movies folder in Nextcloud and
+  series to Shows, or download them with qBittorrent; Jellyfin finds the posters and descriptions.
+version: "12.4"
+upstream: jellyfin/jellyfin
+media:
+- name: movies
+  purpose: Your films, one folder per film, for example "Film Name (2010)/Film Name (2010).mkv".
+- name: shows
+  purpose: Your series, one folder per show with a folder per season, for example "Show Name/Season 01/".
+backup:
+  # Jellyfin rebuilds its cache (pictures, converted video) and keeps its own logs and database copies.
+  ignore:
+  - jellyfin/cache
+  - jellyfin/config/log
+  - jellyfin/config/data/SQLiteBackups
+service:
+  uses_gpu: true
+  local_port: 8096
+  # People reach Jellyfin here, on the home network only (the compose file binds ${MU3LAB_HOME_IP}).
+  extra_ports:
+  - port: 8096
+    purpose: home-network address for TVs, phones and browsers at home
+    listen: home
+  health:
+    path: /health
+  start_timeout_seconds: 300
+sign_in:
+  method: local
+  note: Jellyfin works at home only and has its own login. Mu3Lab made yours and saved it to your vault, so
+    Bitwarden fills it in. TVs sign in with Quick Connect.
+account:
+  # Mu3Lab's own hidden Jellyfin administrator (mu3lab-service) runs the setup and creates each person's account.
+  mode: api_bootstrap
+  needs_owner: false
+  user_action: Open Jellyfin at home; Bitwarden fills in the Jellyfin login Mu3Lab saved to your vault.
+secrets:
+- env: JELLYFIN_ADMIN_PASSWORD
+  length: 32
+env:
+  # This server's home-network address and network (rule home_network follows them if they change).
+  MU3LAB_HOME_IP: '{{home_ip}}'
+  MU3LAB_HOME_NETWORK: '{{home_network}}'
+  MU3LAB_COUNTRY: '{{country_code}}'
+  # Video conversion: hooks.py sets Jellyfin's encoding from this.
+  JELLYFIN_VIDEO_ACCEL: none
+build_env:
+  nvidia:
+    JELLYFIN_VIDEO_ACCEL: nvenc
+integrates_with:
+# Navidrome's music shows in Jellyfin too, read-only.
+- capability: music_library
+  env:
+    MU3LAB_MUSIC_FOLDER: '{{provider:MU3LAB_MUSIC_FOLDER}}'
+    MU3LAB_MUSIC_SHARED: '1'
+  absent_env:
+    # An empty stand-in inside Jellyfin's own folder, so the mount always has a source.
+    MU3LAB_MUSIC_FOLDER: '{{data_root}}/jellyfin/no-music'
+    MU3LAB_MUSIC_SHARED: '0'
+rules:
+- rule: home_network
+- rule: per_person_logins
+  with:
+    audience: household
+    purpose: Create a Jellyfin account for each household member
+mobile:
+  primary: jellyfin-androidtv
+  clients:
+  - id: jellyfin-androidtv
+    name: Jellyfin for Google TV and Android TV
+    kind: native
+    support: official
+    platforms:
+    - android
+    install:
+      android: https://play.google.com/store/apps/details?id=org.jellyfin.androidtv
+    homepage: https://jellyfin.org/downloads/
+    setup: server_url
+    summary: Watch on the TV, with each person's own profile.
+    caveat: Works on the home network only. The TV and this server must be on the same home Wi-Fi or router.
+    steps:
+    - On the TV, open Google Play, search for Jellyfin and install it.
+    - Open Jellyfin, choose Add server, and type the home address shown on this page (it starts with http://).
+    - Choose Quick Connect. The TV shows a six-character code.
+    - On your phone or computer, open Jellyfin, tap your profile picture, choose Quick Connect and type the code.
+    - Each person repeats the last two steps to add their own profile to the TV.
+  - id: jellyfin-android
+    name: Jellyfin
+    kind: native
+    support: official
+    platforms:
+    - android
+    install:
+      android: https://play.google.com/store/apps/details?id=org.jellyfin.mobile
+    homepage: https://jellyfin.org/downloads/
+    setup: server_url
+    summary: Watch on an Android phone or tablet, and download films to watch away from home.
+    caveat: Streams on the home network only; downloaded films play anywhere.
+    steps:
+    - Install Jellyfin and connect the phone to your home Wi-Fi.
+    - Add a server with the home address shown on this page.
+    - Sign in with the Jellyfin username and password Mu3Lab saved to your vault.
+  - id: swiftfin
+    name: Swiftfin
+    kind: native
+    support: official
+    platforms:
+    - ios
+    install:
+      ios: https://apps.apple.com/app/swiftfin/id1604098728
+    homepage: https://jellyfin.org/downloads/
+    setup: server_url
+    summary: Watch on an iPhone, iPad or Apple TV.
+    caveat: Works on the home network only.
+    steps:
+    - Install Swiftfin and connect the device to your home Wi-Fi.
+    - Add a server with the home address shown on this page.
+    - Sign in with the Jellyfin username and password Mu3Lab saved to your vault, or use Quick Connect.
+  - id: jellyfin-web
+    name: Jellyfin in the browser
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://jellyfin.org/
+    setup: web
+    summary: Watch in any browser at home.
+    fallback: true
+    steps:
+    - Connect to your home Wi-Fi.
+    - Open the home address shown on this page; Bitwarden fills in your Jellyfin login.
+resource_guidance: Light while films play as they are. Converting video for a device that cannot play a file uses
+  the graphics card (NVIDIA), or a lot of processor time without one. Films and shows are backed up, so allow
+  backup space for them too.
+setup_action: Install Jellyfin to watch the household's films and shows on the TV at home.
+chat:
+  assistant:
+    title: Jellyfin
+    description: Find films and shows, see what's new, and pick up where you left off.
+    instructions: Help with the household's Jellyfin films and shows. Search before answering, and use the titles the
+      tools return. Watch history and Continue watching are the person's own. You cannot play, change or delete
+      anything; to watch, point them to Jellyfin on the TV or in the browser at home. Use only Jellyfin tools
+      assigned to this agent.
+    faq:
+    - question: "What is Jellyfin for?"
+      answer: "Watching the household's films and shows on the TV, in the browser or on phones at home, like a private Netflix."
+    - question: "How do I add a film or show?"
+      answer: "Put films in the shared Movies folder in Nextcloud, one folder per film named like \"Film Name (2010)\", and series in Shows, one folder per show with Season 01, Season 02 inside. An administrator can also download them with qBittorrent's movies and shows categories."
+    - question: "How do I watch on the TV?"
+      answer: "Install Jellyfin on the TV, add the home address from Jellyfin's page in Mu3Lab, choose Quick Connect, then type the code into Jellyfin on your phone under your profile, Quick Connect."
+    - question: "Why doesn't it work away from home?"
+      answer: "Jellyfin is kept on your home network on purpose, so nobody outside the home can reach it. Films downloaded in the phone app still play anywhere."
+    - question: "Who sees what I watch?"
+      answer: "Your watch history and Continue watching are your own. The films and shows are shared with the household."
+    - question: "A film shows the wrong title or no poster. How do I fix it?"
+      answer: "Name its folder and file like \"Film Name (2010)\". An administrator can also choose Identify on the film in Jellyfin."
+  connectors:
+  - jellyfin-adapter

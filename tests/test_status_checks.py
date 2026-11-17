@@ -236,12 +236,14 @@ class ServiceReadTests(unittest.TestCase):
         self.assertEqual((app["display_state"], app["blocking_check"]), ("checking", "sign_in"))
         self.assertIsNone(app["ui"].get("url"))
 
-    def test_expired_sign_in_evidence_needs_attention(self):
+    def test_expired_sign_in_evidence_is_checked_again_without_an_alarm(self):
+        # Started after a day stopped: nothing failed, the worker re-checks sign-in within a minute or so.
         self.write()
         self.verify_sign_in(age=checks.SIGN_IN_MAX_AGE_SECONDS + 60)
         app = self.mealie()
-        self.assertEqual((app["display_state"], app["blocking_check"]), ("needs_attention", "sign_in"))
-        self.assertIn("24 hours", app["reason"])
+        self.assertEqual((app["display_state"], app["blocking_check"]), ("checking", "sign_in"))
+        self.assertIn("more than a day ago", app["reason"])
+        # Old evidence still supports no usable claim.
         self.assertIsNone(app["ui"].get("url"))
 
     def test_failed_sign_in_check_needs_attention(self):

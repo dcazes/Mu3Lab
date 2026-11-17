@@ -60,11 +60,13 @@ def revoke(subject: str) -> None:
 
 
 def _sync(log: Log) -> tuple[bool, str]:
+    """Bring Open WebUI in step with what is running now; it never needs ContextForge to be up to do that."""
     paths = RuntimePaths()
+    gateway, up = chat_ops.gateway_name(), chat_ops.gateway_up()
     try:
-        desired = chat_ops.desired_assistants()
+        desired = chat_ops.desired_assistants(gateway=up)
         if any(item["active"] for item in desired):
-            contextforge_ops.ensure_accounts(sorted({p["email"] for p in chat_people().values() if p["email"]}))
+            _ensure_accounts(log)
         with client() as api:
             from ctl import local_models
 
@@ -74,13 +76,27 @@ def _sync(log: Log) -> tuple[bool, str]:
                 _guide({str(item["id"]).split("--")[0] for item in desired}),
                 outside_choice=chosen["privacy"] == "local_first",
                 local_choice=local.name if local and chosen["sources"][0] == "outside" else "",
+                gateway_down="" if up else gateway,
             )
-            checks = api.check(desired, _check_token() if any(item["active"] for item in desired) else "")
+            try:
+                api.ensure_status_filter(_filter_entries(desired, gateway))
+                status_filter = ""
+            except ChatError as exc:
+                status_filter = f"Open WebUI's per-message app check could not be set up: {exc}"
+                log(status_filter)
+            checks = api.check(
+                desired, _check_token(log) if any(item["active"] for item in desired) else "", gateway=gateway
+            )
     except (ChatError, ContextForgeError, PeopleError, OSError, ValueError, KeyError) as exc:
         log(f"Open WebUI assistants were not updated: {exc}")
         records.put(SCOPE, RECORD, {**records.get(SCOPE, RECORD, paths), "error": str(exc)}, paths)
         return False, str(exc)
-    records.put(SCOPE, RECORD, {"managed": managed, "checks": checks, "error": ""}, paths)
+    records.put(
+        SCOPE,
+        RECORD,
+        {"managed": managed, "checks": checks, "error": "", "gateway_down": not up, "status_filter": status_filter},
+        paths,
+    )
     names = {item["id"]: item["title"] for item in desired}
     failed = [
         f"{names[app_id]}: {result['detail']}" for app_id, result in checks.items() if result["status"] == "failed"
@@ -88,12 +104,46 @@ def _sync(log: Log) -> tuple[bool, str]:
     if failed:
         log("Open WebUI's check found assistants that do not work: " + "; ".join(failed))
         return False, failed[0]
+    if status_filter:
+        return False, status_filter
+    if not up:
+        return True, f"{gateway} is stopped, so chat tells everyone their app assistants are out of reach."
     return True, "Your assistants are ready."
 
 
-def _check_token() -> str:
-    with contextforge.client() as api:
-        return api.access_token()
+def _ensure_accounts(log: Log) -> None:
+    """A ContextForge account for everyone; a failure here leaves Open WebUI's own update standing."""
+    try:
+        contextforge_ops.ensure_accounts(sorted({p["email"] for p in chat_people().values() if p["email"]}))
+    except ContextForgeError as exc:
+        log(f"ContextForge accounts were not checked this time: {exc}")
+
+
+def _check_token(log: Log) -> str:
+    """How Open WebUI signs in to ContextForge to test each assistant's tools ("" fails those tests)."""
+    try:
+        with contextforge.client() as api:
+            return api.access_token()
+    except ContextForgeError as exc:
+        log(f"Open WebUI's tool check could not sign in to ContextForge: {exc}")
+        return ""
+
+
+def _filter_entries(desired: list[dict], gateway: str) -> dict[str, dict]:
+    """For the status filter: each tool connection's name, whose it is, and what to say when it does not connect."""
+    from ctl import agent_context
+    from ctl.integrations.openwebui import connection_id
+
+    return {
+        connection_id(str(item["id"])): agent_context.filter_entry(
+            str(item.get("app_name") or item["title"]),
+            str(item.get("status") or "ready"),
+            gateway=gateway,
+            connector_state=str(item.get("connector_state") or ""),
+            person=str(item.get("person") or ""),
+        )
+        for item in desired
+    }
 
 
 def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]]:
@@ -123,9 +173,15 @@ def assistant_report(uid: str, *, operator: bool = False) -> list[dict[str, str]
         elif not live:
             current = next((runtime["state"] for runtime in runtimes if runtime), "not started")
             if current == "stopped" and check.get("status") == "paused":
-                status, detail = "paused", "Switched off while the app is stopped; it comes back when the app starts."
+                status, detail = "paused", "Shown in chat as stopped; its tools come back when the app starts."
             else:
                 status, detail = "connector_down", f"Its chat connector is {current.replace('_', ' ')}."
+        elif record.get("gateway_down"):
+            gateway = chat_ops.gateway_name()
+            status, detail = (
+                "connector_down",
+                f"{gateway} is stopped, so chat can't reach this app. Start {gateway} under Apps.",
+            )
         elif check.get("status") == "ready":
             status, detail = "ready", f"Available in chat. {check['detail']}"
         elif check.get("status") == "pending":

@@ -9,7 +9,6 @@ import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { VoiceAppsCard } from './VoiceAppsCard';
 import { VoiceConversationCard } from './VoiceConversationCard';
-import { VoiceEngineCard } from './VoiceEngineCard';
 import { VoiceKeyCard } from './VoiceKeyCard';
 import { voiceSourceLabel, VoiceModelCard } from './VoiceModelCard';
 import { VoiceSoundCard } from './VoiceSoundCard';
@@ -21,14 +20,11 @@ function VoiceStatus({ app, ai, page }: { app?: Service; ai: AiModels | null; pa
   if (!app || !ai || !page) return null;
   const tone = stateTone(app.display_state);
   const voice = page.voices.find((item) => item.id === (page.settings.voice || page.speech.default_voice));
-  const parts =
-    ai.voice_engine.engine === 'duplex'
-      ? [`Full duplex · ${ai.voice_engine.model}`]
-      : [
-          voiceSourceLabel(ai),
-          voice ? `Voice ${voice.name}` : '',
-          page.settings.search && page.search_installed ? 'Web search on' : '',
-        ];
+  const parts = [
+    voiceSourceLabel(ai),
+    voice ? `Voice ${voice.name}` : '',
+    page.settings.search && page.search_installed ? 'Web search on' : '',
+  ];
   return (
     <p className="status-line">
       <Dot tone={tone} />
@@ -56,7 +52,7 @@ export function VoiceSettings() {
     <>
       <PageHeader
         title="Voice assistant"
-        description="Talk to your apps and the web. Choose where its answers come from, how it sounds and listens, and what it can use."
+        description="Talk to your apps and the web. Choose how it sounds and listens, and what it can use. It answers with the same model as chat."
         actions={
           talk && (
             <ExternalButton variant="primary" icon={Mic} href={talk.url}>
@@ -75,11 +71,10 @@ export function VoiceSettings() {
           The voice assistant runs in LiveKit. You can choose its settings now; they apply once it is installed.
         </Callout>
       )}
-      <VoiceModelCard api={ai} readOnly={!isAdmin} />
+      <VoiceModelCard api={ai} />
       <VoiceSoundCard api={page} readOnly={!isAdmin} />
       <VoiceConversationCard api={page} readOnly={!isAdmin} />
       <VoiceAppsCard page={page} readOnly={!isAdmin} />
-      <VoiceEngineCard api={ai} readOnly={!isAdmin} />
       <VoiceKeyCard />
     </>
   );

@@ -126,30 +126,40 @@ export function DevicesSection({ service, address }: { service: Service; address
       Number(b.id === service.mobile?.primary) - Number(a.id === service.mobile?.primary),
   );
   const asksForAddress = clients.some((client) => client.setup === 'server_url');
+  const atHome = Boolean(service.home_network);
   return (
     <>
       <Card
-        title="Server address"
+        title={atHome ? 'Home address' : 'Server address'}
         description={
           asksForAddress
             ? `This is the server address the ${service.name} app asks for. Copy it, or scan the QR code with your phone.`
-            : `Open this address on a device with access to your Tailscale network to use ${service.name}.`
+            : atHome
+              ? `Open this address on a device connected to your home network to use ${service.name}.`
+              : `Open this address on a device with access to your Tailscale network to use ${service.name}.`
         }
       >
         <div className="device-address">
           <div className="stack">
-            <CopyField value={address} label="Server address" />
-            <p className="muted">
-              Your phone needs the Tailscale app, signed in to your network, to reach this address:{' '}
-              <a href={TAILSCALE.ios} target="_blank" rel="noreferrer">
-                iPhone
-              </a>{' '}
-              ·{' '}
-              <a href={TAILSCALE.android} target="_blank" rel="noreferrer">
-                Android
-              </a>
-              .
-            </p>
+            <CopyField value={address} label={atHome ? 'Home address' : 'Server address'} />
+            {atHome ? (
+              <p className="muted">
+                {service.name} works at home only: the TV, phone or computer must be on your home Wi-Fi or plugged into
+                your router. It cannot be reached from outside the home, even with Tailscale.
+              </p>
+            ) : (
+              <p className="muted">
+                Your phone needs the Tailscale app, signed in to your network, to reach this address:{' '}
+                <a href={TAILSCALE.ios} target="_blank" rel="noreferrer">
+                  iPhone
+                </a>{' '}
+                ·{' '}
+                <a href={TAILSCALE.android} target="_blank" rel="noreferrer">
+                  Android
+                </a>
+                .
+              </p>
+            )}
           </div>
           <QrCode value={address} label={`QR code for ${address}`} />
         </div>

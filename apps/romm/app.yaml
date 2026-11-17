@@ -13,6 +13,9 @@ upstream: rommapp/romm
 media:
 - name: roms
   purpose: Your own game files, one folder per system (for example roms/snes/). Add only games you own.
+backup:
+  # The cache RomM's own built-in Redis keeps.
+  ignore: [romm/redis]
 service:
   local_port: 8091
   health:

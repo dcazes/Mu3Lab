@@ -1,0 +1,49 @@
+name: mu3lab-radarr
+
+services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:7.0.3.10918-ls328@sha256:044788f5508b7f67a3e0368cdd142c77c4d4cd5aec2efaba53e1a68b6b6231e7
+    restart: unless-stopped
+    ports: ["127.0.0.1:7878:7878"]
+    environment:
+      TZ: ${TZ:-UTC}
+      # www-data, as Nextcloud and qBittorrent write the media libraries.
+      PUID: "33"
+      PGID: "33"
+      UMASK: "002"
+      # Authentik guards the private address, so Radarr skips its own login ("External").
+      RADARR__AUTH__METHOD: External
+      RADARR__AUTH__REQUIRED: Enabled
+      RADARR__AUTH__APIKEY: ${RADARR_API_KEY:?RADARR_API_KEY is required}
+      RADARR__LOG__ANALYTICSENABLED: "False"
+      # Updates come with Mu3Lab's approved versions, never from inside the app.
+      RADARR__UPDATE__MECHANISM: Docker
+      RADARR__UPDATE__AUTOMATICALLY: "False"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/radarr/config:/config
+      # The whole media root, as qBittorrent has it: a finished film moves from Downloads to
+      # Movies instantly (same drive), and the paths both apps see are the same.
+      - ${MU3LAB_MEDIA_ROOT:?MU3LAB_MEDIA_ROOT is required}:/media
+    networks:
+      default: {}
+      # qBittorrent's own network, where it skips its login (it is installed first: depends_on).
+      qbittorrent: {}
+      # Prowlarr and Seerr reach Radarr here.
+      mu3lab_media:
+        aliases: [radarr]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7878/ping"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+networks:
+  # Its own network, with internet access for film details and the sites' feeds.
+  default: {}
+  qbittorrent:
+    name: mu3lab-qbittorrent_default
+    external: true
+  mu3lab_media: {external: true}

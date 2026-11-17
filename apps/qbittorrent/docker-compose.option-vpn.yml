@@ -1,0 +1,35 @@
+# The VPN, used while the app's "Send torrent traffic through a VPN" setting is on.
+# The gateway becomes Gluetun. qBittorrent already lives in the gateway's network, so its
+# address and every connection it makes now belong to Gluetun, whose firewall lets traffic
+# out only through the VPN: if the VPN drops, torrents stop rather than use this computer's
+# own connection.
+services:
+  gateway:
+    image: qmcgaw/gluetun:v3.41.3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+    entrypoint: ["/gluetun-entrypoint"]
+    user: "0:0"
+    read_only: false
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      TZ: ${TZ:-UTC}
+      VPN_SERVICE_PROVIDER: ${QBT_VPN_PROVIDER:?Choose your VPN provider in qBittorrent's settings}
+      VPN_TYPE: ${QBT_VPN_TYPE:-wireguard}
+      WIREGUARD_PRIVATE_KEY: ${QBT_VPN_WIREGUARD_PRIVATE_KEY:-}
+      WIREGUARD_ADDRESSES: ${QBT_VPN_WIREGUARD_ADDRESSES:-}
+      OPENVPN_USER: ${QBT_VPN_OPENVPN_USER:-}
+      OPENVPN_PASSWORD: ${QBT_VPN_OPENVPN_PASSWORD:-}
+      SERVER_COUNTRIES: ${QBT_VPN_COUNTRIES:-}
+      VPN_PORT_FORWARDING: ${QBT_VPN_PORT_FORWARDING:-false}
+      # The port the VPN forwards goes straight to qBittorrent, which skips its login for itself.
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -qO- --retry-connrefused --post-data
+        "json={\"listen_port\":{{PORT}}}" http://localhost:8479/api/v2/app/setPreferences'
+    healthcheck:
+      # Gluetun's own check: healthy only while the VPN is connected.
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 1m
+      retries: 3

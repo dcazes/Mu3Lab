@@ -1,0 +1,194 @@
+"""Mu3Lab's start for qBittorrent: set the settings Mu3Lab owns, then run the image's own start.
+
+Runs as root inside the container at every start, before qBittorrent does:
+
+- Sign-in. Authentik admits administrators at the private address; qBittorrent then skips its
+  own login for its own Docker network (only this app's containers and this computer are on
+  it) and for itself (Gluetun's port-forwarding command). Nobody types a qBittorrent password:
+  the one set here is random and never kept.
+- Where files go. New torrents land in the Downloads library; a category saves straight into
+  the library it is named after (Music, Audiobooks, Podcasts, Roms, Movies, Shows), so those
+  apps pick the files up. Unfinished pieces wait in Downloads/.incomplete, which backups skip.
+  A finished video with no category is moved on into Movies or Shows for Jellyfin, and every
+  finished torrent is stopped and removed from qBittorrent, files kept, so nothing seeds
+  (finished.py).
+- The drop folder. A .torrent file put in Add torrents (Nextcloud, administrators only) is
+  started and the file removed; one qBittorrent cannot read is renamed *.qbt_rejected.
+- The VPN. While it is on, qBittorrent may use only the VPN's network interface.
+- No programs. Files that could run on a computer (.exe, .scr, .lnk, scripts and the like) are
+  never downloaded, whatever torrent they come in: films, shows and music never need them.
+- Sonarr and Radarr join this app's own network to hand it films and episodes in their own
+  categories; they file what finishes and remove the torrent themselves (finished.py leaves those).
+"""
+
+from __future__ import annotations
+
+import base64
+import configparser
+import hashlib
+import ipaddress
+import json
+import os
+import secrets
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG = Path("/config/qBittorrent/config")
+SETTINGS = CONFIG / "qBittorrent.conf"
+CATEGORIES = CONFIG / "categories.json"
+WATCHED = CONFIG / "watched_folders.json"
+DOWNLOADS = Path("/media/downloads")
+INCOMPLETE = DOWNLOADS / ".incomplete"
+DROP = Path("/media/add-torrents")
+# Category -> the library folder it saves into. Music is Navidrome's, outside the media root.
+LIBRARIES = {
+    "music": Path("/music"),
+    "audiobooks": Path("/media/audiobooks"),
+    "podcasts": Path("/media/podcasts"),
+    "roms": Path("/media/roms"),
+    "movies": Path("/media/movies"),
+    "shows": Path("/media/shows"),
+}
+VPN_INTERFACE = "tun0"
+# Never downloaded: what Sonarr and Radarr call executable or potentially dangerous, and the other
+# file types Windows runs when opened. A media torrent that holds one is a fake.
+EXCLUDED = (
+    "*.exe", "*.msi", "*.com", "*.scr", "*.pif", "*.cpl", "*.bat", "*.cmd", "*.ps1", "*.vbs", "*.vbe",
+    "*.js", "*.jse", "*.wsf", "*.wsh", "*.hta", "*.jar", "*.lnk", "*.sh", "*.arj", "*.lzh", "*.zipx",
+)  # fmt: skip
+OWNER = (int(os.environ.get("PUID", "33")), int(os.environ.get("PGID", "33")))
+
+
+def password_hash() -> str:
+    """A random password in qBittorrent's own format (PBKDF2-SHA512, 100,000 rounds)."""
+    salt = secrets.token_bytes(16)
+    key = hashlib.pbkdf2_hmac("sha512", secrets.token_urlsafe(32).encode(), salt, 100_000)
+    return f'"@ByteArray({base64.b64encode(salt).decode()}:{base64.b64encode(key).decode()})"'
+
+
+def own_networks() -> str:
+    """This container's own Docker network(s), from its eth0 addresses."""
+    output = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", "eth0"], capture_output=True, text=True).stdout
+    networks = [str(ipaddress.ip_interface(part).network) for line in output.splitlines() for part in line.split()[3:4]]
+    if not networks:
+        raise SystemExit("Mu3Lab: qBittorrent has no network address on eth0")
+    return ",".join(networks)  # a list, in qBittorrent's settings file
+
+
+def libraries() -> dict[str, Path]:
+    """The libraries on this computer: Music only while Navidrome shares it, others once they exist."""
+    found = {name: path for name, path in LIBRARIES.items() if name != "music" and path.is_dir()}
+    if os.environ.get("MU3LAB_MUSIC_SHARED") == "1" and LIBRARIES["music"].is_dir():
+        found["music"] = LIBRARIES["music"]
+    return found
+
+
+def writable(path: Path) -> None:
+    """qBittorrent writes here as www-data, as Nextcloud does; files already inside are left alone."""
+    path.mkdir(parents=True, exist_ok=True)
+    if (path.stat().st_uid, path.stat().st_gid) != OWNER:
+        os.chown(path, *OWNER)
+
+
+def settings(vpn: bool) -> None:
+    parser = configparser.RawConfigParser(strict=False)
+    parser.optionxform = str  # qBittorrent's keys are case-sensitive
+    if SETTINGS.is_file():
+        parser.read(SETTINGS, encoding="utf-8")
+    owned = {
+        "Preferences": {
+            "WebUI\\Port": os.environ.get("QBT_WEBUI_PORT", "8479"),
+            # A Host header must name this server (or localhost): no DNS-rebinding page gets in.
+            "WebUI\\HostHeaderValidation": "true",
+            # Quoted: in qBittorrent's settings file an unquoted ";" starts a comment.
+            "WebUI\\ServerDomains": '"' + os.environ.get("MU3LAB_SERVER_DOMAINS", "localhost") + '"',
+            "WebUI\\Username": "mu3lab",
+            "WebUI\\LocalHostAuth": "false",
+            "WebUI\\AuthSubnetWhitelistEnabled": "true",
+            "WebUI\\AuthSubnetWhitelist": own_networks(),
+            # Behind a proxy qBittorrent would see each visitor's own address and ask for a login.
+            "WebUI\\ReverseProxySupportEnabled": "false",
+            "WebUI\\UseUPnP": "false",
+        },
+        "BitTorrent": {
+            "Session\\DefaultSavePath": str(DOWNLOADS),
+            "Session\\TempPath": str(INCOMPLETE),
+            "Session\\TempPathEnabled": "true",
+            # New torrents follow their category's folder.
+            "Session\\DisableAutoTMMByDefault": "false",
+            "Session\\Interface": VPN_INTERFACE if vpn else "",
+            "Session\\InterfaceName": VPN_INTERFACE if vpn else "",
+            # No sharing once a download is complete: finished.py stops and removes the torrent,
+            # and these stop any torrent it has not reached yet.
+            "Session\\GlobalMaxRatio": "0",
+            "Session\\GlobalMaxSeedingMinutes": "0",
+            "Session\\ShareLimitAction": "Stop",
+            # No queue: every torrent downloads at once, so a slow or stalled one never makes the
+            # others wait (most household torrents are thinly shared).
+            "Session\\QueueingSystemEnabled": "false",
+            # qBittorrent keeps this switch outside "Session", as it writes it itself.
+            "ExcludedFileNamesEnabled": "true",
+            "Session\\ExcludedFileNames": ", ".join(EXCLUDED),
+        },
+        "Network": {"PortForwardingEnabled": "false"},
+        # When a torrent finishes, finished.py files a video for Jellyfin and removes the torrent.
+        "AutoRun": {"enabled": "true", "program": "python3 /mu3lab/finished.py"},
+    }
+    for section, values in owned.items():
+        if not parser.has_section(section):
+            parser.add_section(section)
+        for key, value in values.items():
+            parser.set(section, key, value)
+    if not parser.has_option("Preferences", "WebUI\\Password_PBKDF2"):
+        parser.set("Preferences", "WebUI\\Password_PBKDF2", password_hash())
+    CONFIG.mkdir(parents=True, exist_ok=True)
+    with SETTINGS.open("w", encoding="utf-8") as handle:
+        parser.write(handle, space_around_delimiters=False)
+
+
+def categories(found: dict[str, Path]) -> None:
+    """Add a category for each library and drop Mu3Lab's for one that is gone; keep anyone else's."""
+    try:
+        current = json.loads(CATEGORIES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    for name, path in LIBRARIES.items():
+        entry = current.get(name)
+        if name in found:
+            current[name] = {**(entry if isinstance(entry, dict) else {}), "save_path": str(path)}
+        elif isinstance(entry, dict) and entry.get("save_path") == str(path):
+            del current[name]
+    CATEGORIES.write_text(json.dumps(current, indent=4) + "\n", encoding="utf-8")
+
+
+def watched() -> None:
+    """Watch the drop folder: its torrents start with no category, so finished.py files them."""
+    try:
+        current = json.loads(WATCHED.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    current[str(DROP)] = {"add_torrent_params": {"use_auto_tmm": True}, "recursive": False}
+    WATCHED.write_text(json.dumps(current, indent=4) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    found = libraries()
+    for path in (DOWNLOADS, INCOMPLETE, DROP, *found.values()):
+        writable(path)
+    # Kopia skips what .kopiaignore names: half-downloaded pieces are not worth a backup.
+    ignore = DOWNLOADS / ".kopiaignore"
+    if not ignore.exists():
+        ignore.write_text(".incomplete/\n", encoding="utf-8")
+    settings(os.environ.get("MU3LAB_VPN", "").lower() in {"true", "1", "yes", "on"})
+    categories(found)
+    watched()
+    os.execv("/entrypoint.sh", ["/entrypoint.sh", *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    main()

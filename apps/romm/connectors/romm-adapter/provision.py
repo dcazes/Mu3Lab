@@ -4,14 +4,18 @@
 # token is deleted first.
 import sys
 
-from handler.auth import auth_handler
-from handler.database import db_client_token_handler, db_user_handler
-from models.client_token import ClientToken
-
 NAME = "Mu3Lab MCP"
 SCOPES = ("me.read", "platforms.read", "roms.read", "collections.read")
 
 try:
+    # Inside the try, so a RomM release that moves its code says so instead of failing silently.
+    try:
+        from handler.auth import auth_handler
+    except ImportError:  # RomM 5.4 moved it
+        from handler.auth.base_handler import auth_handler
+    from handler.database import db_client_token_handler, db_user_handler
+    from models.client_token import ClientToken
+
     username = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
     user = db_user_handler.get_user_by_username(username) if username else None
     if user is None or not user.enabled:

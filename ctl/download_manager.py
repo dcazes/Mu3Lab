@@ -28,7 +28,7 @@ from ctl.runtime import RuntimePaths
 from ctl.status import signals
 
 Log = Callable[[str], None]
-TICK_SECONDS = 1.0
+TICK_SECONDS = 30.0  # the longest sleep: a queued, paused or finished download wakes the manager at once
 SIZES_EVERY = 600.0  # while someone uses Mu3Lab
 SIZES_EVERY_IDLE = 6 * 3600.0
 
@@ -84,6 +84,7 @@ class DownloadManager:
         # Set when downloads change what this server holds, so sizes are re-measured.
         self.sizes_stale = threading.Event()
         self.sizes_stale.set()
+        self.wakeup = signals.waiter()
 
     @classmethod
     def runtime(cls, log: Log) -> DownloadManager | None:
@@ -110,10 +111,16 @@ class DownloadManager:
             if running.get(batch_id, 0) >= int(item["parallel_downloads"]):
                 continue
             stop = threading.Event()
-            thread = threading.Thread(target=self._download, args=(item, stop), daemon=True)
+            thread = threading.Thread(target=self._download_then_wake, args=(item, stop), daemon=True)
             self.active[key] = (thread, stop)
             running[batch_id] = running.get(batch_id, 0) + 1
             thread.start()
+
+    def _download_then_wake(self, item: dict[str, Any], stop: threading.Event) -> None:
+        try:
+            self._download(item, stop)
+        finally:
+            self.wakeup.set()  # its place in the queue is free for the next download
 
     def _download(self, item: dict[str, Any], stop: threading.Event) -> None:
         batch_id, ordinal, service_id = str(item["batch_id"]), int(item["ordinal"]), str(item["service_id"])
@@ -170,7 +177,10 @@ class DownloadManager:
                 last_sizes = time.monotonic()
                 sizes = threading.Thread(target=self.measure_sizes, name="mu3lab-sizes", daemon=True)
                 sizes.start()
-            stopping.wait(TICK_SECONDS)
+            if stopping.is_set():
+                break
+            self.wakeup.wait(TICK_SECONDS)
+            self.wakeup.clear()
         for _thread, stop in self.active.values():
             stop.set()
 

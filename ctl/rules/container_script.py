@@ -8,7 +8,7 @@ prints are saved to the app's private settings.
 
 ``rerun_when`` names settings the script depends on, such as a mount another
 app provides: when one of them changes (that app came or went, and this one
-restarted with it), the worker runs the script again within a minute.
+restarted with it), or the script itself changes, the worker runs it again within a minute.
 """
 
 from __future__ import annotations
@@ -97,6 +97,11 @@ class ContainerScript(Rule):
     def _inputs(self, ctx: HookContext) -> str:
         env = ctx.env()
         values = {name: env.get(name, "") for name in self.params.rerun_when}
+        # The script itself too: a fixed script reaches running installs without anything else changing.
+        try:
+            values[" script"] = hashlib.sha256((ctx.app.folder / self.params.script).read_bytes()).hexdigest()
+        except OSError:
+            pass
         return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
     def periodic(self, ctx: HookContext) -> str:

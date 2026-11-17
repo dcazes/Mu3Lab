@@ -61,7 +61,6 @@ class VoiceModelTests(unittest.TestCase):
         ctx = context("livekit")
         rule = NeedsVoiceModel(NeedsVoiceModelParams(models=self.MODELS))
         with (
-            patch("ctl.rules.needs_voice_model.duplex_voice.duplex_on", return_value=False),
             patch("ctl.rules.needs_voice_model.local_models.voice_settings", return_value={"privacy": privacy}),
             patch("ctl.rules.needs_voice_model.local_models.voice_model", return_value=MODEL),
             patch("ctl.rules.needs_voice_model.model_ready.provider_connected", return_value=provider),
@@ -75,7 +74,7 @@ class VoiceModelTests(unittest.TestCase):
         with self.assertRaises(SetupNeeded) as caught:
             self.check()
         self.assertEqual(caught.exception.code, "no_outside_provider")
-        self.assertIn("choose a local model in Settings, Voice Assistant", caught.exception.message)
+        self.assertIn("turn on local models in Settings, AI", caught.exception.message)
 
     def test_a_local_voice_model_needs_no_provider(self):
         self.check(privacy="local_only").assert_called_once()

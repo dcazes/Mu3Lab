@@ -44,9 +44,9 @@ class RegistryAccountTests(unittest.TestCase):
         self.assertEqual(services["paperless-ngx"]["account"]["mode"], "environment_bootstrap")
         self.assertEqual(services["adventurelog"]["configuration"], [])
         self.assertEqual(services["actual-budget"]["account"]["mode"], "oidc_first_login")
-        self.assertEqual(services["surfsense"]["account"]["mode"], "api_bootstrap")
+        self.assertEqual(services["surfsense"]["account"]["mode"], "none")  # no accounts: Authentik only
 
-    def test_surfsense_materialization_includes_internal_embedding_contract(self):
+    def test_surfsense_answers_only_its_private_name_and_has_its_own_gateway_key(self):
         with tempfile.TemporaryDirectory() as source_tmp, tempfile.TemporaryDirectory() as runtime_tmp:
             source = Path(source_tmp)
             project = source / "apps" / "surfsense"
@@ -59,10 +59,9 @@ class RegistryAccountTests(unittest.TestCase):
             ):
                 target = materialize(load().get("surfsense"), source)
             values = read_runtime_env(target / ".env")
-            # Search goes through LiteLLM, whichever model runner serves it.
-            self.assertEqual(values["EMBEDDING_MODEL"], "litellm://openai/mu3lab-embed")
-            self.assertEqual(values["EMBEDDING_BASE_URL"], "http://litellm:4000/v1")
-            self.assertEqual(values["SANDBOX_ENABLED"], "FALSE")
+            self.assertEqual(values["SURFSENSE_ALLOWED_HOSTS"], "mu3lab.example.ts.net")
+            self.assertRegex(values["MU3LAB_AI_KEY"], r"^sk-[0-9a-f]{48}$")
+            self.assertGreaterEqual(len(values["SURFSENSE_LOCAL_SECRET"]), 48)
 
 
 class BatchPersistenceTests(unittest.TestCase):

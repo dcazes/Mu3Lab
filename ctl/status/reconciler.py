@@ -25,6 +25,7 @@ INTERVAL = 60  # a page showing app statuses asked: checked again at most once a
 IDLE_INTERVAL = 300  # nobody is looking: Docker, Tailscale and every route are checked rarely
 BUSY_INTERVAL = 5  # an app is installing, starting, stopping or updating: only that app, often
 SETTLING_SECONDS = 120  # after its action ends, an app keeps the quick checks while it comes up
+IDLE_WAIT = 60  # the longest sleep between looks; a queued job or an opened status page wakes it sooner
 # Actions that change whether an app runs. "core-suite" stands for every core app at once.
 BUSY_KINDS = frozenset({"lifecycle", "update", "restore"})
 EVERY_APP = "core-suite"
@@ -90,6 +91,19 @@ def full_check_due(last_full: float | None, wanted_at: float, now: float) -> boo
     return age >= IDLE_INTERVAL or (wanted_at > last_full and age >= INTERVAL)
 
 
+def next_look(last_full: float | None, last_busy: float, settling: bool, now: float) -> float:
+    """Seconds to sleep before looking again, unless woken: the next quick check while an app is
+    changing, else the next full check (sooner once a status page asked), at most ``IDLE_WAIT``."""
+    if settling:
+        pause = BUSY_INTERVAL - (now - last_busy)
+    elif last_full is None:
+        pause = 0.0
+    else:
+        age = now - last_full
+        pause = (INTERVAL if signals.status_wanted_at() > last_full else IDLE_INTERVAL) - age
+    return min(IDLE_WAIT, max(1.0, pause))
+
+
 def start(stopping: threading.Event) -> threading.Thread:
     def observe() -> None:
         log = logging.getLogger(__name__)
@@ -116,7 +130,7 @@ def start(stopping: threading.Event) -> threading.Thread:
                         reconcile(only=set(settling))
                 except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
                     log.warning("Status observation deferred: %s", redact(str(exc)))
-            signals.changed.wait(timeout=1)
+            signals.changed.wait(timeout=next_look(last_full, last_busy, bool(settling), time.time()))
 
     thread = threading.Thread(target=observe, name="mu3lab-status", daemon=True)
     thread.start()

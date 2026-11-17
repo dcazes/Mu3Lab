@@ -14,7 +14,10 @@ import {
   MessagesSquare,
   Music,
   Network,
+  Plug,
+  Popcorn,
   Route,
+  SearchCheck,
   ShieldCheck,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
@@ -25,6 +28,8 @@ import {
   siCaddy,
   siImmich,
   siGrocy,
+  siJellyfin,
+  siLivekit,
   siMealie,
   siNextcloud,
   siOllama,
@@ -32,6 +37,9 @@ import {
   siOutline,
   type SimpleIcon,
   siPaperlessngx,
+  siQbittorrent,
+  siRadarr,
+  siSonarr,
   siTailscale,
   siVaultwarden,
 } from 'simple-icons';
@@ -51,6 +59,11 @@ const brands: Record<string, SimpleIcon> = {
   audiobookshelf: siAudiobookshelf,
   outline: siOutline,
   searxng: siSearxng,
+  qbittorrent: siQbittorrent,
+  livekit: siLivekit,
+  jellyfin: siJellyfin,
+  sonarr: siSonarr,
+  radarr: siRadarr,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
@@ -69,10 +82,18 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   tailnet: { icon: Network, color: '#64748b' },
   'kopia-ui': { icon: ArchiveRestore, color: '#2563eb' },
   navidrome: { icon: Music, color: '#0284c7' },
+  contextforge: { icon: Plug, color: '#0f62fe' },
+  prowlarr: { icon: SearchCheck, color: '#e66001' },
+  seerr: { icon: Popcorn, color: '#6d28d9' },
 };
 
-// Near-black brand colors would vanish in dark mode; those glyphs follow the text color.
-const readable = (hex: string) => (parseInt(hex, 16) < 0x333333 ? undefined : `#${hex}`);
+// A near-black brand color would vanish in dark mode and a near-white one (LiveKit's) in light mode;
+// those glyphs follow the text color.
+const readable = (hex: string) => {
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const lightness = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lightness < 51 || lightness > 225 ? undefined : `#${hex}`;
+};
 
 export function AppIcon({ id, size = 'md' }: { id: string; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   const brand = brands[id];

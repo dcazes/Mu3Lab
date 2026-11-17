@@ -92,21 +92,21 @@ class ProviderCatalogTests(unittest.TestCase):
             self.assertTrue(any(item["id"] == core["id"] and item["state"] == "cancelled" for item in jobs))
 
 
-class SurfSenseContractTests(unittest.TestCase):
+class ConnectorTokenTests(unittest.TestCase):
     def test_mcp_token_prefix_is_enforced_without_storing_password(self):
         from ctl import mcp_config
         from ctl.mcp_catalog import load as load_catalog
         from ctl.registry import load
 
-        server = next(item for item in load_catalog(load()) if item.id == "surfsense-official")
+        server = next(item for item in load_catalog(load()) if item.id == "outline-builtin")
         with tempfile.TemporaryDirectory() as tmp:
             paths = RuntimePaths(Path(tmp))
             with patch("ctl.mcp_registry.RuntimePaths", return_value=paths):
-                with self.assertRaisesRegex(ValueError, "ss_pat_"):
-                    mcp_config.write(server, {"api_token": "not-a-personal-token"})
-                token = "ss_" + "pat_test-value"
-                mcp_config.write(server, {"api_token": token})
-                path = paths.projects / "mcp-surfsense-official" / ".env"
+                with self.assertRaisesRegex(ValueError, "ol_api_"):
+                    mcp_config.write(server, {"api_key": "not-a-personal-token"})
+                token = "ol_" + "api_test-value"
+                mcp_config.write(server, {"api_key": token})
+                path = paths.projects / "mcp-outline-builtin" / ".env"
                 from ctl.secrets import read_runtime_env
 
                 self.assertEqual(read_runtime_env(path)["MCP_AUTH_TOKEN"], token)

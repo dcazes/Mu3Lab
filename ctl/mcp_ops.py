@@ -53,19 +53,21 @@ def bind(server, tools: list[dict[str, Any]], log) -> tuple[bool, str]:
 
 
 def unbind(server, log) -> tuple[bool, str]:
-    """Switch a connector off in ContextForge and take its assistant out of chat; call after its state is updated."""
+    """Switch a connector off in ContextForge and mark its assistant out of reach in chat; call after its state is updated.
+
+    Chat is told even when ContextForge cannot be (it is stopped, say), so no assistant goes on as if it were ready.
+    """
     job_guard.checkpoint()
     from ctl import contextforge_ops
     from ctl.chat_ops import sync_agents
 
     ok, detail = contextforge_ops.disconnect(server, log)
-    if not ok:
-        return False, detail
-    if server.per_person:
+    if ok and server.per_person:
         from ctl import person_connectors
 
         person_connectors.stop(server, log)
-    return sync_agents(log)
+    synced = sync_agents(log)
+    return synced if ok else (False, detail)
 
 
 def _siblings(server, state: ControlState) -> list:
@@ -306,18 +308,6 @@ def _discover_tools(server, values: dict[str, str]) -> list[dict[str, Any]]:
     ]
     if not tools:
         raise ValueError("MCP server returned no tools")
-    if getattr(server, "id", "") == "surfsense-official":
-        check, _ = _rpc_request(
-            url,
-            "tools/call",
-            3,
-            token=token,
-            session_id=session_id,
-            params={"name": "surfsense_list_workspaces", "arguments": {"response_format": "json"}},
-        )
-        result = check.get("result", {})
-        if not isinstance(result, dict) or result.get("isError"):
-            raise ValueError("SurfSense rejected the token or workspace API check")
     if getattr(server, "id", "") in {"nextcloud-context-agent", by_capability("travel").id}:
         name = "list_files" if server.id == "nextcloud-context-agent" else "list_collections"
         check, _ = _rpc_request(
@@ -414,12 +404,55 @@ def sync_application(service_id: str, *, running: bool, root: Path, log) -> bool
                     server.id, service_id, enabled=True, state="incompatible", error={"message": link_detail}
                 )
                 success = False
+                # Chat says the assistant is out of reach rather than keeping what it had before.
+                from ctl.chat_ops import sync_agents
+
+                sync_agents(log)
         except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
             state.set_mcp_server(
                 server.id, service_id, enabled=True, state="degraded", error={"message": redact(str(exc))}
             )
             success = False
     return success
+
+
+def _shipped(project: Path) -> dict[str, bytes]:
+    return {
+        str(item.relative_to(project)): item.read_bytes()
+        for item in sorted(project.rglob("*"))
+        if item.is_file() and not item.name.startswith(".env")
+    }
+
+
+def refresh_files(service_id: str, *, running: bool, root: Path, log) -> None:
+    """After an app update, give its chat connectors the files that release ships.
+
+    A release can move the app (qBittorrent to port 8097), and its connector's files
+    say where to find it; a connector whose files changed is restarted on them.
+    """
+    state = ControlState.runtime()
+    if state is None:
+        return
+    for server in load_catalog(load_registry()):
+        runtime = state.mcp_server(server.id)
+        if server.service_id != service_id or server.builtin or not runtime or not runtime["enabled"]:
+            continue
+        project = credential_path(server.id).parent
+        if not _ready(server, project):
+            continue
+        before = _shipped(project)
+        try:
+            _materialize(server, root)
+        except (OSError, ValueError) as exc:
+            log(f"{server.name} kept its previous files: {redact(str(exc))}")
+            continue
+        if _shipped(project) == before or not running or runtime["state"] != "live":
+            continue
+        rc, output = actions.compose_up(project, log, wait_timeout=120, build=True)
+        if rc:
+            log(f"{server.name} did not restart on its new files: {redact(output)[-300:]}")
+        else:
+            log(f"{server.name} restarted with {server.service_id}'s new release.")
 
 
 def preenable(service_id: str, root: Path) -> None:

@@ -1,0 +1,13 @@
+# NVIDIA computers: Jellyfin converts video with the card's NVENC/NVDEC engines
+# (jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/nvidia). The image already
+# sets NVIDIA_DRIVER_CAPABILITIES; hooks.py switches Jellyfin's encoding to NVENC for this build
+# (JELLYFIN_VIDEO_ACCEL in build_env). Chosen by the compute mode (ctl/compute.py).
+services:
+  jellyfin:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]

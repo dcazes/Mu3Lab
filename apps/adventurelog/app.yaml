@@ -8,7 +8,7 @@ category: places
 tagline: Travel journal and trip planner
 summary: A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations
   into collections, plan upcoming trips, and explore your travels on a map.
-version: v0.13.0
+version: "v0.13.1"
 upstream: seanmorley15/AdventureLog
 service:
   local_port: 8015

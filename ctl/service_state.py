@@ -15,6 +15,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -111,6 +112,56 @@ def tailnet_ip(run=process.completed) -> str:
         if address in ipaddress.IPv4Network("100.64.0.0/10"):
             return str(address)
     return ""
+
+
+@dataclass(frozen=True)
+class HomeAddress:
+    """This server's address on the home network, and that network (for an app's own home-only filter)."""
+
+    ip: str
+    network: str
+
+
+def home_address(run=process.completed) -> HomeAddress | None:
+    """The private IPv4 address of the interface the default route leaves by, or None.
+
+    Apps kept off the tailnet (Jellyfin) listen on this address only, so they are
+    reachable on the home network and nowhere else. Tailscale and Docker addresses
+    are never the answer: neither carries the default route.
+    """
+    try:
+        routes = run(["ip", "-j", "-4", "route", "show", "default"], capture_output=True, text=True, timeout=5)
+        if routes.returncode != 0:
+            return None
+        candidates = sorted(json.loads(routes.stdout or "[]"), key=lambda route: int(route.get("metric") or 0))
+        for route in candidates:
+            device = str(route.get("dev") or "")
+            if not device:
+                continue
+            shown = run(["ip", "-j", "-4", "addr", "show", "dev", device], capture_output=True, text=True, timeout=5)
+            if shown.returncode != 0:
+                continue
+            for link in json.loads(shown.stdout or "[]"):
+                for info in link.get("addr_info") or []:
+                    if info.get("family") != "inet" or info.get("scope") != "global":
+                        continue
+                    interface = ipaddress.IPv4Interface(f"{info['local']}/{info['prefixlen']}")
+                    if interface.ip.is_private and interface.ip not in ipaddress.IPv4Network("100.64.0.0/10"):
+                        return HomeAddress(str(interface.ip), str(interface.network))
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+    return None
+
+
+def home_url(service: Service, address: HomeAddress | None) -> str:
+    """``http://<home address>:<port>`` for an app on the home network, else ""."""
+    port = service.manifest.service.home_port
+    if port is None or address is None:
+        return ""
+    path = str(service.ui.get("path", ""))
+    if path and not path.startswith("/"):
+        path = "/" + path
+    return f"http://{address.ip}:{port}{path}"
 
 
 # The Docker networks app connectors listen on; ContextForge may reach these and nothing else private.
@@ -511,15 +562,23 @@ def status(
     ui = dict(service.ui)
     ui_available = bool(ui.get("available", False))
     url = public_url(service, dns_name) if route_ready else ""
+    # An app on the home network (no tailnet route) opens at its home address once it is healthy.
+    at_home = service.manifest.service.home_port is not None
+    if at_home and healthy and ui_available:
+        url = home_url(service, home_address())
     if route_ready and ui_available and not url and dns_name:
         port = service.private_https_port or service.https_port
         suffix = "" if port == 443 else f":{port}"
         path = str(ui.get("path", ""))
         url = f"https://{dns_name}{suffix}{path}"
-    ui_state = "unavailable" if not ui_available else "ready" if route_ready and bool(url) else "route_pending"
+    ui_state = (
+        "unavailable" if not ui_available else "ready" if (route_ready or at_home) and bool(url) else "route_pending"
+    )
     ui_reason = (
         str(ui.get("unavailable_reason", ""))
         if not ui_available
+        else "This computer is not on a home network right now."
+        if ui_state == "route_pending" and at_home and healthy
         else "Private UI route is not ready yet."
         if ui_state == "route_pending"
         else ""
@@ -529,8 +588,8 @@ def status(
     approved = str(service.update.get("approved_version", ""))
     release = (
         app_releases.status(service, root)
-        if service.stage == "optional"
-        # Core services are pinned and move only together with Mu3Lab itself.
+        if app_releases.updatable(service)
+        # Foundation apps are pinned and move only when ./install.sh runs.
         else {"installed_version": approved, "approved_version": approved, "update_available": False}
     )
     from ctl.lifecycle import compute_switch
@@ -538,7 +597,12 @@ def status(
     return {
         **service.public(),
         "compute": compute_switch.info(service, root),
-        "update": {"repository": str(service.update.get("repository", "")), "supporting_only": False, **release},
+        "update": {
+            "repository": str(service.update.get("repository", "")),
+            "supporting_only": False,
+            "files_only": False,
+            **release,
+        },
         "state": lifecycle_state,
         "detail": detail,
         "lifecycle_state": lifecycle_state,
@@ -558,6 +622,8 @@ def status(
             if lifecycle_state == "starting"
             else "Open securely"
             if route_ready
+            else "Open at home"
+            if at_home and url
             else "Private HTTPS route pending"
             if healthy
             else service.setup_action or detail
@@ -573,7 +639,7 @@ def status(
         "ui": {
             "state": ui_state,
             "url": url or None,
-            "label": "Open securely",
+            "label": "Open at home" if at_home else "Open securely",
             "launch_label": str(ui.get("label", "Open")),
             "authentication": str(ui.get("authentication", service.auth)),
             "reason": ui_reason,

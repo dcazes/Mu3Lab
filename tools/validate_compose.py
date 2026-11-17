@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from ctl.engine.compose import option_env
 from ctl.engine.project import Facts
 from ctl.engine.runtime import render_rules
 from ctl.manifest.catalog import load
@@ -46,6 +47,7 @@ def main() -> int:
         }
         # Explicit manifest defaults for first-start rules and required settings.
         projects = []
+        options: dict[Path, Path] = {}  # an app's copy with an optional part switched on -> that part
         for app in catalog.apps:
             project = render_rules(app, facts, rules_for(app.manifest), OWNER)
             values = {field.env: "test-only" for field in app.manifest.configuration if field.required}
@@ -55,6 +57,13 @@ def main() -> int:
             envfile = project / ".env"
             envfile.write_text(envfile.read_text() + runtime_env_text(values))
             projects.append(project / "docker-compose.yml")
+            for option in sorted(project.glob("docker-compose.option-*.yml")):
+                # Checked switched on, with every setting it may need filled in.
+                switched = project.parent / f"{project.name}+{option.stem.removeprefix('docker-compose.')}"
+                shutil.copytree(project, switched)
+                every = {field.env: "test-only" for field in app.manifest.configuration} | {option_env(option): "true"}
+                (switched / ".env").write_text(envfile.read_text() + runtime_env_text(every))
+                options[switched / "docker-compose.yml"] = switched / option.name
             for connector in app.connectors:
                 if connector.builtin:
                     continue  # the app serves MCP itself; its Compose project is validated above
@@ -66,6 +75,7 @@ def main() -> int:
                 settings.update({secret.env: "test-only" for secret in connector.secrets})
                 (target / ".env").write_text(runtime_env_text(settings))
                 projects.append(target / "docker-compose.yml")
+        projects.extend(options)
         for source in (ROOT / "platform").glob("*/docker-compose.yml"):
             target = paths.projects / ("platform-" + source.parent.name)
             shutil.copytree(source.parent, target)
@@ -81,6 +91,7 @@ def main() -> int:
                     str(compose.parent / ".env"),
                     "-f",
                     str(compose),
+                    *(["-f", str(options[compose])] if compose in options else []),
                     "config",
                     "--quiet",
                 ],

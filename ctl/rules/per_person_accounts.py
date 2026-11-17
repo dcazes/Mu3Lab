@@ -18,7 +18,7 @@ from pydantic import Field
 
 from ctl.control_state import ControlState
 from ctl.engine.hooks import HookContext
-from ctl.people import PeopleError, list_people
+from ctl.people import PeopleError, list_people, people_for_upkeep
 from ctl.rules import Params, Rule, RuleError, register
 
 if TYPE_CHECKING:
@@ -105,7 +105,7 @@ class PerPersonAccounts(Rule):
         if not installation or installation["state"] != "running":
             return ""  # a stopped app catches up once it runs again
         try:
-            people = household(self.params.audience, list_people())
+            people = household(self.params.audience, people_for_upkeep())
         except PeopleError:
             return ""  # Authentik is briefly unavailable; the next minute retries.
         if ctx.env().get(DIGEST_ENV) == digest(people):

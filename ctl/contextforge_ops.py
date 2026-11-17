@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import secrets
 import shutil
+import time
 from collections.abc import Callable
 
 from ctl import person_connectors
-from ctl.contextforge import KEY_PREFIX, ContextForgeError, client, safe_name, tool_ids
+from ctl.contextforge import KEY_PREFIX, ContextForge, ContextForgeError, client, safe_name, tool_ids
 from ctl.mcp_registry import credential_path
 from ctl.mcp_review import load as load_review
 from ctl.runtime import RuntimePaths
@@ -123,6 +124,21 @@ def ensure_accounts(emails: list[str]) -> None:
             api.ensure_user(email, email.split("@")[0], secrets.token_urlsafe(32))
 
 
+# Which of a person's keys ContextForge lists as active, shared by every key check for a minute.
+# ContextForge allows 30 requests a minute on its key routes and then locks Mu3Lab out, and one
+# sync checks every connector's key for everyone.
+ACTIVE_KEYS_SECONDS = 60
+_ACTIVE_KEYS: dict[str, tuple[set[str], float]] = {}
+
+
+def _active_keys(api: ContextForge, email: str) -> set[str]:
+    ids, until = _ACTIVE_KEYS.get(email, (set(), 0.0))
+    if until <= time.monotonic():
+        ids = {str(key.get("id")) for key in api.keys(email) if key.get("is_active", True)}
+        _ACTIVE_KEYS[email] = (ids, time.monotonic() + ACTIVE_KEYS_SECONDS)
+    return ids
+
+
 def person_key(
     uid: str, email: str, connector_id: str, server_id: str, paths: RuntimePaths | None = None, *, team_id: str = ""
 ) -> str:
@@ -139,12 +155,13 @@ def person_key(
         same = isinstance(saved, dict) and saved.get("server_id") == server_id and saved.get("team_id", "") == team_id
         if same and saved.get("token"):
             try:
-                live = {str(key.get("id")) for key in api.keys(email) if key.get("is_active", True)}
+                live = _active_keys(api, email)
             except ContextForgeError:
                 # ContextForge is down: keep the saved key rather than fail the whole sync.
                 return str(saved["token"])
             if saved.get("key_id") and str(saved["key_id"]) in live:
                 return str(saved["token"])
+        _ACTIVE_KEYS.pop(email, None)
         api.ensure_user(email, email.split("@")[0], secrets.token_urlsafe(32))
         # A key whose text Mu3Lab no longer holds (or for another server) cannot be shown again; replace it.
         for key in api.keys(email):
@@ -176,6 +193,7 @@ def revoke_person(uid: str, email: str, paths: RuntimePaths | None = None) -> No
     if emails:
         with client(paths) as api:
             for address in sorted(emails):
+                _ACTIVE_KEYS.pop(address, None)
                 for key in api.keys(address):
                     api.revoke_key(str(key["id"]))
     for name in names:

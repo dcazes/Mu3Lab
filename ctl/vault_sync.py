@@ -29,6 +29,7 @@ from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked
 from ctl.secrets import read_runtime_env
+from ctl.service_state import home_address, home_url
 from ctl.store import onboarding as onboarding_state
 from ctl.store import person_logins, records
 from ctl.store.secrets import SecretStore
@@ -107,14 +108,16 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
         if not any(ref.rule == "per_person_logins" for ref in service.manifest.rules):
             continue
         login = person_logins.get(service.id, str(person.get("username") or ""), paths)
-        if login and host:
+        # An app on the home network is filled at its home address (http://<address>:<port>).
+        url = home_url(service, home_address()) if service.manifest.service.home_port else ""
+        if login and (url or (host and service.private_https_port)):
             items.append(
                 Item(
                     f"login:{service.id}",
                     service.name,
                     str(login["login"]),
                     str(login["password"]),
-                    _origin(host, service.private_https_port),
+                    url or _origin(host, service.private_https_port),
                     "Created by Mu3Lab for you. Bitwarden fills this in when the app asks for its login.",
                 )
             )
@@ -323,8 +326,8 @@ def _retire_authentik_only(session, uid: str, existing: dict[str, Any], paths: R
             onboarding_state.discard_password(str(record["service_id"]), paths)
 
 
-def run(log) -> dict[str, Any] | None:
-    """Sync everyone, as the worker and the dashboard's "save now" do."""
+def run(log, *, upkeep: bool = False) -> dict[str, Any] | None:
+    """Sync everyone, as the worker (``upkeep``) and the dashboard's "save now" do."""
     from ctl import people
     from ctl.service_state import tailnet_dns_name
 
@@ -332,11 +335,20 @@ def run(log) -> dict[str, Any] | None:
     if not paths.runtime.is_dir():
         return None
     try:
-        everyone = people.list_people()
+        everyone = people.people_for_upkeep() if upkeep else people.list_people()
     except people.PeopleError as exc:
         log(f"Saving logins to Vaultwarden waits for Authentik: {exc}")
         return None
     return sync(everyone, tailnet_dns_name(), log, paths)
+
+
+def someone_waiting(paths: RuntimePaths | None = None) -> bool:
+    """Whether the last save left someone's logins waiting (no vault account yet, or some not saved),
+    or did not finish. Only then can a save change anything without a new login or household change."""
+    last = records.get("vault", "organization", paths or RuntimePaths())
+    if not last or not last.get("ok"):
+        return True
+    return any(person.get("state") in {"waiting_for_account", "partly_saved"} for person in last.get("people") or [])
 
 
 def session_password(login, org_key) -> str:

@@ -74,6 +74,12 @@ mu3lab_ensure_bw || fail "Bitwarden could not be installed." "Check the internet
 
 # --- 4. Install ---------------------------------------------------------------------
 cd "$ROOT"
+# Mu3Lab turned off (./stop.sh or the dashboard's Turn off) comes back on before setup checks it.
+if [[ -f /srv/mu3lab/state/power.json && -x "$ROOT/.venv/bin/python" ]]; then
+  step "Turning Mu3Lab back on"
+  "$ROOT/.venv/bin/python" -m ctl.power on \
+    || fail "Mu3Lab could not be turned back on." "Run ./start.sh, then ./install.sh again."
+fi
 set +e
 "$ROOT/.venv/bin/python" -m ctl.bootstrap.terminal "$@"
 status=$?

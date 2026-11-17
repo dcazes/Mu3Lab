@@ -111,6 +111,8 @@ class ServiceUpdate(ApiModel):
     approved_version: str
     update_available: bool
     supporting_only: bool
+    # Same release and images; Mu3Lab changed the app's own files since they were installed.
+    files_only: bool = False
 
 
 class ServiceAccount(ApiModel):
@@ -159,6 +161,8 @@ class Service(ApiModel):
     stage: Literal["foundation"] | Literal["core"] | Literal["optional"]
     group: Literal["apps"] | Literal["ai"] | Literal["infrastructure"]
     routable: bool
+    # Reached on the home network (http://<home address>:<port>), not the tailnet (Jellyfin).
+    home_network: bool = False
     extra_routes: list[ServiceExtraRoute] = Field(default_factory=list)
     required: bool
     identity_note: str
@@ -195,7 +199,7 @@ class Service(ApiModel):
     containers: list[ServiceContainersItem] | None = None
     checks: ServiceChecks | None = None
     recovery: ServiceRecovery | None = None
-    # Kopia's backup service has stopped the app for its backup right now.
+    # Kopia's backup service is backing the app up right now (it keeps running).
     backing_up: bool = False
     blocking_check: Literal["process", "route", "sign_in"] | None = None
 
@@ -324,6 +328,20 @@ class DiskUsage(ApiModel):
     removed_folders: list[str] = Field(default_factory=list)
     # "core" part by part: platform app ids, "tailnet-relay" and "mu3lab" (Mu3Lab's own services).
     core_parts: dict[str, DiskShare] = Field(default_factory=dict)
+    # What owners keep on other drives (SystemResponse.drives), by mount point; "owners" is the main drive only.
+    drives: dict[str, dict[str, DiskShare]] = Field(default_factory=dict)
+
+
+class Drive(ApiModel):
+    """A drive besides the main one that holds Mu3Lab's data, measured live."""
+
+    mount: str
+    name: str
+    # What Mu3Lab keeps there: "backups".
+    role: str
+    total: float
+    used: float
+    percent: float
 
 
 class CleanupRequest(ApiModel):
@@ -360,7 +378,9 @@ class SystemResponse(ApiModel):
     tailscale: TailscaleStatus | None = None
     runtime_root: str
     memory: Metric
+    # The drive Mu3Lab's own folder is on.
     disk: Metric
+    drives: list[Drive] = Field(default_factory=list)
     backup: BackupReadiness
 
 
@@ -758,6 +778,38 @@ class BackupSchedule(ApiModel):
     problems: list[str]
 
 
+class BackupDrive(ApiModel):
+    """A place the backups can live: the main drive's own folder, or a folder on another mounted drive."""
+
+    id: str
+    name: str
+    # The drive's model, when the system knows it.
+    detail: str
+    mount: str
+    path: str
+    size_bytes: int
+    free_bytes: int
+    current: bool
+    # On the same physical drive as the apps' data: one drive failure loses both.
+    same_drive_as_data: bool
+    # Mounted only while someone is signed in to the desktop; night-time backups would miss it.
+    desktop_only: bool
+    # Why it can't be chosen; empty when it can.
+    problem: str
+
+
+class BackupLocation(ApiModel):
+    """Where the backups are, the drives they could move to, and the latest move."""
+
+    ok: bool
+    path: str
+    # Empty unless the chosen drive is missing (nothing is backed up until it is back).
+    problem: str
+    used_bytes: int
+    drives: list[BackupDrive]
+    move: Job | None = None
+
+
 class BackupStarted(ApiModel):
     """Kopia's backup service was asked to back up now; progress shows on the app."""
 
@@ -784,10 +836,16 @@ class LocalModel(ApiModel):
     memory_gb: float
     note: str
     dimensions: int
+    # How its weights are stored (Q4 for every chat model), which the memory estimate assumes.
+    precision: str
     # Downloaded in the model runner that serves requests now.
     downloaded: bool
-    # Used by a setting now (chat, voice or search), so it cannot be removed.
+    # Used by a setting now (chat, which voice follows, or search), so it cannot be removed.
     in_use: bool = False
+    # Billions of parameters, and the group the dashboard lists it in: xsmall (under 5), small (5 to 10),
+    # medium (10 to 18) or large (18 and over).
+    params_b: float = 0.0
+    size_group: Literal["xsmall", "small", "medium", "large"] = "xsmall"
     # How it fits this computer beside the other apps (ctl/model_fit.py): good, slow or too_big; gpu or cpu.
     fit: str = ""
     fit_where: str = ""
@@ -807,43 +865,6 @@ class AiModelSettings(ApiModel):
     changed_by: str
 
 
-class AiVoiceSettings(ApiModel):
-    """Where the voice assistant's answers come from, independent of chat."""
-
-    privacy: AiPrivacy
-    # The local model voice runs on (a chat model id); used with local first and local only.
-    model: str
-    # True until the owner saves a voice choice: voice then reads chat's settings.
-    matches_chat: bool
-    changed_at: str
-    changed_by: str
-
-
-AiVoiceEngine = Literal["pipeline", "duplex"]
-
-
-class AiVoiceEngineSettings(ApiModel):
-    """How the voice assistant talks: separate steps, or one full-duplex model that holds the graphics card."""
-
-    engine: AiVoiceEngine
-    # The full-duplex model, its download size and whether its files are here and checked.
-    model: str
-    download_gb: float
-    downloaded: bool
-    # Apps that use the graphics card and stop while the full-duplex model is on (names).
-    stops: list[str]
-    # The apps this mode stopped, which start again when it is switched off.
-    stopped: list[str]
-    # Why it cannot be switched on here, or "".
-    unavailable_reason: str
-    changed_at: str
-    changed_by: str
-
-
-class AiVoiceEngineRequest(ApiModel):
-    engine: AiVoiceEngine
-
-
 class ModelRunnerOption(ApiModel):
     id: str
     name: str
@@ -857,8 +878,6 @@ class AiModels(ApiModel):
 
     ok: bool
     settings: AiModelSettings
-    voice: AiVoiceSettings
-    voice_engine: AiVoiceEngineSettings
     # The reviewed chat model that fits best, or "" to suggest outside providers; and why.
     suggested: str = ""
     suggestion_reason: str = ""
@@ -868,6 +887,8 @@ class AiModels(ApiModel):
     runner: str
     runners: list[ModelRunnerOption]
     runner_reachable: bool
+    # Stopped from Home: trying, removing or switching a model starts it for that and stops it again.
+    runner_stopped: bool
     # Installed apps whose search index blocks changing the embedding model.
     embedding_locked_by: list[str]
     active_job_id: str
@@ -894,13 +915,8 @@ class AiTryResult(ApiModel):
     seconds: float
     loading_seconds: float
     tokens_per_second: float
-
-
-class AiVoiceRequest(ApiModel):
-    privacy: AiPrivacy
-    model: str = Field(default="", max_length=64)
-    # True goes back to following chat's setting; privacy and model are then ignored.
-    matches_chat: bool = False
+    # The model runner was stopped from Home, so it was started for this answer and stopped again.
+    runner_started: bool = False
 
 
 class VoiceApp(ApiModel):
@@ -958,9 +974,22 @@ class VoiceOption(ApiModel):
     gender: str
 
 
+class SpeechModelOption(ApiModel):
+    id: str
+    name: str
+    note: str
+    download_gb: float
+    # An estimate of the memory it takes while loaded, at the precision its weights are stored.
+    memory_gb: float
+    precision: str
+    # In Speaches' model folder now, and whether Speaches is set up to use it.
+    downloaded: bool
+    in_use: bool
+
+
 class SpeechModelChoice(ApiModel):
     value: str
-    options: list[str]
+    options: list[SpeechModelOption]
 
 
 class VoiceSpeech(ApiModel):
@@ -992,6 +1021,10 @@ class VoicePage(ApiModel):
 class VoiceSpeechRequest(ApiModel):
     stt_model: str = Field(min_length=1, max_length=200)
     tts_model: str = Field(min_length=1, max_length=200)
+
+
+class SpeechModelRemoveRequest(ApiModel):
+    model: str = Field(min_length=1, max_length=200)
 
 
 class VoiceSampleRequest(ApiModel):
@@ -1060,6 +1093,8 @@ class Mu3LabUpdate(ApiModel):
     changes: list[str]
     blocked_reason: str
     checked_at: float
+    # The dashboard's code changed since its page was built: Restart Mu3Lab rebuilds it first.
+    dashboard_outdated: bool = False
     last_update: Mu3LabUpdateResult | None = None
 
 
@@ -1096,6 +1131,7 @@ class UpdateResponse(ApiModel):
     release_url: str
     update_available: bool
     supporting_only: bool
+    files_only: bool = False
     update_enabled: bool
     blocked_reason: str
     added_services: list[str] = Field(default_factory=list)
@@ -1324,6 +1360,11 @@ class BackupScheduleRequest(RequestModel):
     time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
+class BackupLocationRequest(RequestModel):
+    # A drive's id from GET /system/backups/location: "default" or its mount point.
+    target: str = Field(min_length=1, max_length=4096)
+
+
 class BackupHookRequest(RequestModel):
     source: str = Field(max_length=80)
 
@@ -1349,6 +1390,9 @@ class ServiceActionRequest(RequestModel):
     ]
     confirm: str = ""
     snapshot_id: str = ""
+    # Start and restart: which of the stopped apps this one needs start with it. Left out, all of them;
+    # the dashboard asks first and the person may leave some stopped.
+    dependencies: list[str] | None = Field(default=None, max_length=50)
 
 
 class ConfigurationRequest(RequestModel):
@@ -1484,6 +1528,19 @@ class OkResponse(ApiModel):
     warning: str | None = None
     message: str | None = None
     id: str | None = None
+
+
+class PowerStatus(ApiModel):
+    """Whether Mu3Lab as a whole is on, and the progress of turning it off."""
+
+    state: Literal["on", "turning_off", "off", "turning_on"]
+    step: str | None = None
+    done: int | None = None
+    total: int | None = None
+    since: str | None = None
+    error: str | None = None
+    # Why it cannot turn off now (a task is running); only administrators are told.
+    blockers: list[str] | None = None
 
 
 class PersonAccess(ApiModel):

@@ -134,6 +134,18 @@ def servers(uid: str) -> dict[str, dict[str, Any]]:
 def _mint(server, person: dict[str, str], log: Log) -> dict[str, str] | None:
     """The person's own key from the app, as the connector's credential settings; ``None`` if typed by hand."""
     app, connector = cached().connector(server.id)
+    fields = {str(field["key"]): str(field["env"]) for field in server.credentials}
+    if connector.provision_hook:
+        # Mu3Lab signs in to the app as the person, with the login it made for them (Jellyfin).
+        from ctl.engine.hooks import load_app_hooks
+
+        try:
+            outputs = load_app_hooks(app).person_connector_credentials(app, connector.id, person, RuntimePaths())
+        except (ImportError, OSError, ValueError, RuntimeError) as exc:
+            raise PersonToolsError(
+                str(exc) or f"{app.manifest.name} did not make {person['name']}'s chat key."
+            ) from None
+        return _credential(server, app, fields, outputs)
     provision = connector.provision
     if provision is None:
         return None
@@ -144,8 +156,12 @@ def _mint(server, person: dict[str, str], log: Log) -> dict[str, str] | None:
     )
     if not result.ok:
         raise PersonToolsError(result.error or f"{app.manifest.name} did not make {person['name']}'s chat key.")
-    fields = {str(field["key"]): str(field["env"]) for field in server.credentials}
-    values = {fields[key]: value for key, value in result.outputs.items() if key in fields}
+    return _credential(server, app, fields, result.outputs)
+
+
+def _credential(server, app, fields: dict[str, str], outputs: dict[str, str]) -> dict[str, str]:
+    """Credential values by setting name; every required one must be there."""
+    values = {fields[key]: value for key, value in outputs.items() if key in fields}
     missing = [
         str(field["key"]) for field in server.credentials if field.get("required") and field["env"] not in values
     ]

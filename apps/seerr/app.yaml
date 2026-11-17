@@ -1,0 +1,84 @@
+# Seerr — see ctl/manifest/models.py for every field.
+# The household's request page, at home only like Jellyfin (http://<home address>:5055), never
+# on the tailnet (the owner's choice). People sign in with their Jellyfin login; Seerr asks
+# Jellyfin to check it. A requested film goes to Radarr and a show to Sonarr, and Seerr shows it
+# as available once it is in Jellyfin. Mu3Lab sets it all up (hooks.py).
+id: seerr
+name: Seerr
+tier: optional
+group: apps
+category: media
+tagline: Ask for the films and shows you want to watch
+summary: Browse what's popular or search for a film or show, tap Request, and it is downloaded and appears in
+  Jellyfin, usually within the hour. Administrators' requests go straight through, and they approve everyone
+  else's. Works at home, with your Jellyfin login. Needs Jellyfin, plus Radarr for films and Sonarr for shows.
+version: "v3.5.2"
+upstream: seerr-team/seerr
+depends_on: [jellyfin]
+backup:
+  ignore:
+  - seerr/config/logs
+  - seerr/config/cache
+service:
+  local_port: 5055
+  # People reach Seerr here, on the home network only (the compose file binds ${MU3LAB_HOME_IP}).
+  extra_ports:
+  - port: 5055
+    purpose: home-network address for phones and browsers at home
+    listen: home
+  health:
+    path: /api/v1/status
+sign_in:
+  method: local
+  note: Seerr works at home only and signs you in with your Jellyfin login, which Mu3Lab saved to your vault
+    for Seerr's address too, so Bitwarden fills it in.
+account:
+  # Seerr's owner is Jellyfin's hidden Mu3Lab administrator (mu3lab-service); people are added by hooks.py.
+  mode: api_bootstrap
+  needs_owner: false
+  user_action: Open Seerr at home; Bitwarden fills in your Jellyfin login.
+env:
+  # This server's home-network address and network (rule home_network follows them if they change).
+  MU3LAB_HOME_IP: '{{home_ip}}'
+  MU3LAB_HOME_NETWORK: '{{home_network}}'
+integrates_with:
+# Seerr signs in to Jellyfin as its hidden administrator once, to set itself up (hooks.py).
+- capability: videos
+  env:
+    MU3LAB_JELLYFIN_ADMIN_PASSWORD: '{{provider:JELLYFIN_ADMIN_PASSWORD}}'
+# Requests go to Sonarr and Radarr while they are installed.
+- capability: tv_automation
+  env:
+    MU3LAB_SONARR_API_KEY: '{{provider:SONARR_API_KEY}}'
+- capability: movie_automation
+  env:
+    MU3LAB_RADARR_API_KEY: '{{provider:RADARR_API_KEY}}'
+rules:
+- rule: home_network
+- rule: per_person_logins
+  with:
+    audience: household
+    purpose: Let each household member sign in to Seerr with their Jellyfin login
+resource_guidance: Light. Seerr only asks for downloads; the films and shows take space in Jellyfin's libraries.
+setup_action: Install Seerr so everyone at home can ask for films and shows.
+mobile:
+  primary: seerr-web
+  clients:
+  - id: seerr-web
+    name: Seerr in the browser
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://seerr.dev/
+    setup: web
+    summary: Request films and shows from any phone or computer at home; add it to the home screen.
+    caveat: Works on the home network only.
+    fallback: true
+    steps:
+    - Connect to your home Wi-Fi.
+    - Open the home address shown on this page; Bitwarden fills in your Jellyfin login.
+    - Search for a film or show and tap Request.

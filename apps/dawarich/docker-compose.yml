@@ -1,7 +1,7 @@
 name: mu3lab-dawarich
 
 x-dawarich: &dawarich
-  image: freikin/dawarich:1.18.1@sha256:a2b93286a973b2e4b55d6a1ebd8009a65b8624639687ca95e909d0aac27324f5
+  image: freikin/dawarich:1.21.0@sha256:aae6cabd95c1dd5e5d4e2c920692a1b11524feec143d295a9bcc914df7ffdcdf
   extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
   restart: unless-stopped
   environment: &dawarich-env

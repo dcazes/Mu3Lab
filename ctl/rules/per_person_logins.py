@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from ctl.control_state import ControlState
 from ctl.engine.hooks import HookContext, StepFailed, load_app_hooks
-from ctl.people import PeopleError, list_people
+from ctl.people import PeopleError, list_people, people_for_upkeep
 from ctl.rules import Params, Rule, register
 from ctl.rules.per_person_accounts import digest
 
@@ -87,7 +87,7 @@ class PerPersonLogins(Rule):
         if not installation or installation["state"] != "running":
             return ""  # a stopped app catches up once it runs again
         try:
-            people = everyone(self.params.audience, list_people())
+            people = everyone(self.params.audience, people_for_upkeep())
         except PeopleError:
             return ""  # Authentik is briefly unavailable; the next minute retries.
         if ctx.env().get(DIGEST_ENV) == digest(people):

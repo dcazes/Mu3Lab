@@ -1,0 +1,27 @@
+name: mu3lab-mcp-jellyfin-adapter
+services:
+  jellyfin-mcp:
+    build: .
+    restart: 'no'
+    environment:
+      MCP_APP: jellyfin
+      APP_URL: http://jellyfin:8096
+      JELLYFIN_TOKEN: ${JELLYFIN_TOKEN:?JELLYFIN_TOKEN is required}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN is required}
+    ports:
+    - 127.0.0.1:8833:8080
+    # Jellyfin sits on a network of its own; the adapter joins it to reach Jellyfin's API.
+    networks:
+    - jellyfin
+    - mu3lab_mcp_upstream
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+    - no-new-privileges:true
+    image: ghcr.io/dcazes/mu3lab-jellyfin-adapter:development
+networks:
+  jellyfin:
+    name: mu3lab-jellyfin_jellyfin
+    external: true
+  mu3lab_mcp_upstream:
+    external: true

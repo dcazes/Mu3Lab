@@ -2,7 +2,7 @@ name: mu3lab-contextforge
 
 services:
   contextforge:
-    image: ghcr.io/ibm/mcp-context-forge:v1.0.11@sha256:e9639c030162d6cb2f9f188600dd69af8091ec62a7ce307d4a74f4d4f86873df
+    image: ghcr.io/ibm/mcp-context-forge:v1.1.0@sha256:7eb21fb9a8070df59435c03c76c40d8c71230c55ba89f884f2482d2cc81cff1c
     # Containers resolve this server's private name to the tailnet relay (Authentik's sign-in keys),
     # and host.docker.internal to this computer, where Kopia's read-only chat connector listens.
     extra_hosts:
@@ -58,8 +58,15 @@ services:
       # Open WebUI passes each person's own Authentik sign-in with their tool calls;
       # Mu3Lab registers that issuer as trusted for API use (ctl/contextforge.py).
       SSO_API_TOKEN_AUTH_ENABLED: "true"
-      # Pick up tools a connector adds; they stay off until an operator adds them to a virtual server.
-      AUTO_REFRESH_SERVERS: "true"
+      # ContextForge would ask every connector for its tools every 5 minutes and check it every
+      # minute. Mu3Lab asks for the tools whenever it starts or updates a connector (the only times
+      # they change; new ones stay off until an operator adds them to a virtual server), and checks
+      # connectors itself, reconnecting any that stop answering. ContextForge's own check is a
+      # slow backstop: three misses in a row mark a connector unreachable, the next answer clears it.
+      AUTO_REFRESH_SERVERS: "false"
+      HEALTH_CHECK_INTERVAL: "3600"
+      # ContextForge pages MCP tool lists at 100 and needs Redis for a second page; one page holds them all.
+      MCP_LIST_PAGE_SIZE: "1000"
       MCPGATEWAY_A2A_ENABLED: "false"
       # Connectors live at private Docker addresses, which ContextForge blocks by default.
       # Allow only the connector networks (and Kopia's host address), not every private range.

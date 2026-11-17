@@ -17,6 +17,10 @@ if [ "${MU3LAB_MUSIC_SHARED:-0}" = 1 ]; then
     occ files_external:create /Music local null::null -c datadir=/mnt/mu3lab-music >/dev/null \
       || { echo "MU3LAB_ERROR Nextcloud could not add the Music folder"; exit 3; }
   fi
+  # Look for changes on each visit (Nextcloud's own default for a folder added from the command line
+  # is never), so songs Navidrome's library gains elsewhere show up.
+  occ files_external:option "$(existing)" filesystem_check_changes 1 >/dev/null \
+    || { echo "MU3LAB_ERROR Nextcloud could not keep the Music folder up to date"; exit 3; }
 else
   if occ app:list --output=json 2>/dev/null | grep -q '"files_external"'; then
     id=$(existing)

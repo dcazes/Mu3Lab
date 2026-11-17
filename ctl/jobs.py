@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from ctl.runtime import RuntimePaths
 from ctl.secret_file import locked, read_or_create_key
+from ctl.status import signals
 from ctl.status.signals import changed
 from ctl.store import db
 
@@ -205,6 +206,7 @@ class JobStore:
             self._remember_request(conn, idempotency_key, subject, namespace, fingerprint, job_id)
             if commit_state:
                 commit_state(job_id)
+        signals.nudge()  # committed: the worker picks it up now rather than on its next look
         return {"id": job_id, "state": "queued", "created_at": now}
 
     def transition(
@@ -253,6 +255,8 @@ class JobStore:
                 "INSERT INTO audit (job_id, actor, event, created_at, detail) VALUES (?, ?, ?, ?, ?)",
                 (job_id, actor, f"job.{state}", now, redact(detail)),
             )
+        if state == "queued":
+            signals.nudge()
 
     def claim(self, worker_id: str, *, lease_seconds: int = 45) -> dict[str, Any] | None:
         """Atomically claim the oldest queued job or reclaim an expired runner."""

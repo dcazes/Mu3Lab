@@ -260,7 +260,18 @@ class LeftoverCommandTests(_Paths):
 
     def test_commands_a_job_runs_are_recorded_until_reaped(self):
         rows = self.rows
-        code = f"import sqlite3; print(sqlite3.connect({str(self.store.database)!r}).execute('SELECT COUNT(*) FROM job_processes').fetchone()[0])"
+        # The runner records a command just after starting it, so the command looks for its row
+        # for a few seconds instead of racing that write.
+        code = (
+            "import sqlite3, time\n"
+            f"connection = sqlite3.connect({str(self.store.database)!r})\n"
+            "for _ in range(500):\n"
+            "    count = connection.execute('SELECT COUNT(*) FROM job_processes').fetchone()[0]\n"
+            "    if count:\n"
+            "        break\n"
+            "    time.sleep(0.01)\n"
+            "print(count)\n"
+        )
         result = self.run_in_job([sys.executable, "-c", code])
         self.assertEqual(result.stdout, "1")
         self.assertEqual(rows(), [])

@@ -132,6 +132,14 @@ class AppHooks:
         """Finish app-specific setup once its health check passes."""
         return None
 
+    def periodic(self, ctx: HookContext) -> str:
+        """Keep up settings people can add to in the app itself (runs every few minutes while installed).
+
+        Return a line for the worker log when something changed, else "". Raise ``StepFailed``,
+        ``OSError`` or ``ValueError`` to defer it to the next pass.
+        """
+        return ""
+
     def sync_people(self, ctx: HookContext, people: list[dict[str, Any]]) -> None:
         """Give each person with ``member`` set an account, and close everyone else's (rule per_person_logins).
 
@@ -145,6 +153,16 @@ class AppHooks:
         Returns ``{credential key: value}``; raise ``RuntimeError`` with a safe sentence when the app refuses.
         """
         raise RuntimeError(f"{app.manifest.name} cannot create this chat credential.")
+
+    def person_connector_credentials(
+        self, app: App, connector_id: str, person: dict[str, str], paths: RuntimePaths
+    ) -> dict[str, str]:
+        """One person's own credential for a ``per_person`` connector with ``provision_hook``.
+
+        ``person`` has ``username``, ``email`` and ``name``. Returns ``{credential key: value}``;
+        raise ``RuntimeError`` with a safe sentence while the person has no account in the app yet.
+        """
+        raise RuntimeError(f"{app.manifest.name} cannot create a personal chat credential.")
 
 
 def load_app_hooks(app: App) -> AppHooks:

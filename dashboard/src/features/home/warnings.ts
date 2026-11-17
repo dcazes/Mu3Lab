@@ -1,10 +1,11 @@
-import { AlertTriangle, DatabaseBackup, Loader2, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, DatabaseBackup, HardDrive, Loader2, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { DismissedResponse } from '../../api';
+import type { DismissedResponse, Metric } from '../../api';
 import { postJsonApi } from '../../api/client';
 import { isWorking, needsAttention, stateLabel, statusText } from '../../lib/services';
-import { useDashboard } from '../../state/dashboard';
+import { bytes } from '../../lib/format';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { useCoreSetupActive } from './CoreSetupProgress';
 
 export interface HomeNotice {
@@ -40,9 +41,18 @@ function useDismissed() {
   return [dismissed, dismiss] as const;
 }
 
+const GB = 1000 ** 3;
+
+/** Under 10% free, or 20 GB on a small drive: time to make room before installs and backups fail. */
+export function lowOnSpace(drive: Pick<Metric, 'total' | 'used'>) {
+  const free = drive.total - drive.used;
+  return drive.total > 0 && free < Math.max(drive.total * 0.1, 20 * GB);
+}
+
 /** Home's warnings and progress rows; the sidebar's status counts the same warnings. */
 export function useHomeNotices() {
   const { data } = useDashboard();
+  const isAdmin = useIsAdmin();
   const [dismissed, dismiss] = useDismissed();
   const failing = data.services.services.filter(needsAttention);
   // The core apps' own progress card covers them while their setup runs.
@@ -94,6 +104,24 @@ export function useHomeNotices() {
             '/settings/system',
           ),
         ]
+      : []),
+    // Administrators can make room; each drive on its own. A dismissal lasts until another percent fills up.
+    ...(isAdmin && data.system.ok
+      ? [{ mount: 'main', name: 'The main drive', role: '', ...data.system.disk }, ...(data.system.drives || [])]
+          .filter(lowOnSpace)
+          .map((drive) => {
+            const free = bytes(Math.max(0, drive.total - drive.used));
+            const percent = Math.floor(((drive.total - drive.used) / drive.total) * 100);
+            return warning(
+              `disk-${drive.mount}`,
+              `disk|${drive.mount}|${percent}`,
+              drive.role === 'backups'
+                ? `${drive.name}, the backup drive, has ${free} left. Backups stop once it is full.`
+                : `${drive.name} has ${free} left. Installs and updates fail once it is full; Settings, System shows what uses it.`,
+              '/settings/system',
+              HardDrive,
+            );
+          })
       : []),
     ...failing.map((service) =>
       warning(

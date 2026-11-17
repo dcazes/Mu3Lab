@@ -69,24 +69,22 @@ class RewriteTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
 
     def test_the_compose_file_and_manifest_version_move_together(self):
-        service = load(self.root / "apps").get("surfsense")
-        new_backend = f"ghcr.io/modsetter/surfsense-backend:0.0.41@{DIGEST}"
-        new_web = f"ghcr.io/modsetter/surfsense-web:0.0.41@{DIGEST}"
-        approve_release.rewrite(service, "v0.0.41", {"backend": new_backend, "frontend": new_web})
-        registry = load(self.root / "apps")
-        updated = registry.get("surfsense")
-        self.assertEqual(updated.update["approved_version"], "v0.0.41")
-        release = app_releases.approved(updated, self.root)
-        self.assertEqual(release.images["backend"], new_backend)
-        self.assertEqual(release.images["frontend"], new_web)
-        # Every backend container uses the one image, so all of them move.
-        self.assertEqual(
-            {release.images[name] for name in ("migrations", "celery_worker", "celery_beat")}, {new_backend}
+        service = load(self.root / "apps").get("immich")
+        new_server = f"ghcr.io/immich-app/immich-server:v3.4.0@{DIGEST}"
+        new_learning = f"ghcr.io/immich-app/immich-machine-learning:v3.4.0@{DIGEST}"
+        approve_release.rewrite(
+            service, "v3.4.0", {"immich-server": new_server, "immich-machine-learning": new_learning}
         )
+        registry = load(self.root / "apps")
+        updated = registry.get("immich")
+        self.assertEqual(updated.update["approved_version"], "v3.4.0")
+        release = app_releases.approved(updated, self.root)
+        self.assertEqual(release.images["immich-server"], new_server)
+        self.assertEqual(release.images["immich-machine-learning"], new_learning)
         # Databases keep their pins, and so does every other app.
-        self.assertTrue(release.images["db"].startswith("pgvector/pgvector:pg17@"))
+        self.assertTrue(release.images["database"].startswith("ghcr.io/immich-app/postgres:14-"))
         for other in registry.services:
-            if other.id != "surfsense":
+            if other.id != "immich":
                 self.assertEqual(other.update, load().get(other.id).update, other.id)
 
 

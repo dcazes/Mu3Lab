@@ -1,0 +1,25 @@
+schema_version: 1
+data_scope: operator_only
+delegation: none
+server: jellyfin-adapter
+revision: v12.4-api
+reviewed_at: '2026-11-05'
+guidance: |
+  Search or list a library before answering, and use the titles and IDs the tools return. Watch history,
+  Continue watching and Next up belong to the person asking. Nothing here plays or changes anything.
+
+categories:
+  - id: library
+    title: Films and shows
+    summary: List the libraries, search films and shows, see what's new, and list a library.
+  - id: watching
+    title: Your watching
+    summary: Your own Continue watching and Next up.
+
+tools:
+  list_libraries: {category: library, access: read}
+  search_media: {category: library, access: read, core: true}
+  recently_added: {category: library, access: read, core: true}
+  list_library: {category: library, access: read}
+  continue_watching: {category: watching, access: read, core: true}
+  next_up: {category: watching, access: read, core: true}

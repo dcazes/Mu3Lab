@@ -75,6 +75,10 @@ class CatalogContractTests(unittest.TestCase):
         self.edit("apps/speaches/docker-compose.yml", "127.0.0.1:8092:8000", "8092:8000")
         self.refused("127.0.0.1 only")
 
+    def test_a_port_published_only_on_the_internal_network_is_refused(self):
+        self.edit("apps/surfsense/docker-compose.yml", "[mu3lab_frontend, mu3lab_backend]", "[mu3lab_backend]")
+        self.refused("surfsense publishes a port, so it needs mu3lab_frontend")
+
     def test_a_connector_whose_port_differs_from_its_health_check_is_refused(self):
         self.edit("apps/mealie/connectors/mealie-community/docker-compose.yml", "127.0.0.1:8814:", "127.0.0.1:8899:")
         self.refused("mealie-community.*local_health uses port 8814")

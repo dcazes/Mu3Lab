@@ -1,0 +1,55 @@
+name: mu3lab-seerr
+
+services:
+  seerr:
+    image: ghcr.io/seerr-team/seerr:v3.5.2@sha256:aadee014b40e28cf9aa4928bc9d1183a6eb08f8c44d543cddc9efdcb16549be2
+    restart: unless-stopped
+    init: true
+    # At home only: on this server's home-network address, never the tailnet or every network
+    # (the owner's choice). The loopback port is for Mu3Lab's own checks and setup.
+    ports:
+      - "127.0.0.1:5055:5055"
+      - "${MU3LAB_HOME_IP:?MU3LAB_HOME_IP is required}:5055:5055"
+    environment:
+      TZ: ${TZ:-UTC}
+      LOG_LEVEL: info
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/seerr/config:/app/config
+    networks:
+      default: {}
+      # Jellyfin's own network: Seerr checks people's Jellyfin logins and sees what is in the libraries.
+      jellyfin: {}
+      # Sonarr and Radarr, which take the requests.
+      mu3lab_media: {}
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:5055/api/v1/status"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+  # Seerr runs as its image's own user (1000); its settings folder must be that user's.
+  config-init:
+    image: ghcr.io/seerr-team/seerr:v3.5.2@sha256:aadee014b40e28cf9aa4928bc9d1183a6eb08f8c44d543cddc9efdcb16549be2
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "1000:1000", "/app/config"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/seerr/config:/app/config
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
+networks:
+  # Its own network, with internet access for film and show details.
+  default: {}
+  jellyfin:
+    name: mu3lab-jellyfin_jellyfin
+    external: true
+  mu3lab_media: {external: true}

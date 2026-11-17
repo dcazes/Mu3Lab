@@ -1,0 +1,22 @@
+# Mu3Lab :: deploy/mu3lab-wake.service
+# WHAT:  User-level systemd unit for the wake page shown while Mu3Lab is turned off.
+# WHY:   Turning Mu3Lab off stops every app, sign-in, Caddy and the dashboard. This one tiny
+#        page (standard-library Python, no Mu3Lab code loaded) answers on Caddy's addresses
+#        with a Turn on button, so the household can turn Mu3Lab on from a phone.
+# RUN:   Rendered next to mu3lab-ctl.service by the installer but enabled only while Mu3Lab
+#        is off: `python -m ctl.power` enables it on turning off and disables it on turning on.
+# DEBUG: `systemctl --user status mu3lab-wake`; `journalctl --user -u mu3lab-wake -n 50`.
+[Unit]
+Description=Mu3Lab Wake Page
+After=network.target
+
+[Service]
+Type=exec
+WorkingDirectory=@MU3LAB_ROOT@
+ExecStart=@MU3LAB_ROOT@/.venv/bin/python -I @MU3LAB_ROOT@/ctl/power_wake.py --root @MU3LAB_ROOT@ --state @MU3LAB_STATE@
+Restart=on-failure
+RestartSec=5
+MemoryMax=64M
+
+[Install]
+WantedBy=default.target

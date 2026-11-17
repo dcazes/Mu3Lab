@@ -6,7 +6,8 @@
 2. Mu3Lab notes what it is about to change (``in_progress``) and stops the app.
 3. Each live folder is renamed to ``.<folder>.original`` and the restored copy
    takes its place. A backup from another release also brings back that
-   release's deployment.
+   release's deployment. A backup with database dumps starts each database
+   empty and loads its dump first (``ctl.database_dumps``).
 4. The app starts and must pass its health check.
 5. Healthy: the original folders are deleted. Anything failed in steps 2–4:
    the original folders and deployment go back, the app starts again, and
@@ -27,7 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ctl import backups, job_guard
+from ctl import backups, database_dumps, job_guard
 from ctl.jobs import redact
 from ctl.lifecycle import app_control, app_releases, deployments, in_progress
 from ctl.lifecycle.app_releases import Release
@@ -223,7 +224,10 @@ def restore(
             staging = place(name, RESTORING, paths)
             staging.mkdir(mode=0o700)
             backups.restore_folder(snapshot_id, name, staging, log, paths)
-    except (backups.BackupError, OSError) as exc:
+        dumps = database_dumps.prepare(
+            service, root, {name: place(name, RESTORING, paths) for name in names}, log, paths
+        )
+    except (backups.BackupError, database_dumps.DumpFailed, OSError) as exc:
         _wipe([place(name, RESTORING, paths) for name in names], log, paths)
         raise RestoreFailed(f"Nothing changed: {exc}") from exc
     with job_guard.uncancellable():
@@ -250,6 +254,9 @@ def restore(
                 os.rename(place(name, RESTORING, paths), live)
             if target:
                 _switch(service, target, log, paths)
+            if dumps:
+                step("load_databases", f"Loading {service.name}'s databases from the backup.")
+                database_dumps.load(service, root, dumps, log, paths, keep_running=running)
             if running:
                 step("start_app", f"Starting {service.name} on the restored data.")
                 started, detail = app_control.start(service, root, log)

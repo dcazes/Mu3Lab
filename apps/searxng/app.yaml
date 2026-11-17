@@ -10,7 +10,7 @@ category: ai
 tagline: Private web search for your assistants
 summary: Searches the web for Mu3Lab's assistants without an account or key, by asking several search engines at
   once. The voice assistant uses it for news, weather, opening hours and other current facts. It keeps no history.
-version: "2026.3.13-3c1f68c59"
+version: "2026.11.5-3e95f6cd2"
 upstream: searxng/searxng
 service:
   local_port: 8095

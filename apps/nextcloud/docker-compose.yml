@@ -37,7 +37,7 @@ services:
       REDISCLI_AUTH: ${NEXTCLOUD_REDIS_PASSWORD:?NEXTCLOUD_REDIS_PASSWORD is required}
 
   app:
-    image: nextcloud:35.0.1-apache@sha256:b1ae671e9815401b0e837b19b9c778e89887721d67f0c8f9d34aa1d27a9a208f
+    image: nextcloud:35.0.2-apache@sha256:6b015097ca6c30f97d172365f886c27f865e16f8e6ac2d1e80bc1433bc2580da
     extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     depends_on:
@@ -64,6 +64,7 @@ services:
       MU3LAB_MUSIC_SHARED: ${MU3LAB_MUSIC_SHARED:-0}
       # The media libraries scripts/media.sh shares, by folder name (comma-separated).
       MU3LAB_MEDIA_FOLDERS: ${MU3LAB_MEDIA_FOLDERS:-}
+      MU3LAB_MEDIA_ADMIN_FOLDERS: ${MU3LAB_MEDIA_ADMIN_FOLDERS:-}
     volumes:
       - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/nextcloud/html:/var/www/html
       - ${MU3LAB_MUSIC_FOLDER:?MU3LAB_MUSIC_FOLDER is required}:/mnt/mu3lab-music
@@ -84,7 +85,7 @@ services:
       retries: 3
 
   cron:
-    image: nextcloud:35.0.1-apache@sha256:b1ae671e9815401b0e837b19b9c778e89887721d67f0c8f9d34aa1d27a9a208f
+    image: nextcloud:35.0.2-apache@sha256:6b015097ca6c30f97d172365f886c27f865e16f8e6ac2d1e80bc1433bc2580da
     extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     entrypoint: /cron.sh

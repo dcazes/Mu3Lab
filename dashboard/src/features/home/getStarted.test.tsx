@@ -8,14 +8,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function serve(items: Record<string, boolean>) {
+function serve(items: Record<string, boolean>, signedIn = false) {
   return stubFetch((path, init) => {
     if (path === '/api/v1/me/checklist') {
       if (init?.method === 'PUT') items = { ...items, ...JSON.parse(String(init.body)).items };
       return { ok: true, items };
     }
     if (path === '/api/v1/providers') return { ok: true, providers: [], setup: { complete: false } };
-    if (path === '/api/v1/vault/status') return { ok: true, seeded: true, browser_extension: null };
+    if (path === '/api/v1/vault/status')
+      return {
+        ok: true,
+        seeded: true,
+        browser_extension: { browsers: ['Google Chrome'], server_url: '', signed_in: signedIn },
+      };
     return undefined;
   });
 }
@@ -32,6 +37,22 @@ describe('Get started', () => {
       ),
     );
     expect(await screen.findByRole('heading', { name: 'Get started' })).toBeInTheDocument();
+  });
+
+  it('remembers a Bitwarden sign-in, so the step stays done while Vaultwarden is stopped', async () => {
+    const fetchMock = serve({}, true);
+    renderWithDashboard(<GetStarted />, dashboardData([]));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/me/checklist',
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ items: { extension: true } }) }),
+      ),
+    );
+    cleanup();
+    // Stopped, Vaultwarden reports no sign-in; the saved step still counts.
+    serve({ extension: true }, false);
+    renderWithDashboard(<GetStarted />, dashboardData([]));
+    expect(await screen.findByText(/1 of 5 complete/)).toBeInTheDocument();
   });
 
   it('has its own Settings page with a Show on Home switch', async () => {

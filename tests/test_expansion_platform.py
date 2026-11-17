@@ -201,7 +201,7 @@ class PerPersonAccountsTests(unittest.TestCase):
     def test_periodic_runs_the_script_only_when_the_household_changed(self):
         rule = rules_for(load().get("beaver-habits").manifest)[0]
         self.assertIsInstance(rule, PerPersonAccounts)
-        with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
+        with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.people_for_upkeep") as people:
             paths = RuntimePaths(Path(tmp))
             self._set_state(paths, "running")
             people.return_value = self.PEOPLE
@@ -215,7 +215,7 @@ class PerPersonAccountsTests(unittest.TestCase):
 
     def test_periodic_leaves_a_stopped_app_alone_until_it_runs_again(self):
         rule = rules_for(load().get("beaver-habits").manifest)[0]
-        with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.list_people") as people:
+        with tempfile.TemporaryDirectory() as tmp, patch("ctl.rules.per_person_accounts.people_for_upkeep") as people:
             paths = RuntimePaths(Path(tmp))
             people.return_value = self.PEOPLE
             ctx = scripted("beaver-habits", paths, [ok("MU3LAB_BEAVER_PEOPLE_OK created=2")])

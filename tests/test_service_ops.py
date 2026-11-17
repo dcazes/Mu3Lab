@@ -138,8 +138,10 @@ class ServiceOperationTests(unittest.TestCase):
                 (paths.projects / app).mkdir(parents=True)
                 (paths.projects / app / "docker-compose.yml").write_text("services: {}")
 
-            def start(healthy):
-                created = store.create(kind="lifecycle", service_id="livekit", action="start", actor="owner")
+            def start(healthy, params=None):
+                created = store.create(
+                    kind="lifecycle", service_id="livekit", action="start", actor="owner", params=params
+                )
                 claimed = store.claim("worker")
                 assert claimed is not None
                 with (
@@ -154,6 +156,13 @@ class ServiceOperationTests(unittest.TestCase):
                     execute_claimed(store, claimed, "worker", Path(__file__).resolve().parents[1])
                 return store.get(created["id"]), [call.args[0].name for call in action.call_args_list]
 
+            # The person chose to start only LiteLLM with it: Speaches stays stopped.
+            job, started = start(lambda _service: (True, "HTTP 200"), {"dependencies": "litellm"})
+            self.assertEqual(job["state"], "succeeded")
+            self.assertEqual(started, ["litellm", "livekit"])
+            self.assertEqual(state.installation("speaches")["state"], "stopped")
+            state.set_installation("litellm", "stopped")
+            state.set_installation("livekit", "stopped")
             job, started = start(lambda service: (service.id != "speaches", "not ready"))
             self.assertEqual((job["state"], job["error_code"]), ("failed", "dependency_start_failed"))
             self.assertIn("Speaches", job["detail"])

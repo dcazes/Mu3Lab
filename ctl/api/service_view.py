@@ -248,7 +248,11 @@ def _apply_checks(service: Service, item: dict, control_state: ControlState | No
         return
     name, check = blocking
     item["blocking_check"] = name
-    item["state"] = item["lifecycle_state"] = "checking" if check.state == "pending" else "needs_setup"
+    # Unchecked or merely old sign-in evidence (an app that was stopped for a day could not be
+    # re-checked) waits for the worker's next check, a minute or so after the app answers; only a
+    # check that failed needs attention. Neither supports a usable claim meanwhile.
+    waiting = check.state == "pending" or (name == "sign_in" and check.state == "stale")
+    item["state"] = item["lifecycle_state"] = "checking" if waiting else "needs_setup"
     item["detail"] = check.detail
     _suppress_launch(service, item, route_failed=name == "route")
 

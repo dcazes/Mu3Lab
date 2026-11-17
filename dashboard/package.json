@@ -47,5 +47,8 @@
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
   },
+  "overrides": {
+    "minimatch@>=7 <11.0.1": "11.0.1"
+  },
   "type": "module"
 }

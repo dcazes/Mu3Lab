@@ -10,9 +10,11 @@ now gated as its manifest requires (the old base previously supplied the gate).
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 from pathlib import Path
 
+from ctl.manifest.models import BlockedPath
 from ctl.registry import load
 from ctl.routes import _block
 from tools.check_no_app_ids import violations
@@ -62,6 +64,8 @@ class ManifestRoutesTests(unittest.TestCase):
         self.assertNotIn("header_up -Remote-User", browser)
 
     def test_closed_registration_follows_the_manifest(self):
-        self.assertIn(
-            'respond /auth/register* "Accounts are provisioned by Mu3Lab." 403', _block(load().get("surfsense"))
-        )
+        service = load().get("mealie")
+        blocked = BlockedPath(path="/auth/register*", message="Accounts are provisioned by Mu3Lab.")
+        route = service.manifest.route.model_copy(update={"blocked_paths": (blocked,)})
+        service = dataclasses.replace(service, manifest=service.manifest.model_copy(update={"route": route}))
+        self.assertIn('respond /auth/register* "Accounts are provisioned by Mu3Lab." 403', _block(service))

@@ -4,7 +4,7 @@ services:
   # A private metasearch: the frontend network reaches the search engines, the backend network
   # the assistants that ask it.
   searxng:
-    image: searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f
+    image: searxng/searxng:2026.11.5-3e95f6cd2@sha256:ffad724acd87b8dd312328d18da88ddd42e5c4b1d23231594662620053c13cae
     restart: unless-stopped
     ports: ["127.0.0.1:8095:8080"]
     environment:

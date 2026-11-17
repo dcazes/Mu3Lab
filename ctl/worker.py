@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ctl import (
     access,
+    backup_location,
     backup_service,
     disk_cleanup,
     job_guard,
@@ -44,7 +45,10 @@ from ctl.status import reconciler, sign_in, signals
 from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
-POLL_SECONDS = 2
+POLL_SECONDS = 2  # while an earlier worker's command or the runtime layout is still settling
+# With nothing to do the worker sleeps until the dashboard nudges it (``signals.nudge``), and at
+# most this long, so upkeep keeps its pace and a missed nudge only delays work.
+IDLE_SECONDS = 30.0
 log = logging.getLogger("mu3lab.worker")
 
 
@@ -90,6 +94,8 @@ def _dispatch(store: JobStore, job: dict, worker_id: str) -> None:
         self_update.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == disk_cleanup.SERVICE_ID:
         disk_cleanup.execute_claimed(store, job, worker_id, ROOT)
+    elif job.get("service_id") == backup_location.SERVICE_ID:
+        backup_location.execute_claimed(store, job, worker_id, ROOT)
     elif job.get("service_id") == local_models.SERVICE_ID:
         local_models.execute_claimed(store, job, worker_id, ROOT)
     elif str(job.get("service_id") or "").startswith("mcp:"):
@@ -161,6 +167,8 @@ def run() -> int:
     # rarely while nobody does, so an idle Mu3Lab barely touches Authentik, Vaultwarden or Docker.
     last_run: dict[str, float] = {}
     vault_sync_soon = 0.0
+    vault_household_seen = 0.0  # the household change the last vault save already covered
+    build_cache_due = False
 
     def due(task: str, fast: float, slow: float) -> bool:
         now = time.monotonic()
@@ -169,9 +177,12 @@ def run() -> int:
         last_run[task] = now
         return True
 
+    wakeup = signals.waiter()
+
     def stop(_signum, _frame) -> None:
         nonlocal stopping
         stopping = True
+        signals.nudge()  # ends the idle sleep; a socket message is safe to send from a signal handler
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -211,6 +222,7 @@ def run() -> int:
             # Reading status, downloading images and revoking access never change a running app,
             # so they start at once. App images download in the background, several at once,
             # while setup jobs run one at a time below.
+            signals.listen()
             download_manager.start(log.info, downloads_stopping)
             status_thread = reconciler.start(downloads_stopping)
             resource_usage.start(downloads_stopping, ROOT, log.info)
@@ -249,13 +261,21 @@ def run() -> int:
                 run_periodic(store, ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab sign-in verification deferred safely: {exc}")
-        if due("vault", 300, 3600) or (vault_sync_soon and time.monotonic() >= vault_sync_soon):
+        # Logins are saved after each job, when the household changes, and while someone's logins
+        # wait for their vault account; otherwise an hourly pass catches anything changed elsewhere.
+        from ctl import vault_sync
+
+        household_at = signals.household_changed_at()
+        if (
+            (vault_sync_soon and time.monotonic() >= vault_sync_soon)
+            or household_at > vault_household_seen
+            or due("vault", 300 if vault_sync.someone_waiting() else 3600, 3600)
+        ):
             vault_sync_soon = 0.0
+            vault_household_seen = household_at
             last_run["vault"] = time.monotonic()
             try:
-                from ctl import vault_sync
-
-                vault_sync.run(log.info)
+                vault_sync.run(log.info, upkeep=True)
             except Exception as exc:
                 log.warning(f"Mu3Lab vault saving deferred safely: {exc}")
         if due("backup", 60, 900):
@@ -290,6 +310,7 @@ def run() -> int:
                 sync_agents(log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab chat assistant synchronization deferred: {exc}")
+        batches = None
         try:
             from ctl.install_batches import InstallBatchStore
 
@@ -298,12 +319,25 @@ def run() -> int:
                 batches.reconcile(store)
         except Exception as exc:
             log.warning(f"Mu3Lab batch reconciliation deferred safely: {exc}")
+        if build_cache_due and not disk_cleanup.busy(store, batches):
+            build_cache_due = False
+            try:
+                if disk_cleanup.clear_build_cache(log.info):
+                    resource_usage.disk_stale.set()
+            except Exception as exc:
+                log.warning(f"Mu3Lab build cache clean-up deferred: {exc}")
         job = store.claim(worker_id)
         if job is None:
-            time.sleep(POLL_SECONDS)
+            idle = IDLE_SECONDS
+            if vault_sync_soon:
+                idle = min(idle, max(0.0, vault_sync_soon - time.monotonic()))
+            wakeup.wait(idle)
+            wakeup.clear()
             continue
         try:
             run_job(store, job, worker_id)
+            # Once nothing else runs, clear what its builds left (see ctl/disk_cleanup.py).
+            build_cache_due = build_cache_due or disk_cleanup.builds(job)
             if resource_usage.touches_disk(job):
                 resource_usage.disk_stale.set()
             # A finished install may have created logins; save them within a minute.
@@ -319,7 +353,7 @@ def run() -> int:
             except Exception as exc:  # batch recovery will reconcile on next API/worker pass
                 log.warning(f"Mu3Lab post-job reconciliation deferred safely: {exc}")
     downloads_stopping.set()
-    signals.changed.set()
+    signals.wake()
     if status_thread is not None:
         status_thread.join(timeout=2)
     lock.release()

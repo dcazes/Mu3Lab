@@ -1,226 +1,56 @@
 name: mu3lab-surfsense
 
+# SurfSense's own Docker product: one container (its API, workers, model servers and
+# a Caddy that is its only listener) over one /data folder. One shared library for the
+# household; Authentik on Mu3Lab's ingress is the only way in.
 services:
-  db:
-    image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
-    restart: unless-stopped
-    env_file: [".env"]
-    environment:
-      POSTGRES_USER: ${DB_USER:-surfsense}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      POSTGRES_DB: ${DB_NAME:-surfsense}
-    command: postgres -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10
-    volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/postgres:/var/lib/postgresql/data"]
-    networks:
-      surfsense_internal:
-        aliases: [surfsense-db]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-surfsense} -d ${DB_NAME:-surfsense}"]
-      timeout: 5s
-      start_period: 120s
-      start_interval: 10s
-      interval: 5m
-      retries: 3
-
-  migrations:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
-    restart: "no"
-    env_file: [".env"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
-      PYTHONPATH: /app
-      SERVICE_ROLE: migrate
-      MIGRATION_TIMEOUT: 900
-    networks: [surfsense_internal]
-    depends_on:
-      db: {condition: service_healthy}
-
-  redis:
-    image: redis:8-alpine@sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/redis:/data"]
-    networks:
-      surfsense_internal:
-        aliases: [surfsense-redis]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      timeout: 5s
-      start_period: 120s
-      start_interval: 10s
-      interval: 5m
-      retries: 3
-
-  searxng:
-    image: searxng/searxng:2026.3.13-3c1f68c59@sha256:174f6a8498d88d2d98c265a952c2d552859bf315cd505746d1c0d4fbec37952f
-    restart: unless-stopped
-    environment:
-      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET is required}
-      SEARXNG_BASE_URL: http://searxng:8080/
-    volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
-    networks:
-      surfsense_internal:
-        aliases: [surfsense-searxng]
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
-      timeout: 5s
-      start_period: 120s
-      start_interval: 10s
-      interval: 5m
-      retries: 3
-
-  backend:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
-    restart: unless-stopped
-    env_file: [".env"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@surfsense-db:5432/${DB_NAME:-surfsense}
-      CELERY_BROKER_URL: redis://surfsense-redis:6379/0
-      CELERY_RESULT_BACKEND: redis://surfsense-redis:6379/0
-      REDIS_APP_URL: redis://surfsense-redis:6379/0
-      CELERY_TASK_DEFAULT_QUEUE: surfsense
-      PYTHONPATH: /app
-      UVICORN_LOOP: asyncio
-      UNSTRUCTURED_HAS_PATCHED_LOOP: "1"
-      FILE_STORAGE_LOCAL_PATH: /app/.local_object_store
-      NEXT_FRONTEND_URL: ${SURFSENSE_PUBLIC_URL}
-      BACKEND_URL: ${SURFSENSE_PUBLIC_URL}
-      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-TRUE}
-      SEARXNG_URL: http://surfsense-searxng:8080
-      SANDBOX_ENABLED: "FALSE"
-      SERVICE_ROLE: api
-    volumes:
-      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
-      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
-      - ./global_llm_config.yaml:/app/app/config/global_llm_config.yaml:ro
-    # Also on the shared networks: Ollama embeddings and web research need them. Its own
-    # database, Redis and SearXNG use unique names so they cannot resolve to another app's.
-    networks: [surfsense_internal, mu3lab_backend, mu3lab_frontend]
-    depends_on:
-      db: {condition: service_healthy}
-      redis: {condition: service_healthy}
-      migrations: {condition: service_completed_successfully}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/ready"]
-      timeout: 5s
-      start_period: 650s
-      start_interval: 15s
-      interval: 5m
-      retries: 3
-
-  celery_worker:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
-    restart: unless-stopped
-    env_file: [".env"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@surfsense-db:5432/${DB_NAME:-surfsense}
-      CELERY_BROKER_URL: redis://surfsense-redis:6379/0
-      CELERY_RESULT_BACKEND: redis://surfsense-redis:6379/0
-      REDIS_APP_URL: redis://surfsense-redis:6379/0
-      CELERY_TASK_DEFAULT_QUEUE: surfsense
-      PYTHONPATH: /app
-      FILE_STORAGE_LOCAL_PATH: /app/.local_object_store
-      SEARXNG_URL: http://surfsense-searxng:8080
-      SANDBOX_ENABLED: "FALSE"
-      SERVICE_ROLE: worker
-    volumes:
-      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/shared:/shared_tmp
-      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/object-store:/app/.local_object_store
-      - ./global_llm_config.yaml:/app/app/config/global_llm_config.yaml:ro
-    # Also on the shared networks: Ollama embeddings and web research need them. Its own
-    # database, Redis and SearXNG use unique names so they cannot resolve to another app's.
-    networks: [surfsense_internal, mu3lab_backend, mu3lab_frontend]
-    depends_on:
-      migrations: {condition: service_completed_successfully}
-      backend: {condition: service_healthy}
-
-  celery_beat:
-    image: ghcr.io/modsetter/surfsense-backend:0.0.40@sha256:b734e26dace1d9df95910e15c8fd44994ae48be25cd197fbbcf4143f914926b2
-    restart: unless-stopped
-    env_file: [".env"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      CELERY_TASK_DEFAULT_QUEUE: surfsense
-      PYTHONPATH: /app
-      SERVICE_ROLE: beat
-    networks: [surfsense_internal]
-    depends_on:
-      migrations: {condition: service_completed_successfully}
-      celery_worker: {condition: service_started}
-
-  zero-cache:
-    image: rocicorp/zero:1.6.0@sha256:53e66c78b2d2ecf240b6d0e9e0c9c77d2abd6774a0efa84107b5c86ac9f59965
-    restart: unless-stopped
-    stop_grace_period: 300s
-    environment:
-      ZERO_UPSTREAM_DB: postgresql://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}?sslmode=disable
-      ZERO_CVR_DB: postgresql://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}?sslmode=disable
-      ZERO_CHANGE_DB: postgresql://${DB_USER:-surfsense}:${DB_PASSWORD}@db:5432/${DB_NAME:-surfsense}?sslmode=disable
-      ZERO_REPLICA_FILE: /data/zero.db
-      ZERO_ADMIN_PASSWORD: ${ZERO_ADMIN_PASSWORD:?ZERO_ADMIN_PASSWORD is required}
-      ZERO_APP_PUBLICATIONS: zero_publication
-      ZERO_AUTO_RESET: "true"
-      ZERO_NUM_SYNC_WORKERS: 4
-      ZERO_UPSTREAM_MAX_CONNS: 20
-      ZERO_CVR_MAX_CONNS: 30
-      ZERO_QUERY_URL: http://frontend:3000/api/zero/query
-      ZERO_MUTATE_URL: http://frontend:3000/api/zero/mutate
-      ZERO_QUERY_FORWARD_COOKIES: "true"
-    volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/zero-cache:/data"]
-    networks: [surfsense_internal]
-    depends_on:
-      db: {condition: service_healthy}
-      migrations: {condition: service_completed_successfully}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4848/keepalive"]
-      timeout: 5s
-      start_period: 720s
-      start_interval: 10s
-      interval: 5m
-      retries: 3
-
-  frontend:
-    image: ghcr.io/modsetter/surfsense-web:0.0.40@sha256:f2fb32a3da93118afde191ec8cd0133361aac8c3d9553a50732026f14545580e
-    restart: unless-stopped
-    environment:
-      AUTH_TYPE: LOCAL
-      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-TRUE}
-      ETL_SERVICE: DOCLING
-      DEPLOYMENT_MODE: self-hosted
-      SURFSENSE_BACKEND_INTERNAL_URL: http://backend:8000
-    networks: [surfsense_internal]
-    depends_on:
-      backend: {condition: service_healthy}
-      zero-cache: {condition: service_healthy}
-
-  proxy:
-    image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+  surfsense:
+    image: ghcr.io/modsetter/surfsense:2.3.1@sha256:106baa89d5f79168c1c5e9bce77655d3e99f2950250772a1d41508c04d73a4a0
     restart: unless-stopped
     ports: ["127.0.0.1:3929:80"]
-    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro"]
-    networks:
-      mu3lab_backend:
-        aliases: [surfsense-proxy]
-      surfsense_internal: {}
-      surfsense_edge: {}
+    environment:
+      # Authentik decides who reaches it, so SurfSense asks for no password of its own.
+      SURFSENSE_AUTH: none
+      # Only its private address and the server itself; another name is a rebinding page's.
+      SURFSENSE_ALLOWED_HOSTS: ${SURFSENSE_ALLOWED_HOSTS:?SURFSENSE_ALLOWED_HOSTS is required}
+      # Encrypts the API keys it stores (the AI gateway's); kept with Mu3Lab's other secrets.
+      SURFSENSE_LOCAL_SECRET: ${SURFSENSE_LOCAL_SECRET:?SURFSENSE_LOCAL_SECRET is required}
+      SURFSENSE_LOCAL_PUBLIC_PORT: ${SURFSENSE_PUBLIC_PORT:-8447}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/data:/data
     depends_on:
-      frontend: {condition: service_started}
-      backend: {condition: service_healthy}
-      zero-cache: {condition: service_healthy}
+      data-init: {condition: service_completed_successfully}
+    # mu3lab_frontend publishes its port and lets it reach the web (research, crawling);
+    # mu3lab_backend reaches the AI gateway.
+    networks: [mu3lab_frontend, mu3lab_backend]
+    # Its supervisor gives each sidecar 5 s after SIGTERM; Docker's 10 s is too tight.
+    stop_grace_period: 30s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # Its Caddy binary carries the port-binding capability, so starting it needs that one back.
+    cap_add: [NET_BIND_SERVICE]
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/__mu3lab_surfsense_health"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       timeout: 5s
-      start_period: 120s
-      start_interval: 10s
+      # A first start migrates its database and loads the document parser.
+      start_period: 300s
+      start_interval: 5s
       interval: 5m
       retries: 3
 
+  # The image runs as "surfsense" (1000); a folder Docker creates belongs to root.
+  data-init:
+    image: ghcr.io/modsetter/surfsense:2.3.1@sha256:106baa89d5f79168c1c5e9bce77655d3e99f2950250772a1d41508c04d73a4a0
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "1000:1000", "/data"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/surfsense/data:/data
+    network_mode: none
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+
 networks:
-  mu3lab_backend: {external: true}
   mu3lab_frontend: {external: true}
-  surfsense_internal: {internal: true}
-  surfsense_edge: {}
+  mu3lab_backend: {external: true}
