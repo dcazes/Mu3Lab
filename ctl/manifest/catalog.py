@@ -123,7 +123,7 @@ _PUBLISH = re.compile(r"(?:(?P<address>.+):)?(?P<port>\d+):\d+(?:/(?P<protocol>t
 # This server's tailnet address. The ``:?`` form makes Compose refuse to start without it:
 # an empty address would publish the port on every network the computer is on.
 # Networks created with --internal (ctl.install): no internet, and no published ports.
-INTERNAL_NETWORKS = frozenset({"mu3lab_backend"})
+INTERNAL_NETWORKS = frozenset({"mu3lab_backend", "mu3lab_media"})
 _TAILNET_ADDRESS = re.compile(r"\$\{MU3LAB_TAILNET_IP:\?[^}:]*\}")
 # This server's home-network address, for an app kept off the tailnet (same ``:?`` rule).
 _HOME_ADDRESS = re.compile(r"\$\{MU3LAB_HOME_IP:\?[^}:]*\}")

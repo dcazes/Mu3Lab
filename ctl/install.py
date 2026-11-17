@@ -790,7 +790,7 @@ def fix_networks(check: dict, ctx: dict) -> dict:
         rc, _ = actions.docker_cmd(["docker", "network", "inspect", net], lambda line: None)
         if rc == 0:
             continue
-        res = actions.docker_network_create(net, log, internal=(net == "mu3lab_backend"))
+        res = actions.docker_network_create(net, log, internal=net in preflight.INTERNAL_NETWORKS)
         if not res["ok"]:
             return _propagate(res)
     return {"ok": True}

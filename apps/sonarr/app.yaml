@@ -1,0 +1,71 @@
+# Sonarr — see ctl/manifest/models.py for every field.
+# Administrators only. Sonarr follows shows: it finds new episodes on the sites Prowlarr knows,
+# hands them to qBittorrent in its own category, then moves each finished episode into Shows
+# with a tidy name, where Jellyfin and Nextcloud see it. Mu3Lab sets it all up (hooks.py).
+id: sonarr
+name: Sonarr
+tier: optional
+group: apps
+category: media
+tagline: Follows your shows and fetches new episodes
+summary: Pick the shows you follow and Sonarr downloads each new episode as it comes out, in the household's
+  chosen quality (1080p, or 4K, 720p or DVD when that is all there is), then files it in Shows for Jellyfin.
+  It finds episodes on the sites you add to Prowlarr, downloads them with qBittorrent, and checks for new ones
+  every two hours. Seerr sends it the shows people ask for.
+version: "v4.0.20.3014"
+upstream: Sonarr/Sonarr
+# Sonarr offers its key to Prowlarr and Seerr, which connect to it when they are installed.
+capabilities: [tv_automation, media_folders]
+depends_on: [qbittorrent]
+media:
+- name: shows
+  purpose: Your series, one folder per show with a folder per season, for example "Show Name/Season 01/".
+backup:
+  # Sonarr fetches posters again, and keeps its own logs and weekly copies of its database.
+  ignore:
+  - sonarr/config/logs
+  - sonarr/config/MediaCover
+  - sonarr/config/Backups
+service:
+  local_port: 8989
+  health:
+    path: /ping
+route:
+  https_port: 8480
+  caddy_port: 19497
+  access: gate
+  audience: operators
+sign_in:
+  method: gate
+  note: Authentik admits administrators only, and Sonarr then opens without a login of its own (its "External"
+    sign-in, made for this). Prowlarr and Seerr use its key.
+secrets:
+# Sonarr's own key format: 32 hexadecimal characters.
+- env: SONARR_API_KEY
+  kind: hex
+  length: 16
+env:
+  MU3LAB_MEDIA_ROOT: '{{media_root}}'
+resource_guidance: Light on memory and processor. Episodes take disk space in Shows, which backups include, so allow
+  backup space for what you keep. 4K episodes are about three times the size of 1080p ones.
+setup_action: Install Sonarr to have new episodes of your shows downloaded for Jellyfin.
+mobile:
+  primary: sonarr-web
+  clients:
+  - id: sonarr-web
+    name: Sonarr web page
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://sonarr.tv/
+    setup: web
+    summary: Add shows, see what's coming and what's downloading, from the phone's browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Sonarr address; Authentik signs you in as an administrator.
+    - Search for a show under Series, Add New, and choose the Mu3Lab quality profile.

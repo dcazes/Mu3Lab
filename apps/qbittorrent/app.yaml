@@ -37,7 +37,7 @@ route:
 sign_in:
   method: gate
   note: Authentik admits administrators only, and qBittorrent then opens without a login of its own. It skips its
-    login only for its own Docker network, which nothing else joins.
+    login only for its own Docker network, which only Sonarr and Radarr join besides it.
 resource_guidance: Light on memory; disk and network heavy while downloading. Finished files are in the media
   libraries, which backups include, so allow backup space for what you keep.
 setup_action: Install qBittorrent to download torrents straight into your libraries.
@@ -89,8 +89,9 @@ configuration:
   default: false
 env:
   MU3LAB_MEDIA_ROOT: '{{media_root}}'
-  # The names qBittorrent answers to: this server's private name, and localhost for Mu3Lab itself.
-  QBT_SERVER_DOMAINS: '{{dns_name}};localhost'
+  # The names qBittorrent answers to: this server's private name, localhost for Mu3Lab itself, and
+  # qbittorrent for Sonarr and Radarr on its own network.
+  QBT_SERVER_DOMAINS: '{{dns_name}};localhost;qbittorrent'
   # Changes when a library comes or goes, which restarts qBittorrent with that category.
   MU3LAB_MEDIA_FOLDERS: '{{media_folders}}'
 integrates_with:
@@ -133,7 +134,8 @@ chat:
       tools return. When adding a torrent, ask which library it is for and use that category (music, audiobooks,
       podcasts, roms, movies, shows), or none to let Mu3Lab file films and episodes for Jellyfin and leave
       other files in Downloads. Finished torrents are removed from the list on their own, files kept, so a
-      download missing from the list has finished. Removing a torrent always keeps its
+      download missing from the list has finished. Torrents in the sonarr and radarr categories belong to Sonarr
+      and Radarr, which file them and remove them once they finish; leave those alone. Removing a torrent always keeps its
       files; to delete files, point them to the qBittorrent page or Nextcloud. Use only qBittorrent tools assigned to this agent.
     audience: operators
     faq:
@@ -147,6 +149,10 @@ chat:
       answer: "Yes. Drop them into the Add torrents folder in Nextcloud (administrators only) and qBittorrent starts each one and removes the file; episodes and films are filed for Jellyfin when they finish. The qBittorrent page also has an Add torrent file button."
     - question: "Who can add torrents?"
       answer: "Only Mu3Lab administrators. Everyone else gets the finished files in the household's apps."
+    - question: "Is anything checked for viruses?"
+      answer: "qBittorrent never downloads files that could run on a computer, such as .exe, .scr, .lnk or script files, whatever torrent they come in, so a fake film that is really a program arrives without its program. Films, shows and music never need them."
+    - question: "What are the sonarr and radarr categories?"
+      answer: "Episodes Sonarr asks for and films Radarr asks for. Those programs move the finished files into Shows or Movies with tidy names and then remove the torrent, so leave them be."
     - question: "Can the assistant delete downloaded files?"
       answer: "No. Removing a torrent here keeps its files; delete files from the qBittorrent page or Nextcloud."
   connectors:

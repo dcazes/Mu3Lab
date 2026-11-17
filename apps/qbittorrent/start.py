@@ -15,6 +15,10 @@ Runs as root inside the container at every start, before qBittorrent does:
 - The drop folder. A .torrent file put in Add torrents (Nextcloud, administrators only) is
   started and the file removed; one qBittorrent cannot read is renamed *.qbt_rejected.
 - The VPN. While it is on, qBittorrent may use only the VPN's network interface.
+- No programs. Files that could run on a computer (.exe, .scr, .lnk, scripts and the like) are
+  never downloaded, whatever torrent they come in: films, shows and music never need them.
+- Sonarr and Radarr join this app's own network to hand it films and episodes in their own
+  categories; they file what finishes and remove the torrent themselves (finished.py leaves those).
 """
 
 from __future__ import annotations
@@ -47,6 +51,12 @@ LIBRARIES = {
     "shows": Path("/media/shows"),
 }
 VPN_INTERFACE = "tun0"
+# Never downloaded: what Sonarr and Radarr call executable or potentially dangerous, and the other
+# file types Windows runs when opened. A media torrent that holds one is a fake.
+EXCLUDED = (
+    "*.exe", "*.msi", "*.com", "*.scr", "*.pif", "*.cpl", "*.bat", "*.cmd", "*.ps1", "*.vbs", "*.vbe",
+    "*.js", "*.jse", "*.wsf", "*.wsh", "*.hta", "*.jar", "*.lnk", "*.sh", "*.arj", "*.lzh", "*.zipx",
+)  # fmt: skip
 OWNER = (int(os.environ.get("PUID", "33")), int(os.environ.get("PGID", "33")))
 
 
@@ -117,6 +127,9 @@ def settings(vpn: bool) -> None:
             # No queue: every torrent downloads at once, so a slow or stalled one never makes the
             # others wait (most household torrents are thinly shared).
             "Session\\QueueingSystemEnabled": "false",
+            # qBittorrent keeps this switch outside "Session", as it writes it itself.
+            "ExcludedFileNamesEnabled": "true",
+            "Session\\ExcludedFileNames": ", ".join(EXCLUDED),
         },
         "Network": {"PortForwardingEnabled": "false"},
         # When a torrent finishes, finished.py files a video for Jellyfin and removes the torrent.

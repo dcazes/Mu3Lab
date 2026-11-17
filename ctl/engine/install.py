@@ -302,6 +302,13 @@ def run_install(
         return False
 
 
+def running(app: App, paths: RuntimePaths) -> bool:
+    """Whether Mu3Lab last saw the app running (or running with a problem)."""
+    state = ControlState.runtime(paths)
+    installation = state.installation(app.id) if state else None
+    return bool(installation and installation["state"] in {"running", "degraded"})
+
+
 def run_periodic(store: JobStore, root: Path, log: Callable[[str], None]) -> None:
     """Run declared maintenance rules for installed apps, isolating each app's failures."""
     catalog = load().catalog
@@ -325,7 +332,13 @@ def run_periodic(store: JobStore, root: Path, log: Callable[[str], None]) -> Non
                 if detail:
                     log(redact(detail))
                     store.record_audit(actor="worker", event="application.rule", detail=redact(detail))
-        except (StepFailed, AuthentikError, OSError, ValueError) as exc:
+            if running(app, paths):
+                # The app's own upkeep (apps/<id>/hooks.py), only while it runs: it talks to the app.
+                detail = load_app_hooks(app).periodic(ctx)
+                if detail:
+                    log(redact(detail))
+                    store.record_audit(actor="worker", event="application.upkeep", detail=redact(detail))
+        except (StepFailed, AuthentikError, OSError, ValueError, RuntimeError) as exc:
             log(f"{app.manifest.name} maintenance deferred safely: {redact(str(exc))}")
 
 

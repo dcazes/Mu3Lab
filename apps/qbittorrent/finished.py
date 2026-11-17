@@ -1,7 +1,10 @@
 """Mu3Lab's handling of finished torrents: file the video for Jellyfin, then stop sharing it.
 
 qBittorrent runs this inside its own container each time a torrent finishes (start.py sets
-that up). For every finished torrent:
+that up). It looks after torrents people add by hand (a magnet link, the Add torrents folder,
+chat) and the library categories Mu3Lab makes. A torrent in any other category belongs to the
+program that added it, such as Sonarr or Radarr: it is only stopped, and that program files it
+and removes it. For every finished torrent:
 
 1. It stops the torrent, so nothing is uploaded once the download is complete.
 2. A torrent with no category still in the Downloads library is filed by what it holds
@@ -36,6 +39,8 @@ API = "http://localhost:8479/api/v2"
 DOWNLOADS = "/media/downloads"
 MOVIES = "/media/movies"
 SHOWS = "/media/shows"
+# Mu3Lab's categories, one per library (start.py), and none at all: the torrents finished off here.
+OWN_CATEGORIES = {"", "music", "audiobooks", "podcasts", "roms", "movies", "shows"}
 LOG = Path("/config/mu3lab-finished.log")
 LOCK = Path("/config/mu3lab-finished.lock")
 MOVE_SECONDS = 1800
@@ -164,6 +169,8 @@ def finish(torrent: dict, libraries: bool) -> None:
         log(f"{name}: still moving; it stays stopped and is finished off next time")
         return
     category = str(torrent.get("category") or "")
+    if category not in OWN_CATEGORIES:
+        return  # Sonarr's, Radarr's or another program's: it files the files and removes the torrent
     saved = str(torrent.get("save_path") or "").rstrip("/")
     content = ""
     # No category: file it by what it holds. The shows category: its category folder is the

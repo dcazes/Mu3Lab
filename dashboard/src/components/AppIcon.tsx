@@ -15,7 +15,9 @@ import {
   Music,
   Network,
   Plug,
+  Popcorn,
   Route,
+  SearchCheck,
   ShieldCheck,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
@@ -36,6 +38,8 @@ import {
   type SimpleIcon,
   siPaperlessngx,
   siQbittorrent,
+  siRadarr,
+  siSonarr,
   siTailscale,
   siVaultwarden,
 } from 'simple-icons';
@@ -58,6 +62,8 @@ const brands: Record<string, SimpleIcon> = {
   qbittorrent: siQbittorrent,
   livekit: siLivekit,
   jellyfin: siJellyfin,
+  sonarr: siSonarr,
+  radarr: siRadarr,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
@@ -77,6 +83,8 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   'kopia-ui': { icon: ArchiveRestore, color: '#2563eb' },
   navidrome: { icon: Music, color: '#0284c7' },
   contextforge: { icon: Plug, color: '#0f62fe' },
+  prowlarr: { icon: SearchCheck, color: '#e66001' },
+  seerr: { icon: Popcorn, color: '#6d28d9' },
 };
 
 // A near-black brand color would vanish in dark mode and a near-white one (LiveKit's) in light mode;

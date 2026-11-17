@@ -68,6 +68,10 @@ class RegistryV3Tests(unittest.TestCase):
                 "navidrome",
                 "qbittorrent",
                 "jellyfin",
+                "prowlarr",
+                "sonarr",
+                "radarr",
+                "seerr",
             },
         )
         for service in optional:

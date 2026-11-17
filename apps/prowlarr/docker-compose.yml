@@ -1,0 +1,57 @@
+name: mu3lab-prowlarr
+
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:3.0.2.5780-ls169@sha256:45117ba8439e2337a92ffe38a451a4dafc0be771754d05d88cdf102419d09646
+    restart: unless-stopped
+    ports: ["127.0.0.1:9696:9696"]
+    environment:
+      TZ: ${TZ:-UTC}
+      PUID: "33"
+      PGID: "33"
+      UMASK: "002"
+      # Authentik guards the private address, so Prowlarr skips its own login ("External").
+      PROWLARR__AUTH__METHOD: External
+      PROWLARR__AUTH__REQUIRED: Enabled
+      PROWLARR__AUTH__APIKEY: ${PROWLARR_API_KEY:?PROWLARR_API_KEY is required}
+      PROWLARR__LOG__ANALYTICSENABLED: "False"
+      # Updates come with Mu3Lab's approved versions, never from inside the app.
+      PROWLARR__UPDATE__MECHANISM: Docker
+      PROWLARR__UPDATE__AUTOMATICALLY: "False"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/prowlarr/config:/config
+    networks:
+      default: {}
+      # Sonarr and Radarr search through Prowlarr here, and Prowlarr sends them its sites.
+      mu3lab_media:
+        aliases: [prowlarr]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9696/ping"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2@sha256:c80ae007ce2ccdcd217a12426e4f039ef763ff90738c808d38810c3e59323767
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      LOG_LEVEL: info
+    # Only on Prowlarr's own network: nothing else can ask it to fetch a page.
+    networks: [default]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8191/health"]
+      timeout: 10s
+      start_period: 60s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+networks:
+  # Its own network, with internet access to reach the sites.
+  default: {}
+  mu3lab_media: {external: true}

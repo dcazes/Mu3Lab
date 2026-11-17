@@ -132,6 +132,14 @@ class AppHooks:
         """Finish app-specific setup once its health check passes."""
         return None
 
+    def periodic(self, ctx: HookContext) -> str:
+        """Keep up settings people can add to in the app itself (runs every few minutes while installed).
+
+        Return a line for the worker log when something changed, else "". Raise ``StepFailed``,
+        ``OSError`` or ``ValueError`` to defer it to the next pass.
+        """
+        return ""
+
     def sync_people(self, ctx: HookContext, people: list[dict[str, Any]]) -> None:
         """Give each person with ``member`` set an account, and close everyone else's (rule per_person_logins).
 

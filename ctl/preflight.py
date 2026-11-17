@@ -78,7 +78,10 @@ PORT_INFO = {
 }
 
 # Docker networks Step 1a must create before any compose project starts.
-MU3LAB_NETWORKS = ("mu3lab_frontend", "mu3lab_backend", "mu3lab_mcp", "mu3lab_mcp_upstream")
+# mu3lab_media joins the media apps that hand work to each other (Prowlarr, Sonarr, Radarr, Seerr).
+MU3LAB_NETWORKS = ("mu3lab_frontend", "mu3lab_backend", "mu3lab_mcp", "mu3lab_mcp_upstream", "mu3lab_media")
+# Created with --internal: no way out to the internet through them, only between the apps on them.
+INTERNAL_NETWORKS = frozenset({"mu3lab_backend", "mu3lab_media"})
 
 # Repo root = parent of this file's directory (ctl/ -> Mu3Lab/).
 ROOT = Path(__file__).resolve().parent.parent

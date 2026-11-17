@@ -1,0 +1,574 @@
+{
+  "_about": "Mu3Lab's quality settings. Sizes are MB per minute of running time [minimum, preferred, maximum]: minimums from TRaSH Guides (a release far smaller than its quality allows is a fake or unwatchable), preferred sizes Mu3Lab's own, maximum 1000 meaning no limit. Unwanted custom formats from TRaSH Guides (MIT licence) at https://github.com/TRaSH-Guides/Guides/tree/f91330331d83897d588c4248158c6317e007988d are never downloaded. Tiers are best first; upgrades stop at the cutoff tier. Cam, telesync, screener, remux and disc images are in no tier.",
+  "profile": "Mu3Lab",
+  "tiers": [
+    {
+      "name": "1080p",
+      "qualities": [
+        "WEBDL-1080p",
+        "WEBRip-1080p",
+        "Bluray-1080p",
+        "HDTV-1080p"
+      ],
+      "cutoff": true
+    },
+    {
+      "name": "4K",
+      "qualities": [
+        "WEBDL-2160p",
+        "WEBRip-2160p",
+        "Bluray-2160p",
+        "HDTV-2160p"
+      ]
+    },
+    {
+      "name": "720p",
+      "qualities": [
+        "WEBDL-720p",
+        "WEBRip-720p",
+        "Bluray-720p",
+        "HDTV-720p"
+      ]
+    },
+    {
+      "name": "DVD",
+      "qualities": [
+        "DVD",
+        "Bluray-576p",
+        "Bluray-480p"
+      ]
+    }
+  ],
+  "sizes": {
+    "HDTV-720p": [
+      10,
+      15,
+      1000
+    ],
+    "HDTV-1080p": [
+      15,
+      30,
+      1000
+    ],
+    "WEBRip-720p": [
+      10,
+      15,
+      1000
+    ],
+    "WEBDL-720p": [
+      10,
+      15,
+      1000
+    ],
+    "Bluray-720p": [
+      17.1,
+      18.1,
+      1000
+    ],
+    "WEBRip-1080p": [
+      15,
+      30,
+      1000
+    ],
+    "WEBDL-1080p": [
+      15,
+      30,
+      1000
+    ],
+    "Bluray-1080p": [
+      50.4,
+      51.4,
+      1000
+    ],
+    "Bluray-1080p Remux": [
+      69.1,
+      70.1,
+      1000
+    ],
+    "HDTV-2160p": [
+      25,
+      80,
+      1000
+    ],
+    "WEBRip-2160p": [
+      25,
+      80,
+      1000
+    ],
+    "WEBDL-2160p": [
+      25,
+      80,
+      1000
+    ],
+    "Bluray-2160p": [
+      94.6,
+      95.6,
+      1000
+    ],
+    "Bluray-2160p Remux": [
+      187.4,
+      188.4,
+      1000
+    ],
+    "DVD": [
+      3,
+      8,
+      1000
+    ],
+    "Bluray-480p": [
+      3,
+      8,
+      1000
+    ],
+    "Bluray-576p": [
+      3,
+      8,
+      1000
+    ]
+  },
+  "unwanted": [
+    {
+      "trash_id": "85c61753df5da1fb2aab6f2a47426b09",
+      "trash_regex": "https://regex101.com/r/NnBZx0/1",
+      "name": "BR-DISK",
+      "includeCustomFormatWhenRenaming": false,
+      "specifications": [
+        {
+          "name": "BR-DISK",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": true,
+          "fields": {
+            "value": "^(?!.*\\b((?<!HD[._ -]|HD)DVD|BDRip|MKV|XviD|WMV|d3g|(BD)?REMUX|^(?=.*1080p)(?=.*HEVC)|[xh][-_. ]?26[45]|German.*[DM]L|((?<=\\d{4}).*German.*([DM]L)?)(?=.*\\b(AVC|HEVC|VC[-_. ]?1|MVC|MPEG[-_. ]?2)\\b))\\b)(((?=.*\\b(Blu[-_. ]?ray|BD|HD[-_. ]?DVD)\\b)(?=.*\\b(AVC|HEVC|VC[-_. ]?1|MVC|MPEG[-_. ]?2|BDMV|ISO)\\b))|^((?=.*\\b(((?=.*\\b((.*_)?COMPLETE.*|Dis[ck])\\b)(?=.*(Blu[-_. ]?ray|HD[-_. ]?DVD)))|3D[-_. ]?BD|BR[-_. ]?DISK|Full[-_. ]?Blu[-_. ]?ray|^((?=.*((BD|UHD)[-_. ]?(25|50|66|100|ISO)))))))).*"
+          }
+        }
+      ]
+    },
+    {
+      "trash_id": "9c11cd3f07101cdba90a2d81cf0e56b4",
+      "name": "LQ",
+      "includeCustomFormatWhenRenaming": false,
+      "specifications": [
+        {
+          "name": "126811",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(126811)$"
+          }
+        },
+        {
+          "name": "BRiNK",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(BRiNK)$"
+          }
+        },
+        {
+          "name": "BTM",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(BTM)$"
+          }
+        },
+        {
+          "name": "CHX",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(CHX)$"
+          }
+        },
+        {
+          "name": "CTFOH",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(CTFOH)$"
+          }
+        },
+        {
+          "name": "d3g",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(d3g)$"
+          }
+        },
+        {
+          "name": "DepraveD",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(DepraveD)$"
+          }
+        },
+        {
+          "name": "EVO",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(EVO)$"
+          }
+        },
+        {
+          "name": "Feranki1980",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(Feranki1980)$"
+          }
+        },
+        {
+          "name": "FGT",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(FGT)$"
+          }
+        },
+        {
+          "name": "FMD",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(FMD)$"
+          }
+        },
+        {
+          "name": "GHOSTS",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(GHOSTS)$"
+          }
+        },
+        {
+          "name": "HiQVE",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(HiQVE)$"
+          }
+        },
+        {
+          "name": "iNTENSO",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(iNTENSO)$"
+          }
+        },
+        {
+          "name": "iVy",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(iVy)$"
+          }
+        },
+        {
+          "name": "JFF",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(JFF)$"
+          }
+        },
+        {
+          "name": "KC",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(KC)$"
+          }
+        },
+        {
+          "name": "MeGusta",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(MeGusta)$"
+          }
+        },
+        {
+          "name": "nhanc3",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(nhanc3)$"
+          }
+        },
+        {
+          "name": "OFT",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(OFT)$"
+          }
+        },
+        {
+          "name": "Pahe",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "Pahe(\\.(ph|in))?\\b"
+          }
+        },
+        {
+          "name": "PSA",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(PSA)$"
+          }
+        },
+        {
+          "name": "SasukeducK",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(SasukeducK)$"
+          }
+        },
+        {
+          "name": "SHD",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(SHD)$"
+          }
+        },
+        {
+          "name": "ShieldBearer",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(ShieldBearer)$"
+          }
+        },
+        {
+          "name": "TBS",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(TBS)$"
+          }
+        },
+        {
+          "name": "TG",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(TG)$"
+          }
+        },
+        {
+          "name": "VIDEOHOLE",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(VIDEOHOLE)$"
+          }
+        },
+        {
+          "name": "worldmkv",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(worldmkv)$"
+          }
+        },
+        {
+          "name": "XLF",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(XLF)$"
+          }
+        },
+        {
+          "name": "Zero00",
+          "implementation": "ReleaseGroupSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "^(Zero00)$"
+          }
+        }
+      ]
+    },
+    {
+      "trash_id": "e2315f990da2e2cbfc9fa5b7a6fcfe48",
+      "name": "LQ (Release Title)",
+      "includeCustomFormatWhenRenaming": false,
+      "specifications": [
+        {
+          "name": "BEN THE MEN",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(BEN[ ._-]THE[ ._-]MEN)\\b"
+          }
+        },
+        {
+          "name": "BiTOR (2160p)",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "(?=.*?(\\b2160p\\b))(?=.*?(\\bBiTOR\\b))"
+          }
+        },
+        {
+          "name": "CREATiVE24",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(CREATiVE24)\\b"
+          }
+        },
+        {
+          "name": "Feranki1980",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(Feranki1980)\\b"
+          }
+        },
+        {
+          "name": "R&H",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(R&H)\\b"
+          }
+        },
+        {
+          "name": "TeeWee",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(TeeWee)\\b"
+          }
+        }
+      ]
+    },
+    {
+      "trash_id": "fbcb31d8dabd2a319072b84fc0b7249c",
+      "trash_regex": "https://regex101.com/r/lZ9iTm/1",
+      "name": "Extras",
+      "includeCustomFormatWhenRenaming": false,
+      "specifications": [
+        {
+          "name": "Extras",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": true,
+          "fields": {
+            "value": "(?<=\\bS\\d+\\b).*\\b(Extras|Bonus|Extended[ ._-]Clip)\\b"
+          }
+        }
+      ]
+    },
+    {
+      "trash_id": "23297a736ca77c0fc8e70f8edd7ee56c",
+      "trash_regex": "https://regex101.com/r/CISl2B/1",
+      "name": "Upscaled",
+      "includeCustomFormatWhenRenaming": false,
+      "specifications": [
+        {
+          "name": "AI Upscales",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "(?<=\\b\\d{3,4}p\\b)(?=.*\\b(HEVC)\\b)(?=.*\\b(AI)\\b)"
+          }
+        },
+        {
+          "name": "AIUS",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(AIUS)\\b"
+          }
+        },
+        {
+          "name": "Regrade",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b((Upscale)?Re-?graded?)\\b"
+          }
+        },
+        {
+          "name": "RW",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(RW)\\b"
+          }
+        },
+        {
+          "name": "TheUpscaler",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "\\b(The[ ._-]?Upscaler)\\b"
+          }
+        },
+        {
+          "name": "Upscaled",
+          "implementation": "ReleaseTitleSpecification",
+          "negate": false,
+          "required": false,
+          "fields": {
+            "value": "(?<=\\b\\d{3,4}p\\b).*\\b(AI[ ._-]?(Enhanced?|Remaster(ed)?)|UPS(UHD)?|Upscaled?([ ._-]?UHD)?|UpRez)\\b"
+          }
+        }
+      ]
+    }
+  ]
+}

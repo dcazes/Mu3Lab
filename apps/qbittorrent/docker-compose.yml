@@ -15,6 +15,12 @@ services:
     # Inside, qBittorrent listens on its private address's port (8479): it refuses a Host header
     # naming any other port, and Tailscale and Caddy pass that address on unchanged.
     ports: ["127.0.0.1:8097:8479"]
+    # Sonarr and Radarr join this app's own network and reach qBittorrent by this name. It
+    # belongs to the gateway, so it keeps working while the gateway is Gluetun (VPN on):
+    # Gluetun's firewall lets in connections from its own Docker network.
+    networks:
+      default:
+        aliases: [qbittorrent]
     read_only: true
     security_opt: ["no-new-privileges:true"]
     healthcheck:
