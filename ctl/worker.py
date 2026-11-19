@@ -34,6 +34,7 @@ from ctl import (
     self_update,
 )
 from ctl.chat_ops import sync_agents
+from ctl.control_state import ControlState
 from ctl.core_setup import execute_claimed
 from ctl.engine.install import run_periodic
 from ctl.job_processes import JobProcesses
@@ -42,6 +43,7 @@ from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
 from ctl.service_ops import execute_claimed as execute_service_claimed
 from ctl.status import reconciler, sign_in, signals
+from ctl.store import records
 from ctl.store import workflows as workflow_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,7 +51,28 @@ POLL_SECONDS = 2  # while an earlier worker's command or the runtime layout is s
 # With nothing to do the worker sleeps until the dashboard nudges it (``signals.nudge``), and at
 # most this long, so upkeep keeps its pace and a missed nudge only delays work.
 IDLE_SECONDS = 30.0
+# Upkeep that talks to apps (each app's ``hooks.periodic``, the backup service's and the chat
+# connectors') runs when something happened: a job finished, an app started or stopped outside
+# Mu3Lab, the household or the backup settings changed, or the worker started. It runs at once,
+# then each minute for a while so steps waiting on an app that is still starting are retried, and
+# otherwise once an hour as a safety pass. A running backup keeps the backup upkeep each minute.
+EVENT_FOLLOW_UP_SECONDS = 600
+EVENT_RETRY_SECONDS = 60
+SAFETY_PASS_SECONDS = 3600
 log = logging.getLogger("mu3lab.worker")
+
+
+def _running_apps() -> frozenset[str]:
+    state = ControlState.runtime()
+    return state.running_apps() if state else frozenset()
+
+
+def _backup_changed_at() -> str:
+    return str(records.get(*backup_service.SETTINGS).get("changed_at") or "")
+
+
+def _backup_busy() -> bool:
+    return bool(records.names(backup_service.HOLDS))
 
 
 LEASE_SECONDS = 45  # JobStore's default lease
@@ -177,6 +200,43 @@ def run() -> int:
         last_run[task] = now
         return True
 
+    # The worker starting counts as an event: after a boot, an update or a restart every
+    # app's upkeep runs and then follows up.
+    last_event = time.monotonic()
+    seen: dict[str, object] = {}
+
+    def notice_events() -> None:
+        """Record an event when an app started or stopped, or the household or backup settings changed."""
+        nonlocal last_event
+        try:
+            now_seen = {
+                "running": _running_apps(),
+                "household": signals.household_changed_at(),
+                "backup": _backup_changed_at(),
+            }
+        except Exception as exc:  # unreadable for a moment: treat it as a change, to be safe
+            log.warning(f"Mu3Lab could not read app states for upkeep: {exc}")
+            last_event = time.monotonic()
+            return
+        if seen and now_seen != seen:
+            last_event = time.monotonic()
+        seen.update(now_seen)
+
+    def event_due(task: str, *, busy: bool = False) -> bool:
+        """Upkeep that talks to apps: after an event, during its follow-up, while ``busy``, or hourly."""
+        now = time.monotonic()
+        last = last_run.get(task)
+        following_up = busy or now - last_event < EVENT_FOLLOW_UP_SECONDS
+        if (
+            last is None
+            or last < last_event
+            or (following_up and now - last >= EVENT_RETRY_SECONDS)
+            or now - last >= SAFETY_PASS_SECONDS
+        ):
+            last_run[task] = now
+            return True
+        return False
+
     wakeup = signals.waiter()
 
     def stop(_signum, _frame) -> None:
@@ -256,11 +316,14 @@ def run() -> int:
         if not settled:
             settled = True
             backups.start_verification(downloads_stopping, log.info)
-        if due("rules", 60, 900):
+        notice_events()
+        rules_due = due("rules", 60, 900)
+        app_upkeep_due = event_due("app-upkeep")
+        if rules_due or app_upkeep_due:
             try:
-                run_periodic(store, ROOT, log.info)
+                run_periodic(store, ROOT, log.info, rules=rules_due, app_upkeep=app_upkeep_due)
             except Exception as exc:
-                log.warning(f"Mu3Lab sign-in verification deferred safely: {exc}")
+                log.warning(f"Mu3Lab app maintenance deferred safely: {exc}")
         # Logins are saved after each job, when the household changes, and while someone's logins
         # wait for their vault account; otherwise an hourly pass catches anything changed elsewhere.
         from ctl import vault_sync
@@ -278,7 +341,11 @@ def run() -> int:
                 vault_sync.run(log.info, upkeep=True)
             except Exception as exc:
                 log.warning(f"Mu3Lab vault saving deferred safely: {exc}")
-        if due("backup", 60, 900):
+        try:
+            backup_busy = _backup_busy()
+        except Exception:
+            backup_busy = True  # unsure: keep the backup upkeep each minute
+        if event_due("backup", busy=backup_busy):
             try:
                 # Kopia's server runs the schedule; keep its folders, actions and policy in step.
                 backup_service.reconcile(store, ROOT, log.info)
@@ -298,7 +365,7 @@ def run() -> int:
                     log.info(f"Mu3Lab removed old history: {removed}")
             except Exception as exc:
                 log.warning(f"Mu3Lab history clean-up deferred: {exc}")
-        if due("mcp", 60, 900):
+        if event_due("mcp"):
             try:
                 from ctl.mcp_ops import reconcile_lifecycle
 
@@ -336,6 +403,9 @@ def run() -> int:
             continue
         try:
             run_job(store, job, worker_id)
+            # Installs, removals, updates, starts, stops and settings changes are the events
+            # app upkeep follows (see EVENT_FOLLOW_UP_SECONDS).
+            last_event = time.monotonic()
             # Once nothing else runs, clear what its builds left (see ctl/disk_cleanup.py).
             build_cache_due = build_cache_due or disk_cleanup.builds(job)
             if resource_usage.touches_disk(job):

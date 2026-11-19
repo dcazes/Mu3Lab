@@ -330,6 +330,14 @@ class ControlState:
                 result[key] = {}
         return result
 
+    def running_apps(self) -> frozenset[str]:
+        """Every installed app Mu3Lab last saw running (or running with a problem), in one read."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT service_id FROM service_installations WHERE state IN ('running', 'degraded')"
+            ).fetchall()
+        return frozenset(str(row[0]) for row in rows)
+
     def reset_service(self, service_id: str) -> None:
         """Forget a failed or uninstalled optional app without touching application data.
 

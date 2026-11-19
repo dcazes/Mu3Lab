@@ -309,8 +309,17 @@ def running(app: App, paths: RuntimePaths) -> bool:
     return bool(installation and installation["state"] in {"running", "degraded"})
 
 
-def run_periodic(store: JobStore, root: Path, log: Callable[[str], None]) -> None:
-    """Run declared maintenance rules for installed apps, isolating each app's failures."""
+def run_periodic(
+    store: JobStore, root: Path, log: Callable[[str], None], *, rules: bool = True, app_upkeep: bool = True
+) -> None:
+    """Run declared maintenance rules for installed apps, isolating each app's failures.
+
+    ``rules`` are the manifest rules (cheap: each compares a stored digest or setting first);
+    ``app_upkeep`` is each running app's own ``hooks.periodic``, which talks to the app and so
+    runs only when something happened (the worker decides, see ``ctl/worker.py``).
+    """
+    if not rules and not app_upkeep:
+        return
     catalog = load().catalog
     paths = RuntimePaths()
     facts = Facts(tailnet_dns_name(), paths, catalog)
@@ -318,21 +327,21 @@ def run_periodic(store: JobStore, root: Path, log: Callable[[str], None]) -> Non
         if not installed(app, paths):
             continue
         try:
-            rules = rules_for(app.manifest)
+            app_rules = rules_for(app.manifest)
             ctx = context(
                 app,
                 facts,
-                rules,
+                app_rules,
                 onboarding_state.read(app.id, paths).get("owner"),
                 log,
                 lambda name, detail: log(f"{name}: {detail}"),
             )
-            for rule in rules:
+            for rule in app_rules if rules else ():
                 detail = rule.periodic(ctx)
                 if detail:
                     log(redact(detail))
                     store.record_audit(actor="worker", event="application.rule", detail=redact(detail))
-            if running(app, paths):
+            if app_upkeep and running(app, paths):
                 # The app's own upkeep (apps/<id>/hooks.py), only while it runs: it talks to the app.
                 detail = load_app_hooks(app).periodic(ctx)
                 if detail:
