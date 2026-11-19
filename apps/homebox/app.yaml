@@ -1,0 +1,84 @@
+# HomeBox — see ctl/manifest/models.py for every field.
+id: homebox
+capabilities: [home_inventory]
+name: HomeBox
+tier: optional
+group: apps
+category: home
+tagline: Everything you own, where it is, and its receipts
+summary: A household inventory of what you own and where it is kept, with photos, receipts, warranties and
+  manuals. The whole household shares one inventory, and printable QR labels open an item's page.
+version: "v0.27.1"
+upstream: sysadminsmedia/homebox
+service:
+  local_port: 7745
+  health:
+    path: /api/v1/status
+route:
+  https_port: 8460
+  caddy_port: 19477
+  access: open
+  # HomeBox keeps sign-up and password sign-in on for Mu3Lab's own loopback calls (it adds each
+  # household member to the owner's inventory that way); on the private address only Authentik signs in.
+  blocked_paths:
+  - path: /api/v1/users/login
+    message: HomeBox signs in with Mu3Lab.
+  - path: /api/v1/users/login/
+    message: HomeBox signs in with Mu3Lab.
+  - path: /api/v1/users/register*
+    message: Mu3Lab adds each household member to HomeBox.
+  - path: /api/v1/users/forgot-password*
+    message: HomeBox signs in with Mu3Lab.
+  - path: /api/v1/users/reset-password*
+    message: HomeBox signs in with Mu3Lab.
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-homebox
+    redirect_paths:
+    - /api/v1/users/login/oidc/callback
+    launch_path: /api/v1/users/login/oidc
+    env:
+      client_id: HOMEBOX_OIDC_CLIENT_ID
+      client_secret: HOMEBOX_OIDC_CLIENT_SECRET
+  note: HomeBox signs people in with Authentik only. Mu3Lab creates the household's inventory under your name and adds
+    everyone in the household to it, so their first sign-in opens the same shared inventory.
+account:
+  mode: api_bootstrap
+  user_action: Open HomeBox; Authentik signs you in to the household's inventory. Then add your first items.
+secrets:
+- env: HOMEBOX_API_KEY_PEPPER
+  length: 64
+env:
+  HOMEBOX_OIDC_ISSUER_URL: 'https://{{dns_name}}/application/o/mu3lab-homebox/'
+  # HomeBox builds its sign-in return address and QR-label links from this.
+  HOMEBOX_HOSTNAME: '{{dns_name}}:{{https_port}}'
+rules:
+- rule: per_person_logins
+  with:
+    purpose: Add each household member to the shared inventory
+mobile:
+  primary: homebox-web
+  clients:
+  - id: homebox-web
+    name: HomeBox web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://homebox.software/
+    source: https://github.com/sysadminsmedia/homebox
+    setup: pwa
+    summary: HomeBox works in the phone's browser and can be added to the home screen. Scanning an item's QR label
+      with the phone camera opens its page.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private HomeBox address and sign in with Authentik.
+    - Use the browser menu to add it to the Home Screen.
+resource_guidance: Light; one container with a SQLite database. Photos, receipts and manuals use disk space and are
+  backed up.
+setup_action: Install HomeBox to keep track of what the household owns, where it is, and its receipts.

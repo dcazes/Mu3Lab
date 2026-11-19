@@ -72,6 +72,9 @@ class RegistryV3Tests(unittest.TestCase):
                 "sonarr",
                 "radarr",
                 "seerr",
+                "n8n",
+                "wallos",
+                "homebox",
             },
         )
         for service in optional:

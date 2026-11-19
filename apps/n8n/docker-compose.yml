@@ -1,0 +1,109 @@
+name: mu3lab-n8n
+
+services:
+  n8n:
+    image: n8nio/n8n:2.48.5@sha256:c0ea1246a81a34ce8e2b3cfb1f718b97de64b0a1b3747ad24d6d431826bb71ad
+    restart: unless-stopped
+    ports: ["127.0.0.1:5678:5678"]
+    environment:
+      TZ: ${TZ:-UTC}
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      N8N_PORT: "5678"
+      N8N_HOST: ${N8N_HOST:?N8N_HOST is required}
+      N8N_PROTOCOL: https
+      N8N_EDITOR_BASE_URL: ${N8N_PUBLIC_URL:?N8N_PUBLIC_URL is required}
+      # Webhook addresses n8n shows: the private address, reachable from the tailnet only.
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:?N8N_PUBLIC_URL is required}
+      # Tailscale Serve and Caddy sit in front; n8n trusts Caddy's forwarded address.
+      N8N_PROXY_HOPS: "1"
+      N8N_SECURE_COOKIE: "true"
+      # Saved credentials are encrypted with this; it must stay with the data (kept for the app's life).
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?N8N_DB_PASSWORD is required}
+      # Code nodes run in the separate runners container, n8n's recommended production setup.
+      N8N_RUNNERS_MODE: external
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?N8N_RUNNERS_AUTH_TOKEN is required}
+      N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 0.0.0.0
+      # Nothing about this server is sent to n8n, and no upgrade prompts.
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_HIRING_BANNER_ENABLED: "false"
+      # Run history is kept for two weeks.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/n8n/home:/home/node/.n8n
+    depends_on:
+      postgres: {condition: service_healthy}
+      home-init: {condition: service_completed_successfully}
+    # mu3lab_backend: workflows may call other Mu3Lab apps' internal APIs with their own keys. That
+    # power is why n8n is for administrators only (route.audience operators).
+    networks: [mu3lab_frontend, mu3lab_backend, n8n_internal]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz/readiness >/dev/null || exit 1"]
+      timeout: 5s
+      start_period: 300s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+  # Runs the JavaScript and Python of Code nodes, away from n8n and with no way out to the internet.
+  runners:
+    image: n8nio/runners:2.48.5@sha256:3d502b6dcb975958df66f80ceb59d30584e86d7339a4659730d3ecfb74c91fc0
+    restart: unless-stopped
+    environment:
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?N8N_RUNNERS_AUTH_TOKEN is required}
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n:5679
+      # Idle runners exit and start again when a Code node needs one.
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "15"
+    depends_on:
+      n8n: {condition: service_healthy}
+    networks: [n8n_internal]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${N8N_DB_PASSWORD:?N8N_DB_PASSWORD is required}
+      POSTGRES_DB: n8n
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/n8n/postgres:/var/lib/postgresql/data
+    networks: [n8n_internal]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
+      timeout: 5s
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
+
+  # n8n runs as node (1000); a folder Docker creates belongs to root.
+  home-init:
+    image: n8nio/n8n:2.48.5@sha256:c0ea1246a81a34ce8e2b3cfb1f718b97de64b0a1b3747ad24d6d431826bb71ad
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "1000:1000", "/home/node/.n8n"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/n8n/home:/home/node/.n8n
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}
+  n8n_internal: {internal: true}

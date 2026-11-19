@@ -1,0 +1,76 @@
+# Wallos — see ctl/manifest/models.py for every field.
+id: wallos
+capabilities: [subscriptions]
+name: Wallos
+tier: optional
+group: apps
+category: finance
+tagline: Subscriptions and what they cost
+summary: Keeps track of your subscriptions and recurring bills, what they cost each month and when each one renews.
+  Each household member has their own private list.
+version: "v5.11.2"
+upstream: ellite/Wallos
+service:
+  local_port: 8282
+  health:
+    path: /health.php
+route:
+  https_port: 8467
+  caddy_port: 19485
+  access: open
+  # Only Mu3Lab creates the first account (its administrator); nobody registers by hand.
+  redirects:
+  - path: /registration.php
+    to: /
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-wallos
+    # Wallos finishes sign-in on its home page.
+    redirect_paths:
+    - /index.php
+    launch_path: /__mu3lab/login
+    launch: link
+    link_launch:
+      page: /login.php
+    env:
+      client_id: WALLOS_OIDC_CLIENT_ID
+      client_secret: WALLOS_OIDC_CLIENT_SECRET
+  note: Wallos signs people in with Authentik only. Mu3Lab creates its administrator account under your name; everyone
+    else gets their own private account the first time they open it.
+account:
+  mode: api_bootstrap
+  user_action: Open Wallos; Authentik signs you in as its administrator. Then add your first subscription.
+env:
+  WALLOS_OIDC_ISSUER: 'https://{{dns_name}}/application/o/mu3lab-wallos/'
+  WALLOS_OIDC_REDIRECT_URL: '{{public_url}}/index.php'
+configuration:
+- key: currency
+  env: WALLOS_CURRENCY
+  type: string
+  label: Main currency for new accounts (a three-letter code such as CAD, USD, or EUR)
+  # The usual currency of this computer's country.
+  default: '{{currency_code}}'
+mobile:
+  primary: wallos-web
+  clients:
+  - id: wallos-web
+    name: Wallos web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://wallosapp.com/
+    source: https://github.com/ellite/Wallos
+    setup: pwa
+    summary: Wallos works in the phone's browser and can be added to the home screen like an app.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Wallos address and sign in with Authentik.
+    - Use the browser menu to add it to the Home Screen.
+resource_guidance: Very light; one small container with a SQLite database.
+setup_action: Install Wallos to see what your subscriptions cost and when they renew.

@@ -45,6 +45,9 @@ class MobileClientTests(unittest.TestCase):
                 "sonarr",
                 "radarr",
                 "seerr",
+                "n8n",
+                "wallos",
+                "homebox",
             },
         )
         self.assertEqual(mobile["lobehub"]["primary"], "lobechat-pwa")

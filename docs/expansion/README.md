@@ -90,7 +90,8 @@ Update this table in the same commit that merges each task. Use only:
 | 3-3 open-webui (as an optional app) | implemented 2026-10-06 | Chat choice 3-1, 3-2, 3-4 and Hermes 3-5 not started |
 | 4-1 speaches, 4-2 routing and voice keys | implemented 2026-10-06 | 4-3 Wyoming bridge waits for Home Assistant |
 | 5-02 beaver, 5-03 audiobookshelf, 5-04 outline, 5-05 romm, 5-06 photon, 5-07 dawarich | implemented 2026-10-06 | VM acceptance pending |
-| 5-01 homebox, 5-08 … 5-12 | not started | |
+| 5-01 homebox, 5-08 n8n | implemented 2026-11-18 | With Wallos (not in the original plan). No chat connectors yet; the owner deferred them. HomeBox shares one inventory through accounts Mu3Lab pre-creates (owner's choice) |
+| 5-09 … 5-12 | not started | |
 | 6-1 acceptance | not started | |
 
 ## Conventions used in these documents

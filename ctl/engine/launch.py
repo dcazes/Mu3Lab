@@ -1,8 +1,9 @@
 """Same-origin sign-in launch pages generated from a manifest.
 
-Two kinds: a JSON request whose reply names Authentik's address (Actual
-Budget, ContextForge), and a form on the app's own sign-in page that must be submitted
-with that page's anti-forgery token (Dawarich).
+Three kinds: a JSON request whose reply names Authentik's address (Actual
+Budget, ContextForge), a form on the app's own sign-in page that must be submitted
+with that page's anti-forgery token (Dawarich), and a link on the app's sign-in
+page that carries a one-time state (Wallos).
 """
 
 from __future__ import annotations
@@ -44,6 +45,28 @@ def _form_script(page: str, action: str) -> str:
 }());""".replace("SETTINGS", settings)
 
 
+def _link_script(page: str) -> str:
+    settings = json.dumps({"page": page}).replace("<", "\\u003c")
+    return """(async function () {
+  const cfg = SETTINGS;
+  try {
+    // The page saves the link's one-time state in this browser's session cookie as it is served.
+    const r = await fetch(cfg.page, {credentials: 'same-origin'});
+    // Already signed in: the app sends its sign-in page on to the app itself.
+    if (r.redirected && new URL(r.url).pathname !== cfg.page) { location.replace('/'); return; }
+    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    // Only Authentik's authorize address on this same server, never anywhere else.
+    const found = [...doc.querySelectorAll('a[href]')].map((a) => new URL(a.getAttribute('href'), location.href))
+      .find((url) => url.protocol === 'https:' && url.hostname === location.hostname && !url.port
+        && !url.username && !url.password && url.pathname.startsWith('/application/o/authorize/'));
+    if (!r.ok || !found) throw new Error();
+    location.replace(found.href);
+  } catch (_) {
+    document.getElementById('status').textContent = 'Sign-in needs attention. Open the app to continue.';
+  }
+}());""".replace("SETTINGS", settings)
+
+
 def _page(manifest: AppManifest, launch_path: str, script: str, form_action: str) -> str:
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
     page = (
@@ -69,6 +92,8 @@ def caddy_handler(manifest: AppManifest) -> str:
         # The form posts to the app, which redirects the browser on to Authentik on this host.
         script = _form_script(oidc.form_launch.page, oidc.form_launch.action)
         return _page(manifest, oidc.launch_path, script, "form-action 'self' https://{http.request.host}; ")
+    if oidc and oidc.link_launch:
+        return _page(manifest, oidc.launch_path, _link_script(oidc.link_launch.page), "")
     launch = oidc.json_launch if oidc else None
     if not oidc or not launch or not launch.launcher:
         return ""

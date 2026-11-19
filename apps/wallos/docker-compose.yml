@@ -1,0 +1,44 @@
+name: mu3lab-wallos
+
+services:
+  wallos:
+    image: bellamy/wallos:5.11.2@sha256:de82c41215a761d33a38a3672526b3ce47d0fe7acb84f5c2a4cb2342c710cf4c
+    # Wallos fetches Authentik's sign-in details through this server's private name (tailnet relay).
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:8282:80"]
+    environment:
+      TZ: ${TZ:-UTC}
+      OIDC_ENABLED: "true"
+      OIDC_PROVIDER_NAME: Mu3Lab
+      OIDC_CLIENT_ID: ${WALLOS_OIDC_CLIENT_ID:?WALLOS_OIDC_CLIENT_ID is required}
+      OIDC_CLIENT_SECRET: ${WALLOS_OIDC_CLIENT_SECRET:?WALLOS_OIDC_CLIENT_SECRET is required}
+      OIDC_ISSUER: ${WALLOS_OIDC_ISSUER:?WALLOS_OIDC_ISSUER is required}
+      OIDC_REDIRECT_URL: ${WALLOS_OIDC_REDIRECT_URL:?WALLOS_OIDC_REDIRECT_URL is required}
+      OIDC_USER_IDENTIFIER: sub
+      OIDC_SCOPES: openid email profile
+      # Everyone else in the household gets their own account on their first sign-in.
+      OIDC_AUTO_CREATE_USER: "true"
+      # Authentik is the only way in; the owner's account links to it by verified email.
+      OIDC_DISABLE_PASSWORD_LOGIN: "true"
+      OIDC_REQUIRE_EMAIL_VERIFIED: "true"
+      # Wallos refuses private addresses unless listed; Authentik is reached at this one.
+      SSRF_ALLOWLIST: ${MU3LAB_TAILNET_HOST:?MU3LAB_TAILNET_HOST is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/wallos/db:/var/www/html/db
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/wallos/logos:/var/www/html/images/uploads/logos
+    networks: [mu3lab_frontend]
+    security_opt: ["no-new-privileges:true"]
+    # Its start script hands the web folders to www-data, then nginx and PHP drop to that user.
+    cap_drop: ["ALL"]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, NET_BIND_SERVICE]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/health.php"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+networks:
+  mu3lab_frontend: {external: true}

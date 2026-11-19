@@ -226,6 +226,18 @@ class FormLaunch(Model):
     action: str = Field(pattern=r"^/[\w\-./]*$")
 
 
+class LinkLaunch(Model):
+    """The app's sign-in page holds a link to Authentik carrying a one-time state the page just saved.
+
+    Wallos builds that link afresh on each visit and remembers its state in the
+    session, so Mu3Lab cannot link to Authentik itself. Mu3Lab serves a launch
+    page that loads ``page`` and follows the link on it that leads to
+    Authentik's authorize address on this server.
+    """
+
+    page: str = Field(pattern=r"^/[\w\-./]*$")
+
+
 class FirstRunCheck(Model):
     """A JSON endpoint whose fields prove the app skipped its own first-run setup."""
 
@@ -252,10 +264,11 @@ class Oidc(Model):
     redirect_paths: tuple[str, ...]
     role_claim: RoleClaim | None = None
     launch_path: str
-    # How a browser starts sign-in: follow redirects, POST JSON, or submit a CSRF form.
-    launch: Literal["redirect", "json_post", "csrf_form", "form_post"] = "redirect"
+    # How a browser starts sign-in: follow redirects, POST JSON, submit a CSRF form, or follow a page's link.
+    launch: Literal["redirect", "json_post", "csrf_form", "form_post", "link"] = "redirect"
     json_launch: JsonLaunch | None = None
     form_launch: FormLaunch | None = None
+    link_launch: LinkLaunch | None = None
     env: OidcEnv
     first_run_checks: tuple[FirstRunCheck, ...] = ()
     initial_owner_env: str = ""  # env var holding the only username allowed on first sign-in
@@ -268,6 +281,8 @@ class Oidc(Model):
             raise ValueError("json_post launch needs json_launch details, and only it may have them")
         if (self.launch == "form_post") != (self.form_launch is not None):
             raise ValueError("form_post launch needs form_launch details, and only it may have them")
+        if (self.launch == "link") != (self.link_launch is not None):
+            raise ValueError("link launch needs link_launch details, and only it may have them")
         return self
 
 

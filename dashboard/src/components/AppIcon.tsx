@@ -3,8 +3,10 @@ import {
   AudioLines,
   Baby,
   BookOpenText,
+  Boxes,
   Bot,
   Compass,
+  Eraser,
   Flame,
   Gamepad2,
   KeyRound,
@@ -19,6 +21,7 @@ import {
   Route,
   SearchCheck,
   ShieldCheck,
+  WalletCards,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import {
@@ -31,6 +34,7 @@ import {
   siJellyfin,
   siLivekit,
   siMealie,
+  siN8n,
   siNextcloud,
   siOllama,
   siSearxng,
@@ -64,6 +68,7 @@ const brands: Record<string, SimpleIcon> = {
   jellyfin: siJellyfin,
   sonarr: siSonarr,
   radarr: siRadarr,
+  n8n: siN8n,
 };
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
@@ -84,7 +89,10 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   navidrome: { icon: Music, color: '#0284c7' },
   contextforge: { icon: Plug, color: '#0f62fe' },
   prowlarr: { icon: SearchCheck, color: '#e66001' },
+  cleanuparr: { icon: Eraser, color: '#0e7490' },
   seerr: { icon: Popcorn, color: '#6d28d9' },
+  homebox: { icon: Boxes, color: '#6c4a2e' },
+  wallos: { icon: WalletCards, color: '#007bff' },
 };
 
 // A near-black brand color would vanish in dark mode and a near-white one (LiveKit's) in light mode;

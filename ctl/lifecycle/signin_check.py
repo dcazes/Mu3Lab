@@ -19,6 +19,7 @@ Nothing here signs anyone in or touches a person's session.
 
 from __future__ import annotations
 
+import html
 import re
 import time
 from collections.abc import Callable
@@ -161,6 +162,18 @@ def _form_launch(client: httpx.Client, origin: str, page_path: str, action: str,
     return client.post(origin + action, data=fields, headers={"Origin": origin, "Referer": origin + page_path})
 
 
+def _link_launch(client: httpx.Client, origin: str, page_path: str, name: str) -> httpx.Response:
+    """Do what the launch page does in a browser: follow the page's link to Authentik's authorize address."""
+    page = client.get(origin + page_path)
+    _check_cookies(page, urlsplit(origin).hostname or "")
+    authorize = f"https://{urlsplit(origin).hostname}{AUTHORIZE_PATH}"
+    links = (html.unescape(href) for href in re.findall(r'<a\b[^>]*\bhref="([^"]+)"', page.text, flags=re.I))
+    target = next((link for link in links if link.startswith(authorize)), None)
+    if page.status_code != 200 or target is None:
+        raise SignInError(f"{name} did not offer its Authentik sign-in link.")
+    return httpx.Response(302, headers={"location": target}, request=page.request)
+
+
 def _entry(service_id: str, client: httpx.Client, origin: str, launch_path: str) -> httpx.Response:
     """Start sign-in using the protocol declared by the app."""
     manifest = load().get(service_id).manifest
@@ -170,6 +183,8 @@ def _entry(service_id: str, client: httpx.Client, origin: str, launch_path: str)
         return _json_launch(service_id, client, origin)
     if oidc.form_launch is not None:
         return _form_launch(client, origin, oidc.form_launch.page, oidc.form_launch.action, manifest.name)
+    if oidc.link_launch is not None:
+        return _link_launch(client, origin, oidc.link_launch.page, manifest.name)
     if oidc.launch == "csrf_form":
         page = client.get(origin + launch_path)
         _check_cookies(page, urlsplit(origin).hostname or "")

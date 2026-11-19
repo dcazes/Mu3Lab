@@ -47,8 +47,8 @@ table in your task.
 | `outline` | 3005 (3000) | | 8463 | 19480 |
 | `romm` | 8091 (8080) | | 8464 | 19481 |
 | `dawarich` | 3006 (3000) | | 8465 | 19482 |
-| `n8n` | 5678 (5678) | | 8466 | 19483 |
-| `comfyui` | 8188 (8188) | | 8467 | 19484 |
+| `n8n` | 5678 (5678) | | 8466 | 19484 (19483 went to Seerr) |
+| `comfyui` | 8188 (8188) | | 8467 (taken by Wallos; pick the next free) | 19484 (taken by n8n) |
 | `home-assistant` | 8123 (host network) | | 8468 | 19485 |
 | `frigate` | 8971 (8971) | 8554 rtsp (tcp) | 8469 | 19486 |
 | `kopia` | 51515 (51515) | | 8470 | 19487 |
@@ -61,6 +61,7 @@ table in your task.
 | `unsloth` | 8095 (8000) | | 8473 | 19490 |
 | `navidrome` | 4533 (4533) | | 8474 | 19491 |
 | `contextforge` | 4444 (4444) | | 8475 | 19492 |
+| `wallos` | 8282 (80) | | 8467 | 19485 |
 | `livekit` | 8093 (3000) voice page | 7880 signalling, 8094 admin; tailnet 7881/tcp, 7882/udp | 8476, 8477 signal, 8478 admin | 19493–19495 |
 
 Connector `local_health` ports for new connectors: 8824 upward, in Phase 5

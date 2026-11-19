@@ -1,0 +1,49 @@
+name: mu3lab-homebox
+
+services:
+  homebox:
+    image: ghcr.io/sysadminsmedia/homebox:0.27.1@sha256:9d0b64776c694f018c0ca06faf52105a33ca376024f46bb58e6ab0e2b728bb61
+    # HomeBox reads Authentik's sign-in details through this server's private name (tailnet relay).
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:7745:7745"]
+    environment:
+      TZ: ${TZ:-UTC}
+      HBOX_LOG_LEVEL: info
+      HBOX_LOG_FORMAT: text
+      HBOX_WEB_MAX_UPLOAD_SIZE: "100"
+      HBOX_OPTIONS_GITHUB_RELEASE_CHECK: "false"
+      HBOX_OPTIONS_ALLOW_ANALYTICS: "false"
+      # Caddy terminates HTTPS in front of it.
+      HBOX_OPTIONS_TRUST_PROXY: "true"
+      HBOX_OPTIONS_HOSTNAME: ${HOMEBOX_HOSTNAME:?HOMEBOX_HOSTNAME is required}
+      # Sign-up and password sign-in stay on for Mu3Lab's own loopback calls only (it registers the owner
+      # and adds each household member to the owner's inventory). The private address refuses those
+      # paths (route.blocked_paths in app.yaml), so people sign in through Authentik alone.
+      HBOX_OPTIONS_ALLOW_REGISTRATION: "true"
+      HBOX_OPTIONS_ALLOW_LOCAL_LOGIN: "true"
+      HBOX_OIDC_ENABLED: "true"
+      HBOX_OIDC_ISSUER_URL: ${HOMEBOX_OIDC_ISSUER_URL:?HOMEBOX_OIDC_ISSUER_URL is required}
+      HBOX_OIDC_CLIENT_ID: ${HOMEBOX_OIDC_CLIENT_ID:?HOMEBOX_OIDC_CLIENT_ID is required}
+      HBOX_OIDC_CLIENT_SECRET: ${HOMEBOX_OIDC_CLIENT_SECRET:?HOMEBOX_OIDC_CLIENT_SECRET is required}
+      HBOX_OIDC_SCOPE: openid profile email
+      HBOX_OIDC_AUTO_REDIRECT: "true"
+      HBOX_OIDC_VERIFY_EMAIL: "true"
+      HBOX_OIDC_BUTTON_TEXT: Sign in with Mu3Lab
+      # Kept stable for the life of the data: changing it invalidates every API key.
+      HBOX_AUTH_API_KEY_PEPPER: ${HOMEBOX_API_KEY_PEPPER:?HOMEBOX_API_KEY_PEPPER is required}
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/homebox/data:/data
+    networks: [mu3lab_frontend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://127.0.0.1:7745/api/v1/status"]
+      timeout: 5s
+      start_period: 120s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+networks:
+  mu3lab_frontend: {external: true}
