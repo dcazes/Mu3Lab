@@ -84,6 +84,105 @@ export function appSections(services: Service[]) {
     .filter((category) => category.apps.length > 0);
 }
 
+/** Apps that only work together; each app's manifest names its stack (``stack:``). */
+export const STACKS: { id: string; label: string }[] = [
+  { id: 'movies-and-shows', label: 'Movies and shows' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'voice', label: 'Voice' },
+];
+
+export interface LauncherSection {
+  id: string;
+  label: string;
+  apps: Service[];
+  /** A stack: its apps work only together, so a stopped one leaves it incomplete. */
+  stack: boolean;
+  /** AI and system apps most people never open: folded until someone opens them. */
+  foldedByDefault: boolean;
+}
+
+/** A stack's apps that people open come first, the helpers others need after (qBittorrent, LiteLLM). */
+function frontFirst(apps: Service[]): Service[] {
+  const needs = (service: Service, seen = new Set<string>()): string[] =>
+    service.dependencies.flatMap((id) => {
+      if (seen.has(id)) return [];
+      seen.add(id);
+      const found = apps.find((app) => app.id === id);
+      return [id, ...(found ? needs(found, seen) : [])];
+    });
+  const neededBy = new Map(apps.map((app) => [app.id, 0]));
+  for (const app of apps) for (const id of new Set(needs(app))) neededBy.set(id, (neededBy.get(id) ?? 0) + 1);
+  return [...apps].sort(
+    (a, b) => (neededBy.get(a.id) ?? 0) - (neededBy.get(b.id) ?? 0) || a.name.localeCompare(b.name),
+  );
+}
+
+/**
+ * Installed apps as the launcher shows them: everyday apps by category, then each stack, then
+ * the other AI apps and the system apps. An unknown stack still shows, after the known ones.
+ */
+export function launcherSections(services: Service[]): LauncherSection[] {
+  const loose = services.filter((service) => !service.stack);
+  const stackIds = [
+    ...STACKS.map((item) => item.id),
+    ...new Set(services.map((service) => service.stack || '').filter((id) => id && !STACKS.some((s) => s.id === id))),
+  ];
+  const stacks = stackIds
+    .map((id) => ({
+      id: `stack-${id}`,
+      label: STACKS.find((item) => item.id === id)?.label || categoryLabel(id.replaceAll('-', ' ')),
+      apps: frontFirst(services.filter((service) => service.stack === id)),
+      stack: true,
+      foldedByDefault: false,
+    }))
+    .filter((section) => section.apps.length > 0);
+  const rest = [
+    { id: 'ai', label: 'AI', apps: loose.filter((service) => service.group === 'ai') },
+    { id: 'system', label: 'System', apps: loose.filter((service) => service.group === 'infrastructure') },
+  ]
+    .filter((section) => section.apps.length > 0)
+    .map((section) => ({ ...section, stack: false, foldedByDefault: true }));
+  return [
+    ...appSections(loose.filter(isEverydayApp)).map((section) => ({
+      ...section,
+      stack: false,
+      foldedByDefault: false,
+    })),
+    ...stacks,
+    ...rest,
+  ];
+}
+
+const listNames = (apps: Service[]) =>
+  apps.length > 2
+    ? `${apps[0].name}, ${apps[1].name} and ${apps.length - 2} more`
+    : apps.map((s) => s.name).join(' and ');
+
+/** "6 of 7 running" and what is off, for a launcher section's header. */
+export function sectionSummary(section: Pick<LauncherSection, 'apps' | 'stack'>): {
+  count: string;
+  detail: string;
+  tone: Tone;
+} {
+  const { apps, stack } = section;
+  const running = apps.filter(isRunning).length;
+  const broken = apps.filter(needsAttention);
+  const busy = apps.filter((service) => isWorking(service) || service.display_state === 'checking');
+  const off = apps.filter((service) => service.display_state === 'stopped' || service.display_state === 'needs_setup');
+  // One app: its own state says it all ("Stopped"), with no count.
+  if (apps.length === 1) {
+    const [only] = apps;
+    return { count: statusText(only), detail: '', tone: isRunning(only) ? 'green' : stateTone(only.display_state) };
+  }
+  const count = `${running} of ${apps.length} running`;
+  if (broken.length)
+    return { count, detail: `${listNames(broken)} ${broken.length > 1 ? 'need' : 'needs'} attention`, tone: 'red' };
+  if (busy.length)
+    return { count, detail: busy.length === 1 ? statusText(busy[0]) : `${busy.length} busy`, tone: 'blue' };
+  if (off.length) return { count, detail: `${listNames(off)} stopped`, tone: stack ? 'amber' : 'gray' };
+  return { count, detail: '', tone: 'green' };
+}
+
 export function categoryLabel(category: string) {
   if (!category) return '';
   const known = CATEGORIES.find((item) => item.id === category);

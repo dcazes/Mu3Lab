@@ -5,6 +5,7 @@ name: FreeLLMAPI
 tier: core
 group: ai
 category: ai
+stack: chat
 tagline: Pools free AI providers with failover
 summary: Connects multiple AI providers through an OpenAI-compatible API, with model routing and automatic failover.
   Mu3Lab manages provider keys in AI providers settings; availability depends on each provider’s limits.

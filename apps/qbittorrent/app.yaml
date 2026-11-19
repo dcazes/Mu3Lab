@@ -8,6 +8,7 @@ name: qBittorrent
 tier: optional
 group: apps
 category: media
+stack: movies-and-shows
 tagline: Download torrents into your libraries
 summary: Download torrents and magnet links from the browser. Pick a category and the finished files land in
   Music, Audiobooks, Podcasts, Roms, Movies or Shows; films and episodes with no category go to Movies or Shows

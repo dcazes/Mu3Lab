@@ -520,3 +520,20 @@
   filter: grayscale(0.8);
   opacity: 0.6;
 }
+
+/* Tiles or list, beside the search box. */
+.toolbar .view-switch {
+  margin: 0 0 8px auto;
+  align-self: auto;
+}
+
+.view-switch button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+}
+
+.view-switch svg {
+  width: 15px;
+  height: 15px;
+}

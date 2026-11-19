@@ -8,6 +8,7 @@ name: LiveKit
 tier: optional
 group: ai
 category: ai
+stack: voice
 tagline: Talk to your private AI assistant
 summary: A voice assistant you talk to in the browser. Your speech is turned into text by Whisper and read back by a
   natural voice, both on this server. The answer comes from the model chosen in Settings, Voice Assistant, which can be

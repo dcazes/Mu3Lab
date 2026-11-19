@@ -46,6 +46,7 @@ class Service:
     id: str
     name: str
     category: str
+    stack: str
     group: str
     lifecycle: str
     stage: str
@@ -103,6 +104,7 @@ class Service:
             "id": self.id,
             "name": self.name,
             "category": self.category,
+            "stack": self.stack,
             "group": self.group,
             "lifecycle": self.lifecycle,
             "stop_warning": self.stop_warning,
@@ -168,6 +170,7 @@ def service_from(manifest: AppManifest) -> Service:
         id=manifest.id,
         name=manifest.name,
         category=manifest.category,
+        stack=manifest.stack or "",
         group=manifest.group,
         lifecycle=_lifecycle(manifest),
         stage=stage,

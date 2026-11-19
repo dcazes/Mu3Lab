@@ -3720,6 +3720,11 @@ export interface components {
       route_ready: boolean;
       /** Setup Action */
       setup_action: string;
+      /**
+       * Stack
+       * @default
+       */
+      stack?: string;
       /** Stage */
       stage: 'foundation' | 'core' | 'optional';
       /**

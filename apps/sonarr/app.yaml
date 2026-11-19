@@ -7,6 +7,7 @@ name: Sonarr
 tier: optional
 group: apps
 category: media
+stack: movies-and-shows
 tagline: Follows your shows and fetches new episodes
 summary: Pick the shows you follow and Sonarr downloads each new episode as it comes out, in the household's
   chosen quality (4K, or 1080p, 720p or DVD when that is all there is), then files it in Shows for Jellyfin.

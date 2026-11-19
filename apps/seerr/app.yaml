@@ -9,6 +9,7 @@ name: Seerr
 tier: optional
 group: apps
 category: media
+stack: movies-and-shows
 tagline: Ask for the films and shows you want to watch
 summary: Browse what's popular or search for a film or show, tap Request, and it is downloaded and appears in
   Jellyfin, usually within the hour. Administrators' requests go straight through, and they approve everyone

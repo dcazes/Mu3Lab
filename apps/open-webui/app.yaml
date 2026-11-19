@@ -5,6 +5,7 @@ name: Open WebUI
 tier: core
 group: ai
 category: ai
+stack: chat
 tagline: AI chat with your apps, voice and documents
 summary: Mu3Lab's chat. Chat with Mu3Lab's models, use an assistant for each of your apps, talk and listen with
   local voice when Speaches is installed, and ask questions about your own documents.

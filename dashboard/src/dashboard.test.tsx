@@ -37,16 +37,16 @@ describe('Home', () => {
     const ollama = service('ollama', 'Ollama', 'core', { category: 'ai' });
     localStorage.removeItem('mu3lab.homeFolded');
     renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    // AI and infrastructure apps share one last group, folded to icons until opened.
-    const plumbing = () => screen.getByRole('button', { name: /AI & system/ });
+    // AI apps outside a stack come last, folded to icons until opened.
+    const plumbing = () => screen.getByRole('button', { name: 'AI' });
     expect(plumbing()).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama: Running');
     expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
     fireEvent.click(plumbing());
     expect(plumbing()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Ollama: Running' })).not.toHaveAttribute('title');
     fireEvent.click(plumbing());
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama');
+    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama: Running');
     // Everyday apps stay open under their own section.
     expect(screen.getByRole('button', { name: /Productivity/ })).toHaveAttribute('aria-expanded', 'true');
 
@@ -64,6 +64,46 @@ describe('Home', () => {
     panel = screen.getByRole('dialog', { name: 'Mealie' });
     expect(within(panel).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: 'Start' })).toBeInTheDocument();
+  });
+
+  it('groups a stack, says what of it is stopped, and marks working chat assistants', () => {
+    stubFetch(() => ({}));
+    const jellyfin = service('jellyfin', 'Jellyfin', 'optional', { stack: 'movies-and-shows', category: 'media' });
+    const qbittorrent = service('qbittorrent', 'qBittorrent', 'optional', { stack: 'movies-and-shows' });
+    const radarr = service('radarr', 'Radarr', 'optional', {
+      stack: 'movies-and-shows',
+      dependencies: ['qbittorrent'],
+      display_state: 'stopped',
+      allowed_actions: ['start'],
+    });
+    const immich = service('immich', 'Immich', 'optional', { category: 'media' });
+    const data = dashboardData([jellyfin, qbittorrent, radarr, immich]);
+    data.chat = {
+      ...data.chat,
+      assistants: [
+        { id: 'immich', name: 'Immich', status: 'ready', detail: 'Available in chat.' },
+        { id: 'jellyfin', name: 'Jellyfin', status: 'connector_down', detail: 'Its chat connector is stopped.' },
+      ],
+    };
+    localStorage.removeItem('mu3lab.homeFolded');
+    renderWithDashboard(<HomePage />, data);
+    const stack = screen.getByRole('region', { name: 'Movies and shows' });
+    expect(stack).toHaveTextContent('2 of 3 running · Radarr stopped');
+    // The app people open comes first, the helper the others need last.
+    expect(
+      within(stack)
+        .getAllByRole('button', { name: /: / })
+        .map((tile) => tile.getAttribute('aria-label')),
+    ).toEqual(['Jellyfin: Running', 'Radarr: Stopped', 'qBittorrent: Running']);
+    // A stopped tile is greyed and no taller: its state is a dot, not a line of text.
+    const stopped = within(stack).getByRole('button', { name: 'Radarr: Stopped' });
+    expect(stopped).toHaveClass('is-off');
+    expect(stopped).not.toHaveTextContent('Stopped');
+    expect(within(stack).getByRole('button', { name: 'Start all' })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('button', { name: 'Immich: Running' })).getByText('Chat assistant works'),
+    ).toBeInTheDocument();
+    expect(within(stack).getByText('Chat assistant unavailable')).toBeInTheDocument();
   });
 
   it('opens one System chip on donuts and a sortable list of every app, with core part by part', () => {

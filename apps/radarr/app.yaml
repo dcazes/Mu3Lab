@@ -7,6 +7,7 @@ name: Radarr
 tier: optional
 group: apps
 category: media
+stack: movies-and-shows
 tagline: Finds and downloads the films you want
 summary: Add a film and Radarr downloads it once a good copy is out, in the household's chosen quality (4K,
   or 1080p, 720p or DVD when that is all there is), then files it in Movies for Jellyfin. It finds films on the

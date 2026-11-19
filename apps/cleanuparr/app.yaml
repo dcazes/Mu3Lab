@@ -8,6 +8,7 @@ name: Cleanuparr
 tier: optional
 group: apps
 category: media
+stack: movies-and-shows
 tagline: Replaces stuck downloads and finds missing ones
 summary: When a film or episode Sonarr or Radarr asked for stops downloading for a whole day, Cleanuparr removes
   it, blocks that copy and has another found. Every half hour it also searches again for one film or episode

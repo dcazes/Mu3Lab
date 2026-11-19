@@ -5746,6 +5746,11 @@
             "title": "Setup Action",
             "type": "string"
           },
+          "stack": {
+            "default": "",
+            "title": "Stack",
+            "type": "string"
+          },
           "stage": {
             "anyOf": [
               {

@@ -5,6 +5,7 @@ name: Speaches
 tier: optional
 group: ai
 category: ai
+stack: voice
 tagline: Private speech-to-text and text-to-speech
 summary: Turns speech into text with Whisper and reads text aloud with natural voices, on your own server. Chat,
   Home Assistant, other apps, and your own devices use it through Mu3Lab's AI gateway; audio never leaves home.

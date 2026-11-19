@@ -149,6 +149,8 @@ class Service(ApiModel):
     id: str
     name: str
     category: str
+    # The stack of apps it works with (Home groups them), or "".
+    stack: str = ""
     lifecycle: Literal["always_on"] | Literal["shared"] | Literal["optional"]
     stop_warning: str = ""
     # Named parts of the app (Compose service -> label), shown with their state on its page.

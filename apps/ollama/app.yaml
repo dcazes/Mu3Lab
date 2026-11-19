@@ -5,6 +5,7 @@ name: Ollama
 tier: core
 group: ai
 category: ai
+stack: chat
 tagline: Runs AI models on your server
 summary: Runs AI models and generates text embeddings on your server. Mu3Lab uses Ollama as an internal API for
   document search and the optional private chat model chosen in Settings; it has no browser interface.

@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Check, ChevronRight, PackageSearch, Plus, Search } from 'lucide-react';
+import { ArrowUpCircle, Check, ChevronRight, LayoutGrid, List, PackageSearch, Plus, Search } from 'lucide-react';
 import { type MouseEvent, useEffect, useMemo, useState } from 'react';
 import type { AppSize, AppSizesResponse, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
@@ -20,6 +20,7 @@ import {
 import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { useApplyUpdate } from './AdvancedTab';
+import { AppStacks } from './AppStacks';
 import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
 import { activeJob, JobProgress } from './JobProgress';
@@ -27,6 +28,53 @@ import { useInstallBatch } from './useInstallBatch';
 
 const GROUP_ORDER: Group[] = ['apps', 'ai', 'infrastructure'];
 const SELECTION_KEY = 'mu3lab.discoverSelection';
+const VIEW_KEY = 'mu3lab.installedView';
+
+type InstalledView = 'tiles' | 'list';
+
+/** Installed apps as stacks of tiles (the default) or as a list with updates and sign-in; remembered here. */
+function useInstalledView() {
+  const [view, setView] = useState<InstalledView>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'tiles';
+    } catch {
+      return 'tiles';
+    }
+  });
+  const choose = (next: InstalledView) => {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // Storage can be unavailable (private mode); the choice just won't persist.
+    }
+  };
+  return [view, choose] as const;
+}
+
+function ViewSwitch({ view, onChange }: { view: InstalledView; onChange: (view: InstalledView) => void }) {
+  const choices = [
+    { id: 'tiles', label: 'Tiles', icon: LayoutGrid },
+    { id: 'list', label: 'List', icon: List },
+  ] as const;
+  return (
+    <div className="segmented view-switch" role="radiogroup" aria-label="Show installed apps as">
+      {choices.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          role="radio"
+          aria-checked={view === id}
+          aria-label={label}
+          title={label}
+          onClick={() => onChange(id)}
+        >
+          <Icon aria-hidden="true" />
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /** Discover picks survive a visit to an app's detail page and back. */
 function useSelection() {
@@ -182,6 +230,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
   const [query, setQuery] = useState('');
   const [stored, setSelected] = useSelection();
   const [planning, setPlanning] = useState(false);
+  const [view, setView] = useInstalledView();
   const installBatch = useInstallBatch();
   const term = query.trim().toLowerCase();
 
@@ -247,6 +296,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
             { label: 'Discover', to: '/apps/discover', count: available.filter(canInstall).length },
           ]}
         />
+        {!discover && <ViewSwitch view={view} onChange={setView} />}
         <label className="search-input">
           <Search />
           <input
@@ -312,6 +362,8 @@ export function AppsPage({ discover }: { discover: boolean }) {
             </section>
           ))}
         </>
+      ) : view === 'tiles' ? (
+        <AppStacks services={shown} />
       ) : (
         GROUP_ORDER.map((name) => {
           const group = shown.filter((service) => service.group === name);

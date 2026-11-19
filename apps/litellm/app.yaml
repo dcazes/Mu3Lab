@@ -5,6 +5,7 @@ name: LiteLLM
 tier: core
 group: ai
 category: ai
+stack: chat
 tagline: One gateway for all AI models
 summary: Provides a unified API for local and external AI models. Mu3Lab uses LiteLLM to route chat and embedding
   requests through one gateway for connected apps.

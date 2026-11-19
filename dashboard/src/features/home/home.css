@@ -410,20 +410,47 @@
   line-height: 1.3;
 }
 
-.tile-state {
+.tile-icon {
+  position: relative;
   display: inline-flex;
-  white-space: nowrap;
-  align-items: center;
-  gap: 5px;
-  margin-top: -6px;
-  color: var(--text-3);
-  font-size: 11.5px;
 }
 
-.tile-state .dot {
+/* Anything but running is a dot on the icon's corner, so every tile keeps the same size. */
+.tile-icon .dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 11px;
+  height: 11px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.mini-tile .tile-icon .dot {
+  right: -4px;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
+}
+
+/* The hollow "stopped" ring needs a solid centre where it overlaps an icon. */
+.tile-icon .dot-gray {
+  background: var(--surface);
+}
+
+/* Stopped: greyed, same size, so running apps stand out at a glance. */
+.is-off .app-icon {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.tile.is-off {
+  background: var(--surface-2);
   box-shadow: none;
-  width: 6px;
-  height: 6px;
+}
+
+.tile.is-off .tile-name {
+  color: var(--text-3);
+  font-weight: 400;
 }
 
 .tile-muted .app-icon {
@@ -431,9 +458,83 @@
   opacity: 0.7;
 }
 
+/* This person's chat assistant for the app: solid when it works, grey when it doesn't. */
+.tile-chat {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.tile-chat svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tile-chat.is-ready {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
 .launcher-group h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-height: 28px;
   margin: 0 0 8px;
   font-size: inherit;
+  font-weight: 400;
+}
+
+.launcher-summary {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.launcher-summary.tone-amber .launcher-count {
+  color: var(--amber-text);
+}
+
+.launcher-summary.tone-red .launcher-count {
+  color: var(--red-text);
+}
+
+.launcher-summary.tone-blue .launcher-count {
+  color: var(--blue-text);
+}
+
+.launcher-group .launcher-action {
+  margin-left: auto;
+}
+
+/* On a phone: name and button on one line, what is running on the next. */
+@media (max-width: 640px) {
+  .launcher-group h3 .launcher-toggle {
+    order: 1;
+  }
+
+  .launcher-group h3 .launcher-action,
+  .launcher-group h3 .launcher-pick {
+    order: 2;
+  }
+
+  .launcher-summary {
+    order: 3;
+    flex-basis: 100%;
+    padding-left: 20px;
+  }
+}
+
+/* A stack is one unit: a hairline frame around its tiles. */
+.launcher-group.is-stack {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
 .launcher-toggle {
@@ -487,14 +588,6 @@
 
 .mini-tile:hover {
   border-color: var(--border-strong);
-}
-
-.mini-tile .dot {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 7px;
-  height: 7px;
 }
 
 .status-strip {
@@ -914,11 +1007,6 @@
   color: var(--text-2);
 }
 
-/* The hollow "stopped" ring needs a solid centre where it overlaps an icon. */
-.mini-tile .dot-gray {
-  background: var(--surface);
-}
-
 /* "77.2 GB on Storage": which other drive holds an app's data. Unlike the data and program split, it
    stays on narrow screens. */
 .legend-drive {
@@ -937,7 +1025,7 @@
 }
 
 .launcher-group .launcher-pick {
-  margin-left: 10px;
+  margin-left: auto;
   color: var(--text-3);
   font-size: 12px;
 }
