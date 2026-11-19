@@ -1,0 +1,15 @@
+# go2rtc for Mu3Lab. It holds no camera addresses or logins: Mu3Lab adds the streams through the
+# API when someone opens the live view (ctl/camera.py), and go2rtc connects to the camera only
+# while a viewer is connected.
+api:
+  # Reached only through Mu3Lab, which admits administrators.
+  listen: ":1984"
+# No RTSP re-streaming or direct WebRTC: the dashboard plays the stream through Mu3Lab.
+rtsp:
+  listen: ""
+webrtc:
+  listen: ""
+srtp:
+  listen: ""
+log:
+  level: warn

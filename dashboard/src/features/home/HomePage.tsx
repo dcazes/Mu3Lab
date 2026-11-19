@@ -1,8 +1,10 @@
-import { ArrowRight, X } from 'lucide-react';
+import { ArrowRight, Check, Pencil, Plus, X } from 'lucide-react';
+import { useState } from 'react';
+import { Button } from '../../components/Button';
 import { Link } from '../../lib/router';
-import { isInstalled } from '../../lib/services';
 import { useDashboard } from '../../state/dashboard';
-import { AppStacks } from '../apps/AppStacks';
+import { BoardView, type Panel } from './board/Board';
+import { useBoard } from './board/useBoard';
 import { CoreSetupProgress } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
@@ -46,9 +48,13 @@ function Attention() {
   );
 }
 
+// On a computer the add list opens beside the board; on a phone it would cover it, so it waits to be asked for.
+const wide = () => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1001px)').matches;
+
 export function HomePage() {
   const { data } = useDashboard();
-  const installed = data.services.services.filter(isInstalled);
+  const board = useBoard();
+  const [panel, setPanel] = useState<Panel>('closed');
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   return (
     <div className="home">
@@ -61,12 +67,53 @@ export function HomePage() {
           <p>{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
         </div>
         <SystemStatus />
+        <div className="home-edit">
+          {board.editing ? (
+            <>
+              <Button variant="secondary" size="sm" icon={Plus} onClick={() => setPanel('add')}>
+                Add widget
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  board.cancel();
+                  setPanel('closed');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Check}
+                loading={board.saving}
+                onClick={() => void board.save().then((saved) => saved && setPanel('closed'))}
+              >
+                Done
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={Pencil}
+              disabled={!board.loaded}
+              onClick={() => {
+                board.startEditing();
+                setPanel(wide() ? 'add' : 'closed');
+              }}
+            >
+              Edit
+            </Button>
+          )}
+        </div>
       </header>
       <Attention />
       <CoreSetupProgress />
       <GetStarted />
-      <section aria-labelledby="apps-heading">
-        <AppStacks services={installed} title="Your apps" foldedIcons={false} />
+      <section aria-label="Your board">
+        <BoardView board={board} panel={panel} setPanel={setPanel} />
       </section>
     </div>
   );

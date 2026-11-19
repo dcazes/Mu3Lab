@@ -72,18 +72,21 @@ class RegistryV3Tests(unittest.TestCase):
                 "sonarr",
                 "radarr",
                 "seerr",
+                "cleanuparr",
                 "n8n",
                 "wallos",
                 "homebox",
+                "go2rtc",
             },
         )
         for service in optional:
             with self.subTest(service=service.id):
                 self.assertTrue((service.compose_path(ROOT) / "docker-compose.yml").is_file())
                 # Apps people open get a private address; internal services (speech, maps) have none,
-                # and an app kept on the home network (Jellyfin) opens at its home address instead.
+                # and an app kept on the home network (Jellyfin) opens at its home address instead,
+                # unless it also has a tailnet address of its own (Seerr).
                 at_home = service.manifest.service.home_port is not None
-                routed = service.manifest.ui.available and not at_home
+                routed = service.manifest.ui.available and (not at_home or service.manifest.route is not None)
                 self.assertEqual(service.private_https_port is not None, routed)
                 self.assertEqual(service.proxy_port is not None, routed)
                 if at_home:

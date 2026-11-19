@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { AppDetailPage } from './features/apps/AppDetailPage';
 import { AppsPage } from './features/apps/AppsPage';
+import { AppStacks } from './features/apps/AppStacks';
 import { CalendarPage } from './features/calendar/CalendarPage';
 import { HomePage } from './features/home/HomePage';
 import { IntegrationsSettings } from './features/settings/IntegrationsSettings';
@@ -22,7 +23,83 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Home', () => {
+const BOARD = {
+  ok: true,
+  customized: false,
+  columns: 4,
+  widgets: [
+    { id: 'weather', kind: 'weather', w: 2, h: 1, settings: { units: 'celsius' } },
+    { id: 'apps', kind: 'apps', w: 2, h: 1, settings: {} },
+  ],
+  kinds: ['apps', 'weather', 'calendar', 'stocks', 'ask'].map((kind) => ({
+    kind,
+    min_w: 1,
+    min_h: 1,
+    max_w: 4,
+    max_h: 4,
+    w: 2,
+    h: kind === 'ask' ? 2 : 1,
+  })),
+};
+
+describe('Home board', () => {
+  it('shows the board, and Edit adds a widget that Done saves', async () => {
+    const fetchMock = stubFetch((path, init) => {
+      if (path === '/api/v1/home/board' && init?.method === 'PUT')
+        return { ...BOARD, widgets: JSON.parse(String(init.body)).widgets };
+      if (path === '/api/v1/home/board') return BOARD;
+      if (path.startsWith('/api/v1/home/stocks')) return { ok: true, quotes: [] };
+      return {};
+    });
+    const immich = service('immich', 'Immich', 'optional', {
+      identity: identity({ launch_url: 'https://host/immich' }),
+    });
+    renderWithDashboard(<HomePage />, dashboardData([immich]));
+    // The Apps widget counts running apps and opens the running everyday ones.
+    const apps = await screen.findByRole('article', { name: 'Apps' });
+    expect(apps).toHaveTextContent('1 of 1 running');
+    expect(within(apps).getByRole('link', { name: 'Open Immich' })).toHaveAttribute('href', 'https://host/immich');
+    // Weather with no place asks for one.
+    expect(
+      within(screen.getByRole('article', { name: 'Weather' })).getByRole('button', { name: 'Choose a place' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    // A phone-sized window waits to be asked for the list, so it never covers the board.
+    fireEvent.click(screen.getByRole('button', { name: 'Add widget' }));
+    const panel = screen.getByRole('complementary', { name: 'Add a widget' });
+    // Apps belongs on a board once.
+    expect(within(panel).getByRole('button', { name: 'Apps is on your board' })).toBeDisabled();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add Stocks' }));
+    // A widget with settings opens them straight away.
+    const settings = screen.getByRole('complementary', { name: 'Stocks settings' });
+    fireEvent.change(within(settings).getByRole('textbox', { name: 'Ticker symbol' }), { target: { value: 'aapl' } });
+    fireEvent.click(within(settings).getByRole('button', { name: 'Add' }));
+    expect(within(settings).getByRole('button', { name: 'Remove AAPL' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/home/board', expect.objectContaining({ method: 'PUT' })),
+    );
+    const put = fetchMock.mock.calls.find(([path, init]) => path === '/api/v1/home/board' && init?.method === 'PUT');
+    const saved = JSON.parse(String(put![1]!.body)).widgets;
+    expect(saved.map((widget: { kind: string }) => widget.kind)).toEqual(['stocks', 'weather', 'apps']);
+    expect(saved[0].settings).toEqual({ symbols: ['AAPL'] });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument());
+  });
+
+  it('drops a half-made arrangement on Cancel', async () => {
+    const fetchMock = stubFetch((path) => (path === '/api/v1/home/board' ? BOARD : {}));
+    renderWithDashboard(<HomePage />, dashboardData([]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Weather' }));
+    expect(screen.queryByRole('article', { name: 'Weather' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('article', { name: 'Weather' })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/v1/home/board', expect.objectContaining({ method: 'PUT' }));
+  });
+});
+
+describe('App stacks', () => {
   it('shows a picked app in a card beside the tiles, never a pop-up, and folds Backups & system to its heading', () => {
     stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
@@ -36,7 +113,10 @@ describe('Home', () => {
     });
     const kopia = service('kopia-ui', 'Kopia backups', 'core', { category: 'system' });
     localStorage.removeItem('mu3lab.homeFolded');
-    renderWithDashboard(<HomePage />, dashboardData([immich, mealie, kopia]));
+    renderWithDashboard(
+      <AppStacks services={[immich, mealie, kopia]} foldedIcons={false} />,
+      dashboardData([immich, mealie, kopia]),
+    );
     // Backups & system come last, folded on Home to the heading alone.
     const system = () => screen.getByRole('button', { name: 'Backups & system' });
     expect(system()).toHaveAttribute('aria-expanded', 'false');
@@ -89,7 +169,7 @@ describe('Home', () => {
       ],
     };
     localStorage.removeItem('mu3lab.homeFolded');
-    renderWithDashboard(<HomePage />, data);
+    renderWithDashboard(<AppStacks services={[jellyfin, qbittorrent, radarr, immich]} />, data);
     const stack = screen.getByRole('region', { name: 'Torrenting' });
     expect(stack).toHaveTextContent('2 of 3 running');
     expect(stack).not.toHaveTextContent('Radarr stopped');

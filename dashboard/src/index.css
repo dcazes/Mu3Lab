@@ -4,6 +4,7 @@
 @import './shell/shell.css';
 @import './styles/components.css';
 @import './features/home/home.css';
+@import './features/home/board/board.css';
 @import './features/apps/apps.css';
 @import './features/chat/chat.css';
 @import './features/calendar/calendar.css';

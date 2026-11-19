@@ -26,8 +26,10 @@ from ctl.api.routes import (
     ai_models,
     backup_hooks,
     calendar,
+    camera,
     chat,
     chat_calendar,
+    home,
     identity,
     install_batches,
     jobs,
@@ -125,8 +127,11 @@ def create_app(dist: Path = DIST) -> FastAPI:
         people,
         voice,
         ports,
+        home,
+        camera,
     ):
         app.include_router(module.router)
+    app.include_router(camera.live)
     app.include_router(snapshot.router)
     app.middleware("http")(_nudge_after_changes)
     if dist.is_dir():

@@ -6,6 +6,7 @@ import { AiSettings } from './AiSettings';
 import { IntegrationsSettings } from './IntegrationsSettings';
 import { useIsAdmin } from '../../state/dashboard';
 import { PeopleSettings } from './PeopleSettings';
+import { HomeDevicesSettings } from './HomeDevicesSettings';
 import { PortsSettings } from './PortsSettings';
 import { settingsSectionsFor } from './sections';
 import { SecuritySettings } from './SecuritySettings';
@@ -24,6 +25,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   security: SecuritySettings,
   system: SystemSettings,
   ports: PortsSettings,
+  'home-devices': HomeDevicesSettings,
   'whats-new': WhatsNew,
 };
 

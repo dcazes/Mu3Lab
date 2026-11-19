@@ -106,6 +106,164 @@ class PortsResponse(ApiModel):
     apps: list[AppPorts]
 
 
+class HomeWidget(ApiModel):
+    id: str
+    kind: Literal["apps", "weather", "calendar", "stocks", "ask", "thermostat", "camera"]
+    w: int
+    h: int
+    # Each kind's own settings (ctl/home_board.py checks them): weather {units, place}, stocks
+    # {symbols}, calendar {days}.
+    settings: dict[str, JsonValue] = {}
+
+
+class HomeWidgetKind(ApiModel):
+    kind: Literal["apps", "weather", "calendar", "stocks", "ask", "thermostat", "camera"]
+    min_w: int
+    min_h: int
+    max_w: int
+    max_h: int
+    w: int
+    h: int
+
+
+class HomeBoard(ApiModel):
+    ok: bool = True
+    widgets: list[HomeWidget]
+    # False until the person changes their board: they see the starter set.
+    customized: bool
+    columns: int
+    kinds: list[HomeWidgetKind]
+
+
+class HomeBoardRequest(ApiModel):
+    widgets: list[dict[str, JsonValue]]
+
+
+class WeatherDay(ApiModel):
+    date: str
+    code: int
+    high: float | None = None
+    low: float | None = None
+    rain_chance: float | None = None
+
+
+class WeatherResponse(ApiModel):
+    ok: bool = True
+    units: Literal["celsius", "fahrenheit"]
+    temperature: float | None = None
+    feels_like: float | None = None
+    humidity: float | None = None
+    wind: float | None = None
+    wind_unit: str
+    code: int
+    is_day: bool
+    days: list[WeatherDay]
+
+
+class Place(ApiModel):
+    name: str
+    region: str
+    latitude: float
+    longitude: float
+
+
+class PlacesResponse(ApiModel):
+    ok: bool = True
+    places: list[Place]
+
+
+class StockQuote(ApiModel):
+    symbol: str
+    found: bool
+    name: str = ""
+    price: float | None = None
+    change: float | None = None
+    change_percent: float | None = None
+    currency: str = ""
+    points: list[float] = []
+
+
+class StocksResponse(ApiModel):
+    ok: bool = True
+    quotes: list[StockQuote]
+
+
+class ThermostatStatus(ApiModel):
+    ok: bool = True
+    paired: bool
+    name: str = ""
+    units: Literal["celsius", "fahrenheit"] = "celsius"
+    # Temperatures in Celsius, as HomeKit reports them; the dashboard shows the thermostat's own unit.
+    current: float | None = None
+    humidity: float | None = None
+    target: float | None = None
+    heat_to: float | None = None
+    cool_to: float | None = None
+    mode: Literal["off", "heat", "cool", "auto"] = "off"
+    state: Literal["idle", "heating", "cooling"] = "idle"
+    modes: list[Literal["off", "heat", "cool", "auto"]] = []
+    minimum: float = 10
+    maximum: float = 33
+    step: float = 0.5
+
+
+class ThermostatChange(ApiModel):
+    mode: Literal["off", "heat", "cool", "auto"] | None = None
+    target: float | None = Field(default=None, ge=0, le=50)
+    heat_to: float | None = Field(default=None, ge=0, le=50)
+    cool_to: float | None = Field(default=None, ge=0, le=50)
+
+
+class HomeKitDevice(ApiModel):
+    id: str
+    name: str
+    model: str
+    paired: bool
+
+
+class HomeKitDevices(ApiModel):
+    ok: bool = True
+    devices: list[HomeKitDevice]
+
+
+class ThermostatPairRequest(ApiModel):
+    device_id: str = Field(min_length=1, max_length=40)
+    code: str = Field(min_length=8, max_length=12)
+
+
+class CameraSettings(ApiModel):
+    ok: bool = True
+    configured: bool
+    name: str
+    host: str
+    port: int
+    username: str
+    # The password is never sent back; this says whether one is saved.
+    has_password: bool
+    sd_path: str
+    hd_path: str
+
+
+class CameraSettingsRequest(ApiModel):
+    name: str = Field(default="Front door", max_length=40)
+    host: str = Field(max_length=253)
+    port: int = Field(default=554, ge=1, le=65535)
+    username: str = Field(default="", max_length=80)
+    # Blank keeps the saved password.
+    password: str = Field(default="", max_length=200)
+    sd_path: str = Field(default="", max_length=120)
+    hd_path: str = Field(default="", max_length=120)
+
+
+class AskRequest(ApiModel):
+    question: str
+
+
+class AskResponse(ApiModel):
+    ok: bool = True
+    answer: str
+
+
 class ServiceCheck(ApiModel):
     state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
     detail: str

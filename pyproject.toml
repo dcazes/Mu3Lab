@@ -15,6 +15,7 @@ dependencies = [
     "icalendar==7.3.0",
     "recurring-ical-events==3.8.2",
     "jsonschema==4.26.0",
+    "aiohomekit==4.0.1",
 ]
 
 [dependency-groups]

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Service } from '../../api';
 import { dashboardData, renderWithDashboard, service, stubFetch } from '../../test/fixtures';
-import { HomePage } from '../home/HomePage';
+import { AppStacks } from './AppStacks';
 import { inOrder, neededToStart, runningDependents, unneededAfterStop } from './lifecycle';
 
 afterEach(() => {
@@ -46,11 +46,11 @@ describe('apps that need each other', () => {
   });
 });
 
-describe('Home select mode', () => {
+describe('Select mode on the app stacks', () => {
   it('picks apps by highlighting them and starts them with what they need', async () => {
     const all = apps({ ollama: stopped, freellmapi: stopped, litellm: stopped, surfsense: stopped });
     const fetchMock = stubFetch((path) => (path.endsWith('/actions') ? { ok: true, job: { id: 'j' } } : undefined));
-    renderWithDashboard(<HomePage />, dashboardData(all));
+    renderWithDashboard(<AppStacks services={all} />, dashboardData(all));
     fireEvent.click(screen.getByRole('button', { name: 'Select' }));
     const tile = screen.getByRole('button', { name: /^SurfSense/ });
     fireEvent.click(tile);

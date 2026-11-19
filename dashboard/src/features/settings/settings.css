@@ -392,3 +392,66 @@ code.ports-address {
     display: block;
   }
 }
+
+/* ---------- Home devices ---------- */
+.device-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-title svg {
+  width: 17px;
+  height: 17px;
+  color: var(--text-2);
+}
+
+.device-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-2);
+}
+
+.device-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.device-advanced summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.device-advanced[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.device-hint {
+  font-size: 12.5px;
+}
+
+.device-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.device-picture {
+  max-width: 480px;
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}

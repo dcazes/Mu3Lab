@@ -1,0 +1,31 @@
+# go2rtc — see ctl/manifest/models.py for every field.
+# The front-door camera's live view on Home, for administrators. go2rtc turns the camera's stream into one a
+# browser can play. Mu3Lab keeps the camera's address and login (Settings > Home devices) and hands go2rtc the
+# streams when someone watches (ctl/camera.py); go2rtc connects to the camera only then, and records nothing.
+id: go2rtc
+capabilities: [camera_stream]
+name: go2rtc
+tier: optional
+group: apps
+category: home
+tagline: Live view of your front-door camera
+summary: Shows your camera's live picture on the Home page for administrators, at home or away over the tailnet.
+  It connects to the camera only while someone is watching and records nothing. Add the camera in Settings, Home
+  devices.
+version: "1.9.15"
+upstream: AlexxIT/go2rtc
+service:
+  local_port: 8498
+  health:
+    path: /api
+sign_in:
+  method: none
+  note: No page of its own; Mu3Lab relays the live view to administrators only.
+ui:
+  available: false
+  unavailable_reason: go2rtc has no page here; add the Camera widget on Home (administrators only).
+backup:
+  include: false
+  reason: It keeps no data of its own; Mu3Lab keeps the camera's settings.
+resource_guidance: Light, about 20 to 40 MB of memory, and a little processor time while someone watches.
+setup_action: Install go2rtc to watch your front-door camera live on Home.

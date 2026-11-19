@@ -1,0 +1,88 @@
+import { ArrowRight, MessageCircle, Send } from 'lucide-react';
+import { type FormEvent, useState } from 'react';
+import { toast } from 'sonner';
+import { type AskResponse, postJsonApi } from '../../../api';
+import { Button } from '../../../components/Button';
+import { errorText } from '../../../lib/format';
+import { navigate } from '../../../lib/router';
+import type { WidgetProps } from './widgets';
+
+/**
+ * A quick question to the household's assistant, answered right here. Anything that needs the
+ * person's own data in an app goes on in Chat, where the app assistants are.
+ */
+export function AskWidget(_props: WidgetProps) {
+  const [question, setQuestion] = useState('');
+  const [asked, setAsked] = useState('');
+  const [answer, setAnswer] = useState('');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = question.trim();
+    if (!text || pending) return;
+    setPending(true);
+    setAsked(text);
+    setAnswer('');
+    setError('');
+    try {
+      const result = await postJsonApi<AskResponse>('/api/v1/home/ask', { question: text });
+      setAnswer(result.answer);
+      setQuestion('');
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  // Chat apps open on their own page, so the question goes with the person on the clipboard.
+  const continueInChat = async () => {
+    const text = asked || question.trim();
+    if (text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast.success('Your question is copied: paste it into chat.');
+      } catch {
+        /* Chat still opens; the question is on screen to retype. */
+      }
+    }
+    navigate('/chat');
+  };
+
+  return (
+    <div className="ask">
+      <form className="ask-form" onSubmit={(event) => void submit(event)}>
+        <MessageCircle aria-hidden className="ask-icon" />
+        <input
+          className="widget-input"
+          aria-label="Ask the Mu3Lab assistant"
+          placeholder="Ask anything…"
+          value={question}
+          maxLength={2000}
+          onChange={(event) => setQuestion(event.target.value)}
+        />
+        <Button type="submit" variant="primary" size="sm" icon={Send} loading={pending} aria-label="Ask" />
+      </form>
+      {(pending || answer || error) && (
+        <div className="ask-answer" aria-live="polite">
+          <p className="ask-question">{asked}</p>
+          {pending ? (
+            <p className="muted">Thinking…</p>
+          ) : error ? (
+            <p className="widget-error">{error}</p>
+          ) : (
+            <p className="ask-text">{answer}</p>
+          )}
+        </div>
+      )}
+      {(answer || error) && (
+        <button type="button" className="widget-link ask-continue" onClick={() => void continueInChat()}>
+          Continue in Chat
+          <ArrowRight />
+        </button>
+      )}
+    </div>
+  );
+}

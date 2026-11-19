@@ -1,0 +1,20 @@
+name: mu3lab-go2rtc
+
+services:
+  # Its own network, not Mu3Lab's shared ones: no other app can reach its API, and it can still
+  # reach the camera on the home network.
+  go2rtc:
+    image: alexxit/go2rtc:1.9.15@sha256:e098de5c2f8040dc3d4784ed2d5cfdac3b0979f9349afe587ef6a670a14b9f4d
+    restart: unless-stopped
+    ports: ["127.0.0.1:8498:1984"]
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:1984/api"]
+      timeout: 5s
+      start_period: 30s
+      start_interval: 5s
+      interval: 5m
+      retries: 3

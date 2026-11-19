@@ -1,5 +1,6 @@
 import {
   Bot,
+  House,
   KeyRound,
   type LucideIcon,
   Mic,
@@ -33,6 +34,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'voice', label: 'Voice assistant', icon: Mic, group: 'AI' },
   { id: 'people', label: 'People', icon: Users, adminOnly: true, group: 'Household' },
   { id: 'sign-in', label: 'Sign-in', icon: KeyRound, group: 'Household' },
+  { id: 'home-devices', label: 'Home devices', icon: House, adminOnly: true, group: 'Household' },
   { id: 'security', label: 'Security & backups', icon: ShieldCheck, group: 'Server' },
   { id: 'system', label: 'System', icon: ServerCog, adminOnly: true, group: 'Server' },
   { id: 'ports', label: 'Ports', icon: Network, adminOnly: true, group: 'Server' },

@@ -45,6 +45,7 @@ class MobileClientTests(unittest.TestCase):
                 "sonarr",
                 "radarr",
                 "seerr",
+                "cleanuparr",
                 "n8n",
                 "wallos",
                 "homebox",

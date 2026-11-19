@@ -5,6 +5,7 @@ import {
   BookOpenText,
   Boxes,
   Bot,
+  Cctv,
   Compass,
   Eraser,
   Flame,
@@ -93,6 +94,7 @@ const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   seerr: { icon: Popcorn, color: '#6d28d9' },
   homebox: { icon: Boxes, color: '#6c4a2e' },
   wallos: { icon: WalletCards, color: '#007bff' },
+  go2rtc: { icon: Cctv, color: '#0f766e' },
 };
 
 // A near-black brand color would vanish in dark mode and a near-white one (LiveKit's) in light mode;
