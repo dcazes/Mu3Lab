@@ -613,10 +613,10 @@ class AppManifest(Model):
     tier: Literal["foundation", "core", "optional"]
     group: Literal["apps", "ai", "infrastructure"]
     # Where Apps > Discover lists the app; the dashboard names and orders these (lib/services.ts).
-    category: Literal["finance", "home", "media", "documents", "places", "knowledge", "ai", "system"]
-    # Apps that only work together (Home's stacks, e.g. Movies and shows); the dashboard names and
+    category: Literal["finance", "home", "media", "documents", "places", "knowledge", "automation", "ai", "system"]
+    # Apps that only work together (Home's stacks, e.g. Torrenting); the dashboard names and
     # orders these (lib/services.ts) and shows how many of each stack are running.
-    stack: Literal["movies-and-shows", "chat", "voice"] | None = None
+    stack: Literal["streaming", "torrenting", "chat", "voice"] | None = None
     tagline: str
     summary: str
     version: str  # the maintainer-approved release; image digests live in docker-compose.yml

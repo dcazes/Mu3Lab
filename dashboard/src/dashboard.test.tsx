@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('opens a quick panel for every installed app, grouped by category, with Open and its controls', () => {
+  it('shows a picked app in a card beside the tiles, never a pop-up, and folds Backups & system to its heading', () => {
     stubFetch(() => ({}));
     const immich = service('immich', 'Immich', 'optional', {
       identity: identity({ launch_url: 'https://host.ts.net:8449/auth/login?autoLaunch=1' }),
@@ -34,44 +34,47 @@ describe('Home', () => {
       identity: identity(),
       allowed_actions: ['start'],
     });
-    const ollama = service('ollama', 'Ollama', 'core', { category: 'ai' });
+    const kopia = service('kopia-ui', 'Kopia backups', 'core', { category: 'system' });
     localStorage.removeItem('mu3lab.homeFolded');
-    renderWithDashboard(<HomePage />, dashboardData([immich, mealie, ollama]));
-    // AI apps outside a stack come last, folded to icons until opened.
-    const plumbing = () => screen.getByRole('button', { name: 'AI' });
-    expect(plumbing()).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama: Running');
-    expect(screen.queryByRole('link', { name: 'Add apps' })).not.toBeInTheDocument();
-    fireEvent.click(plumbing());
-    expect(plumbing()).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).not.toHaveAttribute('title');
-    fireEvent.click(plumbing());
-    expect(screen.getByRole('button', { name: 'Ollama: Running' })).toHaveAttribute('title', 'Ollama: Running');
+    renderWithDashboard(<HomePage />, dashboardData([immich, mealie, kopia]));
+    // Backups & system come last, folded on Home to the heading alone.
+    const system = () => screen.getByRole('button', { name: 'Backups & system' });
+    expect(system()).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Kopia backups: Running' })).not.toBeInTheDocument();
+    fireEvent.click(system());
+    expect(screen.getByRole('button', { name: 'Kopia backups: Running' })).toBeInTheDocument();
     // Everyday apps stay open under their own section.
     expect(screen.getByRole('button', { name: /Productivity/ })).toHaveAttribute('aria-expanded', 'true');
 
+    // Before a pick, the card sums up the apps.
+    expect(screen.getByRole('complementary', { name: 'Apps at a glance' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Immich: Running' }));
-    let panel = screen.getByRole('dialog', { name: 'Immich' });
-    expect(within(panel).getByRole('link', { name: 'Open' })).toHaveAttribute(
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    let card = screen.getByRole('complementary', { name: 'Immich details' });
+    expect(within(card).getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       'https://host.ts.net:8449/auth/login?autoLaunch=1',
     );
-    expect(within(panel).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
-    expect(within(panel).getByRole('link', { name: 'All details' })).toHaveAttribute('href', '/apps/immich');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
+    expect(within(card).getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(within(card).getByRole('link', { name: 'All details' })).toHaveAttribute('href', '/apps/immich');
+    // The sign-in type is on the app's own page only.
+    expect(within(card).queryByText('Sign-in')).not.toBeInTheDocument();
 
+    // Picking another tile swaps the card; Close goes back to the summary.
     fireEvent.click(screen.getByRole('button', { name: 'Mealie: Stopped' }));
-    panel = screen.getByRole('dialog', { name: 'Mealie' });
-    expect(within(panel).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: 'Start' })).toBeInTheDocument();
+    card = screen.getByRole('complementary', { name: 'Mealie details' });
+    expect(within(card).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Start' })).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('complementary', { name: 'Apps at a glance' })).toBeInTheDocument();
   });
 
-  it('groups a stack, says what of it is stopped, and marks working chat assistants', () => {
+  it('groups a stack, counts what of it runs without naming the stopped apps, and marks chat assistants', () => {
     stubFetch(() => ({}));
-    const jellyfin = service('jellyfin', 'Jellyfin', 'optional', { stack: 'movies-and-shows', category: 'media' });
-    const qbittorrent = service('qbittorrent', 'qBittorrent', 'optional', { stack: 'movies-and-shows' });
+    const jellyfin = service('jellyfin', 'Jellyfin', 'optional', { stack: 'torrenting', category: 'media' });
+    const qbittorrent = service('qbittorrent', 'qBittorrent', 'optional', { stack: 'torrenting' });
     const radarr = service('radarr', 'Radarr', 'optional', {
-      stack: 'movies-and-shows',
+      stack: 'torrenting',
       dependencies: ['qbittorrent'],
       display_state: 'stopped',
       allowed_actions: ['start'],
@@ -87,8 +90,9 @@ describe('Home', () => {
     };
     localStorage.removeItem('mu3lab.homeFolded');
     renderWithDashboard(<HomePage />, data);
-    const stack = screen.getByRole('region', { name: 'Movies and shows' });
-    expect(stack).toHaveTextContent('2 of 3 running · Radarr stopped');
+    const stack = screen.getByRole('region', { name: 'Torrenting' });
+    expect(stack).toHaveTextContent('2 of 3 running');
+    expect(stack).not.toHaveTextContent('Radarr stopped');
     // The app people open comes first, the helper the others need last.
     expect(
       within(stack)

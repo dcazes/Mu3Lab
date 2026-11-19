@@ -300,6 +300,32 @@
         "title": "ApiErrorResponse",
         "type": "object"
       },
+      "AppPorts": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/PortEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "entries"
+        ],
+        "title": "AppPorts",
+        "type": "object"
+      },
       "AppSize": {
         "properties": {
           "disk_bytes": {
@@ -4549,6 +4575,96 @@
           "core_apps"
         ],
         "title": "PlatformBackupStatus",
+        "type": "object"
+      },
+      "PortEntry": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "container_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container Port"
+          },
+          "kind": {
+            "enum": [
+              "tailnet",
+              "home",
+              "loopback",
+              "proxy"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          },
+          "protocol": {
+            "enum": [
+              "tcp",
+              "udp"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "address",
+          "port",
+          "protocol"
+        ],
+        "title": "PortEntry",
+        "type": "object"
+      },
+      "PortsResponse": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/AppPorts"
+            },
+            "title": "Apps",
+            "type": "array"
+          },
+          "home_ip": {
+            "title": "Home Ip",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "tailnet_dns_name": {
+            "title": "Tailnet Dns Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "tailnet_dns_name",
+          "home_ip",
+          "apps"
+        ],
+        "title": "PortsResponse",
         "type": "object"
       },
       "PowerStatus": {
@@ -13989,6 +14105,97 @@
         "summary": "Change Person",
         "tags": [
           "people"
+        ]
+      }
+    },
+    "/api/v1/ports": {
+      "get": {
+        "operationId": "list_ports_api_v1_ports_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Ports",
+        "tags": [
+          "ports"
         ]
       }
     },

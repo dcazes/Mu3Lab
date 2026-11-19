@@ -924,6 +924,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ports': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Ports */
+    get: operations['list_ports_api_v1_ports_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/power': {
     parameters: {
       query?: never;
@@ -1900,6 +1917,15 @@ export interface components {
       ok?: false;
       /** Recommended Action */
       recommended_action: string;
+    };
+    /** AppPorts */
+    AppPorts: {
+      /** Entries */
+      entries: components['schemas']['PortEntry'][];
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
     };
     /** AppSize */
     AppSize: {
@@ -3379,6 +3405,43 @@ export interface components {
       ok: boolean;
       platform: components['schemas']['BackupProtection'];
       recovery_sheet?: components['schemas']['RecoverySheetStatus'] | null;
+    };
+    /** PortEntry */
+    PortEntry: {
+      /** Address */
+      address: string;
+      /** Container Port */
+      container_port?: number | null;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'tailnet' | 'home' | 'loopback' | 'proxy';
+      /** Label */
+      label: string;
+      /**
+       * Note
+       * @default
+       */
+      note?: string;
+      /** Port */
+      port: number;
+      /**
+       * Protocol
+       * @enum {string}
+       */
+      protocol: 'tcp' | 'udp';
+    };
+    /** PortsResponse */
+    PortsResponse: {
+      /** Apps */
+      apps: components['schemas']['AppPorts'][];
+      /** Home Ip */
+      home_ip: string;
+      /** Ok */
+      ok: boolean;
+      /** Tailnet Dns Name */
+      tailnet_dns_name: string;
     };
     /**
      * PowerStatus
@@ -9576,6 +9639,89 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['PersonResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  list_ports_api_v1_ports_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PortsResponse'];
         };
       };
       /** @description Bad Request */

@@ -7,7 +7,7 @@ name: Prowlarr
 tier: optional
 group: apps
 category: media
-stack: movies-and-shows
+stack: torrenting
 tagline: Torrent sites for Sonarr and Radarr
 summary: Add the torrent sites you trust once, here, and Sonarr and Radarr search them all. Prowlarr tests each
   site, shows which ones answer, and passes Cloudflare-protected sites through FlareSolverr. Install it with

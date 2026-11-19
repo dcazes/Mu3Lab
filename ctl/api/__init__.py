@@ -33,6 +33,7 @@ from ctl.api.routes import (
     jobs,
     mcp,
     people,
+    ports,
     providers,
     services,
     snapshot,
@@ -123,6 +124,7 @@ def create_app(dist: Path = DIST) -> FastAPI:
         chat,
         people,
         voice,
+        ports,
     ):
         app.include_router(module.router)
     app.include_router(snapshot.router)

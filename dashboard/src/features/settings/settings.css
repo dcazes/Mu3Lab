@@ -295,3 +295,100 @@
   align-items: center;
   gap: 8px;
 }
+
+/* ---------- Ports: every app's addresses and ports ---------- */
+.ports-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ports-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ports-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ports-table th,
+.ports-table td {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ports-table thead th {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ports-app th {
+  padding-top: 14px;
+  background: var(--surface-2);
+}
+
+.ports-app a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ports-label {
+  color: var(--text-2);
+}
+
+.ports-address {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  word-break: break-all;
+}
+
+code.ports-address {
+  background: none;
+  padding: 0;
+}
+
+.ports-number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A phone: each port as a short block instead of a wide row. */
+@media (max-width: 640px) {
+  .ports-table thead {
+    display: none;
+  }
+
+  .ports-table tr:not(.ports-app) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 2px 12px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ports-table tr:not(.ports-app) td {
+    padding: 0;
+    border: 0;
+  }
+
+  .ports-table tr:not(.ports-app) td:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .ports-app th {
+    display: block;
+  }
+}

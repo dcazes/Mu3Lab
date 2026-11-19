@@ -8,7 +8,7 @@ name: Jellyfin
 tier: optional
 group: apps
 category: media
-stack: movies-and-shows
+stack: streaming
 tagline: Your own films and TV, like Netflix
 summary: Watch the household's films and shows on the TV, in the browser or on phones at home, with each
   person's own watch history and Continue watching. Add films to the shared Movies folder in Nextcloud and

@@ -657,47 +657,198 @@
   transform: rotate(180deg);
 }
 
-/* Home's quick panel for one app: status, then what you can do, then a few facts. */
-.quick-panel-status {
+/* ---------- Tiles beside one app's details (a card, never a pop-up) ---------- */
+.stacks-layout.has-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  align-items: start;
+  gap: 24px;
+}
+
+.details-card {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.details-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.details-card-title h3 {
+  margin: 2px 0 2px;
+  font-size: 15px;
+}
+
+.details-card-title p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.details-card-status {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
 
-.quick-panel-busy {
+.details-card-busy {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 0;
   color: var(--text-2);
   font-size: 13px;
 }
 
-.quick-panel-busy svg {
+.details-card-busy svg {
+  flex-shrink: 0;
   width: 15px;
   height: 15px;
   color: var(--blue);
 }
 
-.quick-panel-actions {
+.details-card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
 /* Opening the app is the main thing a person came for, so it gets the whole first row. */
-.quick-panel-open {
+.details-card-open {
   flex: 1 1 100%;
   justify-content: center;
 }
 
-.quick-panel-actions .btn:not(.quick-panel-open) {
+.details-card-actions .btn:not(.details-card-open) {
   flex: 1 1 0;
   justify-content: center;
 }
 
-.dialog-footer .quick-panel-details {
-  margin-right: auto;
+/* Memory and disk side by side, to keep the card short. */
+.details-card-stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.details-card-stats > div {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.details-card-stats dt {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.details-card-stats dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.details-card-more {
+  align-self: flex-start;
+  margin-left: -8px;
+}
+
+.details-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.details-summary-list button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.details-summary-list button:hover {
+  background: var(--surface-2);
+}
+
+.details-summary p {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* The tile whose details the card shows. */
+.tile.is-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Narrow screens: tiles take the width; a picked app's card docks at the bottom, nothing dimmed. */
+@media (max-width: 1000px) {
+  .stacks-layout.has-card {
+    display: block;
+  }
+
+  .details-summary {
+    display: none;
+  }
+
+  .stacks-layout .details-card:not(.details-summary) {
+    position: fixed;
+    z-index: 24;
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-height: 60vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg, var(--shadow-md));
+    animation: dock-up 0.18s ease-out;
+  }
+
+  /* Room under the last tiles, so the docked card never hides them. */
+  .stacks-layout.has-pick {
+    padding-bottom: 300px;
+  }
+}
+
+@media (max-width: 760px) {
+  .stacks-layout .details-card:not(.details-summary) {
+    bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes dock-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
 }
 
 /* ---------- Memory, disk and CPU per app ---------- */

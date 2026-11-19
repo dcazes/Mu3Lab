@@ -66,7 +66,7 @@ export function HomePage() {
       <CoreSetupProgress />
       <GetStarted />
       <section aria-labelledby="apps-heading">
-        <AppStacks services={installed} title="Your apps" />
+        <AppStacks services={installed} title="Your apps" foldedIcons={false} />
       </section>
     </div>
   );

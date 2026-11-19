@@ -537,3 +537,8 @@
   width: 15px;
   height: 15px;
 }
+
+/* The list view: the same sections as the tiles, each a card of rows. */
+.launcher-groups.is-list .card {
+  width: 100%;
+}

@@ -63,11 +63,12 @@ export function stateTone(state: string): Tone {
 /** Discover's sections, in order; each app's manifest names one. */
 export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'finance', label: 'Finance' },
-  { id: 'home', label: 'Home & family' },
-  { id: 'media', label: 'Photos & media' },
-  { id: 'documents', label: 'Documents & notes' },
+  { id: 'home', label: 'Home' },
+  { id: 'media', label: 'Media' },
+  { id: 'documents', label: 'Files' },
   { id: 'places', label: 'Places & travel' },
   { id: 'knowledge', label: 'Knowledge & search' },
+  { id: 'automation', label: 'Automation' },
   { id: 'ai', label: 'AI & voice' },
   { id: 'system', label: 'Backups & system' },
 ];
@@ -86,7 +87,8 @@ export function appSections(services: Service[]) {
 
 /** Apps that only work together; each app's manifest names its stack (``stack:``). */
 export const STACKS: { id: string; label: string }[] = [
-  { id: 'movies-and-shows', label: 'Movies and shows' },
+  { id: 'streaming', label: 'Streaming' },
+  { id: 'torrenting', label: 'Torrenting' },
   { id: 'chat', label: 'Chat' },
   { id: 'voice', label: 'Voice' },
 ];
@@ -97,7 +99,7 @@ export interface LauncherSection {
   apps: Service[];
   /** A stack: its apps work only together, so a stopped one leaves it incomplete. */
   stack: boolean;
-  /** AI and system apps most people never open: folded until someone opens them. */
+  /** Backups and system apps most people never open: folded until someone opens them. */
   foldedByDefault: boolean;
 }
 
@@ -117,9 +119,14 @@ function frontFirst(apps: Service[]): Service[] {
   );
 }
 
+/** Categories that come after the stacks: tools behind the everyday apps. */
+const BACKSTAGE = ['automation', 'ai', 'system'];
+/** Folded until someone opens it. */
+const FOLDED_BY_DEFAULT = ['system'];
+
 /**
  * Installed apps as the launcher shows them: everyday apps by category, then each stack, then
- * the other AI apps and the system apps. An unknown stack still shows, after the known ones.
+ * Automation, AI and Backups & system. An unknown stack still shows, after the known ones.
  */
 export function launcherSections(services: Service[]): LauncherSection[] {
   const loose = services.filter((service) => !service.stack);
@@ -136,51 +143,37 @@ export function launcherSections(services: Service[]): LauncherSection[] {
       foldedByDefault: false,
     }))
     .filter((section) => section.apps.length > 0);
-  const rest = [
-    { id: 'ai', label: 'AI', apps: loose.filter((service) => service.group === 'ai') },
-    { id: 'system', label: 'System', apps: loose.filter((service) => service.group === 'infrastructure') },
-  ]
-    .filter((section) => section.apps.length > 0)
-    .map((section) => ({ ...section, stack: false, foldedByDefault: true }));
+  const categories = appSections(loose).map((section) => ({
+    ...section,
+    stack: false,
+    foldedByDefault: FOLDED_BY_DEFAULT.includes(section.id),
+  }));
   return [
-    ...appSections(loose.filter(isEverydayApp)).map((section) => ({
-      ...section,
-      stack: false,
-      foldedByDefault: false,
-    })),
+    ...categories.filter((section) => !BACKSTAGE.includes(section.id)),
     ...stacks,
-    ...rest,
+    ...categories.filter((section) => BACKSTAGE.includes(section.id)),
   ];
 }
 
-const listNames = (apps: Service[]) =>
-  apps.length > 2
-    ? `${apps[0].name}, ${apps[1].name} and ${apps.length - 2} more`
-    : apps.map((s) => s.name).join(' and ');
-
-/** "6 of 7 running" and what is off, for a launcher section's header. */
+/** "6 of 7 running" for a launcher section's header; problems and work in progress say so, without names. */
 export function sectionSummary(section: Pick<LauncherSection, 'apps' | 'stack'>): {
   count: string;
   detail: string;
   tone: Tone;
 } {
   const { apps, stack } = section;
-  const running = apps.filter(isRunning).length;
-  const broken = apps.filter(needsAttention);
-  const busy = apps.filter((service) => isWorking(service) || service.display_state === 'checking');
-  const off = apps.filter((service) => service.display_state === 'stopped' || service.display_state === 'needs_setup');
   // One app: its own state says it all ("Stopped"), with no count.
   if (apps.length === 1) {
     const [only] = apps;
     return { count: statusText(only), detail: '', tone: isRunning(only) ? 'green' : stateTone(only.display_state) };
   }
+  const running = apps.filter(isRunning).length;
+  const broken = apps.filter(needsAttention).length;
+  const busy = apps.filter((service) => isWorking(service) || service.display_state === 'checking').length;
   const count = `${running} of ${apps.length} running`;
-  if (broken.length)
-    return { count, detail: `${listNames(broken)} ${broken.length > 1 ? 'need' : 'needs'} attention`, tone: 'red' };
-  if (busy.length)
-    return { count, detail: busy.length === 1 ? statusText(busy[0]) : `${busy.length} busy`, tone: 'blue' };
-  if (off.length) return { count, detail: `${listNames(off)} stopped`, tone: stack ? 'amber' : 'gray' };
-  return { count, detail: '', tone: 'green' };
+  if (broken) return { count, detail: `${broken} ${broken > 1 ? 'need' : 'needs'} attention`, tone: 'red' };
+  if (busy) return { count, detail: `${busy} busy`, tone: 'blue' };
+  return { count, detail: '', tone: running === apps.length ? 'green' : stack ? 'amber' : 'gray' };
 }
 
 export function categoryLabel(category: string) {

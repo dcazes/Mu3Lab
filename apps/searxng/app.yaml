@@ -6,7 +6,7 @@ capabilities: [web_search]
 name: SearXNG
 tier: optional
 group: ai
-category: ai
+category: knowledge
 tagline: Private web search for your assistants
 summary: Searches the web for Mu3Lab's assistants without an account or key, by asking several search engines at
   once. The voice assistant uses it for news, weather, opening hours and other current facts. It keeps no history.

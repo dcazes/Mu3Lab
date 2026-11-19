@@ -7,7 +7,7 @@ capabilities: [automation]
 name: n8n
 tier: optional
 group: apps
-category: system
+category: automation
 tagline: Automations that connect your apps
 summary: Build workflows that connect apps and services, from your Mu3Lab apps to outside ones, run on a schedule or
   when something happens. Administrators only, because workflows can run code and reach other apps.

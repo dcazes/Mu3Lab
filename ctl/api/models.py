@@ -80,6 +80,32 @@ class ServiceExtraRoute(ApiModel):
     private_https_port: float
 
 
+class PortEntry(ApiModel):
+    # tailnet: opened over Tailscale; home: on the home network; loopback: this server only;
+    # proxy: Caddy's loopback listener in front of a tailnet address.
+    kind: Literal["tailnet", "home", "loopback", "proxy"]
+    label: str
+    address: str
+    port: int
+    protocol: Literal["tcp", "udp"]
+    # The port inside the app's container, when its Compose file maps one.
+    container_port: int | None = None
+    note: str = ""
+
+
+class AppPorts(ApiModel):
+    id: str
+    name: str
+    entries: list[PortEntry]
+
+
+class PortsResponse(ApiModel):
+    ok: bool
+    tailnet_dns_name: str
+    home_ip: str
+    apps: list[AppPorts]
+
+
 class ServiceCheck(ApiModel):
     state: Literal["pass", "checking", "fail", "pending", "stale", "not_required"]
     detail: str

@@ -7,16 +7,7 @@ import { EmptyState, PageHeader, Tabs } from '../../components/Layout';
 import { Badge, StatusBadge } from '../../components/Status';
 import { bytes } from '../../lib/format';
 import { Link } from '../../lib/router';
-import {
-  appSections,
-  canInstall,
-  categoryLabel,
-  type Group,
-  groupLabel,
-  isInstalled,
-  launchTarget,
-  signInSummary,
-} from '../../lib/services';
+import { appSections, canInstall, categoryLabel, isInstalled, launchTarget, signInSummary } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { useApplyUpdate } from './AdvancedTab';
@@ -26,7 +17,6 @@ import { InstallProgress } from './InstallProgress';
 import { activeJob, JobProgress } from './JobProgress';
 import { useInstallBatch } from './useInstallBatch';
 
-const GROUP_ORDER: Group[] = ['apps', 'ai', 'infrastructure'];
 const SELECTION_KEY = 'mu3lab.discoverSelection';
 const VIEW_KEY = 'mu3lab.installedView';
 
@@ -101,18 +91,6 @@ function matches(service: Service, term: string, summary = '') {
 }
 
 /** Every installed row shares one set of columns, so states line up down the page. */
-function InstalledHeader() {
-  return (
-    <div className="row installed-row installed-head hide-mobile" aria-hidden="true">
-      <span>App</span>
-      <span>Status</span>
-      <span>Sign-in</span>
-      <span />
-      <span />
-    </div>
-  );
-}
-
 function InstalledRow({ service, summary }: { service: Service; summary: string }) {
   const target = launchTarget(service);
   const isAdmin = useIsAdmin();
@@ -362,28 +340,21 @@ export function AppsPage({ discover }: { discover: boolean }) {
             </section>
           ))}
         </>
-      ) : view === 'tiles' ? (
-        <AppStacks services={shown} />
       ) : (
-        GROUP_ORDER.map((name) => {
-          const group = shown.filter((service) => service.group === name);
-          if (!group.length) return null;
-          return (
-            <section key={name} className="group">
-              <h2 className="group-title">{groupLabel[name]}</h2>
-              <div className="card card-flush rows">
-                <InstalledHeader />
-                {group.map((service) => (
+        <AppStacks
+          services={shown}
+          listRow={
+            view === 'list'
+              ? (service) => (
                   <InstalledRow
                     key={service.id}
                     service={service}
                     summary={catalog[service.id]?.tagline || catalog[service.id]?.summary || ''}
                   />
-                ))}
-              </div>
-            </section>
-          );
-        })
+                )
+              : undefined
+          }
+        />
       )}
       {discover && selected.length > 0 && (
         <div className="action-bar" role="region" aria-label="Selected apps">

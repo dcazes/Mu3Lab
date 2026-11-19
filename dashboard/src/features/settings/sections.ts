@@ -3,6 +3,7 @@ import {
   KeyRound,
   type LucideIcon,
   Mic,
+  Network,
   Plug,
   Rocket,
   ServerCog,
@@ -34,6 +35,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'sign-in', label: 'Sign-in', icon: KeyRound, group: 'Household' },
   { id: 'security', label: 'Security & backups', icon: ShieldCheck, group: 'Server' },
   { id: 'system', label: 'System', icon: ServerCog, adminOnly: true, group: 'Server' },
+  { id: 'ports', label: 'Ports', icon: Network, adminOnly: true, group: 'Server' },
   // Linked from System's Mu3Lab updates card and the user menu.
   { id: 'whats-new', label: "What's new", icon: Sparkles, adminOnly: true, within: 'system', group: 'Server' },
   // First-run help; once done it is rarely opened, so it comes last.

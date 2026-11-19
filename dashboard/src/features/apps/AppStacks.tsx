@@ -1,5 +1,5 @@
 import { Check, ChevronDown, MessageCircle, MessageCircleOff, Play, RefreshCw, Square } from 'lucide-react';
-import { type CSSProperties, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import type { ChatAssistant, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
 import { Button } from '../../components/Button';
@@ -15,7 +15,7 @@ import {
   statusText,
 } from '../../lib/services';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
-import { AppQuickPanel } from '../home/AppQuickPanel';
+import { AppDetailsCard, AppsSummaryCard } from './AppDetailsCard';
 import { can, type Lifecycle, useLifecycle } from './lifecycle';
 
 const FOLDED_KEY = 'mu3lab.homeFolded';
@@ -79,12 +79,14 @@ interface TileProps {
   /** In select mode a tap picks the app instead of opening its panel. */
   selecting: boolean;
   selected: boolean;
+  /** Its details are showing in the card. */
+  current?: boolean;
 }
 
-function tileClass(base: string, { service, selecting, selected }: TileProps) {
+function tileClass(base: string, { service, selecting, selected, current }: TileProps) {
   const muted = selecting ? !pickable(service) : !launchTarget(service);
   const off = !isRunning(service) && !isWorking(service) && !service.backing_up;
-  return `${base}${muted ? ' tile-muted' : ''}${off ? ' is-off' : ''}${selecting ? ' is-selecting' : ''}${selected ? ' is-selected' : ''}`;
+  return `${base}${muted ? ' tile-muted' : ''}${off ? ' is-off' : ''}${selecting ? ' is-selecting' : ''}${selected ? ' is-selected' : ''}${current ? ' is-current' : ''}`;
 }
 
 /** Running needs no mark; anything else shows as a dot on the icon's corner, so every tile is the same size. */
@@ -102,8 +104,7 @@ function MiniTile(props: TileProps) {
       className={tileClass('mini-tile', props)}
       aria-label={`${service.name}: ${statusText(service)}`}
       title={`${service.name}: ${statusText(service)}`}
-      aria-haspopup={selecting ? undefined : 'dialog'}
-      aria-pressed={selecting ? selected : undefined}
+      aria-pressed={selecting ? selected : props.current}
       disabled={selecting && !pickable(service)}
       onClick={onOpen}
     >
@@ -125,8 +126,7 @@ function LauncherTile(props: TileProps) {
       className={tileClass('tile', props)}
       aria-label={`${service.name}: ${statusText(service)}`}
       title={isRunning(service) ? undefined : statusText(service)}
-      aria-haspopup={selecting ? undefined : 'dialog'}
-      aria-pressed={selecting ? selected : undefined}
+      aria-pressed={selecting ? selected : props.current}
       disabled={selecting && !pickable(service)}
       onClick={onOpen}
     >
@@ -252,10 +252,24 @@ function SectionAction({ section }: { section: LauncherSection }) {
 }
 
 /**
- * Installed apps as tiles in sections: everyday apps by category, the stacks that only work
- * together (with how many of each are running), then AI and system apps, folded.
+ * Installed apps in sections: everyday apps by category, the stacks that only work together
+ * (with how many of each are running), then Automation, AI and Backups & system. Picking a tile
+ * shows its details in a card beside the tiles (at the bottom on a phone), never a pop-up.
+ *
+ * ``foldedIcons``: a folded section still shows its apps as small icons (Apps); without it only
+ * the heading shows (Home). ``listRow``: show each section's apps as rows instead of tiles.
  */
-export function AppStacks({ services, title }: { services: Service[]; title?: string }) {
+export function AppStacks({
+  services,
+  title,
+  foldedIcons = true,
+  listRow,
+}: {
+  services: Service[];
+  title?: string;
+  foldedIcons?: boolean;
+  listRow?: (service: Service) => ReactNode;
+}) {
   const { data } = useDashboard();
   const all = data.services.services;
   const assistants = new Map((data.chat.assistants || []).map((item) => [item.id, item]));
@@ -264,9 +278,17 @@ export function AppStacks({ services, title }: { services: Service[]; title?: st
   const [panel, setPanel] = useState('');
   const isAdmin = useIsAdmin();
   const selection = useSelection(services);
-  const open = (id: string) => (selection.selecting ? selection.toggle(id) : setPanel(id));
-  // Look the app up each render so the panel follows its live state.
+  const open = (id: string) =>
+    selection.selecting ? selection.toggle(id) : setPanel((current) => (current === id ? '' : id));
+  // Look the app up each render so the card follows its live state.
   const selected = all.find((service) => service.id === panel);
+  useEffect(() => {
+    if (!panel) return;
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setPanel('');
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panel]);
+  const showCard = !listRow && !selection.selecting;
   return (
     <>
       <div className="section-title">
@@ -277,77 +299,93 @@ export function AppStacks({ services, title }: { services: Service[]; title?: st
               type="button"
               className="link-button"
               aria-pressed={selection.selecting}
-              onClick={selection.selecting ? selection.finish : selection.start}
+              onClick={() => {
+                setPanel('');
+                if (selection.selecting) selection.finish();
+                else selection.start();
+              }}
             >
               {selection.selecting ? 'Done' : 'Select'}
             </button>
           </span>
         )}
       </div>
-      <div className={`launcher-groups${selection.selecting ? ' is-selecting' : ''}`}>
-        {sections.map((section) => {
-          const { id, label, apps, stack } = section;
-          const unfolded = !isFolded(section);
-          const choices = apps.filter(pickable).map((service) => service.id);
-          const allPicked = choices.length > 0 && choices.every((app) => selection.picked.some((s) => s.id === app));
-          const summary = sectionSummary(section);
-          // Stacks and AI/system always get a row of their own; a small category can share one.
-          const wide = stack || section.foldedByDefault || apps.length > 4;
-          return (
-            <section
-              key={id}
-              className={`launcher-group${unfolded ? '' : ' is-folded'}${wide ? ' is-wide' : ''}${stack ? ' is-stack' : ''}`}
-              style={{ '--tiles': apps.length } as CSSProperties}
-              aria-label={label}
-            >
-              <h3>
-                <button
-                  type="button"
-                  className="launcher-toggle"
-                  aria-expanded={unfolded}
-                  onClick={() => toggleFolded(section)}
-                >
-                  <ChevronDown />
-                  {label}
-                </button>
-                <span className={`launcher-summary tone-${summary.tone}`}>
-                  <span className="launcher-count">{summary.count}</span>
-                  {summary.detail && <span className="launcher-detail"> · {summary.detail}</span>}
-                </span>
-                {selection.selecting
-                  ? choices.length > 0 && (
-                      <button
-                        type="button"
-                        className="link-button launcher-pick"
-                        onClick={() => selection.setMany(choices, !allPicked)}
-                      >
-                        {allPicked ? 'Deselect all' : 'Select all'}
-                      </button>
-                    )
-                  : isAdmin && <SectionAction section={section} />}
-              </h3>
-              <div className={unfolded ? 'launcher' : 'launcher-mini'}>
-                {apps.map((service) => {
-                  const props = {
-                    service,
-                    assistant: assistants.get(service.id),
-                    onOpen: () => open(service.id),
-                    selecting: selection.selecting,
-                    selected: selection.picked.some((item) => item.id === service.id),
-                  };
-                  return unfolded ? (
-                    <LauncherTile key={service.id} {...props} />
-                  ) : (
-                    <MiniTile key={service.id} {...props} />
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+      <div className={`stacks-layout${showCard ? ' has-card' : ''}${selected && showCard ? ' has-pick' : ''}`}>
+        <div className={`launcher-groups${selection.selecting ? ' is-selecting' : ''}${listRow ? ' is-list' : ''}`}>
+          {sections.map((section) => {
+            const { id, label, apps, stack } = section;
+            const unfolded = !isFolded(section);
+            const choices = apps.filter(pickable).map((service) => service.id);
+            const allPicked = choices.length > 0 && choices.every((app) => selection.picked.some((s) => s.id === app));
+            const summary = sectionSummary(section);
+            // Lists, stacks and backstage sections always get a row of their own; a small category can share one.
+            const wide = Boolean(listRow) || stack || section.foldedByDefault || apps.length > 4;
+            return (
+              <section
+                key={id}
+                className={`launcher-group${unfolded ? '' : ' is-folded'}${wide ? ' is-wide' : ''}${stack ? ' is-stack' : ''}`}
+                style={{ '--tiles': apps.length } as CSSProperties}
+                aria-label={label}
+              >
+                <h3>
+                  <button
+                    type="button"
+                    className="launcher-toggle"
+                    aria-expanded={unfolded}
+                    onClick={() => toggleFolded(section)}
+                  >
+                    <ChevronDown />
+                    {label}
+                  </button>
+                  <span className={`launcher-summary tone-${summary.tone}`}>
+                    <span className="launcher-count">{summary.count}</span>
+                    {summary.detail && <span className="launcher-detail"> · {summary.detail}</span>}
+                  </span>
+                  {selection.selecting
+                    ? choices.length > 0 && (
+                        <button
+                          type="button"
+                          className="link-button launcher-pick"
+                          onClick={() => selection.setMany(choices, !allPicked)}
+                        >
+                          {allPicked ? 'Deselect all' : 'Select all'}
+                        </button>
+                      )
+                    : isAdmin && <SectionAction section={section} />}
+                </h3>
+                {unfolded && listRow ? (
+                  <div className="card card-flush rows">{apps.map((service) => listRow(service))}</div>
+                ) : unfolded || foldedIcons ? (
+                  <div className={unfolded ? 'launcher' : 'launcher-mini'}>
+                    {apps.map((service) => {
+                      const props = {
+                        service,
+                        assistant: assistants.get(service.id),
+                        onOpen: () => open(service.id),
+                        selecting: selection.selecting,
+                        selected: selection.picked.some((item) => item.id === service.id),
+                        current: showCard && service.id === panel,
+                      };
+                      return unfolded ? (
+                        <LauncherTile key={service.id} {...props} />
+                      ) : (
+                        <MiniTile key={service.id} {...props} />
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
+        </div>
+        {showCard &&
+          (selected ? (
+            <AppDetailsCard key={selected.id} service={selected} onClose={() => setPanel('')} />
+          ) : (
+            <AppsSummaryCard services={services} onPick={setPanel} />
+          ))}
       </div>
       {selection.selecting && <SelectionBar picked={selection.picked} onDone={selection.finish} />}
-      {selected && <AppQuickPanel service={selected} onClose={() => setPanel('')} />}
     </>
   );
 }
