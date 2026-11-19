@@ -8,7 +8,9 @@ followed without a restart), Mu3Lab puts back what it owns:
   check, and the administrator adds the tag to that site.
 - Sonarr and Radarr as applications while they are installed (their keys arrive through
   ``integrates_with``), with full sync: every site added here appears in both, and one
-  removed here disappears from both. One that is uninstalled is taken off the list.
+  removed here disappears from both. One that is uninstalled is taken off the list. One
+  that is stopped, or not installed yet in the same batch, is connected by the upkeep once
+  it is running (Prowlarr will not save an app it cannot reach).
 
 The sites themselves are the administrators' choice; Mu3Lab adds none.
 """
@@ -57,13 +59,15 @@ def _digest(key: str) -> str:
 
 def configure(
     api: servarr.Servarr, env: dict[str, str], remember: Callable[[dict[str, str]], Any] = lambda values: None
-) -> list[str]:
-    """Put back Mu3Lab's connections; returns what changed, in words.
+) -> tuple[list[str], list[str]]:
+    """Put back Mu3Lab's connections; returns what changed and what must wait, in words.
 
     Prowlarr never shows a key it holds, so a digest of the key it was last given is kept in
     its settings (``remember``): a reinstalled Sonarr or Radarr with a new key is sent it again.
+    Prowlarr tests an app before saving it, so one that is not running waits for the next upkeep.
     """
-    changed = []
+    changed: list[str] = []
+    waiting: list[str] = []
     tag = servarr.ensure_tag(api, PROXY_TAG)
     servarr.ensure_provider(
         api, "indexerproxy", PROXY, "FlareSolverr", {"host": FLARESOLVERR_URL, "requestTimeout": 60}, {"tags": [tag]}
@@ -76,20 +80,24 @@ def configure(
             if servarr.remove_provider(api, "applications", name):
                 changed.append(f"{implementation} disconnected")
             continue
-        servarr.ensure_provider(
-            api,
-            "applications",
-            name,
-            implementation,
-            {"prowlarrUrl": PROWLARR_URL, "baseUrl": url, "apiKey": key, **categories},
-            {"syncLevel": "fullSync"},
-            force=env.get(sent) != _digest(key),
-        )
+        try:
+            servarr.ensure_provider(
+                api,
+                "applications",
+                name,
+                implementation,
+                {"prowlarrUrl": PROWLARR_URL, "baseUrl": url, "apiKey": key, **categories},
+                {"syncLevel": "fullSync"},
+                force=env.get(sent) != _digest(key),
+            )
+        except LoopbackError as exc:
+            waiting.append(f"{implementation} is connected once it is running ({exc})")
+            continue
         if env.get(sent) != _digest(key):
             remember({sent: _digest(key)})
         if name not in connected:
             changed.append(f"{implementation} connected")
-    return changed
+    return changed, waiting
 
 
 class Hooks(AppHooks):
@@ -98,12 +106,14 @@ class Hooks(AppHooks):
         api = _api(ctx)
         try:
             api.wait()
-            configure(api, ctx.env(), ctx.set_env)
+            _, waiting = configure(api, ctx.env(), ctx.set_env)
         except LoopbackError as exc:
             ctx.fail(
                 "configure_application", "application_configuration_failed", f"Prowlarr could not be set up: {exc}"
             )
+        for note in waiting:
+            ctx.log(f"Prowlarr: {note}")
 
     def periodic(self, ctx: HookContext) -> str:
-        changed = configure(_api(ctx), ctx.env(), ctx.set_env)
+        changed, _ = configure(_api(ctx), ctx.env(), ctx.set_env)
         return f"Prowlarr: {', '.join(changed)}." if changed else ""

@@ -5,8 +5,8 @@ services:
     image: ghcr.io/seerr-team/seerr:v3.5.2@sha256:aadee014b40e28cf9aa4928bc9d1183a6eb08f8c44d543cddc9efdcb16549be2
     restart: unless-stopped
     init: true
-    # At home only: on this server's home-network address, never the tailnet or every network
-    # (the owner's choice). The loopback port is for Mu3Lab's own checks and setup.
+    # At home on this server's home-network address, never every network. The loopback port is
+    # for Mu3Lab's own checks and setup, and for the tailnet route (Authentik's gate, then Caddy).
     ports:
       - "127.0.0.1:5055:5055"
       - "${MU3LAB_HOME_IP:?MU3LAB_HOME_IP is required}:5055:5055"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import unittest
 from pathlib import Path
 
@@ -28,21 +27,27 @@ def _networks(app: str) -> dict:
 
 
 class NetworkTests(unittest.TestCase):
-    def test_only_sonarr_and_radarr_join_qbittorrents_own_network(self):
-        # qBittorrent skips its login on its own network, so nothing else may join it.
+    def test_only_the_download_managers_join_qbittorrents_own_network(self):
+        # qBittorrent skips its login on its own network, so only the apps that manage its
+        # downloads may join it: Sonarr, Radarr and Cleanuparr.
         joined = sorted(
             compose.parent.name
             for compose in (ROOT / "apps").glob("*/docker-compose.yml")
             if QBITTORRENT_NETWORK in compose.read_text(encoding="utf-8")
         )
-        self.assertEqual(joined, ["radarr", "sonarr"])
+        self.assertEqual(joined, ["cleanuparr", "radarr", "sonarr"])
 
     def test_the_media_apps_meet_on_an_internal_network(self):
         self.assertIn("mu3lab_media", preflight.MU3LAB_NETWORKS)
         self.assertIn("mu3lab_media", preflight.INTERNAL_NETWORKS)
-        for app in ("prowlarr", "sonarr", "radarr", "seerr"):
+        for app in ("prowlarr", "sonarr", "radarr", "seerr", "cleanuparr"):
             with self.subTest(app=app):
                 self.assertTrue(_networks(app)["mu3lab_media"]["external"])
+
+    def test_cleanuparr_listens_on_loopback_only(self):
+        # It skips its own login for local addresses: the home network must never reach it.
+        service = yaml.safe_load((ROOT / "apps/cleanuparr/docker-compose.yml").read_text(encoding="utf-8"))
+        self.assertEqual(service["services"]["cleanuparr"]["ports"], ["127.0.0.1:11011:11011"])
 
     def test_flaresolverr_is_reachable_by_prowlarr_alone(self):
         services = yaml.safe_load((ROOT / "apps/prowlarr/docker-compose.yml").read_text(encoding="utf-8"))["services"]
@@ -76,67 +81,64 @@ class FinishedTorrentTests(unittest.TestCase):
             self.assertIn(f"*.{extension}", excluded)
 
 
-def _schema() -> list[dict]:
-    """A Radarr-like profile template: qualities worst first, some already grouped."""
-    names = ["CAM", "TELESYNC", "DVD", "Bluray-576p", "HDTV-720p", "WEBDL-720p", "HDTV-1080p", "WEBDL-1080p"]
-    names += ["Bluray-1080p", "Remux-1080p", "WEBDL-2160p", "Bluray-2160p", "BR-DISK"]
-    quality = {name: {"id": number, "name": name} for number, name in enumerate(names)}
-    flat = [{"quality": quality[name], "items": [], "allowed": False} for name in names if "WEBDL" not in name]
-    group = {"id": 1002, "name": "WEB 1080p", "allowed": False, "items": [{"quality": quality["WEBDL-1080p"]}]}
-    return [*flat, group, {"quality": quality["WEBDL-720p"]}, {"quality": quality["WEBDL-2160p"]}]
+class _Loader(yaml.SafeLoader):
+    """Reads Recyclarr's files, where ``!env_var NAME`` stands for a secret from the environment."""
 
 
-TIERS = [
-    {"name": "1080p", "qualities": ["WEBDL-1080p", "Bluray-1080p", "HDTV-1080p"], "cutoff": True},
-    {"name": "4K", "qualities": ["WEBDL-2160p", "Bluray-2160p"]},
-    {"name": "720p", "qualities": ["WEBDL-720p", "HDTV-720p"]},
-    {"name": "DVD", "qualities": ["DVD", "Bluray-576p", "Missing-480p"]},
-]
+_Loader.add_constructor("!env_var", lambda loader, node: f"env:{loader.construct_scalar(node)}")
+
+
+def _recyclarr(app: str) -> dict:
+    document = yaml.load((ROOT / "apps" / app / "recyclarr.yml").read_text(encoding="utf-8"), Loader=_Loader)
+    return document[app]["mu3lab"]
 
 
 class QualityTests(unittest.TestCase):
-    def test_tiers_become_groups_best_last_with_the_cutoff_at_1080p(self):
-        items, cutoff = servarr.profile_items(_schema(), TIERS)
-        allowed = [item for item in items if item["allowed"]]
-        self.assertEqual([item["name"] for item in allowed], ["DVD", "720p", "4K", "1080p"])
-        self.assertEqual(cutoff, next(item["id"] for item in allowed if item["name"] == "1080p"))
-        # A name the app does not have is skipped.
-        self.assertEqual([q["quality"]["name"] for q in allowed[0]["items"]], ["DVD", "Bluray-576p"])
-
-    def test_cams_remuxes_and_disc_images_are_never_allowed(self):
-        items, _cutoff = servarr.profile_items(_schema(), TIERS)
-        refused = {item["quality"]["name"] for item in items if not item["allowed"]}
-        self.assertEqual(refused, {"CAM", "TELESYNC", "Remux-1080p", "BR-DISK"})
-        everyone = [q["quality"]["name"] for item in items for q in item["items"]] + sorted(refused)
-        self.assertEqual(len(everyone), len(set(everyone)), "each quality is listed once")
-
-    def test_the_shipped_tables_agree_with_the_owners_choices(self):
+    def test_the_profile_is_the_owners_choice(self):
         for app in ("sonarr", "radarr"):
             with self.subTest(app=app):
-                table = json.loads((ROOT / "apps" / app / "quality.json").read_text(encoding="utf-8"))
-                self.assertEqual([tier["name"] for tier in table["tiers"]], ["1080p", "4K", "720p", "DVD"])
-                self.assertEqual([tier["name"] for tier in table["tiers"] if tier.get("cutoff")], ["1080p"])
-                allowed = [name for tier in table["tiers"] for name in tier["qualities"]]
-                for name in allowed:
+                (profile,) = _recyclarr(app)["quality_profiles"]
+                # Seerr finds the profile by this name.
+                self.assertEqual(profile["name"], "Mu3Lab")
+                self.assertEqual([tier["name"] for tier in profile["qualities"]], ["4K", "1080p", "720p", "DVD"])
+                self.assertFalse(profile["upgrade"]["allowed"], "the first good copy is kept")
+                self.assertEqual(profile["min_format_score"], 0)
+                for name in (name for tier in profile["qualities"] for name in tier["qualities"]):
                     self.assertNotRegex(name, "(?i)cam|telesync|remux|br-disk|raw")
-                    low, preferred, high = table["sizes"][name]
-                    self.assertGreater(low, 0, f"{name} has a minimum size, so fakes are refused")
-                    self.assertLess(low, preferred)
-                    self.assertLessEqual(preferred, high)
-                names = {spec["name"] for spec in table["unwanted"]}
-                self.assertTrue({"BR-DISK", "LQ", "LQ (Release Title)", "Upscaled"} <= names)
 
-    def test_a_trash_custom_format_becomes_the_apps_field_list(self):
-        spec = {
-            "name": "LQ",
-            "specifications": [
-                {"name": "Group", "implementation": "ReleaseGroupSpecification", "fields": {"value": "^(X)$"}},
-            ],
-        }
-        made = servarr.custom_format(spec)
-        self.assertEqual(made["specifications"][0]["fields"], [{"name": "value", "value": "^(X)$"}])
-        self.assertFalse(made["specifications"][0]["negate"])
-        self.assertFalse(made["includeCustomFormatWhenRenaming"])
+    def test_unwanted_releases_score_below_the_minimum(self):
+        for app in ("sonarr", "radarr"):
+            with self.subTest(app=app):
+                (rule,) = _recyclarr(app)["custom_formats"]
+                self.assertEqual(len(rule["trash_ids"]), len(set(rule["trash_ids"])))
+                self.assertEqual(rule["assign_scores_to"], [{"name": "Mu3Lab", "score": -10000}])
+
+    def test_film_preferred_sizes_follow_the_tiers(self):
+        sizes = {item["name"]: item["preferred"] for item in _recyclarr("radarr")["quality_definition"]["qualities"]}
+        self.assertEqual({sizes[name] for name in sizes if "2160p" in name}, {170})
+        self.assertEqual({sizes[name] for name in sizes if "1080p" in name}, {85})
+        self.assertEqual({sizes[name] for name in sizes if "720p" in name}, {42})
+
+    def test_tv_is_capped_at_about_35_gb_a_season(self):
+        rules = _recyclarr("sonarr")
+        sizes = rules["quality_definition"]["qualities"]
+        allowed = {name for tier in rules["quality_profiles"][0]["qualities"] for name in tier["qualities"]}
+        capped = {item["name"] for item in sizes}
+        # Every allowed quality but the DVD tier (no TRaSH sizes, and small anyway) is capped.
+        self.assertEqual(allowed - capped, {"DVD", "Bluray-576p", "Bluray-480p"})
+        for item in sizes:
+            self.assertEqual(item["max"], 65)
+            self.assertLessEqual(item["preferred"], item["max"])
+        # TRaSH's minimum for 4K Blu-ray copies (95 MB a minute) is above the cap.
+        self.assertNotIn("Bluray-2160p", allowed)
+
+    def test_trash_guides_are_pinned_to_one_commit(self):
+        for app in ("sonarr", "radarr"):
+            with self.subTest(app=app):
+                settings = yaml.safe_load((ROOT / "apps" / app / "recyclarr-settings.yml").read_text(encoding="utf-8"))
+                (provider,) = settings["resource_providers"]
+                self.assertRegex(provider["reference"], "^[0-9a-f]{40}$")
+                self.assertTrue(provider["replace_default"])
 
     def test_a_masked_secret_counts_as_unchanged(self):
         item = {"fields": [{"name": "apiKey", "value": servarr.MASK}, {"name": "host", "value": "a"}]}

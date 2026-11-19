@@ -5572,6 +5572,11 @@
             "title": "Home Network",
             "type": "boolean"
           },
+          "home_url": {
+            "default": "",
+            "title": "Home Url",
+            "type": "string"
+          },
           "https_port": {
             "title": "Https Port",
             "type": "number"

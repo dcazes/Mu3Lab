@@ -66,4 +66,18 @@ describe('DevicesSection', () => {
     expect(screen.getByText('In Safari, tap Share, then Add to Home Screen.')).toBeInTheDocument();
     expect(screen.getByText('Community')).toBeInTheDocument();
   });
+
+  it('shows the home address beside the tailnet one for an app on both', () => {
+    const seerr = service('seerr', 'Seerr', 'optional', {
+      home_network: true,
+      routable: true,
+      home_url: 'http://192.168.1.5:5055',
+    });
+    render(<DevicesSection service={seerr} address="https://host.ts.net:8482" />);
+    expect(
+      screen.getByText('Open this address on a device with access to your Tailscale network to use Seerr.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('At home, Seerr also opens here, without Tailscale.')).toBeInTheDocument();
+    expect(screen.queryByText(/It cannot be reached from outside the home/)).not.toBeInTheDocument();
+  });
 });

@@ -562,10 +562,12 @@ def status(
     ui = dict(service.ui)
     ui_available = bool(ui.get("available", False))
     url = public_url(service, dns_name) if route_ready else ""
-    # An app on the home network (no tailnet route) opens at its home address once it is healthy.
+    # An app on the home network opens at its home address once it is healthy, unless its
+    # tailnet address works (Seerr has both): that one opens from anywhere on the tailnet.
     at_home = service.manifest.service.home_port is not None
-    if at_home and healthy and ui_available:
-        url = home_url(service, home_address())
+    at_home_url = home_url(service, home_address()) if at_home and healthy and ui_available else ""
+    if at_home_url and not route_ready:
+        url = at_home_url
     if route_ready and ui_available and not url and dns_name:
         port = service.private_https_port or service.https_port
         suffix = "" if port == 443 else f":{port}"
@@ -629,6 +631,8 @@ def status(
             else service.setup_action or detail
         ),
         "url": url,
+        # Its home-network address, also when the tailnet one is what opens (``url``).
+        "home_url": at_home_url,
         "route_ready": route_ready,
         # The app's other private addresses, offered once its main route works.
         "links": [

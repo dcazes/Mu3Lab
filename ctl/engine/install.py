@@ -234,7 +234,7 @@ def run_install(
         routed, detail = apply_route(registry, service, root, log)
         if not routed:
             raise StepFailed(stage_name, failure_code, detail)
-        if app.manifest.sign_in.method in {"gate", "trusted_header"}:
+        if app.manifest.gated:
             failure_code = "sign_in_unavailable"
             stage("authentik_ready", "Publishing this app's protected sign-in.")
             ctx.reregister_sign_in()

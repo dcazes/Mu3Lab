@@ -161,7 +161,8 @@ class Service(ApiModel):
     stage: Literal["foundation"] | Literal["core"] | Literal["optional"]
     group: Literal["apps"] | Literal["ai"] | Literal["infrastructure"]
     routable: bool
-    # Reached on the home network (http://<home address>:<port>), not the tailnet (Jellyfin).
+    # Reached on the home network (http://<home address>:<port>): Jellyfin there only, Seerr
+    # on the tailnet too (``routable``).
     home_network: bool = False
     extra_routes: list[ServiceExtraRoute] = Field(default_factory=list)
     required: bool
@@ -174,6 +175,8 @@ class Service(ApiModel):
     last_error: str | dict[str, JsonValue]
     detail: str
     url: str
+    # Its home-network address (http://<home address>:<port>), also when ``url`` is the tailnet one.
+    home_url: str = ""
     route_ready: bool
     links: list[ServiceLink] = Field(default_factory=list)
     compose_present: bool

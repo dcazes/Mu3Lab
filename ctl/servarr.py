@@ -3,12 +3,12 @@
 The three apps share one API style: JSON over HTTP with an ``X-Api-Key`` header, settings
 in ``/config/<section>``, and "providers" (download clients, indexers, applications) made
 of an implementation name and a list of ``{name, value}`` fields. Each app's ``hooks.py``
-says what Mu3Lab wants (folders, names, the quality profile, which apps to connect) and
+says what Mu3Lab wants (folders, names, which apps to connect) and
 calls these helpers, which change only what differs, so running them again at every start
 or every few minutes changes nothing.
 
-Nothing here names an app: the hooks pass in addresses, keys and the quality table
-(``apps/<id>/quality.json``).
+Nothing here names an app: the hooks pass in addresses and keys. Quality rules are
+Recyclarr's (``apps/<id>/recyclarr.yml``), run by the hooks.
 """
 
 from __future__ import annotations
@@ -18,18 +18,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
+from ctl.control_state import ControlState
+from ctl.engine.compose import Compose
 from ctl.engine.loopback import LoopbackError
+from ctl.runtime import RuntimePaths
 
 # Sonarr and Radarr call these "Executables" and "Potentially Dangerous": a download holding
 # such a file is marked failed, blocked and searched for again (indexer setting failDownloads).
 FAIL_DANGEROUS = [0, 1]
-# A custom format scored this low is never downloaded (the profile's minimum score is 0).
-UNWANTED_SCORE = -10000
-GROUP_ID_BASE = 1000
 # How the apps show a stored secret; sending it back keeps the stored value.
 MASK = "********"
 
@@ -139,7 +137,8 @@ def ensure_provider(
         if template is None:
             raise LoopbackError(f"{api.name} has no {implementation} {kind}.")
         body = with_fields({**template, "name": name, **extra}, values)
-        # Saved even while the other end is away (qBittorrent stopped, Sonarr still starting).
+        # Saved even while the other end is away (Sonarr still starting). A download client is the
+        # exception: Sonarr and Radarr still test it and refuse one they cannot reach.
         return api.post(f"{kind}?forceSave=true", body)
     current = field_values(existing)
     changed = (
@@ -199,184 +198,6 @@ def fail_dangerous_downloads(api: Servarr) -> list[str]:
     return changed
 
 
-# --- Quality ----------------------------------------------------------------------------
-
-
-def load_quality(path: Path) -> dict[str, Any]:
-    """An app's quality table: sizes per quality, unwanted custom formats and the profile's tiers."""
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def apply_sizes(api: Servarr, sizes: dict[str, list[float]]) -> bool:
-    """Minimum, preferred and maximum size (MB per minute of running time) for each named quality."""
-    definitions = api.get("qualitydefinition") or []
-    changed = []
-    for definition in definitions:
-        wanted = sizes.get(str((definition.get("quality") or {}).get("name")))
-        if not wanted:
-            continue
-        low, preferred, high = wanted
-        update = {"minSize": low, "preferredSize": preferred, "maxSize": high}
-        if any(definition.get(key) != value for key, value in update.items()):
-            definition.update(update)
-            changed.append(definition)
-    if changed:
-        api.put("qualitydefinition/update", definitions)
-    return bool(changed)
-
-
-def custom_format(spec: dict[str, Any]) -> dict[str, Any]:
-    """A TRaSH Guides custom format (fields as a mapping) in the apps' own shape (a field list)."""
-    return {
-        "name": spec["name"],
-        "includeCustomFormatWhenRenaming": bool(spec.get("includeCustomFormatWhenRenaming")),
-        "specifications": [
-            {
-                "name": item["name"],
-                "implementation": item["implementation"],
-                "negate": bool(item.get("negate")),
-                "required": bool(item.get("required")),
-                "fields": [{"name": key, "value": value} for key, value in (item.get("fields") or {}).items()],
-            }
-            for item in spec.get("specifications") or []
-        ],
-    }
-
-
-def _specs(item: dict[str, Any]) -> list[tuple[Any, ...]]:
-    """A custom format's rules, comparable whatever extra details the app adds."""
-    return sorted(
-        (
-            spec.get("name"),
-            spec.get("implementation"),
-            bool(spec.get("negate")),
-            bool(spec.get("required")),
-            json.dumps(field_values(spec), sort_keys=True),
-        )
-        for spec in item.get("specifications") or []
-    )
-
-
-def ensure_custom_formats(api: Servarr, specs: Iterable[dict[str, Any]]) -> dict[str, int]:
-    """Create or update each custom format by name; returns ``{name: id}``."""
-    existing = {str(item.get("name")): item for item in api.get("customformat") or []}
-    ids = {}
-    for spec in specs:
-        wanted = custom_format(spec)
-        current = existing.get(wanted["name"])
-        if current is None:
-            ids[wanted["name"]] = int(api.post("customformat", wanted)["id"])
-            continue
-        if _specs(current) != _specs(wanted) or bool(current.get("includeCustomFormatWhenRenaming")) != bool(
-            wanted["includeCustomFormatWhenRenaming"]
-        ):
-            api.put(f"customformat/{current['id']}", {**wanted, "id": current["id"]})
-        ids[wanted["name"]] = int(current["id"])
-    return ids
-
-
-def _qualities(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Every quality in a profile's item list, groups opened up, in the app's order."""
-    found = []
-    for item in items:
-        if item.get("quality"):
-            found.append(item["quality"])
-        found += _qualities(item.get("items") or [])
-    return found
-
-
-def profile_items(schema_items: list[dict[str, Any]], tiers: list[dict[str, Any]]) -> tuple[list[dict], int]:
-    """A profile's items from the app's template and Mu3Lab's tiers, best first; returns (items, cutoff id).
-
-    Each tier is ``{"name": "1080p", "qualities": [...], "cutoff": bool}`` and becomes one group,
-    so any of its qualities counts the same. The apps list items worst first, so the groups go
-    last in reverse; every quality in no tier is listed, not allowed, before them. A name the
-    app does not have is skipped (a release can rename a quality).
-    """
-    by_name = {str(quality["name"]): quality for quality in _qualities(schema_items)}
-    placed = {name for tier in tiers for name in tier["qualities"]}
-    items: list[dict[str, Any]] = [
-        {"quality": quality, "items": [], "allowed": False} for name, quality in by_name.items() if name not in placed
-    ]
-    cutoff = 0
-    for position, tier in reversed(list(enumerate(tiers))):
-        members = [by_name[name] for name in tier["qualities"] if name in by_name]
-        if not members:
-            continue
-        group_id = GROUP_ID_BASE + 100 + position
-        items.append(
-            {
-                "id": group_id,
-                "name": tier["name"],
-                "allowed": True,
-                "items": [{"quality": quality, "items": [], "allowed": True} for quality in members],
-            }
-        )
-        if tier.get("cutoff"):
-            cutoff = group_id
-    if not cutoff:
-        raise ValueError("the quality tiers name no cutoff the app has")
-    return items, cutoff
-
-
-def _shape(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
-    """What a profile's item list means: each allowed group's name and qualities, in order."""
-    return [
-        (
-            item.get("name") or "",
-            bool(item.get("allowed")),
-            tuple(quality["id"] for quality in _qualities(item.get("items") or []) or [item.get("quality") or {}]),
-        )
-        for item in items
-    ]
-
-
-def ensure_profile(
-    api: Servarr, name: str, tiers: list[dict[str, Any]], unwanted: dict[str, int], extra: dict[str, Any] | None = None
-) -> int:
-    """Create or update the quality profile ``name``; returns its id.
-
-    Upgrades stop at the cutoff tier. Unwanted custom formats score far below the minimum, so a
-    release matching one is never downloaded; every other custom format scores nothing.
-    """
-    schema = api.get("qualityprofile/schema")
-    items, cutoff = profile_items(schema["items"], tiers)
-    formats = [
-        {
-            "format": item["format"],
-            "name": item.get("name"),
-            "score": UNWANTED_SCORE if item["format"] in unwanted.values() else 0,
-        }
-        for item in schema.get("formatItems") or []
-    ]
-    wanted = {
-        "name": name,
-        "upgradeAllowed": True,
-        "cutoff": cutoff,
-        "items": items,
-        "minFormatScore": 0,
-        "cutoffFormatScore": 0,
-        "minUpgradeFormatScore": 1,
-        "formatItems": formats,
-        **(extra or {}),
-    }
-    current = next((item for item in api.get("qualityprofile") or [] if item.get("name") == name), None)
-    if current is None:
-        return int(api.post("qualityprofile", {**schema, **wanted})["id"])
-    scores = {item["format"]: item["score"] for item in current.get("formatItems") or []}
-    same = (
-        _shape(current["items"]) == _shape(items)
-        and current.get("cutoff") == cutoff
-        and current.get("upgradeAllowed") is True
-        and current.get("minFormatScore") == 0
-        and scores == {item["format"]: item["score"] for item in formats}
-        and all(current.get(key) == value for key, value in (extra or {}).items())
-    )
-    if not same:
-        api.put(f"qualityprofile/{current['id']}", {**current, **wanted, "id": current["id"]})
-    return int(current["id"])
-
-
 # --- Sonarr and Radarr ------------------------------------------------------------------
 
 DOWNLOAD_CLIENT = "qBittorrent (Mu3Lab)"
@@ -396,7 +217,6 @@ def configure_library(
     category_field: str,
     category: str,
     naming: dict[str, Any],
-    quality: Path,
 ) -> list[str]:
     """Everything Mu3Lab owns in Sonarr or Radarr, put back at every start; returns what must wait.
 
@@ -404,13 +224,11 @@ def configure_library(
       its own network) as the download client, in the app's own category. qBittorrent stops each torrent the moment it finishes (no sharing); the app
       then moves the file into the library and removes the torrent.
     - Names Jellyfin reads, with subtitles kept beside the video.
-    - Size limits, the unwanted-release rules and the "Mu3Lab" quality profile (``quality``).
     - Slow feed checks, and a download holding a program fails so another release is tried.
 
     The app will not add qBittorrent while qBittorrent is stopped; that one waits for the
     app's upkeep (``ensure_download_client``), and the rest is done now.
     """
-    table = load_quality(quality)
     waiting = []
     ensure_root_folder(api, root)
     try:
@@ -430,11 +248,22 @@ def configure_library(
         },
     )
     set_config(api, "indexer", {"rssSyncInterval": FEED_CHECK_MINUTES})
-    apply_sizes(api, table["sizes"])
-    unwanted = ensure_custom_formats(api, table["unwanted"])
-    ensure_profile(api, table["profile"], table["tiers"], unwanted)
     fail_dangerous_downloads(api)
     return waiting
+
+
+def apply_quality_rules(compose: Compose, name: str, log: Any) -> None:
+    """Run Recyclarr, the service beside the app, once: sizes, unwanted formats and the "Mu3Lab" profile.
+
+    Its rules are the app's ``recyclarr.yml``. It also runs weekly on its own schedule; this run
+    makes a new install or a changed rule take effect at once. Raises ``ValueError`` with its error.
+    """
+    rc, output = compose.exec("recyclarr", ["recyclarr", "sync"], log, timeout=900)
+    errors = [line.strip() for line in output.splitlines() if "[ERR]" in line or "[FTL]" in line]
+    if rc or errors:
+        lines = errors or [line for line in output.splitlines() if line.strip()] or ["it stopped without a message"]
+        reason = lines[-1]
+        raise ValueError(f"Recyclarr could not apply {name}'s quality rules: {reason}")
 
 
 def ensure_download_client(api: Servarr, client: tuple[str, int], category_field: str, category: str) -> bool:
@@ -452,3 +281,29 @@ def ensure_download_client(api: Servarr, client: tuple[str, int], category_field
         {"enable": True, "priority": 1, "removeCompletedDownloads": True, "removeFailedDownloads": True},
     )
     return before != after
+
+
+def keep_download_client(
+    api: Servarr,
+    client: tuple[str, int],
+    category_field: str,
+    category: str,
+    *,
+    client_app: str,
+    paths: RuntimePaths,
+    log: Any,
+) -> bool:
+    """The upkeep pass of ``ensure_download_client``; True when qBittorrent was added or changed.
+
+    While qBittorrent (the app ``client_app``) is stopped the app refuses it, and that waits quietly
+    for the next pass. A refusal while it runs is a real fault (nothing would download), so it goes
+    to the log.
+    """
+    try:
+        return ensure_download_client(api, client, category_field, category)
+    except LoopbackError as exc:
+        state = ControlState.runtime(paths)
+        installation = state.installation(client_app) if state else None
+        if installation and installation["state"] in {"running", "degraded"}:
+            log(f"{api.name} cannot use qBittorrent, so nothing downloads: {exc}")
+        return False

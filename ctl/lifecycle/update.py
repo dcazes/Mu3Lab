@@ -282,9 +282,21 @@ def _refresh_route(service: Service, root: Path, log: Log) -> None:
     from ctl.registry import load as load_registry
     from ctl.routes import apply as apply_route
 
-    routed, detail = apply_route(load_registry(), service, root, log)
+    registry = load_registry()
+    routed, detail = apply_route(registry, service, root, log)
     if not routed:
         log(f"{service.name}'s private address was not refreshed: {redact(detail)}")
+        return
+    if service.manifest.gated:
+        # A release may bring the gate itself (Seerr's tailnet address): Authentik must know it.
+        from ctl.identity import sync_sign_in
+        from ctl.integrations.authentik import Authentik, AuthentikError
+        from ctl.service_state import tailnet_dns_name
+
+        try:
+            sync_sign_in(registry.catalog, tailnet_dns_name(), Authentik.runtime(), app_id=service.id)
+        except (AuthentikError, OSError, ValueError) as exc:
+            log(f"{service.name}'s sign-in was not refreshed: {redact(str(exc))}")
 
 
 def _refresh_connectors(service: Service, root: Path, log: Log, *, running: bool) -> None:

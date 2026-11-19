@@ -52,6 +52,12 @@ class Item:
     notes: str
     # Called once the item is safely in the person's vault.
     saved: list[Any] = field(default_factory=list)
+    # More addresses the same login is filled at (an app at home that is on the tailnet too).
+    more_urls: tuple[str, ...] = ()
+
+    @property
+    def urls(self) -> list[str]:
+        return [url for url in dict.fromkeys((self.url, *self.more_urls)) if url]
 
 
 def _origin(host: str, port: int | None) -> str:
@@ -108,17 +114,20 @@ def items_for(person: dict[str, Any], host: str, paths: RuntimePaths) -> list[It
         if not any(ref.rule == "per_person_logins" for ref in service.manifest.rules):
             continue
         login = person_logins.get(service.id, str(person.get("username") or ""), paths)
-        # An app on the home network is filled at its home address (http://<address>:<port>).
+        # An app on the home network is filled at its home address (http://<address>:<port>), and
+        # at its tailnet address too when it has one (Seerr).
         url = home_url(service, home_address()) if service.manifest.service.home_port else ""
-        if login and (url or (host and service.private_https_port)):
+        private = _origin(host, service.private_https_port) if host and service.private_https_port else ""
+        if login and (url or private):
             items.append(
                 Item(
                     f"login:{service.id}",
                     service.name,
                     str(login["login"]),
                     str(login["password"]),
-                    url or _origin(host, service.private_https_port),
+                    url or private,
                     "Created by Mu3Lab for you. Bitwarden fills this in when the app asks for its login.",
+                    more_urls=(private,) if url and private else (),
                 )
             )
     if person.get("role") == "admin" and host:
@@ -289,7 +298,7 @@ def _sync_person(session, org_id, org_key, person, host, members, names, collect
             "name": item.name,
             "username": item.username,
             "password": item.password,
-            "uris": [(item.url, MATCH_HOST)] if item.url else [],
+            "uris": [(url, MATCH_HOST) for url in item.urls],
             "notes": item.notes,
             "fields": fields,
         }
@@ -297,7 +306,12 @@ def _sync_person(session, org_id, org_key, person, host, members, names, collect
         try:
             if current is None:
                 session.create_login(org_id, org_key, collection, **payload)
-            elif session_password(current, org_key) != item.password or current.username != item.username:
+            elif (
+                session_password(current, org_key) != item.password
+                or current.username != item.username
+                # An address added later (the app's tailnet address) is filled there too.
+                or not set(item.urls) <= set(current.uris)
+            ):
                 session.update_login(current, org_id, org_key, **payload)
         except VaultError as exc:
             log(f"Could not save {item.name} for {name}: {exc}")

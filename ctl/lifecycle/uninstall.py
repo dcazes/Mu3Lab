@@ -154,7 +154,7 @@ def _release_chat_connectors(service_id: str, root: Path, log: Log, *, forget: b
 
 
 def _remove_sign_in(service: Service, registry: Registry, paths: RuntimePaths) -> None:
-    if service.manifest.sign_in.method in {"oidc", "gate", "trusted_header"}:
+    if service.manifest.sign_in.method == "oidc" or service.manifest.gated:
         remove_sign_in(
             registry.catalog.get(service.id),
             Authentik.runtime(paths),

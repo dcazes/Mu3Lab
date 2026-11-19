@@ -8,8 +8,8 @@ tier: optional
 group: apps
 category: media
 tagline: Finds and downloads the films you want
-summary: Add a film and Radarr downloads it once a good copy is out, in the household's chosen quality (1080p,
-  or 4K, 720p or DVD when that is all there is), then files it in Movies for Jellyfin. It finds films on the
+summary: Add a film and Radarr downloads it once a good copy is out, in the household's chosen quality (4K,
+  or 1080p, 720p or DVD when that is all there is), then files it in Movies for Jellyfin. It finds films on the
   sites you add to Prowlarr, downloads them with qBittorrent, and checks for new copies every two hours.
   Seerr sends it the films people ask for.
 version: "v7.0.3.10918"
@@ -46,8 +46,8 @@ secrets:
   length: 16
 env:
   MU3LAB_MEDIA_ROOT: '{{media_root}}'
-resource_guidance: Light on memory and processor. Films take disk space in Movies (about 6 GB each in 1080p, 15 to
-  40 GB in 4K), which backups include, so allow backup space for what you keep.
+resource_guidance: Light on memory and processor. Films take disk space in Movies (about 20 GB each in 4K, 10 GB in
+  1080p), which backups include, so allow backup space for what you keep.
 setup_action: Install Radarr to have the films you want downloaded for Jellyfin.
 mobile:
   primary: radarr-web

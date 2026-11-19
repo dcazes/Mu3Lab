@@ -188,7 +188,7 @@ def _oidc_settings(app: App, paths: RuntimePaths) -> OidcApp | None:
 
 
 def _gated(app: App) -> bool:
-    return app.manifest.route is not None and app.manifest.route.access in {"gate", "trusted_header"}
+    return app.manifest.gated
 
 
 def sync_sign_in(
@@ -232,15 +232,17 @@ def remove_sign_in(
     app: App, authentik: Authentik, *, catalog: Catalog | None = None, host: str = "", paths: RuntimePaths | None = None
 ) -> None:
     method = app.manifest.sign_in.method
-    if method not in {"oidc", "gate", "trusted_header"}:
+    # An app on the home network signs people in itself and may still be gated on the tailnet.
+    gated = app.manifest.gated
+    if method != "oidc" and not gated:
         return
-    if method in {"gate", "trusted_header"}:
+    if gated:
         if catalog is None:
             raise ValueError("Removing a gated app needs the remaining app catalog.")
         # Exclude explicitly too: a caller may be retrying cleanup before removing the project.
         remaining = Catalog(tuple(item for item in catalog.apps if item.id != app.id))
     with resource_locks.hold(SIGN_IN_LOCK, paths=paths or RuntimePaths()):
-        if method in {"gate", "trusted_header"}:
+        if gated:
             sync_sign_in(remaining, host, authentik, paths)
         authentik.apply_blueprint(
             removal_blueprint_name(app.id), render_removal_blueprint(app.id, app.manifest.name, oidc=method == "oidc")

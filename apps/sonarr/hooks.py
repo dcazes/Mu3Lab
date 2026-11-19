@@ -2,10 +2,10 @@
 
 At every start Mu3Lab puts back what it owns (``ctl.servarr.configure_library``): Shows as
 the library folder, qBittorrent as the download client in the ``sonarr`` category, Jellyfin's
-folder names ("Show Name/Season 01"), size limits and unwanted-release rules, and the
-"Mu3Lab" quality profile: 1080p, else 4K, 720p or DVD, upgrading only up to 1080p
-(``quality.json``). Everything else (which shows to follow, extra settings) is the
-administrators' to change in Sonarr.
+folder names ("Show Name/Season 01"). Then Recyclarr, a service beside Sonarr, applies the
+quality rules in ``recyclarr.yml``: size limits, unwanted-release rules and the "Mu3Lab"
+profile (4K, else 1080p, 720p or DVD; the first good copy is kept, no upgrades). Everything
+else (which shows to follow, extra settings) is the administrators' to change in Sonarr.
 
 Every few minutes it also adds qBittorrent if it was stopped at setup, and marks any site
 Prowlarr added since as failing a download that holds a program, so Sonarr skips it and
@@ -14,16 +14,14 @@ tries another release.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from ctl import servarr
 from ctl.engine.hooks import AppHooks, HookContext
 from ctl.engine.loopback import LoopbackError
+from ctl.runtime import RuntimePaths
 
 KEY_ENV = "SONARR_API_KEY"
 CATEGORY = "sonarr"
 SHOWS = "/media/shows"
-QUALITY = Path(__file__).with_name("quality.json")
 # qBittorrent's name and port on its own network, which this app joins (docker-compose.yml).
 QBITTORRENT = ("qbittorrent", 8479)
 NAMING = {
@@ -55,8 +53,8 @@ class Hooks(AppHooks):
                 category_field="tvCategory",
                 category=CATEGORY,
                 naming=NAMING,
-                quality=QUALITY,
             )
+            servarr.apply_quality_rules(ctx.compose, "Sonarr", ctx.log)
         except (LoopbackError, ValueError) as exc:
             ctx.fail("configure_application", "application_configuration_failed", f"Sonarr could not be set up: {exc}")
         for note in waiting:
@@ -65,11 +63,11 @@ class Hooks(AppHooks):
     def periodic(self, ctx: HookContext) -> str:
         api = _api(ctx)
         notes = []
-        try:
-            if servarr.ensure_download_client(api, QBITTORRENT, "tvCategory", CATEGORY):
-                notes.append("now downloads with qBittorrent")
-        except LoopbackError:
-            pass  # qBittorrent is stopped; tried again next time
+        paths = ctx.facts.paths if ctx.facts else RuntimePaths()
+        if servarr.keep_download_client(
+            api, QBITTORRENT, "tvCategory", CATEGORY, client_app="qbittorrent", paths=paths, log=ctx.log
+        ):
+            notes.append("now downloads with qBittorrent")
         changed = servarr.fail_dangerous_downloads(api)
         if changed:
             notes.append(f"skips downloads holding programs from {', '.join(changed)}")

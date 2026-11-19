@@ -9,7 +9,7 @@ group: apps
 category: media
 tagline: Follows your shows and fetches new episodes
 summary: Pick the shows you follow and Sonarr downloads each new episode as it comes out, in the household's
-  chosen quality (1080p, or 4K, 720p or DVD when that is all there is), then files it in Shows for Jellyfin.
+  chosen quality (4K, or 1080p, 720p or DVD when that is all there is), then files it in Shows for Jellyfin.
   It finds episodes on the sites you add to Prowlarr, downloads them with qBittorrent, and checks for new ones
   every two hours. Seerr sends it the shows people ask for.
 version: "v4.0.20.3014"
@@ -47,7 +47,7 @@ secrets:
 env:
   MU3LAB_MEDIA_ROOT: '{{media_root}}'
 resource_guidance: Light on memory and processor. Episodes take disk space in Shows, which backups include, so allow
-  backup space for what you keep. 4K episodes are about three times the size of 1080p ones.
+  backup space for what you keep. An hour-long episode is about 10 GB in 4K and 5 GB in 1080p.
 setup_action: Install Sonarr to have new episodes of your shows downloaded for Jellyfin.
 mobile:
   primary: sonarr-web

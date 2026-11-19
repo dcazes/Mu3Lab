@@ -3666,6 +3666,11 @@ export interface components {
        * @default false
        */
       home_network?: boolean;
+      /**
+       * Home Url
+       * @default
+       */
+      home_url?: string;
       /** Https Port */
       https_port: number;
       /** Id */

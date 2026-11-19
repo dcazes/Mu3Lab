@@ -306,13 +306,13 @@ def verify_sign_in(service_id: str, host: str, log: Log, *, patience: float | No
     service = load().get(service_id)
     if service.manifest.sign_in.method == "none":
         return "This app does not use Authentik sign-in."
-    if service.manifest.service.home_port is not None:
+    if service.manifest.service.home_port is not None and not service.manifest.gated:
         # Kept off the tailnet: no Authentik in the way, and the app checks each person's login itself.
         return "This app is on the home network and signs people in with its own login."
     port = service.private_https_port
     if not host or not port:
         raise SignInError("This server's private address is not known yet.")
-    if service.manifest.sign_in.method in {"gate", "trusted_header"}:
+    if service.manifest.gated:
         # The outpost can keep serving an app Authentik has already deleted;
         # ask Authentik itself first.
         if patience is None:

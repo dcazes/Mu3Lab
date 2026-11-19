@@ -1,0 +1,9 @@
+# Recyclarr's own settings (mounted as /config/settings.yml). See hooks.py and recyclarr.yml.
+# TRaSH Guides at one commit Mu3Lab approved, never their latest: the rules change only with
+# a Mu3Lab release (the same pin as an app version).
+resource_providers:
+  - name: trash-guides-approved
+    type: trash-guides
+    clone_url: https://github.com/TRaSH-Guides/Guides.git
+    reference: f91330331d83897d588c4248158c6317e007988d
+    replace_default: true

@@ -1,0 +1,96 @@
+# Mu3Lab's quality rules for Sonarr, applied by Recyclarr (see hooks.py) at every start and weekly.
+# Owner's choices (2026-11-18): 4K first, else 1080p, 720p or DVD; the first good copy is kept
+# (no upgrades). Blu-ray disc images, remuxes, cams, telesyncs and screeners are never taken; every
+# HDR and Dolby Vision kind is fine. Sizes are MB per minute of running time: minimums are TRaSH
+# Guides'. Owner's cap (2026-11-18): about 35 GB for a season, so at most 65 MB a minute (12
+# episodes of 48 minutes: 37 GB; about 3 GB for a 45-minute episode). 4K Blu-ray copies are not
+# taken, as TRaSH's minimum for them (95 MB a minute) is above that. The preferred size, the
+# tie-breaker between copies of one quality, stays under the cap.
+sonarr:
+  mu3lab:
+    base_url: http://sonarr:8989
+    api_key: !env_var SONARR_API_KEY
+    # Only formats Recyclarr itself made and this file no longer names are removed.
+    delete_old_custom_formats: true
+    quality_definition:
+      type: series
+      # DVD-grade qualities have no TRaSH sizes; the app's own stay.
+      qualities:
+        - name: WEBDL-2160p
+          preferred: 60
+          max: 65
+        - name: WEBRip-2160p
+          preferred: 60
+          max: 65
+        - name: HDTV-2160p
+          preferred: 60
+          max: 65
+        - name: WEBDL-1080p
+          preferred: 55
+          max: 65
+        - name: WEBRip-1080p
+          preferred: 55
+          max: 65
+        - name: Bluray-1080p
+          preferred: 55
+          max: 65
+        - name: HDTV-1080p
+          preferred: 55
+          max: 65
+        - name: WEBDL-720p
+          preferred: 25
+          max: 65
+        - name: WEBRip-720p
+          preferred: 25
+          max: 65
+        - name: Bluray-720p
+          preferred: 25
+          max: 65
+        - name: HDTV-720p
+          preferred: 25
+          max: 65
+    quality_profiles:
+      # Seerr sends every request to this profile by name (apps/seerr/hooks.py).
+      - name: Mu3Lab
+        reset_unmatched_scores:
+          enabled: true
+        upgrade:
+          allowed: false
+          until_quality: 4K
+        min_format_score: 0
+        quality_sort: top
+        # Best first; any quality in a group counts the same. Anything not listed is not allowed.
+        qualities:
+          - name: 4K
+            qualities:
+              - WEBDL-2160p
+              - WEBRip-2160p
+              - HDTV-2160p
+          - name: 1080p
+            qualities:
+              - WEBDL-1080p
+              - WEBRip-1080p
+              - Bluray-1080p
+              - HDTV-1080p
+          - name: 720p
+            qualities:
+              - WEBDL-720p
+              - WEBRip-720p
+              - Bluray-720p
+              - HDTV-720p
+          - name: DVD
+            qualities:
+              - DVD
+              - Bluray-576p
+              - Bluray-480p
+    custom_formats:
+      # Never downloaded: scored far below the profile's minimum of 0.
+      - trash_ids:
+          - 85c61753df5da1fb2aab6f2a47426b09  # BR-DISK
+          - 9c11cd3f07101cdba90a2d81cf0e56b4  # LQ
+          - e2315f990da2e2cbfc9fa5b7a6fcfe48  # LQ (Release Title)
+          - fbcb31d8dabd2a319072b84fc0b7249c  # Extras
+          - 23297a736ca77c0fc8e70f8edd7ee56c  # Upscaled
+        assign_scores_to:
+          - name: Mu3Lab
+            score: -10000

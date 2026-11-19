@@ -126,7 +126,11 @@ export function DevicesSection({ service, address }: { service: Service; address
       Number(b.id === service.mobile?.primary) - Number(a.id === service.mobile?.primary),
   );
   const asksForAddress = clients.some((client) => client.setup === 'server_url');
-  const atHome = Boolean(service.home_network);
+  // An app on the home network that is on the tailnet too (Seerr): ``address`` is its tailnet
+  // address, and its home one gets a card of its own.
+  const homeUrl = service.home_url || '';
+  const alsoAtHome = Boolean(service.home_network && service.routable && homeUrl && homeUrl !== address);
+  const atHome = Boolean(service.home_network) && !alsoAtHome;
   return (
     <>
       <Card
@@ -164,6 +168,20 @@ export function DevicesSection({ service, address }: { service: Service; address
           <QrCode value={address} label={`QR code for ${address}`} />
         </div>
       </Card>
+      {alsoAtHome && (
+        <Card title="Home address" description={`At home, ${service.name} also opens here, without Tailscale.`}>
+          <div className="device-address">
+            <div className="stack">
+              <CopyField value={homeUrl} label="Home address" />
+              <p className="muted">
+                The phone or computer must be on your home Wi-Fi or plugged into your router. Your login is the same at
+                both addresses.
+              </p>
+            </div>
+            <QrCode value={homeUrl} label={`QR code for ${homeUrl}`} />
+          </div>
+        </Card>
+      )}
       {clients.length ? (
         clients.map((client) => <ClientCard key={client.id} client={client} platform={platform} />)
       ) : (

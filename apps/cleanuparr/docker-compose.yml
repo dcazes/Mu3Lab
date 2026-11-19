@@ -1,0 +1,40 @@
+name: mu3lab-cleanuparr
+
+services:
+  cleanuparr:
+    image: ghcr.io/cleanuparr/cleanuparr:2.11.1@sha256:923c2fe435e22fc58d261bacd2d6bbd8eb1ba3f95358803a8e4d3287ffd919d3
+    restart: unless-stopped
+    # Loopback only: Caddy reaches it here behind Authentik's gate, and Mu3Lab's setup. Cleanuparr
+    # skips its own login for local addresses, so it must never listen on the home network.
+    ports: ["127.0.0.1:11011:11011"]
+    environment:
+      TZ: ${TZ:-UTC}
+      PORT: "11011"
+      # Its image starts as root, hands /config to this user and drops to it. It never touches
+      # media files itself: qBittorrent and the apps remove what it strikes.
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/cleanuparr/config:/config
+    networks:
+      # Its own network, for the loopback port.
+      default: {}
+      # qBittorrent's own network, where it skips its login (it is installed first: depends_on).
+      qbittorrent: {}
+      # Sonarr and Radarr, whose queues it watches and whose searches it starts.
+      mu3lab_media: {}
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11011/health"]
+      timeout: 5s
+      start_period: 60s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+
+networks:
+  default: {}
+  qbittorrent:
+    name: mu3lab-qbittorrent_default
+    external: true
+  mu3lab_media: {external: true}

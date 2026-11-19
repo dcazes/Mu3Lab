@@ -40,6 +40,43 @@ services:
       interval: 5m
       retries: 3
 
+  # Recyclarr applies the quality rules in recyclarr.yml (TRaSH Guides at a commit Mu3Lab approved,
+  # recyclarr-settings.yml): once Sonarr answers at every start (hooks.py), then weekly on its own
+  # schedule, which puts back anything changed by hand. It has no web page.
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:8.8.1@sha256:3e9c41b9ec29bbf65fe846864058730d321a21f7695d8c0d9437b73e34d50ad9
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      CRON_SCHEDULE: "@weekly"
+      SONARR_API_KEY: ${SONARR_API_KEY:?SONARR_API_KEY is required}
+    volumes:
+      # Its downloaded copy of TRaSH Guides and its logs.
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/sonarr/recyclarr:/config
+      - ./recyclarr.yml:/config/recyclarr.yml:ro
+      - ./recyclarr-settings.yml:/config/settings.yml:ro
+    # Its own network only: it reaches Sonarr by name there, and GitHub for TRaSH Guides.
+    networks:
+      default: {}
+    depends_on:
+      recyclarr-init:
+        condition: service_completed_successfully
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  # Recyclarr runs as its image's own user (1000); its folder must be that user's.
+  recyclarr-init:
+    image: ghcr.io/recyclarr/recyclarr:8.8.1@sha256:3e9c41b9ec29bbf65fe846864058730d321a21f7695d8c0d9437b73e34d50ad9
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "1000:1000", "/config"]
+    volumes:
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/sonarr/recyclarr:/config
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+
 networks:
   # Its own network, with internet access for show details and the sites' feeds.
   default: {}

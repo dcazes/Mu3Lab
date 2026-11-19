@@ -657,8 +657,12 @@ class AppManifest(Model):
             # Nothing guards the home network but the app's own login.
             if self.sign_in.method != "local":
                 raise ValueError("an app on the home network signs people in itself (sign_in.method local)")
-            if self.route is not None:
-                raise ValueError("an app on the home network has no tailnet route")
+            # Its tailnet address, if it has one, is Authentik's to guard first (Seerr): the app's
+            # own login then follows, the same at home and on the tailnet.
+            if self.route is not None and not self.gated:
+                raise ValueError("an app on the home network has a tailnet route only behind Authentik's gate")
+            if self.extra_routes:
+                raise ValueError("an app on the home network has at most one tailnet route")
         if self.sign_in.method in {"gate", "trusted_header"} and (self.route is None or self.route.access == "open"):
             raise ValueError("gated sign-in needs a route whose access is gate or trusted_header")
         if self.route and self.route.access == "trusted_header" and self.sign_in.method != "trusted_header":
@@ -703,6 +707,15 @@ class AppManifest(Model):
     @property
     def data_folder(self) -> str:
         return self.data_dir or self.id
+
+    @property
+    def gated(self) -> bool:
+        """Authentik admits people at the tailnet address first (gate or trusted_header).
+
+        Usually the same as ``sign_in.method`` gate or trusted_header; an app on the home network
+        keeps its own login (``local``) and may still be gated on the tailnet.
+        """
+        return self.route is not None and self.route.access in {"gate", "trusted_header"}
 
     @property
     def removable(self) -> bool:

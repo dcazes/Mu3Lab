@@ -1,0 +1,69 @@
+# Cleanuparr — see ctl/manifest/models.py for every field.
+# Administrators only. Cleanuparr watches Sonarr's and Radarr's downloads in qBittorrent: one that
+# makes no progress for a day is removed, that copy is blocked and another is searched for. Every
+# half hour it also searches for one missing film or episode that is out. Mu3Lab sets it all up
+# (hooks.py); its page shows what it struck and removed.
+id: cleanuparr
+name: Cleanuparr
+tier: optional
+group: apps
+category: media
+tagline: Replaces stuck downloads and finds missing ones
+summary: When a film or episode Sonarr or Radarr asked for stops downloading for a whole day, Cleanuparr removes
+  it, blocks that copy and has another found. Every half hour it also searches again for one film or episode
+  you are still missing, once it is out to buy or stream. Torrents you add by hand are left alone.
+version: "v2.11.1"
+upstream: Cleanuparr/Cleanuparr
+depends_on: [qbittorrent]
+backup:
+  ignore:
+  - cleanuparr/config/logs
+service:
+  local_port: 11011
+  health:
+    path: /health
+route:
+  https_port: 8484
+  caddy_port: 19490
+  access: gate
+  audience: operators
+sign_in:
+  method: gate
+  note: Authentik admits administrators only, and Cleanuparr then opens without a login of its own (its "disable
+    authentication for local addresses" setting; it sees every visitor as Caddy on this computer).
+secrets:
+# Cleanuparr's own administrator login, used only by Mu3Lab's setup; nobody signs in with it.
+- env: CLEANUPARR_PASSWORD
+  kind: token
+  length: 32
+integrates_with:
+# Installing Sonarr or Radarr hands Cleanuparr its key; Cleanuparr then watches its downloads (hooks.py).
+- capability: tv_automation
+  env:
+    MU3LAB_SONARR_API_KEY: '{{provider:SONARR_API_KEY}}'
+- capability: movie_automation
+  env:
+    MU3LAB_RADARR_API_KEY: '{{provider:RADARR_API_KEY}}'
+resource_guidance: Light. It checks qBittorrent every 15 minutes and searches for one missing item every half
+  hour.
+setup_action: Install Cleanuparr to replace stuck downloads and fetch missing films and episodes on its own.
+mobile:
+  primary: cleanuparr-web
+  clients:
+  - id: cleanuparr-web
+    name: Cleanuparr web page
+    kind: web
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://github.com/Cleanuparr/Cleanuparr
+    setup: web
+    summary: See which downloads were struck or replaced, from the phone's browser.
+    fallback: true
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private Cleanuparr address; Authentik signs you in as an administrator.
+    - Open Events to see what was struck, removed and searched for.

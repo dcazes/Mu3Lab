@@ -70,6 +70,16 @@ SERVERS: tuple[tuple[str, str, str, dict[str, Any], str, dict[str, Any]], ...] =
 PROFILE = "Mu3Lab"
 
 
+def _reason(exc: urllib.error.HTTPError) -> str:
+    """Seerr's own words for a refusal (``{"error": ...}`` or ``{"message": ...}``), if it gave any."""
+    try:
+        body = json.loads(exc.read() or b"{}")
+    except (OSError, ValueError):
+        return ""
+    reason = body.get("error") or body.get("message") if isinstance(body, dict) else ""
+    return f": {str(reason)[:200]}" if reason else ""
+
+
 class Seerr:
     """Seerr's API on this computer's loopback port, with its key or a sign-in session."""
 
@@ -91,7 +101,9 @@ class Seerr:
             with self.opener.open(request, timeout=60) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            raise LoopbackError(f"Seerr refused {method} {path.split('?')[0]} (HTTP {exc.code}).") from None
+            raise LoopbackError(
+                f"Seerr refused {method} {path.split('?')[0]} (HTTP {exc.code}){_reason(exc)}."
+            ) from None
         except OSError as exc:
             raise LoopbackError(f"Seerr did not answer {path.split('?')[0]}.") from exc
         return json.loads(raw) if raw.strip() else None
@@ -128,8 +140,10 @@ def owner_key(port: int, env: dict[str, str]) -> str:
         raise LoopbackError("Jellyfin's Mu3Lab administrator is not known yet; Jellyfin must be installed first.")
     session = Seerr(port)
     login = {"username": SERVICE, "password": password}
-    if not session.get("settings/public").get("initialized"):
-        # Seerr's first sign-in names its Jellyfin server and makes the owner.
+    # Seerr's first sign-in names its Jellyfin server and makes the owner. Seerr refuses the
+    # server's address once it has one, and an install that stopped after this sign-in leaves
+    # Seerr with Jellyfin set but not yet "initialized", so ask about Jellyfin itself.
+    if session.get("settings/public").get("mediaServerType") != SERVER_TYPE_JELLYFIN:
         login |= {**JELLYFIN, "useSsl": False, "urlBase": "", "email": f"{SERVICE}@mu3lab.invalid"}
         login["serverType"] = SERVER_TYPE_JELLYFIN
     session.post("auth/jellyfin", login)
@@ -154,9 +168,16 @@ def _addresses(ctx: HookContext) -> tuple[str, str]:
     )
 
 
-def configure(api: Seerr, env: dict[str, str], own_url: str = "", jellyfin_url: str = "") -> list[str]:
-    """Put back what Mu3Lab owns in Seerr; returns what changed, in words."""
+def configure(
+    api: Seerr, env: dict[str, str], own_url: str = "", jellyfin_url: str = ""
+) -> tuple[list[str], list[str]]:
+    """Put back what Mu3Lab owns in Seerr; returns what changed and what must wait, in words.
+
+    Seerr asks Radarr and Sonarr for their quality profiles, so one that is stopped (or not
+    installed yet in the same batch) is connected by the upkeep once it is running.
+    """
     changed: list[str] = []
+    waiting: list[str] = []
     main = api.get("settings/main")
     wanted = {
         "localLogin": False,
@@ -182,10 +203,15 @@ def configure(api: Seerr, env: dict[str, str], own_url: str = "", jellyfin_url: 
                 api.delete(f"settings/{kind}/{server['id']}")
                 changed.append(f"{kind} disconnected")
             continue
-        found = api.post(f"settings/{kind}/test", {**address, "apiKey": key, "useSsl": False, "baseUrl": ""})
-        profile = next((item for item in found.get("profiles") or [] if item.get("name") == PROFILE), None)
+        try:
+            found = api.post(f"settings/{kind}/test", {**address, "apiKey": key, "useSsl": False, "baseUrl": ""})
+        except LoopbackError as exc:
+            waiting.append(f"{kind} is connected once it is running ({exc})")
+            continue
+        profile = next((item for item in (found or {}).get("profiles") or [] if item.get("name") == PROFILE), None)
         if profile is None:
-            raise LoopbackError(f"{kind} has no {PROFILE} quality profile yet; it is made when {kind} starts.")
+            waiting.append(f"{kind} has no {PROFILE} quality profile yet; it is made when {kind} starts")
+            continue
         settings = {
             "name": name,
             **address,
@@ -216,7 +242,7 @@ def configure(api: Seerr, env: dict[str, str], own_url: str = "", jellyfin_url: 
             api.put(f"settings/{kind}/{existing[0]['id']}", {**existing[0], **settings})
     if not api.get("settings/public").get("initialized"):
         api.post("settings/initialize")
-    return changed
+    return changed, waiting
 
 
 def _jellyfin_app(ctx: HookContext) -> App:
@@ -271,12 +297,14 @@ class Hooks(AppHooks):
         try:
             api = _api(ctx)
             _wait(api)
-            configure(api, ctx.env(), *_addresses(ctx))
+            _, waiting = configure(api, ctx.env(), *_addresses(ctx))
         except LoopbackError as exc:
             ctx.fail("configure_application", "application_configuration_failed", f"Seerr could not be set up: {exc}")
+        for note in waiting:
+            ctx.log(f"Seerr: {note}")
 
     def periodic(self, ctx: HookContext) -> str:
-        changed = configure(_api(ctx), ctx.env(), *_addresses(ctx))
+        changed, _ = configure(_api(ctx), ctx.env(), *_addresses(ctx))
         return f"Seerr: {', '.join(changed)}." if changed else ""
 
     def sync_people(self, ctx: HookContext, people: list[dict[str, Any]]) -> None:

@@ -1,8 +1,9 @@
 # Seerr — see ctl/manifest/models.py for every field.
-# The household's request page, at home only like Jellyfin (http://<home address>:5055), never
-# on the tailnet (the owner's choice). People sign in with their Jellyfin login; Seerr asks
-# Jellyfin to check it. A requested film goes to Radarr and a show to Sonarr, and Seerr shows it
-# as available once it is in Jellyfin. Mu3Lab sets it all up (hooks.py).
+# The household's request page, at home like Jellyfin (http://<home address>:5055) and on the
+# tailnet behind Authentik's gate for the household (the owner's choice). People sign in with
+# their Jellyfin login at both addresses; Seerr asks Jellyfin to check it. A requested film goes
+# to Radarr and a show to Sonarr, and Seerr shows it as available once it is in Jellyfin. Mu3Lab
+# sets it all up (hooks.py).
 id: seerr
 name: Seerr
 tier: optional
@@ -11,7 +12,8 @@ category: media
 tagline: Ask for the films and shows you want to watch
 summary: Browse what's popular or search for a film or show, tap Request, and it is downloaded and appears in
   Jellyfin, usually within the hour. Administrators' requests go straight through, and they approve everyone
-  else's. Works at home, with your Jellyfin login. Needs Jellyfin, plus Radarr for films and Sonarr for shows.
+  else's. Works at home and on the tailnet, with your Jellyfin login. Needs Jellyfin, plus Radarr for films and
+  Sonarr for shows.
 version: "v3.5.2"
 upstream: seerr-team/seerr
 depends_on: [jellyfin]
@@ -21,22 +23,29 @@ backup:
   - seerr/config/cache
 service:
   local_port: 5055
-  # People reach Seerr here, on the home network only (the compose file binds ${MU3LAB_HOME_IP}).
+  # People reach Seerr here at home (the compose file binds ${MU3LAB_HOME_IP}), and through the
+  # tailnet route below, which proxies to the loopback port.
   extra_ports:
   - port: 5055
     purpose: home-network address for phones and browsers at home
     listen: home
   health:
     path: /api/v1/status
+# On the tailnet, Authentik admits the household first; Seerr's own Jellyfin login follows.
+route:
+  https_port: 8483
+  caddy_port: 19483
+  access: gate
+  audience: household
 sign_in:
   method: local
-  note: Seerr works at home only and signs you in with your Jellyfin login, which Mu3Lab saved to your vault
-    for Seerr's address too, so Bitwarden fills it in.
+  note: Seerr signs you in with your Jellyfin login, at home and on the tailnet (after Authentik there). Mu3Lab
+    saved that login to your vault for both Seerr addresses, so Bitwarden fills it in.
 account:
   # Seerr's owner is Jellyfin's hidden Mu3Lab administrator (mu3lab-service); people are added by hooks.py.
   mode: api_bootstrap
   needs_owner: false
-  user_action: Open Seerr at home; Bitwarden fills in your Jellyfin login.
+  user_action: Open Seerr; Bitwarden fills in your Jellyfin login.
 env:
   # This server's home-network address and network (rule home_network follows them if they change).
   MU3LAB_HOME_IP: '{{home_ip}}'
@@ -75,10 +84,10 @@ mobile:
     install: {}
     homepage: https://seerr.dev/
     setup: web
-    summary: Request films and shows from any phone or computer at home; add it to the home screen.
-    caveat: Works on the home network only.
+    summary: Request films and shows from any phone or computer, at home or on the tailnet; add it to the home
+      screen.
     fallback: true
     steps:
-    - Connect to your home Wi-Fi.
-    - Open the home address shown on this page; Bitwarden fills in your Jellyfin login.
+    - Connect your phone to the Mu3Lab tailnet, or to your home Wi-Fi.
+    - Open the address shown on this page (the home address at home); Bitwarden fills in your Jellyfin login.
     - Search for a film or show and tap Request.

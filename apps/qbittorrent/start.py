@@ -96,20 +96,26 @@ def settings(vpn: bool) -> None:
     parser.optionxform = str  # qBittorrent's keys are case-sensitive
     if SETTINGS.is_file():
         parser.read(SETTINGS, encoding="utf-8")
+    # qBittorrent 5 reads its web settings from [WebUI] only. It moved the old "Preferences\WebUI\..."
+    # keys there once and ignores them after that, so those are carried over (the password) and dropped.
+    old = dict(parser.items("Preferences")) if parser.has_section("Preferences") else {}
+    for key in old:
+        if key.startswith("WebUI\\"):
+            parser.remove_option("Preferences", key)
     owned = {
-        "Preferences": {
-            "WebUI\\Port": os.environ.get("QBT_WEBUI_PORT", "8479"),
+        "WebUI": {
+            "Port": os.environ.get("QBT_WEBUI_PORT", "8479"),
             # A Host header must name this server (or localhost): no DNS-rebinding page gets in.
-            "WebUI\\HostHeaderValidation": "true",
+            "HostHeaderValidation": "true",
             # Quoted: in qBittorrent's settings file an unquoted ";" starts a comment.
-            "WebUI\\ServerDomains": '"' + os.environ.get("MU3LAB_SERVER_DOMAINS", "localhost") + '"',
-            "WebUI\\Username": "mu3lab",
-            "WebUI\\LocalHostAuth": "false",
-            "WebUI\\AuthSubnetWhitelistEnabled": "true",
-            "WebUI\\AuthSubnetWhitelist": own_networks(),
+            "ServerDomains": '"' + os.environ.get("MU3LAB_SERVER_DOMAINS", "localhost") + '"',
+            "Username": "mu3lab",
+            "LocalHostAuth": "false",
+            "AuthSubnetWhitelistEnabled": "true",
+            "AuthSubnetWhitelist": own_networks(),
             # Behind a proxy qBittorrent would see each visitor's own address and ask for a login.
-            "WebUI\\ReverseProxySupportEnabled": "false",
-            "WebUI\\UseUPnP": "false",
+            "ReverseProxySupportEnabled": "false",
+            "UseUPnP": "false",
         },
         "BitTorrent": {
             "Session\\DefaultSavePath": str(DOWNLOADS),
@@ -140,8 +146,8 @@ def settings(vpn: bool) -> None:
             parser.add_section(section)
         for key, value in values.items():
             parser.set(section, key, value)
-    if not parser.has_option("Preferences", "WebUI\\Password_PBKDF2"):
-        parser.set("Preferences", "WebUI\\Password_PBKDF2", password_hash())
+    if not parser.has_option("WebUI", "Password_PBKDF2"):
+        parser.set("WebUI", "Password_PBKDF2", old.get("WebUI\\Password_PBKDF2") or password_hash())
     CONFIG.mkdir(parents=True, exist_ok=True)
     with SETTINGS.open("w", encoding="utf-8") as handle:
         parser.write(handle, space_around_delimiters=False)
