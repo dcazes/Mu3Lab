@@ -13,7 +13,7 @@ import type { HomeWidget } from '../../../api';
 import { AppsWidget } from './AppsWidget';
 import { AskWidget } from './AskWidget';
 import { CalendarSettings, CalendarWidget } from './CalendarWidget';
-import { CameraWidget } from './CameraWidget';
+import { CameraWidget, CameraWidgetSettings } from './CameraWidget';
 import { StocksSettings, StocksWidget } from './StocksWidget';
 import { ThermostatWidget } from './ThermostatWidget';
 import { WeatherSettings, WeatherWidget } from './WeatherWidget';
@@ -83,8 +83,9 @@ export const WIDGETS: Record<HomeWidget['kind'], WidgetInfo> = {
   },
   camera: {
     title: 'Front door',
-    description: 'The front-door camera, live (administrators only).',
+    description: 'The front-door camera, live (administrators only). Adding it sets up what it needs.',
     icon: Cctv,
     Component: CameraWidget,
+    Settings: CameraWidgetSettings,
   },
 };

@@ -5,6 +5,7 @@ import { postApi } from '../../api/client';
 import { LinkButton } from '../../components/Button';
 import { EmptyState } from '../../components/Layout';
 import type { AiModels } from '../../api/models';
+import { CHAT_QUESTION } from '../../lib/chatQuestion';
 import { useApi } from '../../lib/useApi';
 import { useDashboard } from '../../state/dashboard';
 
@@ -14,6 +15,17 @@ function expectedMcp(): { name: string; serviceId: string } | null {
     return value && typeof value.name === 'string' && typeof value.serviceId === 'string' ? value : null;
   } catch {
     return null;
+  }
+}
+
+/** A question someone asked on Home and took on to chat (the Ask widget), read once. */
+function takeQuestion(): string {
+  try {
+    const value = window.sessionStorage.getItem(CHAT_QUESTION) || '';
+    window.sessionStorage.removeItem(CHAT_QUESTION);
+    return value;
+  } catch {
+    return '';
   }
 }
 
@@ -40,6 +52,7 @@ export function ChatPage() {
   const { data } = useDashboard();
   const status = data.chat;
   const [expected] = useState(expectedMcp);
+  const [question] = useState(takeQuestion);
   const [connection, setConnection] = useState<{ url: string; interval: number } | null>(null);
   const [connected, setConnected] = useState(false);
   const started = useRef(false);
@@ -95,9 +108,12 @@ export function ChatPage() {
   }, [needsConnection]);
   // The approval page needs a chat session, so it goes through the same silent sign-in as the chat itself.
   const approval = connection ? new URL(connection.url) : null;
+  // The question goes inside another address (the app's sign-in hands it on), hence encoded twice.
   const frameUrl = approval
     ? `${status.url}?next=${encodeURIComponent(approval.pathname + approval.search)}`
-    : status.url;
+    : question && status.prompt_url
+      ? status.prompt_url.replace('{question}', encodeURIComponent(encodeURIComponent(question)))
+      : status.url;
   if (!status.ready || !status.url)
     return (
       <div className="page">

@@ -7,6 +7,7 @@ import {
   CloudRain,
   CloudSnow,
   CloudSun,
+  Droplet,
   type LucideIcon,
   MapPin,
   Moon,
@@ -164,7 +165,8 @@ export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
   const now = look(data.code);
   const Icon = data.is_day ? now.day : now.night;
-  const days = data.days.slice(0, widget.w >= 3 ? 5 : widget.w === 2 ? 4 : widget.h >= 2 ? 3 : 0);
+  // All seven days; the widget's own width decides how many fit (board.css).
+  const days = data.days.slice(0, 7);
   return (
     <div className={`weather weather-h${widget.h}`}>
       <div className="weather-now">
@@ -190,8 +192,18 @@ export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
               <li key={day.date} title={look(day.code).label}>
                 <span>{weekday(day.date, index)}</span>
                 <DayIcon aria-label={look(day.code).label} />
+                <span className={`weather-pop${(day.rain_chance ?? 0) >= 30 ? ' is-likely' : ''}`}>
+                  <Droplet aria-hidden />
+                  <span className="sr-only">Chance of rain </span>
+                  {day.rain_chance == null ? '—' : `${Math.round(day.rain_chance)}%`}
+                </span>
                 <span className="weather-range">
-                  {degrees(day.high)} <small>{degrees(day.low)}</small>
+                  <span className="sr-only">High </span>
+                  {degrees(day.high)}
+                  <small>
+                    <span className="sr-only">Low </span>
+                    {degrees(day.low)}
+                  </small>
                 </span>
               </li>
             );

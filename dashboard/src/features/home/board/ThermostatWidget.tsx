@@ -108,9 +108,11 @@ export function ThermostatWidget({ widget }: WidgetProps) {
     }
   };
   const StateIcon = view.state === 'heating' ? Flame : view.state === 'cooling' ? Snowflake : null;
+  // A one-column, one-row widget has room for the reading and set point only; the mode waits for more room.
   const compact = widget.w === 1 && widget.h === 1;
+  const size = `${widget.h >= 2 ? ' is-tall' : ' is-short'}${widget.w === 1 ? ' is-narrow' : ''}`;
   return (
-    <div className={`thermostat${compact ? ' is-compact' : ''}`}>
+    <div className={`thermostat${size}`}>
       <div className="thermostat-now">
         <p className="thermostat-temp">{shown(view.current, view.units)}</p>
         <p className="thermostat-state">

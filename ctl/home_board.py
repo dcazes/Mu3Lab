@@ -39,7 +39,7 @@ class Kind:
 KINDS: dict[str, Kind] = {
     "apps": Kind((1, 1), (4, 2), (4, 1)),
     "weather": Kind((1, 1), (4, 2), (2, 1)),
-    "calendar": Kind((1, 1), (4, 4), (2, 2)),
+    "calendar": Kind((2, 1), (4, 4), (2, 2)),
     "stocks": Kind((1, 1), (4, 3), (2, 1)),
     "ask": Kind((2, 2), (4, 4), (2, 2)),
     "thermostat": Kind((1, 1), (2, 2), (1, 1)),
@@ -88,8 +88,13 @@ def settings(kind: str, value: Any) -> dict[str, Any]:
                 symbols.append(symbol)
         return {"symbols": symbols[:MAX_SYMBOLS]}
     if kind == "calendar":
-        days = given.get("days")
-        return {"days": days if days in (1, 3, 7, 14) else 7}
+        # auto: a wide, short widget opens on the week, a square or tall one on the month.
+        view = given.get("view")
+        week_start = given.get("week_start")
+        return {
+            "view": view if view in ("auto", "month", "week") else "auto",
+            "week_start": week_start if week_start in ("sunday", "monday") else "sunday",
+        }
     return {}
 
 

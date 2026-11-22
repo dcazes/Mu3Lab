@@ -622,6 +622,9 @@ class AppManifest(Model):
     version: str  # the maintainer-approved release; image digests live in docker-compose.yml
     upstream: str  # GitHub owner/repo for release notes
     capabilities: tuple[str, ...] = ()
+    # A helper for one Home widget (e.g. "camera"): not listed in Apps or Discover. The widget's
+    # setup installs it, and Mu3Lab starts it while the widget is in use and stops it after.
+    serves_widget: str = ""
     depends_on: tuple[str, ...] = ()
     data_dir: str = ""  # folder under /srv/mu3lab/data; defaults to the app id
     media: tuple[MediaFolder, ...] = ()

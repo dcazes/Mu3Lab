@@ -72,7 +72,7 @@ def _get(url: str, params: dict[str, Any], what: str) -> Any:
 
 
 def weather(latitude: float, longitude: float, units: str) -> dict[str, Any]:
-    """Now and the next five days at one place, in the place's own time zone."""
+    """Now and the next seven days at one place, in the place's own time zone."""
     fahrenheit = units == "fahrenheit"
     key = ("weather", round(latitude, 2), round(longitude, 2), fahrenheit)
 
@@ -86,7 +86,7 @@ def weather(latitude: float, longitude: float, units: str) -> dict[str, Any]:
                 "wind_speed_10m,is_day",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
                 "timezone": "auto",
-                "forecast_days": 5,
+                "forecast_days": 7,
                 "temperature_unit": "fahrenheit" if fahrenheit else "celsius",
                 "wind_speed_unit": "mph" if fahrenheit else "kmh",
             },

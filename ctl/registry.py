@@ -105,6 +105,7 @@ class Service:
             "name": self.name,
             "category": self.category,
             "stack": self.stack,
+            "serves_widget": self.manifest.serves_widget,
             "group": self.group,
             "lifecycle": self.lifecycle,
             "stop_warning": self.stop_warning,

@@ -7,7 +7,15 @@ import { EmptyState, PageHeader, Tabs } from '../../components/Layout';
 import { Badge, StatusBadge } from '../../components/Status';
 import { bytes } from '../../lib/format';
 import { Link } from '../../lib/router';
-import { appSections, canInstall, categoryLabel, isInstalled, launchTarget, signInSummary } from '../../lib/services';
+import {
+  appSections,
+  canInstall,
+  categoryLabel,
+  isInstalled,
+  isListed,
+  launchTarget,
+  signInSummary,
+} from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { useApplyUpdate } from './AdvancedTab';
@@ -203,7 +211,7 @@ function DiscoverCard({
 
 export function AppsPage({ discover }: { discover: boolean }) {
   const { data } = useDashboard();
-  const services = data.services.services;
+  const services = useMemo(() => data.services.services.filter(isListed), [data.services.services]);
   const catalog = data.catalog.services;
   const [query, setQuery] = useState('');
   const [stored, setSelected] = useSelection();

@@ -64,7 +64,11 @@ def _entry(
 
 
 def report(root: Path) -> dict[str, Any]:
-    """Each installed app with every address people open and every port it holds on this server."""
+    """Each installed app with every address people open and every port it holds on this server.
+
+    Caddy's sign-in listeners in front of tailnet addresses are left out: they are part of the
+    tailnet address, not something a person opens or needs to keep free.
+    """
     host = tailnet_dns_name()
     tailnet = tailnet_ip()
     home = home_address()
@@ -97,16 +101,6 @@ def report(root: Path) -> dict[str, Any]:
             address = f"{ip}:{extra_port.port}" if ip else ""
             entries.append(
                 _entry(inside, extra_port.listen, extra_port.purpose, address, extra_port.port, extra_port.protocol)
-            )
-        # Caddy's own route proxies to itself: its loopback port is already listed.
-        if route is not None and route.caddy_port != service.local_port:
-            address = f"127.0.0.1:{route.caddy_port}"
-            entries.append(_entry(inside, "proxy", "Sign-in (Caddy)", address, route.caddy_port))
-        for extra_route in manifest.extra_routes:
-            # Its own loopback port is one of service.extra_ports, listed above.
-            label = f"Sign-in (Caddy) for {extra_route.label}"
-            entries.append(
-                _entry(inside, "proxy", label, f"127.0.0.1:{extra_route.caddy_port}", extra_route.caddy_port)
             )
         apps.append({"id": app.id, "name": manifest.name, "entries": entries})
     apps.sort(key=lambda item: str(item["name"]).lower())

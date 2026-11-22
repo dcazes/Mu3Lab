@@ -3,6 +3,7 @@ import { EmptyState } from '../../components/Layout';
 import { GetStartedSettings } from '../home/GetStarted';
 import { Link } from '../../lib/router';
 import { AiSettings } from './AiSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 import { IntegrationsSettings } from './IntegrationsSettings';
 import { useIsAdmin } from '../../state/dashboard';
 import { PeopleSettings } from './PeopleSettings';
@@ -26,6 +27,7 @@ const PAGES: Record<string, () => JSX.Element> = {
   system: SystemSettings,
   ports: PortsSettings,
   'home-devices': HomeDevicesSettings,
+  appearance: AppearanceSettings,
   'whats-new': WhatsNew,
 };
 

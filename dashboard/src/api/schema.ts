@@ -2758,6 +2758,11 @@ export interface components {
       mcp_enabled_count: number;
       /** Ok */
       ok: boolean;
+      /**
+       * Prompt Url
+       * @default
+       */
+      prompt_url?: string;
       /** Providers */
       providers?: components['schemas']['ChatProvider'][] | null;
       /** Ready */
@@ -3748,7 +3753,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'tailnet' | 'home' | 'loopback' | 'proxy';
+      kind: 'tailnet' | 'home' | 'loopback';
       /** Label */
       label: string;
       /**
@@ -4113,6 +4118,11 @@ export interface components {
       routable: boolean;
       /** Route Ready */
       route_ready: boolean;
+      /**
+       * Serves Widget
+       * @default
+       */
+      serves_widget?: string;
       /** Setup Action */
       setup_action: string;
       /**

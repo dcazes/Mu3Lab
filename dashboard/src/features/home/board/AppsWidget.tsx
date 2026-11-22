@@ -1,7 +1,15 @@
 import { ArrowRight } from 'lucide-react';
 import { AppIcon } from '../../../components/AppIcon';
 import { Link } from '../../../lib/router';
-import { isEverydayApp, isInstalled, isRunning, isWorking, launchTarget, needsAttention } from '../../../lib/services';
+import {
+  isEverydayApp,
+  isInstalled,
+  isListed,
+  isRunning,
+  isWorking,
+  launchTarget,
+  needsAttention,
+} from '../../../lib/services';
 import { useDashboard } from '../../../state/dashboard';
 import type { WidgetProps } from './widgets';
 
@@ -11,7 +19,7 @@ import type { WidgetProps } from './widgets';
  */
 export function AppsWidget({ widget }: WidgetProps) {
   const { data } = useDashboard();
-  const installed = data.services.services.filter(isInstalled);
+  const installed = data.services.services.filter((service) => isInstalled(service) && isListed(service));
   const running = installed.filter(isRunning);
   const broken = installed.filter(needsAttention);
   const busy = installed.filter(isWorking);

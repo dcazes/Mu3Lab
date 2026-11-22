@@ -1,0 +1,41 @@
+/* The camera's settings form: in Settings > Home devices and in the Home board's widget panel. */
+.device-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.device-advanced summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.device-advanced[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.device-hint {
+  font-size: 12.5px;
+}
+
+.device-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.device-picture {
+  max-width: 480px;
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}

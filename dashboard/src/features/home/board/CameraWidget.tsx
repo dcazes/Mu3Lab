@@ -1,9 +1,11 @@
-import { Loader2, Play, Square } from 'lucide-react';
+import { Loader2, Play, Settings2, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CameraSettings } from '../../../api';
-import { Link } from '../../../lib/router';
+import { Button } from '../../../components/Button';
+import { isInstalled } from '../../../lib/services';
 import { useApi } from '../../../lib/useApi';
-import type { WidgetProps } from './widgets';
+import { CameraForm, helperBusy, useStreamHelper } from '../../settings/CameraForm';
+import type { SettingsProps, WidgetProps } from './widgets';
 
 type Quality = 'sd' | 'hd';
 
@@ -35,12 +37,17 @@ function useLive(quality: Quality, playing: boolean) {
   const video = useRef<HTMLVideoElement>(null);
   // What the current connection reported; a newer one (another quality) starts out connecting.
   const session = `${quality}:${playing}`;
-  const [reported, setReported] = useState<{ session: string; status: 'live' | 'error'; error: string } | null>(null);
+  const [reported, setReported] = useState<{
+    session: string;
+    status: 'starting' | 'live' | 'error';
+    error: string;
+  } | null>(null);
   useEffect(() => {
     const element = video.current;
     if (!playing || !element) return;
     let closed = false;
-    const setState = (value: { status: 'live' | 'error'; error: string }) => setReported({ session, ...value });
+    const setState = (value: { status: 'starting' | 'live' | 'error'; error: string }) =>
+      setReported({ session, ...value });
     const fail = (error: string) => !closed && setState({ status: 'error', error });
     const Source = mediaSource();
     if (!Source) {
@@ -96,6 +103,8 @@ function useLive(quality: Quality, playing: boolean) {
             } catch {
               fail('This browser cannot play the camera’s video format. Try the other quality.');
             }
+          } else if (message.type === 'status' && message.value === 'starting') {
+            if (!closed && element.readyState < 2) setState({ status: 'starting', error: '' });
           } else if (message.type === 'error') fail(message.value);
           return;
         }
@@ -122,9 +131,18 @@ function useLive(quality: Quality, playing: boolean) {
   return { video, status, error: reported?.session === session ? reported.error : '' };
 }
 
-/** The front-door camera, live, for administrators. Nothing streams until someone presses play. */
-export function CameraWidget(_props: WidgetProps) {
+/** The camera's settings in the board's panel: saving installs the stream helper the first time. */
+export function CameraWidgetSettings(_props: SettingsProps) {
+  return <CameraForm />;
+}
+
+/**
+ * The front-door camera, live, for administrators. Nothing streams until someone presses play;
+ * the stream helper (go2rtc) starts then and stops a little after the last viewer leaves.
+ */
+export function CameraWidget({ onConfigure }: WidgetProps) {
   const { data, error } = useApi<CameraSettings>('/api/v1/home/devices/camera');
+  const helper = useStreamHelper();
   const [quality, setQuality] = useState<Quality>('sd');
   const [playing, setPlaying] = useState(false);
   const [hidden, setHidden] = useState(document.visibilityState === 'hidden');
@@ -137,13 +155,20 @@ export function CameraWidget(_props: WidgetProps) {
   const { video } = live;
 
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
-  if (!data.configured)
+  if (helperBusy(helper))
     return (
       <div className="widget-empty">
-        <p>No camera is set up yet.</p>
-        <Link to="/settings/home-devices" className="widget-link">
-          Add it in Settings
-        </Link>
+        <Loader2 className="spin" aria-hidden />
+        <p>Getting the live view ready…</p>
+      </div>
+    );
+  if (!data.configured || !helper || !isInstalled(helper))
+    return (
+      <div className="widget-empty">
+        <p>{data.configured ? 'Finish setting up the camera.' : 'No camera is set up yet.'}</p>
+        <Button variant="secondary" size="sm" icon={Settings2} onClick={onConfigure}>
+          Set up the camera
+        </Button>
       </div>
     );
   return (
@@ -155,10 +180,10 @@ export function CameraWidget(_props: WidgetProps) {
             <Play aria-hidden />
             Watch {data.name.toLowerCase()}
           </button>
-        ) : live.status === 'connecting' ? (
+        ) : live.status === 'connecting' || live.status === 'starting' ? (
           <span className="camera-note">
             <Loader2 className="spin" aria-hidden />
-            Connecting…
+            {live.status === 'starting' ? 'Starting the camera…' : 'Connecting…'}
           </span>
         ) : live.status === 'error' ? (
           <span className="camera-note camera-error">{live.error}</span>

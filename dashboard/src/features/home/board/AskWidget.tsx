@@ -4,7 +4,9 @@ import { toast } from 'sonner';
 import { type AskResponse, postJsonApi } from '../../../api';
 import { Button } from '../../../components/Button';
 import { errorText } from '../../../lib/format';
+import { CHAT_QUESTION } from '../../../lib/chatQuestion';
 import { navigate } from '../../../lib/router';
+import { useDashboard } from '../../../state/dashboard';
 import type { WidgetProps } from './widgets';
 
 /**
@@ -12,6 +14,8 @@ import type { WidgetProps } from './widgets';
  * person's own data in an app goes on in Chat, where the app assistants are.
  */
 export function AskWidget(_props: WidgetProps) {
+  const { data: dashboard } = useDashboard();
+  const chat = dashboard.chat;
   const [question, setQuestion] = useState('');
   const [asked, setAsked] = useState('');
   const [answer, setAnswer] = useState('');
@@ -37,10 +41,18 @@ export function AskWidget(_props: WidgetProps) {
     }
   };
 
-  // Chat apps open on their own page, so the question goes with the person on the clipboard.
+  // The chat app opens on the Chat page with the question already typed in, where the app
+  // assistants can take it further. A chat app that cannot be handed a question gets it on the
+  // clipboard instead.
   const continueInChat = async () => {
     const text = asked || question.trim();
-    if (text) {
+    if (text && chat.prompt_url) {
+      try {
+        window.sessionStorage.setItem(CHAT_QUESTION, text);
+      } catch {
+        /* Private browsing: chat still opens, without the question. */
+      }
+    } else if (text) {
       try {
         await navigator.clipboard.writeText(text);
         toast.success('Your question is copied: paste it into chat.');
@@ -79,7 +91,7 @@ export function AskWidget(_props: WidgetProps) {
       )}
       {(answer || error) && (
         <button type="button" className="widget-link ask-continue" onClick={() => void continueInChat()}>
-          Continue in Chat
+          Continue in {chat.app_name || 'Chat'}
           <ArrowRight />
         </button>
       )}

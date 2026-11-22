@@ -95,28 +95,6 @@ function StateDot({ service }: { service: Service }) {
   return <Dot tone={service.backing_up ? 'blue' : stateTone(service.display_state)} />;
 }
 
-/** A folded tile is the icon alone; its name is the tooltip. */
-function MiniTile(props: TileProps) {
-  const { service, onOpen, selecting, selected } = props;
-  return (
-    <button
-      type="button"
-      className={tileClass('mini-tile', props)}
-      aria-label={`${service.name}: ${statusText(service)}`}
-      title={`${service.name}: ${statusText(service)}`}
-      aria-pressed={selecting ? selected : props.current}
-      disabled={selecting && !pickable(service)}
-      onClick={onOpen}
-    >
-      <span className="tile-icon">
-        <AppIcon id={service.id} />
-        <StateDot service={service} />
-      </span>
-      {selected && <Check className="tile-check" aria-hidden="true" />}
-    </button>
-  );
-}
-
 /** A tile opens the app's quick panel; the panel's Open button opens the app itself. */
 function LauncherTile(props: TileProps) {
   const { service, assistant, onOpen, selecting, selected } = props;
@@ -255,19 +233,17 @@ function SectionAction({ section }: { section: LauncherSection }) {
  * Installed apps in sections: everyday apps by category, the stacks that only work together
  * (with how many of each are running), then Automation, AI and Backups & system. Picking a tile
  * shows its details in a card beside the tiles (at the bottom on a phone), never a pop-up.
+ * A folded section is its heading alone: the name and how many of its apps are running.
  *
- * ``foldedIcons``: a folded section still shows its apps as small icons (Apps); without it only
- * the heading shows (Home). ``listRow``: show each section's apps as rows instead of tiles.
+ * ``listRow``: show each section's apps as rows instead of tiles.
  */
 export function AppStacks({
   services,
   title,
-  foldedIcons = true,
   listRow,
 }: {
   services: Service[];
   title?: string;
-  foldedIcons?: boolean;
   listRow?: (service: Service) => ReactNode;
 }) {
   const { data } = useDashboard();
@@ -337,10 +313,13 @@ export function AppStacks({
                     <ChevronDown />
                     {label}
                   </button>
-                  <span className={`launcher-summary tone-${summary.tone}`}>
-                    <span className="launcher-count">{summary.count}</span>
-                    {summary.detail && <span className="launcher-detail"> · {summary.detail}</span>}
-                  </span>
+                  {(summary.count || summary.detail) && (
+                    <span className={`launcher-summary tone-${summary.tone}`}>
+                      {summary.count && <span className="launcher-count">{summary.count}</span>}
+                      {summary.count && summary.detail && ' · '}
+                      {summary.detail && <span className="launcher-detail">{summary.detail}</span>}
+                    </span>
+                  )}
                   {selection.selecting
                     ? choices.length > 0 && (
                         <button
@@ -355,23 +334,19 @@ export function AppStacks({
                 </h3>
                 {unfolded && listRow ? (
                   <div className="card card-flush rows">{apps.map((service) => listRow(service))}</div>
-                ) : unfolded || foldedIcons ? (
-                  <div className={unfolded ? 'launcher' : 'launcher-mini'}>
-                    {apps.map((service) => {
-                      const props = {
-                        service,
-                        assistant: assistants.get(service.id),
-                        onOpen: () => open(service.id),
-                        selecting: selection.selecting,
-                        selected: selection.picked.some((item) => item.id === service.id),
-                        current: showCard && service.id === panel,
-                      };
-                      return unfolded ? (
-                        <LauncherTile key={service.id} {...props} />
-                      ) : (
-                        <MiniTile key={service.id} {...props} />
-                      );
-                    })}
+                ) : unfolded ? (
+                  <div className="launcher">
+                    {apps.map((service) => (
+                      <LauncherTile
+                        key={service.id}
+                        service={service}
+                        assistant={assistants.get(service.id)}
+                        onOpen={() => open(service.id)}
+                        selecting={selection.selecting}
+                        selected={selection.picked.some((item) => item.id === service.id)}
+                        current={showCard && service.id === panel}
+                      />
+                    ))}
                   </div>
                 ) : null}
               </section>

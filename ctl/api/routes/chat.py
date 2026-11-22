@@ -60,6 +60,9 @@ def chat_status(operator: Member) -> models.ChatStatus:
             "providers": [provider],
             "mcp_enabled_count": sum(1 for item in mcp["servers"] if item["enabled"]) if operator["is_admin"] else 0,
             "detail": provider["detail"],
+            "prompt_url": state.url.rstrip("/") + chat_ops.prompt_path(app)
+            if state and state.url and chat_ops.prompt_path(app)
+            else "",
         }
     )
 

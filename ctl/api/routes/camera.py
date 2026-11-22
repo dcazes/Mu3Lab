@@ -58,7 +58,9 @@ def remove_camera(admin: OperatorMutation) -> models.CameraSettings:
 @live.get("/camera/snapshot.jpg", include_in_schema=False)
 async def camera_snapshot(_admin: Operator, quality: str = "sd") -> Response:
     try:
-        picture = await run_in_threadpool(camera.snapshot, quality if quality in QUALITIES else "sd")
+        picture = await run_in_threadpool(
+            camera.snapshot, runtime.job_store(), quality if quality in QUALITIES else "sd"
+        )
     except camera.CameraError as exc:
         raise ApiError(503, str(exc), code="camera_unavailable") from None
     return Response(picture, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
@@ -72,8 +74,10 @@ async def camera_hls(path: str, request: Request, _admin: Operator) -> Response:
     params = dict(request.query_params)
     if "src" in params and params["src"] not in camera.STREAMS.values():
         raise ApiError(404, "not found")
+    camera.touch()
     try:
         if path == "api/stream.m3u8":
+            await run_in_threadpool(camera.wake, runtime.job_store())
             await run_in_threadpool(camera.ensure_streams)
         async with httpx.AsyncClient(timeout=20) as client:
             upstream = await client.get(f"{camera.go2rtc_url()}/{path}", params=params)
@@ -81,7 +85,7 @@ async def camera_hls(path: str, request: Request, _admin: Operator) -> Response:
         raise ApiError(503, str(exc), code="camera_unavailable") from None
     except httpx.HTTPError:
         raise ApiError(
-            503, "The camera app (go2rtc) is not running. Start it in Apps.", code="camera_unavailable"
+            503, "The camera's stream helper (go2rtc) is not running. Try again.", code="camera_unavailable"
         ) from None
     return Response(
         upstream.content,
@@ -105,18 +109,32 @@ async def camera_live(websocket: WebSocket, quality: str = "sd") -> None:
     if not _allowed(websocket):
         await websocket.close(code=4403)
         return
+    with camera.watching():
+        await _relay(websocket, quality)
+
+
+async def _relay(websocket: WebSocket, quality: str) -> None:
+    await websocket.accept()
     try:
+        # The first viewer starts go2rtc; the page says so while it waits.
+        await websocket.send_json({"type": "status", "value": "starting"})
+        await run_in_threadpool(camera.wake, runtime.job_store())
         await run_in_threadpool(camera.ensure_streams)
+        # go2rtc would only hang up when the camera refuses; say why instead.
+        reason = await run_in_threadpool(camera.problem)
+        if reason:
+            raise camera.CameraError(reason)
     except camera.CameraError as exc:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "value": str(exc)})
-        await websocket.close()
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "value": str(exc)})
+            await websocket.close()
+        return
+    except (OSError, WebSocketDisconnect):
         return
     from websockets.asyncio.client import connect
 
     stream = camera.stream_name(quality)
     target = camera.go2rtc_url().replace("http://", "ws://") + f"/api/ws?src={stream}"
-    await websocket.accept()
     try:
         async with connect(target, max_size=None, open_timeout=10) as upstream:
 

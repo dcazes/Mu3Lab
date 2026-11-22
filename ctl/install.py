@@ -40,7 +40,7 @@ import httpx
 from ctl import actions, dashboard_build, docker_config, platform_releases, preflight, privilege, routes
 from ctl.bootstrap import stamps
 from ctl.engine.project import Facts, render
-from ctl.identity import gate_blueprint, sync_sign_in
+from ctl.identity import gate_applied, gate_blueprint, sync_sign_in
 from ctl.integrations.authentik import Authentik, AuthentikError, password_hash
 from ctl.lifecycle import compose_settings
 from ctl.manifest.catalog import load as load_app_catalog
@@ -1477,7 +1477,8 @@ def _dashboard_protection_outdated(ctx: dict, host: str) -> bool:
     try:
         if not routes.base_matches(source.read_text(encoding="utf-8"), target.read_text(encoding="utf-8")):
             return True
-        return stamps.read(stamp) != _gate_digest(host)
+        # Installing an app from the dashboard updates the gate in Authentik without touching the stamp.
+        return stamps.read(stamp) != _gate_digest(host) and not gate_applied(load_registry().catalog, host)
     except (OSError, ValueError):
         return True
 

@@ -18,6 +18,7 @@
         var pref = localStorage.getItem('mu3lab.theme');
         var dark = pref === 'dark' || (pref !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        document.documentElement.dataset.sections = localStorage.getItem('mu3lab.sections') === 'open' ? 'open' : 'framed';
       } catch (e) {}
     </script>
   </head>

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '../../components/Button';
 import { Link } from '../../lib/router';
 import { useDashboard } from '../../state/dashboard';
-import { BoardView, type Panel } from './board/Board';
+import { BoardView, type Panel, usePanelRoom } from './board/Board';
 import { useBoard } from './board/useBoard';
 import { CoreSetupProgress } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
@@ -55,9 +55,15 @@ export function HomePage() {
   const { data } = useDashboard();
   const board = useBoard();
   const [panel, setPanel] = useState<Panel>('closed');
+  const { home, shift, covered } = usePanelRoom(board.editing && panel !== 'closed');
+  const cancel = () => {
+    board.cancel();
+    setPanel('closed');
+  };
+  const done = () => void board.save().then((saved) => saved && setPanel('closed'));
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   return (
-    <div className="home">
+    <div className="home" ref={home} style={shift ? { transform: `translateX(-${shift}px)` } : undefined}>
       <header className="home-header">
         <div>
           <h1>
@@ -73,23 +79,10 @@ export function HomePage() {
               <Button variant="secondary" size="sm" icon={Plus} onClick={() => setPanel('add')}>
                 Add widget
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  board.cancel();
-                  setPanel('closed');
-                }}
-              >
+              <Button variant="ghost" size="sm" onClick={cancel}>
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Check}
-                loading={board.saving}
-                onClick={() => void board.save().then((saved) => saved && setPanel('closed'))}
-              >
+              <Button variant="primary" size="sm" icon={Check} loading={board.saving} onClick={done}>
                 Done
               </Button>
             </>
@@ -113,7 +106,7 @@ export function HomePage() {
       <CoreSetupProgress />
       <GetStarted />
       <section aria-label="Your board">
-        <BoardView board={board} panel={panel} setPanel={setPanel} />
+        <BoardView board={board} panel={panel} setPanel={setPanel} finish={covered ? { cancel, done } : undefined} />
       </section>
     </div>
   );

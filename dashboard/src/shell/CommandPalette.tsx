@@ -14,7 +14,7 @@ import {
 import { useEffect } from 'react';
 import { AppIcon } from '../components/AppIcon';
 import { navigate } from '../lib/router';
-import { isInstalled, launchTarget } from '../lib/services';
+import { isInstalled, isListed, launchTarget } from '../lib/services';
 import type { ThemePreference } from '../lib/theme';
 import { useDashboard } from '../state/dashboard';
 import { useIsAdmin } from '../state/dashboard';
@@ -46,7 +46,7 @@ export function CommandPalette({
     setOpen(false);
     navigate(path);
   };
-  const installed = data.services.services.filter(isInstalled);
+  const installed = data.services.services.filter((service) => isInstalled(service) && isListed(service));
   const launchable = installed
     .map((service) => ({ service, target: launchTarget(service) }))
     .filter((item) => item.target);

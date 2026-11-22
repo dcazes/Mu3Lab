@@ -49,7 +49,7 @@ class BoardTests(unittest.TestCase):
                         "place": {"name": "Toronto", "latitude": 43.7, "longitude": -79.4},
                     },
                 },
-                {"id": "c", "kind": "calendar", "settings": {"days": 365}},
+                {"id": "c", "kind": "calendar", "settings": {"days": 365, "view": "year"}},
             ],
             is_admin=False,
         )
@@ -57,7 +57,7 @@ class BoardTests(unittest.TestCase):
         # An impossible place is dropped, and unknown units fall back to Celsius.
         self.assertEqual(board[1]["settings"], {"units": "celsius"})
         self.assertEqual(board[2]["settings"]["place"], {"name": "Toronto", "latitude": 43.7, "longitude": -79.4})
-        self.assertEqual(board[3]["settings"], {"days": 7})
+        self.assertEqual(board[3]["settings"], {"view": "auto", "week_start": "sunday"})
 
     def test_ids_are_made_unique_and_safe(self):
         board = clean(

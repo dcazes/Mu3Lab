@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from ctl import __version__, resource_locks
+from ctl import camera as camera_stream
+from ctl.api import runtime
 from ctl.api.errors import (
     ApiError,
     api_error_handler,
@@ -65,6 +67,8 @@ def _reconcile_runtime_state() -> None:
     # all of them kept the dashboard down for minutes after every restart, past
     # the installer's and the update guard's health checks.
     threading.Thread(target=_reconcile_sign_in, name="sign-in-sync", daemon=True).start()
+    # A camera stream helper left running by the previous process stops once it has been idle.
+    camera_stream.after_restart(runtime.job_store())
 
 
 def _reconcile_sign_in() -> None:

@@ -9,7 +9,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { Dot } from '../components/Status';
 import { useHomeNotices } from '../features/home/warnings';
 import { Link, usePath } from '../lib/router';
@@ -33,7 +33,37 @@ const COLLAPSED_KEY = 'mu3lab.sidebarCollapsed';
  * except on Chat, where it folds by itself so Open WebUI's own menu has room. Opening it on
  * Chat lasts until they leave Chat.
  */
+// A page can ask for the sidebar's width for a while (Home's edit panel); the person's own choice is kept.
+let roomRequested = false;
+// The person opened the sidebar while it was lent: do not fold it again until the next request.
+let roomDeclined = false;
+const roomListeners = new Set<() => void>();
+
+/** Fold (or give back) the sidebar for a page; false when the person kept it open this time. */
+export function requestSidebarRoom(on: boolean) {
+  if (on && roomDeclined) return false;
+  if (roomRequested !== on) {
+    roomRequested = on;
+    roomListeners.forEach((listener) => listener());
+  }
+  return true;
+}
+
+/** A new borrowing (Home's edit panel opening again) may fold the sidebar even if it was opened last time. */
+export function resetSidebarRoom() {
+  roomDeclined = false;
+}
+
+/** Called when the sidebar is folded or given back, so a page can lay itself out again. */
+export function subscribeRoom(listener: () => void) {
+  roomListeners.add(listener);
+  return () => {
+    roomListeners.delete(listener);
+  };
+}
+
 export function useSidebarCollapsed(path: string) {
+  const room = useSyncExternalStore(subscribeRoom, () => roomRequested);
   const [saved, setSaved] = useState(() => {
     try {
       return localStorage.getItem(COLLAPSED_KEY) === '1';
@@ -49,8 +79,15 @@ export function useSidebarCollapsed(path: string) {
     setWasOnChat(onChat);
     setOpenOnChat(false);
   }
-  const collapsed = onChat ? !openOnChat : saved;
+  const chosen = onChat ? !openOnChat : saved;
+  const collapsed = chosen || room;
   const toggle = () => {
+    // Folded only for a page that borrowed the room: opening it gives the room back, nothing saved.
+    if (room && !chosen) {
+      requestSidebarRoom(false);
+      roomDeclined = true;
+      return;
+    }
     if (onChat) {
       setOpenOnChat(collapsed);
       return;

@@ -2093,6 +2093,11 @@
             "title": "Ok",
             "type": "boolean"
           },
+          "prompt_url": {
+            "default": "",
+            "title": "Prompt Url",
+            "type": "string"
+          },
           "providers": {
             "anyOf": [
               {
@@ -4986,8 +4991,7 @@
             "enum": [
               "tailnet",
               "home",
-              "loopback",
-              "proxy"
+              "loopback"
             ],
             "title": "Kind",
             "type": "string"
@@ -6245,6 +6249,11 @@
           "route_ready": {
             "title": "Route Ready",
             "type": "boolean"
+          },
+          "serves_widget": {
+            "default": "",
+            "title": "Serves Widget",
+            "type": "string"
           },
           "setup_action": {
             "title": "Setup Action",

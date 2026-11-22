@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from urllib.parse import urlsplit
 
 from ctl import resource_locks
@@ -24,10 +26,14 @@ from ctl.manifest.models import AppManifest
 from ctl.registry import RegistryError, Service, load
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store import records
 
 # Every sign-in change goes through Authentik one at a time: the dashboard's
 # startup sync, app installs and removals, and the installer (another process).
 SIGN_IN_LOCK = "sign-in"
+# What each sign-in import last applied (a fingerprint, never the content: it holds client secrets).
+APPLIED_SCOPE = "sign_in_applied"
+_APPLICATION_SLUG = re.compile(r"model: authentik_core\.application\b[^\n]*\n(?:[^\n]*\n){0,6}?\s*slug: (\S+)")
 
 
 def launch_path(app: AppManifest, paths: RuntimePaths | None = None) -> str:
@@ -212,20 +218,70 @@ def sync_sign_in(
 
 
 def _sync_sign_in(
-    catalog: Catalog, host: str, authentik: Authentik, paths: RuntimePaths, app_id: str | None
+    catalog: Catalog, host: str, authentik: Authentik, paths: RuntimePaths, app_id: str | None, force: bool = False
 ) -> list[str]:
     target = catalog.get(app_id) if app_id else None
+    # An import Authentik already holds is skipped (each takes tens of seconds): same content, same
+    # Authentik release, and its applications still there. Anything else is imported again.
+    unchanged = _Unchanged(authentik, paths, force)
     if target is None or _gated(target):
         authentik.remove_duplicate_default_brands()
-        authentik.apply_blueprint(DASHBOARD_BLUEPRINT, gate_blueprint(catalog, host, paths))
+        unchanged.apply(DASHBOARD_BLUEPRINT, gate_blueprint(catalog, host, paths))
     applied: list[str] = []
     for app in (target,) if target else catalog.apps:
         settings = _oidc_settings(app, paths)
         if settings is None:
             continue
-        authentik.apply_blueprint(oidc_blueprint_name(app.id), render_oidc_blueprint(host, settings))
+        unchanged.apply(oidc_blueprint_name(app.id), render_oidc_blueprint(host, settings))
         applied.append(app.id)
     return applied
+
+
+class _Unchanged:
+    """Applies a sign-in import only when Authentik does not already hold it."""
+
+    def __init__(self, authentik: Authentik, paths: RuntimePaths, force: bool) -> None:
+        self.authentik, self.paths, self.force = authentik, paths, force
+        self._version: str | None = None
+        self._slugs: set[str] | None = None
+
+    def _fingerprint(self, content: str) -> str:
+        if self._version is None:
+            self._version = self.authentik.version()
+        return hashlib.sha256(f"{self._version}\n{content}".encode()).hexdigest()
+
+    def _present(self, content: str) -> bool:
+        wanted = set(_APPLICATION_SLUG.findall(content))
+        if not wanted:
+            return True
+        if self._slugs is None:
+            self._slugs = self.authentik.application_slugs()
+        return wanted <= self._slugs
+
+    def apply(self, name: str, content: str) -> None:
+        fingerprint = self._fingerprint(content)
+        saved = records.get(APPLIED_SCOPE, name, self.paths).get("fingerprint")
+        if not self.force and saved == fingerprint and self._present(content):
+            return
+        self.authentik.apply_blueprint(name, content)
+        records.put(APPLIED_SCOPE, name, {"fingerprint": fingerprint, "content": _digest(content)}, self.paths)
+        self._slugs = None  # the import may have added applications
+
+
+def _digest(content: str) -> str:
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def gate_applied(catalog: Catalog, host: str, paths: RuntimePaths | None = None) -> bool:
+    """Authentik last received exactly this dashboard gate, from the installer or an app install."""
+    paths = paths or RuntimePaths()
+    saved = records.get(APPLIED_SCOPE, DASHBOARD_BLUEPRINT, paths).get("content")
+    return saved == _digest(gate_blueprint(catalog, host, paths))
+
+
+def forget_applied(name: str, paths: RuntimePaths | None = None) -> None:
+    """After a removal import, the next install of that app imports its sign-in again."""
+    records.delete(APPLIED_SCOPE, name, paths or RuntimePaths())
 
 
 def remove_sign_in(
@@ -247,3 +303,4 @@ def remove_sign_in(
         authentik.apply_blueprint(
             removal_blueprint_name(app.id), render_removal_blueprint(app.id, app.manifest.name, oidc=method == "oidc")
         )
+        forget_applied(oidc_blueprint_name(app.id), paths)

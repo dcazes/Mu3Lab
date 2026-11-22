@@ -30,11 +30,31 @@
   }
 }
 
-.board-layout.has-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  align-items: start;
-  gap: 24px;
+/* While editing, the board keeps its width and columns: the panel sits beside it (the page slides
+   left into its margin to make room, usePanelRoom) or, in a window too narrow, floats over its edge. */
+.home {
+  transition: transform 0.18s ease-out;
+}
+
+@media (min-width: 1001px) {
+  .board-panel {
+    position: fixed;
+    z-index: 24;
+    top: 24px;
+    right: 16px;
+    width: 280px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg, var(--shadow-md));
+    animation: panel-in 0.18s ease-out;
+  }
+}
+
+@keyframes panel-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
 }
 
 /* Four columns on a computer, two on a tablet, one on a phone; widgets keep their order. */
@@ -60,17 +80,6 @@
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-}
-
-@media (max-width: 1200px) {
-  .board-layout.has-panel .board {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .board-layout.has-panel .widget[data-w='3'],
-  .board-layout.has-panel .widget[data-w='4'] {
-    grid-column: span 2;
-  }
 }
 
 @media (max-width: 1000px) {
@@ -318,6 +327,18 @@
   line-height: 1.35;
 }
 
+.board-panel-finish {
+  position: sticky;
+  bottom: -16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0 -16px -16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
 .board-panel-reset,
 .board-panel-remove {
   align-self: flex-start;
@@ -534,23 +555,47 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-width: 0;
   font-size: 12px;
   color: var(--text-2);
 }
 
-.weather-days svg {
+.weather-days li > svg {
   width: 18px;
   height: 18px;
   color: var(--text-2);
 }
 
+/* Chance of rain: quiet when low, blue when it is likely. */
+.weather-pop {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-pop svg {
+  width: 10px;
+  height: 10px;
+}
+
+.weather-pop.is-likely {
+  color: var(--blue);
+}
+
 .weather-range {
+  display: flex;
+  gap: 4px;
   color: var(--text);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .weather-range small {
   color: var(--text-3);
+  font-size: inherit;
   font-weight: 400;
 }
 
@@ -563,12 +608,30 @@
 .board .weather-h1 .weather-days {
   flex: 1;
   margin: 0 0 0 auto;
-  max-width: 280px;
+  max-width: 420px;
 }
 
-/* What fits is decided by the widget's own width, which changes with the panel and the window. */
-@container (max-width: 460px) {
+/* How many days fit is decided by the widget's own width, which changes with the window. */
+@container (max-width: 640px) {
+  .weather-h1 .weather-days li:nth-child(n + 6) {
+    display: none;
+  }
+}
+
+@container (max-width: 520px) {
+  .weather-h1 .weather-more {
+    display: none;
+  }
+}
+
+@container (max-width: 420px) {
   .weather-h1 .weather-days {
+    display: none;
+  }
+}
+
+@container (max-width: 360px) {
+  .weather-days li:nth-child(n + 6) {
     display: none;
   }
 }
@@ -578,48 +641,262 @@
     display: none;
   }
 
-  .weather-days li:nth-child(n + 4) {
+  .weather-days li:nth-child(n + 5) {
     display: none;
   }
 }
 
-/* ---------- Calendar ---------- */
-.agenda {
+/* ---------- Calendar: a month of dots, or a week of stacked events ---------- */
+.cal {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
 }
 
-.agenda h4 {
-  margin-bottom: 4px;
+.cal-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+}
+
+.cal-nav button {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
   color: var(--text-2);
+  font: inherit;
   font-size: 12px;
+  cursor: pointer;
+}
+
+.cal-nav button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.cal-nav svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cal-today {
+  padding: 2px 6px !important;
+}
+
+.cal-views button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* Month: seven columns of dates, up to three dots each. */
+.cal-month {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-rows: auto;
+  min-height: 0;
+}
+
+.cal-weekday {
+  padding-bottom: 2px;
+  color: var(--text-3);
+  font-size: 11px;
+  text-align: center;
+}
+
+.cal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.cal-cell:hover {
+  background: var(--surface-2);
+}
+
+.cal-cell.is-outside {
+  color: var(--text-3);
+}
+
+.cal-date {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  line-height: 1;
+}
+
+.cal-cell.is-today .cal-date {
+  background: var(--accent);
+  color: #fff;
   font-weight: 600;
 }
 
-.agenda ul {
+.cal-dots {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  height: 5px;
+}
+
+.cal-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cal-cell.is-outside .cal-dots i {
+  opacity: 0.45;
+}
+
+.cal-dots b {
+  color: var(--text-3);
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Week: a column per day with its events stacked; a narrow widget lists the days instead. */
+.cal-week {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
+  min-height: 0;
   list-style: none;
 }
 
-.agenda li {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  gap: 8px;
-  font-size: 13px;
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.agenda-time {
+.cal-day.is-today {
+  background: var(--accent-soft);
+}
+
+.cal-day.is-past {
+  opacity: 0.6;
+}
+
+.cal-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
   color: var(--text-3);
+  font-size: 11px;
+}
+
+.cal-day-head b {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cal-day.is-today .cal-day-head b {
+  color: var(--accent-text);
+}
+
+.cal-day ul {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.cal-day ul li {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 5px;
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.cal-event-time {
+  color: var(--text-3);
+  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
 
-.agenda-title {
+.cal-event-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@container (max-width: 480px) {
+  .cal-week {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+    overflow: auto;
+  }
+
+  .cal-day {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    align-items: start;
+    padding: 4px 6px;
+    overflow: visible;
+  }
+
+  .cal-day ul {
+    overflow: visible;
+  }
+
+  .cal-day ul li {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .cal-free::before {
+    content: '—';
+    color: var(--text-3);
+    font-size: 12px;
+  }
 }
 
 /* ---------- Apps ---------- */
@@ -810,18 +1087,26 @@
 }
 
 /* ---------- Thermostat ---------- */
+/* Reading on the left, set points on the right, modes along the bottom: fits one row without
+   scrolling, and a taller widget spreads the same parts out with larger type instead of leaving space. */
 .thermostat {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'now setpoints'
+    'modes modes';
+  align-content: center;
+  align-items: center;
+  gap: 8px 12px;
   height: 100%;
 }
 
 .thermostat-now {
+  grid-area: now;
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .thermostat-temp {
@@ -834,42 +1119,47 @@
 .thermostat-state {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 .thermostat-state svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 
 .thermostat-state .muted {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: 4px;
+  margin-left: 2px;
 }
 
 .setpoints {
+  grid-area: setpoints;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
 }
 
 .setpoint {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .setpoint-label {
   color: var(--text-2);
+  white-space: nowrap;
 }
 
 .setpoint strong {
-  min-width: 34px;
+  min-width: 30px;
   font-size: 15px;
   text-align: center;
 }
@@ -877,8 +1167,8 @@
 .setpoint button {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
@@ -893,13 +1183,88 @@
 }
 
 .setpoint button svg {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 .thermostat-modes {
-  margin-top: auto;
-  align-self: flex-start;
+  grid-area: modes;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  width: 100%;
+}
+
+.thermostat .thermostat-modes {
+  padding: 2px;
+}
+
+.thermostat .thermostat-modes button {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+/* One row tall: everything fits in the row without scrolling. */
+.thermostat.is-short {
+  gap: 6px 12px;
+}
+
+.thermostat.is-short .thermostat-temp {
+  font-size: 26px;
+}
+
+/* One column wide: the set point's label goes, the buttons and value stay. */
+.thermostat.is-narrow .setpoint-label {
+  display: none;
+}
+
+/* Two rows tall: the same parts, larger and spread over the height. */
+.thermostat.is-tall {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'now'
+    'setpoints'
+    'modes';
+  align-content: space-evenly;
+  justify-items: center;
+  text-align: center;
+}
+
+.thermostat.is-tall .thermostat-now {
+  align-items: center;
+}
+
+.thermostat.is-tall .thermostat-temp {
+  font-size: 48px;
+}
+
+.thermostat.is-tall .thermostat-state {
+  font-size: 13.5px;
+}
+
+.thermostat.is-tall .setpoints {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 20px;
+}
+
+.thermostat.is-tall .setpoint strong {
+  font-size: 18px;
+}
+
+.thermostat.is-tall .setpoint button {
+  width: 30px;
+  height: 30px;
+}
+
+.thermostat.is-tall .thermostat-modes {
+  padding: 3px;
+}
+
+.thermostat.is-tall .thermostat-modes button {
+  height: 30px;
 }
 
 /* ---------- Camera ---------- */

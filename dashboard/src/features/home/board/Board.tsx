@@ -1,4 +1,4 @@
-import { ArrowLeft, GripVertical, MoveDiagonal2, Plus, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, GripVertical, MoveDiagonal2, Plus, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
 import {
   Component,
   type CSSProperties,
@@ -11,10 +11,12 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import type { HomeWidget } from '../../../api';
 import { Button } from '../../../components/Button';
 import { EmptyState } from '../../../components/Layout';
 import { Link } from '../../../lib/router';
+import { requestSidebarRoom, resetSidebarRoom, subscribeRoom } from '../../../shell/Sidebar';
 import type { Board as BoardState } from './useBoard';
 import { WIDGETS } from './widgets';
 
@@ -247,12 +249,25 @@ function EditPanel({
   picked,
   onPick,
   onClose,
+  finish,
 }: {
   board: BoardState;
   picked: HomeWidget | undefined;
   onPick: (id: string | null) => void;
   onClose: () => void;
+  /** Cancel and Done in the panel itself, when it covers the page's own (a narrow window). */
+  finish?: { cancel: () => void; done: () => void };
 }) {
+  const footer = finish && (
+    <div className="board-panel-finish">
+      <Button variant="ghost" size="sm" onClick={finish.cancel}>
+        Cancel
+      </Button>
+      <Button variant="primary" size="sm" icon={Check} loading={board.saving} onClick={finish.done}>
+        Done
+      </Button>
+    </div>
+  );
   if (picked) {
     const info = WIDGETS[picked.kind];
     const Settings = info.Settings;
@@ -287,6 +302,7 @@ function EditPanel({
         >
           Remove from board
         </Button>
+        {footer}
       </aside>
     );
   }
@@ -335,8 +351,77 @@ function EditPanel({
       >
         Start over with the starter board
       </Button>
+      {footer}
     </aside>
   );
+}
+
+// The edit panel's width, the gap beside the board, and the margin it keeps from the window's edge.
+const PANEL = 280 + 20 + 16;
+
+/**
+ * Room for the edit panel without changing the board: the page slides left into its own margin by
+ * as much as the panel needs (and the margin allows). The board keeps its width and columns, so
+ * what you arrange is what Home shows after Done. Phones use the bottom sheet instead.
+ */
+export function usePanelRoom(open: boolean) {
+  const home = useRef<HTMLDivElement>(null);
+  const [measured, setMeasured] = useState({ shift: 0, covered: false });
+  useEffect(() => {
+    const element = home.current;
+    const board = element?.querySelector<HTMLElement>('.board');
+    const inner = element?.parentElement;
+    if (!open || !element || !board || !inner) return;
+    resetSidebarRoom();
+    // The board keeps the width it has now, even if the sidebar folds and the page gets wider.
+    board.style.width = `${board.offsetWidth}px`;
+    // Where the board will sit, worked out from the layout's own sizes, so nothing waits for the
+    // sidebar to finish folding: the board and the panel move together, once.
+    const measure = () => {
+      const width = document.documentElement.clientWidth;
+      if (width <= 1000) {
+        setMeasured({ shift: 0, covered: false });
+        return;
+      }
+      const root = getComputedStyle(document.documentElement);
+      const full = parseFloat(root.getPropertyValue('--sidebar-width')) || 240;
+      const folded = parseFloat(root.getPropertyValue('--sidebar-collapsed-width')) || 56;
+      const page = getComputedStyle(inner);
+      const maxWidth = parseFloat(page.maxWidth) || Infinity;
+      const padding = parseFloat(page.paddingLeft) || 0;
+      const place = (sidebar: number) => {
+        const main = width - sidebar;
+        const left = sidebar + (main - Math.min(maxWidth, main)) / 2 + padding;
+        const needed = left + board.offsetWidth + PANEL - width;
+        const room = left - sidebar - 16;
+        return { needed, room };
+      };
+      const sidebarNow = document.querySelector('.shell.sidebar-collapsed') ? folded : full;
+      let { needed, room } = place(sidebarNow);
+      // Not enough margin: borrow the sidebar's width too (it folds to icons until the panel closes).
+      if (needed > room && sidebarNow === full && requestSidebarRoom(true)) ({ needed, room } = place(folded));
+      setMeasured({ shift: Math.max(0, Math.min(needed, room)), covered: needed > room });
+    };
+    let timer = 0;
+    // After the sidebar changes, once React has drawn it; never waiting on animation frames, which a
+    // background tab holds back.
+    const later = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(measure, 0);
+    };
+    measure();
+    // The person opening the sidebar again moves the page: place it again.
+    const unsubscribe = subscribeRoom(later);
+    window.addEventListener('resize', later);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe();
+      window.removeEventListener('resize', later);
+      requestSidebarRoom(false);
+      board.style.width = '';
+    };
+  }, [open]);
+  return { home, shift: open ? measured.shift : 0, covered: open && measured.covered };
 }
 
 /** What edit mode's side panel shows: nothing, the widgets to add, or one widget's settings (its id). */
@@ -347,10 +432,12 @@ export function BoardView({
   board,
   panel,
   setPanel,
+  finish,
 }: {
   board: BoardState;
   panel: Panel;
   setPanel: (panel: Panel) => void;
+  finish?: { cancel: () => void; done: () => void };
 }) {
   const grid = useRef<HTMLDivElement>(null);
   const arrange = useArrange(board, grid);
@@ -393,7 +480,12 @@ export function BoardView({
           {board.editing ? 'Add a widget from the list.' : 'Choose Edit to add weather, your calendar and more.'}
         </EmptyState>
       )}
-      {showPanel && <EditPanel board={board} picked={picked} onPick={pick} onClose={() => setPanel('closed')} />}
+      {/* In the body, not the page: the page slides to make room, and a slid page would carry the panel along. */}
+      {showPanel &&
+        createPortal(
+          <EditPanel board={board} picked={picked} onPick={pick} onClose={() => setPanel('closed')} finish={finish} />,
+          document.body,
+        )}
     </div>
   );
 }

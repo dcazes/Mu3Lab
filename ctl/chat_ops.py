@@ -90,6 +90,17 @@ def needs_connect(app: App) -> bool:
     return app.manifest.chat.workspace == "lobe"
 
 
+def prompt_path(app: App) -> str:
+    """The path that opens the chat app with a question typed in ("{question}" marks where), or "".
+
+    Open WebUI fills its message box from ``/?q=``; going through ``/auth?redirect=`` keeps the
+    question when the person has to sign in first (it signs in by itself, then goes on there).
+    """
+    if app.manifest.chat.workspace == "open_webui":
+        return "/auth?redirect=%2F%3Fq%3D{question}"
+    return ""
+
+
 GATEWAY = "tool_gateway"
 
 

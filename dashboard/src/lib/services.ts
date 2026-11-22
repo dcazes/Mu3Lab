@@ -155,25 +155,21 @@ export function launcherSections(services: Service[]): LauncherSection[] {
   ];
 }
 
-/** "6 of 7 running" for a launcher section's header; problems and work in progress say so, without names. */
+/** "6 running" for a launcher section's header (nothing when none are); problems and work in progress say so, without names. */
 export function sectionSummary(section: Pick<LauncherSection, 'apps' | 'stack'>): {
   count: string;
   detail: string;
   tone: Tone;
 } {
   const { apps, stack } = section;
-  // One app: its own state says it all ("Stopped"), with no count.
-  if (apps.length === 1) {
-    const [only] = apps;
-    return { count: statusText(only), detail: '', tone: isRunning(only) ? 'green' : stateTone(only.display_state) };
-  }
+  // Only how many are running, and nothing when none are: the Start button says that already.
   const running = apps.filter(isRunning).length;
   const broken = apps.filter(needsAttention).length;
   const busy = apps.filter((service) => isWorking(service) || service.display_state === 'checking').length;
-  const count = `${running} of ${apps.length} running`;
+  const count = running ? `${running} running` : '';
   if (broken) return { count, detail: `${broken} ${broken > 1 ? 'need' : 'needs'} attention`, tone: 'red' };
   if (busy) return { count, detail: `${busy} busy`, tone: 'blue' };
-  return { count, detail: '', tone: running === apps.length ? 'green' : stack ? 'amber' : 'gray' };
+  return { count, detail: '', tone: running === apps.length ? 'green' : stack && running ? 'amber' : 'gray' };
 }
 
 export function categoryLabel(category: string) {
@@ -184,6 +180,8 @@ export function categoryLabel(category: string) {
 }
 
 export const isRunning = (service: Service) => service.display_state === 'running';
+/** Shown in Apps, Discover and search: everything but a widget's helper (the camera's go2rtc). */
+export const isListed = (service: Service) => !service.serves_widget;
 export const isWorking = (service: Service) => service.display_state === 'working';
 export const isInstalled = (service: Service) => service.installed;
 export const needsAttention = (service: Service) => service.display_state === 'needs_attention' && service.installed;

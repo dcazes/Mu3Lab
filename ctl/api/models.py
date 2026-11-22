@@ -81,9 +81,8 @@ class ServiceExtraRoute(ApiModel):
 
 
 class PortEntry(ApiModel):
-    # tailnet: opened over Tailscale; home: on the home network; loopback: this server only;
-    # proxy: Caddy's loopback listener in front of a tailnet address.
-    kind: Literal["tailnet", "home", "loopback", "proxy"]
+    # tailnet: opened over Tailscale; home: on the home network; loopback: this server only.
+    kind: Literal["tailnet", "home", "loopback"]
     label: str
     address: str
     port: int
@@ -335,6 +334,8 @@ class Service(ApiModel):
     category: str
     # The stack of apps it works with (Home groups them), or "".
     stack: str = ""
+    # The Home widget it runs for, when it is a helper kept out of Apps and Discover, or "".
+    serves_widget: str = ""
     lifecycle: Literal["always_on"] | Literal["shared"] | Literal["optional"]
     stop_warning: str = ""
     # Named parts of the app (Compose service -> label), shown with their state on its page.
@@ -1419,6 +1420,9 @@ class ChatStatus(ApiModel):
     mcp_enabled_count: float
     detail: str
     providers: list[ChatProvider] | None = None
+    # Opens the chat app with a question typed in: replace "{question}" with the question,
+    # URL-encoded twice (it travels inside another address). Empty when the app cannot.
+    prompt_url: str = ""
 
 
 class ChatAppChoice(ApiModel):

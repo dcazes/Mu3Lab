@@ -114,7 +114,7 @@ describe('App stacks', () => {
     const kopia = service('kopia-ui', 'Kopia backups', 'core', { category: 'system' });
     localStorage.removeItem('mu3lab.homeFolded');
     renderWithDashboard(
-      <AppStacks services={[immich, mealie, kopia]} foldedIcons={false} />,
+      <AppStacks services={[immich, mealie, kopia]} />,
       dashboardData([immich, mealie, kopia]),
     );
     // Backups & system come last, folded on Home to the heading alone.
@@ -171,7 +171,7 @@ describe('App stacks', () => {
     localStorage.removeItem('mu3lab.homeFolded');
     renderWithDashboard(<AppStacks services={[jellyfin, qbittorrent, radarr, immich]} />, data);
     const stack = screen.getByRole('region', { name: 'Torrenting' });
-    expect(stack).toHaveTextContent('2 of 3 running');
+    expect(stack).toHaveTextContent('2 running');
     expect(stack).not.toHaveTextContent('Radarr stopped');
     // The app people open comes first, the helper the others need last.
     expect(

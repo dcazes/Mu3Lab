@@ -398,8 +398,7 @@
   transform: translateY(0) scale(0.98);
 }
 
-.tile:focus-visible,
-.mini-tile:focus-visible {
+.tile:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -423,13 +422,6 @@
   width: 11px;
   height: 11px;
   box-shadow: 0 0 0 2px var(--surface);
-}
-
-.mini-tile .tile-icon .dot {
-  right: -4px;
-  bottom: -4px;
-  width: 9px;
-  height: 9px;
 }
 
 /* The hollow "stopped" ring needs a solid centre where it overlaps an icon. */
@@ -530,11 +522,25 @@
   }
 }
 
-/* A stack is one unit: a hairline frame around its tiles. */
-.launcher-group.is-stack {
+/* Every section is drawn the same way: framed (the default) or open, as chosen in Settings > Appearance. */
+:root:not([data-sections='open']) .launcher-groups {
+  gap: 14px;
+}
+
+:root:not([data-sections='open']) .launcher-group {
   padding: 10px 12px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+/* Folded, a framed section is only its heading row. */
+:root:not([data-sections='open']) .launcher-group.is-folded {
+  padding-bottom: 10px;
+}
+
+:root:not([data-sections='open']) .launcher-group.is-folded h3 {
+  margin-bottom: 0;
 }
 
 .launcher-toggle {
@@ -568,26 +574,6 @@
 .launcher-count {
   color: var(--text-3);
   font-weight: 400;
-}
-
-.launcher-mini {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.mini-tile {
-  position: relative;
-  display: inline-flex;
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  cursor: pointer;
-}
-
-.mini-tile:hover {
-  border-color: var(--border-strong);
 }
 
 .status-strip {
@@ -1191,8 +1177,7 @@
   transform: none;
 }
 
-.tile.is-selected,
-.mini-tile.is-selected {
+.tile.is-selected {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1202,8 +1187,7 @@
   color: var(--accent-text);
 }
 
-.tile:disabled,
-.mini-tile:disabled {
+.tile:disabled {
   cursor: default;
   opacity: 0.45;
   box-shadow: none;
@@ -1221,15 +1205,6 @@
   color: #fff;
   stroke-width: 3;
   animation: pop 0.14s ease-out;
-}
-
-.mini-tile .tile-check {
-  top: auto;
-  right: -5px;
-  bottom: -5px;
-  width: 15px;
-  height: 15px;
-  padding: 2px;
 }
 
 .selection-bar {

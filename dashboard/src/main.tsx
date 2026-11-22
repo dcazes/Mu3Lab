@@ -3,9 +3,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import { applyTheme, storedPreference } from './lib/theme';
+import { applySectionStyle, applyTheme, storedPreference, storedSectionStyle } from './lib/theme';
 
 applyTheme(storedPreference());
+applySectionStyle(storedSectionStyle());
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {

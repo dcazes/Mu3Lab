@@ -146,6 +146,15 @@ class Authentik:
             detail = json.dumps(redact_data(logs), ensure_ascii=False) if logs else f"HTTP {response.status_code}"
             raise AuthentikError(f"Authentik rejected {name}: {detail}")
 
+    def version(self) -> str:
+        """The running Authentik release, so an Authentik update re-imports Mu3Lab's sign-in settings."""
+        data = self.request("GET", "/admin/version/") or {}
+        return str(data.get("version_current") or "")
+
+    def application_slugs(self) -> set[str]:
+        """Every application's slug, including ones only administrators can open."""
+        return {str(item.get("slug")) for item in self._all("/core/applications/", {"superuser_full_list": "true"})}
+
     def wait_for_defaults(self, timeout: float = 300) -> None:
         """A healthy fresh server may still be waiting for the worker's built-in blueprints."""
         defaults = (
