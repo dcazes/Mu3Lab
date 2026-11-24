@@ -43,6 +43,7 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    APIConnectOptions,
     JobContext,
     JobProcess,
     RunContext,
@@ -53,8 +54,9 @@ from livekit.agents import (
     mcp,
     utils,
 )
-from livekit.agents.llm import ChatContext, ToolError
+from livekit.agents.llm import ChatContext, LLMError, ToolError
 from livekit.agents.llm.mcp import MCPToolset
+from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero
 
 logger = logging.getLogger("mu3lab-voice-agent")
@@ -112,6 +114,11 @@ WARM_SECONDS = 60
 # How long the agent waits for the answer's first words. Longer than the plugin's 5 s, so the
 # gateway can try its next route when one is late (8 s local, then 4 s for the outside list).
 ANSWER_WAIT_SECONDS = 30
+# LiteLLM alone picks routes and hands a late one over to the next. LiveKit's own retries (3 by
+# default, 2 s apart) would stack on top: in the VoiceAgent project a provider error became ~8 s of
+# silence. So the agent asks once, and says sorry when no answer comes.
+LLM_RETRIES = 0
+NO_ANSWER = "Sorry, I couldn't get an answer just then. Please say that again."
 # What the person hears while a tool runs and nothing else is being said.
 FILLERS = ("One moment.", "Still working on it.")
 FILLER_DELAY_SECONDS = 1.0
@@ -291,6 +298,16 @@ def log_turns(session: AgentSession) -> None:
         )
 
 
+def apologize_on_failure(session: AgentSession) -> None:
+    """When the answer model gives up (every route failed), say so instead of going quiet."""
+
+    @session.on("error")
+    def failed(event) -> None:
+        if isinstance(event.error, LLMError) and not event.error.recoverable:
+            logger.warning("No answer from the model: %s", event.error.label)
+            session.say(NO_ANSWER, add_to_chat_ctx=False)
+
+
 def _handoff_context(agent: Agent) -> ChatContext:
     """The recent conversation, without tool calls or the other assistant's instructions."""
     return agent.chat_ctx.copy(exclude_function_call=True, exclude_instructions=True).truncate(max_items=HANDOFF_ITEMS)
@@ -452,6 +469,11 @@ server = AgentServer()
 
 
 def prewarm(proc: JobProcess) -> None:
+    # The OpenAI client imports its chat modules on the first request, which held up the start of
+    # every call by ~140 ms in the VoiceAgent project. Import them here, before any call.
+    import openai.pagination
+    import openai.resources.chat.completions.completions  # noqa: F401
+
     # Voice activity: local Silero model, so no LiveKit Cloud call. Loaded once per worker
     # process, before any call, instead of at the start of each.
     proc.userdata["vad"] = silero.VAD.load(min_silence_duration=END_OF_SPEECH_SECONDS)
@@ -498,6 +520,7 @@ async def entrypoint(ctx: JobContext) -> None:
             api_key=LLM_API_KEY,
             timeout=httpx2.Timeout(connect=15.0, read=ANSWER_WAIT_SECONDS, write=5.0, pool=5.0),
         ),
+        conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=LLM_RETRIES)),
         tts=openai.TTS(
             base_url=SPEECH_BASE_URL,
             api_key=SPEECH_API_KEY,
@@ -520,6 +543,7 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     log_turns(session)
+    apologize_on_failure(session)
 
     await ctx.connect()
     # The person's identity is their email, set from their sign-in by the voice page.
