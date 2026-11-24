@@ -7,11 +7,11 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from ctl import chat_ops, local_models, model_runners, voice_settings, voice_tools
+from ctl import chat_ops, local_models, model_runners, voice_reports, voice_settings, voice_tools
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
-from ctl.api.security import Member, MemberMutation, OperatorMutation
+from ctl.api.security import Member, MemberMutation, Operator, OperatorMutation
 from ctl.jobs import JobConflict, JobStore
 from ctl.registry import load
 from ctl.runtime import RuntimePaths
@@ -203,6 +203,51 @@ async def change_voice_settings(payload: models.VoiceSettingsRequest, operator: 
             detail="Changed the voice assistant's settings.",
         )
     return await run_in_threadpool(_voice_page)
+
+
+def _report_audit(operator: dict, event: str, report_id: str, what: str) -> None:
+    store = JobStore.runtime()
+    if store:
+        store.record_audit(actor=operator["username"], event=event, detail=f"{what} voice call report {report_id}.")
+
+
+@router.get("/voice/reports", response_model=models.VoiceReports)
+async def voice_reports_list(_operator: Operator) -> models.VoiceReports:
+    """The kept call reports, newest first; reports past the household's limit are deleted first."""
+    return models.VoiceReports(reports=await run_in_threadpool(voice_reports.listing))
+
+
+@router.get("/voice/reports/{report_id}", response_model=models.VoiceReport)
+async def voice_report(report_id: str, operator: Operator) -> models.VoiceReport:
+    """One call's transcript, tool calls and timing. Each opening is noted in the activity log."""
+    try:
+        report = await run_in_threadpool(voice_reports.read, report_id)
+    except voice_reports.ReportError as exc:
+        raise ApiError(404, str(exc), code="report_missing") from None
+    _report_audit(operator, "ai.voice_report_opened", report_id, "Opened")
+    return models.VoiceReport.model_validate(report)
+
+
+@router.get("/voice/reports/{report_id}/audio", response_model=models.VoiceReportAudio)
+async def voice_report_audio(report_id: str, operator: Operator) -> models.VoiceReportAudio:
+    """One call's audio, to play or save. Each listening is noted in the activity log."""
+    try:
+        audio = await run_in_threadpool(voice_reports.audio, report_id)
+    except voice_reports.ReportError as exc:
+        raise ApiError(404, str(exc), code="report_missing") from None
+    _report_audit(operator, "ai.voice_report_audio", report_id, "Played or saved the audio of")
+    return models.VoiceReportAudio(audio=audio)
+
+
+@router.delete("/voice/reports/{report_id}", response_model=models.VoiceReports)
+async def delete_voice_report(report_id: str, operator: OperatorMutation) -> models.VoiceReports:
+    """Delete one call's report and audio now."""
+    try:
+        await run_in_threadpool(voice_reports.delete, report_id)
+    except voice_reports.ReportError as exc:
+        raise ApiError(404, str(exc), code="report_missing") from None
+    _report_audit(operator, "ai.voice_report_deleted", report_id, "Deleted")
+    return models.VoiceReports(reports=await run_in_threadpool(voice_reports.listing))
 
 
 @router.post("/voice/sample", response_model=models.VoiceSample, response_model_exclude_none=True)

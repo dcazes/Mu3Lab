@@ -1298,6 +1298,10 @@ class VoiceSettings(ApiModel):
     silence_after: float = 30
     silence_reasks: int = 1
     silence_goodbye: str = ""
+    # Each call's transcript and timing (and audio) kept for reports_days, for administrators.
+    reports: bool = True
+    reports_audio: bool = True
+    reports_days: int = 14
     changed_at: str
     changed_by: str
 
@@ -1312,6 +1316,47 @@ class VoiceSettingsRequest(ApiModel):
     silence_after: float | None = Field(default=None, ge=0, le=600)
     silence_reasks: int | None = Field(default=None, ge=0, le=3)
     silence_goodbye: str | None = Field(default=None, max_length=160)
+    reports: bool | None = None
+    reports_audio: bool | None = None
+    reports_days: int | None = Field(default=None, ge=1, le=90)
+
+
+class VoiceReportSummary(ApiModel):
+    id: str
+    # The caller's name, or their sign-in when Mu3Lab has no name for them.
+    who: str
+    started_at: float
+    seconds: float
+    audio: bool
+
+
+class VoiceReports(ApiModel):
+    """Kept call reports, newest first (ctl/voice_reports.py); administrators only."""
+
+    ok: bool = True
+    reports: list[VoiceReportSummary]
+
+
+class VoiceReportLine(ApiModel):
+    # said: a message; tool, tool_result, tool_error: what the assistant asked an app and got back.
+    kind: Literal["said", "tool", "tool_result", "tool_error"]
+    who: Literal["person", "assistant"]
+    text: str
+    interrupted: bool = False
+    at: float = 0
+    # Seconds from the end of the person's speech to the reply's first sound.
+    reply_after: float | None = None
+
+
+class VoiceReport(VoiceReportSummary):
+    ok: bool = True
+    lines: list[VoiceReportLine]
+
+
+class VoiceReportAudio(ApiModel):
+    ok: bool = True
+    # A data: address the dashboard plays and saves.
+    audio: str
 
 
 class VoiceOption(ApiModel):

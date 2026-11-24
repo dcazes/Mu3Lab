@@ -58,11 +58,14 @@ services:
       MU3LAB_VOICE_TOOLS: /app/voice-tools/people.json
       # One line as each call starts and ends (who and when, never what was said), for Home.
       MU3LAB_CALL_LOG: /app/calls/calls.jsonl
+      # Each call's report and audio, for administrators to find what went wrong (reports/README.md).
+      MU3LAB_REPORTS: /app/reports
       # The household's time zone, so "tomorrow at 10" means 10 here.
       TZ: ${TZ:-UTC}
     volumes:
       - ./voice-tools:/app/voice-tools:ro
       - ./calls:/app/calls
+      - ./reports:/app/reports
     depends_on:
       server: {condition: service_healthy}
     # mu3lab_mcp: the apps' tools, through ContextForge.

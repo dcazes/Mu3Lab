@@ -96,6 +96,25 @@ function renderPage({ page = voicePage(), appsOn = true } = {}) {
           { id: 'kopia-ui', ok: false, tools: 0, detail: 'ContextForge is not answering.' },
         ],
       };
+    if (path === '/api/v1/ai/voice/reports')
+      return {
+        ok: true,
+        reports: [{ id: '20261124-100000Z_room-a', who: 'Sam', started_at: 1795600000, seconds: 95, audio: true }],
+      };
+    if (path === '/api/v1/ai/voice/reports/20261124-100000Z_room-a')
+      return {
+        ok: true,
+        id: '20261124-100000Z_room-a',
+        who: 'Sam',
+        started_at: 1795600000,
+        seconds: 95,
+        audio: true,
+        lines: [
+          { kind: 'said', who: 'person', text: 'Add dinner at seven', interrupted: false, at: 0 },
+          { kind: 'tool', who: 'assistant', text: 'calendar-create_event({})', interrupted: false, at: 0 },
+          { kind: 'said', who: 'assistant', text: 'Shall I add it?', interrupted: true, at: 0, reply_after: 1.25 },
+        ],
+      };
     if (path === '/api/v1/voice-key')
       return { ok: true, available: true, exists: false, base_url: '', models: [], created_at: '' };
     return undefined;
@@ -139,6 +158,19 @@ describe('Voice assistant settings', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Let people interrupt' }));
     await vi.waitFor(() =>
       expect(puts).toContainEqual({ path: '/api/v1/ai/voice/settings', body: { interruptions: false } }),
+    );
+  });
+
+  it('lists call reports for administrators, opens one, and turns their audio off', async () => {
+    const puts = renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Sam/ }));
+    expect(await screen.findByText('Add dinner at seven')).toBeInTheDocument();
+    expect(screen.getByText(/cut off · answered after 1.3 s/)).toBeInTheDocument();
+    expect(screen.getByText('Asked an app')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Play the audio' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Keep the audio too' }));
+    await vi.waitFor(() =>
+      expect(puts).toContainEqual({ path: '/api/v1/ai/voice/settings', body: { reports_audio: false } }),
     );
   });
 

@@ -143,6 +143,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ai/voice/reports': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Voice Reports List
+     * @description The kept call reports, newest first; reports past the household's limit are deleted first.
+     */
+    get: operations['voice_reports_list_api_v1_ai_voice_reports_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/reports/{report_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Voice Report
+     * @description One call's transcript, tool calls and timing. Each opening is noted in the activity log.
+     */
+    get: operations['voice_report_api_v1_ai_voice_reports__report_id__get'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Voice Report
+     * @description Delete one call's report and audio now.
+     */
+    delete: operations['delete_voice_report_api_v1_ai_voice_reports__report_id__delete'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ai/voice/reports/{report_id}/audio': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Voice Report Audio
+     * @description One call's audio, to play or save. Each listening is noted in the activity log.
+     */
+    get: operations['voice_report_audio_api_v1_ai_voice_reports__report_id__audio_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ai/voice/sample': {
     parameters: {
       query?: never;
@@ -5294,6 +5358,89 @@ export interface components {
       /** Voices */
       voices: components['schemas']['VoiceOption'][];
     };
+    /** VoiceReport */
+    VoiceReport: {
+      /** Audio */
+      audio: boolean;
+      /** Id */
+      id: string;
+      /** Lines */
+      lines: components['schemas']['VoiceReportLine'][];
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Seconds */
+      seconds: number;
+      /** Started At */
+      started_at: number;
+      /** Who */
+      who: string;
+    };
+    /** VoiceReportAudio */
+    VoiceReportAudio: {
+      /** Audio */
+      audio: string;
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+    };
+    /** VoiceReportLine */
+    VoiceReportLine: {
+      /**
+       * At
+       * @default 0
+       */
+      at?: number;
+      /**
+       * Interrupted
+       * @default false
+       */
+      interrupted?: boolean;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'said' | 'tool' | 'tool_result' | 'tool_error';
+      /** Reply After */
+      reply_after?: number | null;
+      /** Text */
+      text: string;
+      /**
+       * Who
+       * @enum {string}
+       */
+      who: 'person' | 'assistant';
+    };
+    /** VoiceReportSummary */
+    VoiceReportSummary: {
+      /** Audio */
+      audio: boolean;
+      /** Id */
+      id: string;
+      /** Seconds */
+      seconds: number;
+      /** Started At */
+      started_at: number;
+      /** Who */
+      who: string;
+    };
+    /**
+     * VoiceReports
+     * @description Kept call reports, newest first (ctl/voice_reports.py); administrators only.
+     */
+    VoiceReports: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Reports */
+      reports: components['schemas']['VoiceReportSummary'][];
+    };
     /** VoiceSample */
     VoiceSample: {
       /** Audio */
@@ -5317,6 +5464,21 @@ export interface components {
       changed_by: string;
       /** Interruptions */
       interruptions: boolean;
+      /**
+       * Reports
+       * @default true
+       */
+      reports?: boolean;
+      /**
+       * Reports Audio
+       * @default true
+       */
+      reports_audio?: boolean;
+      /**
+       * Reports Days
+       * @default 14
+       */
+      reports_days?: number;
       /**
        * Responsiveness
        * @enum {string}
@@ -5356,6 +5518,12 @@ export interface components {
     VoiceSettingsRequest: {
       /** Interruptions */
       interruptions?: boolean | null;
+      /** Reports */
+      reports?: boolean | null;
+      /** Reports Audio */
+      reports_audio?: boolean | null;
+      /** Reports Days */
+      reports_days?: number | null;
       /** Responsiveness */
       responsiveness?: ('fast' | 'balanced' | 'patient') | null;
       /** Search */
@@ -6076,6 +6244,344 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['VoiceApps'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_reports_list_api_v1_ai_voice_reports_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceReports'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_report_api_v1_ai_voice_reports__report_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        report_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceReport'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  delete_voice_report_api_v1_ai_voice_reports__report_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        report_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceReports'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  voice_report_audio_api_v1_ai_voice_reports__report_id__audio_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        report_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VoiceReportAudio'];
         };
       };
       /** @description Bad Request */

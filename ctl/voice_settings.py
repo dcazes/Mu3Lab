@@ -10,6 +10,8 @@ An administrator chooses, in Settings, Voice Assistant:
 - **Quiet calls**: after ``silence_after`` seconds with nobody speaking, the assistant asks whether
   the person is still there, then says goodbye and ends the call (0 is off), so a page left open
   does not keep the speech and answer models busy.
+- **Call reports**: each call's transcript and timing (and audio, unless switched off), kept for
+  ``reports_days`` days so administrators can find what went wrong (``ctl.voice_reports``).
 - **Wait phrase**: what the assistant says when an answer's first words are slow (``wait_after``
   seconds), so the person never sits in silence; empty is off.
 
@@ -53,7 +55,11 @@ DEFAULTS: dict[str, Any] = {
     "silence_after": 30,
     "silence_reasks": 1,
     "silence_goodbye": "I'll end the call now. Talk to you soon.",
+    "reports": True,
+    "reports_audio": True,
+    "reports_days": 14,
 }
+REPORT_DAYS = (1, 90)
 SILENCE_AFTER = (10, 600)
 GOODBYE_CHARS = 160
 WAIT_PHRASE_CHARS = 80
@@ -92,6 +98,9 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
         "silence_after": _silence(new.get("silence_after")),
         "silence_reasks": _whole(new.get("silence_reasks"), "times to check on a quiet call", 0, 3),
         "silence_goodbye": _words(new.get("silence_goodbye"), "goodbye", GOODBYE_CHARS),
+        "reports": bool(new.get("reports")),
+        "reports_audio": bool(new.get("reports_audio")),
+        "reports_days": _whole(new.get("reports_days"), "days to keep call reports", *REPORT_DAYS),
     }
 
 
@@ -186,6 +195,9 @@ def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "silence_after": chosen["silence_after"],
         "silence_reasks": chosen["silence_reasks"],
         "silence_goodbye": chosen["silence_goodbye"],
+        "reports": chosen["reports"],
+        "reports_audio": chosen["reports_audio"] and chosen["reports"],
+        "reports_days": chosen["reports_days"],
     }
 
 

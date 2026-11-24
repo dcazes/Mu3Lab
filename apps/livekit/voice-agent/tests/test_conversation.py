@@ -94,3 +94,27 @@ def test_the_end_of_turn_score_is_one_readable_line() -> None:
     assert record.getMessage() == "End of turn: score 0.12 against threshold 0.36, so waited 2.00 s (vad)"
     other = logging.LogRecord("livekit.agents", logging.DEBUG, __file__, 1, "something else", (), None)
     assert not agent._EndOfTurnScore().filter(other)
+
+
+def test_reports_record_what_the_household_keeps(monkeypatch) -> None:
+    monkeypatch.setattr(agent, "REPORTS", "/reports")
+    assert agent.recording(settings()) == {"audio": True, "transcript": True, "traces": False, "logs": False}
+    assert agent.recording(settings(reports_audio=False))["audio"] is False
+    assert agent.recording(settings(reports=False)) is False
+    monkeypatch.setattr(agent, "REPORTS", "")
+    assert agent.recording(settings()) is False
+
+
+def test_old_reports_are_deleted(tmp_path) -> None:
+    import os
+    import time
+
+    old, new = tmp_path / "20261101-100000Z_room-a", tmp_path / "20261124-100000Z_room-b"
+    for folder in (old, new):
+        folder.mkdir()
+        (folder / "call.json").write_text("{}")
+    long_ago = time.time() - 20 * 86400
+    os.utime(old, (long_ago, long_ago))
+    assert agent.prune_reports(tmp_path, 14) == 1
+    assert not old.exists() and new.exists()
+    assert agent.prune_reports(tmp_path / "missing", 14) == 0

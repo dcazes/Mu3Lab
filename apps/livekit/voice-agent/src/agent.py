@@ -29,11 +29,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 import wave
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -97,6 +98,10 @@ VOICE_SETTINGS = VOICE_TOOLS.with_name("settings.json")
 # One line as each call starts and ends, for Mu3Lab's Home widget (apps/livekit/widgets.py): the
 # room, who called and when. Never anything said. Empty: calls are not noted (a desktop test).
 CALL_LOG = _env("MU3LAB_CALL_LOG", "")
+# Each call's report (what was said, each turn's timing, and the audio when the household keeps it),
+# one folder per call, for administrators to find what went wrong (Settings, Voice assistant).
+# Empty: no reports (a desktop test).
+REPORTS = _env("MU3LAB_REPORTS", "")
 DEFAULT_SETTINGS: dict[str, Any] = {
     "responsiveness": "balanced",
     "interruptions": True,
@@ -111,6 +116,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "silence_after": 30,
     "silence_reasks": 1,
     "silence_goodbye": "I'll end the call now. Talk to you soon.",
+    # Call reports: kept unless switched off, with the audio unless that is, for reports_days days.
+    "reports": True,
+    "reports_audio": True,
+    "reports_days": 14,
 }
 SILENCE_REASK = (
     "The person has been quiet for a while. Briefly ask whether they are still there, or repeat your last "
@@ -206,6 +215,9 @@ def load_settings() -> dict[str, Any]:
     settings["silence_after"] = silence if silence >= 10 else 0
     settings["silence_reasks"] = int(_number(settings["silence_reasks"], DEFAULT_SETTINGS["silence_reasks"], 0, 3))
     settings["silence_goodbye"] = str(settings["silence_goodbye"] or "")[:160]
+    settings["reports"] = bool(settings["reports"])
+    settings["reports_audio"] = bool(settings["reports_audio"]) and settings["reports"]
+    settings["reports_days"] = int(_number(settings["reports_days"], DEFAULT_SETTINGS["reports_days"], 1, 365))
     return settings
 
 
@@ -802,6 +814,68 @@ def prewarm(proc: JobProcess) -> None:
 server.setup_fnc = prewarm
 
 
+def recording(settings: dict[str, Any]) -> dict[str, bool] | bool:
+    """What LiveKit records for the call's report. Self-hosted, nothing is uploaded: the report and
+    audio stay on this server (save_report copies them into REPORTS)."""
+    if not (REPORTS and settings["reports"]):
+        return False
+    return {"audio": settings["reports_audio"], "transcript": True, "traces": False, "logs": False}
+
+
+def prune_reports(folder: Path, days: int, now: float | None = None) -> int:
+    """Delete reports older than ``days``; returns how many went."""
+    cutoff = (now or time.time()) - days * 86400
+    removed = 0
+    for report in folder.iterdir() if folder.is_dir() else []:
+        try:
+            if report.is_dir() and report.stat().st_mtime < cutoff:
+                shutil.rmtree(report)
+                removed += 1
+        except OSError:
+            logger.warning("An old call report could not be deleted: %s", report.name)
+    return removed
+
+
+async def save_report(ctx: JobContext) -> None:
+    """After a call: its report (each message, tool call and turn timing) and, when kept, its audio, in
+    REPORTS/<time>_<room>/, with who called; then reports older than the household keeps are deleted."""
+    state: CallState | None = ctx.proc.userdata.get("sessions", {}).pop(ctx.room.name, None)
+    settings = state.settings if state else load_settings()
+    if not (REPORTS and settings["reports"]):
+        return
+    try:
+        report = ctx.make_session_report()
+    except RuntimeError as exc:  # no session started, or the recording did not close
+        logger.warning("No call report: %s", exc)
+        return
+    folder = Path(REPORTS)
+    target = folder / f"{datetime.now(UTC):%Y%m%d-%H%M%SZ}_{re.sub(r'[^A-Za-z0-9_-]', '_', ctx.room.name)}"
+    audio = report.audio_recording_path
+    about = {
+        "room": ctx.room.name,
+        "who": str(state.extra.get("identity") or "") if state else "",
+        "name": str((state.person or {}).get("name") or "") if state else "",
+        "started_at": report.started_at,
+        "ended_at": report.timestamp,
+        "audio": bool(audio and audio.exists()),
+    }
+
+    def write() -> None:
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "report.json").write_text(json.dumps(report.to_dict(), default=str), encoding="utf-8")
+        (target / "call.json").write_text(json.dumps(about), encoding="utf-8")
+        if about["audio"]:
+            shutil.copy(audio, target / "audio.ogg")
+        prune_reports(folder, settings["reports_days"])
+
+    try:
+        await asyncio.to_thread(write)
+    except OSError:
+        logger.warning("The call report could not be saved.", exc_info=True)
+        return
+    logger.info("Call report saved as %s.", target.name)
+
+
 def note_call(event: str, room: str, who: str = "") -> None:
     """Add a call's start or end to the call log; a failure only costs the widget a line."""
     if not CALL_LOG:
@@ -816,7 +890,7 @@ def note_call(event: str, room: str, who: str = "") -> None:
         logger.warning("The call could not be noted for Mu3Lab's Home widget.", exc_info=True)
 
 
-@server.rtc_session(agent_name=AGENT_NAME)
+@server.rtc_session(agent_name=AGENT_NAME, on_session_end=save_report)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
     log_end_of_turn_scores()
@@ -880,6 +954,8 @@ async def entrypoint(ctx: JobContext) -> None:
     participant = await ctx.wait_for_participant()
     room = ctx.room.name
     note_call("start", room, participant.identity.lower())
+    state.extra["identity"] = participant.identity.lower()
+    ctx.proc.userdata.setdefault("sessions", {})[room] = state
 
     async def ended(_reason: str = "") -> None:
         note_call("end", room)
@@ -892,7 +968,7 @@ async def entrypoint(ctx: JobContext) -> None:
         logger.warning("No voice tools for this caller; answering without app tools.")
     assistant = Assistant(state)
     answer_ready = asyncio.create_task(warm_answer_model(assistant.instructions))
-    await session.start(agent=assistant, room=ctx.room)
+    await session.start(agent=assistant, room=ctx.room, record=recording(settings))
     await wait_until_warm(speech_ready, answer_ready)
     # Speak first, once everything is loaded, so the first answer is quick. A fixed sentence needs
     # no model call: an instruction-only request has no messages, which Gemini rejects. Kept out
