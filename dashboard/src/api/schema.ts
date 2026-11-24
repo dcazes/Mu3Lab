@@ -5326,6 +5326,16 @@ export interface components {
       search: boolean;
       /** Voice */
       voice: string;
+      /**
+       * Wait After
+       * @default 1.5
+       */
+      wait_after?: number;
+      /**
+       * Wait Phrase
+       * @default
+       */
+      wait_phrase?: string;
     };
     /** VoiceSettingsRequest */
     VoiceSettingsRequest: {
@@ -5337,6 +5347,10 @@ export interface components {
       search?: boolean | null;
       /** Voice */
       voice?: string | null;
+      /** Wait After */
+      wait_after?: number | null;
+      /** Wait Phrase */
+      wait_phrase?: string | null;
     };
     /**
      * VoiceSpeech

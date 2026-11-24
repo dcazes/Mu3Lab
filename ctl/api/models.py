@@ -1291,6 +1291,9 @@ class VoiceSettings(ApiModel):
     voice: str
     # Web search for current facts; it works once SearXNG is installed.
     search: bool
+    # Said when an answer's first words take longer than wait_after seconds; "" is off.
+    wait_phrase: str = ""
+    wait_after: float = 1.5
     changed_at: str
     changed_by: str
 
@@ -1300,6 +1303,8 @@ class VoiceSettingsRequest(ApiModel):
     interruptions: bool | None = None
     voice: str | None = Field(default=None, max_length=40)
     search: bool | None = None
+    wait_phrase: str | None = Field(default=None, max_length=80)
+    wait_after: float | None = Field(default=None, ge=0.5, le=10)
 
 
 class VoiceOption(ApiModel):

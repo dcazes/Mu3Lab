@@ -7,6 +7,8 @@ An administrator chooses, in Settings, Voice Assistant:
 - **Interruptions**: whether talking over the assistant stops it.
 - **Voice**: the assistant's own voice; empty uses Speaches' default voice.
 - **Web search**: on unless switched off; it works once the SearXNG app is installed.
+- **Wait phrase**: what the assistant says when an answer's first words are slow (``wait_after``
+  seconds), so the person never sits in silence; empty is off.
 
 The agent cannot reach the control plane, so Mu3Lab writes ``settings.json`` beside the app tools
 (``ctl/voice_tools.py``) whenever these change and whenever chat's assistants sync (every install
@@ -38,7 +40,16 @@ FILE = "settings.json"
 # What earlier versions wrote instead; deleted when FILE is written.
 OLD_FILE = "engine.json"
 RESPONSIVENESS = ("fast", "balanced", "patient")
-DEFAULTS: dict[str, Any] = {"responsiveness": "balanced", "interruptions": True, "voice": "", "search": True}
+DEFAULTS: dict[str, Any] = {
+    "responsiveness": "balanced",
+    "interruptions": True,
+    "voice": "",
+    "search": True,
+    "wait_phrase": "One moment.",
+    "wait_after": 1.5,
+}
+WAIT_PHRASE_CHARS = 80
+WAIT_AFTER = (0.5, 10.0)
 # Kokoro voice names: a language and gender letter pair, then a name (af_heart, bm_george).
 VOICE_NAME = re.compile(r"^[a-z]{2}_[a-z0-9]{1,30}$")
 SEARCH_CAPABILITY = "web_search"
@@ -62,12 +73,27 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
     voice = str(new.get("voice") or "")
     if voice and not VOICE_NAME.match(voice):
         raise ValueError("Choose one of the voices listed.")
+    phrase = " ".join(str(new.get("wait_phrase") or "").split())
+    if len(phrase) > WAIT_PHRASE_CHARS:
+        raise ValueError(f"Keep the wait phrase under {WAIT_PHRASE_CHARS} characters.")
     return {
         "responsiveness": new["responsiveness"],
         "interruptions": bool(new.get("interruptions")),
         "voice": voice,
         "search": bool(new.get("search")),
+        "wait_phrase": phrase,
+        "wait_after": _seconds(new.get("wait_after"), "the wait phrase", *WAIT_AFTER),
     }
+
+
+def _seconds(value: Any, what: str, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Give {what} a number of seconds.") from None
+    if not low <= number <= high:
+        raise ValueError(f"Choose between {low:g} and {high:g} seconds for {what}.")
+    return round(number, 2)
 
 
 def get(paths: RuntimePaths | None = None) -> dict[str, Any]:
@@ -123,6 +149,8 @@ def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "interruptions": chosen["interruptions"],
         "voice": chosen["voice"],
         "search_url": SEARCH_URL if chosen["search"] and search_installed() else "",
+        "wait_phrase": chosen["wait_phrase"],
+        "wait_after": chosen["wait_after"],
     }
 
 

@@ -30,6 +30,8 @@ import os
 import re
 import time
 import wave
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import httpx2
+import speech
 import websearch
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -46,6 +49,7 @@ from livekit.agents import (
     APIConnectOptions,
     JobContext,
     JobProcess,
+    ModelSettings,
     RunContext,
     TurnHandlingOptions,
     cli,
@@ -54,6 +58,7 @@ from livekit.agents import (
     mcp,
     utils,
 )
+from livekit.agents import llm as lk_llm
 from livekit.agents.llm import ChatContext, LLMError, ToolError
 from livekit.agents.llm.mcp import MCPToolset
 from livekit.agents.voice.agent_session import SessionConnectOptions
@@ -96,6 +101,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "voice": "",
     # SearXNG's address when web search is on and the app is installed; empty means no search.
     "search_url": "",
+    # Said when the answer's first words take longer than wait_after seconds; empty is off.
+    "wait_phrase": "One moment.",
+    "wait_after": 1.5,
 }
 
 INSTRUCTIONS = (
@@ -172,7 +180,18 @@ def load_settings() -> dict[str, Any]:
     if settings["responsiveness"] not in MAX_WAIT_SECONDS:
         settings["responsiveness"] = DEFAULT_SETTINGS["responsiveness"]
     settings["voice"] = str(settings["voice"] or TTS_VOICE)
+    settings["wait_phrase"] = str(settings["wait_phrase"] or "")[:80]
+    settings["wait_after"] = _number(settings["wait_after"], DEFAULT_SETTINGS["wait_after"], 0.5, 10)
     return settings
+
+
+def _number(value: Any, default: float, low: float, high: float) -> float:
+    """A number from the settings file, kept within sensible bounds; the default when it is not one."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(number, low), high) if number == number else default
 
 
 def _silence() -> bytes:
@@ -253,8 +272,56 @@ async def wait_until_warm(*tasks: asyncio.Task) -> None:
             logger.warning("A model could not be loaded before the call: %s", result)
 
 
-def _filler(step: int) -> str | None:
-    return FILLERS[step] if step < len(FILLERS) else None
+@dataclass
+class CallState:
+    """One call's state, on ``session.userdata``: who is talking and the household's settings,
+    kept apart from anything the model says."""
+
+    settings: dict[str, Any]
+    person: dict[str, Any] | None = None
+    guide: str = ""
+    # When the wait phrase was last said (monotonic seconds), so a tool's filler does not repeat it.
+    waited_at: float = 0.0
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def search_url(self) -> str:
+        return str(self.settings.get("search_url") or "")
+
+
+def _fillers(state: CallState):
+    """What the person hears while a tool runs. Right after the wait phrase ("One moment."), the
+    first filler waits one more interval and the second ("Still working on it.") is said instead."""
+    waited = time.monotonic() - state.waited_at < FILLER_INTERVAL_SECONDS
+    skipped = False
+
+    def filler(step: int) -> str | None:
+        nonlocal skipped
+        if waited and not skipped:
+            skipped = True
+            return None  # LiveKit tries again after FILLER_INTERVAL_SECONDS
+        index = step + (1 if waited else 0)
+        return FILLERS[index] if index < len(FILLERS) else None
+
+    return filler
+
+
+class SpokenReplies:
+    """For an assistant: its answers are cleaned for the voice (``speech.clean_reply``) and, when the
+    first words are slow, start with the household's wait phrase. Put it first in the bases."""
+
+    async def llm_node(
+        self, chat_ctx: ChatContext, tools: list[lk_llm.Tool], model_settings: ModelSettings
+    ) -> AsyncIterator:
+        state: CallState = self.session.userdata  # type: ignore[attr-defined]
+        stream = speech.clean_reply(Agent.default.llm_node(self, chat_ctx, tools, model_settings))  # type: ignore[arg-type]
+
+        def said() -> None:
+            state.waited_at = time.monotonic()
+
+        settings = state.settings
+        async for chunk in speech.with_wait_phrase(stream, settings["wait_after"], settings["wait_phrase"], said):
+            yield chunk
 
 
 def _seconds(value: Any) -> str:
@@ -348,7 +415,10 @@ class ConfirmedToolset(MCPToolset):
             started = time.monotonic()
             try:
                 async with context.with_filler(
-                    _filler, delay=FILLER_DELAY_SECONDS, interval=FILLER_INTERVAL_SECONDS, max_steps=len(FILLERS)
+                    _fillers(context.userdata),
+                    delay=FILLER_DELAY_SECONDS,
+                    interval=FILLER_INTERVAL_SECONDS,
+                    max_steps=len(FILLERS),
                 ):
                     return await tool(raw_arguments=raw_arguments)
             finally:
@@ -368,7 +438,10 @@ def search_tool(base_url: str):
         """
         started = time.monotonic()
         async with context.with_filler(
-            _filler, delay=FILLER_DELAY_SECONDS, interval=FILLER_INTERVAL_SECONDS, max_steps=len(FILLERS)
+            _fillers(context.userdata),
+            delay=FILLER_DELAY_SECONDS,
+            interval=FILLER_INTERVAL_SECONDS,
+            max_steps=len(FILLERS),
         ):
             found = await websearch.search(utils.http_context.http_session(), base_url, query)
         logger.info("Web search took %s", _seconds(time.monotonic() - started))
@@ -377,13 +450,12 @@ def search_tool(base_url: str):
     return function_tool(search_web)
 
 
-class Assistant(Agent):
+class Assistant(SpokenReplies, Agent):
     """The main assistant: answers general questions and hands the person to an app's assistant."""
 
-    def __init__(
-        self, person: dict[str, Any] | None, guide: str, search_url: str, chat_ctx: ChatContext | None = None
-    ) -> None:
-        self.person, self.guide, self.search_url = person, guide, search_url
+    def __init__(self, state: CallState, chat_ctx: ChatContext | None = None) -> None:
+        self.state = state
+        person, guide, search_url = state.person, state.guide, state.search_url
         agents = (person or {}).get("agents", [])
         if person is None:
             situation = (
@@ -418,7 +490,7 @@ class Assistant(Agent):
 
     def _open(self, spec: dict[str, Any]):
         async def open_app(context: RunContext):
-            return AppAssistant(spec, self.person, self.guide, self.search_url, _handoff_context(self))
+            return AppAssistant(spec, self.state, _handoff_context(self))
 
         return function_tool(
             open_app,
@@ -432,13 +504,11 @@ class Assistant(Agent):
             self.session.generate_reply()
 
 
-class AppAssistant(Agent):
+class AppAssistant(SpokenReplies, Agent):
     """One app's assistant, with only that app's tools, acting as the person talking."""
 
-    def __init__(
-        self, spec: dict[str, Any], person: dict[str, Any], guide: str, search_url: str, chat_ctx: ChatContext
-    ) -> None:
-        self.person, self.guide, self.search_url, self.title = person, guide, search_url, spec["title"]
+    def __init__(self, spec: dict[str, Any], state: CallState, chat_ctx: ChatContext) -> None:
+        self.state, self.title = state, spec["title"]
         server = mcp.MCPServerHTTP(
             url=spec["url"],
             headers={"Authorization": f"Bearer {spec['token']}"},
@@ -455,7 +525,7 @@ class AppAssistant(Agent):
     @function_tool
     async def back_to_main(self, context: RunContext):
         """Hand the person back to the main assistant: when they are done here or ask about another app."""
-        return Assistant(self.person, self.guide, self.search_url, _handoff_context(self))
+        return Assistant(self.state, _handoff_context(self))
 
     async def on_enter(self) -> None:
         # Say what is happening at once; the answer is worked out while this plays. Kept out of the
@@ -503,7 +573,9 @@ async def entrypoint(ctx: JobContext) -> None:
     # Speech models load while the person joins.
     speech_ready = asyncio.create_task(warm_speech(settings["voice"]))
 
-    session = AgentSession(
+    state = CallState(settings=settings)
+    session = AgentSession[CallState](
+        userdata=state,
         vad=ctx.proc.userdata["vad"],
         stt=openai.STT(
             base_url=SPEECH_BASE_URL,
@@ -556,10 +628,11 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(ended)
     people = load_people()
-    person = (people.get("people") or {}).get(participant.identity.lower())
-    if person is None:
+    state.person = (people.get("people") or {}).get(participant.identity.lower())
+    state.guide = str(people.get("guide") or "")
+    if state.person is None:
         logger.warning("No voice tools for this caller; answering without app tools.")
-    assistant = Assistant(person, str(people.get("guide") or ""), str(settings["search_url"] or ""))
+    assistant = Assistant(state)
     answer_ready = asyncio.create_task(warm_answer_model(assistant.instructions))
     await session.start(agent=assistant, room=ctx.room)
     await wait_until_warm(speech_ready, answer_ready)

@@ -9175,6 +9175,16 @@
           "voice": {
             "title": "Voice",
             "type": "string"
+          },
+          "wait_after": {
+            "default": 1.5,
+            "title": "Wait After",
+            "type": "number"
+          },
+          "wait_phrase": {
+            "default": "",
+            "title": "Wait Phrase",
+            "type": "string"
           }
         },
         "required": [
@@ -9239,6 +9249,31 @@
               }
             ],
             "title": "Voice"
+          },
+          "wait_after": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.5,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait After"
+          },
+          "wait_phrase": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait Phrase"
           }
         },
         "title": "VoiceSettingsRequest",

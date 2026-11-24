@@ -58,6 +58,21 @@ class VoiceSettingsTests(unittest.TestCase):
         self.assertEqual((self.folder / voice_settings.FILE).stat().st_mode & 0o777, 0o644)
         self.assertFalse((self.folder / voice_settings.OLD_FILE).exists())
 
+    def test_the_wait_phrase_reaches_the_agent_and_can_be_switched_off(self):
+        self.folder.mkdir()
+        voice_settings.write(lambda _line: None, self.paths)
+        self.assertEqual((self.agent_file()["wait_phrase"], self.agent_file()["wait_after"]), ("One moment.", 1.5))
+        voice_settings.save(
+            {"wait_phrase": "  Just a  second. ", "wait_after": 2}, "owner", lambda _line: None, self.paths
+        )
+        self.assertEqual((self.agent_file()["wait_phrase"], self.agent_file()["wait_after"]), ("Just a second.", 2.0))
+        voice_settings.save({"wait_phrase": ""}, "owner", lambda _line: None, self.paths)
+        self.assertEqual(self.agent_file()["wait_phrase"], "")
+        with self.assertRaisesRegex(ValueError, "between"):
+            voice_settings.save({"wait_after": 30}, "owner", lambda _line: None, self.paths)
+        with self.assertRaisesRegex(ValueError, "under"):
+            voice_settings.save({"wait_phrase": "x" * 81}, "owner", lambda _line: None, self.paths)
+
     def test_web_search_needs_the_searxng_app_and_the_switch(self):
         voice_settings.write(lambda _line: None, self.paths)
         self.assertEqual(self.agent_file()["search_url"], "")
