@@ -1,8 +1,9 @@
 # Voice assistant: lessons from the VoiceAgent phone project
 
-Status: **proposal, for review.** Nothing here is built yet. Written 2026-11-24; the owner's
-answers to the open questions were added the same day (see "Decisions from the owner" near the
-end).
+Status: **in progress.** Phases 1, 4 and 5, most of Phase 3, and the code parts of Phase 2 are
+built (see "Progress" at the end); what is left needs measurements from real calls or an owner
+decision. Written 2026-11-24; the owner's answers to the open questions were added the same day
+(see "Decisions from the owner" near the end).
 
 This plan takes what was learned building a separate phone receptionist
 (`/home/dak/Desktop/VoiceAgent`, LiveKit Agents 1.8.10, self-hosted, answering real calls
@@ -402,3 +403,34 @@ Copy `save_call_report` and the `record=` option from VoiceAgent's `agent.py`.
 | `my-agent/src/pocket_voice.py` | in-process streaming TTS with per-sentence timing and gap logging |
 | `my-agent/tests/` | tests to copy and adapt |
 | `DEPLOY-PLAN.md` sections 0.1, 2, 3 | the measurements quoted above |
+
+## Progress (2026-11-24)
+
+Built and committed, each with tests in `apps/livekit/voice-agent/tests` (run by `make test`,
+32 tests) or `tests/test_voice_*.py`. None of it has been heard on a real call yet: LiveKit must be
+updated in Apps first, which rebuilds the agent.
+
+| Item | Commit | What was built | Notes |
+| --- | --- | --- | --- |
+| 1.1, 1.2 | d7abd19 | LLM `max_retry=0` (LiteLLM alone fails over); a spoken apology when every route fails; OpenAI chat modules imported in prewarm | The LLM's own read timeout stays 30 s (the openai plugin ignores `conn_options.timeout`). |
+| 1.3, 1.4 | f25ef8a | `speech.py`: `clean_for_speech`, `ReplyCutter`, `clean_reply`, `with_wait_phrase`; settings `wait_phrase` ("One moment.") and `wait_after` (1.5 s) in Settings, Voice assistant, Conversation | A tool's filler skips its own "One moment." right after the wait phrase. The full character map was kept: Kokoro's handling of each character was not listened to. |
+| 5.1 | 0b3eb4c | pytest suite in a dev-only group (`uv sync --no-dev` in the image); `make agent-test`, part of `make test` | |
+| 4.1, 4.2 | 8250666 | `CallState` on `session.userdata`; writes only prepare (`needs_confirmation`, `action_id`); `confirm_change` runs the stored arguments once, refused unless the read-back began after the proposal, played in full, and a later user turn came; `parallel_tool_calls=False` | "Read-back heard" uses the message's start time (LiveKit stamps assistant messages with when they started playing), so words said before the tool ran don't count. Still to check: whether local Qwen 3.5 4B does the two steps reliably. |
+| 4.3, 3.1, 3.2, 1.5 | 1cc0fac | Quiet calls: after 30 s (1 min, 2 min, 5 min or never) ask, then goodbye and end the call (deletes the room); 14-day date list and speaking rules in the instructions; ISO times in tool results get words in the household's zone; "Let me check" not repeated; turn detector score logged as `End of turn: score … against threshold …` | |
+| 5.2 | 6852526 | Reports in LiveKit's `reports/` folder (not its data folder): `call.json`, `report.json`, `audio.ogg`; Settings, Voice assistant, Call reports: keep (on), audio (on), 3 to 90 days (14), list and transcript drawer with audio and Delete; administrators only, each opening noted in the activity log | Decided: reports are never backed up (short-lived and private) and go with LiveKit's uninstall. Mu3Lab does not create data folders for a non-root container, and the agent now runs as UID 1000 so it can write here. |
+| 2.1, 3.3, 2.4 step 1 | 6465ec8 | Advanced turn timing (folded, administrators): VAD silence, min/max delay, detector threshold, minimum interruption length; logs of false interruptions, cut-off replies, and each reply's voice gaps (`Voice: … gaps totalling …`) | Defaults unchanged (0.25 s VAD silence). LiveKit 1.8.8 already resumes after a false interruption by default. |
+
+Left, and why:
+
+- **2.2 tuning, 2.1's new VAD default**: needs ~30 logged household turns (`End of turn` and
+  `Reply after` lines) first.
+- **2.5 mid-call fallback**: a live test (tool call on the local route, then the local route timing
+  out); write the result here.
+- **2.3 streaming speech recognition**: waiting on the owner. The approved Apache-2.0 zipformer
+  writes upper case with no punctuation. Its text also feeds the turn detector, which judges
+  "finished" from it, so it may lengthen waits. VoiceAgent used Kroko (CC-BY-SA community licence)
+  for punctuation and casing.
+- **2.4 steps 2 to 4** (first-clause tokenizer, Speaches streaming, Pocket TTS): measure the logged
+  voice gaps and `first sound` first. Pocket TTS also needs its CPU-against-CUDA and image-size
+  check.
+- **3.4 thinking sound**: the owner's choice; not built.
