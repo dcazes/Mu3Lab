@@ -6,6 +6,10 @@ An administrator chooses, in Settings, Voice Assistant:
   ``balanced`` or ``patient``); the agent turns the word into seconds.
 - **Interruptions**: whether talking over the assistant stops it.
 - **Voice**: the assistant's own voice; empty uses Speaches' default voice.
+- **Hearing**: ``whisper`` (Speaches transcribes each phrase once it ends) or a streaming model in
+  the LiveKit app's own recognizer (``apps/livekit/stt-server``): ``kroko`` (punctuated; Kroko ASR
+  by Banafo, CC BY-SA) or ``zipformer`` (Apache-2.0, no punctuation). Streaming gives the text as
+  the person talks, so answers start sooner.
 - **Web search**: on unless switched off; it works once the SearXNG app is installed.
 - **Quiet calls**: after ``silence_after`` seconds with nobody speaking, the assistant asks whether
   the person is still there, then says goodbye and ends the call (0 is off), so a page left open
@@ -62,6 +66,7 @@ DEFAULTS: dict[str, Any] = {
     "reports": True,
     "reports_audio": True,
     "reports_days": 14,
+    "stt_engine": "whisper",
     "vad_silence": 0.25,
     "min_delay": 0.25,
     "max_delay": 0,
@@ -69,6 +74,7 @@ DEFAULTS: dict[str, Any] = {
     "interrupt_after": 0.5,
 }
 REPORT_DAYS = (1, 90)
+STT_ENGINES = ("whisper", "kroko", "zipformer")
 # The advanced turn timing: (what it is called, smallest, largest); 0 is allowed where it means "default".
 TIMING = {
     "vad_silence": ("the silence that ends speech", 0.1, 1.5),
@@ -118,6 +124,7 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
         "reports": bool(new.get("reports")),
         "reports_audio": bool(new.get("reports_audio")),
         "reports_days": _whole(new.get("reports_days"), "days to keep call reports", *REPORT_DAYS),
+        "stt_engine": _engine(new.get("stt_engine")),
         **{
             key: 0
             if key in DEFAULT_ZERO and new.get(key) in (0, "0", None, "")
@@ -126,6 +133,12 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
         },
         "eot_threshold": _threshold(new.get("eot_threshold")),
     }
+
+
+def _engine(value: Any) -> str:
+    if value not in STT_ENGINES:
+        raise ValueError("Choose how the voice assistant hears you from the list.")
+    return str(value)
 
 
 def _threshold(value: Any) -> float:
@@ -234,6 +247,7 @@ def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "reports": chosen["reports"],
         "reports_audio": chosen["reports_audio"] and chosen["reports"],
         "reports_days": chosen["reports_days"],
+        "stt_engine": chosen["stt_engine"],
         **{key: chosen[key] for key in (*TIMING, "eot_threshold")},
     }
 

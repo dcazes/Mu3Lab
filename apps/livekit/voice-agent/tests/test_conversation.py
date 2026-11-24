@@ -141,3 +141,34 @@ def test_voice_gaps_are_audio_that_came_after_the_last_finished() -> None:
     meter.add(11.3, 0.5)  # ready 0.3 s after the audio before it ended: a gap
     meter.add(11.82, 0.2)  # 0.02 s late: not heard
     assert (meter.count, round(meter.total, 2), round(meter.longest, 2), meter.audio) == (1, 0.3, 0.3, 1.7)
+
+
+async def test_a_streaming_model_is_used_only_while_its_recognizer_answers() -> None:
+    async def up():
+        return True
+
+    async def down():
+        return False
+
+    stt, plugin = await agent.choose_stt(settings(stt_engine="kroko"), ready=up)
+    assert plugin is stt and plugin.model == "kroko" and plugin._url.endswith("/?model=kroko")
+    stt, plugin = await agent.choose_stt(settings(stt_engine="zipformer"), ready=down)
+    assert plugin is None and stt.model == agent.STT_MODEL  # Whisper, so the call still works
+    stt, plugin = await agent.choose_stt(settings(), ready=up)
+    assert plugin is None  # Whisper by default
+
+
+def test_an_unknown_engine_is_whisper() -> None:
+    agent.VOICE_SETTINGS.write_text('{"stt_engine": "magic"}')
+    assert agent.load_settings()["stt_engine"] == "whisper"
+
+
+def test_the_recognizer_is_flushed_when_the_person_stops_talking() -> None:
+    session = QuietSession()
+    flushed = []
+    agent.follow_speech(session, type("Plugin", (), {"flush_all": lambda self: flushed.append(1)})())
+    handler = session.handlers["user_state_changed"]
+    handler(type("Event", (), {"old_state": "listening", "new_state": "speaking"})())
+    assert not flushed
+    handler(type("Event", (), {"old_state": "speaking", "new_state": "listening"})())
+    assert flushed == [1]

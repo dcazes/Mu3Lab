@@ -16,6 +16,27 @@ import type { ApiState } from '../../lib/useApi';
 import { JobLog } from './AiModelsCard';
 import { ModelChoices, useRemoveModel } from './ModelChoices';
 
+type Engine = NonNullable<VoicePage['settings']['stt_engine']>;
+
+// The choices match STT_ENGINES in ctl/voice_settings.py; streaming runs in LiveKit's own recognizer.
+const HEARING: { id: Engine; label: string; hint: string }[] = [
+  {
+    id: 'whisper',
+    label: 'Whisper (most accurate)',
+    hint: 'Speaches writes down each phrase once you stop, with the hearing model below.',
+  },
+  {
+    id: 'kroko',
+    label: 'Streaming: Kroko (answers sooner)',
+    hint: 'Writes as you talk, with punctuation, so answers start sooner. Kroko ASR by Banafo, licensed CC BY-SA.',
+  },
+  {
+    id: 'zipformer',
+    label: 'Streaming: Zipformer (answers sooner)',
+    hint: 'Writes as you talk, so answers start sooner, but without punctuation, which can make the assistant wait longer to answer. Licensed Apache 2.0.',
+  },
+];
+
 /** How the assistant sounds and hears: its own voice, and Speaches' models, which other apps share. */
 export function VoiceSoundCard({ api, readOnly = false }: { api: ApiState<VoicePage>; readOnly?: boolean }) {
   const { data, error, reload } = api;
@@ -63,6 +84,11 @@ export function VoiceSoundCard({ api, readOnly = false }: { api: ApiState<VoiceP
   const draft = models ?? { stt_model: speech.stt.value, tts_model: speech.tts.value };
   const modelsEdited = draft.stt_model !== speech.stt.value || draft.tts_model !== speech.tts.value;
 
+  const chooseHearing = async (engine: Engine) => {
+    if (await run('hearing', () => putJsonApi<VoicePage>('/api/v1/ai/voice/settings', { stt_engine: engine }), 'Saved'))
+      void reload();
+  };
+  const hearing = HEARING.find((item) => item.id === (data.settings.stt_engine ?? 'whisper')) ?? HEARING[0];
   const chooseVoice = async (id: string) => {
     if (await run('voice', () => putJsonApi<VoicePage>('/api/v1/ai/voice/settings', { voice: id }), 'Voice saved'))
       void reload();
@@ -133,6 +159,22 @@ export function VoiceSoundCard({ api, readOnly = false }: { api: ApiState<VoiceP
               ? 'The next call uses it; no restart needed.'
               : 'Speaches is not answering, so its voices cannot be listed. Start it in Apps.'}
           </small>
+        </label>
+        <label className="field">
+          <span>How it hears you</span>
+          <select
+            aria-label="How it hears you"
+            value={hearing.id}
+            disabled={readOnly || pending === 'hearing'}
+            onChange={(event) => void chooseHearing(event.target.value as Engine)}
+          >
+            {HEARING.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <small className="muted">{hearing.hint} The next call uses it.</small>
         </label>
       </div>
       <form className="form" onSubmit={(event) => void saveModels(event)}>

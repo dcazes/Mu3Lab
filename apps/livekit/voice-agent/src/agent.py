@@ -42,6 +42,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import aiohttp
 import httpx2
 import speech
+import streaming_stt
 import websearch
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -91,6 +92,10 @@ SPEECH_API_KEY = _env("MU3LAB_SPEECH_API_KEY", LLM_API_KEY)
 STT_MODEL = _env("MU3LAB_STT_MODEL", "mu3lab-stt")
 TTS_MODEL = _env("MU3LAB_TTS_MODEL", "mu3lab-tts")
 TTS_VOICE = _env("MU3LAB_TTS_VOICE", "af_heart")
+# The LiveKit app's streaming recognizer (apps/livekit/stt-server), for a streaming speech model.
+STREAMING_STT_URL = _env("MU3LAB_STREAMING_STT_URL", "ws://livekit-stt:6006")
+# Speech recognition: Whisper through Speaches (a recording per utterance), or a streaming model.
+STT_ENGINES = ("whisper", "kroko", "zipformer")
 
 VOICE_TOOLS = Path(_env("MU3LAB_VOICE_TOOLS", "voice-tools/people.json"))
 # The household's choices, beside the app tools (Settings, Voice Assistant; ctl/voice_settings.py).
@@ -120,6 +125,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "reports": True,
     "reports_audio": True,
     "reports_days": 14,
+    # How speech becomes text: "whisper" (Speaches), or "kroko" or "zipformer" (streaming).
+    "stt_engine": "whisper",
     # Advanced turn timing (Settings, Voice assistant, Advanced; administrators). Silence that ends a
     # stretch of speech (each stretch goes to speech recognition on its own); the shortest wait before
     # the turn may end; the longest when the person sounds unfinished (0: from Responsiveness); the
@@ -235,6 +242,8 @@ def load_settings() -> dict[str, Any]:
     settings["max_delay"] = max(longest, settings["min_delay"]) if longest else 0
     threshold = _number(settings["eot_threshold"], 0, 0, 0.99)
     settings["eot_threshold"] = threshold if threshold >= 0.01 else 0
+    if settings["stt_engine"] not in STT_ENGINES:
+        settings["stt_engine"] = DEFAULT_SETTINGS["stt_engine"]
     settings["interrupt_after"] = _number(settings["interrupt_after"], DEFAULT_SETTINGS["interrupt_after"], 0.2, 2)
     return settings
 
@@ -292,20 +301,66 @@ async def _post(url: str, key: str, **request: Any) -> None:
         await reply.read()
 
 
-async def warm_speech(voice: str) -> None:
-    """Load speech recognition and the voice by using each once."""
-    form = aiohttp.FormData()
-    form.add_field("model", STT_MODEL)
-    form.add_field("language", "en")
-    form.add_field("file", _silence(), filename="silence.wav", content_type="audio/wav")
-    await asyncio.gather(
-        _post(f"{SPEECH_BASE_URL}/audio/transcriptions", SPEECH_API_KEY, data=form),
+async def warm_speech(voice: str, whisper: bool = True) -> None:
+    """Load the voice, and Whisper when the call uses it, by using each once. (The streaming
+    recognizer keeps its models loaded.)"""
+    steps = [
         _post(
             f"{SPEECH_BASE_URL}/audio/speech",
             SPEECH_API_KEY,
             json={"model": TTS_MODEL, "voice": voice, "input": "Hi.", "response_format": "pcm"},
-        ),
+        )
+    ]
+    if whisper:
+        form = aiohttp.FormData()
+        form.add_field("model", STT_MODEL)
+        form.add_field("language", "en")
+        form.add_field("file", _silence(), filename="silence.wav", content_type="audio/wav")
+        steps.append(_post(f"{SPEECH_BASE_URL}/audio/transcriptions", SPEECH_API_KEY, data=form))
+    await asyncio.gather(*steps)
+
+
+def whisper_stt() -> openai.STT:
+    return openai.STT(
+        base_url=SPEECH_BASE_URL,
+        api_key=SPEECH_API_KEY,
+        model=STT_MODEL,
+        language="en",
+        # Speaches' REST transcription endpoint, one request per utterance.
+        use_realtime=False,
     )
+
+
+async def streaming_ready(url: str = STREAMING_STT_URL) -> bool:
+    """Whether the streaming recognizer answers its health check now."""
+    health = url.replace("ws://", "http://", 1).replace("wss://", "https://", 1).rstrip("/") + "/health"
+    try:
+        async with utils.http_context.http_session().get(health, timeout=aiohttp.ClientTimeout(total=2)) as reply:
+            return reply.status == 200
+    except (aiohttp.ClientError, TimeoutError):
+        return False
+
+
+async def choose_stt(settings: dict[str, Any], ready=streaming_ready) -> tuple[Any, streaming_stt.SherpaSTT | None]:
+    """This call's speech recognition, and the streaming plugin to flush when there is one. A
+    streaming model whose recognizer does not answer falls back to Whisper, so the call still works."""
+    engine = settings["stt_engine"]
+    if engine != "whisper":
+        if await ready():
+            plugin = streaming_stt.SherpaSTT(url=STREAMING_STT_URL, model_name=engine)
+            return plugin, plugin
+        logger.warning("The streaming speech recognizer is not answering; using Whisper for this call.")
+    return whisper_stt(), None
+
+
+def follow_speech(session: AgentSession, plugin: streaming_stt.SherpaSTT) -> None:
+    """When voice activity says the person stopped talking, ask the streaming recognizer for its final
+    now, rather than waiting about a second for it to notice the silence itself."""
+
+    @session.on("user_state_changed")
+    def changed(event) -> None:
+        if event.old_state == "speaking" and event.new_state != "speaking":
+            plugin.flush_all()
 
 
 async def warm_answer_model(instructions: str) -> None:
@@ -966,8 +1021,9 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
     log_end_of_turn_scores()
     settings = load_settings()
+    stt, streaming = await choose_stt(settings)
     # Speech models load while the person joins.
-    speech_ready = asyncio.create_task(warm_speech(settings["voice"]))
+    speech_ready = asyncio.create_task(warm_speech(settings["voice"], whisper=streaming is None))
 
     state = CallState(settings=settings)
     vad: silero.VAD = ctx.proc.userdata["vad"]
@@ -975,14 +1031,7 @@ async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession[CallState](
         userdata=state,
         vad=vad,
-        stt=openai.STT(
-            base_url=SPEECH_BASE_URL,
-            api_key=SPEECH_API_KEY,
-            model=STT_MODEL,
-            language="en",
-            # Speaches' REST transcription endpoint, one request per utterance.
-            use_realtime=False,
-        ),
+        stt=stt,
         # No reasoning level here: the route in LiteLLM sets it (see LLM_BASE_URL above).
         llm=openai.LLM(
             model=LLM_MODEL,
@@ -1008,6 +1057,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     log_turns(session)
     log_interruptions(session)
+    if streaming is not None:
+        follow_speech(session, streaming)
+    logger.info("Speech recognition for this call: %s.", settings["stt_engine"] if streaming else "whisper")
     apologize_on_failure(session)
     follow_turns(session, state)
     if settings["silence_after"]:

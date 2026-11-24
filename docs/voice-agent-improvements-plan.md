@@ -418,6 +418,7 @@ updated in Apps first, which rebuilds the agent.
 | 4.1, 4.2 | 8250666 | `CallState` on `session.userdata`; writes only prepare (`needs_confirmation`, `action_id`); `confirm_change` runs the stored arguments once, refused unless the read-back began after the proposal, played in full, and a later user turn came; `parallel_tool_calls=False` | "Read-back heard" uses the message's start time (LiveKit stamps assistant messages with when they started playing), so words said before the tool ran don't count. Still to check: whether local Qwen 3.5 4B does the two steps reliably. |
 | 4.3, 3.1, 3.2, 1.5 | 1cc0fac | Quiet calls: after 30 s (1 min, 2 min, 5 min or never) ask, then goodbye and end the call (deletes the room); 14-day date list and speaking rules in the instructions; ISO times in tool results get words in the household's zone; "Let me check" not repeated; turn detector score logged as `End of turn: score … against threshold …` | |
 | 5.2 | 6852526 | Reports in LiveKit's `reports/` folder (not its data folder): `call.json`, `report.json`, `audio.ogg`; Settings, Voice assistant, Call reports: keep (on), audio (on), 3 to 90 days (14), list and transcript drawer with audio and Delete; administrators only, each opening noted in the activity log | Decided: reports are never backed up (short-lived and private) and go with LiveKit's uninstall. Mu3Lab does not create data folders for a non-root container, and the agent now runs as UID 1000 so it can write here. |
+| 2.3 | "voice: streaming speech recognition" | `stt` container in LiveKit (`apps/livekit/stt-server`, sherpa-onnx 2.0.1, both models, loaded on first use); `streaming_stt.py` plugin with a flush when voice activity stops; Settings, Voice assistant, Sound: "How it hears you" = Whisper (default), Streaming: Kroko, Streaming: Zipformer; a call falls back to Whisper when `stt` does not answer | Owner chose both models (2026-11-24). Measured on this computer with the bundled sample through the plugin on LiveKit 1.8.8: final 2 ms (Kroko) and 20 ms (Zipformer) after the flush; both models ~270 MB together; image 600 MB. Kroko's model card says only "CC-BY-SA" (empty LICENSE file, no attribution wording), so Mu3Lab credits "Kroko ASR by Banafo, CC BY-SA" and never redistributes it: the server downloads it at build. Zipformer's text is put in sentence case for the turn detector. Whisper stays the default until household speech is compared. |
 | 2.1, 3.3, 2.4 step 1 | 6465ec8 | Advanced turn timing (folded, administrators): VAD silence, min/max delay, detector threshold, minimum interruption length; logs of false interruptions, cut-off replies, and each reply's voice gaps (`Voice: … gaps totalling …`) | Defaults unchanged (0.25 s VAD silence). LiveKit 1.8.8 already resumes after a false interruption by default. |
 
 Left, and why:
@@ -426,10 +427,8 @@ Left, and why:
   `Reply after` lines) first.
 - **2.5 mid-call fallback**: a live test (tool call on the local route, then the local route timing
   out); write the result here.
-- **2.3 streaming speech recognition**: waiting on the owner. The approved Apache-2.0 zipformer
-  writes upper case with no punctuation. Its text also feeds the turn detector, which judges
-  "finished" from it, so it may lengthen waits. VoiceAgent used Kroko (CC-BY-SA community licence)
-  for punctuation and casing.
+- **2.3 default**: compare Whisper, Kroko and Zipformer on ~20 household sentences (accuracy) and
+  `Reply after` (speed), then choose the default.
 - **2.4 steps 2 to 4** (first-clause tokenizer, Speaches streaming, Pocket TTS): measure the logged
   voice gaps and `first sound` first. Pocket TTS also needs its CPU-against-CUDA and image-size
   check.

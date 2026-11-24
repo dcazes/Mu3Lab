@@ -97,6 +97,15 @@ class VoiceSettingsTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 voice_settings.save(bad, "owner", lambda _line: None, self.paths)
 
+    def test_hearing_is_whisper_until_a_streaming_model_is_chosen(self):
+        self.folder.mkdir()
+        voice_settings.write(lambda _line: None, self.paths)
+        self.assertEqual(self.agent_file()["stt_engine"], "whisper")
+        voice_settings.save({"stt_engine": "kroko"}, "owner", lambda _line: None, self.paths)
+        self.assertEqual(self.agent_file()["stt_engine"], "kroko")
+        with self.assertRaisesRegex(ValueError, "hears you"):
+            voice_settings.save({"stt_engine": "deepgram"}, "owner", lambda _line: None, self.paths)
+
     def test_web_search_needs_the_searxng_app_and_the_switch(self):
         voice_settings.write(lambda _line: None, self.paths)
         self.assertEqual(self.agent_file()["search_url"], "")

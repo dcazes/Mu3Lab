@@ -83,6 +83,7 @@ docker logs mu3lab-livekit-agent-1 2>&1 | grep -E "Reply after|Tool .* took|Web 
 | `agent` | The voice agent (`voice-agent/`) | LiveKit Agents 1.8.8, `uv.lock` |
 | `voice-ui` | The page people talk on | `livekit-examples/agent-starter-react`, pinned commit |
 | `dashboard` | LiveKit admin dashboard | `thinhdanggroup/livekit-dashboard`, pinned commit |
+| `stt` | Streaming speech recognition (`stt-server/`), on the processor; backend network only | sherpa-onnx 2.0.1; models downloaded at build, checked by SHA-256 |
 
 ## Install, start and stop
 
@@ -109,6 +110,18 @@ Start and Stop are on the app's page.
 - **Voice:** choose it (and try it) in **Settings, Voice Assistant, Voice**; the next call uses it.
 - **Speech models:** the same card sets Speaches up again with other Whisper or Kokoro models,
   which every app using speech then shares.
+- **How it hears you:** the same card chooses Whisper (Speaches writes down each phrase once it
+  ends; the default) or a streaming model in the `stt` container, which writes as the person talks.
+  When their voice activity stops, the agent asks for the last words, which arrive within about 20 ms
+  instead of Whisper's ~0.4 s. If the `stt` container does not answer when a call starts, that call
+  uses Whisper.
+  - **Kroko** (default streaming model): punctuation and capitals. Kroko ASR by Banafo, licensed
+    CC BY-SA (<https://huggingface.co/Banafo/Kroko-ASR>).
+  - **Zipformer** (k2-fsa, 2023-06-26, int8): Apache-2.0. It writes no punctuation, which the turn
+    detector reads, so it may wait a little longer before answering.
+
+  Mu3Lab does not redistribute either model: the server downloads them from sherpa-onnx's releases
+  while building the image. Both load in about 1.5 s and use about 270 MB of memory together.
 
 ## Bypassing LiteLLM
 

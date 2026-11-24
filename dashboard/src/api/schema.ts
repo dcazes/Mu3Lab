@@ -5522,6 +5522,12 @@ export interface components {
        */
       silence_reasks?: number;
       /**
+       * Stt Engine
+       * @default whisper
+       * @enum {string}
+       */
+      stt_engine?: 'whisper' | 'kroko' | 'zipformer';
+      /**
        * Vad Silence
        * @default 0.25
        */
@@ -5567,6 +5573,8 @@ export interface components {
       silence_goodbye?: string | null;
       /** Silence Reasks */
       silence_reasks?: number | null;
+      /** Stt Engine */
+      stt_engine?: ('whisper' | 'kroko' | 'zipformer') | null;
       /** Vad Silence */
       vad_silence?: number | null;
       /** Voice */

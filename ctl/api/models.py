@@ -1302,6 +1302,8 @@ class VoiceSettings(ApiModel):
     reports: bool = True
     reports_audio: bool = True
     reports_days: int = 14
+    # How speech becomes text: Whisper (Speaches), or a streaming model in LiveKit's own recognizer.
+    stt_engine: Literal["whisper", "kroko", "zipformer"] = "whisper"
     # Advanced turn timing, in seconds; 0 means the default (Responsiveness, or the detector's own).
     vad_silence: float = 0.25
     min_delay: float = 0.25
@@ -1325,6 +1327,7 @@ class VoiceSettingsRequest(ApiModel):
     reports: bool | None = None
     reports_audio: bool | None = None
     reports_days: int | None = Field(default=None, ge=1, le=90)
+    stt_engine: Literal["whisper", "kroko", "zipformer"] | None = None
     vad_silence: float | None = Field(default=None, ge=0.1, le=1.5)
     min_delay: float | None = Field(default=None, ge=0.25, le=2)
     max_delay: float | None = Field(default=None, ge=0, le=6)

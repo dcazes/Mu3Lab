@@ -33,6 +33,20 @@ services:
       start_interval: 5s
       retries: 3
 
+  # Streaming speech recognition on the processor (stt-server/): text while the person talks, the
+  # last words a few milliseconds after they stop. Used when Settings, Voice assistant chooses a
+  # streaming model; Whisper (Speaches) otherwise. Reached only by the agent, on the backend network.
+  stt:
+    build: ./stt-server
+    restart: unless-stopped
+    networks:
+      mu3lab_backend:
+        aliases: [livekit-stt]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+
   # Waits for rooms that ask for "mu3lab-agent", then listens, thinks and answers.
   agent:
     build:
@@ -52,6 +66,8 @@ services:
       MU3LAB_LLM_MODEL: mu3lab-voice
       MU3LAB_SPEECH_URL: http://litellm:4000/v1
       MU3LAB_STT_MODEL: mu3lab-stt
+      # The streaming recognizer above, for a streaming speech model (Settings, Voice assistant).
+      MU3LAB_STREAMING_STT_URL: ws://livekit-stt:6006
       MU3LAB_TTS_MODEL: mu3lab-tts
       MU3LAB_TTS_VOICE: ${MU3LAB_TTS_VOICE:-af_heart}
       # Each person's app assistants and their own keys, written by Mu3Lab (ctl/voice_tools.py).

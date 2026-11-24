@@ -174,6 +174,17 @@ describe('Voice assistant settings', () => {
     );
   });
 
+  it('chooses a streaming speech model', async () => {
+    const puts = renderPage();
+    const select = await screen.findByRole('combobox', { name: 'How it hears you' });
+    expect(screen.getByText(/Speaches writes down each phrase/)).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: 'kroko' } });
+    await vi.waitFor(() =>
+      expect(puts).toContainEqual({ path: '/api/v1/ai/voice/settings', body: { stt_engine: 'kroko' } }),
+    );
+    expect(await screen.findByText(/Kroko ASR by Banafo/)).toBeInTheDocument();
+  });
+
   it('chooses the assistant’s voice without a restart', async () => {
     const puts = renderPage();
     const select = await screen.findByRole('combobox', { name: 'The assistant’s voice' });

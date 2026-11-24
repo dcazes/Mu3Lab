@@ -9395,6 +9395,16 @@
             "title": "Silence Reasks",
             "type": "integer"
           },
+          "stt_engine": {
+            "default": "whisper",
+            "enum": [
+              "whisper",
+              "kroko",
+              "zipformer"
+            ],
+            "title": "Stt Engine",
+            "type": "string"
+          },
           "vad_silence": {
             "default": 0.25,
             "title": "Vad Silence",
@@ -9590,6 +9600,22 @@
               }
             ],
             "title": "Silence Reasks"
+          },
+          "stt_engine": {
+            "anyOf": [
+              {
+                "enum": [
+                  "whisper",
+                  "kroko",
+                  "zipformer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stt Engine"
           },
           "vad_silence": {
             "anyOf": [
