@@ -13,6 +13,7 @@ import { VoiceKeyCard } from './VoiceKeyCard';
 import { voiceSourceLabel, VoiceModelCard } from './VoiceModelCard';
 import { VoiceReportsCard } from './VoiceReportsCard';
 import { VoiceSoundCard } from './VoiceSoundCard';
+import { VoiceTimingCard } from './VoiceTimingCard';
 
 const VOICE_APP = 'livekit';
 
@@ -76,6 +77,7 @@ export function VoiceSettings() {
       <VoiceSoundCard api={page} readOnly={!isAdmin} />
       <VoiceConversationCard api={page} readOnly={!isAdmin} />
       <VoiceAppsCard page={page} readOnly={!isAdmin} />
+      {isAdmin && <VoiceTimingCard api={page} />}
       {isAdmin && <VoiceReportsCard api={page} />}
       <VoiceKeyCard />
     </>

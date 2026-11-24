@@ -84,6 +84,19 @@ class VoiceSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between"):
             voice_settings.save({"silence_after": 5}, "owner", lambda _line: None, self.paths)
 
+    def test_advanced_turn_timing_is_checked_and_zero_means_default(self):
+        self.folder.mkdir()
+        voice_settings.save(
+            {"vad_silence": 0.5, "max_delay": 2.5, "eot_threshold": 0.2}, "owner", lambda _line: None, self.paths
+        )
+        written = self.agent_file()
+        self.assertEqual((written["vad_silence"], written["max_delay"], written["eot_threshold"]), (0.5, 2.5, 0.2))
+        voice_settings.save({"max_delay": 0, "eot_threshold": 0}, "owner", lambda _line: None, self.paths)
+        self.assertEqual((self.agent_file()["max_delay"], self.agent_file()["eot_threshold"]), (0, 0))
+        for bad in ({"min_delay": 0.1}, {"vad_silence": 0}, {"eot_threshold": 1.5}, {"interrupt_after": 5}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                voice_settings.save(bad, "owner", lambda _line: None, self.paths)
+
     def test_web_search_needs_the_searxng_app_and_the_switch(self):
         voice_settings.write(lambda _line: None, self.paths)
         self.assertEqual(self.agent_file()["search_url"], "")

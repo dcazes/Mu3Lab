@@ -9328,9 +9328,29 @@
             "title": "Changed By",
             "type": "string"
           },
+          "eot_threshold": {
+            "default": 0,
+            "title": "Eot Threshold",
+            "type": "number"
+          },
+          "interrupt_after": {
+            "default": 0.5,
+            "title": "Interrupt After",
+            "type": "number"
+          },
           "interruptions": {
             "title": "Interruptions",
             "type": "boolean"
+          },
+          "max_delay": {
+            "default": 0,
+            "title": "Max Delay",
+            "type": "number"
+          },
+          "min_delay": {
+            "default": 0.25,
+            "title": "Min Delay",
+            "type": "number"
           },
           "reports": {
             "default": true,
@@ -9375,6 +9395,11 @@
             "title": "Silence Reasks",
             "type": "integer"
           },
+          "vad_silence": {
+            "default": 0.25,
+            "title": "Vad Silence",
+            "type": "number"
+          },
           "voice": {
             "title": "Voice",
             "type": "string"
@@ -9403,6 +9428,32 @@
       },
       "VoiceSettingsRequest": {
         "properties": {
+          "eot_threshold": {
+            "anyOf": [
+              {
+                "maximum": 0.99,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eot Threshold"
+          },
+          "interrupt_after": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 0.2,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interrupt After"
+          },
           "interruptions": {
             "anyOf": [
               {
@@ -9413,6 +9464,32 @@
               }
             ],
             "title": "Interruptions"
+          },
+          "max_delay": {
+            "anyOf": [
+              {
+                "maximum": 6.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Delay"
+          },
+          "min_delay": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 0.25,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Delay"
           },
           "reports": {
             "anyOf": [
@@ -9513,6 +9590,19 @@
               }
             ],
             "title": "Silence Reasks"
+          },
+          "vad_silence": {
+            "anyOf": [
+              {
+                "maximum": 1.5,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vad Silence"
           },
           "voice": {
             "anyOf": [

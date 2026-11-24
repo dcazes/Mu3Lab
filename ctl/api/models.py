@@ -1302,6 +1302,12 @@ class VoiceSettings(ApiModel):
     reports: bool = True
     reports_audio: bool = True
     reports_days: int = 14
+    # Advanced turn timing, in seconds; 0 means the default (Responsiveness, or the detector's own).
+    vad_silence: float = 0.25
+    min_delay: float = 0.25
+    max_delay: float = 0
+    eot_threshold: float = 0
+    interrupt_after: float = 0.5
     changed_at: str
     changed_by: str
 
@@ -1319,6 +1325,11 @@ class VoiceSettingsRequest(ApiModel):
     reports: bool | None = None
     reports_audio: bool | None = None
     reports_days: int | None = Field(default=None, ge=1, le=90)
+    vad_silence: float | None = Field(default=None, ge=0.1, le=1.5)
+    min_delay: float | None = Field(default=None, ge=0.25, le=2)
+    max_delay: float | None = Field(default=None, ge=0, le=6)
+    eot_threshold: float | None = Field(default=None, ge=0, le=0.99)
+    interrupt_after: float | None = Field(default=None, ge=0.2, le=2)
 
 
 class VoiceReportSummary(ApiModel):

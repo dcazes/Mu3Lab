@@ -118,3 +118,26 @@ def test_old_reports_are_deleted(tmp_path) -> None:
     assert agent.prune_reports(tmp_path, 14) == 1
     assert not old.exists() and new.exists()
     assert agent.prune_reports(tmp_path / "missing", 14) == 0
+
+
+def test_advanced_turn_timing_reaches_the_session() -> None:
+    chosen = settings(vad_silence=0.5, min_delay=0.1, max_delay=0, eot_threshold=0.2, interrupt_after=0.8)
+    agent.VOICE_SETTINGS.write_text(__import__("json").dumps(chosen))
+    loaded = agent.load_settings()
+    assert loaded["min_delay"] == agent.END_OF_SPEECH_SECONDS  # LiveKit refuses less with the turn detector
+    handling = agent.turn_handling(loaded)
+    assert handling["endpointing"] == {"min_delay": 0.25, "max_delay": 2.0}  # 0: from Responsiveness
+    assert handling["interruption"]["min_duration"] == 0.8
+    loaded["max_delay"] = 4
+    assert agent.turn_handling(loaded)["endpointing"]["max_delay"] == 4
+
+
+def test_voice_gaps_are_audio_that_came_after_the_last_finished() -> None:
+    from speech import GapMeter
+
+    meter = GapMeter()
+    meter.add(10.0, 0.5)  # plays 10.0 to 10.5
+    meter.add(10.1, 0.5)  # ready early: plays 10.5 to 11.0
+    meter.add(11.3, 0.5)  # ready 0.3 s after the audio before it ended: a gap
+    meter.add(11.82, 0.2)  # 0.02 s late: not heard
+    assert (meter.count, round(meter.total, 2), round(meter.longest, 2), meter.audio) == (1, 0.3, 0.3, 1.7)

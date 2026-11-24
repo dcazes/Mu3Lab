@@ -12,6 +12,10 @@ An administrator chooses, in Settings, Voice Assistant:
   does not keep the speech and answer models busy.
 - **Call reports**: each call's transcript and timing (and audio, unless switched off), kept for
   ``reports_days`` days so administrators can find what went wrong (``ctl.voice_reports``).
+- **Advanced turn timing** (administrators): the silence that ends a stretch of speech, the
+  shortest and longest waits before a turn ends, the turn detector's threshold, and how long
+  talking over the assistant must last to stop it. Zero means the default (Responsiveness, or the
+  detector's own threshold).
 - **Wait phrase**: what the assistant says when an answer's first words are slow (``wait_after``
   seconds), so the person never sits in silence; empty is off.
 
@@ -58,8 +62,21 @@ DEFAULTS: dict[str, Any] = {
     "reports": True,
     "reports_audio": True,
     "reports_days": 14,
+    "vad_silence": 0.25,
+    "min_delay": 0.25,
+    "max_delay": 0,
+    "eot_threshold": 0,
+    "interrupt_after": 0.5,
 }
 REPORT_DAYS = (1, 90)
+# The advanced turn timing: (what it is called, smallest, largest); 0 is allowed where it means "default".
+TIMING = {
+    "vad_silence": ("the silence that ends speech", 0.1, 1.5),
+    "min_delay": ("the shortest wait", 0.25, 2.0),
+    "max_delay": ("the longest wait", 0.5, 6.0),
+    "interrupt_after": ("interrupting", 0.2, 2.0),
+}
+DEFAULT_ZERO = ("max_delay",)
 SILENCE_AFTER = (10, 600)
 GOODBYE_CHARS = 160
 WAIT_PHRASE_CHARS = 80
@@ -101,7 +118,26 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
         "reports": bool(new.get("reports")),
         "reports_audio": bool(new.get("reports_audio")),
         "reports_days": _whole(new.get("reports_days"), "days to keep call reports", *REPORT_DAYS),
+        **{
+            key: 0
+            if key in DEFAULT_ZERO and new.get(key) in (0, "0", None, "")
+            else _seconds(new.get(key), what, low, high)
+            for key, (what, low, high) in TIMING.items()
+        },
+        "eot_threshold": _threshold(new.get("eot_threshold")),
     }
+
+
+def _threshold(value: Any) -> float:
+    if value in (0, "0", None, ""):
+        return 0
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("Give the turn detector's threshold as a number between 0.01 and 0.99.") from None
+    if not 0.01 <= number <= 0.99:
+        raise ValueError("Give the turn detector's threshold as a number between 0.01 and 0.99.")
+    return round(number, 3)
 
 
 def _silence(value: Any) -> float:
@@ -198,6 +234,7 @@ def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "reports": chosen["reports"],
         "reports_audio": chosen["reports_audio"] and chosen["reports"],
         "reports_days": chosen["reports_days"],
+        **{key: chosen[key] for key in (*TIMING, "eot_threshold")},
     }
 
 

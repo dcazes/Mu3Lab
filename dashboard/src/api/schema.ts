@@ -5462,8 +5462,28 @@ export interface components {
       changed_at: string;
       /** Changed By */
       changed_by: string;
+      /**
+       * Eot Threshold
+       * @default 0
+       */
+      eot_threshold?: number;
+      /**
+       * Interrupt After
+       * @default 0.5
+       */
+      interrupt_after?: number;
       /** Interruptions */
       interruptions: boolean;
+      /**
+       * Max Delay
+       * @default 0
+       */
+      max_delay?: number;
+      /**
+       * Min Delay
+       * @default 0.25
+       */
+      min_delay?: number;
       /**
        * Reports
        * @default true
@@ -5501,6 +5521,11 @@ export interface components {
        * @default 1
        */
       silence_reasks?: number;
+      /**
+       * Vad Silence
+       * @default 0.25
+       */
+      vad_silence?: number;
       /** Voice */
       voice: string;
       /**
@@ -5516,8 +5541,16 @@ export interface components {
     };
     /** VoiceSettingsRequest */
     VoiceSettingsRequest: {
+      /** Eot Threshold */
+      eot_threshold?: number | null;
+      /** Interrupt After */
+      interrupt_after?: number | null;
       /** Interruptions */
       interruptions?: boolean | null;
+      /** Max Delay */
+      max_delay?: number | null;
+      /** Min Delay */
+      min_delay?: number | null;
       /** Reports */
       reports?: boolean | null;
       /** Reports Audio */
@@ -5534,6 +5567,8 @@ export interface components {
       silence_goodbye?: string | null;
       /** Silence Reasks */
       silence_reasks?: number | null;
+      /** Vad Silence */
+      vad_silence?: number | null;
       /** Voice */
       voice?: string | null;
       /** Wait After */

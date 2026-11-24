@@ -158,6 +158,33 @@ async def with_wait_phrase(
             await it.aclose()
 
 
+class GapMeter:
+    """Follows a reply's audio as it is made: a gap is audio that arrived after the audio before it
+    had finished playing (assuming playback starts with the first frame and runs without pause)."""
+
+    # Shorter waits are not heard.
+    NOTICEABLE = 0.05
+
+    def __init__(self) -> None:
+        self.frames = 0
+        self.audio = 0.0
+        self.count = 0
+        self.total = 0.0
+        self.longest = 0.0
+        self._ends_at = 0.0
+
+    def add(self, arrived: float, seconds: float) -> None:
+        if self.frames and arrived - self._ends_at > self.NOTICEABLE:
+            gap = arrived - self._ends_at
+            self.count += 1
+            self.total += gap
+            self.longest = max(self.longest, gap)
+        # Playback of this frame starts when it arrives or when the audio before it ends, whichever is later.
+        self._ends_at = max(arrived, self._ends_at) + seconds
+        self.frames += 1
+        self.audio += seconds
+
+
 # --- Dates and times in words --------------------------------------------------------------
 
 _ONES = [

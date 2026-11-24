@@ -32,7 +32,7 @@ import re
 import shutil
 import time
 import wave
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,6 +120,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "reports": True,
     "reports_audio": True,
     "reports_days": 14,
+    # Advanced turn timing (Settings, Voice assistant, Advanced; administrators). Silence that ends a
+    # stretch of speech (each stretch goes to speech recognition on its own); the shortest wait before
+    # the turn may end; the longest when the person sounds unfinished (0: from Responsiveness); the
+    # turn detector's "finished" threshold (0: its own); and how long talking over the assistant must
+    # last to stop it.
+    "vad_silence": 0.25,
+    "min_delay": 0.25,
+    "max_delay": 0,
+    "eot_threshold": 0,
+    "interrupt_after": 0.5,
 }
 SILENCE_REASK = (
     "The person has been quiet for a while. Briefly ask whether they are still there, or repeat your last "
@@ -218,7 +228,40 @@ def load_settings() -> dict[str, Any]:
     settings["reports"] = bool(settings["reports"])
     settings["reports_audio"] = bool(settings["reports_audio"]) and settings["reports"]
     settings["reports_days"] = int(_number(settings["reports_days"], DEFAULT_SETTINGS["reports_days"], 1, 365))
+    settings["vad_silence"] = _number(settings["vad_silence"], DEFAULT_SETTINGS["vad_silence"], 0.1, 1.5)
+    # LiveKit refuses a call with the turn detector below 0.25 s.
+    settings["min_delay"] = _number(settings["min_delay"], DEFAULT_SETTINGS["min_delay"], END_OF_SPEECH_SECONDS, 2)
+    longest = _number(settings["max_delay"], 0, 0, 6)
+    settings["max_delay"] = max(longest, settings["min_delay"]) if longest else 0
+    threshold = _number(settings["eot_threshold"], 0, 0, 0.99)
+    settings["eot_threshold"] = threshold if threshold >= 0.01 else 0
+    settings["interrupt_after"] = _number(settings["interrupt_after"], DEFAULT_SETTINGS["interrupt_after"], 0.2, 2)
     return settings
+
+
+def turn_handling(settings: dict[str, Any]) -> TurnHandlingOptions:
+    """How the call decides the person has finished, and when talking over the assistant stops it."""
+    detector: dict[str, Any] = {"version": "v1-mini"}
+    if settings["eot_threshold"]:
+        detector["unlikely_threshold"] = settings["eot_threshold"]
+    return TurnHandlingOptions(
+        # End-of-turn model that runs locally. "v1-mini" is the local model; the default "v1" would call
+        # LiveKit's hosted gateway.
+        turn_detection=inference.TurnDetector(**detector),
+        endpointing={
+            "min_delay": settings["min_delay"],
+            "max_delay": settings["max_delay"] or MAX_WAIT_SECONDS[settings["responsiveness"]],
+        },
+        # Talking over the assistant stops it, judged by voice activity alone ("adaptive" would ask
+        # LiveKit Cloud). A false interruption (a cough, the TV) resumes the reply (LiveKit's default).
+        interruption={
+            "enabled": bool(settings["interruptions"]),
+            "mode": "vad",
+            "min_duration": settings["interrupt_after"],
+        },
+        # Prepare the answer and its first spoken sentence before the turn is confirmed.
+        preemptive_generation={"enabled": True, "preemptive_tts": True},
+    )
 
 
 def _number(value: Any, default: float, low: float, high: float) -> float:
@@ -421,6 +464,22 @@ class SpokenReplies:
         async for chunk in speech.with_wait_phrase(stream, settings["wait_after"], settings["wait_phrase"], said):
             yield chunk
 
+    async def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings) -> AsyncIterator:
+        """The voice, as LiveKit makes it, with the gaps logged: moments when the next audio was ready
+        only after the audio before it had finished playing, which make a voice sound broken."""
+        gaps = speech.GapMeter()
+        async for frame in Agent.default.tts_node(self, text, model_settings):  # type: ignore[arg-type]
+            gaps.add(time.monotonic(), frame.duration)
+            yield frame
+        if gaps.frames:
+            logger.info(
+                "Voice: %s of audio, %d gaps totalling %s (longest %s)",
+                _seconds(gaps.audio),
+                gaps.count,
+                _seconds(gaps.total),
+                _seconds(gaps.longest),
+            )
+
 
 def _seconds(value: Any) -> str:
     return f"{value:.2f} s" if isinstance(value, (int, float)) else "?"
@@ -444,6 +503,9 @@ def log_turns(session: AgentSession) -> None:
             heard.clear()
             heard.update(metrics)
             return
+        if item.role == "assistant" and getattr(item, "interrupted", False):
+            played = len((item.text_content or "").split())
+            logger.info("The person talked over the reply; %d words of it had played.", played)
         if item.role != "assistant" or "e2e_latency" not in metrics:
             return
         spoke = None
@@ -565,6 +627,15 @@ def apologize_on_failure(session: AgentSession) -> None:
         if isinstance(event.error, LLMError) and not event.error.recoverable:
             logger.warning("No answer from the model: %s", event.error.label)
             session.say(NO_ANSWER, add_to_chat_ctx=False)
+
+
+def log_interruptions(session: AgentSession) -> None:
+    """Log each interruption LiveKit judged false (a cough, an "mm-hm", the TV), and whether the reply
+    carried on, to tune Advanced's interruption length (plan item 3.3)."""
+
+    @session.on("agent_false_interruption")
+    def false_interruption(event) -> None:
+        logger.info("A false interruption; the reply %s.", "carried on" if event.resumed else "stopped")
 
 
 def _handoff_context(agent: Agent) -> ChatContext:
@@ -899,9 +970,11 @@ async def entrypoint(ctx: JobContext) -> None:
     speech_ready = asyncio.create_task(warm_speech(settings["voice"]))
 
     state = CallState(settings=settings)
+    vad: silero.VAD = ctx.proc.userdata["vad"]
+    vad.update_options(min_silence_duration=settings["vad_silence"])
     session = AgentSession[CallState](
         userdata=state,
-        vad=ctx.proc.userdata["vad"],
+        vad=vad,
         stt=openai.STT(
             base_url=SPEECH_BASE_URL,
             api_key=SPEECH_API_KEY,
@@ -928,22 +1001,13 @@ async def entrypoint(ctx: JobContext) -> None:
             # Raw 24 kHz audio, as the plugin plays it: no MP3 to encode in Speaches and decode here.
             response_format="pcm",
         ),
-        # End-of-turn model that runs locally. "v1-mini" is the local model; the default
-        # "v1" would call LiveKit's hosted gateway.
-        turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(version="v1-mini"),
-            endpointing={"min_delay": END_OF_SPEECH_SECONDS, "max_delay": MAX_WAIT_SECONDS[settings["responsiveness"]]},
-            # Talking over the assistant stops it, judged by voice activity alone ("adaptive" would
-            # ask LiveKit Cloud).
-            interruption={"enabled": bool(settings["interruptions"]), "mode": "vad"},
-            # Prepare the answer and its first spoken sentence before the turn is confirmed.
-            preemptive_generation={"enabled": True, "preemptive_tts": True},
-        ),
+        turn_handling=turn_handling(settings),
         # The person counts as away after this much silence on both sides (check_on_silence).
         user_away_timeout=settings["silence_after"] or None,
     )
 
     log_turns(session)
+    log_interruptions(session)
     apologize_on_failure(session)
     follow_turns(session, state)
     if settings["silence_after"]:
