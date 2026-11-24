@@ -7,8 +7,9 @@ the person is done. Who is talking comes from their Authentik sign-in on the voi
 The agent cannot reach the control plane, so Mu3Lab writes one file into the voice app's folder,
 mounted read-only into the agent: for each person, their app assistants as chat has them
 (``chat_ops.desired_assistants``), each with its instructions, its ContextForge address, that
-person's own key, and which of its tools only read. Every other tool changes something, and the
-agent runs it only right after the person says yes. An administrator switches an app's voice
+person's own key, and which of its tools only read. Every other tool changes something: the agent
+only prepares it, reads it back, and runs it once the person agrees (``confirm_change``). An
+administrator switches an app's voice
 assistant off in Settings, Voice assistant (``switches``).
 """
 
@@ -35,8 +36,10 @@ CALENDAR_READS = ("list_events",)
 VOICE_RULES = (
     "You are speaking with the person, not writing: answer in one to three short, plain sentences that sound "
     "natural read aloud, with no lists, markdown, links or emoji. Say times and numbers the way people say them. "
-    "Before any tool that adds, changes or deletes something, say exactly what you will do and ask the person to "
-    "say yes; the tool refuses to run until they have. Where the instructions below mention typing, menus or "
+    "A tool that adds, changes or deletes something only prepares the change: read its details back in plain "
+    "words, ask whether to go ahead, and wait for the answer. If they agree, call confirm_change with its "
+    "action_id; if they change anything, prepare it again. Never say a change is done until confirm_change "
+    "succeeds. Where the instructions below mention typing, menus or "
     "choosing another assistant in chat, instead call back_to_main, and the main assistant hands the person to "
     "the right one. Call back_to_main too when the person is done here or asks about something else."
 )

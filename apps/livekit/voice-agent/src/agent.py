@@ -10,7 +10,8 @@ The person talking is named in their room token (the voice page reads their sign
 assistant talks with them and hands the conversation to an app's assistant, which has only that
 app's tools, reached through ContextForge with the person's own key, and hands it back when they
 are done. Mu3Lab writes each person's app assistants to MU3LAB_VOICE_TOOLS (ctl/voice_tools.py).
-A tool that changes something runs only right after the person says yes.
+A tool that changes something only prepares it; it runs once the person has heard the details read
+back and agreed in a later turn (confirm_change), exactly as read back.
 
 The main assistant can also search the web privately, through the household's SearXNG app.
 
@@ -134,14 +135,10 @@ FILLER_INTERVAL_SECONDS = 5.0
 # How much of the conversation an app's assistant (or the main one, back again) is given: enough
 # for the request at hand, little enough for a small local model.
 HANDOFF_ITEMS = 8
-# Words that answer "Shall I ...?" with yes, at the start of what the person said.
-YES = re.compile(
-    r"^\W*(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|please|correct|confirm|that's right|right)\b",
-    re.IGNORECASE,
-)
-ASK_FIRST = (
-    "Not done: this changes something. Tell the person exactly what you will change and ask them to say yes. "
-    "Call this tool again only after they say yes."
+# A tool that changes something only prepares the change; this is added to its description.
+PROPOSE_NOTE = (
+    " This only prepares the change: nothing happens yet. Read the returned details back to the person in "
+    "plain words and ask whether to go ahead, then wait for their answer."
 )
 
 
@@ -282,7 +279,69 @@ class CallState:
     guide: str = ""
     # When the wait phrase was last said (monotonic seconds), so a tool's filler does not repeat it.
     waited_at: float = 0.0
+    # The person's finished turns so far: a change is confirmed only by a later one.
+    user_turns: int = 0
+    # The latest change a tool prepared; only it can be confirmed, once.
+    pending: "PendingChange | None" = None
+    proposals: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def propose(self, toolset: str, tool: str, arguments: dict[str, Any]) -> "PendingChange":
+        """Hold a change for the person to agree to; it replaces any earlier one."""
+        self.proposals += 1
+        self.pending = PendingChange(
+            action_id=f"C{self.proposals}",
+            toolset=toolset,
+            tool=tool,
+            arguments=arguments,
+            turn=self.user_turns,
+            at=time.time(),
+        )
+        return self.pending
+
+    def heard(self, role: str, interrupted: bool, started_at: float) -> None:
+        """A message joined the conversation. The person's count as turns. The assistant's, when it
+        began after the change was prepared (not words said before the tool ran) and played to the
+        end, mean the person heard the read-back."""
+        pending = self.pending
+        if role == "user":
+            self.user_turns += 1
+        elif (
+            role == "assistant"
+            and pending
+            and not interrupted
+            and started_at >= pending.at
+            and self.user_turns == pending.turn
+        ):
+            pending.heard = True
+
+    def take(self, toolset: str, action_id: str) -> "PendingChange":
+        """The change to run now, or a ToolError telling the model its next step. Code owns this
+        decision; the model only judged that the person meant yes."""
+        pending = self.pending
+        if pending is None or pending.action_id != action_id or pending.toolset != toolset:
+            raise ToolError("That is not the latest prepared change. Prepare the change again.")
+        if not pending.heard:
+            raise ToolError("The person has not heard the details in full. Read the change back to them and ask again.")
+        if self.user_turns <= pending.turn:
+            raise ToolError("The person has not answered yet. Wait for their answer.")
+        self.pending = None
+        return pending
+
+
+@dataclass
+class PendingChange:
+    """A change a tool prepared: exactly what will run once the person agrees."""
+
+    action_id: str
+    toolset: str
+    tool: str
+    arguments: dict[str, Any]
+    # The person's turn count and the time (seconds since 1970) when it was prepared, and whether
+    # its read-back played in full.
+    turn: int
+    at: float
+    heard: bool = False
 
     @property
     def search_url(self) -> str:
@@ -365,6 +424,16 @@ def log_turns(session: AgentSession) -> None:
         )
 
 
+def follow_turns(session: AgentSession, state: CallState) -> None:
+    """Count the person's turns and whether a read-back was heard in full, for confirm_change."""
+
+    @session.on("conversation_item_added")
+    def added(event) -> None:
+        item = event.item
+        if getattr(item, "type", "") == "message":
+            state.heard(item.role, bool(getattr(item, "interrupted", False)), float(item.created_at))
+
+
 def apologize_on_failure(session: AgentSession) -> None:
     """When the answer model gives up (every route failed), say so instead of going quiet."""
 
@@ -380,51 +449,94 @@ def _handoff_context(agent: Agent) -> ChatContext:
     return agent.chat_ctx.copy(exclude_function_call=True, exclude_instructions=True).truncate(max_items=HANDOFF_ITEMS)
 
 
-def _latest_words(history: ChatContext) -> tuple[str, str] | None:
-    """The ID and text of the person's latest message."""
-    for item in reversed(history.items):
-        if getattr(item, "type", "") == "message" and item.role == "user":
-            return item.id, item.text_content or ""
-    return None
+def _readable(name: str) -> str:
+    """'nextcloud-create_event' reads as 'create event'."""
+    return name.rsplit("-", 1)[-1].replace("_", " ")
 
 
 class ConfirmedToolset(MCPToolset):
-    """One app's tools through ContextForge; a tool that is not read-only runs only after a spoken yes.
-
-    Each yes allows one change, so a second change needs its own. While a tool runs and nothing is
-    being said, the person hears that it is still working.
+    """One app's tools through ContextForge. A tool that only reads runs at once. Any other only
+    prepares its change (``CallState.propose``); ``confirm_change`` runs exactly those arguments
+    once the person has heard them read back and agreed in a later turn (``CallState.take``).
+    While a tool runs and nothing is being said, the person hears that it is still working.
     """
 
     def __init__(self, *, id: str, mcp_server: mcp.MCPServer, reads: list[str]) -> None:
         super().__init__(id=id, mcp_server=mcp_server)
         self._reads = tuple(f"-{name}" for name in reads)
-        self._used: set[str] = set()
+        self._writes: dict[str, Any] = {}
 
     async def setup(self, *, reload: bool = False):
         await super().setup(reload=reload)
-        self._tools = [self._wrap(tool, read=tool.info.name.endswith(self._reads)) for tool in self._tools]
+        self._tools = self.arrange(self._tools)
         return self
 
-    def _wrap(self, tool, *, read: bool):
+    def arrange(self, found: list) -> list:
+        """The tools the assistant gets for the app's MCP tools: reads as they are, each write as a
+        tool that prepares it, and confirm_change when there is any write."""
+        tools = []
+        self._writes = {}
+        for tool in found:
+            if tool.info.name.endswith(self._reads):
+                tools.append(self._run(tool))
+            else:
+                self._writes[tool.info.name] = tool
+                tools.append(self._prepare(tool))
+        if self._writes:
+            tools.append(self._confirm())
+        return tools
+
+    @staticmethod
+    async def _call(tool, arguments: dict[str, Any], context: RunContext) -> Any:
+        started = time.monotonic()
+        try:
+            async with context.with_filler(
+                _fillers(context.userdata),
+                delay=FILLER_DELAY_SECONDS,
+                interval=FILLER_INTERVAL_SECONDS,
+                max_steps=len(FILLERS),
+            ):
+                return await tool(raw_arguments=arguments)
+        finally:
+            logger.info("Tool %s took %s", tool.info.name, _seconds(time.monotonic() - started))
+
+    def _run(self, tool):
         async def call(raw_arguments: dict[str, Any], context: RunContext) -> Any:
-            if not read:
-                said = _latest_words(context.session.history)
-                if said is None or said[0] in self._used or not YES.search(said[1]):
-                    raise ToolError(ASK_FIRST)
-                self._used.add(said[0])
-            started = time.monotonic()
-            try:
-                async with context.with_filler(
-                    _fillers(context.userdata),
-                    delay=FILLER_DELAY_SECONDS,
-                    interval=FILLER_INTERVAL_SECONDS,
-                    max_steps=len(FILLERS),
-                ):
-                    return await tool(raw_arguments=raw_arguments)
-            finally:
-                logger.info("Tool %s took %s", tool.info.name, _seconds(time.monotonic() - started))
+            return await self._call(tool, raw_arguments, context)
 
         return function_tool(call, raw_schema=tool.info.raw_schema)
+
+    def _prepare(self, tool):
+        schema = dict(tool.info.raw_schema)
+        schema["description"] = str(schema.get("description") or "").rstrip() + PROPOSE_NOTE
+
+        async def prepare(raw_arguments: dict[str, Any], context: RunContext) -> dict[str, Any]:
+            pending = context.userdata.propose(self.id, tool.info.name, dict(raw_arguments))
+            logger.info("Prepared %s as %s; waiting for the person.", tool.info.name, pending.action_id)
+            return {
+                "status": "needs_confirmation",
+                "action_id": pending.action_id,
+                "change": _readable(tool.info.name),
+                "details": pending.arguments,
+                "next": "Read these details back in plain words and ask whether to go ahead. If they agree, "
+                "call confirm_change with this action_id. If they change anything, prepare it again.",
+            }
+
+        return function_tool(prepare, raw_schema=schema)
+
+    def _confirm(self):
+        async def confirm_change(context: RunContext, action_id: str) -> Any:
+            """Make the change prepared most recently, exactly as it was read back. Call it only after
+            the person heard the details and agreed in their answer; one call makes one change.
+
+            Args:
+                action_id: The action_id the preparing tool returned.
+            """
+            pending = context.userdata.take(self.id, action_id)
+            logger.info("Making %s (%s), as the person agreed.", pending.tool, pending.action_id)
+            return await self._call(self._writes[pending.tool], pending.arguments, context)
+
+        return function_tool(confirm_change)
 
 
 def search_tool(base_url: str):
@@ -590,6 +702,8 @@ async def entrypoint(ctx: JobContext) -> None:
             model=LLM_MODEL,
             base_url=LLM_BASE_URL,
             api_key=LLM_API_KEY,
+            # One tool call at a time: small models otherwise make two conflicting calls in one turn.
+            parallel_tool_calls=False,
             timeout=httpx2.Timeout(connect=15.0, read=ANSWER_WAIT_SECONDS, write=5.0, pool=5.0),
         ),
         conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=LLM_RETRIES)),
@@ -616,6 +730,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     log_turns(session)
     apologize_on_failure(session)
+    follow_turns(session, state)
 
     await ctx.connect()
     # The person's identity is their email, set from their sign-in by the voice page.
