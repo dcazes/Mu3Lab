@@ -55,6 +55,7 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     function_tool,
+    get_job_context,
     inference,
     mcp,
     utils,
@@ -105,11 +106,23 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Said when the answer's first words take longer than wait_after seconds; empty is off.
     "wait_phrase": "One moment.",
     "wait_after": 1.5,
+    # When nobody has spoken for silence_after seconds, ask whether the person is still there (up to
+    # silence_reasks times, the same wait apart), then say silence_goodbye and end the call. 0 is off.
+    "silence_after": 30,
+    "silence_reasks": 1,
+    "silence_goodbye": "I'll end the call now. Talk to you soon.",
 }
+SILENCE_REASK = (
+    "The person has been quiet for a while. Briefly ask whether they are still there, or repeat your last "
+    "question if you asked one."
+)
 
 INSTRUCTIONS = (
     "You are Mu3Lab's voice assistant for a household. Speak in short, plain sentences "
-    "that sound natural when read aloud. Do not use lists, markdown or emoji."
+    "that sound natural when read aloud. Do not use lists, markdown or emoji. Say times the way people "
+    'say them ("two thirty in the afternoon", "noon"), and dates as words ("Thursday the twenty sixth"). '
+    "Never read out IDs, links, file names or raw dates like 2026-11-24T14:00. Round numbers when the "
+    "exact figure does not matter."
 )
 # The person has stopped talking after this much silence (LiveKit's default is 0.5 s). LiveKit
 # refuses to start a call with the turn detector below 0.25 s.
@@ -151,10 +164,20 @@ def now_line() -> str:
         name, zone = "UTC", ZoneInfo("UTC")
     now = datetime.now(zone)
     offset = now.strftime("%z")
+    # Small models get weekday arithmetic wrong; the next days with their dates are looked up instead.
     return (
         f"It is now {now:%A %d %B %Y, %H:%M} in {name} (UTC{offset[:3]}:{offset[3:]}). Give and take times in this "
-        "time zone, and send tools times with this UTC offset."
+        "time zone, and send tools times with this UTC offset. Never work a date out yourself; use this list. "
+        '"This Thursday" is the first Thursday in it; if "next Thursday" could mean either, say the date and '
+        "check.\n" + speech.upcoming_days(now.date())
     )
+
+
+def household_zone() -> ZoneInfo:
+    try:
+        return ZoneInfo(_env("TZ", "UTC"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
 
 
 def load_people() -> dict[str, Any]:
@@ -179,6 +202,10 @@ def load_settings() -> dict[str, Any]:
     settings["voice"] = str(settings["voice"] or TTS_VOICE)
     settings["wait_phrase"] = str(settings["wait_phrase"] or "")[:80]
     settings["wait_after"] = _number(settings["wait_after"], DEFAULT_SETTINGS["wait_after"], 0.5, 10)
+    silence = _number(settings["silence_after"], DEFAULT_SETTINGS["silence_after"], 0, 600)
+    settings["silence_after"] = silence if silence >= 10 else 0
+    settings["silence_reasks"] = int(_number(settings["silence_reasks"], DEFAULT_SETTINGS["silence_reasks"], 0, 3))
+    settings["silence_goodbye"] = str(settings["silence_goodbye"] or "")[:160]
     return settings
 
 
@@ -424,6 +451,90 @@ def log_turns(session: AgentSession) -> None:
         )
 
 
+class _EndOfTurnScore(logging.Filter):
+    """On LiveKit's logger: its "eot prediction" debug line becomes one readable INFO line (the turn
+    detector's score, its threshold and the wait it chose); its other debug lines are dropped."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.INFO:
+            return True
+        if record.msg != "eot prediction":
+            return False
+        found = record.__dict__
+        record.levelno, record.levelname = logging.INFO, "INFO"
+        record.msg = "End of turn: score %s against threshold %s, so waited %s (%s)"
+        record.args = (
+            _score(found.get("probability")),
+            _score(found.get("unlikely_threshold")),
+            _seconds(found.get("endpointing_delay")),
+            found.get("trigger") or "?",
+        )
+        return True
+
+
+class _InfoAndUp(logging.Filter):
+    """On the root handlers: drop the debug lines LiveKit's child loggers make once its level is DEBUG."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= logging.INFO
+
+
+def _score(value: Any) -> str:
+    return f"{value:.2f}" if isinstance(value, (int, float)) else "?"
+
+
+def log_end_of_turn_scores() -> None:
+    """Log the turn detector's score on every turn, beside "Reply after", to tune Responsiveness from
+    real turns (plan item 1.5). LiveKit logs it only at debug level. Once per process."""
+    lk_logger = logging.getLogger("livekit.agents")
+    if any(isinstance(item, _EndOfTurnScore) for item in lk_logger.filters):
+        return
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(_InfoAndUp())
+    lk_logger.addFilter(_EndOfTurnScore())
+    lk_logger.setLevel(logging.DEBUG)
+
+
+async def end_call(session: AgentSession, reason: str) -> None:
+    """End the call: close the session and the room, which ends it on the person's page too."""
+    job = get_job_context()
+
+    async def delete_room() -> None:
+        await job.delete_room()
+
+    job.add_shutdown_callback(delete_room)
+    session.shutdown()
+    job.shutdown(reason=reason)
+
+
+def check_on_silence(session: AgentSession, settings: dict[str, Any], end=end_call) -> None:
+    """When nobody has spoken for a while (LiveKit marks the person "away" after silence_after
+    seconds), ask whether they are still there, up to silence_reasks times the same wait apart, then
+    say goodbye and end the call, so an open page does not keep the speech and answer models busy.
+    Any sound from the person stops it."""
+    task: asyncio.Task | None = None
+
+    async def check_in() -> None:
+        for _ in range(settings["silence_reasks"]):
+            logger.info("The person has been quiet; checking they are still there.")
+            await session.generate_reply(instructions=SILENCE_REASK)
+            await asyncio.sleep(settings["silence_after"])
+        logger.info("The person has been quiet; ending the call.")
+        if settings["silence_goodbye"]:
+            await session.say(settings["silence_goodbye"], allow_interruptions=False, add_to_chat_ctx=False)
+        await end(session, "the person was quiet")
+
+    @session.on("user_state_changed")
+    def changed(event) -> None:
+        nonlocal task
+        if event.new_state == "away":
+            if task is None or task.done():
+                task = asyncio.create_task(check_in())
+        elif task is not None and not task.done():
+            task.cancel()  # they are back; whatever is being said still plays
+            task = None
+
+
 def follow_turns(session: AgentSession, state: CallState) -> None:
     """Count the person's turns and whether a read-back was heard in full, for confirm_change."""
 
@@ -447,6 +558,30 @@ def apologize_on_failure(session: AgentSession) -> None:
 def _handoff_context(agent: Agent) -> ChatContext:
     """The recent conversation, without tool calls or the other assistant's instructions."""
     return agent.chat_ctx.copy(exclude_function_call=True, exclude_instructions=True).truncate(max_items=HANDOFF_ITEMS)
+
+
+# An ISO 8601 date and time with an offset, as app tools return them: 2026-11-24T14:00:00-05:00.
+ISO_MOMENT = re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})\b")
+
+
+def speakable(result: Any) -> Any:
+    """A tool's text result with each date and time it holds said in words, in the household's time
+    zone, so the model reads "Thursday, November twenty sixth at two in the afternoon" rather than
+    working it out. Other results pass unchanged."""
+    if not isinstance(result, str):
+        return result
+    spoken = {}
+    for found in dict.fromkeys(ISO_MOMENT.findall(result)):
+        try:
+            moment = datetime.fromisoformat(found.replace("Z", "+00:00")).astimezone(household_zone())
+        except ValueError:
+            continue
+        spoken[found] = speech.say_when(moment)
+        if len(spoken) == 20:
+            break
+    if not spoken:
+        return result
+    return result + "\n\nSay these times as: " + "; ".join(f"{iso} = {words}" for iso, words in spoken.items())
 
 
 def _readable(name: str) -> str:
@@ -496,7 +631,7 @@ class ConfirmedToolset(MCPToolset):
                 interval=FILLER_INTERVAL_SECONDS,
                 max_steps=len(FILLERS),
             ):
-                return await tool(raw_arguments=arguments)
+                return speakable(await tool(raw_arguments=arguments))
         finally:
             logger.info("Tool %s took %s", tool.info.name, _seconds(time.monotonic() - started))
 
@@ -643,8 +778,11 @@ class AppAssistant(SpokenReplies, Agent):
         # Say what is happening at once; the answer is worked out while this plays. Kept out of the
         # history, so the model does not say it again.
         self.session.say(f"Let me check {self.title}.", add_to_chat_ctx=False)
-        # Answer the request the main assistant handed over.
-        self.session.generate_reply()
+        # Answer the request the main assistant handed over, without a second lead-in.
+        self.session.generate_reply(
+            instructions=f'You have just said "Let me check {self.title}." Do not say that or anything like it '
+            "again: go straight to the answer, or to the tool you need."
+        )
 
 
 server = AgentServer()
@@ -681,6 +819,7 @@ def note_call(event: str, room: str, who: str = "") -> None:
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
+    log_end_of_turn_scores()
     settings = load_settings()
     # Speech models load while the person joins.
     speech_ready = asyncio.create_task(warm_speech(settings["voice"]))
@@ -726,11 +865,15 @@ async def entrypoint(ctx: JobContext) -> None:
             # Prepare the answer and its first spoken sentence before the turn is confirmed.
             preemptive_generation={"enabled": True, "preemptive_tts": True},
         ),
+        # The person counts as away after this much silence on both sides (check_on_silence).
+        user_away_timeout=settings["silence_after"] or None,
     )
 
     log_turns(session)
     apologize_on_failure(session)
     follow_turns(session, state)
+    if settings["silence_after"]:
+        check_on_silence(session, settings)
 
     await ctx.connect()
     # The person's identity is their email, set from their sign-in by the voice page.

@@ -1294,6 +1294,10 @@ class VoiceSettings(ApiModel):
     # Said when an answer's first words take longer than wait_after seconds; "" is off.
     wait_phrase: str = ""
     wait_after: float = 1.5
+    # After this many seconds with nobody speaking, check on the person, then end the call; 0 is off.
+    silence_after: float = 30
+    silence_reasks: int = 1
+    silence_goodbye: str = ""
     changed_at: str
     changed_by: str
 
@@ -1305,6 +1309,9 @@ class VoiceSettingsRequest(ApiModel):
     search: bool | None = None
     wait_phrase: str | None = Field(default=None, max_length=80)
     wait_after: float | None = Field(default=None, ge=0.5, le=10)
+    silence_after: float | None = Field(default=None, ge=0, le=600)
+    silence_reasks: int | None = Field(default=None, ge=0, le=3)
+    silence_goodbye: str | None = Field(default=None, max_length=160)
 
 
 class VoiceOption(ApiModel):

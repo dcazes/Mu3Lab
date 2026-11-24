@@ -7,6 +7,9 @@ An administrator chooses, in Settings, Voice Assistant:
 - **Interruptions**: whether talking over the assistant stops it.
 - **Voice**: the assistant's own voice; empty uses Speaches' default voice.
 - **Web search**: on unless switched off; it works once the SearXNG app is installed.
+- **Quiet calls**: after ``silence_after`` seconds with nobody speaking, the assistant asks whether
+  the person is still there, then says goodbye and ends the call (0 is off), so a page left open
+  does not keep the speech and answer models busy.
 - **Wait phrase**: what the assistant says when an answer's first words are slow (``wait_after``
   seconds), so the person never sits in silence; empty is off.
 
@@ -47,7 +50,12 @@ DEFAULTS: dict[str, Any] = {
     "search": True,
     "wait_phrase": "One moment.",
     "wait_after": 1.5,
+    "silence_after": 30,
+    "silence_reasks": 1,
+    "silence_goodbye": "I'll end the call now. Talk to you soon.",
 }
+SILENCE_AFTER = (10, 600)
+GOODBYE_CHARS = 160
 WAIT_PHRASE_CHARS = 80
 WAIT_AFTER = (0.5, 10.0)
 # Kokoro voice names: a language and gender letter pair, then a name (af_heart, bm_george).
@@ -73,9 +81,7 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
     voice = str(new.get("voice") or "")
     if voice and not VOICE_NAME.match(voice):
         raise ValueError("Choose one of the voices listed.")
-    phrase = " ".join(str(new.get("wait_phrase") or "").split())
-    if len(phrase) > WAIT_PHRASE_CHARS:
-        raise ValueError(f"Keep the wait phrase under {WAIT_PHRASE_CHARS} characters.")
+    phrase = _words(new.get("wait_phrase"), "wait phrase", WAIT_PHRASE_CHARS)
     return {
         "responsiveness": new["responsiveness"],
         "interruptions": bool(new.get("interruptions")),
@@ -83,7 +89,33 @@ def validate(new: dict[str, Any]) -> dict[str, Any]:
         "search": bool(new.get("search")),
         "wait_phrase": phrase,
         "wait_after": _seconds(new.get("wait_after"), "the wait phrase", *WAIT_AFTER),
+        "silence_after": _silence(new.get("silence_after")),
+        "silence_reasks": _whole(new.get("silence_reasks"), "times to check on a quiet call", 0, 3),
+        "silence_goodbye": _words(new.get("silence_goodbye"), "goodbye", GOODBYE_CHARS),
     }
+
+
+def _silence(value: Any) -> float:
+    if value in (0, "0", None, ""):
+        return 0
+    return _seconds(value, "a quiet call", *SILENCE_AFTER)
+
+
+def _whole(value: Any, what: str, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Give {what} as a whole number.") from None
+    if not low <= number <= high:
+        raise ValueError(f"Choose between {low} and {high} {what}.")
+    return number
+
+
+def _words(value: Any, what: str, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        raise ValueError(f"Keep the {what} under {limit} characters.")
+    return text
 
 
 def _seconds(value: Any, what: str, low: float, high: float) -> float:
@@ -151,6 +183,9 @@ def agent_settings(paths: RuntimePaths | None = None) -> dict[str, Any]:
         "search_url": SEARCH_URL if chosen["search"] and search_installed() else "",
         "wait_phrase": chosen["wait_phrase"],
         "wait_after": chosen["wait_after"],
+        "silence_after": chosen["silence_after"],
+        "silence_reasks": chosen["silence_reasks"],
+        "silence_goodbye": chosen["silence_goodbye"],
     }
 
 

@@ -7,6 +7,15 @@ import type { ApiState } from '../../lib/useApi';
 type Responsiveness = VoicePage['settings']['responsiveness'];
 
 // The seconds match MAX_WAIT_SECONDS in apps/livekit/voice-agent/src/agent.py.
+// How long a call may stay quiet before the assistant checks on the person, then ends it.
+const QUIET: { seconds: number; label: string }[] = [
+  { seconds: 30, label: 'After 30 seconds' },
+  { seconds: 60, label: 'After 1 minute' },
+  { seconds: 120, label: 'After 2 minutes' },
+  { seconds: 300, label: 'After 5 minutes' },
+  { seconds: 0, label: 'Never' },
+];
+
 // Said when an answer is slow to start; turning the phrase back on starts from this.
 const WAIT_PHRASE = 'One moment.';
 
@@ -82,6 +91,11 @@ export function VoiceConversationCard({ api, readOnly = false }: { api: ApiState
             onChange={(event) => void change('interruptions', { interruptions: event.target.checked })}
           />
         </label>
+        <QuietCalls
+          after={settings.silence_after ?? 30}
+          disabled={readOnly || Boolean(pending)}
+          onSave={(body) => void change('silence_after', body)}
+        />
         <WaitPhrase
           phrase={settings.wait_phrase ?? ''}
           after={settings.wait_after ?? 1.5}
@@ -159,6 +173,41 @@ function PhraseInput({
           if (event.key === 'Enter') save();
         }}
       />
+    </label>
+  );
+}
+
+/** A page left open must not keep the speech and answer models busy: quiet calls end by themselves. */
+function QuietCalls({
+  after,
+  disabled,
+  onSave,
+}: {
+  after: number;
+  disabled: boolean;
+  onSave: (body: VoiceSettingsRequest) => void;
+}) {
+  const known = QUIET.some((item) => item.seconds === after);
+  return (
+    <label className="field">
+      <span>End a quiet call</span>
+      <select
+        value={after}
+        disabled={disabled}
+        onChange={(event) => onSave({ silence_after: Number(event.target.value) })}
+      >
+        {!known && <option value={after}>After {after} seconds</option>}
+        {QUIET.map((item) => (
+          <option key={item.seconds} value={item.seconds}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <small className="muted">
+        {after
+          ? 'When nobody has spoken for this long, the assistant asks whether you’re still there, then says goodbye and ends the call. This frees the speech and answer models for others.'
+          : 'Calls stay open until you end them, even when nobody is speaking.'}
+      </small>
     </label>
   );
 }

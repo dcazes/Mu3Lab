@@ -1,0 +1,6 @@
+pyproject.toml
+src/mu3lab_voice_agent.egg-info/PKG-INFO
+src/mu3lab_voice_agent.egg-info/SOURCES.txt
+src/mu3lab_voice_agent.egg-info/dependency_links.txt
+src/mu3lab_voice_agent.egg-info/requires.txt
+src/mu3lab_voice_agent.egg-info/top_level.txt

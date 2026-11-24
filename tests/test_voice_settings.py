@@ -73,6 +73,17 @@ class VoiceSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "under"):
             voice_settings.save({"wait_phrase": "x" * 81}, "owner", lambda _line: None, self.paths)
 
+    def test_quiet_calls_end_after_the_chosen_wait_or_never(self):
+        self.folder.mkdir()
+        voice_settings.write(lambda _line: None, self.paths)
+        self.assertEqual((self.agent_file()["silence_after"], self.agent_file()["silence_reasks"]), (30, 1))
+        voice_settings.save({"silence_after": 120}, "owner", lambda _line: None, self.paths)
+        self.assertEqual(self.agent_file()["silence_after"], 120)
+        voice_settings.save({"silence_after": 0}, "owner", lambda _line: None, self.paths)
+        self.assertEqual(self.agent_file()["silence_after"], 0)
+        with self.assertRaisesRegex(ValueError, "between"):
+            voice_settings.save({"silence_after": 5}, "owner", lambda _line: None, self.paths)
+
     def test_web_search_needs_the_searxng_app_and_the_switch(self):
         voice_settings.write(lambda _line: None, self.paths)
         self.assertEqual(self.agent_file()["search_url"], "")

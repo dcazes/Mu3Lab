@@ -5324,6 +5324,21 @@ export interface components {
       responsiveness: 'fast' | 'balanced' | 'patient';
       /** Search */
       search: boolean;
+      /**
+       * Silence After
+       * @default 30
+       */
+      silence_after?: number;
+      /**
+       * Silence Goodbye
+       * @default
+       */
+      silence_goodbye?: string;
+      /**
+       * Silence Reasks
+       * @default 1
+       */
+      silence_reasks?: number;
       /** Voice */
       voice: string;
       /**
@@ -5345,6 +5360,12 @@ export interface components {
       responsiveness?: ('fast' | 'balanced' | 'patient') | null;
       /** Search */
       search?: boolean | null;
+      /** Silence After */
+      silence_after?: number | null;
+      /** Silence Goodbye */
+      silence_goodbye?: string | null;
+      /** Silence Reasks */
+      silence_reasks?: number | null;
       /** Voice */
       voice?: string | null;
       /** Wait After */

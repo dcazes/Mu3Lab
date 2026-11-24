@@ -9172,6 +9172,21 @@
             "title": "Search",
             "type": "boolean"
           },
+          "silence_after": {
+            "default": 30,
+            "title": "Silence After",
+            "type": "number"
+          },
+          "silence_goodbye": {
+            "default": "",
+            "title": "Silence Goodbye",
+            "type": "string"
+          },
+          "silence_reasks": {
+            "default": 1,
+            "title": "Silence Reasks",
+            "type": "integer"
+          },
           "voice": {
             "title": "Voice",
             "type": "string"
@@ -9237,6 +9252,44 @@
               }
             ],
             "title": "Search"
+          },
+          "silence_after": {
+            "anyOf": [
+              {
+                "maximum": 600.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Silence After"
+          },
+          "silence_goodbye": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Silence Goodbye"
+          },
+          "silence_reasks": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Silence Reasks"
           },
           "voice": {
             "anyOf": [
