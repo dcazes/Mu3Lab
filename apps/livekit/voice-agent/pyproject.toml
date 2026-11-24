@@ -17,6 +17,16 @@ dependencies = [
     "python-dotenv",
 ]
 
+[dependency-groups]
+# The agent's tests (tests/), run by Mu3Lab's `make test`; never installed in the image.
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
 [tool.uv]
 # yarl 1.24.1 was published with only a cp310 wheel and no sdist, so it can't
 # install on Python 3.11+. Remove this once upstream uploads the remaining wheels.

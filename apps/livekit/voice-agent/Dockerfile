@@ -15,7 +15,7 @@ WORKDIR /app
 # Only the dependencies: the agent runs as a script, so the project itself is never
 # built (building it at start would need PyPI, which the agent's network can't reach).
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-install-project
+RUN uv sync --locked --no-install-project --no-dev
 
 # Downloads the local voice activity and turn-detection models the installed plugins need.
 RUN .venv/bin/python -m livekit.agents download-files

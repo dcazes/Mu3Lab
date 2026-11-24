@@ -10,7 +10,7 @@ export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_CACHE_DIR := $(CURDIR)/.tools/cache
 RUN := $(UV) run --frozen
 
-.PHONY: check-updates approve pause resume install start dev-setup test lint format typecheck contract verify verify-security sbom check vm-test dry-run clean nuke ui-dev
+.PHONY: check-updates approve pause resume install start dev-setup test agent-test lint format typecheck contract verify verify-security sbom check vm-test dry-run clean nuke ui-dev
 
 install:
 	./install.sh
@@ -22,12 +22,18 @@ start:
 dev-setup:
 	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_uv'
 	$(UV) sync --frozen
+	$(UV) sync --frozen --directory $(VOICE_AGENT)
 	ROOT="$(CURDIR)" bash -c 'source tools/toolchain.sh && mu3lab_ensure_bw'
 	$(RUN) python -m tools.dashboard build
 
-test:
+test: agent-test
 	$(RUN) python -m unittest discover -s tests -t . -v
 	$(RUN) python -m tools.dashboard check
+
+# agent-test: the voice agent's own tests (apps/livekit/voice-agent/tests), in its own environment.
+VOICE_AGENT := apps/livekit/voice-agent
+agent-test:
+	$(UV) run --directory $(VOICE_AGENT) --frozen pytest -q
 
 lint:
 	$(RUN) python tools/check_no_app_ids.py
