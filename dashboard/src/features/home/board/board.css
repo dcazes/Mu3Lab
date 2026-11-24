@@ -309,6 +309,10 @@
   list-style: none;
 }
 
+.fit.has-more > ul {
+  max-height: calc(100% - 22px);
+}
+
 .fit > ul > [hidden] {
   display: none !important;
 }
@@ -1592,12 +1596,157 @@ body > li[data-kind] .board-kind-detail {
   align-self: flex-end;
 }
 
+/* The person's newest chats in the chosen chat app, under the question box while nothing is asked. */
+.ask-recent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.ask-recent-list li a {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.ask-recent-list li a:hover span {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+
+.ask-recent-list span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-recent-list small {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.ask-apps {
+  flex: none;
+  align-self: flex-start;
+}
+
+.ask-apps button {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.ask-apps-select {
+  flex: none;
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
 .ask-hint {
   margin: auto 0;
   color: var(--text-3);
   font-size: 12.5px;
   line-height: 1.45;
   text-align: center;
+}
+
+/* ---------- Search ---------- */
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.search-modes {
+  flex: none;
+  align-self: flex-start;
+}
+
+.search-modes button {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.search-found {
+  flex: 1;
+  min-height: 0;
+  font-size: 13px;
+}
+
+.search-answer {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  line-height: 1.45;
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.search-results a,
+.search-page a {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.search-results a strong,
+.search-page a strong {
+  overflow: hidden;
+  color: var(--accent-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-results a:hover strong,
+.search-page a:hover strong {
+  text-decoration: underline;
+}
+
+.search-results small,
+.search-page small {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.search-results p {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-2);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.search-page p {
+  margin-top: 8px;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 /* ---------- Thermostat ---------- */
@@ -2171,6 +2320,90 @@ a.appw-item:hover {
   flex: none;
   width: 14px;
   height: 14px;
+}
+
+/* The last known figures while the app is stopped, starting or not answering: a one-line banner,
+   and the figures greyed beneath it, the way a stopped app's tile is. */
+.appw-saved {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 4px 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.appw-saved.is-tiny {
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  font-size: 11.5px;
+}
+
+.appw-saved.is-tiny svg {
+  width: 12px;
+  height: 12px;
+}
+
+.appw-saved.is-tiny button {
+  padding: 1px 6px;
+}
+
+.appw-saved.is-error {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.appw-saved svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.appw-saved.is-starting svg {
+  animation: spin 1s linear infinite;
+}
+
+.appw-saved span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appw-saved button {
+  flex: none;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.appw-saved button:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* A short widget keeps its figures under the banner: a little less room around them. */
+.appw.is-saved.is-tiny {
+  gap: 4px;
+}
+
+.appw.is-saved.is-tiny .appw-stat {
+  min-height: 44px;
+  padding-block: 4px;
+}
+
+.appw.is-saved .appw-main {
+  opacity: 0.6;
+  filter: grayscale(1);
 }
 
 /* No figures: one sentence and the fix, centred in the widget. */

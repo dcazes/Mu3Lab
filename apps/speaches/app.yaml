@@ -9,6 +9,15 @@ stack: voice
 tagline: Private speech-to-text and text-to-speech
 summary: Turns speech into text with Whisper and reads text aloud with natural voices, on your own server. Chat,
   Home Assistant, other apps, and your own devices use it through Mu3Lab's AI gateway; audio never leaves home.
+widgets:
+- id: models
+  title: Speech models
+  description: The speech-to-text and text-to-speech models voice uses, its voice, and the speech models downloaded.
+  audience: operators
+  refresh_seconds: 300
+  needs_running: false
+  largest: [12, 8]
+  start: [4, 3]
 version: "v0.9.0-rc.3"
 upstream: speaches-ai/speaches
 service:

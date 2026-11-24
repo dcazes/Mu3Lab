@@ -13,6 +13,14 @@ tagline: Replaces stuck downloads, finds missing ones
 summary: When a film or episode Sonarr or Radarr asked for stops downloading for a whole day, Cleanuparr removes
   it, blocks that copy and has another found. Every half hour it also searches again for one film or episode
   you are still missing, once it is out to buy or stream. Torrents you add by hand are left alone.
+widgets:
+- id: downloads
+  title: Stuck downloads
+  description: Downloads Cleanuparr will remove soon if they stay stuck, and the ones it removed this week.
+  audience: operators
+  refresh_seconds: 300
+  largest: [12, 10]
+  start: [4, 4]
 version: "v2.11.1"
 upstream: Cleanuparr/Cleanuparr
 depends_on: [qbittorrent]

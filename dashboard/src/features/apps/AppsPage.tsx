@@ -23,6 +23,7 @@ import { AppStacks } from './AppStacks';
 import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
 import { activeJob, JobProgress } from './JobProgress';
+import { UpdateAll } from './UpdateAll';
 import { useInstallBatch } from './useInstallBatch';
 
 const SELECTION_KEY = 'mu3lab.discoverSelection';
@@ -283,6 +284,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
           ]}
         />
         {!discover && <ViewSwitch view={view} onChange={setView} />}
+        {!discover && <UpdateAll />}
         <label className="search-input">
           <Search />
           <input

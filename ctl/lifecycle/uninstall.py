@@ -251,4 +251,7 @@ def uninstall_application(
     from ctl.store import onboarding as onboarding_state
 
     onboarding_state.forget(service.id, paths)
+    from ctl import app_widgets
+
+    app_widgets.drop_saved(service.id, paths)
     return True, "", f"{service.name} and all of its data were deleted."

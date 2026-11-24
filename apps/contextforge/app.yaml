@@ -11,6 +11,14 @@ category: automation
 tagline: Every app's AI tools in one place
 summary: Connects chat to your apps' tools. Each app gets its own set of tools for its assistant; operators choose
   which tools are on, who can use them, and see every call in ContextForge's screens.
+widgets:
+- id: connectors
+  title: Chat connectors
+  description: Which apps' chat tools are live now, and the tool calls each app answered and failed.
+  audience: operators
+  refresh_seconds: 120
+  largest: [12, 10]
+  start: [4, 4]
 version: "v1.1.0"
 upstream: IBM/mcp-context-forge
 service:

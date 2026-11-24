@@ -7,6 +7,8 @@ widget's id (dashes as underscores), taking a ``WidgetContext`` and returning a 
 * who may add a widget: everyone, or administrators for server-wide figures and administrators-only apps;
 * whether the app can answer now: not installed, starting, stopped (with why), or reachable;
 * how long an answer is kept (the widget's ``refresh_seconds``), so several screens ask the app once;
+* the last figures read, kept in the database, shown (marked, with their age) while the app is stopped
+  or cannot answer, so a widget still says something useful;
 * trimming what comes back to the shape the dashboard draws, so one app's mistake cannot break the
   board, and never passing on an error's details, which could hold an address or a key.
 """
@@ -14,6 +16,7 @@ widget's id (dashes as underscores), taking a ``WidgetContext`` and returning a 
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import threading
 import time
@@ -31,6 +34,7 @@ from ctl.manifest.models import HomeWidgetSpec
 from ctl.mcp_registry import credential_path
 from ctl.runtime import RuntimePaths
 from ctl.secrets import read_runtime_env
+from ctl.store import records
 
 LOG = logging.getLogger(__name__)
 SEPARATOR = ":"
@@ -43,6 +47,10 @@ MAX_ITEMS = 50
 State = Literal["ok", "not_installed", "starting", "stopped", "setup", "error"]
 # Keys people paste into a widget's settings (manifest ``key``), per app and person.
 KEYS = "widget-keys"
+# The last figures each widget read (records scope), per widget and whose figures they are.
+SAVED = "home-widget-saved"
+# Unchanged figures are written again at most this often, so their "as of" time stays near the truth.
+SAVE_SECONDS = 600
 
 
 class WidgetError(RuntimeError):
@@ -364,10 +372,11 @@ def read(
     app = widget.app
     reply: dict[str, Any] = {"app_id": app.id, "app_name": app.manifest.name, "updated_at": 0.0}
     state, detail = _reachable(widget, service_state)
+    key = _key(widget, is_admin=is_admin, uid=uid)
+    if state in ("stopped", "starting"):
+        return _with_saved(reply | {"state": state, "detail": detail}, key, paths)
     if state != "ok":
         return reply | {"state": state, "detail": detail}
-    # Personal figures are each person's; the rest are the same for every administrator, or everyone.
-    key = (widget.kind, uid if widget.spec.personal else "admin" if is_admin else "member")
     now = time.time()
     with _lock:
         hit = _cache.get(key)
@@ -377,19 +386,83 @@ def read(
         raw = _reader(app, widget.spec)(_context(widget, is_admin=is_admin, uid=uid, email=email, paths=paths))
         result = reply | {"state": "ok", "detail": "", "updated_at": now} | figures(raw)
         keep = max(5.0, widget.spec.refresh_seconds * 0.8)
+        _remember(key, result, paths)
     except NeedsSetup as exc:
         result = reply | {"state": "setup", "detail": str(exc), "updated_at": now}
         keep = ERROR_SECONDS
     except WidgetError as exc:
-        result = reply | {"state": "error", "detail": str(exc), "updated_at": now}
+        result = _with_saved(reply | {"state": "error", "detail": str(exc), "updated_at": now}, key, paths)
         keep = ERROR_SECONDS
     except Exception:  # a reader's own bug: logged here, never shown with its details
         LOG.exception("Home widget %s failed", widget.kind)
-        result = reply | {"state": "error", "detail": f"Mu3Lab could not read {app.manifest.name}'s figures."}
+        detail = f"Mu3Lab could not read {app.manifest.name}'s figures."
+        result = _with_saved(reply | {"state": "error", "detail": detail}, key, paths)
         keep = ERROR_SECONDS
     with _lock:
         _cache[key] = (now, now + keep, result)
     return result
+
+
+def _key(widget: Offered, *, is_admin: bool, uid: str) -> tuple[str, str]:
+    # Personal figures are each person's; the rest are the same for every administrator, or everyone.
+    return (widget.kind, uid if widget.spec.personal else "admin" if is_admin else "member")
+
+
+def _saved_name(key: tuple[str, str]) -> str:
+    return f"{key[0]}|{key[1]}"
+
+
+# What was last written for each widget: the figures (as JSON) and when, so unchanged ones are not
+# written on every refresh; and what was last read back, so a stopped app's widget is not a database read.
+_written: dict[tuple[str, str], tuple[str, float]] = {}
+_saved: dict[tuple[str, str], dict[str, Any]] = {}
+FIELDS = ("stats", "items", "items_title", "empty", "note")
+
+
+def _remember(key: tuple[str, str], result: dict[str, Any], paths: RuntimePaths | None) -> None:
+    """Keep these figures as the last known, for when the app stops."""
+    body = {name: result[name] for name in FIELDS}
+    text = json.dumps(body, sort_keys=True)
+    now = float(result["updated_at"])
+    with _lock:
+        last = _written.get(key)
+        _saved[key] = body | {"updated_at": now}
+        if last and last[0] == text and now - last[1] < SAVE_SECONDS:
+            return
+        _written[key] = (text, now)
+    try:
+        records.put(SAVED, _saved_name(key), body | {"updated_at": now}, paths or RuntimePaths())
+    except Exception:  # a full disk or a locked database must not cost the person their figures
+        LOG.warning("Could not keep home widget %s's figures", key[0], exc_info=True)
+
+
+def _with_saved(result: dict[str, Any], key: tuple[str, str], paths: RuntimePaths | None) -> dict[str, Any]:
+    """The last known figures, with their age, beside why there are no new ones; ``result`` if none."""
+    with _lock:
+        saved = _saved.get(key)
+    if saved is None:
+        try:
+            saved = records.get(SAVED, _saved_name(key), paths or RuntimePaths())
+        except Exception:
+            LOG.warning("Could not read home widget %s's kept figures", key[0], exc_info=True)
+            saved = {}
+        with _lock:
+            _saved[key] = saved
+    if not saved:
+        return result
+    return result | figures(saved) | {"updated_at": float(saved.get("updated_at") or 0), "saved": True}
+
+
+def drop_saved(app_id: str, paths: RuntimePaths | None = None) -> None:
+    """Forget an app's kept figures (its data was deleted): they are a copy of what it held."""
+    prefix = f"{app_id}{SEPARATOR}"
+    with _lock:
+        for store in (_written, _saved, _cache):
+            for key in [key for key in store if key[0].startswith(prefix)]:
+                store.pop(key, None)
+    for name in records.names(SAVED, paths or RuntimePaths()):
+        if name.startswith(prefix):
+            records.delete(SAVED, name, paths or RuntimePaths())
 
 
 def forget(kind: str) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from starlette.concurrency import run_in_threadpool
 
-from ctl import app_widgets, home_board, home_widgets, thermostat
+from ctl import app_widgets, chat_ops, chat_recent, home_board, home_search, home_widgets, thermostat
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
@@ -161,6 +161,49 @@ async def ask(payload: models.AskRequest, person: OwnerMutation) -> models.AskRe
     except home_widgets.WidgetError as exc:
         raise ApiError(503, str(exc), code="ask_unavailable") from None
     return models.AskResponse(answer=answer)
+
+
+@router.get("/ask/chats", response_model=models.AskChats)
+async def ask_chats(person: Owner, app: str = "") -> models.AskChats:
+    """The chat apps the Ask widget can switch between, and the person's newest chats in one."""
+    apps = await run_in_threadpool(chat_recent.choices)
+    household = await run_in_threadpool(chat_ops.selected)
+    chosen = next((item for item in apps if item.id == app), None) or (apps[0] if apps else None)
+    reply: dict = {
+        "apps": [{"id": item.id, "name": item.manifest.name} for item in apps],
+        "household_id": household.id,
+    }
+    if chosen is None:
+        return models.AskChats.model_validate(reply | {"detail": "No chat app is installed yet."})
+    uid = str(person["subject_id"])
+    reply |= {
+        "app_id": chosen.id,
+        "app_name": chosen.manifest.name,
+        "prompt_url": await run_in_threadpool(chat_recent.prompt_url, chosen, uid),
+    }
+    try:
+        reply["chats"] = await run_in_threadpool(
+            lambda: chat_recent.recent(chosen, uid=uid, email=str(person.get("email") or ""))
+        )
+    except chat_recent.RecentError as exc:
+        reply["detail"] = str(exc)
+    return models.AskChats.model_validate(reply)
+
+
+@router.get("/search", response_model=models.SearchModes)
+def search_modes(_member: Member) -> models.SearchModes:
+    """Which halves of the Search widget work now."""
+    return models.SearchModes.model_validate(home_search.available())
+
+
+@router.post("/search", response_model=models.SearchResponse)
+async def search(payload: models.SearchRequest, _person: MemberMutation) -> models.SearchResponse:
+    """The Search widget: SearXNG's results, or a page or a deep search through Firecrawl."""
+    try:
+        found = await run_in_threadpool(home_search.search, payload.query, payload.mode)
+    except home_search.SearchError as exc:
+        raise ApiError(503, str(exc), code="search_unavailable") from None
+    return models.SearchResponse.model_validate(found)
 
 
 def _audit(admin: IdentityData, event: str, detail: str) -> None:

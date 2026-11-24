@@ -427,6 +427,102 @@
         "title": "AppSizesResponseAppsValue",
         "type": "object"
       },
+      "AskChat": {
+        "properties": {
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": 0,
+            "title": "Updated At",
+            "type": "number"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "AskChat",
+        "type": "object"
+      },
+      "AskChatApp": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "AskChatApp",
+        "type": "object"
+      },
+      "AskChats": {
+        "description": "The Ask widget's chat switch: the installed chat apps (the household's first) and, for the one\nchosen, the person's own newest chats there (ctl/chat_recent.py).",
+        "properties": {
+          "app_id": {
+            "default": "",
+            "title": "App Id",
+            "type": "string"
+          },
+          "app_name": {
+            "default": "",
+            "title": "App Name",
+            "type": "string"
+          },
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/AskChatApp"
+            },
+            "title": "Apps",
+            "type": "array"
+          },
+          "chats": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AskChat"
+            },
+            "title": "Chats",
+            "type": "array"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "household_id": {
+            "default": "",
+            "title": "Household Id",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "prompt_url": {
+            "default": "",
+            "title": "Prompt Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "apps"
+        ],
+        "title": "AskChats",
+        "type": "object"
+      },
       "AskRequest": {
         "properties": {
           "question": {
@@ -2912,6 +3008,11 @@
           "ok": {
             "default": true,
             "title": "Ok",
+            "type": "boolean"
+          },
+          "saved": {
+            "default": false,
+            "title": "Saved",
             "type": "boolean"
           },
           "state": {
@@ -6205,6 +6306,160 @@
           "opened_by"
         ],
         "title": "RecoverySheetStatus",
+        "type": "object"
+      },
+      "SearchModes": {
+        "properties": {
+          "fetch": {
+            "title": "Fetch",
+            "type": "boolean"
+          },
+          "fetch_name": {
+            "default": "",
+            "title": "Fetch Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "web": {
+            "title": "Web",
+            "type": "boolean"
+          },
+          "web_name": {
+            "default": "",
+            "title": "Web Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "web",
+          "fetch"
+        ],
+        "title": "SearchModes",
+        "type": "object"
+      },
+      "SearchPage": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "text"
+        ],
+        "title": "SearchPage",
+        "type": "object"
+      },
+      "SearchRequest": {
+        "properties": {
+          "mode": {
+            "default": "web",
+            "enum": [
+              "web",
+              "fetch"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "query": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "answer": {
+            "default": "",
+            "title": "Answer",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "web",
+              "deep",
+              "page"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchPage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "results": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchResult": {
+        "properties": {
+          "read": {
+            "default": false,
+            "title": "Read",
+            "type": "boolean"
+          },
+          "snippet": {
+            "default": "",
+            "title": "Snippet",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "SearchResult",
         "type": "object"
       },
       "Service": {
@@ -13381,6 +13636,110 @@
         ]
       }
     },
+    "/api/v1/home/ask/chats": {
+      "get": {
+        "description": "The chat apps the Ask widget can switch between, and the person's newest chats in one.",
+        "operationId": "ask_chats_api_v1_home_ask_chats_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "app",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "App",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskChats"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ask Chats",
+        "tags": [
+          "home"
+        ]
+      }
+    },
     "/api/v1/home/board": {
       "delete": {
         "description": "Back to the starter set.",
@@ -14318,6 +14677,198 @@
           }
         },
         "summary": "Search Places",
+        "tags": [
+          "home"
+        ]
+      }
+    },
+    "/api/v1/home/search": {
+      "get": {
+        "description": "Which halves of the Search widget work now.",
+        "operationId": "search_modes_api_v1_home_search_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchModes"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Search Modes",
+        "tags": [
+          "home"
+        ]
+      },
+      "post": {
+        "description": "The Search widget: SearXNG's results, or a page or a deep search through Firecrawl.",
+        "operationId": "search_api_v1_home_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Search",
         "tags": [
           "home"
         ]

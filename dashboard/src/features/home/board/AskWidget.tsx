@@ -1,24 +1,52 @@
 import { ArrowRight, MessageCircle, Send } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { toast } from 'sonner';
-import { type AskResponse, postJsonApi } from '../../../api';
+import { type AskChats, type AskResponse, postJsonApi } from '../../../api';
 import { Button } from '../../../components/Button';
-import { errorText } from '../../../lib/format';
+import { errorText, relativeTime } from '../../../lib/format';
 import { CHAT_QUESTION } from '../../../lib/chatQuestion';
 import { navigate } from '../../../lib/router';
-import { useDashboard } from '../../../state/dashboard';
-import { useBox } from './size';
+import { useApi } from '../../../lib/useApi';
+import { FitList, useBox } from './size';
 import type { WidgetProps } from './widgets';
 
+const storeKey = (id: string) => `mu3lab.ask.${id}`;
+
+const remembered = (id: string) => {
+  try {
+    return window.localStorage.getItem(storeKey(id)) ?? '';
+  } catch {
+    return '';
+  }
+};
+
+/** Opens a chat app with the question typed in (see ``prompt_url``). */
+const withQuestion = (url: string, question: string) =>
+  url
+    .replace('{question2}', encodeURIComponent(encodeURIComponent(question)))
+    .replace('{question}', encodeURIComponent(question));
+
 /**
- * A quick question to the household's assistant, answered right here. Anything that needs the
- * person's own data in an app goes on in Chat, where the app assistants are.
+ * A quick question to the household's assistant, answered right here. A switch picks which chat app
+ * the conversation goes on in (Open WebUI, LobeChat or LibreChat, whichever are installed), and while
+ * nothing is asked the widget lists the person's own newest chats there.
  */
-export function AskWidget(_props: WidgetProps) {
-  const { data: dashboard } = useDashboard();
-  const chat = dashboard.chat;
+export function AskWidget({ widget }: WidgetProps) {
   const { width, height } = useBox();
   const measured = width > 0;
+  const [chosen, setChosen] = useState(() => remembered(widget.id));
+  const { data: chats } = useApi<AskChats>(`/api/v1/home/ask/chats?app=${encodeURIComponent(chosen)}`, {
+    interval: 60_000,
+  });
+  const appName = chats?.app_name || 'Chat';
+  const choose = (id: string) => {
+    setChosen(id);
+    try {
+      window.localStorage.setItem(storeKey(widget.id), id);
+    } catch {
+      /* Private browsing: the switch still works until the page reloads. */
+    }
+  };
   const [question, setQuestion] = useState('');
   const [asked, setAsked] = useState('');
   const [answer, setAnswer] = useState('');
@@ -44,12 +72,29 @@ export function AskWidget(_props: WidgetProps) {
     }
   };
 
-  // The chat app opens on the Chat page with the question already typed in, where the app
-  // assistants can take it further. A chat app that cannot be handed a question gets it on the
-  // clipboard instead.
+  // The household's chat app opens on the Chat page with the question already typed in, where the
+  // app assistants can take it further; another chat app opens in a new tab with it typed in. A
+  // chat app that cannot be handed a question gets it on the clipboard instead.
   const continueInChat = async () => {
     const text = asked || question.trim();
-    if (text && chat.prompt_url) {
+    if (chats?.app_id && chats.app_id !== chats.household_id) {
+      if (chats.prompt_url && text) {
+        window.open(withQuestion(chats.prompt_url, text), '_blank', 'noopener');
+        return;
+      }
+      if (text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          toast.success(`Your question is copied: paste it into ${appName}.`);
+        } catch {
+          /* The app still opens; the question is on screen to retype. */
+        }
+      }
+      const home = chats.prompt_url ? new URL(chats.prompt_url).origin : '';
+      if (home) window.open(home, '_blank', 'noopener');
+      return;
+    }
+    if (text && chats?.prompt_url) {
       try {
         window.sessionStorage.setItem(CHAT_QUESTION, text);
       } catch {
@@ -80,6 +125,9 @@ export function AskWidget(_props: WidgetProps) {
         />
         <Button type="submit" variant="primary" size="sm" icon={Send} loading={pending} aria-label="Ask" />
       </form>
+      {(chats?.apps.length ?? 0) > 1 && (!measured || height >= 140) && (
+        <AppSwitch chats={chats!} wide={!measured || width >= 380} onChoose={choose} />
+      )}
       {(pending || answer || error) && (
         <div className="ask-answer widget-scroll" aria-live="polite">
           <p className="ask-question">{asked}</p>
@@ -92,18 +140,76 @@ export function AskWidget(_props: WidgetProps) {
           )}
         </div>
       )}
-      {!pending && !answer && !error && (!measured || height >= 140) && (
-        <p className="ask-hint">
-          Quick questions are answered here. Anything about your own data in an app goes on in {chat.app_name || 'Chat'}
-          .
-        </p>
-      )}
+      {!pending && !answer && !error && (!measured || height >= 140) && <RecentChats chats={chats} />}
       {(answer || error) && (
         <button type="button" className="widget-link ask-continue" onClick={() => void continueInChat()}>
-          Continue in {chat.app_name || 'Chat'}
+          Continue in {appName}
           <ArrowRight />
         </button>
       )}
+    </div>
+  );
+}
+
+/** Which chat app the widget goes on in: buttons when there is room, a menu when narrow. */
+function AppSwitch({ chats, wide, onChoose }: { chats: AskChats; wide: boolean; onChoose: (id: string) => void }) {
+  if (!wide)
+    return (
+      <select
+        className="ask-apps-select"
+        aria-label="Chat app"
+        value={chats.app_id}
+        onChange={(event) => onChoose(event.target.value)}
+      >
+        {chats.apps.map((app) => (
+          <option key={app.id} value={app.id}>
+            {app.name}
+          </option>
+        ))}
+      </select>
+    );
+  return (
+    <div className="segmented ask-apps" role="radiogroup" aria-label="Chat app">
+      {chats.apps.map((app) => (
+        <button
+          key={app.id}
+          type="button"
+          role="radio"
+          aria-checked={chats.app_id === app.id}
+          onClick={() => onChoose(app.id)}
+        >
+          {app.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The person's own newest chats in the chosen app, each opening there; titles and times only. */
+function RecentChats({ chats }: { chats: AskChats | null }) {
+  if (!chats) return <div className="ask-recent" />;
+  const list = chats.chats ?? [];
+  if (!list.length)
+    return (
+      <p className="ask-hint">
+        {chats.detail ||
+          `Quick questions are answered here. Your chats in ${chats.app_name || 'Chat'} will be listed here too.`}
+      </p>
+    );
+  return (
+    <div className="ask-recent">
+      <FitList className="ask-recent-list" label={`Your chats in ${chats.app_name}`}>
+        {list.map((item) => (
+          <li key={item.url}>
+            <a href={item.url} target="_blank" rel="noreferrer">
+              <span>{item.title}</span>
+              {(item.updated_at ?? 0) > 0 && (
+                <small>{relativeTime(new Date((item.updated_at ?? 0) * 1000).toISOString())}</small>
+              )}
+            </a>
+          </li>
+        ))}
+      </FitList>
     </div>
   );
 }

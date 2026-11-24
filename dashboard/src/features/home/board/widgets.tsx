@@ -5,6 +5,7 @@ import {
   LayoutGrid,
   type LucideIcon,
   MessageCircle,
+  Search,
   Thermometer,
   TrendingUp,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import { AppsWidget } from './AppsWidget';
 import { AskWidget } from './AskWidget';
 import { CalendarSettings, CalendarWidget } from './CalendarWidget';
 import { CameraWidget, CameraWidgetSettings } from './CameraWidget';
+import { SearchWidget } from './SearchWidget';
 import { StocksSettings, StocksWidget } from './StocksWidget';
 import { ThermostatWidget } from './ThermostatWidget';
 import { WeatherSettings, WeatherWidget } from './WeatherWidget';
@@ -66,6 +68,12 @@ export const WIDGETS: Record<string, WidgetInfo> = {
     description: 'A quick question to the Mu3Lab assistant, answered right here.',
     icon: MessageCircle,
     Component: AskWidget,
+  },
+  search: {
+    title: 'Search',
+    description: 'A private web search, or Firecrawl to read a page or search deeper.',
+    icon: Search,
+    Component: SearchWidget,
   },
   apps: {
     title: 'Apps',

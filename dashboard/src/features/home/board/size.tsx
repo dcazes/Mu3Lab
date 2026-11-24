@@ -85,7 +85,9 @@ export function FitList({
     return () => observer.disconnect();
   });
   return (
-    <div ref={frame} className="fit">
+    // While "+N more" shows, the rows keep out of its line: rows that share out the height (weather's
+    // days) would otherwise grow into it once the others are hidden.
+    <div ref={frame} className={`fit${hidden > 0 && more ? ' has-more' : ''}`}>
       <ul ref={list} className={className} aria-label={label}>
         {children}
       </ul>

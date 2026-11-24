@@ -85,6 +85,9 @@ TTS_VOICE = _env("MU3LAB_TTS_VOICE", "af_heart")
 VOICE_TOOLS = Path(_env("MU3LAB_VOICE_TOOLS", "voice-tools/people.json"))
 # The household's choices, beside the app tools (Settings, Voice Assistant; ctl/voice_settings.py).
 VOICE_SETTINGS = VOICE_TOOLS.with_name("settings.json")
+# One line as each call starts and ends, for Mu3Lab's Home widget (apps/livekit/widgets.py): the
+# room, who called and when. Never anything said. Empty: calls are not noted (a desktop test).
+CALL_LOG = _env("MU3LAB_CALL_LOG", "")
 DEFAULT_SETTINGS: dict[str, Any] = {
     "responsiveness": "balanced",
     "interruptions": True,
@@ -457,6 +460,20 @@ def prewarm(proc: JobProcess) -> None:
 server.setup_fnc = prewarm
 
 
+def note_call(event: str, room: str, who: str = "") -> None:
+    """Add a call's start or end to the call log; a failure only costs the widget a line."""
+    if not CALL_LOG:
+        return
+    line = {"event": event, "room": room, "at": round(time.time(), 1)}
+    if who:
+        line["who"] = who
+    try:
+        with open(CALL_LOG, "a", encoding="utf-8") as log:
+            log.write(json.dumps(line) + "\n")
+    except OSError:
+        logger.warning("The call could not be noted for Mu3Lab's Home widget.", exc_info=True)
+
+
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
@@ -507,6 +524,13 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     # The person's identity is their email, set from their sign-in by the voice page.
     participant = await ctx.wait_for_participant()
+    room = ctx.room.name
+    note_call("start", room, participant.identity.lower())
+
+    async def ended(_reason: str = "") -> None:
+        note_call("end", room)
+
+    ctx.add_shutdown_callback(ended)
     people = load_people()
     person = (people.get("people") or {}).get(participant.identity.lower())
     if person is None:

@@ -627,6 +627,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/home/ask/chats': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Ask Chats
+     * @description The chat apps the Ask widget can switch between, and the person's newest chats in one.
+     */
+    get: operations['ask_chats_api_v1_home_ask_chats_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/home/board': {
     parameters: {
       query?: never;
@@ -701,6 +721,30 @@ export interface paths {
     get: operations['search_places_api_v1_home_places_get'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search Modes
+     * @description Which halves of the Search widget work now.
+     */
+    get: operations['search_modes_api_v1_home_search_get'];
+    put?: never;
+    /**
+     * Search
+     * @description The Search widget: SearXNG's results, or a page or a deep search through Firecrawl.
+     */
+    post: operations['search_api_v1_home_search_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -2183,6 +2227,69 @@ export interface components {
       /** Updated At */
       updated_at: string;
     };
+    /** AskChat */
+    AskChat: {
+      /** Title */
+      title: string;
+      /**
+       * Updated At
+       * @default 0
+       */
+      updated_at?: number;
+      /** Url */
+      url: string;
+    };
+    /** AskChatApp */
+    AskChatApp: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * AskChats
+     * @description The Ask widget's chat switch: the installed chat apps (the household's first) and, for the one
+     *     chosen, the person's own newest chats there (ctl/chat_recent.py).
+     */
+    AskChats: {
+      /**
+       * App Id
+       * @default
+       */
+      app_id?: string;
+      /**
+       * App Name
+       * @default
+       */
+      app_name?: string;
+      /** Apps */
+      apps: components['schemas']['AskChatApp'][];
+      /**
+       * Chats
+       * @default []
+       */
+      chats?: components['schemas']['AskChat'][];
+      /**
+       * Detail
+       * @default
+       */
+      detail?: string;
+      /**
+       * Household Id
+       * @default
+       */
+      household_id?: string;
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * Prompt Url
+       * @default
+       */
+      prompt_url?: string;
+    };
     /** AskRequest */
     AskRequest: {
       /** Question */
@@ -3154,6 +3261,11 @@ export interface components {
        * @default true
        */
       ok?: boolean;
+      /**
+       * Saved
+       * @default false
+       */
+      saved?: boolean;
       /**
        * State
        * @enum {string}
@@ -4242,6 +4354,89 @@ export interface components {
       opened_at: string;
       /** Opened By */
       opened_by: string;
+    };
+    /** SearchModes */
+    SearchModes: {
+      /** Fetch */
+      fetch: boolean;
+      /**
+       * Fetch Name
+       * @default
+       */
+      fetch_name?: string;
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Web */
+      web: boolean;
+      /**
+       * Web Name
+       * @default
+       */
+      web_name?: string;
+    };
+    /** SearchPage */
+    SearchPage: {
+      /** Text */
+      text: string;
+      /** Title */
+      title: string;
+      /** Url */
+      url: string;
+    };
+    /** SearchRequest */
+    SearchRequest: {
+      /**
+       * Mode
+       * @default web
+       * @enum {string}
+       */
+      mode?: 'web' | 'fetch';
+      /** Query */
+      query: string;
+    };
+    /** SearchResponse */
+    SearchResponse: {
+      /**
+       * Answer
+       * @default
+       */
+      answer?: string;
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: 'web' | 'deep' | 'page';
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      page?: components['schemas']['SearchPage'] | null;
+      /**
+       * Results
+       * @default []
+       */
+      results?: components['schemas']['SearchResult'][];
+    };
+    /** SearchResult */
+    SearchResult: {
+      /**
+       * Read
+       * @default false
+       */
+      read?: boolean;
+      /**
+       * Snippet
+       * @default
+       */
+      snippet?: string;
+      /** Title */
+      title: string;
+      /** Url */
+      url: string;
     };
     /** Service */
     Service: {
@@ -8815,6 +9010,91 @@ export interface operations {
       };
     };
   };
+  ask_chats_api_v1_home_ask_chats_get: {
+    parameters: {
+      query?: {
+        app?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AskChats'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   read_board_api_v1_home_board_get: {
     parameters: {
       query?: never;
@@ -9592,6 +9872,176 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['PlacesResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  search_modes_api_v1_home_search_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SearchModes'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  search_api_v1_home_search_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SearchRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SearchResponse'];
         };
       };
       /** @description Bad Request */

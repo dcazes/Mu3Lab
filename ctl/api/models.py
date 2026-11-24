@@ -184,6 +184,9 @@ class HomeWidgetData(ApiModel):
     app_name: str
     # When the figures were read (seconds since 1970); 0 when there are none.
     updated_at: float = 0
+    # The figures are the last ones read, kept while the app is stopped or cannot answer (``state``
+    # and ``detail`` say why); ticking a box is not possible until it answers again.
+    saved: bool = False
     stats: list[HomeWidgetStat] = []
     items: list[HomeWidgetItem] = []
     items_title: str = ""
@@ -329,6 +332,75 @@ class CameraSettingsRequest(ApiModel):
 
 class AskRequest(ApiModel):
     question: str
+
+
+class AskChatApp(ApiModel):
+    id: str
+    name: str
+
+
+class AskChat(ApiModel):
+    title: str
+    url: str
+    # When the chat was last used (seconds since 1970); 0 when the app does not say.
+    updated_at: float = 0
+
+
+class AskChats(ApiModel):
+    """The Ask widget's chat switch: the installed chat apps (the household's first) and, for the one
+    chosen, the person's own newest chats there (ctl/chat_recent.py)."""
+
+    ok: bool = True
+    apps: list[AskChatApp]
+    app_id: str = ""
+    app_name: str = ""
+    # The household's chat app, which the Chat page shows.
+    household_id: str = ""
+    chats: list[AskChat] = []
+    # Why there are no chats to show, when that is not simply that there are none yet.
+    detail: str = ""
+    # Opens the app with a question typed in ("{question}" once encoded, "{question2}" twice).
+    prompt_url: str = ""
+
+
+class SearchRequest(ApiModel):
+    query: str = Field(min_length=1, max_length=500)
+    # web: the web search app (SearXNG). fetch: the page reader (Firecrawl): a web address is read,
+    # words are a deep search (ctl/home_search.py).
+    mode: Literal["web", "fetch"] = "web"
+
+
+class SearchResult(ApiModel):
+    title: str
+    url: str
+    snippet: str = ""
+    # Firecrawl read the page: the snippet is its own opening text, not a search engine's summary.
+    read: bool = False
+
+
+class SearchPage(ApiModel):
+    title: str
+    url: str
+    text: str
+
+
+class SearchResponse(ApiModel):
+    ok: bool = True
+    mode: Literal["web", "deep", "page"]
+    # SearXNG's instant answer, when it has one.
+    answer: str = ""
+    results: list[SearchResult] = []
+    page: SearchPage | None = None
+
+
+class SearchModes(ApiModel):
+    ok: bool = True
+    # Which halves of the Search widget work: whether the web search app (SearXNG) and the page
+    # reader (Firecrawl) are installed, and their names for the switch.
+    web: bool
+    fetch: bool
+    web_name: str = ""
+    fetch_name: str = ""
 
 
 class AskResponse(ApiModel):

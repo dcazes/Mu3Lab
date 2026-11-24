@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink, KeyRound, Play, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CircleStop, ExternalLink, KeyRound, Loader2, Play, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import {
@@ -106,7 +106,50 @@ function Unavailable({
   );
 }
 
-function Item({ item, onAct }: { item: HomeWidgetItem; onAct: (action: string, done: boolean) => Promise<void> }) {
+/**
+ * Above the last known figures while the app cannot give new ones: why, how old they are, and the
+ * fix. Grey for a stopped or starting app, amber when it is running but did not answer.
+ */
+function SavedBanner({ data, onRetry, tiny }: { data: HomeWidgetData; onRetry: () => void; tiny: boolean }) {
+  const isAdmin = useIsAdmin();
+  const lifecycle = useLifecycle();
+  const service = useDashboard().data.services.services.find((item) => item.id === data.app_id);
+  // A short widget: a few words, so the figures still fit beneath.
+  const why =
+    data.state === 'starting'
+      ? tiny
+        ? 'Starting'
+        : `${data.app_name} is starting`
+      : data.state === 'error'
+        ? tiny
+          ? 'No answer'
+          : `Couldn’t reach ${data.app_name}`
+        : tiny
+          ? 'Stopped'
+          : `${data.app_name} is stopped`;
+  const Icon = data.state === 'starting' ? Loader2 : data.state === 'error' ? AlertTriangle : CircleStop;
+  return (
+    <p className={`appw-saved is-${data.state}${tiny ? ' is-tiny' : ''}`} role="status" title={data.detail}>
+      <Icon aria-hidden />
+      <span>
+        {why} · {tiny ? '' : 'figures from '}
+        {since(data.updated_at ?? 0)}
+      </span>
+      {data.state === 'stopped' && isAdmin && service && (
+        <button type="button" onClick={() => void lifecycle('start', [service])}>
+          Start
+        </button>
+      )}
+      {data.state === 'error' && (
+        <button type="button" onClick={onRetry}>
+          Try again
+        </button>
+      )}
+    </p>
+  );
+}
+
+function Item({ item, onAct }: { item: HomeWidgetItem; onAct?: (action: string, done: boolean) => Promise<void> }) {
   // Ticking shows at once; it goes back if the app does not take it.
   const [pending, setPending] = useState<boolean | null>(null);
   const checked = pending ?? item.check ?? false;
@@ -117,8 +160,10 @@ function Item({ item, onAct }: { item: HomeWidgetItem; onAct: (action: string, d
           <input
             type="checkbox"
             checked={checked}
-            disabled={pending !== null}
+            // Last known figures: the app cannot take a tick until it answers again.
+            disabled={pending !== null || !onAct}
             onChange={(event) => {
+              if (!onAct) return;
               const next = event.target.checked;
               setPending(next);
               void onAct(item.action ?? '', next).finally(() => setPending(null));
@@ -187,7 +232,9 @@ export function AppWidget({ widget, kind, onConfigure }: WidgetProps & { kind?: 
     }
   };
   if (!data) return error ? <p className="appw-state appw-error">{error}</p> : <Skeleton />;
-  if (data.state !== 'ok')
+  // The app cannot answer now; when Mu3Lab kept its last figures, they show (greyed, with their age).
+  const saved = data.state !== 'ok' && Boolean(data.saved);
+  if (data.state !== 'ok' && !saved)
     return (
       <Unavailable
         data={data}
@@ -227,10 +274,11 @@ export function AppWidget({ widget, kind, onConfigure }: WidgetProps & { kind?: 
     );
   return (
     <div
-      className={`appw${side ? ' is-side' : ''}${tiny ? ' is-tiny' : ''}${compact ? ' is-compact' : ''}${showList ? '' : ' is-figures'}`}
+      className={`appw${side ? ' is-side' : ''}${tiny ? ' is-tiny' : ''}${compact ? ' is-compact' : ''}${showList ? '' : ' is-figures'}${saved ? ' is-saved' : ''}`}
       title={updated ? `Updated ${since(updated)}` : undefined}
     >
-      {error && !tiny && (
+      {saved && <SavedBanner data={data} onRetry={retry} tiny={tiny} />}
+      {error && !saved && !tiny && (
         <p className="appw-stale" role="status">
           <AlertTriangle aria-hidden /> Couldn’t refresh: showing figures from {since(updated)}.{' '}
           <span className="sr-only">{errorText(error)}</span>
@@ -253,7 +301,7 @@ export function AppWidget({ widget, kind, onConfigure }: WidgetProps & { kind?: 
             {items.length ? (
               <FitList more={more}>
                 {items.map((item, index) => (
-                  <Item key={`${item.title}-${index}`} item={item} onAct={act} />
+                  <Item key={`${item.title}-${index}`} item={item} onAct={saved ? undefined : act} />
                 ))}
               </FitList>
             ) : (

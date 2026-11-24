@@ -14,6 +14,15 @@ summary: A voice assistant you talk to in the browser. Your speech is turned int
   natural voice, both on this server. The answer comes from the model chosen in Settings, Voice Assistant, which can be
   a local model or your outside providers. It can use your apps as you, and search the web privately with SearXNG.
   Built on LiveKit, with its admin dashboard for checking that the assistant is connected.
+widgets:
+- id: calls
+  title: Voice calls
+  description: Calls with the voice assistant now and today, and the last few calls with who and how long.
+  audience: operators
+  refresh_seconds: 30
+  needs_running: false
+  largest: [12, 8]
+  start: [4, 3]
 version: "v1.13.11"
 upstream: livekit/livekit
 depends_on:

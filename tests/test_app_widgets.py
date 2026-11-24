@@ -111,6 +111,68 @@ class StateTests(unittest.TestCase):
         self.assertNotIn("secret", reply["detail"])
 
 
+class SavedFiguresTests(unittest.TestCase):
+    """The last figures read stay on the widget, marked, while the app is stopped or cannot answer."""
+
+    def setUp(self):
+        app = next(app for app in cached().apps if app.manifest.widgets)
+        self.widget = app_widgets.Offered(app, HomeWidgetSpec(id="probe", title="Probe", description="A test."))
+        self.store: dict[tuple[str, str], dict] = {}
+        fake = {
+            "put": lambda scope, name, value, _paths=None: self.store.__setitem__((scope, name), value),
+            "get": lambda scope, name, _paths=None: self.store.get((scope, name), {}),
+            "names": lambda scope, _paths=None: sorted(name for kept, name in self.store if kept == scope),
+            "delete": lambda scope, name, _paths=None: self.store.pop((scope, name), None),
+        }
+        for name, function in fake.items():
+            patcher = patch.object(app_widgets.records, name, side_effect=function)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        app_widgets.drop_saved(self.widget.app.id)
+        self.addCleanup(app_widgets.drop_saved, self.widget.app.id)
+
+    def read(self, state="ready", reader=None, is_admin=True):
+        reader = reader or (lambda _ctx: {"stats": [{"label": "Photos", "value": 12}]})
+        with patch.object(app_widgets, "_reader", return_value=reader):
+            return app_widgets.read(self.widget, service_state=state, is_admin=is_admin)
+
+    def test_a_stopped_app_shows_its_last_figures_with_their_age(self):
+        self.assertFalse(self.read("stopped").get("saved"))
+        fresh = self.read()
+        self.assertFalse(fresh.get("saved"))
+        stopped = self.read("stopped")
+        self.assertEqual(stopped["state"], "stopped")
+        self.assertTrue(stopped["detail"])
+        self.assertTrue(stopped["saved"])
+        self.assertEqual(stopped["stats"], fresh["stats"])
+        self.assertEqual(stopped["updated_at"], fresh["updated_at"])
+        # Members' figures are kept apart from administrators'.
+        self.assertFalse(self.read("stopped", is_admin=False).get("saved"))
+
+    def test_figures_survive_a_restart_and_an_error_and_go_with_the_data(self):
+        self.read()
+        app_widgets._saved.clear()  # as after a restart: only the database has them
+
+        def down(_ctx):
+            raise app_widgets.WidgetError("Immich did not answer.")
+
+        app_widgets.forget(self.widget.kind)
+        reply = self.read(reader=down)
+        self.assertEqual((reply["state"], reply["saved"]), ("error", True))
+        self.assertEqual(reply["stats"][0]["value"], "12")
+        app_widgets.drop_saved(self.widget.app.id)
+        self.assertEqual(self.store, {})
+        self.assertFalse(self.read("stopped").get("saved"))
+
+    def test_unchanged_figures_are_not_written_on_every_refresh(self):
+        self.read()
+        written = dict(self.store)
+        app_widgets.forget(self.widget.kind)
+        with patch.object(app_widgets.records, "put", side_effect=AssertionError("written again")):
+            self.read()
+        self.assertEqual(self.store, written)
+
+
 class TimeWordsTests(unittest.TestCase):
     def test_ago_and_until_read_naturally(self):
         import time

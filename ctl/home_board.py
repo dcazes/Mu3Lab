@@ -54,6 +54,7 @@ KINDS: dict[str, Kind] = {
     "calendar": Kind((2, 2), (12, 14), (6, 4)),
     "stocks": Kind((2, 2), (12, 10), (6, 2)),
     "ask": Kind((3, 2), (12, 14), (6, 4)),
+    "search": Kind((3, 2), (12, 14), (6, 4)),
     "thermostat": Kind((2, 2), (6, 6), (3, 2)),
     "camera": Kind((3, 2), (12, 12), (6, 4), admin_only=True),
 }

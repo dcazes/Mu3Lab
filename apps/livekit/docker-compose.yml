@@ -35,7 +35,10 @@ services:
 
   # Waits for rooms that ask for "mu3lab-agent", then listens, thinks and answers.
   agent:
-    build: ./voice-agent
+    build:
+      context: ./voice-agent
+      # Mu3Lab's own user, as the server above, so the agent can note calls in ./calls.
+      args: {UID: "1000"}
     restart: unless-stopped
     environment:
       LIVEKIT_URL: ws://livekit:7880
@@ -53,10 +56,13 @@ services:
       MU3LAB_TTS_VOICE: ${MU3LAB_TTS_VOICE:-af_heart}
       # Each person's app assistants and their own keys, written by Mu3Lab (ctl/voice_tools.py).
       MU3LAB_VOICE_TOOLS: /app/voice-tools/people.json
+      # One line as each call starts and ends (who and when, never what was said), for Home.
+      MU3LAB_CALL_LOG: /app/calls/calls.jsonl
       # The household's time zone, so "tomorrow at 10" means 10 here.
       TZ: ${TZ:-UTC}
     volumes:
       - ./voice-tools:/app/voice-tools:ro
+      - ./calls:/app/calls
     depends_on:
       server: {condition: service_healthy}
     # mu3lab_mcp: the apps' tools, through ContextForge.
