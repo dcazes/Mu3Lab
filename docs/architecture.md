@@ -60,7 +60,7 @@ The manifest is a deployment contract, not a sandbox for untrusted code. Hooks a
 
 ## 3. Host bootstrap and installation
 
-[`install.sh`](../install.sh) is the shell entry point. It rejects root invocation, requires an apt-based environment and initial download utilities, establishes a sudo session, and prepares the pinned toolchain through [`tools/toolchain.sh`](../tools/toolchain.sh). `uv`, a managed Python 3.12 build, locked Python packages and the standalone Bitwarden CLI are kept in the checkout's tool directories; the installer does not replace system Python.
+[`install.sh`](../install.sh) is the shell entry point. It rejects root invocation, requires an apt-based environment and initial download utilities, establishes a sudo session, and prepares the pinned toolchain through [`tools/toolchain.sh`](../tools/toolchain.sh). `uv`, a managed Python 3.13 build, locked Python packages and the standalone Bitwarden CLI are kept in the checkout's tool directories; the installer does not replace system Python.
 
 [`ctl/bootstrap/terminal.py`](../ctl/bootstrap/terminal.py) handles interactive input and progress. Fresh installs collect a name, email and a password of at least 12 characters, with confirmation and an acknowledgment to save it. The supplied owner password is used to bootstrap Authentik and Vaultwarden, not persisted as a reusable master password. Existing installs can request the existing vault login. Restore mode asks for the copied repository and backup password instead.
 

@@ -14,6 +14,14 @@ summary: Download torrents and magnet links from the browser. Pick a category an
   Music, Audiobooks, Podcasts, Roms, Movies or Shows; films and episodes with no category go to Movies or Shows
   for Jellyfin, and anything else to the Downloads folder in Nextcloud. Finished torrents are removed, files
   kept, so nothing is shared after it downloads. Torrent traffic can go through a VPN of your choice.
+widgets:
+- id: downloads
+  title: Downloads
+  description: Download and upload speed, and what is downloading with its progress and time left.
+  audience: operators
+  refresh_seconds: 10
+  largest: [12, 10]
+  start: [4, 4]
 version: "v5.3.0"
 upstream: qbittorrent/qBittorrent
 media:
@@ -131,6 +139,12 @@ chat:
   assistant:
     title: qBittorrent (admins)
     description: See what's downloading, add magnet links, and pause, resume or remove torrents.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "What's downloading right now?"
+    - "Pause all downloads"
+    - "Which torrents are finished?"
+    - "Add this magnet link"
     instructions: Help administrators with qBittorrent. List the torrents before changing one, and use the hashes the
       tools return. When adding a torrent, ask which library it is for and use that category (music, audiobooks,
       podcasts, roms, movies, shows), or none to let Mu3Lab file films and episodes for Jellyfin and leave

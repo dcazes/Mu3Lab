@@ -14,6 +14,7 @@ import {
   stateTone,
   statusText,
 } from '../../lib/services';
+import { useSectionWidth } from '../../lib/theme';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { AppDetailsCard, AppsSummaryCard } from './AppDetailsCard';
 import { can, type Lifecycle, useLifecycle } from './lifecycle';
@@ -251,6 +252,7 @@ export function AppStacks({
   const assistants = new Map((data.chat.assistants || []).map((item) => [item.id, item]));
   const sections = launcherSections(services);
   const [isFolded, toggleFolded] = useFolded();
+  const { width } = useSectionWidth();
   const [panel, setPanel] = useState('');
   const isAdmin = useIsAdmin();
   const selection = useSelection(services);
@@ -294,8 +296,9 @@ export function AppStacks({
             const choices = apps.filter(pickable).map((service) => service.id);
             const allPicked = choices.length > 0 && choices.every((app) => selection.picked.some((s) => s.id === app));
             const summary = sectionSummary(section);
-            // Lists, stacks and backstage sections always get a row of their own; a small category can share one.
-            const wide = Boolean(listRow) || stack || section.foldedByDefault || apps.length > 4;
+            // Every section gets a row of its own, unless Settings > Appearance chose Compact: then a
+            // small category can share one (lists, stacks and backstage sections still never do).
+            const wide = width === 'full' || Boolean(listRow) || stack || section.foldedByDefault || apps.length > 4;
             return (
               <section
                 key={id}

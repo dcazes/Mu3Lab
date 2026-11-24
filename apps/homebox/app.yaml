@@ -5,9 +5,16 @@ name: HomeBox
 tier: optional
 group: apps
 category: home
-tagline: Everything you own, where it is, and its receipts
+tagline: What you own, where it is, and its receipts
 summary: A household inventory of what you own and where it is kept, with photos, receipts, warranties and
   manuals. The whole household shares one inventory, and printable QR labels open an item's page.
+widgets:
+- id: inventory
+  title: Inventory
+  description: How many things the household has recorded, what they are worth, and where they live.
+  refresh_seconds: 1800
+  largest: [12, 10]
+  start: [4, 3]
 version: "v0.27.1"
 upstream: sysadminsmedia/homebox
 service:

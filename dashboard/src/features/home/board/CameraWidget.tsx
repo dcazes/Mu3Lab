@@ -5,6 +5,7 @@ import { Button } from '../../../components/Button';
 import { isInstalled } from '../../../lib/services';
 import { useApi } from '../../../lib/useApi';
 import { CameraForm, helperBusy, useStreamHelper } from '../../settings/CameraForm';
+import { useBox } from './size';
 import type { SettingsProps, WidgetProps } from './widgets';
 
 type Quality = 'sd' | 'hd';
@@ -153,6 +154,9 @@ export function CameraWidget({ onConfigure }: WidgetProps) {
   }, []);
   const live = useLive(quality, playing && !hidden);
   const { video } = live;
+  // A short widget keeps the picture as tall as it can: the controls sit over its bottom edge.
+  const { height } = useBox();
+  const overlay = height > 0 && height < 170;
 
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
   if (helperBusy(helper))
@@ -171,6 +175,27 @@ export function CameraWidget({ onConfigure }: WidgetProps) {
         </Button>
       </div>
     );
+  const controls = playing && (
+    <div className={`camera-bar${overlay ? ' is-overlay' : ''}`}>
+      <div className="segmented" role="radiogroup" aria-label="Picture quality">
+        {(['sd', 'hd'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={quality === value}
+            onClick={() => setQuality(value)}
+          >
+            {value === 'sd' ? 'Clear' : 'HD'}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="widget-link" onClick={() => setPlaying(false)}>
+        <Square aria-hidden />
+        Stop
+      </button>
+    </div>
+  );
   return (
     <div className="camera">
       <div className="camera-frame">
@@ -188,28 +213,9 @@ export function CameraWidget({ onConfigure }: WidgetProps) {
         ) : live.status === 'error' ? (
           <span className="camera-note camera-error">{live.error}</span>
         ) : null}
+        {overlay && controls}
       </div>
-      {playing && (
-        <div className="camera-bar">
-          <div className="segmented" role="radiogroup" aria-label="Picture quality">
-            {(['sd', 'hd'] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={quality === value}
-                onClick={() => setQuality(value)}
-              >
-                {value === 'sd' ? 'Clear' : 'HD'}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="widget-link" onClick={() => setPlaying(false)}>
-            <Square aria-hidden />
-            Stop
-          </button>
-        </div>
-      )}
+      {!overlay && controls}
     </div>
   );
 }

@@ -8,6 +8,14 @@ category: finance
 tagline: Envelope budgeting and spending
 summary: A personal finance app built around envelope budgeting. Track accounts and transactions, plan spending,
   and review financial reports, with budget data synced through your own server.
+widgets:
+- id: budget
+  title: Budget
+  description: Your spending this month against your budget, and the categories you spend most on.
+  personal: true
+  refresh_seconds: 1800
+  largest: [12, 10]
+  start: [4, 4]
 version: "v26.11.0"
 upstream: actualbudget/actual
 service:
@@ -66,6 +74,12 @@ chat:
   assistant:
     title: Actual Budget
     description: Plan budgets and inspect transactions.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "How much have we spent on groceries this month?"
+    - "Which budget categories are over this month?"
+    - "Show my biggest transactions from last week"
+    - "How does this month's spending compare to last month?"
     instructions: Help with Actual Budget. Explain calculations and ask before changing transactions, categories,
       or budgets. Use only Actual Budget tools assigned to this agent.
     faq:

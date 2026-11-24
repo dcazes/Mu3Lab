@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react';
 import type { StockQuote, StocksResponse } from '../../../api';
 import { Button } from '../../../components/Button';
 import { useApi } from '../../../lib/useApi';
+import { FitList, useBox } from './size';
 import type { SettingsProps, WidgetProps } from './widgets';
 
 const SYMBOL = /^[A-Za-z0-9.^=-]{1,15}$/;
@@ -43,7 +44,7 @@ function Sparkline({ points, up }: { points: number[]; up: boolean }) {
   );
 }
 
-function Row({ quote, wide }: { quote: StockQuote; wide: boolean }) {
+function Row({ quote, wide, showPrice }: { quote: StockQuote; wide: boolean; showPrice: boolean }) {
   if (!quote.found)
     return (
       <li className="stock">
@@ -59,7 +60,7 @@ function Row({ quote, wide }: { quote: StockQuote; wide: boolean }) {
         {wide && <small>{quote.name}</small>}
       </span>
       {wide && <Sparkline points={quote.points ?? []} up={up} />}
-      <span className="stock-price">{money(quote.price, quote.currency ?? '')}</span>
+      {showPrice && <span className="stock-price">{money(quote.price, quote.currency ?? '')}</span>}
       <span className={`stock-change ${up ? 'tone-green' : 'tone-red'}`}>
         {quote.change_percent == null ? '—' : `${up ? '+' : ''}${quote.change_percent.toFixed(2)}%`}
       </span>
@@ -119,6 +120,7 @@ export function StocksSettings({ widget, onChange }: SettingsProps) {
 
 /** A watchlist from Yahoo Finance: price and today's change, with today's line when there is room. */
 export function StocksWidget({ widget, onConfigure }: WidgetProps) {
+  const { width } = useBox();
   const symbols = symbolsOf(widget);
   const { data, error } = useApi<StocksResponse>(
     symbols.length ? `/api/v1/home/stocks?symbols=${encodeURIComponent(symbols.join(','))}` : null,
@@ -134,11 +136,19 @@ export function StocksWidget({ widget, onConfigure }: WidgetProps) {
       </div>
     );
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
+  // Narrow: ticker and today's change. Then the price; wide, the name and today's line too.
+  const measured = width > 0;
+  const wide = !measured || width >= 480;
+  const showPrice = !measured || width >= 230;
   return (
-    <ul className="stocks">
+    <FitList
+      className={`stocks${wide ? ' is-wide' : showPrice ? '' : ' is-narrow'}`}
+      label="Watchlist"
+      more={(hidden) => `+${hidden} more`}
+    >
       {(data.quotes ?? []).map((quote) => (
-        <Row key={quote.symbol} quote={quote} wide={widget.w >= 2} />
+        <Row key={quote.symbol} quote={quote} wide={wide} showPrice={showPrice} />
       ))}
-    </ul>
+    </FitList>
   );
 }

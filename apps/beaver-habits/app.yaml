@@ -8,6 +8,14 @@ category: home
 tagline: Daily habits and streaks
 summary: A simple daily habit tracker. Tick off habits each day, keep streaks, and see your consistency at a glance.
   Each household member has their own private list.
+widgets:
+- id: habits
+  title: Habits
+  description: Your habits for today, ticked off right here, with your streaks.
+  personal: true
+  refresh_seconds: 300
+  largest: [12, 10]
+  start: [4, 4]
 version: 0.10.0
 upstream: daya0576/beaverhabits
 service:
@@ -81,6 +89,12 @@ chat:
   assistant:
     title: Beaver Habits
     description: Check and tick off your daily habits.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Which habits have I done today?"
+    - "Tick off today's exercise habit"
+    - "What's my longest streak right now?"
+    - "How did I do on my habits this week?"
     instructions: Help with the person's own Beaver Habits. Look up habits by name before acting, confirm the habit and date
       before marking it, and report streaks from the days the tools return. Use only Beaver Habits tools assigned to
       this agent.

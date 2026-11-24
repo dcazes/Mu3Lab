@@ -8,6 +8,14 @@ category: documents
 tagline: Files, calendars, and contacts
 summary: A self-hosted workspace for files, calendars, and contacts. Sync and share files across devices, manage
   events, and connect a Nextcloud calendar to Mu3Lab’s calendar and Home agenda.
+widgets:
+- id: storage
+  title: Nextcloud
+  description: Free space, files, shares, and how many people used Nextcloud today.
+  audience: operators
+  refresh_seconds: 900
+  largest: [12, 4]
+  start: [4, 2]
 version: "v35.0.2"
 upstream: nextcloud/server
 service:
@@ -122,6 +130,12 @@ chat:
   assistant:
     title: Nextcloud
     description: Work with files and calendars.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "What's on my calendar this week?"
+    - "Find the file I edited yesterday"
+    - "Which files were shared with me recently?"
+    - "Add an event to my calendar for Friday"
     instructions: Help with Nextcloud files and calendars. Do not claim to have accessed live data unless a reviewed
       Nextcloud tool is assigned. Ask before changing data.
     faq:

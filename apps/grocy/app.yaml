@@ -8,6 +8,19 @@ category: home
 tagline: Pantry stock, shopping lists, and chores
 summary: Track pantry stock, expiry dates, purchases, and shopping lists in a shared household inventory. Organize
   recipes, recurring chores, tasks, and batteries alongside your groceries.
+widgets:
+- id: pantry
+  title: Pantry
+  description: What has expired or is due soon, what has run out, and how much is on the shopping list.
+  refresh_seconds: 900
+  largest: [12, 10]
+  start: [4, 4]
+- id: chores
+  title: Chores
+  description: Chores due today or overdue, ticked off right here.
+  refresh_seconds: 300
+  largest: [12, 10]
+  start: [4, 4]
 version: v4.7.1
 upstream: grocy/grocy
 service:
@@ -68,6 +81,12 @@ chat:
   assistant:
     title: Grocy
     description: Check stock, expiry dates, shopping lists, and chores.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "What's expiring in the next few days?"
+    - "What's on the shopping list?"
+    - "Which chores are due today?"
+    - "Are we running low on anything?"
     instructions: Help with Grocy stock, expiry dates, shopping lists, recipes, and chores. Ask before consuming,
       purchasing, or changing products or lists. Use only Grocy tools assigned to this agent.
     faq:

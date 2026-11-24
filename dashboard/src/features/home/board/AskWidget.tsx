@@ -7,6 +7,7 @@ import { errorText } from '../../../lib/format';
 import { CHAT_QUESTION } from '../../../lib/chatQuestion';
 import { navigate } from '../../../lib/router';
 import { useDashboard } from '../../../state/dashboard';
+import { useBox } from './size';
 import type { WidgetProps } from './widgets';
 
 /**
@@ -16,6 +17,8 @@ import type { WidgetProps } from './widgets';
 export function AskWidget(_props: WidgetProps) {
   const { data: dashboard } = useDashboard();
   const chat = dashboard.chat;
+  const { width, height } = useBox();
+  const measured = width > 0;
   const [question, setQuestion] = useState('');
   const [asked, setAsked] = useState('');
   const [answer, setAnswer] = useState('');
@@ -66,7 +69,7 @@ export function AskWidget(_props: WidgetProps) {
   return (
     <div className="ask">
       <form className="ask-form" onSubmit={(event) => void submit(event)}>
-        <MessageCircle aria-hidden className="ask-icon" />
+        {(!measured || width >= 260) && <MessageCircle aria-hidden className="ask-icon" />}
         <input
           className="widget-input"
           aria-label="Ask the Mu3Lab assistant"
@@ -78,7 +81,7 @@ export function AskWidget(_props: WidgetProps) {
         <Button type="submit" variant="primary" size="sm" icon={Send} loading={pending} aria-label="Ask" />
       </form>
       {(pending || answer || error) && (
-        <div className="ask-answer" aria-live="polite">
+        <div className="ask-answer widget-scroll" aria-live="polite">
           <p className="ask-question">{asked}</p>
           {pending ? (
             <p className="muted">Thinking…</p>
@@ -88,6 +91,12 @@ export function AskWidget(_props: WidgetProps) {
             <p className="ask-text">{answer}</p>
           )}
         </div>
+      )}
+      {!pending && !answer && !error && (!measured || height >= 140) && (
+        <p className="ask-hint">
+          Quick questions are answered here. Anything about your own data in an app goes on in {chat.app_name || 'Chat'}
+          .
+        </p>
       )}
       {(answer || error) && (
         <button type="button" className="widget-link ask-continue" onClick={() => void continueInChat()}>

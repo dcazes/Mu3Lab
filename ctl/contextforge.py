@@ -9,7 +9,7 @@ changes a virtual server it has already created.
 
 Chat reaches a virtual server at ``/servers/<id>/mcp``:
 
-* Open WebUI passes each person's own Authentik sign-in, which ContextForge
+* Open WebUI and LibreChat pass each person's own Authentik sign-in, which ContextForge
   trusts through the ``mu3lab-chat`` provider below (no keys to keep);
 * LobeChat cannot, so Mu3Lab creates a key per person and virtual server.
 
@@ -290,16 +290,18 @@ class ContextForge:
                 raise
 
     def accept_chat_sign_ins(self, server: dict[str, Any], dns_name: str) -> None:
-        """Let a virtual server take the Authentik sign-ins Open WebUI passes on.
+        """Let a virtual server take the Authentik sign-ins chat apps pass on (Open WebUI, LibreChat).
 
         ContextForge's MCP endpoint takes an outside sign-in only on a virtual server
-        with OAuth on and that issuer listed, checked against ``client_id`` as the audience
-        (the trusted provider from ``ensure_chat_provider`` covers its REST API alone). The
-        person must already have an account here (``contextforge_ops.ensure_accounts``).
-        Mu3Lab's own keys keep working: ContextForge issued them.
+        with OAuth on and that issuer listed, checked against the audiences in ``resource``
+        (each chat app's Authentik client ID; the trusted provider from ``ensure_chat_provider``
+        covers its REST API alone). Left empty, ContextForge would keep the first audience it
+        saw and refuse the other chat app. The person must already have an account here
+        (``contextforge_ops.ensure_accounts``). Mu3Lab's own keys keep working: ContextForge issued them.
         """
-        issuer, client_id = _chat_issuer(dns_name)
-        wanted = {"authorization_servers": [issuer], "client_id": client_id}
+        clients = _chat_clients(dns_name)
+        issuers, audiences = [issuer for issuer, _ in clients], [client_id for _, client_id in clients]
+        wanted = {"authorization_servers": issuers, "client_id": audiences[0], "resource": audiences}
         config = _field(server, "oauth_config") or {}
         if _field(server, "oauth_enabled") and all(config.get(key) == value for key, value in wanted.items()):
             return
@@ -422,6 +424,18 @@ def _chat_issuer(dns_name: str) -> tuple[str, str]:
         raise ContextForgeError("Open WebUI has no Authentik sign-in to trust.")
     # Authentik's per-application issuer (ctl/authentik_blueprints.py names the application).
     return f"https://{dns_name}/application/o/mu3lab-{chat.id}/", oidc.client_id
+
+
+def _chat_clients(dns_name: str) -> list[tuple[str, str]]:
+    """Every chat app that passes people's sign-ins on: its Authentik issuer and client ID, Open WebUI first."""
+    from ctl.chat_ops import chat_apps
+
+    found = [_chat_issuer(dns_name)]
+    for chat in chat_apps():
+        oidc = chat.manifest.sign_in.oidc
+        if oidc and oidc.forwards_sign_in and oidc.client_id != found[0][1]:
+            found.append((f"https://{dns_name}/application/o/mu3lab-{chat.id}/", oidc.client_id))
+    return found
 
 
 def tool_ids(tools: list[dict[str, Any]], wanted: set[str] | None) -> list[str]:

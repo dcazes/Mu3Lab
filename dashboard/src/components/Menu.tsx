@@ -9,7 +9,16 @@ export interface MenuItem {
   disabled?: boolean;
 }
 
-export function Menu({ items, label = 'More actions' }: { items: MenuItem[]; label?: string }) {
+export function Menu({
+  items,
+  label = 'More actions',
+  compact = false,
+}: {
+  items: MenuItem[];
+  label?: string;
+  /** A small icon button, for tight places such as a widget's title bar. */
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -31,7 +40,7 @@ export function Menu({ items, label = 'More actions' }: { items: MenuItem[]; lab
     <div className="menu" ref={root}>
       <button
         type="button"
-        className="btn btn-secondary btn-md btn-icon"
+        className={compact ? 'widget-tool' : 'btn btn-secondary btn-md btn-icon'}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}

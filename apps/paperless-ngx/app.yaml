@@ -8,6 +8,14 @@ category: documents
 tagline: Searchable scanned document archive
 summary: Turns scanned paperwork and digital files into a searchable document archive. Extract text with OCR, organize
   documents by tags and correspondents, and find records without sorting through folders.
+widgets:
+- id: documents
+  title: Documents
+  description: Your own documents, how many wait in the inbox, and the newest.
+  personal: true
+  refresh_seconds: 600
+  largest: [12, 10]
+  start: [4, 4]
 version: "v3.4.2"
 upstream: paperless-ngx/paperless-ngx
 data_dir: paperless
@@ -81,6 +89,12 @@ chat:
   assistant:
     title: Paperless-ngx
     description: Find and organize documents.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Find our latest electricity bill"
+    - "Which documents are still in the inbox?"
+    - "Show warranty documents for the fridge"
+    - "Find tax documents from last year"
     instructions: Help find and organize Paperless documents. Ask before changing metadata, uploading, or deleting
       documents. Use only Paperless tools assigned to this agent.
     faq:

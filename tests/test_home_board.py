@@ -7,15 +7,18 @@ import unittest
 from pathlib import Path
 
 from ctl import camera, thermostat
-from ctl.home_board import STARTER, BoardError, clean
+from ctl.home_board import STARTER, BoardError, _upgrade, clean, placement_of
 from ctl.runtime import RuntimePaths
 from ctl.store.secrets import SecretStore
 
 
 class BoardTests(unittest.TestCase):
     def test_the_starter_board_keeps_its_shape(self):
-        shape = [(widget["kind"], widget["w"], widget["h"]) for widget in clean(STARTER, is_admin=False)]
-        self.assertEqual(shape, [("weather", 2, 1), ("apps", 2, 1), ("ask", 2, 2), ("calendar", 2, 2)])
+        shape = [(w["kind"], w["x"], w["y"], w["w"], w["h"]) for w in clean(STARTER, is_admin=False)]
+        self.assertEqual(
+            shape,
+            [("weather", 0, 0, 6, 2), ("apps", 6, 0, 6, 2), ("ask", 0, 2, 6, 4), ("calendar", 6, 2, 6, 4)],
+        )
 
     def test_unknown_kinds_go_and_sizes_stay_within_each_kinds_limits(self):
         board = clean(
@@ -26,7 +29,33 @@ class BoardTests(unittest.TestCase):
             ],
             is_admin=False,
         )
-        self.assertEqual([(w["kind"], w["w"], w["h"]) for w in board], [("ask", 4, 2), ("weather", 2, 1)])
+        # Ask is at least 2 rows tall; a size that is not a number becomes the kind's starting size.
+        self.assertEqual([(w["kind"], w["w"], w["h"]) for w in board], [("ask", 9, 2), ("weather", 6, 2)])
+
+    def test_widgets_never_overlap_and_unplaced_ones_take_the_first_free_space(self):
+        board = clean(
+            [
+                {"id": "a", "kind": "weather", "x": 0, "y": 0, "w": 6, "h": 2},
+                {"id": "b", "kind": "weather", "x": 3, "y": 1, "w": 6, "h": 2},
+                {"id": "c", "kind": "weather", "w": 6, "h": 2},
+                {"id": "d", "kind": "weather", "x": 20, "y": 0, "w": 6, "h": 2},
+            ],
+            is_admin=False,
+        )
+        spots = {w["id"]: (w["x"], w["y"]) for w in board}
+        # b overlapped a and c had no place: both go to the first free space, in order; d is pulled onto the board.
+        self.assertEqual(spots, {"a": (0, 0), "d": (6, 0), "b": (0, 2), "c": (6, 2)})
+
+    def test_a_board_from_before_positions_keeps_its_arrangement(self):
+        legacy = [{"id": "w", "kind": "weather", "w": 2, "h": 1}, {"id": "a", "kind": "ask", "w": 2, "h": 2}]
+        board = clean(_upgrade(legacy), is_admin=False)
+        self.assertEqual([(w["x"], w["y"], w["w"], w["h"]) for w in board], [(0, 0, 6, 2), (6, 0, 6, 4)])
+
+    def test_placement_and_hide_on_phone_have_safe_defaults(self):
+        self.assertEqual(placement_of("gravity"), "gravity")
+        self.assertEqual(placement_of("sideways"), "free")
+        board = clean([{"id": "a", "kind": "ask", "hide_on_phone": "yes"}], is_admin=False)
+        self.assertFalse(board[0]["hide_on_phone"])
 
     def test_settings_keep_only_what_each_kind_understands(self):
         board = clean(

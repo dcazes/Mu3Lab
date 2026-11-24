@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ctl import chat_connections, chat_ops
 from ctl.contextforge import ContextForgeError
 from ctl.control_state import ControlState
@@ -11,6 +13,53 @@ from ctl.mcp_catalog import load as load_connectors
 from ctl.people import PeopleError, chat_people
 from ctl.registry import load as load_registry
 from ctl.runtime import RuntimePaths
+
+# The main assistant, everyone's first chat: general help, their calendar, and the way to each app's.
+MAIN = "main"
+# LobeChat fills these in from the person's browser with each message; without them a model guesses
+# the date, and books "tomorrow" a year early.
+NOW = (
+    'Now: {{weekday}}, {{date}}, {{time}} ({{timezone}}). Work out "today", "tomorrow" and every other date from '
+    "this, in this time zone; never assume another year."
+)
+PICK = (
+    "When a request needs one of these apps, name the assistant to use and tell the person to open it from the "
+    "list of assistants in chat. When its app is out of reach, say so first, with how to fix it."
+)
+
+
+def with_main(desired: list[dict[str, Any]], guide: str, gateway_down: str) -> list[dict[str, Any]]:
+    """One person's assistants with the main one first, carrying their calendar tools (as in Open WebUI)."""
+    from ctl.integrations.openwebui import main_model
+
+    calendar = [item for item in desired if item.get("tools_only")]
+    apps = [item for item in desired if not item.get("tools_only")]
+    listed: dict[str, dict[str, Any]] = {}
+    for item in apps:
+        if item.get("audience") == "operators":
+            continue
+        if item["title"] not in listed or item.get("active"):
+            listed[item["title"]] = item
+    tools = [item for item in calendar if item.get("active") and item.get("token")]
+    main = main_model(
+        list(listed.values()),
+        guide,
+        tool_ids=[MAIN] if calendar else None,
+        gateway_down=gateway_down,
+        now=NOW,
+        pick=PICK,
+    )
+    first: dict[str, Any] = {
+        "id": MAIN,
+        "title": "Mu3Lab",
+        "description": main["meta"]["description"],
+        "instructions": main["params"]["system"],
+        "active": True,
+        "audience": "household",
+    }
+    if tools:
+        first |= {"url": tools[0]["url"], "token": tools[0]["token"]}
+    return [first, *apps]
 
 
 def origin() -> str:
@@ -88,6 +137,7 @@ def _sync_agents(log) -> tuple[bool, str]:
             and record["state"] != "not_installed"
         }
         address = origin()
+        gateway_down = "" if chat_ops.gateway_up() else chat_ops.gateway_name()
     except (ChatError, PeopleError, OSError, ValueError) as exc:
         log(str(exc))
         return False, str(exc)
@@ -99,10 +149,16 @@ def _sync_agents(log) -> tuple[bool, str]:
         try:
             person = people.get(uid)
             desired = (
-                chat_ops.desired_assistants(uid, person["email"], operator=bool(person.get("operator")))
+                chat_ops.desired_assistants(
+                    uid, person["email"], operator=bool(person.get("operator")), gateway=not gateway_down, now=NOW
+                )
                 if person and person["email"]
                 else []
             )
+            if person and person["email"]:
+                from ctl.openwebui_ops import _guide
+
+                desired = with_main(desired, _guide({str(item["id"]) for item in desired}), gateway_down)
             with LobeHub(address, record["key"]) as client:
                 managed = client.ensure_assistants(desired, record.get("managed", {}), installed=installed)
             chat_connections.save(uid, {**record, "managed": managed, "error": ""}, paths)

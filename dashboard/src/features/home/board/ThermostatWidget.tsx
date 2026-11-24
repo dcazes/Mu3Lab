@@ -6,6 +6,7 @@ import { errorText } from '../../../lib/format';
 import { Link } from '../../../lib/router';
 import { useApi } from '../../../lib/useApi';
 import { useDashboard } from '../../../state/dashboard';
+import { useBox } from './size';
 import type { WidgetProps } from './widgets';
 
 type Mode = NonNullable<ThermostatStatus['mode']>;
@@ -71,7 +72,8 @@ function Setpoint({
 }
 
 /** The household thermostat: everyone sees it; administrators change the mode and temperature. */
-export function ThermostatWidget({ widget }: WidgetProps) {
+export function ThermostatWidget(_props: WidgetProps) {
+  const { width, height } = useBox();
   const { data: dashboard } = useDashboard();
   const isAdmin = dashboard.identity.is_admin;
   const { data, error, reload } = useApi<ThermostatStatus>('/api/v1/home/thermostat', { interval: 60_000 });
@@ -108,9 +110,14 @@ export function ThermostatWidget({ widget }: WidgetProps) {
     }
   };
   const StateIcon = view.state === 'heating' ? Flame : view.state === 'cooling' ? Snowflake : null;
-  // A one-column, one-row widget has room for the reading and set point only; the mode waits for more room.
-  const compact = widget.w === 1 && widget.h === 1;
-  const size = `${widget.h >= 2 ? ' is-tall' : ' is-short'}${widget.w === 1 ? ' is-narrow' : ''}`;
+  // Short: the reading beside the set point, and the modes beside them once wide. Tall: the same parts
+  // stacked and larger. Narrow: the set point's label goes, its buttons and value stay.
+  const measured = width > 0;
+  const tall = !measured || height >= 140;
+  const huge = measured && height >= 280 && width >= 300;
+  const narrow = measured && width < 250;
+  const modesFit = tall ? !measured || (width >= 210 && height >= 170) : width >= 560;
+  const size = `${tall ? ' is-tall' : ' is-short'}${huge ? ' is-huge' : ''}${narrow ? ' is-narrow' : ''}${modesFit ? '' : ' no-modes'}`;
   return (
     <div className={`thermostat${size}`}>
       <div className="thermostat-now">
@@ -157,7 +164,7 @@ export function ThermostatWidget({ widget }: WidgetProps) {
           />
         </div>
       ) : null}
-      {isAdmin && !compact && (view.modes?.length ?? 0) > 1 && (
+      {isAdmin && modesFit && (view.modes?.length ?? 0) > 1 && (
         <div className="segmented thermostat-modes" role="radiogroup" aria-label="Thermostat mode">
           {(view.modes ?? []).map((mode) => (
             <button

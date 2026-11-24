@@ -11,6 +11,17 @@ category: automation
 tagline: Automations that connect your apps
 summary: Build workflows that connect apps and services, from your Mu3Lab apps to outside ones, run on a schedule or
   when something happens. Administrators only, because workflows can run code and reach other apps.
+widgets:
+- id: automations
+  title: Automations
+  description: How many workflows are switched on, and which runs failed in the last day.
+  audience: operators
+  refresh_seconds: 300
+  key:
+    label: n8n API key
+    help: In n8n, open Settings, then n8n API, and create an API key (no expiry, or a long one). Copy it here.
+  largest: [12, 10]
+  start: [4, 4]
 version: "n8n@2.48.5"  # the upstream release tag
 upstream: n8n-io/n8n
 service:

@@ -61,6 +61,7 @@ class RegistryV3Tests(unittest.TestCase):
                 "livekit",
                 "dawarich",
                 "lobehub",
+                "librechat",
                 "speaches",
                 "searxng",
                 "firecrawl",

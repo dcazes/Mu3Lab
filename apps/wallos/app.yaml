@@ -8,6 +8,17 @@ category: finance
 tagline: Subscriptions and what they cost
 summary: Keeps track of your subscriptions and recurring bills, what they cost each month and when each one renews.
   Each household member has their own private list.
+widgets:
+- id: subscriptions
+  title: Subscriptions
+  description: What your subscriptions cost this month, and which renew soon.
+  personal: true
+  refresh_seconds: 1800
+  key:
+    label: Wallos API key
+    help: In Wallos, open your profile (your name at the top right), find API Key, and copy it here. It shows only your own subscriptions.
+  largest: [12, 10]
+  start: [4, 4]
 version: "v5.11.2"
 upstream: ellite/Wallos
 service:

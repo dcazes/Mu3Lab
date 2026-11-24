@@ -8,6 +8,21 @@ category: media
 tagline: Photo and video backup
 summary: Manages your photo and video library on your server. Upload media from your phone, organize shared albums,
   and find images using metadata, facial recognition, and visual search.
+widgets:
+- id: photos
+  title: Photos
+  description: Your own photos and videos, "on this day" memories, and your newest albums.
+  personal: true
+  refresh_seconds: 900
+  largest: [12, 10]
+  start: [4, 4]
+- id: server
+  title: Photo storage
+  description: Photos, videos and space used across the household, and how full the disk is.
+  audience: operators
+  refresh_seconds: 1800
+  largest: [12, 6]
+  start: [4, 3]
 version: "v3.3.6"
 upstream: immich-app/immich
 service:
@@ -67,6 +82,12 @@ chat:
   assistant:
     title: Immich
     description: Find and organize photos and videos.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Find photos from our last holiday"
+    - "Show pictures of the dog from this year"
+    - "Make an album of last weekend's photos"
+    - "How many photos did we take last month?"
     instructions: Help find and organize Immich photos and albums. Ask before uploads, edits, or deletions. Use
       only Immich tools assigned to this agent.
     faq:

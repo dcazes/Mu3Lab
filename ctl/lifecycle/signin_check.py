@@ -202,7 +202,7 @@ def _entry(service_id: str, client: httpx.Client, origin: str, launch_path: str)
             data={"csrfmiddlewaretoken": token.group(1)},
             headers={"Origin": origin, "Referer": origin + launch_path},
         )
-    return client.get(origin + launch_path)
+    return client.get(origin + (oidc.check_path or launch_path))
 
 
 def _check_secret(client: httpx.Client, token_endpoint: str, client_id: str, secret: str, redirect: str) -> None:

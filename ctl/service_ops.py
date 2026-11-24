@@ -112,13 +112,13 @@ def allowed_actions(service: Service, state: str) -> list[str]:
 
 
 def _sync_chat_assistants(log: Callable[[str], None]) -> None:
-    """Show an app's LobeChat assistant only while the app is installed.
+    """Show an app's chat assistants only while the app is installed.
 
     A convenience: a failure is logged and never fails the app's own job.
     """
     ok, detail = sync_agents(log)
     if not ok:
-        log(f"LobeChat assistants were not updated: {detail}")
+        log(f"Chat assistants were not updated: {detail}")
 
 
 def _uninstall(

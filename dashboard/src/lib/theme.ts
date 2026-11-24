@@ -3,9 +3,12 @@ import { useEffect, useSyncExternalStore } from 'react';
 export type ThemePreference = 'system' | 'light' | 'dark';
 /** How the Apps page draws its sections: each in a frame, or open on the page. */
 export type SectionStyle = 'framed' | 'open';
+/** Whether every Apps section takes a full row (the default), or small ones share a row. */
+export type SectionWidth = 'full' | 'compact';
 
 const STORAGE_KEY = 'mu3lab.theme';
 const SECTIONS_KEY = 'mu3lab.sections';
+const WIDTH_KEY = 'mu3lab.sectionWidth';
 const media = () => window.matchMedia?.('(prefers-color-scheme: dark)');
 
 function read(key: string) {
@@ -34,6 +37,10 @@ export function storedSectionStyle(): SectionStyle {
   return read(SECTIONS_KEY) === 'open' ? 'open' : 'framed';
 }
 
+export function storedSectionWidth(): SectionWidth {
+  return read(WIDTH_KEY) === 'compact' ? 'compact' : 'full';
+}
+
 export function applyTheme(preference: ThemePreference) {
   const dark = preference === 'dark' || (preference === 'system' && Boolean(media()?.matches));
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -48,6 +55,7 @@ export function applySectionStyle(style: SectionStyle) {
 // Settings > Appearance always agree.
 let theme = storedPreference();
 let sections = storedSectionStyle();
+let width = storedSectionWidth();
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
@@ -69,6 +77,12 @@ function setSectionStyle(style: SectionStyle) {
   changed();
 }
 
+function setSectionWidth(value: SectionWidth) {
+  width = value;
+  write(WIDTH_KEY, value === 'full' ? null : value);
+  changed();
+}
+
 export function useTheme() {
   const preference = useSyncExternalStore(subscribe, () => theme);
   useEffect(() => {
@@ -84,4 +98,9 @@ export function useTheme() {
 export function useSectionStyle() {
   const style = useSyncExternalStore(subscribe, () => sections);
   return { style, setStyle: setSectionStyle };
+}
+
+export function useSectionWidth() {
+  const value = useSyncExternalStore(subscribe, () => width);
+  return { width: value, setWidth: setSectionWidth };
 }

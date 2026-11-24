@@ -9,7 +9,7 @@ tier: optional
 group: apps
 category: media
 stack: torrenting
-tagline: Replaces stuck downloads and finds missing ones
+tagline: Replaces stuck downloads, finds missing ones
 summary: When a film or episode Sonarr or Radarr asked for stops downloading for a whole day, Cleanuparr removes
   it, blocks that copy and has another found. Every half hour it also searches again for one film or episode
   you are still missing, once it is out to buy or stream. Torrents you add by hand are left alone.

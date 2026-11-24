@@ -84,7 +84,8 @@ function Shell() {
         toggle={toggleSidebar}
       />
       <MobileBar openSearch={() => setSearchOpen(true)} theme={preference} setTheme={setPreference} />
-      <main className={path === '/chat' ? 'main main-full' : 'main'}>
+      {/* Chat fills the window edge to edge; Home's board fills its width. */}
+      <main className={path === '/chat' ? 'main main-full' : path === '/' ? 'main main-wide' : 'main'}>
         <div className="main-inner">
           {(statusStale || Boolean(failedSources?.length)) && (
             <p className="stale-note" role="status">

@@ -44,7 +44,7 @@
     right: 16px;
     width: 280px;
     max-height: calc(100vh - 48px);
-    overflow-y: auto;
+    overflow: hidden auto;
     box-shadow: var(--shadow-lg, var(--shadow-md));
     animation: panel-in 0.18s ease-out;
   }
@@ -57,19 +57,37 @@
   }
 }
 
-/* Four columns on a computer, two on a tablet, one on a phone; widgets keep their order. */
+/* The grid is gridstack's (Board.tsx): as wide as the page, the person's own columns. Each cell is
+   inset by half the gap, so the grid reaches half a gap past the page edge on every side. */
 .board {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-rows: 148px;
-  grid-auto-flow: row dense;
+  min-width: 0;
+}
+
+.board-grid.grid-stack {
+  margin: -8px;
+}
+
+.board-grid .grid-stack-item-content {
+  overflow: visible;
+}
+
+.board-grid .grid-stack-item-content > .widget {
+  height: 100%;
+}
+
+/* A phone-width board: one column, top-left first. */
+.board-stack {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
+.board-stack-note {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
 .widget {
-  container-type: inline-size;
-  grid-column: span var(--w, 1);
-  grid-row: span var(--h, 1);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -82,32 +100,150 @@
   box-shadow: var(--shadow-sm);
 }
 
-@media (max-width: 1000px) {
-  .board {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .widget[data-w='3'],
-  .widget[data-w='4'] {
-    grid-column: span 2;
-  }
+/* Where a dragged or resized widget will land. */
+.board-grid .grid-stack-placeholder > .placeholder-content {
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
 }
 
-@media (max-width: 640px) {
-  .board {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.board-grid .ui-draggable-dragging > .grid-stack-item-content > .widget,
+.board-grid .ui-resizable-resizing > .grid-stack-item-content > .widget {
+  box-shadow: var(--shadow-lg);
+  opacity: 0.92;
+}
 
-  .widget,
-  .widget[data-w='3'],
-  .widget[data-w='4'] {
-    grid-column: span 1;
-  }
+/* In edit mode the title bar moves the widget. */
+.board.is-editing .widget-head {
+  cursor: grab;
+}
 
-  /* One column: resizing would only change the height, so the corner goes. */
-  .widget-resize {
-    display: none;
-  }
+.board-grid .ui-draggable-dragging .widget-head {
+  cursor: grabbing;
+}
+
+/* Resize from the right edge, the bottom edge or the corner; shown on hover, only in edit mode. */
+.board-grid .ui-resizable-handle {
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.board-grid .grid-stack-item:hover > .ui-resizable-handle,
+.board-grid .grid-stack-item:focus-within > .ui-resizable-handle,
+.board-grid .ui-resizable-resizing > .ui-resizable-handle {
+  opacity: 1;
+}
+
+.board-grid .ui-resizable-e {
+  top: 16px;
+  right: 2px;
+  bottom: 16px;
+  width: 10px;
+  background: none;
+  cursor: ew-resize;
+}
+
+.board-grid .ui-resizable-s {
+  right: 16px;
+  bottom: 2px;
+  left: 16px;
+  height: 10px;
+  background: none;
+  cursor: ns-resize;
+}
+
+.board-grid .ui-resizable-e::after,
+.board-grid .ui-resizable-s::after {
+  content: '';
+  position: absolute;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.board-grid .ui-resizable-e::after {
+  top: 50%;
+  left: 3px;
+  width: 4px;
+  height: 32px;
+  transform: translateY(-50%);
+}
+
+.board-grid .ui-resizable-s::after {
+  top: 3px;
+  left: 50%;
+  width: 32px;
+  height: 4px;
+  transform: translateX(-50%);
+}
+
+/* Edit mode's toolbar stays in view while scrolling down a long board. */
+.board-editbar {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.board-editbar .segmented {
+  align-self: center;
+}
+
+.board-editbar .segmented button {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.board-editbar-history {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.board-editbar-end {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* A widget left out of the phone board, marked while arranging. */
+.widget-flag {
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+
+.widget-flag svg {
+  width: 14px;
+  height: 14px;
+}
+
+.board-panel-switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.board-panel-switch input {
+  margin-top: 2px;
+}
+
+.board-panel-switch small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
 }
 
 .widget-head {
@@ -122,6 +258,9 @@
 .widget-head h3 {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -144,15 +283,73 @@
   color: var(--text-3);
 }
 
+/* A widget never scrolls: each one lays itself out for the room it has (size.tsx). The few parts
+   that may scroll (the calendar's week, Ask's answer) do so inside. Focus rings may spill a little. */
 .widget-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: clip;
+  overflow-clip-margin: 4px;
+  container: widget / size;
+}
+
+/* Rows that fit whole, then "+3 more" (FitList). */
+.fit {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.widget-body > .fit {
+  height: 100%;
+}
+
+.fit > ul {
+  list-style: none;
+}
+
+.fit > ul > [hidden] {
+  display: none !important;
+}
+
+.fit-more {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.fit-more a,
+.fit-more button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fit-more a:hover,
+.fit-more button:hover {
+  text-decoration: underline;
+}
+
+/* Thin, quiet scroll bars for the few parts that scroll. */
+.widget-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .widget-grip,
-.widget-tool,
-.widget-resize {
+.widget-tool {
   display: grid;
   place-items: center;
   flex: none;
@@ -167,15 +364,13 @@
 }
 
 .widget-grip svg,
-.widget-tool svg,
-.widget-resize svg {
+.widget-tool svg {
   width: 15px;
   height: 15px;
 }
 
 .widget-grip:hover,
 .widget-tool:hover,
-.widget-resize:hover,
 .widget-tool[aria-pressed='true'] {
   background: var(--surface-hover);
   color: var(--text);
@@ -184,14 +379,6 @@
 .widget-grip {
   margin-left: -6px;
   cursor: grab;
-  touch-action: none;
-}
-
-.widget-resize {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  cursor: nwse-resize;
   touch-action: none;
 }
 
@@ -205,11 +392,6 @@
 .widget.is-editing .widget-body {
   pointer-events: none;
   opacity: 0.75;
-}
-
-.widget.is-dragging {
-  opacity: 0.55;
-  border-color: var(--accent);
 }
 
 .widget.is-current {
@@ -289,42 +471,222 @@
   font-weight: 600;
 }
 
-.board-panel .board-kinds {
+/* The Add list: groups that fold, names one line each, the chosen one opening on its preview. */
+.board-kinds-hint {
+  margin: -4px 0 4px;
+  font-size: 12px;
+}
+
+.board-kinds-groups {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 0 -6px;
+}
+
+.board-kinds-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.board-kinds-head:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.board-kinds-head:disabled {
+  cursor: default;
+}
+
+.board-kinds-head span {
+  flex: 1;
+}
+
+.board-kinds-head small {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.board-kinds-chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.board-kinds-head[aria-expanded='true'] .board-kinds-chevron {
+  transform: rotate(90deg);
+}
+
+.board-panel .board-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 6px;
   list-style: none;
 }
 
 .board-kinds li {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 6px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
 }
 
-.board-kinds li:hover {
+.board-kinds li.is-chosen {
+  background: var(--surface-2);
+}
+
+.board-kind-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: grab;
+}
+
+.board-kind-row:hover {
   background: var(--surface-hover);
+}
+
+.board-kind-row:active {
+  cursor: grabbing;
+}
+
+li[data-added] .board-kind-row {
+  cursor: pointer;
 }
 
 .board-kind-icon {
   width: 18px;
   height: 18px;
+  flex: none;
   color: var(--text-2);
 }
 
-.board-kinds strong {
-  font-size: 13.5px;
-  font-weight: 600;
+.board-kind-icon .app-icon {
+  width: 18px;
+  height: 18px;
 }
 
-.board-kinds p {
+.board-kind-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-kind-name small {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.board-kind-count {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.board-kind-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 2px 8px 10px;
+}
+
+.board-kind-detail p {
   color: var(--text-2);
   font-size: 12.5px;
-  line-height: 1.35;
+  line-height: 1.4;
+}
+
+/* While dragged in, the copy of the list entry floats over the board. */
+body > li[data-kind] {
+  z-index: 100;
+  width: 248px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  list-style: none;
+  opacity: 0.92;
+}
+
+body > li[data-kind] .board-kind-detail {
+  display: none;
+}
+
+/* The chosen widget at the size it is added at, shrunk to the panel's width. */
+.board-kind-preview {
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+}
+
+.board-kind-preview > .widget {
+  transform-origin: top left;
+  box-shadow: none;
+}
+
+.board-kinds-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-3);
+}
+
+.board-kinds-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.board-kinds-search svg {
+  width: 15px;
+  height: 15px;
+}
+
+.board-kinds-search input {
+  flex: 1;
+  height: 34px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
 }
 
 .board-panel-finish {
@@ -500,6 +862,8 @@
 }
 
 /* ---------- Weather ---------- */
+/* Three layouts (WeatherWidget): "now" beside the days (short), "now" above a row of days, or the
+   days as a list (tall and narrow). A row of days keeps only the days that fit whole. */
 .weather {
   display: flex;
   flex-direction: column;
@@ -510,44 +874,87 @@
 .weather-now {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .weather-icon {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex: none;
   color: var(--amber);
   stroke-width: 1.5;
 }
 
 .weather-temp {
+  flex: none;
   font-size: 30px;
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.02em;
 }
 
+.weather-text {
+  min-width: 0;
+}
+
+.weather-label,
+.weather-more {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .weather-label {
-  margin-top: 4px;
   color: var(--text-2);
   font-size: 13px;
 }
 
 .weather-more {
+  margin-top: 2px;
   font-size: 12px;
+}
+
+.weather.is-big .weather-icon {
+  width: 52px;
+  height: 52px;
+}
+
+.weather.is-big .weather-temp {
+  font-size: 46px;
+}
+
+.weather.is-big .weather-label {
+  font-size: 14px;
+}
+
+.weather-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+}
+
+.weather-row .weather-now {
+  flex: 0 1 auto;
 }
 
 .weather-days {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
+  grid-template-rows: auto;
+  grid-auto-rows: 0;
+  gap: 0 4px;
+  overflow: hidden;
   list-style: none;
 }
 
-.board .weather-days {
+.weather-stack .weather-days {
   margin-top: auto;
+}
+
+.weather-row .weather-days {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .weather-days li {
@@ -556,14 +963,77 @@
   align-items: center;
   gap: 2px;
   min-width: 0;
+  overflow: hidden;
   font-size: 12px;
   color: var(--text-2);
 }
 
-.weather-days li > svg {
+.weather-days li > svg,
+.weather-list li > svg {
   width: 18px;
   height: 18px;
   color: var(--text-2);
+}
+
+.weather-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Rows share out a tall widget's height, up to a comfortable spacing. */
+.weather-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px 46px auto;
+  align-items: center;
+  gap: 8px;
+  flex: 1 0 28px;
+  max-height: 44px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.weather-bar {
+  display: none;
+}
+
+/* A wide list: each day's low to high, on the week's scale. */
+@container widget (min-width: 400px) {
+  .weather-list li {
+    grid-template-columns: 64px 18px 46px minmax(0, 1fr) 64px;
+    gap: 14px;
+    font-size: 13px;
+  }
+
+  .weather-bar {
+    position: relative;
+    display: block;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--chart-track);
+  }
+
+  .weather-bar i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--blue), var(--amber));
+  }
+
+  .weather-list .weather-range {
+    justify-content: flex-end;
+  }
+}
+
+.weather-list .weather-day {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.weather-list .weather-pop {
+  justify-content: flex-end;
 }
 
 /* Chance of rain: quiet when low, blue when it is likely. */
@@ -599,54 +1069,7 @@
   font-weight: 400;
 }
 
-/* A short widget shows the days beside "now", not under it. */
-.weather-h1 {
-  flex-direction: row;
-  align-items: center;
-}
-
-.board .weather-h1 .weather-days {
-  flex: 1;
-  margin: 0 0 0 auto;
-  max-width: 420px;
-}
-
-/* How many days fit is decided by the widget's own width, which changes with the window. */
-@container (max-width: 640px) {
-  .weather-h1 .weather-days li:nth-child(n + 6) {
-    display: none;
-  }
-}
-
-@container (max-width: 520px) {
-  .weather-h1 .weather-more {
-    display: none;
-  }
-}
-
-@container (max-width: 420px) {
-  .weather-h1 .weather-days {
-    display: none;
-  }
-}
-
-@container (max-width: 360px) {
-  .weather-days li:nth-child(n + 6) {
-    display: none;
-  }
-}
-
-@container (max-width: 300px) {
-  .weather-more {
-    display: none;
-  }
-
-  .weather-days li:nth-child(n + 5) {
-    display: none;
-  }
-}
-
-/* ---------- Calendar: a month of dots, or a week of stacked events ---------- */
+/* ---------- Calendar: FullCalendar's month grid, or the week as a list ---------- */
 .cal {
   display: flex;
   flex-direction: column;
@@ -662,6 +1085,7 @@
 }
 
 .cal-title {
+  min-width: 0;
   overflow: hidden;
   font-size: 13px;
   font-weight: 600;
@@ -702,74 +1126,242 @@
   padding: 2px 6px !important;
 }
 
+.cal-views {
+  flex: none;
+}
+
 .cal-views button {
   padding: 2px 8px;
   font-size: 12px;
 }
 
-/* Month: seven columns of dates, up to three dots each. */
-.cal-month {
-  display: grid;
-  flex: 1;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
-  grid-template-rows: auto;
-  min-height: 0;
-}
-
-.cal-weekday {
-  padding-bottom: 2px;
-  color: var(--text-3);
-  font-size: 11px;
-  text-align: center;
-}
-
-.cal-cell {
+/* A small calendar: today's date, then the next events (CalendarWidget's Agenda). */
+.cal-agenda {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
+  gap: 6px;
+  height: 100%;
+}
+
+.cal-agenda-date {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.cal-agenda-date strong {
+  color: var(--accent-text);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.cal-agenda-date span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-agenda-date small {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-size: inherit;
+}
+
+/* Wide and short: the date on the left, the events in columns beside it. */
+.cal-agenda.is-side {
+  flex-direction: row;
+  gap: 16px;
+}
+
+.cal-agenda.is-side .cal-agenda-date {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: none;
+  width: 88px;
+}
+
+.cal-agenda.is-side .cal-agenda-date strong {
+  font-size: 30px;
+}
+
+.cal-agenda.is-side .cal-agenda-date small {
+  display: block;
+  margin: 0;
+}
+
+.cal-agenda.is-side .cal-agenda-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 16px;
+}
+
+.cal-agenda.is-side .cal-agenda-list li + li {
+  margin-top: 0;
+}
+
+.cal-agenda.is-short {
+  gap: 4px;
+}
+
+.cal-agenda.is-short .cal-agenda-date strong {
+  font-size: 18px;
+}
+
+.cal-agenda-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  padding: 2px 0 2px 8px;
+  border-left: 2px solid var(--accent);
+  font-size: 12.5px;
+}
+
+.cal-agenda-list li + li {
+  margin-top: 4px;
+}
+
+.cal-agenda-when {
+  flex: none;
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+.cal-agenda-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-agenda-empty {
+  font-size: 13px;
+}
+
+.cal-problem {
+  font-size: 12px;
+}
+
+/* FullCalendar fills what the bar leaves; its own height="100%" sizes the month rows to fit. */
+.cal-body {
+  flex: 1;
+  min-height: 0;
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--surface);
+  --fc-neutral-bg-color: var(--surface-2);
+  --fc-list-event-hover-bg-color: var(--surface-hover);
+  --fc-today-bg-color: transparent;
+  --fc-event-bg-color: var(--accent);
+  --fc-event-border-color: var(--accent);
+  --fc-small-font-size: 11px;
+  font-size: 12px;
+}
+
+.cal-body .fc-theme-standard .fc-scrollgrid,
+.cal-body .fc-theme-standard .fc-list {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* dayMaxEvents already fits each day to its row; the month never needs to scroll, only rounding made it. */
+.cal-body .fc-dayGridMonth-view .fc-scroller {
+  overflow: hidden !important;
+}
+
+.cal-body .fc .fc-col-header-cell-cushion {
+  padding: 3px 2px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cal-body .fc .fc-daygrid-day {
   cursor: pointer;
 }
 
-.cal-cell:hover {
-  background: var(--surface-2);
+.cal-body .fc .fc-daygrid-day:hover {
+  background: var(--surface-hover);
 }
 
-.cal-cell.is-outside {
+.cal-body .fc .fc-day-other .fc-daygrid-day-top {
+  opacity: 0.45;
+}
+
+/* FullCalendar keeps 2em under each date for events; a small widget's rows can't spare it. */
+.cal-body .fc .fc-daygrid-day-events {
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.cal-body .fc .fc-daygrid-day-number {
+  padding: 2px 4px;
+  line-height: 1.2;
+  color: var(--text-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-body .fc .fc-day-today .fc-daygrid-day-number {
+  min-width: 18px;
+  margin: 2px 2px 0 0;
+  padding: 1px 4px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  text-align: center;
+}
+
+.cal-body .fc .fc-daygrid-event {
+  margin-top: 1px;
+  font-size: 11px;
+}
+
+.cal-body .fc .fc-daygrid-dot-event {
+  padding: 0 2px;
+  color: var(--text);
+}
+
+.cal-body .fc .fc-daygrid-dot-event .fc-event-time,
+.cal-body .fc-daygrid-more-link {
   color: var(--text-3);
 }
 
-.cal-date {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  line-height: 1;
+.cal-body .fc .fc-daygrid-more-link {
+  padding: 0 2px;
+  font-size: 11px;
 }
 
-.cal-cell.is-today .cal-date {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
+.cal-body .fc .fc-daygrid-dot-event .fc-event-title {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+/* A compact month: centred dates, each day's events as up to three dots. */
+.cal-compact .fc .fc-daygrid-day-top {
+  justify-content: center;
+}
+
+.cal-compact .fc .fc-daygrid-day-bottom {
+  display: flex;
+  justify-content: center;
+}
+
+.cal-compact .fc .fc-daygrid-more-link:hover {
+  background: none;
 }
 
 .cal-dots {
-  display: flex;
-  align-items: center;
+  display: inline-flex;
   gap: 2px;
-  height: 5px;
 }
 
 .cal-dots i {
@@ -779,138 +1371,52 @@
   background: var(--accent);
 }
 
-.cal-cell.is-outside .cal-dots i {
+.cal-compact .fc .fc-day-other .cal-dots {
   opacity: 0.45;
 }
 
-.cal-dots b {
-  color: var(--text-3);
-  font-size: 9px;
-  line-height: 1;
+/* The week: a heading per day with something on, then its events. */
+.cal-body .fc .fc-list-day-cushion {
+  padding: 4px 10px;
 }
 
-/* Week: a column per day with its events stacked; a narrow widget lists the days instead. */
-.cal-week {
-  display: grid;
-  flex: 1;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
-  min-height: 0;
-  list-style: none;
-}
-
-.cal-day {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  min-height: 0;
-  padding: 4px;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.cal-day.is-today {
-  background: var(--accent-soft);
-}
-
-.cal-day.is-past {
-  opacity: 0.6;
-}
-
-.cal-day-head {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  color: var(--text-3);
-  font-size: 11px;
-}
-
-.cal-day-head b {
-  color: var(--text);
-  font-size: 13px;
+.cal-body .fc .fc-list-day-text {
+  color: var(--text-2);
   font-weight: 600;
 }
 
-.cal-day.is-today .cal-day-head b {
+.cal-body .fc .fc-day-today .fc-list-day-text {
   color: var(--accent-text);
 }
 
-.cal-day ul {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-height: 0;
-  overflow: auto;
-  list-style: none;
+.cal-body .fc .fc-list-event td {
+  padding: 4px 10px;
 }
 
-.cal-day ul li {
-  display: flex;
-  flex-direction: column;
-  padding: 2px 5px;
-  border-left: 2px solid var(--accent);
-  border-radius: 4px;
-  background: var(--surface-2);
-  font-size: 11.5px;
-  line-height: 1.3;
-}
-
-.cal-event-time {
+.cal-body .fc .fc-list-event-time {
   color: var(--text-3);
-  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
 
-.cal-event-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@container (max-width: 480px) {
-  .cal-week {
-    grid-template-columns: 1fr;
-    grid-auto-rows: auto;
-    overflow: auto;
-  }
-
-  .cal-day {
-    display: grid;
-    grid-template-columns: 56px minmax(0, 1fr);
-    align-items: start;
-    padding: 4px 6px;
-    overflow: visible;
-  }
-
-  .cal-day ul {
-    overflow: visible;
-  }
-
-  .cal-day ul li {
-    flex-direction: row;
-    gap: 6px;
-  }
-
-  .cal-free::before {
-    content: '—';
-    color: var(--text-3);
-    font-size: 12px;
-  }
+.cal-body .fc .fc-list-empty {
+  background: none;
+  color: var(--text-3);
 }
 
 /* ---------- Apps ---------- */
 .apps-widget {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+  height: 100%;
 }
 
 .apps-widget-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 4px 12px;
+  white-space: nowrap;
 }
 
 .apps-widget-summary strong {
@@ -938,14 +1444,13 @@
 .apps-widget-icons {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  list-style: none;
+  gap: 4px;
 }
 
 .apps-widget-icons a {
   display: grid;
   place-items: center;
-  padding: 4px;
+  padding: 3px;
   border-radius: var(--radius-sm);
   color: var(--text);
 }
@@ -959,12 +1464,12 @@
   display: none;
 }
 
-.apps-widget-h2 .apps-widget-icons a {
-  width: 76px;
+.apps-widget.is-named .apps-widget-icons a {
+  width: 72px;
   gap: 4px;
 }
 
-.apps-widget-h2 .apps-widget-name {
+.apps-widget.is-named .apps-widget-name {
   display: block;
   max-width: 100%;
   overflow: hidden;
@@ -978,7 +1483,6 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  list-style: none;
 }
 
 .stock {
@@ -990,9 +1494,11 @@
   font-size: 13px;
 }
 
-.widget[data-w='2'] .stock,
-.widget[data-w='3'] .stock,
-.widget[data-w='4'] .stock {
+.stocks.is-narrow .stock {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.stocks.is-wide .stock {
   grid-template-columns: minmax(0, 1fr) 72px auto 64px;
 }
 
@@ -1064,7 +1570,6 @@
 .ask-answer {
   flex: 1;
   min-height: 0;
-  overflow: auto;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
@@ -1083,7 +1588,16 @@
 }
 
 .ask-continue {
+  flex: none;
   align-self: flex-end;
+}
+
+.ask-hint {
+  margin: auto 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
 }
 
 /* ---------- Thermostat ---------- */
@@ -1205,21 +1719,27 @@
   font-size: 12px;
 }
 
-/* One row tall: everything fits in the row without scrolling. */
+/* Short: one line. The modes join it on the right once it is wide enough. */
 .thermostat.is-short {
-  gap: 6px 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'now setpoints modes';
+  gap: 6px 16px;
+}
+
+.thermostat.is-short .thermostat-modes {
+  width: auto;
 }
 
 .thermostat.is-short .thermostat-temp {
   font-size: 26px;
 }
 
-/* One column wide: the set point's label goes, the buttons and value stay. */
+/* Narrow: the set point's label goes, the buttons and value stay. */
 .thermostat.is-narrow .setpoint-label {
   display: none;
 }
 
-/* Two rows tall: the same parts, larger and spread over the height. */
+/* Tall: the same parts, larger and spread over the height. */
 .thermostat.is-tall {
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
@@ -1265,6 +1785,18 @@
 
 .thermostat.is-tall .thermostat-modes button {
   height: 30px;
+}
+
+.thermostat.is-tall .thermostat-modes {
+  max-width: 320px;
+}
+
+.thermostat.is-huge .thermostat-temp {
+  font-size: 68px;
+}
+
+.thermostat.is-huge .setpoint strong {
+  font-size: 22px;
 }
 
 /* ---------- Camera ---------- */
@@ -1325,5 +1857,464 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+
+.camera-bar.is-overlay {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 6px 2px 2px;
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 55%);
+}
+
+.camera-bar.is-overlay .widget-link {
+  color: #fff;
+}
+
+/* Edit mode: how many columns the board has. */
+.board-columns {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* ---------- App widgets (AppWidget.tsx): figures, a list, and plain-language states ---------- */
+.widget-head .menu .menu-list {
+  z-index: 40;
+}
+
+.widget-icon > .app-icon,
+.widget-icon .app-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.appw {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+}
+
+.appw-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+/* Wide: the figures on the left, the list beside them. */
+.appw.is-side .appw-main {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 16px;
+}
+
+.appw.is-side .appw-main > .fit {
+  height: 100%;
+}
+
+/* Figure tiles, each as wide as its value (a figure is never cut), sharing out the row. Above a
+   list: the first row only. Alone or beside a list: the rows that fit whole (FitList), stretched to
+   fill the widget, with larger figures when there is room. */
+.appw-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+}
+
+.appw-stats.is-row {
+  flex: none;
+  max-height: 52px;
+  overflow: hidden;
+}
+
+.appw-main > .fit:has(> .appw-stats) > .appw-stats {
+  height: 100%;
+  align-content: stretch;
+}
+
+.appw-stat {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 84px;
+  max-width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.appw-stat b,
+.appw-stat i {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appw-stat b {
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.appw-stat i {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-style: normal;
+}
+
+@container widget (min-height: 200px) {
+  .appw.is-figures .appw-stat b {
+    font-size: 24px;
+  }
+
+  .appw.is-figures .appw-stat i {
+    font-size: 12.5px;
+  }
+}
+
+@container widget (min-height: 320px) {
+  .appw.is-figures .appw-stat b {
+    font-size: 30px;
+  }
+}
+
+.appw-stat.tone-good b {
+  color: var(--green-text);
+}
+
+.appw-stat.tone-warn b {
+  color: var(--amber-text);
+}
+
+.appw-stat.tone-bad b {
+  color: var(--red-text);
+}
+
+.appw-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.appw-list h4 {
+  flex: none;
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.appw-list .fit > ul {
+  margin: 0 -6px;
+}
+
+.appw.is-compact .appw-item {
+  padding-block: 4px;
+}
+
+.appw.is-compact .appw-item-text small {
+  display: none;
+}
+
+.appw.is-compact .appw-progress {
+  margin-top: 2px;
+  height: 3px;
+}
+
+.appw-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+}
+
+a.appw-item:hover {
+  background: var(--surface-hover);
+}
+
+.appw-item-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.appw-item-text strong,
+.appw-item-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appw-item-text strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.appw-item-text small {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.appw-meta {
+  flex: none;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.appw-meta.tone-good {
+  color: var(--green-text);
+}
+
+.appw-meta.tone-warn {
+  color: var(--amber-text);
+}
+
+.appw-meta.tone-bad {
+  color: var(--red-text);
+}
+
+.appw-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gray);
+}
+
+.appw-dot.tone-good {
+  background: var(--green);
+}
+
+.appw-dot.tone-warn {
+  background: var(--amber);
+}
+
+.appw-dot.tone-bad {
+  background: var(--red);
+}
+
+.appw-progress {
+  display: block;
+  height: 4px;
+  margin-top: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--chart-track);
+}
+
+.appw-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.appw-open {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-3);
+}
+
+.appw-empty {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.appw-note {
+  flex: none;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appw-stale {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+  color: var(--amber-text);
+  font-size: 12.5px;
+}
+
+.appw-stale svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+/* No figures: one sentence and the fix, centred in the widget. */
+.appw-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: center;
+}
+
+.appw-state p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.appw-state small {
+  color: var(--text-3);
+}
+
+/* Short: the sentence on up to two lines, its button beside it. */
+.appw-state.is-tiny {
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.appw-state.is-tiny p {
+  -webkit-line-clamp: 2;
+}
+
+.appw-state.is-tiny .btn {
+  flex: none;
+}
+
+.appw-state.is-tiny small {
+  display: none;
+}
+
+.appw-state.appw-error p {
+  color: var(--red-text);
+}
+
+/* Loading: grey shapes where the figures will be. */
+.appw-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.appw-skeleton .appw-stat b,
+.appw-skeleton .appw-stat i,
+.appw-skeleton-row {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-hover), var(--border), var(--surface-hover));
+  background-size: 200% 100%;
+  animation: appw-shimmer 1.4s ease-in-out infinite;
+}
+
+.appw-skeleton .appw-stat b {
+  width: 60%;
+  height: 18px;
+}
+
+.appw-skeleton .appw-stat i {
+  width: 80%;
+  height: 10px;
+}
+
+.appw-skeleton-row {
+  height: 14px;
+}
+
+.appw-skeleton-row:nth-child(3) {
+  width: 85%;
+}
+
+.appw-skeleton-row:nth-child(4) {
+  width: 70%;
+}
+
+@keyframes appw-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appw-skeleton .appw-stat b,
+  .appw-skeleton .appw-stat i,
+  .appw-skeleton-row {
+    animation: none;
+  }
+}
+
+/* A tick-box row (a habit, a chore): ticking it records it in the app. */
+.appw-check {
+  cursor: pointer;
+}
+
+.appw-check:hover {
+  background: var(--surface-hover);
+}
+
+.appw-check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.appw-check.is-done strong {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+/* A key pasted into an app widget's settings. */
+.board-key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-key-help {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.board-key-actions {
+  display: flex;
   gap: 8px;
 }

@@ -5,6 +5,16 @@
 # backups and restore single files into /srv/mu3lab/backups/restores.
 id: kopia-ui
 capabilities: [backup_service]
+widgets:
+- id: backups
+  title: Backups
+  description: The last backup of Mu3Lab and of each app, whether it was checked, and the next run.
+  audience: operators
+  refresh_seconds: 300
+  # Mu3Lab keeps these records itself: shown while Kopia is stopped too.
+  needs_running: false
+  largest: [12, 12]
+  start: [5, 6]
 name: Kopia backups
 tier: optional
 group: infrastructure
@@ -56,6 +66,12 @@ chat:
   assistant:
     title: Kopia backups (admins)
     description: Check whether each app's backups are running and up to date. Read-only.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Are all backups up to date?"
+    - "When did each app last back up?"
+    - "Did any backup fail this week?"
+    - "How much space do the backups use?"
     instructions: Help administrators check Mu3Lab's backups. You can only read each app's backup status and the
       backup storage; to back up now, restore or change the schedule, point them to Security & backups in the Mu3Lab
       dashboard. Use only Kopia tools assigned to this agent.

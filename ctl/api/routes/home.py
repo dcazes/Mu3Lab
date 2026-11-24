@@ -5,22 +5,25 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from starlette.concurrency import run_in_threadpool
 
-from ctl import home_board, home_widgets, thermostat
+from ctl import app_widgets, home_board, home_widgets, thermostat
 from ctl.api import models, runtime
 from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
-from ctl.api.security import IdentityData, Member, Operator, OperatorMutation, Owner, OwnerMutation
+from ctl.api.security import IdentityData, Member, MemberMutation, Operator, OperatorMutation, Owner, OwnerMutation
 
 router = APIRouter(prefix="/api/v1/home", tags=["home"], route_class=ContractRoute)
 
 
 def _board(uid: str, is_admin: bool) -> models.HomeBoard:
-    widgets, customized = home_board.load(uid, is_admin=is_admin)
+    board = home_board.load(uid, is_admin=is_admin)
     return models.HomeBoard.model_validate(
         {
-            "widgets": widgets,
-            "customized": customized,
-            "columns": home_board.COLUMNS,
+            "widgets": board.widgets,
+            "customized": board.customized,
+            "columns": board.columns,
+            "placement": board.placement,
+            "column_choices": list(home_board.COLUMN_CHOICES),
+            "base_columns": home_board.BASE_COLUMNS,
             "kinds": home_board.kinds(is_admin=is_admin),
         }
     )
@@ -35,7 +38,7 @@ def read_board(person: Owner) -> models.HomeBoard:
 def save_board(payload: models.HomeBoardRequest, person: OwnerMutation) -> models.HomeBoard:
     uid, is_admin = str(person["subject_id"]), bool(person.get("is_admin"))
     try:
-        home_board.save(uid, payload.widgets, is_admin=is_admin)
+        home_board.save(uid, payload.widgets, is_admin=is_admin, columns=payload.columns, placement=payload.placement)
     except home_board.BoardError as exc:
         raise ApiError(400, str(exc), code="board_invalid") from None
     return _board(uid, is_admin)
@@ -46,6 +49,73 @@ def reset_board(person: OwnerMutation) -> models.HomeBoard:
     """Back to the starter set."""
     home_board.reset(str(person["subject_id"]))
     return _board(str(person["subject_id"]), bool(person.get("is_admin")))
+
+
+@router.get("/widgets/{kind}/data", response_model=models.HomeWidgetData)
+async def widget_data(kind: str, person: Member, fresh: bool = False) -> models.HomeWidgetData:
+    """An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh)."""
+    from ctl.api.service_view import service_states
+
+    is_admin = bool(person.get("is_admin"))
+    widget = app_widgets.find(kind, is_admin=is_admin)
+    if widget is None:
+        raise ApiError(404, "This widget is not available to you.", code="widget_unavailable")
+    if fresh:
+        app_widgets.forget(kind)
+    states = await run_in_threadpool(service_states, person)
+    data = await run_in_threadpool(
+        app_widgets.read,
+        widget,
+        service_state=states.get(widget.app.id, "not_installed"),
+        is_admin=is_admin,
+        uid=str(person["subject_id"]),
+        email=str(person.get("email") or ""),
+    )
+    return models.HomeWidgetData.model_validate(data)
+
+
+def _widget(kind: str, person: IdentityData) -> app_widgets.Offered:
+    widget = app_widgets.find(kind, is_admin=bool(person.get("is_admin")))
+    if widget is None:
+        raise ApiError(404, "This widget is not available to you.", code="widget_unavailable")
+    return widget
+
+
+@router.post("/widgets/{kind}/action", response_model=models.OkResponse)
+async def widget_action(kind: str, payload: models.HomeWidgetAction, person: MemberMutation) -> models.OkResponse:
+    """A ticked box in an app widget (a habit done, a chore finished): the app records it."""
+    widget = _widget(kind, person)
+    try:
+        await run_in_threadpool(
+            app_widgets.act,
+            widget,
+            payload.action,
+            is_admin=bool(person.get("is_admin")),
+            uid=str(person["subject_id"]),
+            email=str(person.get("email") or ""),
+        )
+    except app_widgets.WidgetError as exc:
+        raise ApiError(502, str(exc), code="widget_action_failed") from None
+    return models.OkResponse(ok=True)
+
+
+@router.get("/widgets/{kind}/key", response_model=models.HomeWidgetKeyStatus)
+def widget_key_status(kind: str, person: Member) -> models.HomeWidgetKeyStatus:
+    """Whether a key is saved for this widget; the key itself is never sent back."""
+    widget = _widget(kind, person)
+    return models.HomeWidgetKeyStatus(saved=app_widgets.has_key(widget, uid=str(person["subject_id"])))
+
+
+@router.put("/widgets/{kind}/key", response_model=models.HomeWidgetKeyStatus)
+def save_widget_key(
+    kind: str, payload: models.HomeWidgetKeyRequest, person: MemberMutation
+) -> models.HomeWidgetKeyStatus:
+    widget = _widget(kind, person)
+    if widget.spec.key is None:
+        raise ApiError(400, "This widget does not take a key.", code="widget_key_unused")
+    # Administrators-only widgets share one key, which only administrators may change.
+    app_widgets.save_key(widget, payload.key, uid=str(person["subject_id"]))
+    return models.HomeWidgetKeyStatus(saved=bool(payload.key.strip()))
 
 
 @router.get("/weather", response_model=models.WeatherResponse)

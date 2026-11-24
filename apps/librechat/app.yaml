@@ -1,0 +1,135 @@
+# LibreChat — see ctl/manifest/models.py for every field.
+id: librechat
+name: LibreChat
+tier: optional
+capabilities: [chat]
+group: ai
+category: ai
+stack: chat
+tagline: A third chat app, with app assistants
+summary: An AI chat app with an assistant for each of your apps. Mu3Lab connects LibreChat to its models through
+  LiteLLM, signs everyone in with Authentik, and passes each person's own sign-in on to their app tools, as it does for
+  Open WebUI. Choose it as the household chat in Settings > AI.
+version: "v0.8.9"
+upstream: danny-avila/LibreChat
+depends_on:
+- litellm
+- authentik
+service:
+  local_port: 3213
+  health:
+    path: /health
+  start_timeout_seconds: 600
+route:
+  https_port: 8472
+  caddy_port: 19489
+  access: open
+  # LibreChat forbids framing; it is the household chat inside the dashboard's Chat page.
+  dashboard_frame: true
+  # Mu3Lab's own administrator account signs in with a password from this server only
+  # (ctl/librechat_ops.py); on the private address, Authentik is the only way in.
+  blocked_paths:
+  - path: /api/auth/login
+    message: LibreChat signs in with Mu3Lab.
+  - path: /api/admin/login/local
+    message: LibreChat signs in with Mu3Lab.
+  - path: /api/auth/register
+    message: LibreChat signs in with Mu3Lab.
+sign_in:
+  method: oidc
+  oidc:
+    client_id: mu3lab-librechat
+    redirect_paths:
+    - /oauth/openid/callback
+    # Its home page: signed-in people go straight to their chats, everyone else on to Authentik
+    # (OPENID_AUTO_REDIRECT). Starting at /oauth/openid would sign in again on every visit, and
+    # LibreChat allows only a few sign-ins a minute.
+    launch_path: /
+    # Its home page signs in from the browser's scripts; Mu3Lab's sign-in check starts where they go.
+    check_path: /oauth/openid
+    forwards_sign_in: true
+    env:
+      client_id: OPENID_CLIENT_ID
+      client_secret: OPENID_CLIENT_SECRET
+      discovery_url: OPENID_ISSUER
+account:
+  mode: oidc_first_login
+  user_action: Open LibreChat; Authentik signs you in, as an administrator if you are one in Mu3Lab.
+secrets:
+- env: CREDS_KEY
+  kind: hex
+  length: 32
+- env: CREDS_IV
+  kind: hex
+  length: 16
+- env: JWT_SECRET
+  kind: hex
+  length: 32
+- env: JWT_REFRESH_SECRET
+  kind: hex
+  length: 32
+- env: OPENID_SESSION_SECRET
+  length: 48
+- env: MEILI_MASTER_KEY
+  length: 32
+# Mu3Lab's own LibreChat administrator (scripts/service-admin.js): it adds each person's assistants.
+- env: LIBRECHAT_ADMIN_PASSWORD
+  length: 40
+# The value of its own AI gateway key (gateway_key rule); LiteLLM keys start with sk-.
+- env: LITELLM_APP_KEY
+  kind: hex
+  length: 24
+env:
+  DOMAIN_CLIENT: '{{public_url}}'
+  DOMAIN_SERVER: '{{public_url}}'
+  MU3LAB_LLM_API_KEY: 'sk-{{LITELLM_APP_KEY}}'
+# Registers its key again when the gateway is reinstalled.
+integrates_with:
+- capability: model_proxy
+rules:
+# Its own AI gateway key, for chat only: never the voice assistant's route.
+- rule: gateway_key
+  with:
+    key_env: MU3LAB_LLM_API_KEY
+    models: [mu3lab-chat, mu3lab-fast, mu3lab-local, mu3lab-outside]
+    rpm_limit: 3000
+# Stays stopped until an outside provider or a local chat model can answer; the card says what to open.
+- rule: needs_chat_model
+# Mu3Lab's administrator account, made before anyone signs in, so it is LibreChat's first
+# (administrator) account; Mu3Lab's operators become administrators through Authentik.
+- rule: container_script
+  with:
+    at: after_healthy
+    service: api
+    script: scripts/service-admin.js
+    interpreter:
+    - node
+    - '-'
+    expect: MU3LAB_LIBRECHAT_ADMIN_OK
+    purpose: Create Mu3Lab's LibreChat administrator, which adds everyone's app assistants
+mobile:
+  primary: librechat-pwa
+  clients:
+  - id: librechat-pwa
+    name: LibreChat web app
+    kind: pwa
+    support: official
+    platforms:
+    - ios
+    - android
+    - web
+    install: {}
+    homepage: https://www.librechat.ai/
+    source: https://github.com/danny-avila/LibreChat
+    setup: pwa
+    summary: Chat with your AI models and app assistants from the phone's home screen.
+    caveat: Your phone must be connected to the Mu3Lab tailnet.
+    steps:
+    - Connect your phone to the Mu3Lab tailnet.
+    - Open the private LibreChat address; Authentik signs you in.
+    - Use the browser's share or menu button and choose Add to Home Screen.
+chat:
+  workspace: libre
+resource_guidance: Runs LibreChat, MongoDB and Meilisearch (chat search). The first install downloads about 5 GB;
+  expect moderate memory use. Models run through LiteLLM.
+setup_action: Connect LibreChat to LiteLLM, sign in with Authentik, and add an assistant for each app.

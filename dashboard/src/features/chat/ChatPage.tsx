@@ -108,11 +108,13 @@ export function ChatPage() {
   }, [needsConnection]);
   // The approval page needs a chat session, so it goes through the same silent sign-in as the chat itself.
   const approval = connection ? new URL(connection.url) : null;
-  // The question goes inside another address (the app's sign-in hands it on), hence encoded twice.
+  // Where the question goes inside another address (Open WebUI's sign-in hands it on), it is encoded twice.
   const frameUrl = approval
     ? `${status.url}?next=${encodeURIComponent(approval.pathname + approval.search)}`
     : question && status.prompt_url
-      ? status.prompt_url.replace('{question}', encodeURIComponent(encodeURIComponent(question)))
+      ? status.prompt_url
+          .replace('{question2}', encodeURIComponent(encodeURIComponent(question)))
+          .replace('{question}', encodeURIComponent(question))
       : status.url;
   if (!status.ready || !status.url)
     return (

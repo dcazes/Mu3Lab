@@ -13,6 +13,20 @@ tagline: Your own films and TV, like Netflix
 summary: Watch the household's films and shows on the TV, in the browser or on phones at home, with each
   person's own watch history and Continue watching. Add films to the shared Movies folder in Nextcloud and
   series to Shows, or download them with qBittorrent; Jellyfin finds the posters and descriptions.
+widgets:
+- id: library
+  title: Films & shows
+  description: What the household's libraries hold, what was added lately, and how many are watching now.
+  refresh_seconds: 300
+  largest: [12, 10]
+  start: [5, 4]
+- id: continue-watching
+  title: Continue watching
+  description: Your own half-watched films and episodes, with how much is left.
+  personal: true
+  refresh_seconds: 300
+  largest: [12, 10]
+  start: [4, 4]
 version: "12.4"
 upstream: jellyfin/jellyfin
 media:
@@ -152,6 +166,12 @@ chat:
   assistant:
     title: Jellyfin
     description: Find films and shows, see what's new, and pick up where you left off.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "What's new in the library this week?"
+    - "Find a family film for tonight"
+    - "What was I watching last?"
+    - "Which shows have new episodes?"
     instructions: Help with the household's Jellyfin films and shows. Search before answering, and use the titles the
       tools return. Watch history and Continue watching are the person's own. You cannot play, change or delete
       anything; to watch, point them to Jellyfin on the TV or in the browser at home. Use only Jellyfin tools

@@ -8,6 +8,19 @@ category: home
 tagline: Recipes, meal plans, and shopping lists
 summary: Organizes household recipes, meal plans, and shopping lists. Import recipes from websites or add your own,
   schedule meals, and turn recipe ingredients into shopping lists.
+widgets:
+- id: meal-plan
+  title: Meal plan
+  description: Today's meals and the rest of the week, from Mealie's household plan.
+  refresh_seconds: 900
+  largest: [12, 10]
+  start: [4, 4]
+- id: shopping-list
+  title: Shopping list
+  description: What is still to buy, ticked off right here.
+  refresh_seconds: 60
+  largest: [12, 12]
+  start: [4, 4]
 version: "v3.30.0"
 upstream: mealie-recipes/mealie
 service:
@@ -64,6 +77,12 @@ chat:
   assistant:
     title: Mealie
     description: Plan meals, recipes, and shopping lists.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "What's on the meal plan this week?"
+    - "Suggest a quick dinner from our recipes"
+    - "Add tonight's recipe to the shopping list"
+    - "Find a vegetarian recipe we have"
     instructions: Help with Mealie recipes, meal plans, and shopping lists. Ask before changing recipes or lists.
       Use only Mealie tools assigned to this agent.
     faq:

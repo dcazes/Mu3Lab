@@ -431,6 +431,9 @@ def main_model(
     *,
     tool_ids: list[str] | None = None,
     gateway_down: str = "",
+    now: str = agent_context.NOW,
+    pick: str = "",
+    delegates: bool = False,
 ) -> dict[str, Any]:
     """The main assistant, told which app assistants exist, whether each can reach its app now, and what every
     installed app is for.
@@ -438,6 +441,9 @@ def main_model(
     ``guide`` (``agent_context.household_guide``) lets it answer questions about the apps themselves,
     such as what one is for or how to get it on a phone, without sending people elsewhere.
     ``gateway_down`` names ContextForge while it is stopped: then no assistant reaches its app.
+    ``now`` and ``pick`` are how another chat app (LibreChat) gives the date and offers an assistant.
+    ``delegates``: it can hand work to the app assistants itself (LibreChat's subagents), so ``pick``
+    says how, and it no longer tells people it has no app tools.
     """
     if assistants:
         listing = "\n".join(_listing(item, gateway_down) for item in assistants)
@@ -449,12 +455,11 @@ def main_model(
             if gateway_down
             else ""
         )
-        apps = (
-            "These app assistants can read and change data in their app:\n"
-            f"{listing}{offline}\n\n"
-            "When a request needs one of these apps, name the assistant to use and tell the person to type @ "
-            "followed by its name in the message box, or to choose it from the model menu at the top of the chat. "
-            "When its app is out of reach, say so first, with how to fix it."
+        apps = f"These app assistants can read and change data in their app:\n{listing}{offline}\n\n" + (
+            pick
+            or "When a request needs one of these apps, name the assistant to use and tell the person to type @ "
+            "followed by its name in the message box, or to choose it from the model menu at the top of the "
+            "chat. When its app is out of reach, say so first, with how to fix it."
         )
     else:
         apps = (
@@ -481,10 +486,16 @@ def main_model(
         else ""
     )
     instructions = (
-        f"{agent_context.NOW}\n\n"
+        f"{now}\n\n"
         "You are Mu3Lab, this household's general assistant. You can help with general questions, writing and "
-        "planning. Apart from the calendar, you have no app tools: you cannot see or change anything inside the "
-        f"household's apps, so never claim to have done so.\n\n{apps}{household}{calendar}\n\n"
+        + (
+            "planning. You reach the household's apps only through their app assistants: never claim something "
+            "was done in an app unless its assistant reported doing it.\n\n"
+            if delegates
+            else "planning. Apart from the calendar, you have no app tools: you cannot see or change anything "
+            "inside the household's apps, so never claim to have done so.\n\n"
+        )
+        + f"{apps}{household}{calendar}\n\n"
         "People manage Mu3Lab itself (apps, people, AI settings, backups) in the Mu3Lab dashboard."
     )
     return {

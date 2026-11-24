@@ -338,6 +338,10 @@ kbd {
   padding: 36px 40px 96px;
 }
 
+.main-wide .main-inner {
+  max-width: none;
+}
+
 .main-full .main-inner {
   max-width: none;
   padding: 0;

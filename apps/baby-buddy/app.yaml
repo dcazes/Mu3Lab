@@ -8,6 +8,13 @@ category: home
 tagline: Baby feeding, sleep, and diaper tracker
 summary: A shared baby-care tracker for feedings, sleep, diaper changes, pumping, and growth. Caregivers can record
   daily routines and review trends from a common activity history.
+widgets:
+- id: baby
+  title: Baby
+  description: How long since the last feeding, sleep and nappy change.
+  refresh_seconds: 120
+  largest: [12, 8]
+  start: [4, 4]
 version: v2.11.0
 upstream: babybuddy/babybuddy
 service:
@@ -67,6 +74,12 @@ chat:
   assistant:
     title: Baby Buddy
     description: Log and look up feedings, sleep, diapers and growth.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "When was the last feeding?"
+    - "How long did the baby sleep today?"
+    - "Log a diaper change now"
+    - "Show this week's growth measurements"
     instructions: Help log and review Baby Buddy records for the household's children. Confirm the child, time and
       details before logging, ask before changing or deleting records, and give times in the household's time zone.
       Use only Baby Buddy tools assigned to this agent.

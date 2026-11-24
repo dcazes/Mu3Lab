@@ -1,10 +1,10 @@
-import { ArrowRight, Check, Pencil, Plus, X } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowRight, Check, LayoutGrid, Pencil, Plus, Redo2, Undo2, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { Link } from '../../lib/router';
 import { useDashboard } from '../../state/dashboard';
 import { BoardView, type Panel, usePanelRoom } from './board/Board';
-import { useBoard } from './board/useBoard';
+import { type Board, useBoard } from './board/useBoard';
 import { CoreSetupProgress } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
 import { SystemStatus } from './SystemStatus';
@@ -48,6 +48,121 @@ function Attention() {
   );
 }
 
+/**
+ * Edit mode's toolbar, kept in view while scrolling: how the board is laid out (columns, free or
+ * gravity), undo and redo, then adding widgets and finishing.
+ */
+function EditBar({
+  board,
+  onAdd,
+  onCancel,
+  onDone,
+}: {
+  board: Board;
+  onAdd: () => void;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
+  const { undo, redo } = board;
+  // Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes, except while typing in a field.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const typing =
+        event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]');
+      if (!(event.ctrlKey || event.metaKey) || typing) return;
+      const key = event.key.toLowerCase();
+      if (key === 'z' && !event.shiftKey) undo();
+      else if ((key === 'z' && event.shiftKey) || key === 'y') redo();
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
+  return (
+    <div className="board-editbar" role="toolbar" aria-label="Arrange your board">
+      <label className="board-columns">
+        Columns
+        <select
+          className="select-sm"
+          value={board.columns}
+          onChange={(event) => board.setColumns(Number(event.target.value))}
+          aria-label="Columns across the board"
+        >
+          {board.columnChoices.map((count) => (
+            <option key={count} value={count}>
+              {count}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="segmented" role="radiogroup" aria-label="How widgets sit">
+        {(
+          [
+            ['free', 'Free', 'Widgets stay where you put them; ones pushed aside slide back'],
+            ['gravity', 'Gravity', 'Widgets always pack up to the top'],
+          ] as const
+        ).map(([value, label, hint]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={board.placement === value}
+            title={hint}
+            onClick={() => board.setPlacement(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {board.placement === 'free' && (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={LayoutGrid}
+          title="Move every widget up as far as it goes, closing the gaps"
+          onClick={board.tidy}
+        >
+          Tidy up
+        </Button>
+      )}
+      <span className="board-editbar-history">
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Undo2}
+          className="btn-icon"
+          aria-label="Undo"
+          title="Undo (Ctrl+Z)"
+          disabled={!board.canUndo}
+          onClick={undo}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={Redo2}
+          className="btn-icon"
+          aria-label="Redo"
+          title="Redo (Ctrl+Shift+Z)"
+          disabled={!board.canRedo}
+          onClick={redo}
+        />
+      </span>
+      <span className="board-editbar-end">
+        <Button variant="secondary" size="sm" icon={Plus} onClick={onAdd}>
+          Add widget
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="sm" icon={Check} loading={board.saving} onClick={onDone}>
+          Done
+        </Button>
+      </span>
+    </div>
+  );
+}
+
 // On a computer the add list opens beside the board; on a phone it would cover it, so it waits to be asked for.
 const wide = () => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1001px)').matches;
 
@@ -55,7 +170,7 @@ export function HomePage() {
   const { data } = useDashboard();
   const board = useBoard();
   const [panel, setPanel] = useState<Panel>('closed');
-  const { home, shift, covered } = usePanelRoom(board.editing && panel !== 'closed');
+  const { home, shift, covered, reserve } = usePanelRoom(board.editing && panel !== 'closed');
   const cancel = () => {
     board.cancel();
     setPanel('closed');
@@ -63,7 +178,11 @@ export function HomePage() {
   const done = () => void board.save().then((saved) => saved && setPanel('closed'));
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   return (
-    <div className="home" ref={home} style={shift ? { transform: `translateX(-${shift}px)` } : undefined}>
+    <div
+      className="home"
+      ref={home}
+      style={shift ? { transform: `translateX(-${shift}px)` } : reserve ? { paddingRight: reserve } : undefined}
+    >
       <header className="home-header">
         <div>
           <h1>
@@ -74,19 +193,7 @@ export function HomePage() {
         </div>
         <SystemStatus />
         <div className="home-edit">
-          {board.editing ? (
-            <>
-              <Button variant="secondary" size="sm" icon={Plus} onClick={() => setPanel('add')}>
-                Add widget
-              </Button>
-              <Button variant="ghost" size="sm" onClick={cancel}>
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" icon={Check} loading={board.saving} onClick={done}>
-                Done
-              </Button>
-            </>
-          ) : (
+          {!board.editing && (
             <Button
               variant="ghost"
               size="sm"
@@ -102,6 +209,7 @@ export function HomePage() {
           )}
         </div>
       </header>
+      {board.editing && <EditBar board={board} onAdd={() => setPanel('add')} onCancel={cancel} onDone={done} />}
       <Attention />
       <CoreSetupProgress />
       <GetStarted />

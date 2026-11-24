@@ -26,19 +26,22 @@ afterEach(() => {
 const BOARD = {
   ok: true,
   customized: false,
-  columns: 4,
+  columns: 12,
+  column_choices: [4, 6, 8, 12, 16, 24],
+  base_columns: 12,
+  placement: 'free',
   widgets: [
-    { id: 'weather', kind: 'weather', w: 2, h: 1, settings: { units: 'celsius' } },
-    { id: 'apps', kind: 'apps', w: 2, h: 1, settings: {} },
+    { id: 'weather', kind: 'weather', x: 0, y: 0, w: 6, h: 2, settings: { units: 'celsius' } },
+    { id: 'apps', kind: 'apps', x: 6, y: 0, w: 6, h: 2, settings: {} },
   ],
   kinds: ['apps', 'weather', 'calendar', 'stocks', 'ask'].map((kind) => ({
     kind,
-    min_w: 1,
-    min_h: 1,
-    max_w: 4,
-    max_h: 4,
-    w: 2,
-    h: kind === 'ask' ? 2 : 1,
+    min_w: 3,
+    min_h: 2,
+    max_w: 12,
+    max_h: 8,
+    w: 6,
+    h: kind === 'ask' ? 4 : 2,
   })),
 };
 
@@ -68,9 +71,11 @@ describe('Home board', () => {
     // A phone-sized window waits to be asked for the list, so it never covers the board.
     fireEvent.click(screen.getByRole('button', { name: 'Add widget' }));
     const panel = screen.getByRole('complementary', { name: 'Add a widget' });
-    // Apps belongs on a board once.
-    expect(within(panel).getByRole('button', { name: 'Apps is on your board' })).toBeDisabled();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Add Stocks' }));
+    // Choosing a name shows it with Add. Apps belongs on a board once.
+    fireEvent.click(within(panel).getByRole('button', { name: /^Apps/ }));
+    expect(within(panel).getByRole('button', { name: 'Already on your board' })).toBeDisabled();
+    fireEvent.click(within(panel).getByRole('button', { name: /^Stocks/ }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Add to board' }));
     // A widget with settings opens them straight away.
     const settings = screen.getByRole('complementary', { name: 'Stocks settings' });
     fireEvent.change(within(settings).getByRole('textbox', { name: 'Ticker symbol' }), { target: { value: 'aapl' } });
@@ -82,8 +87,9 @@ describe('Home board', () => {
     );
     const put = fetchMock.mock.calls.find(([path, init]) => path === '/api/v1/home/board' && init?.method === 'PUT');
     const saved = JSON.parse(String(put![1]!.body)).widgets;
-    expect(saved.map((widget: { kind: string }) => widget.kind)).toEqual(['stocks', 'weather', 'apps']);
-    expect(saved[0].settings).toEqual({ symbols: ['AAPL'] });
+    expect(saved.map((widget: { kind: string }) => widget.kind)).toEqual(['weather', 'apps', 'stocks']);
+    // A new widget takes the first free space: under the two across the top.
+    expect(saved[2]).toMatchObject({ x: 0, y: 2, w: 6, h: 2, settings: { symbols: ['AAPL'] } });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument());
   });
 
@@ -113,10 +119,7 @@ describe('App stacks', () => {
     });
     const kopia = service('kopia-ui', 'Kopia backups', 'core', { category: 'system' });
     localStorage.removeItem('mu3lab.homeFolded');
-    renderWithDashboard(
-      <AppStacks services={[immich, mealie, kopia]} />,
-      dashboardData([immich, mealie, kopia]),
-    );
+    renderWithDashboard(<AppStacks services={[immich, mealie, kopia]} />, dashboardData([immich, mealie, kopia]));
     // Backups & system come last, folded on Home to the heading alone.
     const system = () => screen.getByRole('button', { name: 'Backups & system' });
     expect(system()).toHaveAttribute('aria-expanded', 'false');

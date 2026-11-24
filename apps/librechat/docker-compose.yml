@@ -1,0 +1,143 @@
+name: mu3lab-librechat
+
+x-logging: &default-logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+services:
+  api:
+    image: registry.librechat.ai/librechat-ai/librechat:v0.8.9@sha256:4a3967a47031c1fdba8302a6a341be7671101e40b617f7934ba25aac69fcea2b
+    restart: unless-stopped
+    ports: ["127.0.0.1:3213:3080"]
+    extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3080"
+      DOMAIN_CLIENT: ${DOMAIN_CLIENT:?DOMAIN_CLIENT is required}
+      DOMAIN_SERVER: ${DOMAIN_SERVER:?DOMAIN_SERVER is required}
+      TRUST_PROXY: "2"
+      NO_INDEX: "true"
+      # Mu3Lab Chat: its name, with Mu3Lab's icons over LibreChat's (volumes below).
+      APP_TITLE: Mu3Lab Chat
+      HELP_AND_FAQ_URL: /
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      SEARCH: "true"
+      MEILI_HOST: http://meilisearch:7700
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY is required}
+      CONFIG_PATH: /app/librechat.yaml
+      CREDS_KEY: ${CREDS_KEY:?CREDS_KEY is required}
+      CREDS_IV: ${CREDS_IV:?CREDS_IV is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      # Models come only from LiteLLM (librechat.yaml); LibreChat's built-in providers stay off.
+      ENDPOINTS: agents,custom
+      MU3LAB_LLM_API_KEY: ${MU3LAB_LLM_API_KEY:?MU3LAB_LLM_API_KEY is required}
+      # Authentik is the only way in for people. The password form stays hidden; the password
+      # path answers only Mu3Lab's own administrator, from this server (route blocked_paths).
+      ALLOW_REGISTRATION: "false"
+      ALLOW_SOCIAL_LOGIN: "true"
+      ALLOW_SOCIAL_REGISTRATION: "true"
+      ALLOW_PASSWORD_RESET: "false"
+      ALLOW_EMAIL_LOGIN: "false"
+      ALLOW_EMAIL_LOGIN_OVERRIDE: "true"
+      ALLOW_ACCOUNT_DELETION: "false"
+      ALLOW_SHARED_LINKS: "false"
+      ALLOW_SHARED_LINKS_PUBLIC: "false"
+      OPENID_ISSUER: ${OPENID_ISSUER:?OPENID_ISSUER is required}
+      OPENID_CLIENT_ID: ${OPENID_CLIENT_ID:?OPENID_CLIENT_ID is required}
+      OPENID_CLIENT_SECRET: ${OPENID_CLIENT_SECRET:?OPENID_CLIENT_SECRET is required}
+      OPENID_SESSION_SECRET: ${OPENID_SESSION_SECRET:?OPENID_SESSION_SECRET is required}
+      OPENID_CALLBACK_URL: /oauth/openid/callback
+      # offline_access: a refresh token, so app tools keep acting as the signed-in person (ContextForge).
+      OPENID_SCOPE: openid profile email offline_access
+      OPENID_BUTTON_LABEL: Sign in with Mu3Lab
+      OPENID_AUTO_REDIRECT: "true"
+      # LibreChat counts every request to its sign-in routes (/oauth/*) toward 7 per 5 minutes per
+      # address. Authentik guards the sign-in itself and password sign-in is blocked on the
+      # private address, so allow a household's worth of sign-ins and refreshes.
+      LOGIN_MAX: "40"
+      OPENID_USE_PKCE: "true"
+      # LibreChat keeps each person's Authentik tokens and refreshes them, and passes the access
+      # token on with app tool calls ({{LIBRECHAT_OPENID_ACCESS_TOKEN}}, set by Mu3Lab).
+      OPENID_REUSE_TOKENS: "true"
+      # Mu3Lab operators are administrators; everyone else in the household is a user.
+      OPENID_REQUIRED_ROLE: mu3lab-users,mu3lab-operators
+      OPENID_REQUIRED_ROLE_TOKEN_KIND: id
+      OPENID_REQUIRED_ROLE_PARAMETER_PATH: groups
+      OPENID_ADMIN_ROLE: mu3lab-operators
+      OPENID_ADMIN_ROLE_TOKEN_KIND: id
+      OPENID_ADMIN_ROLE_PARAMETER_PATH: groups
+      # Mu3Lab's own administrator (scripts/service-admin.js, ctl/librechat_ops.py).
+      MU3LAB_ADMIN_PASSWORD: ${LIBRECHAT_ADMIN_PASSWORD:?LIBRECHAT_ADMIN_PASSWORD is required}
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      # LibreChat has no setting for its logo, icons or app name on a phone's home screen: Mu3Lab's files
+      # replace its own. Recheck these names whenever the LibreChat version changes.
+      - ./branding/logo.svg:/app/client/dist/assets/logo.svg:ro
+      - ./branding/favicon-16x16.png:/app/client/dist/assets/favicon-16x16.png:ro
+      - ./branding/favicon-32x32.png:/app/client/dist/assets/favicon-32x32.png:ro
+      - ./branding/apple-touch-icon-180x180.png:/app/client/dist/assets/apple-touch-icon-180x180.png:ro
+      - ./branding/icon-192x192.png:/app/client/dist/assets/icon-192x192.png:ro
+      - ./branding/maskable-icon.png:/app/client/dist/assets/maskable-icon.png:ro
+      - ./branding/manifest.webmanifest:/app/client/dist/manifest.webmanifest:ro
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/librechat/uploads:/app/uploads
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/librechat/images:/app/client/public/images
+      - ${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/librechat/logs:/app/logs
+    depends_on:
+      mongodb: {condition: service_healthy}
+      meilisearch: {condition: service_healthy}
+    # mu3lab_mcp: app tools, through ContextForge.
+    networks: [mu3lab_frontend, mu3lab_backend, mu3lab_mcp, librechat_internal]
+    # Docker creates the data folders as root; LibreChat writes uploads and logs there.
+    user: "0:0"
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3080/health >/dev/null || exit 1"]
+      timeout: 5s
+      start_period: 300s
+      start_interval: 10s
+      interval: 5m
+      retries: 3
+    logging: *default-logging
+
+  mongodb:
+    image: mongo:8.0.20@sha256:098862b1339f031900ca66cf8fef799e616d6324fa41b9a263f2ec899552c1ef
+    restart: unless-stopped
+    command: mongod --noauth --bind_ip_all
+    volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/librechat/mongodb:/data/db"]
+    networks: [librechat_internal]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      timeout: 10s
+      start_period: 60s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+    logging: *default-logging
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1@sha256:8b57fc3c7f46535ddef3828df1538465ac19d892eb57c9a10da6df0880bd5856
+    restart: unless-stopped
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY is required}
+    volumes: ["${MU3LAB_DATA_ROOT:-/srv/mu3lab/data}/librechat/meilisearch:/meili_data"]
+    networks: [librechat_internal]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7700/health >/dev/null || exit 1"]
+      timeout: 5s
+      start_period: 60s
+      start_interval: 5s
+      interval: 5m
+      retries: 3
+    logging: *default-logging
+
+networks:
+  mu3lab_frontend: {external: true}
+  mu3lab_backend: {external: true}
+  mu3lab_mcp: {external: true}
+  librechat_internal: {internal: true}

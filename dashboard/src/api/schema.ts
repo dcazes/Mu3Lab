@@ -762,6 +762,67 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/home/widgets/{kind}/action': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Widget Action
+     * @description A ticked box in an app widget (a habit done, a chore finished): the app records it.
+     */
+    post: operations['widget_action_api_v1_home_widgets__kind__action_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/widgets/{kind}/data': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Widget Data
+     * @description An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh).
+     */
+    get: operations['widget_data_api_v1_home_widgets__kind__data_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/widgets/{kind}/key': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Widget Key Status
+     * @description Whether a key is saved for this widget; the key itself is never sent back.
+     */
+    get: operations['widget_key_status_api_v1_home_widgets__kind__key_get'];
+    /** Save Widget Key */
+    put: operations['save_widget_key_api_v1_home_widgets__kind__key_put'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/identity': {
     parameters: {
       query?: never;
@@ -2960,6 +3021,10 @@ export interface components {
     };
     /** HomeBoard */
     HomeBoard: {
+      /** Base Columns */
+      base_columns: number;
+      /** Column Choices */
+      column_choices: number[];
       /** Columns */
       columns: number;
       /** Customized */
@@ -2971,11 +3036,27 @@ export interface components {
        * @default true
        */
       ok?: boolean;
+      /**
+       * Placement
+       * @enum {string}
+       */
+      placement: 'free' | 'gravity';
       /** Widgets */
       widgets: components['schemas']['HomeWidget'][];
     };
     /** HomeBoardRequest */
     HomeBoardRequest: {
+      /**
+       * Columns
+       * @default 12
+       */
+      columns?: number;
+      /**
+       * Placement
+       * @default free
+       * @enum {string}
+       */
+      placement?: 'free' | 'gravity';
       /** Widgets */
       widgets: {
         [key: string]: components['schemas']['JsonValue'];
@@ -3006,13 +3087,15 @@ export interface components {
     HomeWidget: {
       /** H */
       h: number;
+      /**
+       * Hide On Phone
+       * @default false
+       */
+      hide_on_phone?: boolean;
       /** Id */
       id: string;
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: 'apps' | 'weather' | 'calendar' | 'stocks' | 'ask' | 'thermostat' | 'camera';
+      /** Kind */
+      kind: string;
       /**
        * Settings
        * @default {}
@@ -3022,16 +3105,137 @@ export interface components {
       };
       /** W */
       w: number;
+      /** X */
+      x: number;
+      /** Y */
+      y: number;
+    };
+    /** HomeWidgetAction */
+    HomeWidgetAction: {
+      /** Action */
+      action: string;
+    };
+    /**
+     * HomeWidgetData
+     * @description An app widget's figures, or why there are none (ctl/app_widgets.py).
+     */
+    HomeWidgetData: {
+      /** App Id */
+      app_id: string;
+      /** App Name */
+      app_name: string;
+      /**
+       * Detail
+       * @default
+       */
+      detail?: string;
+      /**
+       * Empty
+       * @default
+       */
+      empty?: string;
+      /**
+       * Items
+       * @default []
+       */
+      items?: components['schemas']['HomeWidgetItem'][];
+      /**
+       * Items Title
+       * @default
+       */
+      items_title?: string;
+      /**
+       * Note
+       * @default
+       */
+      note?: string;
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'ok' | 'not_installed' | 'starting' | 'stopped' | 'setup' | 'error';
+      /**
+       * Stats
+       * @default []
+       */
+      stats?: components['schemas']['HomeWidgetStat'][];
+      /**
+       * Updated At
+       * @default 0
+       */
+      updated_at?: number;
+    };
+    /** HomeWidgetItem */
+    HomeWidgetItem: {
+      /**
+       * Action
+       * @default
+       */
+      action?: string;
+      /** Check */
+      check?: boolean | null;
+      /**
+       * Meta
+       * @default
+       */
+      meta?: string;
+      /** Progress */
+      progress?: number | null;
+      /**
+       * Subtitle
+       * @default
+       */
+      subtitle?: string;
+      /** Title */
+      title: string;
+      /**
+       * Tone
+       * @default
+       * @enum {string}
+       */
+      tone?: '' | 'good' | 'warn' | 'bad';
+      /**
+       * Url
+       * @default
+       */
+      url?: string;
+    };
+    /** HomeWidgetKeyRequest */
+    HomeWidgetKeyRequest: {
+      /** Key */
+      key: string;
+    };
+    /** HomeWidgetKeyStatus */
+    HomeWidgetKeyStatus: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Saved */
+      saved: boolean;
     };
     /** HomeWidgetKind */
     HomeWidgetKind: {
+      /** App Id */
+      app_id?: string | null;
+      /** App Name */
+      app_name?: string | null;
+      /** Description */
+      description?: string | null;
       /** H */
       h: number;
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: 'apps' | 'weather' | 'calendar' | 'stocks' | 'ask' | 'thermostat' | 'camera';
+      /** Key Help */
+      key_help?: string | null;
+      /** Key Label */
+      key_label?: string | null;
+      /** Kind */
+      kind: string;
       /** Max H */
       max_h: number;
       /** Max W */
@@ -3040,8 +3244,27 @@ export interface components {
       min_h: number;
       /** Min W */
       min_w: number;
+      /** Personal */
+      personal?: boolean | null;
+      /** Refresh Seconds */
+      refresh_seconds?: number | null;
+      /** Title */
+      title?: string | null;
       /** W */
       w: number;
+    };
+    /** HomeWidgetStat */
+    HomeWidgetStat: {
+      /** Label */
+      label: string;
+      /**
+       * Tone
+       * @default
+       * @enum {string}
+       */
+      tone?: '' | 'good' | 'warn' | 'bad';
+      /** Value */
+      value: string;
     };
     /** IdentityResponse */
     IdentityResponse: {
@@ -5064,7 +5287,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5147,7 +5370,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5234,7 +5457,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5321,7 +5544,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5406,7 +5629,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5489,7 +5712,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5572,7 +5795,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5661,7 +5884,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5748,7 +5971,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5831,7 +6054,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -5918,7 +6141,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6005,7 +6228,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6092,7 +6315,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6177,7 +6400,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6260,7 +6483,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6343,7 +6566,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6426,7 +6649,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6511,7 +6734,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6596,7 +6819,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6679,7 +6902,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6762,7 +6985,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6849,7 +7072,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -6936,7 +7159,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7019,7 +7242,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7102,7 +7325,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7189,7 +7412,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7278,7 +7501,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7367,7 +7590,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7456,7 +7679,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7539,7 +7762,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7622,7 +7845,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7705,7 +7928,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7792,7 +8015,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7881,7 +8104,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -7970,7 +8193,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8053,7 +8276,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8140,7 +8363,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8223,7 +8446,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8306,7 +8529,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8389,7 +8612,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8476,7 +8699,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8563,7 +8786,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8646,7 +8869,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8733,7 +8956,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8816,7 +9039,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8899,7 +9122,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -8986,7 +9209,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9069,7 +9292,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9152,7 +9375,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9239,7 +9462,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9322,7 +9545,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9407,7 +9630,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9492,7 +9715,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9575,7 +9798,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9662,7 +9885,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9749,7 +9972,357 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  widget_action_api_v1_home_widgets__kind__action_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['HomeWidgetAction'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OkResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  widget_data_api_v1_home_widgets__kind__data_get: {
+    parameters: {
+      query?: {
+        fresh?: boolean;
+      };
+      header?: never;
+      path: {
+        kind: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HomeWidgetData'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  widget_key_status_api_v1_home_widgets__kind__key_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HomeWidgetKeyStatus'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  save_widget_key_api_v1_home_widgets__kind__key_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        kind: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['HomeWidgetKeyRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HomeWidgetKeyStatus'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9832,7 +10405,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9915,7 +10488,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -9998,7 +10571,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10081,7 +10654,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10166,7 +10739,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10251,7 +10824,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10336,7 +10909,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10421,7 +10994,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10504,7 +11077,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10593,7 +11166,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10680,7 +11253,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10767,7 +11340,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10852,7 +11425,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -10937,7 +11510,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11023,7 +11596,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11106,7 +11679,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11193,7 +11766,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11276,7 +11849,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11363,7 +11936,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11453,7 +12026,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11536,7 +12109,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11619,7 +12192,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11702,7 +12275,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11785,7 +12358,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11872,7 +12445,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11955,7 +12528,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12040,7 +12613,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12125,7 +12698,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12210,7 +12783,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12295,7 +12868,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12380,7 +12953,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12463,7 +13036,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12546,7 +13119,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12631,7 +13204,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12716,7 +13289,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12802,7 +13375,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12888,7 +13461,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12977,7 +13550,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13066,7 +13639,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13151,7 +13724,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13236,7 +13809,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13319,7 +13892,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13406,7 +13979,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13495,7 +14068,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13580,7 +14153,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13665,7 +14238,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13750,7 +14323,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13839,7 +14412,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13924,7 +14497,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14012,7 +14585,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14097,7 +14670,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14180,7 +14753,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14263,7 +14836,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14348,7 +14921,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14431,7 +15004,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14514,7 +15087,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14601,7 +15174,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14684,7 +15257,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14767,7 +15340,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14850,7 +15423,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14933,7 +15506,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15020,7 +15593,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15103,7 +15676,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15190,7 +15763,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15273,7 +15846,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15360,7 +15933,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15443,7 +16016,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15528,7 +16101,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15611,7 +16184,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15698,7 +16271,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15781,7 +16354,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15864,7 +16437,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -15947,7 +16520,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -16030,7 +16603,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;
@@ -16113,7 +16686,7 @@ export interface operations {
           'application/json': components['schemas']['ApiErrorResponse'];
         };
       };
-      /** @description Unprocessable Entity */
+      /** @description Unprocessable Content */
       422: {
         headers: {
           [name: string]: unknown;

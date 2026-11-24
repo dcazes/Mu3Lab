@@ -1,10 +1,10 @@
 """The household chat app and the app assistants inside it.
 
-Two chat apps can be installed (capability ``chat``): Open WebUI, which the
-installer sets up and is the default, and LobeChat, an optional app. The
-owner picks the household one in Settings > AI; the dashboard's Chat page
+Three chat apps can be installed (capability ``chat``): Open WebUI, which the
+installer sets up and is the default, and LobeChat and LibreChat, optional apps.
+The owner picks the household one in Settings > AI; the dashboard's Chat page
 shows it. Each installed chat app keeps its own assistants in step, through
-its backend: ``ctl.openwebui_ops`` or ``ctl.lobehub_ops``.
+its backend: ``ctl.openwebui_ops``, ``ctl.lobehub_ops`` or ``ctl.librechat_ops``.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from types import ModuleType
 from typing import Any
+from urllib.parse import quote
 
 from ctl.control_state import ControlState
 from ctl.manifest.catalog import App, Catalog, cached
@@ -80,24 +81,45 @@ def backend(app: App) -> ModuleType:
         from ctl import lobehub_ops
 
         return lobehub_ops
+    if app.manifest.chat.workspace == "libre":
+        from ctl import librechat_ops
+
+        return librechat_ops
     from ctl import openwebui_ops
 
     return openwebui_ops
 
 
 def needs_connect(app: App) -> bool:
-    """LobeChat asks each person for a one-time approval; Mu3Lab manages Open WebUI itself."""
+    """LobeChat asks each person for a one-time approval; Mu3Lab manages Open WebUI and LibreChat itself."""
     return app.manifest.chat.workspace == "lobe"
 
 
-def prompt_path(app: App) -> str:
-    """The path that opens the chat app with a question typed in ("{question}" marks where), or "".
+def prompt_path(app: App, uid: str = "") -> str:
+    """The path that opens the chat app with a question typed in, or "".
+
+    ``{question}`` marks where the question goes, encoded once; ``{question2}`` where it goes
+    encoded twice (inside another address's query).
 
     Open WebUI fills its message box from ``/?q=``; going through ``/auth?redirect=`` keeps the
     question when the person has to sign in first (it signs in by itself, then goes on there).
+    LibreChat fills a new chat's message box from ``prompt``, without sending it. LobeChat sends
+    ``message`` to an assistant straight away: this person's main Mu3Lab assistant, once they
+    have connected chat.
     """
-    if app.manifest.chat.workspace == "open_webui":
-        return "/auth?redirect=%2F%3Fq%3D{question}"
+    workspace = app.manifest.chat.workspace
+    if workspace == "open_webui":
+        return "/auth?redirect=%2F%3Fq%3D{question2}"
+    if workspace == "libre":
+        return "/c/new?prompt={question}"
+    if workspace == "lobe" and uid:
+        from ctl import chat_connections
+        from ctl.lobehub_ops import MAIN
+
+        managed = (chat_connections.records().get(uid) or {}).get("managed") or {}
+        agent = str((managed.get(MAIN) or {}).get("agent_id") or "")
+        if agent:
+            return f"/agent/{quote(agent, safe='')}?message={{question}}"
     return ""
 
 
@@ -132,7 +154,13 @@ def _status(installation: str, connector: str, gateway: bool) -> str:
 
 
 def desired_assistants(
-    uid: str = "", email: str = "", *, operator: bool = False, gateway: bool | None = None
+    uid: str = "",
+    email: str = "",
+    *,
+    operator: bool = False,
+    gateway: bool | None = None,
+    now: str | None = None,
+    person_view: bool = False,
 ) -> list[dict[str, Any]]:
     """Everyone's assistants: one per installed app whose connector is switched on and has a ContextForge virtual server.
 
@@ -148,6 +176,9 @@ def desired_assistants(
     A private app (``per_person`` connector) has one assistant per person instead, pointing at
     their own virtual server (``ctl.person_connectors``): for LobeChat only that person's, and for
     Open WebUI everyone's, each with ``person`` (whose it is) and an ID of its own.
+
+    LibreChat words its instructions its own way: ``now`` is how it gives the date and time, and
+    ``person_view`` says who the instructions serve (``operator``) even for the household's.
     """
     from ctl import contextforge, contextforge_ops, person_connectors
     from ctl.mcp_catalog import load as load_connectors
@@ -208,8 +239,8 @@ def desired_assistants(
             connector_state=connector_state[app.id],
             # One person's assistants (LobeChat) know who they serve; Open WebUI fills in each person's role,
             # and the date and time from their browser.
-            operator=operator if uid else None,
-            now="" if uid else agent_context.NOW,
+            operator=operator if uid or person_view else None,
+            now=now if now is not None else "" if uid else agent_context.NOW,
         )
         item = {
             "id": app.id,
@@ -221,6 +252,7 @@ def desired_assistants(
             "connector_state": connector_state[app.id],
             "active": status == "ready",
             "audience": assistant.audience,
+            "starters": list(assistant.starters),
         }
         if uid and assistant.audience == "operators" and not operator:
             continue

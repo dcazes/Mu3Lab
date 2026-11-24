@@ -14,6 +14,7 @@ import {
   ListChecks,
   type LucideIcon,
   MapPinned,
+  MessageCircle,
   MessagesSquare,
   Music,
   Network,
@@ -74,6 +75,7 @@ const brands: Record<string, SimpleIcon> = {
 
 const fallbacks: Record<string, { icon: LucideIcon; color: string }> = {
   lobehub: { icon: Bot, color: '#8b5cf6' },
+  librechat: { icon: MessageCircle, color: '#0d9488' },
   litellm: { icon: Route, color: '#0ea5e9' },
   freellmapi: { icon: KeyRound, color: '#14b8a6' },
   firecrawl: { icon: Flame, color: '#f97316' },

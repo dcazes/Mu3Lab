@@ -167,6 +167,10 @@ class Route(Model):
     # Who Authentik admits, through a gate or to an OIDC app: everyone in the household, or administrators only.
     audience: Literal["household", "operators"] = "household"
     upstream_basic_auth: UpstreamBasicAuth | None = None
+    # The app forbids framing (X-Frame-Options) but is the household chat inside the
+    # dashboard: let the dashboard, and only the dashboard, frame it. Only for apps that
+    # send no Content-Security-Policy of their own, which this replaces.
+    dashboard_frame: bool = False
     # Foundation routes (dashboard, Authentik, Vaultwarden) are hand-reviewed in
     # apps/ingress/Caddyfile; every other route is generated from its manifest.
     generated: bool = True
@@ -264,6 +268,9 @@ class Oidc(Model):
     redirect_paths: tuple[str, ...]
     role_claim: RoleClaim | None = None
     launch_path: str
+    # Where Mu3Lab's sign-in check starts, when the launch path hands over to Authentik from the browser's
+    # own scripts (which the check cannot run): the app's server-side sign-in address. Default: launch_path.
+    check_path: str = ""
     # How a browser starts sign-in: follow redirects, POST JSON, submit a CSRF form, or follow a page's link.
     launch: Literal["redirect", "json_post", "csrf_form", "form_post", "link"] = "redirect"
     json_launch: JsonLaunch | None = None
@@ -390,13 +397,48 @@ class Assistant(Model):
     audience: Literal["household", "operators"] = "household"
     # Questions people ask about the app itself, answered without tools.
     faq: tuple[Faq, ...] = ()
+    # Up to four suggested first questions, shown on a new chat with this assistant.
+    starters: tuple[Annotated[str, Field(min_length=1, max_length=120)], ...] = Field(default=(), max_length=4)
+
+
+class HomeWidgetKey(Model):
+    """A key the widget needs that Mu3Lab cannot make itself (one only the app's own settings show).
+
+    The person pastes it once in the widget's settings; Mu3Lab keeps it in its secret store and never
+    shows it again."""
+
+    label: str = Field(min_length=1, max_length=60)
+    help: str = Field(min_length=1, max_length=240)
+
+
+class HomeWidgetSpec(Model):
+    """A Home board widget this app offers. ``apps/<id>/widgets.py`` reads its data: a function named
+    after ``id`` (dashes as underscores) that takes a ``ctl.app_widgets.WidgetContext``."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$")
+    title: str = Field(min_length=1, max_length=40)
+    description: str = Field(min_length=1, max_length=160)
+    # Who may add it: the whole household, or administrators only (server-wide figures).
+    audience: Literal["household", "operators"] = "household"
+    # How often the board asks for new figures; Mu3Lab keeps an answer this long, so several
+    # screens showing the same widget ask the app once.
+    refresh_seconds: int = Field(default=300, ge=10, le=3600)
+    # False for figures Mu3Lab keeps itself, which it can show while the app is stopped.
+    needs_running: bool = True
+    # Each person's own figures, read with their own key (their chat connector's, or ``key``).
+    personal: bool = False
+    key: HomeWidgetKey | None = None
+    # Smallest and largest size, and the size it starts at: (columns of 12, rows).
+    smallest: tuple[int, int] = (2, 2)
+    largest: tuple[int, int] = (12, 8)
+    start: tuple[int, int] = (4, 3)
 
 
 class Chat(Model):
     assistant: Assistant | None = None
     connectors: tuple[str, ...] = ()  # folder names under apps/<id>/connectors/
     # For a chat app (capability "chat"): how Mu3Lab adds the app assistants (ctl.chat_ops).
-    workspace: Literal["", "lobe", "open_webui"] = ""
+    workspace: Literal["", "lobe", "open_webui", "libre"] = ""
 
 
 class ModelRunner(Model):
@@ -625,6 +667,8 @@ class AppManifest(Model):
     # A helper for one Home widget (e.g. "camera"): not listed in Apps or Discover. The widget's
     # setup installs it, and Mu3Lab starts it while the widget is in use and stops it after.
     serves_widget: str = ""
+    # Widgets it adds to the Home board's "Add widget" list while it is installed.
+    widgets: tuple[HomeWidgetSpec, ...] = ()
     depends_on: tuple[str, ...] = ()
     data_dir: str = ""  # folder under /srv/mu3lab/data; defaults to the app id
     media: tuple[MediaFolder, ...] = ()

@@ -20,6 +20,8 @@ from ctl.service_state import tailnet_dns_name
 START = "# BEGIN MU3LAB GENERATED APP ROUTES"
 END = "# END MU3LAB GENERATED APP ROUTES"
 # The Authentik outpost header that carries each kind of trusted identity.
+# The dashboard's private port (ctl/install.py DASHBOARD_SERVE_PORT), the one page that may frame apps.
+DASHBOARD_PORT = "8446"
 IDENTITY_HEADERS = {"username": "X-Authentik-Username", "email": "X-Authentik-Email"}
 
 
@@ -159,9 +161,18 @@ def _block(service: Service, target: RouteTarget | None = None) -> str:
             [
                 f"{indent}\theader_up X-Forwarded-Proto https",
                 f"{indent}\theader_up X-Forwarded-Host {host}",
-                f"{indent}}}",
             ]
         )
+        if route.dashboard_frame:
+            # Same rule as Authentik's framed sign-in pages (Caddyfile.authenticated).
+            lines.extend(
+                [
+                    f"{indent}\theader_down -X-Frame-Options",
+                    f"{indent}\theader_down Content-Security-Policy \"frame-ancestors 'self' "
+                    f'https://{{http.request.host}}:{DASHBOARD_PORT}"',
+                ]
+            )
+        lines.append(f"{indent}}}")
 
     if route.token_bypass:
         bypass = route.token_bypass

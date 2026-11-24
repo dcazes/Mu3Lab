@@ -1,5 +1,12 @@
 import { Card, PageHeader } from '../../components/Layout';
-import { type SectionStyle, type ThemePreference, useSectionStyle, useTheme } from '../../lib/theme';
+import {
+  type SectionStyle,
+  type SectionWidth,
+  type ThemePreference,
+  useSectionStyle,
+  useSectionWidth,
+  useTheme,
+} from '../../lib/theme';
 
 const THEMES: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: 'Match system' },
@@ -12,10 +19,16 @@ const SECTIONS: { value: SectionStyle; label: string; hint: string }[] = [
   { value: 'open', label: 'Open', hint: 'Sections sit on the page with only their heading between them.' },
 ];
 
+const WIDTHS: { value: SectionWidth; label: string; hint: string }[] = [
+  { value: 'full', label: 'Full rows', hint: 'Every section is as wide as the page, so they line up.' },
+  { value: 'compact', label: 'Compact', hint: 'Sections with a few apps share a row, so more fit on screen.' },
+];
+
 /** Settings > Appearance: how Mu3Lab looks on this device. Each person and device chooses for itself. */
 export function AppearanceSettings() {
   const { preference, setPreference } = useTheme();
   const { style, setStyle } = useSectionStyle();
+  const { width, setWidth } = useSectionWidth();
   return (
     <>
       <PageHeader
@@ -50,6 +63,35 @@ export function AppearanceSettings() {
             >
               <span className={`appearance-sample is-${value}`} aria-hidden>
                 {[3, 2].map((tiles, group) => (
+                  <span key={group} className="appearance-sample-group">
+                    <i />
+                    <span>
+                      {Array.from({ length: tiles }, (_, index) => (
+                        <b key={index} />
+                      ))}
+                    </span>
+                  </span>
+                ))}
+              </span>
+              <strong>{label}</strong>
+              <small>{hint}</small>
+            </button>
+          ))}
+        </div>
+      </Card>
+      <Card title="Section layout" description="How wide the Apps page draws each category.">
+        <div className="appearance-choices" role="radiogroup" aria-label="Section layout">
+          {WIDTHS.map(({ value, label, hint }) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={width === value}
+              className="appearance-choice"
+              onClick={() => setWidth(value)}
+            >
+              <span className={`appearance-sample is-${style} is-${value}`} aria-hidden>
+                {[3, 1].map((tiles, group) => (
                   <span key={group} className="appearance-sample-group">
                     <i />
                     <span>

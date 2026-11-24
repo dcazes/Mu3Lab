@@ -1,6 +1,14 @@
 # Authentik — see ctl/manifest/models.py for every field.
 id: authentik
 capabilities: [identity_provider]
+widgets:
+- id: sign-ins
+  title: Sign-ins
+  description: People, sign-ins in the last 24 hours, and recent failed sign-ins.
+  audience: operators
+  refresh_seconds: 120
+  largest: [12, 8]
+  start: [4, 3]
 name: Authentik
 tier: foundation
 group: infrastructure
@@ -29,6 +37,12 @@ chat:
   assistant:
     title: Authentik (admins)
     description: Look up who can sign in and recent sign-in activity. Read-only.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Who has signed in today?"
+    - "Were there any failed sign-ins this week?"
+    - "Which groups is each person in?"
+    - "Is anyone's account disabled?"
     instructions: Help administrators check Mu3Lab's sign-in service. You can only read people, groups and sign-in
       events; to change anyone, point them to the People page in the Mu3Lab dashboard. Use only Authentik tools
       assigned to this agent.

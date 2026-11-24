@@ -13,6 +13,13 @@ summary: Add a film and Radarr downloads it once a good copy is out, in the hous
   or 1080p, 720p or DVD when that is all there is), then files it in Movies for Jellyfin. It finds films on the
   sites you add to Prowlarr, downloads them with qBittorrent, and checks for new copies every two hours.
   Seerr sends it the films people ask for.
+widgets:
+- id: upcoming
+  title: Upcoming films
+  description: Films the household follows coming out this month, and which are downloaded.
+  refresh_seconds: 1800
+  largest: [12, 12]
+  start: [4, 4]
 version: "v7.0.3.10918"
 upstream: Radarr/Radarr
 # Radarr offers its key to Prowlarr and Seerr, which connect to it when they are installed.

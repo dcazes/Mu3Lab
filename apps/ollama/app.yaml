@@ -1,6 +1,14 @@
 # Ollama — see ctl/manifest/models.py for every field.
 id: ollama
 capabilities: [model_runner]
+widgets:
+- id: local-ai
+  title: Local AI
+  description: The AI models loaded on this server now, and the graphics memory they use.
+  audience: operators
+  refresh_seconds: 30
+  largest: [12, 8]
+  start: [4, 3]
 name: Ollama
 tier: core
 group: ai

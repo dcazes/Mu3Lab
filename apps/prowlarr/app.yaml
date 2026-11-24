@@ -12,6 +12,14 @@ tagline: Torrent sites for Sonarr and Radarr
 summary: Add the torrent sites you trust once, here, and Sonarr and Radarr search them all. Prowlarr tests each
   site, shows which ones answer, and passes Cloudflare-protected sites through FlareSolverr. Install it with
   Sonarr and Radarr; nobody else in the household needs it.
+widgets:
+- id: indexers
+  title: Indexers
+  description: The sites Prowlarr searches, their searches and grabs, and which are failing now.
+  audience: operators
+  refresh_seconds: 300
+  largest: [12, 10]
+  start: [4, 4]
 version: "v3.0.2.5780"
 upstream: Prowlarr/Prowlarr
 backup:

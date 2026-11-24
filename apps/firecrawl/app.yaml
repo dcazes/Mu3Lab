@@ -25,6 +25,12 @@ chat:
   assistant:
     title: Firecrawl
     description: Collect and analyze web content.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Summarize this web page for me"
+    - "Collect the main points from these links"
+    - "Pull the product details from this page"
+    - "Compare what these two articles say"
     instructions: Help collect web content with Firecrawl tools assigned to this agent. Explain when a request will
       fetch external pages or start a crawl. Ask before starting large crawls.
     faq:

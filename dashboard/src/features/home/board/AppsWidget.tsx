@@ -11,22 +11,28 @@ import {
   needsAttention,
 } from '../../../lib/services';
 import { useDashboard } from '../../../state/dashboard';
+import { FitList, useBox } from './size';
 import type { WidgetProps } from './widgets';
 
 /**
  * How the installed apps are doing, with the running ones a click away. Everything else (stacks,
  * starting and stopping, details) is on Apps, which "All apps" opens.
  */
-export function AppsWidget({ widget }: WidgetProps) {
+export function AppsWidget(_props: WidgetProps) {
   const { data } = useDashboard();
+  const { width, height } = useBox();
+  const measured = width > 0;
   const installed = data.services.services.filter((service) => isInstalled(service) && isListed(service));
   const running = installed.filter(isRunning);
   const broken = installed.filter(needsAttention);
   const busy = installed.filter(isWorking);
   // Everyday apps a person opens; the plumbing behind them (sign-in, AI, backups) counts but has no icon here.
   const shown = running.filter((service) => isEverydayApp(service) && launchTarget(service));
+  // Names under the icons once there is room for them; the title already links to Apps, so a narrow
+  // widget leaves out "All apps".
+  const named = !measured || height >= 150;
   return (
-    <div className={`apps-widget apps-widget-h${widget.h}`}>
+    <div className={`apps-widget${named ? ' is-named' : ''}`}>
       <div className="apps-widget-summary">
         <p>
           <strong>{running.length}</strong> of {installed.length} running
@@ -37,13 +43,16 @@ export function AppsWidget({ widget }: WidgetProps) {
           </Link>
         )}
         {busy.length > 0 && <span className="apps-widget-flag tone-blue">{busy.length} busy</span>}
-        <Link to="/apps" className="widget-link apps-widget-all">
-          All apps
-          <ArrowRight />
-        </Link>
+        {(!measured || width >= 300) && (
+          <Link to="/apps" className="widget-link apps-widget-all">
+            All apps
+            <ArrowRight />
+          </Link>
+        )}
       </div>
       {shown.length > 0 ? (
-        <ul className="apps-widget-icons" aria-label="Running apps">
+        // As many icons as fit; the count above and the title (which opens Apps) cover the rest.
+        <FitList className="apps-widget-icons" label="Running apps">
           {shown.map((service) => {
             const target = launchTarget(service);
             return (
@@ -61,7 +70,7 @@ export function AppsWidget({ widget }: WidgetProps) {
               </li>
             );
           })}
-        </ul>
+        </FitList>
       ) : (
         <p className="muted">No everyday apps are running.</p>
       )}

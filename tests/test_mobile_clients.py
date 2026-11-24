@@ -24,6 +24,7 @@ class MobileClientTests(unittest.TestCase):
                 "vaultwarden",
                 "surfsense",
                 "lobehub",
+                "librechat",
                 "actual-budget",
                 "immich",
                 "mealie",

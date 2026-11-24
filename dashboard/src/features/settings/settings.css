@@ -499,6 +499,11 @@
   border-color: var(--border-strong);
 }
 
+/* Full rows: each section stretches across the page. */
+.appearance-sample.is-full {
+  flex-direction: column;
+}
+
 .appearance-sample-group i {
   width: 28px;
   height: 4px;

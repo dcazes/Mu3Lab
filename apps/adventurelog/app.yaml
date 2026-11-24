@@ -8,6 +8,14 @@ category: places
 tagline: Travel journal and trip planner
 summary: A travel journal and trip planner for recording places, activities, and past adventures. Organize destinations
   into collections, plan upcoming trips, and explore your travels on a map.
+widgets:
+- id: trips
+  title: Trips
+  description: Your next trip and how long until it, and the ones after.
+  personal: true
+  refresh_seconds: 1800
+  largest: [12, 10]
+  start: [4, 3]
 version: "v0.13.1"
 upstream: seanmorley15/AdventureLog
 service:
@@ -66,6 +74,12 @@ chat:
   assistant:
     title: AdventureLog
     description: Plan and review travel records.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "What trips do we have coming up?"
+    - "Where did we travel last year?"
+    - "Start planning a weekend trip"
+    - "Which places are on our wish list?"
     instructions: Help plan and review AdventureLog trips. Do not claim to have accessed live data unless a reviewed
       AdventureLog tool is assigned. Ask before changing data.
     faq:

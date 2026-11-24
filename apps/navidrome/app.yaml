@@ -9,6 +9,13 @@ tagline: Your own music streaming, like Spotify
 summary: Stream the household's music library from any browser or phone, with playlists, favourites, and play
   history for each person. Add music to the shared Music folder in Nextcloud, or copy it to the server; phone apps
   that speak Subsonic play it anywhere on your tailnet, and can download songs for offline listening.
+widgets:
+- id: music
+  title: Music
+  description: How many songs the household library holds, and the newest albums.
+  refresh_seconds: 900
+  largest: [12, 10]
+  start: [4, 4]
 version: v0.64.2
 upstream: navidrome/navidrome
 service:
@@ -96,6 +103,12 @@ chat:
   assistant:
     title: Navidrome
     description: Find music and build playlists from the household library.
+    # Suggested first questions, shown on a new chat with this assistant.
+    starters:
+    - "Play something like my favourite album"
+    - "Make a playlist for a road trip"
+    - "What music was added recently?"
+    - "Find songs by an artist in our library"
     instructions: Help with the household's Navidrome music library. Search before answering, and use the IDs the
       tools return. Ask before creating a playlist, since everyone in the household will see it. Use only Navidrome
       tools assigned to this agent.

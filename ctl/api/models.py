@@ -107,22 +107,88 @@ class PortsResponse(ApiModel):
 
 class HomeWidget(ApiModel):
     id: str
-    kind: Literal["apps", "weather", "calendar", "stocks", "ask", "thermostat", "camera"]
+    # Mu3Lab's own (weather, calendar…) or an app's, as "<app>:<widget>" (ctl/app_widgets.py).
+    kind: str
+    # Column and row of its top-left corner, and how many columns and rows it takes.
+    x: int
+    y: int
     w: int
     h: int
+    # Left out of the one-column board a phone shows.
+    hide_on_phone: bool = False
     # Each kind's own settings (ctl/home_board.py checks them): weather {units, place}, stocks
     # {symbols}, calendar {days}.
     settings: dict[str, JsonValue] = {}
 
 
 class HomeWidgetKind(ApiModel):
-    kind: Literal["apps", "weather", "calendar", "stocks", "ask", "thermostat", "camera"]
+    kind: str
     min_w: int
     min_h: int
     max_w: int
     max_h: int
     w: int
     h: int
+    # Set for an app's widget (Mu3Lab's own are described by the dashboard).
+    title: str | None = None
+    description: str | None = None
+    app_id: str | None = None
+    app_name: str | None = None
+    refresh_seconds: int | None = None
+    # Shows each person's own figures.
+    personal: bool | None = None
+    # A key the person pastes in the widget's settings, when Mu3Lab cannot make one.
+    key_label: str | None = None
+    key_help: str | None = None
+
+
+class HomeWidgetStat(ApiModel):
+    label: str
+    value: str
+    tone: Literal["", "good", "warn", "bad"] = ""
+
+
+class HomeWidgetItem(ApiModel):
+    title: str
+    subtitle: str = ""
+    meta: str = ""
+    progress: float | None = None
+    tone: Literal["", "good", "warn", "bad"] = ""
+    url: str = ""
+    # A tick box: whether it is done, and what ticking it asks the app.
+    check: bool | None = None
+    action: str = ""
+
+
+class HomeWidgetAction(ApiModel):
+    action: str = Field(min_length=1, max_length=120)
+
+
+class HomeWidgetKeyRequest(ApiModel):
+    # Empty removes the saved key.
+    key: str = Field(max_length=4000)
+
+
+class HomeWidgetKeyStatus(ApiModel):
+    ok: bool = True
+    saved: bool
+
+
+class HomeWidgetData(ApiModel):
+    """An app widget's figures, or why there are none (ctl/app_widgets.py)."""
+
+    ok: bool = True
+    state: Literal["ok", "not_installed", "starting", "stopped", "setup", "error"]
+    detail: str = ""
+    app_id: str
+    app_name: str
+    # When the figures were read (seconds since 1970); 0 when there are none.
+    updated_at: float = 0
+    stats: list[HomeWidgetStat] = []
+    items: list[HomeWidgetItem] = []
+    items_title: str = ""
+    empty: str = ""
+    note: str = ""
 
 
 class HomeBoard(ApiModel):
@@ -130,12 +196,19 @@ class HomeBoard(ApiModel):
     widgets: list[HomeWidget]
     # False until the person changes their board: they see the starter set.
     customized: bool
+    # How many columns the person chose; the kinds' sizes are for base_columns.
     columns: int
+    column_choices: list[int]
+    base_columns: int
+    # free: widgets stay where they are put (gaps allowed); gravity: they pack to the top.
+    placement: Literal["free", "gravity"]
     kinds: list[HomeWidgetKind]
 
 
 class HomeBoardRequest(ApiModel):
     widgets: list[dict[str, JsonValue]]
+    columns: int = 12
+    placement: Literal["free", "gravity"] = "free"
 
 
 class WeatherDay(ApiModel):

@@ -1,0 +1,145 @@
+# LibreChat's settings for Mu3Lab. Everyone's assistants (model specs) and app tools (MCP
+# servers) are not here: Mu3Lab keeps them in step through LibreChat's admin API, the
+# household's in the Base profile and each person's own in theirs (ctl/librechat_ops.py).
+version: 1.3.19
+cache: true
+
+interface:
+  customWelcome: "Hi {{user.name}}. Ask Mu3Lab anything: it uses your apps for you, or pick an app's assistant from the menu at the top."
+  # Mu3Lab's assistants are the menu, for everyone; people still make their own agents.
+  modelSelect: false
+  presets: false
+  agents: true
+  # No agent marketplace (Mu3Lab also switches it off for administrators, ctl/librechat_ops.py).
+  marketplace:
+    use: false
+  # LibreChat's own welcome mascot does not belong in Mu3Lab Chat.
+  mascot: false
+  # Mu3Lab's look: the dashboard's colours (dashboard/src/styles/tokens.css) and font, over LibreChat's own
+  # theme; people still choose light or dark.
+  theme:
+    version: 1
+    name: Mu3Lab
+    modes:
+      light:
+        colors:
+          rgb-text-primary: "27 28 32"
+          rgb-text-secondary: "93 97 106"
+          rgb-text-secondary-alt: "93 97 106"
+          rgb-text-tertiary: "113 117 127"
+          rgb-link: "74 85 189"
+          rgb-link-hover: "78 90 196"
+          rgb-link-prose: "74 85 189"
+          rgb-link-inline: "74 85 189"
+          rgb-accent-primary: "94 106 210"
+          rgb-accent-primary-hover: "78 90 196"
+          rgb-ring-primary: "94 106 210"
+          rgb-focus-outline: "94 106 210"
+          rgb-focus-control: "94 106 210"
+          rgb-border-field-focus: "94 106 210"
+          rgb-surface-submit: "94 106 210"
+          rgb-surface-submit-hover: "78 90 196"
+          rgb-page-canvas: "251 251 252"
+          rgb-surface-primary: "255 255 255"
+          rgb-surface-chat: "255 255 255"
+          rgb-surface-sidebar: "245 245 247"
+          rgb-surface-secondary: "247 247 249"
+          rgb-surface-tertiary: "242 242 245"
+          rgb-surface-hover: "242 242 245"
+          rgb-surface-nav-hover: "242 242 245"
+          rgb-surface-nav-selected: "239 240 250"
+          rgb-surface-composer: "255 255 255"
+          rgb-surface-user-message: "247 247 249"
+          rgb-border-light: "231 231 236"
+          rgb-border-medium: "215 216 222"
+          rgb-border-heavy: "160 164 172"
+          rgb-brand-purple: "94 106 210"
+          rgb-checkbox-fill: "94 106 210"
+          rgb-status-success: "28 155 89"
+          rgb-status-warning: "192 122 12"
+          rgb-status-error: "211 63 44"
+          rgb-status-info: "58 123 240"
+        appearance:
+          fontFamily: "Inter, system-ui, -apple-system, Segoe UI, sans-serif"
+      dark:
+        colors:
+          rgb-text-primary: "238 239 242"
+          rgb-text-secondary: "160 164 173"
+          rgb-text-secondary-alt: "160 164 173"
+          rgb-text-tertiary: "128 132 141"
+          rgb-link: "168 176 243"
+          rgb-link-hover: "190 196 247"
+          rgb-link-prose: "168 176 243"
+          rgb-link-inline: "168 176 243"
+          rgb-accent-primary: "108 119 216"
+          rgb-accent-primary-hover: "123 134 226"
+          rgb-ring-primary: "108 119 216"
+          rgb-focus-outline: "108 119 216"
+          rgb-focus-control: "108 119 216"
+          rgb-border-field-focus: "108 119 216"
+          rgb-surface-submit: "108 119 216"
+          rgb-surface-submit-hover: "123 134 226"
+          rgb-page-canvas: "14 15 18"
+          rgb-surface-primary: "14 15 18"
+          rgb-surface-chat: "14 15 18"
+          rgb-surface-sidebar: "11 12 14"
+          rgb-surface-secondary: "24 25 30"
+          rgb-surface-tertiary: "29 30 36"
+          rgb-surface-hover: "29 30 36"
+          rgb-surface-nav-hover: "29 30 36"
+          rgb-surface-nav-selected: "27 29 46"
+          rgb-surface-composer: "20 21 25"
+          rgb-surface-dialog: "20 21 25"
+          rgb-surface-menu: "20 21 25"
+          rgb-surface-popover: "20 21 25"
+          rgb-surface-user-message: "24 25 30"
+          rgb-border-light: "37 38 42"
+          rgb-border-medium: "48 49 54"
+          rgb-border-heavy: "70 72 78"
+          rgb-brand-purple: "108 119 216"
+          rgb-checkbox-fill: "108 119 216"
+          rgb-status-success: "69 189 127"
+          rgb-status-warning: "226 168 71"
+          rgb-status-error: "240 100 82"
+          rgb-status-info: "98 160 250"
+        appearance:
+          fontFamily: "Inter, system-ui, -apple-system, Segoe UI, sans-serif"
+  # No document search (RAG API) or paid code sandbox in Mu3Lab's LibreChat.
+  fileSearch: false
+  runCode: false
+  webSearch: false
+  mcpServers:
+    placeholder: App tools
+
+registration:
+  socialLogins: [openid]
+
+endpoints:
+  custom:
+  # Every model comes through Mu3Lab's AI gateway (LiteLLM) with LibreChat's own key.
+  - name: Mu3Lab
+    apiKey: ${MU3LAB_LLM_API_KEY}
+    baseURL: http://litellm:4000/v1
+    models:
+      default: [mu3lab-chat, mu3lab-local, mu3lab-outside]
+      fetch: false
+    titleConvo: true
+    titleModel: mu3lab-fast
+    modelDisplayLabel: Mu3Lab
+
+mcpSettings:
+  # App tools live on ContextForge, on Mu3Lab's private container network.
+  allowedAddresses:
+  - contextforge:4444
+
+modelSpecs:
+  prioritize: true
+  list:
+  # Until Mu3Lab's first sync replaces this list with the household's assistants.
+  - name: mu3lab
+    label: Mu3Lab
+    default: true
+    description: General help, and directions to the right app assistant.
+    preset:
+      endpoint: Mu3Lab
+      model: mu3lab-chat

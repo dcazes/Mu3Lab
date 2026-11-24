@@ -19,6 +19,7 @@ import { api, type Place, type PlacesResponse, type WeatherResponse } from '../.
 import { errorText } from '../../../lib/format';
 import { useApi } from '../../../lib/useApi';
 import { Button } from '../../../components/Button';
+import { FitList, useBox } from './size';
 import type { SettingsProps, WidgetProps } from './widgets';
 
 interface Look {
@@ -147,6 +148,7 @@ export function WeatherSettings({ widget, onChange }: SettingsProps) {
 }
 
 export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
+  const box = useBox();
   const settings = widget.settings as { units?: string; place?: PlaceSettings };
   const place = settings.place;
   const path = place
@@ -165,18 +167,29 @@ export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
   const now = look(data.code);
   const Icon = data.is_day ? now.day : now.night;
-  // All seven days; the widget's own width decides how many fit (board.css).
   const days = data.days.slice(0, 7);
+  // The week's coldest and warmest, for each day's bar in the list.
+  const lows = days.map((day) => day.low).filter((value): value is number => value != null);
+  const highs = days.map((day) => day.high).filter((value): value is number => value != null);
+  const week: [number, number] | null = lows.length && highs.length ? [Math.min(...lows), Math.max(...highs)] : null;
+  // The layout follows the room: "now" beside the days when short, "now" above a row of days, or
+  // above a list of them once tall. Days that do not fit are left out whole.
+  const { width, height } = box;
+  const measured = width > 0;
+  const layout = !measured ? 'stack' : height < 140 ? 'row' : height >= 200 ? 'list' : 'stack';
+  const big = measured && height >= 200 && width >= 400;
+  const showDays = days.length > 0 && (layout !== 'row' || width >= 300);
+  const details = layout === 'row' ? width >= 640 : width >= 280;
   return (
-    <div className={`weather weather-h${widget.h}`}>
+    <div className={`weather weather-${layout}${big ? ' is-big' : ''}`}>
       <div className="weather-now">
         <Icon className="weather-icon" aria-hidden />
-        <div>
-          <p className="weather-temp">{degrees(data.temperature)}</p>
+        <p className="weather-temp">{degrees(data.temperature)}</p>
+        <div className="weather-text">
           <p className="weather-label">
             {now.label} · {place.name}
           </p>
-          {(widget.w >= 2 || widget.h >= 2) && (
+          {details && (
             <p className="muted weather-more">
               Feels {degrees(data.feels_like)} · Wind {Math.round(data.wind ?? 0)} {data.wind_unit}
               {data.humidity != null && ` · ${Math.round(data.humidity)}% humidity`}
@@ -184,32 +197,63 @@ export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
           )}
         </div>
       </div>
-      {days.length > 0 && (
-        <ol className="weather-days">
-          {days.map((day, index) => {
-            const DayIcon = look(day.code).day;
-            return (
-              <li key={day.date} title={look(day.code).label}>
-                <span>{weekday(day.date, index)}</span>
-                <DayIcon aria-label={look(day.code).label} />
-                <span className={`weather-pop${(day.rain_chance ?? 0) >= 30 ? ' is-likely' : ''}`}>
-                  <Droplet aria-hidden />
-                  <span className="sr-only">Chance of rain </span>
-                  {day.rain_chance == null ? '—' : `${Math.round(day.rain_chance)}%`}
-                </span>
-                <span className="weather-range">
-                  <span className="sr-only">High </span>
-                  {degrees(day.high)}
-                  <small>
-                    <span className="sr-only">Low </span>
-                    {degrees(day.low)}
-                  </small>
-                </span>
-              </li>
-            );
-          })}
+      {showDays && layout === 'list' && (
+        <FitList className="weather-list" label="Forecast" more={(hidden) => `+${hidden} more days`}>
+          {days.map((day, index) => (
+            <Day key={day.date} day={day} index={index} week={week} />
+          ))}
+        </FitList>
+      )}
+      {showDays && layout !== 'list' && (
+        <ol className="weather-days" aria-label="Forecast">
+          {days.map((day, index) => (
+            <Day key={day.date} day={day} index={index} />
+          ))}
         </ol>
       )}
     </div>
+  );
+}
+
+function Day({
+  day,
+  index,
+  week,
+}: {
+  day: WeatherResponse['days'][number];
+  index: number;
+  /** In the list: the week's range, to draw where this day sits in it. */
+  week?: [number, number] | null;
+}) {
+  const DayIcon = look(day.code).day;
+  const span = week && day.low != null && day.high != null ? week[1] - week[0] || 1 : 0;
+  return (
+    <li title={look(day.code).label}>
+      <span className="weather-day">{weekday(day.date, index)}</span>
+      <DayIcon aria-label={look(day.code).label} />
+      <span className={`weather-pop${(day.rain_chance ?? 0) >= 30 ? ' is-likely' : ''}`}>
+        <Droplet aria-hidden />
+        <span className="sr-only">Chance of rain </span>
+        {day.rain_chance == null ? '—' : `${Math.round(day.rain_chance)}%`}
+      </span>
+      {week && span > 0 && (
+        <span className="weather-bar" aria-hidden>
+          <i
+            style={{
+              left: `${(((day.low ?? 0) - week[0]) / span) * 100}%`,
+              right: `${((week[1] - (day.high ?? 0)) / span) * 100}%`,
+            }}
+          />
+        </span>
+      )}
+      <span className="weather-range">
+        <span className="sr-only">High </span>
+        {degrees(day.high)}
+        <small>
+          <span className="sr-only">Low </span>
+          {degrees(day.low)}
+        </small>
+      </span>
+    </li>
   );
 }

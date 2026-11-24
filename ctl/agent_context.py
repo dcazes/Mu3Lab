@@ -205,8 +205,7 @@ def app_instructions(
         )
     elsewhere = (
         f"Other app assistants handle other apps ({', '.join(others)}). When asked to do something in "
-        "one of them, say which assistant to use: type @ and its name in the message box, or choose it "
-        "from the model menu."
+        "one of them, say which assistant to use; people pick it from chat's list of assistants."
         if others
         else "You are the only app assistant so far; the main Mu3Lab assistant answers general questions."
     )

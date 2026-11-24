@@ -15,6 +15,13 @@ summary: Browse what's popular or search for a film or show, tap Request, and it
   Jellyfin, usually within the hour. Administrators' requests go straight through, and they approve everyone
   else's. Works at home and on the tailnet, with your Jellyfin login. Needs Jellyfin, plus Radarr for films and
   Sonarr for shows.
+widgets:
+- id: requests
+  title: Requests
+  description: Films and shows asked for, waiting, on their way and ready to watch.
+  refresh_seconds: 120
+  largest: [12, 10]
+  start: [4, 4]
 version: "v3.5.2"
 upstream: seerr-team/seerr
 depends_on: [jellyfin]

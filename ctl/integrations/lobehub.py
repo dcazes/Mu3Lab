@@ -178,23 +178,31 @@ class LobeHub:
         if not agent:
             agent = next((a for a in agents if a.get("title") == item["title"]), None)
         server = next((s for s in servers if s["identifier"] == slug), None)
-        server_body = {
-            "name": item["title"],
-            "serverUrl": item["url"],
-            "isEnabled": True,
-            "credentials": {"type": "bearer", "token": item["token"]},
-        }
-        if server:
-            server = self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json=server_body)
+        if item.get("url"):
+            server_body = {
+                "name": item["title"],
+                "serverUrl": item["url"],
+                "isEnabled": True,
+                "credentials": {"type": "bearer", "token": item["token"]},
+            }
+            if server:
+                server = self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json=server_body)
+            else:
+                server = self.request("POST", "/api/v1/mcp-servers", json={"identifier": slug, **server_body})
+            check = self._sync_tools(server)
+            plugins = [{"identifier": slug, "mode": "pinned"}]
         else:
-            server = self.request("POST", "/api/v1/mcp-servers", json={"identifier": slug, **server_body})
-        check = self._sync_tools(server)
+            # An assistant without app tools (the main one while its calendar tools are out of reach).
+            if server and server.get("isEnabled"):
+                self.request("PATCH", "/api/v1/mcp-servers/" + quote(server["id"], safe=""), json={"isEnabled": False})
+            check = {"status": "ready", "tools": 0, "detail": "No app tools of its own."}
+            plugins = []
         body = {
             "title": item["title"],
             "description": item["description"],
             "model": "mu3lab-chat",
             "provider": "openai",
-            "plugins": [{"identifier": slug, "mode": "pinned"}],
+            "plugins": plugins,
         }
         instructions = item["instructions"]
         if not agent or agent.get("systemRole") in {old.get("instructions"), instructions}:

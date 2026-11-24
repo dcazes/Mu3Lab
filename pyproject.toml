@@ -2,7 +2,7 @@
 name = "mu3lab"
 description = "Private homelab control plane"
 version = "0.1.0"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13,<3.14"
 # Exact pins: uv.lock records every indirect dependency too, so two computers
 # installing the same release get identical libraries.
 dependencies = [
@@ -16,6 +16,12 @@ dependencies = [
     "recurring-ical-events==3.8.2",
     "jsonschema==4.26.0",
     "aiohomekit==4.0.1",
+    "python-overseerr==0.10.1",
+    "aiomealie==2.1.4",
+    "qbittorrent-api==2026.10.1",
+    "pypaperless==5.2.3",
+    "aioimmich==0.18.0",
+    "actualpy==0.22.4",
 ]
 
 [dependency-groups]
@@ -28,13 +34,15 @@ dev = [
 
 [tool.uv]
 package = false
+# Widget client packages must not move the libraries the control plane is built on.
+constraint-dependencies = ["pydantic==2.13.5"]
 # Always use uv's own Python build (pinned in .python-version), never the
 # host's, so every computer runs the same interpreter.
 python-preference = "only-managed"
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py313"
 extend-exclude = ["dashboard", ".venv"]
 
 [tool.ruff.lint]
@@ -53,7 +61,7 @@ extend-immutable-calls = ["ctl.runtime.RuntimePaths", "ctl.backups.Retention", "
 known-first-party = ["ctl", "tests", "tools"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 files = ["ctl"]
 ignore_missing_imports = true
 warn_unused_ignores = true
